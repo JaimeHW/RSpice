@@ -10,6 +10,45 @@ fn snapshot(plan: &SimulationPlan) -> String {
     serde_json::to_string(plan).expect("plan serializes")
 }
 
+/// A plan written before participation existed states no `run_at`, and must
+/// reload running every analysis at every point.
+///
+/// The instance struct is `deny_unknown_fields`, so the whole document is
+/// refused if the field is spelled wrong — but a *missing* field is refused
+/// too unless it is `serde(default)`, and nothing tested that the default is
+/// present or that it is `AllPoints`. Any other reading would narrow a run
+/// nobody narrowed. This removes the key from a real serialized plan rather
+/// than rewriting its value, because a rewritten value proves only that the
+/// parser reads values.
+#[test]
+fn an_instance_stating_no_run_at_reloads_at_every_point() {
+    let mut plan = SimulationPlan::empty();
+    let (id, _) = plan.insert(AnalysisKind::Transient).expect("inserts");
+    plan.set_run_at(id, AnalysisRunAt::NominalPoint)
+        .expect("a transient takes a participation");
+
+    let mut document: serde_json::Value =
+        serde_json::to_value(&plan).expect("a plan serializes to JSON");
+    let instance = document["instances"][0]
+        .as_object_mut()
+        .expect("the plan writes its instances as objects");
+    assert!(
+        instance.remove("run_at").is_some(),
+        "the fixture must actually state a participation for its removal to mean anything"
+    );
+
+    let restored: SimulationPlan =
+        serde_json::from_value(document).expect("a plan written before participation still loads");
+    assert_eq!(
+        restored
+            .instance(id)
+            .expect("the instance survives")
+            .run_at(),
+        &AnalysisRunAt::AllPoints,
+        "an unstated participation is every point, which is what such a plan did"
+    );
+}
+
 fn exact_periodic_context() -> AnalysisDependencyRepairContext {
     AnalysisDependencyRepairContext::exact_periodic_sources(
             "periodic fixture\nVLO lo 0 SIN(0 1 1k)\nVRF rf 0 SIN(0 1 2k)\nR1 lo 0 1k\nR2 rf 0 1k\n.end\n",

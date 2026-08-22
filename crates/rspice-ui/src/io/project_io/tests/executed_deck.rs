@@ -131,6 +131,44 @@ fn a_runs_executed_decks_round_trip_and_stay_shared_between_its_points() {
     );
 }
 
+/// A project written before executed decks were retained states no key, and
+/// must load with none rather than being refused.
+///
+/// The load direction is the one that matters here: every project saved before
+/// schema v15 carries no `executed_decks` member at all, and `deny_unknown_fields`
+/// elsewhere in this document makes a missing `serde(default)` a hard refusal
+/// to open the file. Removing the key from a real serialized document is the
+/// only way to exercise that; writing an empty archive exercises a present
+/// field, which is a different question.
+#[test]
+fn a_project_stating_no_executed_decks_loads_with_none() {
+    let written = ProjectSimulationResults::from_state(&swept_state());
+    let mut document: serde_json::Value =
+        serde_json::to_value(&written).expect("results serialize");
+    let object = document
+        .as_object_mut()
+        .expect("results are written as an object");
+    assert!(
+        object.remove("executed_decks").is_some(),
+        "the fixture must actually carry decks for their removal to mean anything"
+    );
+
+    let decoded: ProjectSimulationResults =
+        serde_json::from_value(document).expect("a project written before v15 still opens");
+    decoded
+        .validate()
+        .expect("a document carrying no deck is internally consistent");
+    assert!(
+        decoded.executed_decks.is_empty(),
+        "no decks retained, and none invented"
+    );
+    assert_eq!(
+        decoded.runs.len(),
+        written.runs.len(),
+        "and the datasets it does carry are unaffected"
+    );
+}
+
 #[test]
 fn a_run_the_history_no_longer_holds_writes_no_deck() {
     let mut simulation = swept_state();

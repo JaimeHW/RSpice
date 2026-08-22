@@ -374,6 +374,37 @@ fn format_freq(frequency: f64) -> String {
 mod tests {
     use super::*;
 
+    /// A draft written before the tone list existed restores as naming none.
+    ///
+    /// The default was once the literal `"VIN_DIFF"` — a source name invented
+    /// from nothing, which the reader would then see in the Tone sources
+    /// field of a plan they never authored it into, and which the deck would
+    /// carry. It is empty now, and this pins that with real absent-key JSON:
+    /// rewriting the value to `""` would pass even if the default came back.
+    #[test]
+    fn a_draft_naming_no_tone_source_restores_as_naming_none() {
+        let state = PssDialogState {
+            tone_sources: "VIN_LO".to_owned(),
+            ..PssDialogState::default()
+        };
+        let mut document: serde_json::Value =
+            serde_json::to_value(&state).expect("the draft serializes");
+        let object = document
+            .as_object_mut()
+            .expect("a draft is written as an object");
+        assert!(
+            object.remove("tone_sources").is_some(),
+            "the fixture must state one for its removal to mean anything"
+        );
+
+        let restored: PssDialogState =
+            serde_json::from_value(document).expect("a draft written before tone lists loads");
+        assert_eq!(
+            restored.tone_sources, "",
+            "no reader can supply a source name the design does not carry"
+        );
+    }
+
     #[test]
     fn exact_nine_field_dialog_round_trips_to_config() {
         let state = PssDialogState {

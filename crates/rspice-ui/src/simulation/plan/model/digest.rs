@@ -147,6 +147,40 @@ mod tests {
         assert_ne!(before, after, "a disabled analysis is a different plan");
     }
 
+    /// The same case with the key genuinely gone, not rewritten to `""`.
+    ///
+    /// A receipt written before digests existed carries no `digest` member at
+    /// all. Rewriting the value to an empty string exercises the parser's
+    /// handling of a *present* field, which is a different question: it would
+    /// pass even if the field had no `serde(default)` and every such project
+    /// failed to open.
+    #[test]
+    fn a_receipt_with_no_digest_key_at_all_still_loads() {
+        let mut plan = transient_plan();
+        plan.commit_configuration_change("Added design variable vdd.")
+            .expect("commits");
+        let mut document: serde_json::Value =
+            serde_json::to_value(&plan).expect("a plan serializes to JSON");
+        let receipt = document["configuration_receipts"][0]
+            .as_object_mut()
+            .expect("receipts are written as objects");
+        assert!(
+            receipt.remove("digest").is_some(),
+            "a fresh receipt states a digest, so removing it is a real regression to an \
+             older document"
+        );
+
+        let restored: SimulationPlan =
+            serde_json::from_value(document).expect("an older receipt still loads");
+        assert_eq!(restored.configuration_receipts()[0].digest(), None);
+        assert!(
+            !restored.configuration_receipts()[0]
+                .status_line()
+                .contains("fnv1a64"),
+            "a receipt without a digest does not claim one"
+        );
+    }
+
     #[test]
     fn a_receipt_persisted_before_digests_reports_absence_not_a_wrong_digest() {
         let mut plan = transient_plan();
