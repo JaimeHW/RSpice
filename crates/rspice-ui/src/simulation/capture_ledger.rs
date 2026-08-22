@@ -504,6 +504,132 @@ mod tests {
         );
     }
 
+    /// Each axis on its own, in both directions, for every value it can take.
+    ///
+    /// The test above judges the `points` axis, which is the one the ledger
+    /// prices — so a wrong answer there shows up as a wrong number. Streaming
+    /// and precision move no byte count: a member left on `Store only` under a
+    /// group that asked for live delivery, or written at full precision under
+    /// a group that asked for a display cache, produces a run that reports
+    /// exactly the size it was forecast at and stores something else. Nothing
+    /// downstream contradicts it.
+    ///
+    /// So all three axes are walked, and each against both halves of the
+    /// contract the module header states: a group that sets an axis imposes it
+    /// on its members, and a group that leaves one unset leaves the member's
+    /// own value in force. Both halves are asserted in the same pass over the
+    /// same pair of outputs, because an `apply` that overwrote unconditionally
+    /// and one that never wrote at all each satisfy one half on its own.
+    ///
+    /// Each axis is also checked to have left the other two alone, which is
+    /// what makes these three overrides rather than one policy in three
+    /// fields.
+    #[test]
+    fn a_group_imposes_the_axes_it_sets_and_only_those() {
+        /// A group claiming `/x1`, configured on one axis and no other.
+        fn claiming(configure: impl FnOnce(&mut CaptureGroup)) -> CaptureGroup {
+            let mut group = CaptureGroup::new("Core").expect("group name");
+            group.rules.push(CaptureGroupRule::for_scope(
+                InstancePath::parse_legacy("/x1").expect("scope"),
+            ));
+            configure(&mut group);
+            group
+        }
+
+        // What `output()` authors, restated so the "unset" half of each
+        // assertion compares against a named contract rather than against
+        // whatever the helper happens to build today.
+        let authored = output("authored", "V(n)");
+        assert_eq!(
+            authored.save_policy,
+            SavedOutputPolicy::SelectedAndFinalPoints
+        );
+        assert_eq!(
+            authored.stored_precision,
+            SavedOutputPrecision::FullSourcePrecision
+        );
+        assert_eq!(authored.streaming, SavedOutputStreaming::StoreOnly);
+
+        for points in SavedOutputPolicy::ALL {
+            let groups = vec![claiming(|group| group.points = Some(points))];
+            let mut outputs = vec![output("claimed", "V(x1.n)"), output("free", "V(x2.n)")];
+            project_onto_groups(&groups, &mut outputs);
+
+            assert_eq!(
+                outputs[0].save_policy, points,
+                "a group that sets the point policy imposes it on its member"
+            );
+            assert_eq!(
+                outputs[1].save_policy, authored.save_policy,
+                "and states nothing about an output it does not hold"
+            );
+            assert_eq!(
+                (outputs[0].stored_precision, outputs[0].streaming),
+                (authored.stored_precision, authored.streaming),
+                "a point policy is not a precision or a streaming decision"
+            );
+        }
+
+        for precision in SavedOutputPrecision::ALL {
+            let groups = vec![claiming(|group| group.precision = Some(precision))];
+            let mut outputs = vec![output("claimed", "V(x1.n)"), output("free", "V(x2.n)")];
+            project_onto_groups(&groups, &mut outputs);
+
+            assert_eq!(
+                outputs[0].stored_precision, precision,
+                "a group that sets a precision imposes it on its member"
+            );
+            assert_eq!(
+                outputs[1].stored_precision, authored.stored_precision,
+                "and a member whose group sets none keeps its own"
+            );
+            assert_eq!(
+                (outputs[0].save_policy, outputs[0].streaming),
+                (authored.save_policy, authored.streaming),
+                "a precision is not a point policy or a streaming decision"
+            );
+        }
+
+        for streaming in SavedOutputStreaming::ALL {
+            let groups = vec![claiming(|group| group.streaming = Some(streaming))];
+            let mut outputs = vec![output("claimed", "V(x1.n)"), output("free", "V(x2.n)")];
+            project_onto_groups(&groups, &mut outputs);
+
+            assert_eq!(
+                outputs[0].streaming, streaming,
+                "a group that sets a streaming mode imposes it on its member"
+            );
+            assert_eq!(
+                outputs[1].streaming, authored.streaming,
+                "and a member whose group sets none keeps its own"
+            );
+            assert_eq!(
+                (outputs[0].save_policy, outputs[0].stored_precision),
+                (authored.save_policy, authored.stored_precision),
+                "a streaming mode is not a point policy or a precision"
+            );
+        }
+
+        // A group that sets nothing leaves its member exactly as it found it,
+        // which is what makes membership in one a fact rather than a policy.
+        let groups = vec![claiming(|_| {})];
+        let mut outputs = vec![output("claimed", "V(x1.n)")];
+        let membership = project_onto_groups(&groups, &mut outputs);
+        assert_eq!(membership.owner(0), groups[0].id);
+        assert_eq!(
+            (
+                outputs[0].save_policy,
+                outputs[0].stored_precision,
+                outputs[0].streaming
+            ),
+            (
+                authored.save_policy,
+                authored.stored_precision,
+                authored.streaming
+            )
+        );
+    }
+
     #[test]
     fn a_plan_with_no_groups_prices_exactly_as_it_did_before_groups_existed() {
         let mut outputs = vec![output("a", "V(x1.n)"), output("b", "V(x2.n)")];
