@@ -5,6 +5,7 @@
 //! does; validation is rendered by the caller.
 
 mod dc_sweep;
+mod pss;
 mod run_space;
 mod stb_probe;
 mod sweep_point_label;
@@ -1425,37 +1426,7 @@ pub(super) fn form(
             }
         }
         AnalysisDraft::Pss(setup) => {
-            choice_row(
-                ui,
-                PSS_FIELD_LABELS[0],
-                &PSS_MODE_CHOICES,
-                &mut setup.method_idx,
-            );
-            quantity_input_row(
-                ui,
-                PSS_FIELD_LABELS[1],
-                &mut setup.fund_freq,
-                QuantityInputKind::Frequency,
-                policy,
-                locale,
-            );
-            named_periodic_source_row(
-                ui,
-                PSS_FIELD_LABELS[2],
-                "pss-tones",
-                &mut setup.tone_sources,
-                envelope_modulation_sources,
-            );
-            input_row(ui, PSS_FIELD_LABELS[3], &mut setup.tstab_periods);
-            input_row(ui, PSS_FIELD_LABELS[4], &mut setup.points_per_period);
-            engineering_input_row(ui, PSS_FIELD_LABELS[5], &mut setup.tolerance);
-            enabled_choice_row(ui, PSS_FIELD_LABELS[6], &mut setup.osc_mode);
-            // The oscillator field is a stable member of the grid. Toggling
-            // autonomous mode changes enablement, not the position of every
-            // field that follows it.
-            input_row_enabled(ui, PSS_FIELD_LABELS[7], &mut setup.osc_node, setup.osc_mode);
-            input_row(ui, PSS_FIELD_LABELS[8], &mut setup.num_harmonics);
-            "Periodic steady state of the large-signal circuit."
+            pss::fields(ui, setup, envelope_modulation_sources, policy, locale)
         }
         AnalysisDraft::Stb(setup) => {
             stb_probe::row(ui, placed_loop_probes, setup);
