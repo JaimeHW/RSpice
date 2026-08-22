@@ -570,7 +570,9 @@ impl CaptureGroupMembership {
 
 /// Name every group in `groups`, with the fallback group's name supplied for
 /// any identity the authored set does not hold.
-#[must_use]
+///
+/// The returned closure carries `#[must_use]` itself, so the attribute is not
+/// repeated here: dropping it is already refused by the type.
 pub fn group_namer(groups: &[CaptureGroup]) -> impl Fn(CaptureGroupId) -> String + '_ {
     move |id| {
         groups
