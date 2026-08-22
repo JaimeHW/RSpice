@@ -387,12 +387,39 @@ fn a_refused_step_ceiling_reads_the_transient_form_it_names() {
         panic!("expected a transient draft");
     };
     setup.max_step = "auto".to_owned();
+    let step_time = setup.step.clone();
     let inherited = rows_with(AnalysisKind::Transient, &draft, None, &options);
+    // Not the plan's ceiling. With `auto` the bridge writes no `.tran`
+    // max-step, so the deck carries this analysis's own output step time in
+    // that field and the engine mins it with `MAXTIMESTEP`: the run steps at
+    // the tighter of the two, which for the stock 10 ns transient under a 1 µs
+    // plan ceiling is 10 ns. This cell printed the 1 µs.
     assert_eq!(
         effective_of(&inherited, O::MaximumTimestep),
-        super::super::page_solver::plan_preset_value(O::MaximumTimestep, &options),
-        "an `auto` transient steps at the plan's ceiling"
+        step_time,
+        "an `auto` transient steps at its own step time where that is the tighter bound"
     );
+    assert_ne!(
+        effective_of(&inherited, O::MaximumTimestep),
+        super::super::page_solver::plan_preset_value(O::MaximumTimestep, &options),
+        "the plan preset is not what an `auto` transient steps at"
+    );
+
+    // And where the step time is the looser of the two, the plan's ceiling is
+    // what runs — the same `min`, read from the other side.
+    let AnalysisDraft::Transient(setup) = &mut draft else {
+        panic!("expected a transient draft");
+    };
+    setup.step = "1m".to_owned();
+    let plan_bound = rows_with(AnalysisKind::Transient, &draft, None, &options);
+    assert_eq!(
+        effective_of(&plan_bound, O::MaximumTimestep),
+        super::super::page_solver::plan_preset_value(O::MaximumTimestep, &options),
+    );
+    let AnalysisDraft::Transient(setup) = &mut draft else {
+        panic!("expected a transient draft");
+    };
+    setup.step = step_time;
 
     let AnalysisDraft::Transient(setup) = &mut draft else {
         panic!("expected a transient draft");

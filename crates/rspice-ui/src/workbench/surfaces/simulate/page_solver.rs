@@ -1014,6 +1014,12 @@ const LEDGER_COLUMNS: [f32; 5] = [0.19, 0.25, 0.16, 0.18, 0.22];
 
 /// The origin cell of a row an analysis owns rather than the plan.
 const OVERRIDE_ORIGIN: &str = "analysis override";
+/// The origin of a value the plan's own ceiling took back from an override.
+const PLAN_TIGHTER_THAN_OVERRIDE_ORIGIN: &str = "plan preset \u{b7} tighter than the override";
+/// The origin of a step ceiling nobody authored.
+const STEP_TIME_ORIGIN: &str = "transient step time \u{b7} no ceiling authored";
+/// The same, where the plan's ceiling is the tighter of the two.
+const PLAN_TIGHTER_THAN_STEP_ORIGIN: &str = "plan preset \u{b7} tighter than the step time";
 
 /// What a step ceiling resolves to once both bounds are applied.
 ///
@@ -1029,16 +1035,48 @@ const OVERRIDE_ORIGIN: &str = "analysis override";
 /// analysis and used to show the authored number: two panels on one page,
 /// disagreeing about the ceiling the same run would step at.
 pub(super) fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (String, &'static str) {
-    let Ok(authored_value) = crate::simulation::dialog::parse_si_value(authored) else {
-        return (authored.to_owned(), OVERRIDE_ORIGIN);
-    };
-    if !plan_ceiling.is_finite() || plan_ceiling <= 0.0 || authored_value <= plan_ceiling {
-        return (authored.to_owned(), OVERRIDE_ORIGIN);
+    match step_ceiling(authored, plan_ceiling) {
+        Some((value, true)) => (value, PLAN_TIGHTER_THAN_OVERRIDE_ORIGIN),
+        Some((value, false)) => (value, OVERRIDE_ORIGIN),
+        None => (authored.to_owned(), OVERRIDE_ORIGIN),
     }
-    (
-        format_value(plan_ceiling),
-        "plan preset · tighter than the override",
-    )
+}
+
+/// What a transient that authors no ceiling actually steps at.
+///
+/// `auto` does not mean "the plan's ceiling". The bridge writes no `.tran`
+/// max-step for it, so the deck carries the analysis's own output step time in
+/// that field instead — `simulation/engine_bridge/transient.rs:118` reads
+/// `config.max_timestep.unwrap_or(config.step_time)` — and the engine then mins
+/// *that* with the plan's `MAXTIMESTEP` exactly as it mins an authored one. The
+/// run steps at `min(step time, plan preset)`, which for the stock transient is
+/// 10 ns rather than the plan's 1 ms.
+///
+/// `None` where the step time does not parse: such a plan has no ceiling to
+/// state, and its run is refused before it acquires one.
+pub(super) fn inherited_step_ceiling(
+    step_time: &str,
+    plan_ceiling: f64,
+) -> Option<(String, &'static str)> {
+    step_ceiling(step_time, plan_ceiling).map(|(value, from_plan)| {
+        if from_plan {
+            (value, PLAN_TIGHTER_THAN_STEP_ORIGIN)
+        } else {
+            (value, STEP_TIME_ORIGIN)
+        }
+    })
+}
+
+/// The `min` both ceilings are composed by, and which side won.
+///
+/// One owner for the arithmetic; the two callers above differ only in what they
+/// call each side. `None` where the candidate does not parse at all.
+fn step_ceiling(candidate: &str, plan_ceiling: f64) -> Option<(String, bool)> {
+    let value = crate::simulation::dialog::parse_si_value(candidate).ok()?;
+    if !plan_ceiling.is_finite() || plan_ceiling <= 0.0 || value <= plan_ceiling {
+        return Some((candidate.trim().to_owned(), false));
+    }
+    Some((format_value(plan_ceiling), true))
 }
 
 /// One statement of what an analysis actually resolves to.
@@ -1398,18 +1436,31 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
                 rows.push(tier_iteration_budget_row(&analysis, accuracy, options));
             }
             // A transient that names its own step ceiling departs from the
-            // plan's, though it can only tighten it. `auto` means it does not.
+            // plan's, though it can only tighten it. `auto` does not mean it
+            // steps at the plan's ceiling either: the deck then carries the
+            // analysis's output step time in that field and the engine mins
+            // the two, so there is a row to state in both cases — and the
+            // ledger emitted none for `auto`, which is where the largest gap
+            // between the reported and the honoured ceiling was.
             AnalysisDraft::Transient(setup) => {
                 let ceiling = setup.max_step.trim();
-                if !(ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto")) {
-                    let (effective, origin) = resolved_step_ceiling(ceiling, options.max_timestep);
+                let authored = !(ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto"));
+                let resolved = if authored {
+                    Some(resolved_step_ceiling(ceiling, options.max_timestep))
+                } else {
+                    inherited_step_ceiling(&setup.step, options.max_timestep)
+                };
+                if let Some((effective, origin)) = resolved {
                     rows.push(PolicyRow {
                         analysis: analysis.clone(),
                         option: NumericOverrideOption::MaximumTimestep.label().to_owned(),
                         preset: plan_preset_value(NumericOverrideOption::MaximumTimestep, options),
                         effective,
                         origin,
-                        target: Some(OverrideTarget {
+                        // Only an authored ceiling can be removed from here.
+                        // An inherited one is what the analysis's own step time
+                        // implies, and there is nothing on this row to clear.
+                        target: authored.then_some(OverrideTarget {
                             instance: instance.id(),
                             option: NumericOverrideOption::MaximumTimestep,
                         }),

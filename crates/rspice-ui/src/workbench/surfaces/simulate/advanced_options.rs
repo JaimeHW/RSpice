@@ -226,7 +226,7 @@ const NO_REFUSED_VALUE: &str = "\u{2014}";
 /// The fourth refusal — an option that only reaches a solve which advances
 /// time, or one a kind forbids outright rather than assigning — has no owner
 /// and no value, so it states an em dash rather than a number.
-fn refused_effective(
+pub(super) fn refused_effective(
     option: NumericOverrideOption,
     draft: &AnalysisDraft,
     ownership: SolverOwnership,
@@ -248,10 +248,13 @@ fn refused_effective(
             AnalysisDraft::Transient(setup) => {
                 let ceiling = setup.max_step.trim();
                 if ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto") {
-                    // The transient states nothing, so the plan's ceiling is
-                    // what the run steps at. That is not the preset standing in
-                    // for an answer; it is the answer.
-                    super::page_solver::plan_preset_value(option, options)
+                    // Not the plan's ceiling. `auto` leaves the deck's `.tran`
+                    // max-step carrying the analysis's own output step time,
+                    // and the engine mins that with the plan's — so a stock
+                    // transient under a 1 ms plan ceiling steps at 10 ns, and
+                    // this cell used to print the 1 ms.
+                    super::page_solver::inherited_step_ceiling(&setup.step, options.max_timestep)
+                        .map_or_else(|| NO_REFUSED_VALUE.to_owned(), |(value, _)| value)
                 } else {
                     super::page_solver::resolved_step_ceiling(ceiling, options.max_timestep).0
                 }

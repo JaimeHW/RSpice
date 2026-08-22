@@ -1841,6 +1841,43 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
         origin, "plan preset · tighter than the override",
         "and it has to say which of the two bounds won"
     );
+
+    // `auto` is not "no ceiling", and it is not the plan's either: the bridge
+    // writes no `.tran` max-step, the deck carries the analysis's own step
+    // time in that field, and the engine mins the two. The ledger emitted no
+    // row at all here, and the advanced-options panel printed the plan preset
+    // — a millisecond, for a run that steps at ten nanoseconds.
+    author_ceiling(&mut app, "auto");
+    let (preset, effective, origin) = ceiling_row(&app);
+    assert_eq!(preset, "1u");
+    assert_eq!(
+        effective, "10n",
+        "an `auto` transient steps at its own step time where that is tighter"
+    );
+    assert_eq!(origin, "transient step time · no ceiling authored");
+
+    // And the panel that reports the same option for the same analysis reads
+    // the same owner rather than a second account of it.
+    let draft = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance has a stable plan")
+        .instances()
+        .iter()
+        .find(|instance| matches!(instance.draft(), AnalysisDraft::Transient(_)))
+        .map(|instance| instance.draft().clone())
+        .expect("the default plan runs a transient");
+    assert_eq!(
+        super::advanced_options::refused_effective(
+            crate::simulation::plan::NumericOverrideOption::MaximumTimestep,
+            &draft,
+            crate::simulation::plan::SolverOwnership::NONE,
+            &app.state.sim_setup.options,
+        ),
+        effective,
+        "the Solver ledger and the advanced-options panel state one ceiling"
+    );
 }
 
 /// The active plan's identity, for seeds that hold only the session state.
