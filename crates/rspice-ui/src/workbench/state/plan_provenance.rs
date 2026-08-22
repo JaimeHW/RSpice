@@ -50,10 +50,17 @@ pub(crate) fn producing_plan_hop(
     if plan.id() != plan_id {
         return Err("the plan that produced this dataset is not the active simulation plan");
     }
-    let produced_by = simulation
+    let provenance = simulation
         .active_analysis()
-        .and_then(|analysis| analysis.provenance.as_ref())
-        .map(AnalysisResultProvenance::authored_source_instance_id);
+        .and_then(|analysis| analysis.provenance.as_ref());
+    let produced_by = provenance.map(AnalysisResultProvenance::authored_source_instance_id);
+    // The plan is the same object; it may not be the same version of it. The
+    // task's provenance retains the plan revision it was prepared from, so a
+    // plan edited since the run can be said to have moved on rather than
+    // presented as the thing that produced these numbers.
+    let moved_on = provenance
+        .map(AnalysisResultProvenance::source_revision)
+        .is_some_and(|prepared| prepared != plan.revision());
     let produced_by_name = produced_by
         .and_then(|id| plan.instance(id))
         .map(|entry| entry.display_name().to_owned());
@@ -82,6 +89,18 @@ pub(crate) fn producing_plan_hop(
                  provenance, so no producing instance could be selected on arrival."
             )),
         ),
+    };
+    let instance_note = match (instance_note, moved_on) {
+        (Some(note), true) => Some(format!(
+            "{note} The plan has also been edited since this run, so what it declares now is not \
+             what produced these results."
+        )),
+        (Some(note), false) => Some(note),
+        (None, true) => Some(format!(
+            "Simulation plan {plan_id} has been edited since this run, so what it declares now is \
+             not what produced these results."
+        )),
+        (None, false) => None,
     };
     Ok(ProducingPlanHop {
         instance,

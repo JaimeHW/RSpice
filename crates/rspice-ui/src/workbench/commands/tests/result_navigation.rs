@@ -206,6 +206,49 @@ fn the_producing_plan_hop_carries_the_instance_that_made_the_result() {
     );
 }
 
+/// A hop whose producing instance is gone must not leave the previous one lit.
+///
+/// The instance was written only when the hop resolved one, so the
+/// producer-gone branch landed on the plan with whatever had been highlighted
+/// before still highlighted — while the console note beside it said nothing had
+/// been selected. Removing the producer also moves the plan on from the
+/// revision the run was prepared at, which the note now says as well: the plan
+/// is the same object, and it is not the version that produced these numbers.
+#[test]
+fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
+    let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
+    let (_, analysis_id) = plan_binding(&app);
+    app.state.workbench.active_analysis_instance = Some(analysis_id);
+    app.state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the fixture owns a stable plan")
+        .remove(analysis_id, Vec::new())
+        .expect("the producing instance is removed from the plan");
+    app.state.workbench.activate(Workspace::Results);
+    let before = app.state.log_buffer.revision();
+
+    Command::OpenProducingPlan.execute(&mut app);
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+    assert!(
+        app.state.workbench.active_analysis_instance.is_none(),
+        "the hop selected nothing, so nothing may stay selected"
+    );
+    assert!(
+        app.state.log_buffer.revision() > before,
+        "and what the hop could not carry is stated"
+    );
+    assert!(
+        app.state.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("has also been edited since this run")
+        }),
+        "a plan that has moved on since the run says so"
+    );
+}
+
 /// Three different facts, three different refusals: a manual deck, a dataset
 /// that predates receipts, and a plan that is no longer the active one are not
 /// one "unavailable".

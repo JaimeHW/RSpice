@@ -2097,9 +2097,12 @@ impl Command {
             Self::OpenRunInResults => activate_workspace(app, Workspace::Results),
             Self::OpenProducingPlan => match result_navigation::producing_plan_hop(app) {
                 Ok(hop) => {
-                    if let Some(id) = hop.instance {
-                        app.state.workbench.active_analysis_instance = Some(id);
-                    }
+                    // Written unconditionally, `None` included. A hop whose
+                    // producing instance is gone used to leave the previously
+                    // highlighted one selected, so the page arrived showing an
+                    // analysis that produced nothing the reader was looking at
+                    // — while the console note said nothing had been selected.
+                    app.state.workbench.active_analysis_instance = hop.instance;
                     if let Some(note) = hop.selected_note {
                         app.state
                             .push_user_message(crate::diagnostics::ConsoleMessage::info(note));
