@@ -892,10 +892,6 @@ impl<'a> Dialog<'a> {
                     (content.y - header_height - footer_height - transaction_height).max(1.0);
                 let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
                 let flush_body = self.flush_body;
-                // What the body wanted and the surface would not give it. A body
-                // the caller scrolls itself is handed a viewport on purpose and
-                // asks for nothing more.
-                let mut body_shortfall = 0.0;
                 if self.manual_body_scroll {
                     let body_output = ui.allocate_ui_with_layout(
                         vec2(ui.available_width(), body_max_height),
@@ -961,8 +957,6 @@ impl<'a> Dialog<'a> {
                             .inner
                     });
                     rendered_focus.body = body_output.inner;
-                    body_shortfall =
-                        (body_output.content_size.y - body_output.inner_rect.height()).max(0.0);
                     if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
                         *offset = body_output.state.offset.y;
                     }
@@ -989,26 +983,25 @@ impl<'a> Dialog<'a> {
                     DialogChoice::None => {}
                     chosen => choice = chosen,
                 }
-                body_shortfall
             });
-            // How tall the surface must be to hold its stack, asked of the
-            // stack. `response.rect` is the frame's outer rect, its stroke
-            // already counted in, so the border allowance must not be added a
-            // second time. It was, and because an overflowing body spends
-            // whatever room the surface gives it, every pass handed the next
-            // one a surface two points taller: the dialog crawled two points a
-            // frame until it reached its ceiling, and nothing on it ever
-            // stopped moving.
+            // The surface is as tall as the stack it holds, and no taller. The
+            // frame reports its outer rect, the stroke already counted in, so
+            // the border allowance must not be added a second time. It was, and
+            // because an overflowing body spends every point the surface offers,
+            // every pass measured two points more than the last and handed them
+            // to the next: the dialog grew two points a frame until it reached
+            // its ceiling, and nothing on it ever stopped moving.
             //
-            // A clamped body is the other half of the same question. It
-            // reports the height it was allowed, never the height it wants, so
-            // a body that lengthens after the dialog opens cannot lift the
-            // surface on its own: shortening the surface only shortens the
-            // body, and its last row stays clipped forever. Adding back the
-            // measure the scroll area could not show states the stack's real
-            // appetite, and the next pass settles on it.
-            rendered_surface_height =
-                Some(surface_output.response.rect.height() + surface_output.inner);
+            // Counting the border once is also what makes the measurement a
+            // fixed point in the other direction. Dropping the allowance
+            // entirely, which is the other way to stop the crawl, shortens the
+            // surface by the border on every pass instead.
+            //
+            // A body longer than the surface scrolls rather than lifting it. The
+            // surface it settled on is the one the reader placed and sized their
+            // window around, and a dialog that resized itself under content that
+            // arrived later would move every control on it.
+            rendered_surface_height = Some(surface_output.response.rect.height());
         });
 
         if self.fixed_height.is_none()
