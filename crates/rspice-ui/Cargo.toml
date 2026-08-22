@@ -65,7 +65,7 @@ parquet = { version = "59", default-features = false, features = ["arrow"] }
 thiserror.workspace = true
 sha2 = "0.10"
 regex = "1.12"
-similar = "2.7"
+similar = "3.2"
 # Signed PDK callbacks run in a deterministic, fuel-metered interpreter on
 # every supported target. No WASI integration is linked, so callbacks receive
 # only the explicit RSpice host capabilities declared by their signed contract.
