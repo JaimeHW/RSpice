@@ -398,9 +398,15 @@ fn point_base_analysis_request(
                 start2: None,
                 stop2: None,
                 step2: None,
-                // A corner base sweep travels once through its range; retracing
-                // is a property of the analysis an engineer configures, and no
-                // corner declares one.
+                // A point-family base sweep travels once through its range.
+                //
+                // The base is taken from the plan's DC sweep draft, which *can*
+                // declare a retrace, but `CornerBaseMode::DcSweep` carries no
+                // such field — it is the run's wire contract to the worker as
+                // well as its in-process form — so the flag is dropped rather
+                // than carried. The Corner and Temperature forms say so beside
+                // the Base control instead of leaving "repeats the base
+                // analysis" to imply otherwise.
                 hysteresis: false,
             },
             None,

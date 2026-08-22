@@ -140,10 +140,19 @@ pub(super) fn temperature_form(
                 *route = Some(SimulationPage::RunSet);
             }
             super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
-            "Repeats the base analysis across the temperatures the plan declares. Inheriting \
-             authors those temperatures once; it does not move who walks them, so this instance \
-             still owns a point expansion and the plan is refused while any global run-set axis \
-             is enabled. Edit the temperatures in PVT, sweeps & variation."
+            if setup.base_idx == 3 {
+                "Repeats the base analysis across the temperatures the plan declares, travelling \
+                 the DC range once at each: a Bidirectional retrace belongs to that analysis \
+                 instance and the point family does not carry it. Inheriting authors those \
+                 temperatures once; it does not move who walks them, so this instance still owns \
+                 a point expansion and the plan is refused while any global run-set axis is \
+                 enabled."
+            } else {
+                "Repeats the base analysis across the temperatures the plan declares. Inheriting \
+                 authors those temperatures once; it does not move who walks them, so this \
+                 instance still owns a point expansion and the plan is refused while any global \
+                 run-set axis is enabled. Edit the temperatures in PVT, sweeps & variation."
+            }
         }
         TempAxisMode::Explicit => {
             super::quantity_input_row(
@@ -172,9 +181,18 @@ pub(super) fn temperature_form(
             );
             super::choice_row(ui, "Base", &["op", "tran", "ac", "dc"], &mut setup.base_idx);
             super::input_row(ui, "Explicit list", &mut setup.specific_temps);
-            "Repeats the base analysis across temperature. An explicit list replaces the range \
-             above; leave it empty to sweep the range. This instance owns a point expansion \
-             either way, so the plan is refused while any global run-set axis is enabled."
+            if setup.base_idx == 3 {
+                "Repeats the base analysis across temperature, travelling the DC range once at \
+                 each: a Bidirectional retrace belongs to that analysis instance and the point \
+                 family does not carry it. An explicit list replaces the range above; leave it \
+                 empty to sweep the range. This instance owns a point expansion either way, so \
+                 the plan is refused while any global run-set axis is enabled."
+            } else {
+                "Repeats the base analysis across temperature. An explicit list replaces the \
+                 range above; leave it empty to sweep the range. This instance owns a point \
+                 expansion either way, so the plan is refused while any global run-set axis is \
+                 enabled."
+            }
         }
     }
 }
@@ -284,5 +302,15 @@ pub(super) fn corner_form(
 
     sub_header(ui, "At every point");
     choice_row(ui, "Base", &["tran", "ac", "dc", "op"], base_analysis_idx);
-    "Repeats the base analysis at every point of the plan's declared run space."
+    // The point family carries the base analysis's configuration, not its
+    // Bidirectional flag: `CornerBaseMode::DcSweep` has no field for one, so a
+    // retracing DC sweep runs one-way at every point. Said where the base is
+    // chosen, because "repeats the base analysis" otherwise implies it.
+    if *base_analysis_idx == 2 {
+        "Repeats the base analysis at every point of the plan's declared run space. The DC base \
+         travels its range once at each point: a Bidirectional retrace belongs to that analysis \
+         instance and the point family does not carry it."
+    } else {
+        "Repeats the base analysis at every point of the plan's declared run space."
+    }
 }
