@@ -520,6 +520,47 @@ impl ResultOperationalStatus {
             dismissible: false,
         }
     }
+
+    /// A failure, named by whatever named it.
+    ///
+    /// The canonical description says only that "the requested viewer
+    /// operation failed", which is true of every failure and identifies none
+    /// of them. This banner sits directly above the control that acts on the
+    /// failure, so the sentence over that control has to say what failed.
+    fn failed(run: &SimulationRun, blocks_visuals: bool) -> Self {
+        Self {
+            state: ResultOperationalState::Failed,
+            detail: failed_analysis_detail(run),
+            blocks_visuals,
+            dismissible: false,
+        }
+    }
+}
+
+/// What actually failed in `run`, in the words of the owner that produced it.
+///
+/// The engine's own attribution headline first: that is the classification the
+/// engine committed to, and the same one the failure-site control below the
+/// banner offers to mark. Otherwise the analysis's error message verbatim.
+/// Never a sentence assembled here out of parts — a failure this surface
+/// invented would be worse than a generic one.
+///
+/// A live partial is written `success == false` with a reserved message, so it
+/// is told from a real failure before the success bit is read at all: a run
+/// still streaming has not failed.
+fn failed_analysis_detail(run: &SimulationRun) -> Option<String> {
+    let analysis = run
+        .analyses
+        .iter()
+        .find(|analysis| !analysis.success && !analysis.is_live_partial())?;
+    let name = analysis.label.as_str();
+    if let Some(attribution) = analysis.failure_attribution.as_ref() {
+        return Some(format!("{name}: {}", attribution.class.headline()));
+    }
+    analysis
+        .error_message
+        .as_deref()
+        .map(|message| format!("{name}: {message}"))
 }
 
 pub(crate) fn classify_viewer(
@@ -618,26 +659,20 @@ pub(crate) fn classify_viewer(
             );
         }
         SimulationRunLifecycle::Failed => {
-            return ResultOperationalStatus::canonical(
-                ResultOperationalState::Failed,
-                !run_has_data,
-            );
+            return ResultOperationalStatus::failed(run, !run_has_data);
         }
         SimulationRunLifecycle::Completed | SimulationRunLifecycle::LegacyUnknown => {}
     }
 
     if !run_has_data {
-        return ResultOperationalStatus::canonical(
-            if run.success {
-                ResultOperationalState::NoDataset
-            } else {
-                ResultOperationalState::Failed
-            },
-            true,
-        );
+        return if run.success {
+            ResultOperationalStatus::canonical(ResultOperationalState::NoDataset, true)
+        } else {
+            ResultOperationalStatus::failed(run, true)
+        };
     }
     if !run.success || run.analyses.iter().any(|analysis| !analysis.success) {
-        return ResultOperationalStatus::canonical(ResultOperationalState::Failed, false);
+        return ResultOperationalStatus::failed(run, false);
     }
 
     let currentness = run_currentness(state, run, |_| true);
@@ -910,8 +945,8 @@ pub(super) fn show_result_operational_status(
                 });
                 if status.dismissible {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        dismiss = ui
-                            .button("Dismiss")
+                        dismiss = crate::ui::widgets::Button::new("Dismiss")
+                            .show(ui)
                             .on_hover_text("Dismiss this recorded runtime notice")
                             .clicked();
                     });
@@ -1003,9 +1038,9 @@ fn failure_site_offer(state: &AppState) -> Option<FailureSiteOffer> {
 /// thirty — and it says how many the engine measured but did not name, so the
 /// marking is not read as the complete set.
 ///
-/// A plain `Button` on purpose: it is one of egui's own widgets, so its
-/// disabled and focus states are handled for it. A self-painted row here
-/// would have to clear the `ENABLED` accessibility bit itself.
+/// The workbench's own Button: it already marks its response disabled and
+/// paints its own focus ring, so nothing is given up by drawing it in the
+/// chrome every other control on this surface uses.
 fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteOffer, marked: bool) -> bool {
     // "Objects", not "nodes": a site is a node *or* a branch current, which the
     // schematic draws as a device (`ConvergenceSiteKind`). The console's anchor
@@ -1030,7 +1065,10 @@ fn show_failure_site_control(ui: &mut Ui, offer: &FailureSiteOffer, marked: bool
             offer.headline, offer.named
         )
     };
-    let clicked = ui.button(&label).on_hover_text(&hint).clicked();
+    let clicked = crate::ui::widgets::Button::new(&label)
+        .show(ui)
+        .on_hover_text(&hint)
+        .clicked();
     if !marked && offer.elided > 0 {
         let t = Tokens::get(ui.ctx());
         ui.label(
