@@ -1406,7 +1406,7 @@ impl<'a> ExprConverter<'a> {
             // KNOWN DEFECT: this returns `expr` itself rather than its partial
             // derivative with respect to `probe`, so any model relying on
             // ddx() gets a wrong number from this pipeline instead of an error.
-            // It is not refused here only because 23 of the 42 generated model
+            // It is not refused here only because 24 of the 43 generated model
             // sources call ddx(), and failing closed would drop them from the
             // catalog. `codegen/generator.rs` already rejects an unresolved
             // `IrExpr::Ddx`, which is the contract this branch should meet once

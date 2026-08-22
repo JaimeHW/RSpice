@@ -127,6 +127,10 @@ veriloga-model-bsimsoi-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bsimsoi-va",
 ]
+veriloga-model-ekv3-rf = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-ekv3-rf",
+]
 veriloga-model-ekv-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-ekv-va",
@@ -234,6 +238,7 @@ veriloga-builtins-models = [
     "veriloga-model-bsimsoi-18c250bc",
     "veriloga-model-bsimsoi-e2aff994",
     "veriloga-model-bsimsoi-va",
+    "veriloga-model-ekv3-rf",
     "veriloga-model-ekv-va",
     "veriloga-model-hicuml0va",
     "veriloga-model-hicuml2va",

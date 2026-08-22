@@ -1,6 +1,6 @@
 //! Engine-side adapter for the precompiled Verilog-A model catalog.
 //!
-//! Nothing here is generated. The generated devices are 42 independent crates
+//! Nothing here is generated. The generated devices are 43 independent crates
 //! under `rspice-veriloga-models`, each depending only on the engine-neutral
 //! `rspice-veriloga-runtime` ABI; this module is what teaches `rspice-core` to
 //! drive them. It resolves netlist parameters into an instance, owns the

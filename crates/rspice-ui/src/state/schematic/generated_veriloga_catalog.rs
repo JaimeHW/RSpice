@@ -391,7 +391,7 @@ mod descriptor_v2_tests {
 mod tests {
     use super::*;
 
-    const EXPECTED_SHIPPED_MODEL_COUNT: usize = 42;
+    const EXPECTED_SHIPPED_MODEL_COUNT: usize = 43;
 
     #[test]
     fn every_compiled_model_materializes_and_round_trips_exactly() {

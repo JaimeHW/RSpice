@@ -42,6 +42,8 @@ pub use crate::bsimsoi__bsimsoi__18c250bc;
 pub use crate::bsimsoi__bsimsoi__e2aff994;
 #[cfg(feature = "veriloga-model-bsimsoi-va")]
 pub use crate::bsimsoi__bsimsoi_va__3b1f6b5e;
+#[cfg(feature = "veriloga-model-ekv3-rf")]
+pub use crate::ekv3__ekv3_rf__958cd2b2;
 #[cfg(feature = "veriloga-model-ekv-va")]
 pub use crate::ekv26_sdext_verilog_a__ekv_va__0f1ec77e;
 #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -129,48 +131,50 @@ pub enum GeneratedBuiltinKind {
     Device19(Box<bsimsoi__bsimsoi__e2aff994::Instance>),
     #[cfg(feature = "veriloga-model-bsimsoi-va")]
     Device20(Box<bsimsoi__bsimsoi_va__3b1f6b5e::Instance>),
+    #[cfg(feature = "veriloga-model-ekv3-rf")]
+    Device21(Box<ekv3__ekv3_rf__958cd2b2::Instance>),
     #[cfg(feature = "veriloga-model-ekv-va")]
-    Device21(Box<ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance>),
+    Device22(Box<ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance>),
     #[cfg(feature = "veriloga-model-hicuml0va")]
-    Device22(Box<hicuml0_v2p1p0__hicuml0va__91cb3377::Instance>),
+    Device23(Box<hicuml0_v2p1p0__hicuml0va__91cb3377::Instance>),
     #[cfg(feature = "veriloga-model-hicuml2va")]
-    Device23(Box<hicuml2_v320__hicuml2va__25e676cf::Instance>),
+    Device24(Box<hicuml2_v320__hicuml2va__25e676cf::Instance>),
     #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
-    Device24(Box<hisimhv_n4__hisimhv_n4_va__69344dcf::Instance>),
+    Device25(Box<hisimhv_n4__hisimhv_n4_va__69344dcf::Instance>),
     #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
-    Device25(Box<hisimhv_n5__hisimhv_n5_va__89bf8539::Instance>),
+    Device26(Box<hisimhv_n5__hisimhv_n5_va__89bf8539::Instance>),
     #[cfg(feature = "veriloga-model-hisimhv-va")]
-    Device26(Box<hisimhv__hisimhv_va__57d0ff0e::Instance>),
+    Device27(Box<hisimhv__hisimhv_va__57d0ff0e::Instance>),
     #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
-    Device27(Box<hisimsoi__hisimsoi_va__5be18005::Instance>),
+    Device28(Box<hisimsoi__hisimsoi_va__5be18005::Instance>),
     #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
-    Device28(Box<hisimsoi_n4__hisimsoi_va__242bc21d::Instance>),
+    Device29(Box<hisimsoi_n4__hisimsoi_va__242bc21d::Instance>),
     #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
-    Device29(Box<hisimsoi_n5__hisimsoi_va__38074d06::Instance>),
+    Device30(Box<hisimsoi_n5__hisimsoi_va__38074d06::Instance>),
     #[cfg(feature = "veriloga-model-hisimsotb-va")]
-    Device30(Box<hisimsotb__hisimsotb_va__41200697::Instance>),
+    Device31(Box<hisimsotb__hisimsotb_va__41200697::Instance>),
     #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
-    Device31(Box<l_utsoi_102__l_utsoi__832ce87d::Instance>),
+    Device32(Box<l_utsoi_102__l_utsoi__832ce87d::Instance>),
     #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
-    Device32(Box<l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance>),
+    Device33(Box<l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance>),
     #[cfg(feature = "veriloga-model-mosvar")]
-    Device33(Box<mosvar__mosvar__0a88ed4a::Instance>),
+    Device34(Box<mosvar__mosvar__0a88ed4a::Instance>),
     #[cfg(feature = "veriloga-model-mvsg-cmc")]
-    Device34(Box<mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance>),
+    Device35(Box<mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance>),
     #[cfg(feature = "veriloga-model-r2-cmc")]
-    Device35(Box<r2_cmc__r2_cmc__bc71a915::Instance>),
+    Device36(Box<r2_cmc__r2_cmc__bc71a915::Instance>),
     #[cfg(feature = "veriloga-model-r2-et-cmc")]
-    Device36(Box<r2_et_cmc__r2_et_cmc__a8425039::Instance>),
+    Device37(Box<r2_et_cmc__r2_et_cmc__a8425039::Instance>),
     #[cfg(feature = "veriloga-model-r3-cmc")]
-    Device37(Box<r3_cmc__r3_cmc__2e3554ae::Instance>),
+    Device38(Box<r3_cmc__r3_cmc__2e3554ae::Instance>),
     #[cfg(feature = "veriloga-model-vbic13")]
-    Device38(Box<vbic_3t__vbic13__aa00e2e7::Instance>),
+    Device39(Box<vbic_3t__vbic13__aa00e2e7::Instance>),
     #[cfg(feature = "veriloga-model-vbic13-3t-et")]
-    Device39(Box<vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance>),
+    Device40(Box<vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance>),
     #[cfg(feature = "veriloga-model-vbic13-4t")]
-    Device40(Box<vbic_1p3__vbic13_4t__132cb4e0::Instance>),
+    Device41(Box<vbic_1p3__vbic13_4t__132cb4e0::Instance>),
     #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
-    Device41(Box<vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance>),
+    Device42(Box<vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance>),
     #[doc(hidden)]
     __NonExhaustive(std::convert::Infallible),
 }
@@ -220,48 +224,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(_) => bsimsoi__bsimsoi__e2aff994::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
+            Self::Device21(_) => ekv3__ekv3_rf__958cd2b2::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-ekv-va")]
-            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device22(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hicuml0va")]
-            Self::Device22(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device23(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hicuml2va")]
-            Self::Device23(_) => hicuml2_v320__hicuml2va__25e676cf::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device24(_) => hicuml2_v320__hicuml2va__25e676cf::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
-            Self::Device24(_) => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device25(_) => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
-            Self::Device25(_) => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device26(_) => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimhv-va")]
-            Self::Device26(_) => hisimhv__hisimhv_va__57d0ff0e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device27(_) => hisimhv__hisimhv_va__57d0ff0e::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
-            Self::Device27(_) => hisimsoi__hisimsoi_va__5be18005::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device28(_) => hisimsoi__hisimsoi_va__5be18005::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
-            Self::Device28(_) => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device29(_) => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
-            Self::Device29(_) => hisimsoi_n5__hisimsoi_va__38074d06::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device30(_) => hisimsoi_n5__hisimsoi_va__38074d06::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-hisimsotb-va")]
-            Self::Device30(_) => hisimsotb__hisimsotb_va__41200697::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device31(_) => hisimsotb__hisimsotb_va__41200697::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
-            Self::Device31(_) => l_utsoi_102__l_utsoi__832ce87d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device32(_) => l_utsoi_102__l_utsoi__832ce87d::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
-            Self::Device32(_) => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device33(_) => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-mosvar")]
-            Self::Device33(_) => mosvar__mosvar__0a88ed4a::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device34(_) => mosvar__mosvar__0a88ed4a::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-mvsg-cmc")]
-            Self::Device34(_) => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device35(_) => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-r2-cmc")]
-            Self::Device35(_) => r2_cmc__r2_cmc__bc71a915::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device36(_) => r2_cmc__r2_cmc__bc71a915::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-r2-et-cmc")]
-            Self::Device36(_) => r2_et_cmc__r2_et_cmc__a8425039::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device37(_) => r2_et_cmc__r2_et_cmc__a8425039::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-r3-cmc")]
-            Self::Device37(_) => r3_cmc__r3_cmc__2e3554ae::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device38(_) => r3_cmc__r3_cmc__2e3554ae::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-vbic13")]
-            Self::Device38(_) => vbic_3t__vbic13__aa00e2e7::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device39(_) => vbic_3t__vbic13__aa00e2e7::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-vbic13-3t-et")]
-            Self::Device39(_) => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device40(_) => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-vbic13-4t")]
-            Self::Device40(_) => vbic_1p3__vbic13_4t__132cb4e0::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device41(_) => vbic_1p3__vbic13_4t__132cb4e0::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
-            Self::Device41(_) => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::ONE_STEP_DAE_SPLIT_SAFE,
+            Self::Device42(_) => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::ONE_STEP_DAE_SPLIT_SAFE,
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -310,48 +316,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.capture_rollback_state(),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.capture_rollback_state(),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.capture_rollback_state(),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.capture_rollback_state(),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -401,48 +409,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.restore_rollback_state(state),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.restore_rollback_state(state),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.restore_rollback_state(state),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.restore_rollback_state(state),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -491,48 +501,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(_) => bsimsoi__bsimsoi__e2aff994::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(_) => bsimsoi__bsimsoi_va__3b1f6b5e::Instance::CHECKPOINT_MODEL_IDENTITY,
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
+            Self::Device21(_) => ekv3__ekv3_rf__958cd2b2::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-ekv-va")]
-            Self::Device21(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device22(_) => ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hicuml0va")]
-            Self::Device22(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device23(_) => hicuml0_v2p1p0__hicuml0va__91cb3377::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hicuml2va")]
-            Self::Device23(_) => hicuml2_v320__hicuml2va__25e676cf::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device24(_) => hicuml2_v320__hicuml2va__25e676cf::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
-            Self::Device24(_) => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device25(_) => hisimhv_n4__hisimhv_n4_va__69344dcf::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
-            Self::Device25(_) => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device26(_) => hisimhv_n5__hisimhv_n5_va__89bf8539::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimhv-va")]
-            Self::Device26(_) => hisimhv__hisimhv_va__57d0ff0e::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device27(_) => hisimhv__hisimhv_va__57d0ff0e::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
-            Self::Device27(_) => hisimsoi__hisimsoi_va__5be18005::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device28(_) => hisimsoi__hisimsoi_va__5be18005::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
-            Self::Device28(_) => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device29(_) => hisimsoi_n4__hisimsoi_va__242bc21d::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
-            Self::Device29(_) => hisimsoi_n5__hisimsoi_va__38074d06::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device30(_) => hisimsoi_n5__hisimsoi_va__38074d06::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-hisimsotb-va")]
-            Self::Device30(_) => hisimsotb__hisimsotb_va__41200697::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device31(_) => hisimsotb__hisimsotb_va__41200697::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
-            Self::Device31(_) => l_utsoi_102__l_utsoi__832ce87d::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device32(_) => l_utsoi_102__l_utsoi__832ce87d::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
-            Self::Device32(_) => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device33(_) => l_utsoi_102_nqs__l_utsoi__485e0ac9::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-mosvar")]
-            Self::Device33(_) => mosvar__mosvar__0a88ed4a::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device34(_) => mosvar__mosvar__0a88ed4a::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-mvsg-cmc")]
-            Self::Device34(_) => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device35(_) => mvsg_cmc_4__mvsg_cmc__7d7f784b::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-r2-cmc")]
-            Self::Device35(_) => r2_cmc__r2_cmc__bc71a915::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device36(_) => r2_cmc__r2_cmc__bc71a915::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-r2-et-cmc")]
-            Self::Device36(_) => r2_et_cmc__r2_et_cmc__a8425039::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device37(_) => r2_et_cmc__r2_et_cmc__a8425039::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-r3-cmc")]
-            Self::Device37(_) => r3_cmc__r3_cmc__2e3554ae::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device38(_) => r3_cmc__r3_cmc__2e3554ae::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-vbic13")]
-            Self::Device38(_) => vbic_3t__vbic13__aa00e2e7::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device39(_) => vbic_3t__vbic13__aa00e2e7::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-vbic13-3t-et")]
-            Self::Device39(_) => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device40(_) => vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-vbic13-4t")]
-            Self::Device40(_) => vbic_1p3__vbic13_4t__132cb4e0::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device41(_) => vbic_1p3__vbic13_4t__132cb4e0::Instance::CHECKPOINT_MODEL_IDENTITY,
             #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
-            Self::Device41(_) => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::CHECKPOINT_MODEL_IDENTITY,
+            Self::Device42(_) => vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::CHECKPOINT_MODEL_IDENTITY,
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -581,48 +593,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.capture_persistent_state(),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.capture_persistent_state(),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.capture_persistent_state(),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.capture_persistent_state(),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -672,48 +686,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.validate_persistent_state_shape(state),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.validate_persistent_state_shape(state),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.validate_persistent_state_shape(state),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.validate_persistent_state_shape(state),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -763,48 +779,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.restore_persistent_state(state),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.restore_persistent_state(state),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.restore_persistent_state(state),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.restore_persistent_state(state),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -853,48 +871,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.limiter_converged(),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.limiter_converged(),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.limiter_converged(),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.limiter_converged(),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -943,48 +963,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(_) => &bsimsoi__bsimsoi__e2aff994::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
             Self::Device20(_) => &bsimsoi__bsimsoi_va__3b1f6b5e::NOISE_SOURCES,
+            #[cfg(all(feature = "veriloga-model-ekv3-rf", feature = "veriloga-builtins-noise"))]
+            Self::Device21(_) => &ekv3__ekv3_rf__958cd2b2::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
-            Self::Device21(_) => &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::NOISE_SOURCES,
+            Self::Device22(_) => &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
-            Self::Device22(_) => &hicuml0_v2p1p0__hicuml0va__91cb3377::NOISE_SOURCES,
+            Self::Device23(_) => &hicuml0_v2p1p0__hicuml0va__91cb3377::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
-            Self::Device23(_) => &hicuml2_v320__hicuml2va__25e676cf::NOISE_SOURCES,
+            Self::Device24(_) => &hicuml2_v320__hicuml2va__25e676cf::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimhv-n4-va", feature = "veriloga-builtins-noise"))]
-            Self::Device24(_) => &hisimhv_n4__hisimhv_n4_va__69344dcf::NOISE_SOURCES,
+            Self::Device25(_) => &hisimhv_n4__hisimhv_n4_va__69344dcf::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimhv-n5-va", feature = "veriloga-builtins-noise"))]
-            Self::Device25(_) => &hisimhv_n5__hisimhv_n5_va__89bf8539::NOISE_SOURCES,
+            Self::Device26(_) => &hisimhv_n5__hisimhv_n5_va__89bf8539::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimhv-va", feature = "veriloga-builtins-noise"))]
-            Self::Device26(_) => &hisimhv__hisimhv_va__57d0ff0e::NOISE_SOURCES,
+            Self::Device27(_) => &hisimhv__hisimhv_va__57d0ff0e::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimsoi-va-5be18005", feature = "veriloga-builtins-noise"))]
-            Self::Device27(_) => &hisimsoi__hisimsoi_va__5be18005::NOISE_SOURCES,
+            Self::Device28(_) => &hisimsoi__hisimsoi_va__5be18005::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimsoi-va-242bc21d", feature = "veriloga-builtins-noise"))]
-            Self::Device28(_) => &hisimsoi_n4__hisimsoi_va__242bc21d::NOISE_SOURCES,
+            Self::Device29(_) => &hisimsoi_n4__hisimsoi_va__242bc21d::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimsoi-va-38074d06", feature = "veriloga-builtins-noise"))]
-            Self::Device29(_) => &hisimsoi_n5__hisimsoi_va__38074d06::NOISE_SOURCES,
+            Self::Device30(_) => &hisimsoi_n5__hisimsoi_va__38074d06::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-hisimsotb-va", feature = "veriloga-builtins-noise"))]
-            Self::Device30(_) => &hisimsotb__hisimsotb_va__41200697::NOISE_SOURCES,
+            Self::Device31(_) => &hisimsotb__hisimsotb_va__41200697::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-l-utsoi-832ce87d", feature = "veriloga-builtins-noise"))]
-            Self::Device31(_) => &l_utsoi_102__l_utsoi__832ce87d::NOISE_SOURCES,
+            Self::Device32(_) => &l_utsoi_102__l_utsoi__832ce87d::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-l-utsoi-485e0ac9", feature = "veriloga-builtins-noise"))]
-            Self::Device32(_) => &l_utsoi_102_nqs__l_utsoi__485e0ac9::NOISE_SOURCES,
+            Self::Device33(_) => &l_utsoi_102_nqs__l_utsoi__485e0ac9::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-mosvar", feature = "veriloga-builtins-noise"))]
-            Self::Device33(_) => &mosvar__mosvar__0a88ed4a::NOISE_SOURCES,
+            Self::Device34(_) => &mosvar__mosvar__0a88ed4a::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-mvsg-cmc", feature = "veriloga-builtins-noise"))]
-            Self::Device34(_) => &mvsg_cmc_4__mvsg_cmc__7d7f784b::NOISE_SOURCES,
+            Self::Device35(_) => &mvsg_cmc_4__mvsg_cmc__7d7f784b::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
-            Self::Device35(_) => &r2_cmc__r2_cmc__bc71a915::NOISE_SOURCES,
+            Self::Device36(_) => &r2_cmc__r2_cmc__bc71a915::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-r2-et-cmc", feature = "veriloga-builtins-noise"))]
-            Self::Device36(_) => &r2_et_cmc__r2_et_cmc__a8425039::NOISE_SOURCES,
+            Self::Device37(_) => &r2_et_cmc__r2_et_cmc__a8425039::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-r3-cmc", feature = "veriloga-builtins-noise"))]
-            Self::Device37(_) => &r3_cmc__r3_cmc__2e3554ae::NOISE_SOURCES,
+            Self::Device38(_) => &r3_cmc__r3_cmc__2e3554ae::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
-            Self::Device38(_) => &vbic_3t__vbic13__aa00e2e7::NOISE_SOURCES,
+            Self::Device39(_) => &vbic_3t__vbic13__aa00e2e7::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-vbic13-3t-et", feature = "veriloga-builtins-noise"))]
-            Self::Device39(_) => &vbic_3t_et__vbic13_3t_et__bd2f63d4::NOISE_SOURCES,
+            Self::Device40(_) => &vbic_3t_et__vbic13_3t_et__bd2f63d4::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-vbic13-4t", feature = "veriloga-builtins-noise"))]
-            Self::Device40(_) => &vbic_1p3__vbic13_4t__132cb4e0::NOISE_SOURCES,
+            Self::Device41(_) => &vbic_1p3__vbic13_4t__132cb4e0::NOISE_SOURCES,
             #[cfg(all(feature = "veriloga-model-vbic-4t-et-cf", feature = "veriloga-builtins-noise"))]
-            Self::Device41(_) => &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::NOISE_SOURCES,
+            Self::Device42(_) => &vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::NOISE_SOURCES,
             #[cfg(feature = "veriloga-builtins-noise")]
             Self::__NonExhaustive(value) => match *value {},
             #[cfg(not(feature = "veriloga-builtins-noise"))]
@@ -1037,48 +1059,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.evaluate_noise_sources(ctx, visitor),
             #[cfg(all(feature = "veriloga-model-bsimsoi-va", feature = "veriloga-builtins-noise"))]
             Self::Device20(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-ekv3-rf", feature = "veriloga-builtins-noise"))]
             Self::Device21(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-ekv-va", feature = "veriloga-builtins-noise"))]
             Self::Device22(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hicuml0va", feature = "veriloga-builtins-noise"))]
             Self::Device23(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimhv-n4-va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hicuml2va", feature = "veriloga-builtins-noise"))]
             Self::Device24(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimhv-n5-va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimhv-n4-va", feature = "veriloga-builtins-noise"))]
             Self::Device25(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimhv-va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimhv-n5-va", feature = "veriloga-builtins-noise"))]
             Self::Device26(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimsoi-va-5be18005", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimhv-va", feature = "veriloga-builtins-noise"))]
             Self::Device27(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimsoi-va-242bc21d", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-5be18005", feature = "veriloga-builtins-noise"))]
             Self::Device28(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimsoi-va-38074d06", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-242bc21d", feature = "veriloga-builtins-noise"))]
             Self::Device29(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-hisimsotb-va", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimsoi-va-38074d06", feature = "veriloga-builtins-noise"))]
             Self::Device30(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-l-utsoi-832ce87d", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-hisimsotb-va", feature = "veriloga-builtins-noise"))]
             Self::Device31(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-l-utsoi-485e0ac9", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-l-utsoi-832ce87d", feature = "veriloga-builtins-noise"))]
             Self::Device32(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-mosvar", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-l-utsoi-485e0ac9", feature = "veriloga-builtins-noise"))]
             Self::Device33(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-mvsg-cmc", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-mosvar", feature = "veriloga-builtins-noise"))]
             Self::Device34(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-mvsg-cmc", feature = "veriloga-builtins-noise"))]
             Self::Device35(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-r2-et-cmc", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-r2-cmc", feature = "veriloga-builtins-noise"))]
             Self::Device36(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-r3-cmc", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-r2-et-cmc", feature = "veriloga-builtins-noise"))]
             Self::Device37(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-r3-cmc", feature = "veriloga-builtins-noise"))]
             Self::Device38(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-vbic13-3t-et", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-vbic13", feature = "veriloga-builtins-noise"))]
             Self::Device39(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-vbic13-4t", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-vbic13-3t-et", feature = "veriloga-builtins-noise"))]
             Self::Device40(device) => device.evaluate_noise_sources(ctx, visitor),
-            #[cfg(all(feature = "veriloga-model-vbic-4t-et-cf", feature = "veriloga-builtins-noise"))]
+            #[cfg(all(feature = "veriloga-model-vbic13-4t", feature = "veriloga-builtins-noise"))]
             Self::Device41(device) => device.evaluate_noise_sources(ctx, visitor),
+            #[cfg(all(feature = "veriloga-model-vbic-4t-et-cf", feature = "veriloga-builtins-noise"))]
+            Self::Device42(device) => device.evaluate_noise_sources(ctx, visitor),
             #[cfg(feature = "veriloga-builtins-noise")]
             Self::__NonExhaustive(value) => match *value {},
             #[cfg(not(feature = "veriloga-builtins-noise"))]
@@ -1134,48 +1158,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.stamp(ctx, stamper),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.stamp(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.stamp(ctx, stamper),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.stamp(ctx, stamper),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -1225,48 +1251,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.set_timepoint(time, timestep, ddt_coefficients),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.set_timepoint(time, timestep, ddt_coefficients),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.set_timepoint(time, timestep, ddt_coefficients),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.set_timepoint(time, timestep, ddt_coefficients),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -1315,48 +1343,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.accept_timestep(),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.accept_timestep(),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.accept_timestep(),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.accept_timestep(),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -1406,48 +1436,50 @@ impl GeneratedBuiltinKind {
             Self::Device19(device) => device.stamp_reactive(ctx, stamper),
             #[cfg(feature = "veriloga-model-bsimsoi-va")]
             Self::Device20(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-ekv-va")]
+            #[cfg(feature = "veriloga-model-ekv3-rf")]
             Self::Device21(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hicuml0va")]
+            #[cfg(feature = "veriloga-model-ekv-va")]
             Self::Device22(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hicuml2va")]
+            #[cfg(feature = "veriloga-model-hicuml0va")]
             Self::Device23(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
+            #[cfg(feature = "veriloga-model-hicuml2va")]
             Self::Device24(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
             Self::Device25(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimhv-va")]
+            #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
             Self::Device26(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
+            #[cfg(feature = "veriloga-model-hisimhv-va")]
             Self::Device27(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
             Self::Device28(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
             Self::Device29(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-hisimsotb-va")]
+            #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
             Self::Device30(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
+            #[cfg(feature = "veriloga-model-hisimsotb-va")]
             Self::Device31(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
+            #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
             Self::Device32(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-mosvar")]
+            #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
             Self::Device33(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-mvsg-cmc")]
+            #[cfg(feature = "veriloga-model-mosvar")]
             Self::Device34(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-r2-cmc")]
+            #[cfg(feature = "veriloga-model-mvsg-cmc")]
             Self::Device35(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-r2-et-cmc")]
+            #[cfg(feature = "veriloga-model-r2-cmc")]
             Self::Device36(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-r3-cmc")]
+            #[cfg(feature = "veriloga-model-r2-et-cmc")]
             Self::Device37(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic13")]
+            #[cfg(feature = "veriloga-model-r3-cmc")]
             Self::Device38(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
+            #[cfg(feature = "veriloga-model-vbic13")]
             Self::Device39(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic13-4t")]
+            #[cfg(feature = "veriloga-model-vbic13-3t-et")]
             Self::Device40(device) => device.stamp_reactive(ctx, stamper),
-            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            #[cfg(feature = "veriloga-model-vbic13-4t")]
             Self::Device41(device) => device.stamp_reactive(ctx, stamper),
+            #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
+            Self::Device42(device) => device.stamp_reactive(ctx, stamper),
             Self::__NonExhaustive(value) => match *value {},
         }
     }
@@ -1496,6 +1528,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "bsimsoi__e2aff994",
     #[cfg(feature = "veriloga-model-bsimsoi-va")]
     "bsimsoi_va",
+    #[cfg(feature = "veriloga-model-ekv3-rf")]
+    "ekv3_rf",
     #[cfg(feature = "veriloga-model-ekv-va")]
     "ekv_va",
     #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -1587,6 +1621,8 @@ pub const BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "bsimsoi__e2aff994", module_name: "bsimsoi", source_digest: "e2aff9942de1e4c9", checkpoint_identity: bsimsoi__bsimsoi__e2aff994::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &bsimsoi__bsimsoi__e2aff994::Instance::TERMINALS, parameters: &bsimsoi__bsimsoi__e2aff994::Instance::PARAMETER_DESCRIPTORS, total_node_count: bsimsoi__bsimsoi__e2aff994::Instance::NODE_COUNT, internal_node_names: &bsimsoi__bsimsoi__e2aff994::Instance::INTERNAL_NODE_NAMES, branch_count: bsimsoi__bsimsoi__e2aff994::Instance::BRANCH_COUNT },
     #[cfg(feature = "veriloga-model-bsimsoi-va")]
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "bsimsoi_va", module_name: "bsimsoi_va", source_digest: "3b1f6b5e08b3dece", checkpoint_identity: bsimsoi__bsimsoi_va__3b1f6b5e::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &bsimsoi__bsimsoi_va__3b1f6b5e::Instance::TERMINALS, parameters: &bsimsoi__bsimsoi_va__3b1f6b5e::Instance::PARAMETER_DESCRIPTORS, total_node_count: bsimsoi__bsimsoi_va__3b1f6b5e::Instance::NODE_COUNT, internal_node_names: &bsimsoi__bsimsoi_va__3b1f6b5e::Instance::INTERNAL_NODE_NAMES, branch_count: bsimsoi__bsimsoi_va__3b1f6b5e::Instance::BRANCH_COUNT },
+    #[cfg(feature = "veriloga-model-ekv3-rf")]
+    super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "ekv3_rf", module_name: "ekv3_rf", source_digest: "958cd2b25bc3d3f9", checkpoint_identity: ekv3__ekv3_rf__958cd2b2::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &ekv3__ekv3_rf__958cd2b2::Instance::TERMINALS, parameters: &ekv3__ekv3_rf__958cd2b2::Instance::PARAMETER_DESCRIPTORS, total_node_count: ekv3__ekv3_rf__958cd2b2::Instance::NODE_COUNT, internal_node_names: &ekv3__ekv3_rf__958cd2b2::Instance::INTERNAL_NODE_NAMES, branch_count: ekv3__ekv3_rf__958cd2b2::Instance::BRANCH_COUNT },
     #[cfg(feature = "veriloga-model-ekv-va")]
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "ekv_va", module_name: "ekv_va", source_digest: "0f1ec77e926f0fd3", checkpoint_identity: ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::CHECKPOINT_MODEL_IDENTITY, terminals: &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::TERMINALS, parameters: &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::PARAMETER_DESCRIPTORS, total_node_count: ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::NODE_COUNT, internal_node_names: &ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::INTERNAL_NODE_NAMES, branch_count: ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::BRANCH_COUNT },
     #[cfg(feature = "veriloga-model-hicuml0va")]
@@ -2199,6 +2235,31 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             }
             Ok(Some(GeneratedBuiltinKind::Device20(instance)))
         }
+        #[cfg(feature = "veriloga-model-ekv3-rf")]
+        "EKV3_RF" => {
+            let mut instance = Box::new(ekv3__ekv3_rf__958cd2b2::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            let mut device_params = Vec::with_capacity(params.len());
+            let mut multiplicity = None;
+            for assignment in params {
+                if assignment.name.eq_ignore_ascii_case("m") && !ekv3__ekv3_rf__958cd2b2::Instance::has_parameter(assignment.name) {
+                    if assignment.origin == crate::GeneratedParameterOrigin::ModelCard {
+                        return Err("instance multiplicity 'm' cannot be assigned from model-card scope".to_string());
+                    }
+                    if !assignment.value.is_finite() || assignment.value <= 0.0 {
+                        return Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", assignment.value));
+                    }
+                    multiplicity = Some(assignment.value);
+                } else {
+                    device_params.push(*assignment);
+                }
+            }
+            instance.apply_parameters(&device_params)?;
+            if let Some(multiplicity) = multiplicity {
+                instance.set_multiplicity(multiplicity)?;
+            }
+            Ok(Some(GeneratedBuiltinKind::Device21(instance)))
+        }
         #[cfg(feature = "veriloga-model-ekv-va")]
         "EKV_VA" => {
             let mut instance = Box::new(ekv26_sdext_verilog_a__ekv_va__0f1ec77e::Instance::new(nodes));
@@ -2222,7 +2283,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device21(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device22(instance)))
         }
         #[cfg(feature = "veriloga-model-hicuml0va")]
         "HICUML0VA" => {
@@ -2247,7 +2308,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device22(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device23(instance)))
         }
         #[cfg(feature = "veriloga-model-hicuml2va")]
         "HICUML2VA" => {
@@ -2272,7 +2333,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device23(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device24(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimhv-n4-va")]
         "HISIMHV_N4_VA" => {
@@ -2297,7 +2358,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device24(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device25(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimhv-n5-va")]
         "HISIMHV_N5_VA" => {
@@ -2322,7 +2383,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device25(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device26(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimhv-va")]
         "HISIMHV_VA" => {
@@ -2347,7 +2408,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device26(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device27(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsoi-va-5be18005")]
         "HISIMSOI_VA__5BE18005" => {
@@ -2372,7 +2433,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device27(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device28(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsoi-va-242bc21d")]
         "HISIMSOI_VA__242BC21D" => {
@@ -2397,7 +2458,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device28(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device29(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsoi-va-38074d06")]
         "HISIMSOI_VA__38074D06" => {
@@ -2422,7 +2483,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device29(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device30(instance)))
         }
         #[cfg(feature = "veriloga-model-hisimsotb-va")]
         "HISIMSOTB_VA" => {
@@ -2447,7 +2508,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device30(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device31(instance)))
         }
         #[cfg(feature = "veriloga-model-l-utsoi-832ce87d")]
         "L_UTSOI__832CE87D" => {
@@ -2472,7 +2533,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device31(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device32(instance)))
         }
         #[cfg(feature = "veriloga-model-l-utsoi-485e0ac9")]
         "L_UTSOI__485E0AC9" => {
@@ -2497,7 +2558,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device32(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device33(instance)))
         }
         #[cfg(feature = "veriloga-model-mosvar")]
         "MOSVAR" => {
@@ -2522,7 +2583,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device33(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device34(instance)))
         }
         #[cfg(feature = "veriloga-model-mvsg-cmc")]
         "MVSG_CMC" => {
@@ -2547,7 +2608,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device34(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device35(instance)))
         }
         #[cfg(feature = "veriloga-model-r2-cmc")]
         "R2_CMC" => {
@@ -2572,7 +2633,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device35(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device36(instance)))
         }
         #[cfg(feature = "veriloga-model-r2-et-cmc")]
         "R2_ET_CMC" => {
@@ -2597,7 +2658,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device36(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device37(instance)))
         }
         #[cfg(feature = "veriloga-model-r3-cmc")]
         "R3_CMC" => {
@@ -2622,7 +2683,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device37(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device38(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic13")]
         "VBIC13" => {
@@ -2647,7 +2708,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device38(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device39(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic13-3t-et")]
         "VBIC13_3T_ET" => {
@@ -2672,7 +2733,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device39(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device40(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic13-4t")]
         "VBIC13_4T" => {
@@ -2697,7 +2758,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device40(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device41(instance)))
         }
         #[cfg(feature = "veriloga-model-vbic-4t-et-cf")]
         "VBIC_4T_ET_CF" => {
@@ -2722,7 +2783,7 @@ pub fn instantiate_scoped(model_name: &str, nodes: &[usize], branches: &[usize],
             if let Some(multiplicity) = multiplicity {
                 instance.set_multiplicity(multiplicity)?;
             }
-            Ok(Some(GeneratedBuiltinKind::Device41(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device42(instance)))
         }
         _ => Ok(None),
     }

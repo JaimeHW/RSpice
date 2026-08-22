@@ -32,6 +32,7 @@ veriloga-model-bsimimg = ["dep:rspice-veriloga-model-bsimimg"]
 veriloga-model-bsimsoi-18c250bc = ["dep:rspice-veriloga-model-bsimsoi-18c250bc"]
 veriloga-model-bsimsoi-e2aff994 = ["dep:rspice-veriloga-model-bsimsoi-e2aff994"]
 veriloga-model-bsimsoi-va = ["dep:rspice-veriloga-model-bsimsoi-va"]
+veriloga-model-ekv3-rf = ["dep:rspice-veriloga-model-ekv3-rf"]
 veriloga-model-ekv-va = ["dep:rspice-veriloga-model-ekv-va"]
 veriloga-model-hicuml0va = ["dep:rspice-veriloga-model-hicuml0va"]
 veriloga-model-hicuml2va = ["dep:rspice-veriloga-model-hicuml2va"]
@@ -75,6 +76,7 @@ veriloga-builtins-noise = [
     "rspice-veriloga-model-bsimsoi-18c250bc?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimsoi-e2aff994?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimsoi-va?/veriloga-builtins-noise",
+    "rspice-veriloga-model-ekv3-rf?/veriloga-builtins-noise",
     "rspice-veriloga-model-ekv-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-hicuml0va?/veriloga-builtins-noise",
     "rspice-veriloga-model-hicuml2va?/veriloga-builtins-noise",
@@ -121,6 +123,7 @@ rspice-veriloga-model-bsimimg = { path = "models/bsimimg", version = "0.1.0", op
 rspice-veriloga-model-bsimsoi-18c250bc = { path = "models/bsimsoi-18c250bc", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimsoi-e2aff994 = { path = "models/bsimsoi-e2aff994", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimsoi-va = { path = "models/bsimsoi-va", version = "0.1.0", optional = true }
+rspice-veriloga-model-ekv3-rf = { path = "models/ekv3-rf", version = "0.1.0", optional = true }
 rspice-veriloga-model-ekv-va = { path = "models/ekv-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-hicuml0va = { path = "models/hicuml0va", version = "0.1.0", optional = true }
 rspice-veriloga-model-hicuml2va = { path = "models/hicuml2va", version = "0.1.0", optional = true }

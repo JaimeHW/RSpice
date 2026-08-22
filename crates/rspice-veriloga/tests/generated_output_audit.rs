@@ -102,7 +102,7 @@ fn generated_veriloga_devices_are_portable_direct_rust_artifacts() {
         }
     }
 
-    assert_eq!(model_crates, 42, "audit every generated model crate");
+    assert_eq!(model_crates, 43, "audit every generated model crate");
     assert!(
         failures.is_empty(),
         "generated models must be portable direct Rust and independent of interpreter/JIT/compiler implementation:\n{}",
@@ -588,7 +588,7 @@ fn generated_veriloga_bodies_are_protected_from_rustfmt_rewrites() {
             display_path(&lib_path)
         );
     }
-    assert_eq!(model_crates, 42, "audit every generated model crate");
+    assert_eq!(model_crates, 43, "audit every generated model crate");
 
     let mut unmarked = Vec::new();
     scan_generated_rust(&generated_root, &mut |path, source| {
@@ -847,7 +847,7 @@ fn generated_model_features_match_the_core_feature_catalog() {
 
     assert_eq!(
         model_features.len(),
-        42,
+        43,
         "every generated model must have one stable compile feature"
     );
     for feature in &model_features {

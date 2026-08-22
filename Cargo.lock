@@ -5514,6 +5514,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-veriloga-model-ekv3-rf"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
 name = "rspice-veriloga-model-epfl-hemt-10a"
 version = "0.1.0"
 dependencies = [
@@ -5709,6 +5716,7 @@ dependencies = [
  "rspice-veriloga-model-bsimsoi-va",
  "rspice-veriloga-model-diode-cmc",
  "rspice-veriloga-model-ekv-va",
+ "rspice-veriloga-model-ekv3-rf",
  "rspice-veriloga-model-epfl-hemt-10a",
  "rspice-veriloga-model-hicuml0va",
  "rspice-veriloga-model-hicuml2va",
