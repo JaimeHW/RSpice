@@ -102,8 +102,9 @@ fn a_probe_on_a_generated_instance_names_the_missing_noise_feature() {
                 rspice_core::analysis::NoiseContributionProbeError::MechanismsUnavailable {
                     ref device,
                     feature,
-                } if device.eq_ignore_ascii_case("d1")
-                    && feature == rspice_core::analysis::MISSING_GENERATED_NOISE_FEATURE
+                    // The Cargo feature that compiles the generated noise
+                    // schedules, spelled the way a rebuild has to spell it.
+                } if device.eq_ignore_ascii_case("d1") && feature == "veriloga-builtins-noise"
             ),
             "the probe must name the missing feature rather than the device: {error}"
         );

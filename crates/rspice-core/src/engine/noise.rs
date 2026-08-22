@@ -295,7 +295,7 @@ impl Engine {
                 ANNOUNCED.call_once(|| {
                     log::warn!(
                         "this build compiled the generated Verilog-A catalog without its noise                          schedules, so its devices contribute no noise; rebuild with the '{}'                          feature to restore them",
-                        crate::analysis::MISSING_GENERATED_NOISE_FEATURE
+                        crate::analysis::noise::MISSING_GENERATED_NOISE_FEATURE
                     );
                 });
             }

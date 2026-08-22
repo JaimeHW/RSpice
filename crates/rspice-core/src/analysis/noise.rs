@@ -462,7 +462,7 @@ pub const NOISE_MECHANISM_MAX_BYTES: usize = 128;
 /// than half of the checked-in generated source, so a build can carry the
 /// catalog and still answer no noise question about it. Naming the feature is
 /// what turns that into a diagnosis rather than a device that went missing.
-pub const MISSING_GENERATED_NOISE_FEATURE: &str = "veriloga-builtins-noise";
+pub(crate) const MISSING_GENERATED_NOISE_FEATURE: &str = "veriloga-builtins-noise";
 
 /// Whether `text` is shaped like a mechanism a noise summary may be written
 /// with.
