@@ -39,7 +39,7 @@ pub(crate) fn open_diagnostic_location(
     let included_source = diagnostic
         .line
         .is_none()
-        .then(|| diagnostic.source_path.as_deref())
+        .then_some(diagnostic.source_path.as_deref())
         .flatten();
     open_source_location(
         state,

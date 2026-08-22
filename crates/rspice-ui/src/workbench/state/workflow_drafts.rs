@@ -495,33 +495,20 @@ impl Default for DesignVariableDraft {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SavedOutputDraft {
     pub kind: usize,
+    /// Names a signal in the user's own design, so a new draft opens empty
+    /// rather than pre-filled with a node nothing here has seen. Which is what
+    /// `String::default` already is, so the whole impl is derived.
     pub name: String,
+    /// The same, for the expression the output evaluates.
     pub expression: String,
     pub compatible_analyses: usize,
     pub save_policy: usize,
     pub precision: usize,
     pub streaming: usize,
     pub validation_error: Option<String>,
-}
-
-impl Default for SavedOutputDraft {
-    fn default() -> Self {
-        Self {
-            kind: 0,
-            // Both name a signal in the user's own design. A new draft opens
-            // empty rather than pre-filled with a node nothing here has seen.
-            name: String::new(),
-            expression: String::new(),
-            compatible_analyses: 0,
-            save_policy: 0,
-            precision: 0,
-            streaming: 0,
-            validation_error: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

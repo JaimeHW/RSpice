@@ -53,7 +53,7 @@ pub(super) const fn sweep_point_field_label(sweep_kind: usize) -> &'static str {
 /// the axis is the list, and the point field is disabled beside it.
 pub(super) fn noise_point_field_label(sweep: NoiseSweepType) -> &'static str {
     match sweep.selection_index() {
-        Some(index @ (0 | 1 | 2)) => sweep_point_field_label(index),
+        Some(index @ 0..=2) => sweep_point_field_label(index),
         _ => SWEEP_POINT_NEUTRAL_LABEL,
     }
 }

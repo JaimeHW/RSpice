@@ -250,9 +250,14 @@ const SCOPE_LABELS: [&str; 4] = [
 /// The split matters: the dialog binds columns *after* the file is read, so
 /// reading cannot depend on the binding. Only the table's own shape is refused
 /// here — bad CSV, or more than one import may carry.
-fn read_sheet(
-    source: &str,
-) -> Result<(Vec<String>, Vec<(u64, Vec<String>)>), VariableImportRefusal> {
+/// One numbered data row: the sheet line it came from, and its cells.
+///
+/// Named because the line number travels with the row all the way to a
+/// refusal — a defect reported against "row 4" of a file whose header is on
+/// line 2 sends the reader to the wrong place.
+type SheetRow = (u64, Vec<String>);
+
+fn read_sheet(source: &str) -> Result<(Vec<String>, Vec<SheetRow>), VariableImportRefusal> {
     if source.len() > MAX_IMPORT_BYTES {
         return Err(schema(
             0,

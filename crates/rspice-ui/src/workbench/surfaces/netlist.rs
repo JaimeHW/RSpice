@@ -379,10 +379,10 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             if strip_button(&mut actions, &open_run, None).clicked() {
                 action = Some(RunStripAction::OpenInResults(projection.run_id));
             }
-            if let Some(next) = task_deck_hop(&projection) {
-                if let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next) {
-                    action = Some(hop);
-                }
+            if let Some(next) = task_deck_hop(&projection)
+                && let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next)
+            {
+                action = Some(hop);
             }
             // An executed deck has no working copy: it is the source a point
             // was handed after expansion and corner materialization, and a
@@ -406,10 +406,10 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             if strip_button(&mut actions, &deck, None).clicked() {
                 action = Some(RunStripAction::OpenDeckSnapshot);
             }
-            if let Some(next) = task_deck_hop(&projection) {
-                if let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next) {
-                    action = Some(hop);
-                }
+            if let Some(next) = task_deck_hop(&projection)
+                && let Some(hop) = task_deck_button(&mut actions, &messages, &projection, next)
+            {
+                action = Some(hop);
             }
         }
     }
