@@ -678,3 +678,127 @@ fn ekv26_generated_route_admits_the_card_tail_it_can_honour_and_names_the_rest()
         }
     }
 }
+
+/// One EKV 2.6 transistor's `.noise` contribution table has to read the same
+/// on whichever implementation the build routes `LEVEL=260` to.
+///
+/// The ranked contributor table is what an analyst reads first and what a
+/// frontend persists verbatim, so its rows are part of the model's observable
+/// behaviour rather than a debug view. Both ports export the same two physical
+/// mechanisms across the same drain-source pair, so both have to present M1 as
+/// one device with one row per mechanism, resolve a whole-device `DNO(M1)`
+/// probe by summing them, and integrate to the same output-referred power.
+///
+/// The mechanism spellings differ on purpose. The native port names its own
+/// two, and the code generator composes the generated ones out of the Verilog-A
+/// module's node and label names, which is what keeps them unique across a
+/// module exporting thirteen of them. What has to agree is the device, the
+/// count, and the numbers.
+///
+/// Compiling the generated catalog without `veriloga-builtins-noise` leaves
+/// its models with no noise blocks at all, which is a build with no
+/// contribution table to compare rather than a route that disagrees about one.
+/// Held out on that configuration and only that one.
+#[cfg(any(
+    not(feature = "veriloga-builtins-base"),
+    feature = "veriloga-builtins-noise"
+))]
+#[test]
+fn ekv26_noise_contribution_table_reads_the_same_on_either_route() {
+    use rspice_core::analysis::{
+        IntegratedNoise, NoiseContributionKind, NoiseContributionProbe,
+        is_persistable_noise_mechanism,
+    };
+
+    // The two ports settle 3.8e-8 apart on this deck - 1.349_080_490_8e-7
+    // against 1.349_080_440_3e-7 - so this window is five times that and four
+    // orders tighter than the 2e-3 relative window the Xyce ID(VD) oracle rows
+    // already run under.
+    const EKV26_NOISE_BAND_TOLERANCE: f64 = 2.0e-7;
+    /// Output-referred noise power under M1 integrated over the band, in V^2,
+    /// as the native evaluator produces it.
+    const EXPECTED_M1_BAND_POWER: f64 = 1.349_080_490_769_807_4e-7;
+
+    let deck = "* EKV 2.6 noise contribution table\n\
+         .options temp=27 gmin=0\n\
+         .model n nmos (level=260 tnom=27 cox=2e-3 xj=300n vto=0.5 tcv=0\n\
+         + gamma=0 phi=0.5 kp=150u bex=0 theta=0 e0=0 ucrit=2e6 ucex=0\n\
+         + lambda=0 dl=0 dw=0 weta=0 leta=0 q0=0 lk=0.4u iba=0\n\
+         + ibb=400meg ibbt=0 ibn=1 rsh=0 hdif=0 avto=1u akp=1u agamma=1u\n\
+         + kf=2e-22 af=1.3)\n\
+         vdd dd 0 dc 2\n\
+         vin g 0 dc 0.8 ac 1\n\
+         rl dd d 10k\n\
+         m1 d g 0 0 n w=10u l=1u as=0 ad=0 ps=0 pd=0\n\
+         .end\n";
+    let netlist = Netlist::parse(deck).expect("EKV26 noise deck parses");
+    let frequencies: Vec<f64> = (0..=40)
+        .map(|index| 10.0_f64.powf(1.0 + f64::from(index) / 10.0))
+        .collect();
+    let results = Engine::new(SimulationConfig::default())
+        .run_noise_named_with_input_source(&netlist, "d", None, "vin", &frequencies, 300.15)
+        .expect("EKV26 noise analysis runs");
+
+    let whole_device = results
+        .last()
+        .expect("the sweep produced at least one point")
+        .contribution(&NoiseContributionProbe {
+            kind: NoiseContributionKind::Output,
+            device: "m1".to_string(),
+            mechanism: None,
+        })
+        .expect("DNO(M1) resolves the transistor by the name the deck gave it");
+    assert!(
+        whole_device.is_finite() && whole_device > 0.0,
+        "a biased EKV26 must contribute output noise, got {whole_device:e}"
+    );
+
+    let summary = IntegratedNoise::new(results).contribution_summary();
+    let m1 = summary
+        .iter()
+        .filter(|row| row.device_name.eq_ignore_ascii_case("m1"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        m1.len(),
+        2,
+        "M1 ranks as one device with one row per mechanism; got {:?}",
+        summary
+            .iter()
+            .map(|row| (row.device_name.as_str(), row.mechanism.as_str()))
+            .collect::<Vec<_>>()
+    );
+    for row in &m1 {
+        assert!(
+            is_persistable_noise_mechanism(&row.mechanism),
+            "'{}' is a mechanism no saved result can be written with",
+            row.mechanism
+        );
+        assert!(
+            row.integrated_power.is_finite() && row.integrated_power > 0.0,
+            "{} must carry power, got {:e}",
+            row.mechanism,
+            row.integrated_power
+        );
+    }
+    let mechanisms = m1
+        .iter()
+        .map(|row| row.mechanism.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(mechanisms.len(), 2, "the two rows are distinct mechanisms");
+    assert!(
+        mechanisms.iter().any(|name| name.contains("thermal")),
+        "one row is the channel thermal mechanism: {mechanisms:?}"
+    );
+    assert!(
+        mechanisms.iter().any(|name| name.contains("flicker")),
+        "one row is the flicker mechanism: {mechanisms:?}"
+    );
+
+    let band_power: f64 = m1.iter().map(|row| row.integrated_power).sum();
+    let relative = (band_power - EXPECTED_M1_BAND_POWER).abs() / EXPECTED_M1_BAND_POWER;
+    assert!(
+        relative <= EKV26_NOISE_BAND_TOLERANCE,
+        "M1 band power must not depend on which port serves the card: \
+         got {band_power:e}, want {EXPECTED_M1_BAND_POWER:e}, rel {relative:.3e}"
+    );
+}
