@@ -984,24 +984,15 @@ impl<'a> Dialog<'a> {
                     chosen => choice = chosen,
                 }
             });
-            // The surface is as tall as the stack it holds, and no taller. The
-            // frame reports its outer rect, the stroke already counted in, so
-            // the border allowance must not be added a second time. It was, and
-            // because an overflowing body spends every point the surface offers,
-            // every pass measured two points more than the last and handed them
-            // to the next: the dialog grew two points a frame until it reached
-            // its ceiling, and nothing on it ever stopped moving.
-            //
-            // Counting the border once is also what makes the measurement a
-            // fixed point in the other direction. Dropping the allowance
-            // entirely, which is the other way to stop the crawl, shortens the
-            // surface by the border on every pass instead.
-            //
-            // A body longer than the surface scrolls rather than lifting it. The
-            // surface it settled on is the one the reader placed and sized their
-            // window around, and a dialog that resized itself under content that
-            // arrived later would move every control on it.
-            rendered_surface_height = Some(surface_output.response.rect.height());
+            // A content-height frame reports the structural stack's used
+            // height. Its stroke is an inset handed back as `total_margin`,
+            // not height consumed by a child, so retain that outer allowance
+            // in the next pass's resolved surface. Omitting it creates a
+            // fixed point two points too short: shortening the body merely
+            // shortens the next surface by the same amount and its last text
+            // row remains clipped forever.
+            rendered_surface_height =
+                Some(surface_output.response.rect.height() + surface_margin.y);
         });
 
         if self.fixed_height.is_none()
