@@ -139,7 +139,7 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
     open.model_library_manager = opened.model_library_manager;
 
     assert!(
-        findings_for(&open, "alpha").iter().count() == 1,
+        findings_for(&open, "alpha").len() == 1,
         "the stale verdict is still sitting in the view state — this is the \
          state a reader would be shown"
     );
@@ -287,7 +287,7 @@ fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
         "and when it was found: {labels:?}"
     );
     assert!(
-        labels.iter().any(|label| *label == DRIFT_EFFECT),
+        labels.contains(&DRIFT_EFFECT),
         "and what it means for a run: {labels:?}"
     );
     assert!(
