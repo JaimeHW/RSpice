@@ -178,19 +178,8 @@ fn evaluate_specification(
         };
     }
 
-    candidates.sort_by(|left, right| {
-        left.measurement_passed
-            .cmp(&right.measurement_passed)
-            .then_with(|| compare_margin(left.signed_margin, right.signed_margin))
-    });
+    let status = status_of(&mut candidates);
     let worst = &candidates[0];
-    let status = if !worst.measurement_passed {
-        SpecificationVerdictStatus::MeasurementFailure
-    } else if worst.signed_margin.is_none_or(|margin| margin >= 0.0) {
-        SpecificationVerdictStatus::Pass
-    } else {
-        SpecificationVerdictStatus::BoundFailure
-    };
     SpecificationVerdict {
         specification_id,
         requirement_key,
@@ -239,18 +228,17 @@ fn candidates_for(
                     }
                 };
 
-            let analysis_level = analysis.measurements.iter().filter_map(move |measurement| {
-                measurement
-                    .name
-                    .eq_ignore_ascii_case(&spec.measurement)
-                    .then(|| {
-                        make(
-                            measurement.value,
-                            measurement.passed && measurement.error.is_none(),
-                            None,
-                        )
-                    })
-            });
+            let analysis_level = analysis
+                .measurements
+                .iter()
+                .filter(move |measurement| measurement.name.eq_ignore_ascii_case(&spec.measurement))
+                .map(move |measurement| {
+                    make(
+                        measurement.value,
+                        measurement.passed && measurement.error.is_none(),
+                        None,
+                    )
+                });
 
             // A family that measured its own members answers the limit over all
             // of them. This is what makes a Monte Carlo trial set or an
@@ -279,6 +267,30 @@ fn candidate_is_passing(candidate: &Candidate) -> bool {
     candidate.measurement_passed && candidate.signed_margin.is_none_or(|margin| margin >= 0.0)
 }
 
+/// The terminal status one evidence set answers to, worst candidate first.
+///
+/// Sorts in place, so the caller that also needs the worst candidate reads it
+/// at index zero rather than searching again. Extracted because the acceptance
+/// gate has to ask the same question of a *subset* of the same evidence — the
+/// non-Monte-Carlo candidates, once the yield gate has answered for the trials
+/// — and a second copy of this ordering is how the gate would come to disagree
+/// with the verdict it was handed.
+fn status_of(candidates: &mut [Candidate]) -> SpecificationVerdictStatus {
+    candidates.sort_by(|left, right| {
+        left.measurement_passed
+            .cmp(&right.measurement_passed)
+            .then_with(|| compare_margin(left.signed_margin, right.signed_margin))
+    });
+    match candidates.first() {
+        None => SpecificationVerdictStatus::MissingEvidence,
+        Some(worst) if !worst.measurement_passed => SpecificationVerdictStatus::MeasurementFailure,
+        Some(worst) if worst.signed_margin.is_none_or(|margin| margin >= 0.0) => {
+            SpecificationVerdictStatus::Pass
+        }
+        Some(_) => SpecificationVerdictStatus::BoundFailure,
+    }
+}
+
 pub(super) fn acceptance_is_blocked(
     specifications: &[PreparedSpecification],
     policy: &SpecificationPolicy,
@@ -296,24 +308,7 @@ pub(super) fn acceptance_is_blocked(
                 return false;
             }
 
-            if let MonteCarloSpecificationGate::YieldAtLeast { percent } = policy.monte_carlo
-                && definition.is_some()
-            {
-                let monte_carlo = candidates_for(specification, analyses)
-                    .into_iter()
-                    .filter(|candidate| candidate.is_monte_carlo)
-                    .collect::<Vec<_>>();
-                if !monte_carlo.is_empty() {
-                    let passing = monte_carlo
-                        .iter()
-                        .filter(|candidate| candidate_is_passing(candidate))
-                        .count();
-                    let yield_percent = 100.0 * passing as f64 / monte_carlo.len() as f64;
-                    return yield_percent < percent;
-                }
-            }
-
-            match verdict.status {
+            let status_blocks = |status| match status {
                 SpecificationVerdictStatus::Pass => false,
                 SpecificationVerdictStatus::MissingEvidence => {
                     policy.missing_measurement == MissingMeasurementPolicy::FailClosed
@@ -323,7 +318,38 @@ pub(super) fn acceptance_is_blocked(
                     !(policy.nominal_failure == NominalFailurePolicy::RecordDisposition
                         && matches!(specification.entry().scope, SpecPointScope::Nominal))
                 }
+            };
+
+            if let MonteCarloSpecificationGate::YieldAtLeast { percent } = policy.monte_carlo
+                && definition.is_some()
+            {
+                let mut candidates = candidates_for(specification, analyses);
+                let trials = candidates
+                    .iter()
+                    .filter(|candidate| candidate.is_monte_carlo)
+                    .count();
+                if trials > 0 {
+                    let passing = candidates
+                        .iter()
+                        .filter(|candidate| {
+                            candidate.is_monte_carlo && candidate_is_passing(candidate)
+                        })
+                        .count();
+                    let yield_percent = 100.0 * passing as f64 / trials as f64;
+                    // The yield gate answers for the trials, and only for
+                    // them. A specification is routinely governed by corner
+                    // and parametric evidence as well, and a passing yield
+                    // says nothing about that — so this is the OR of the two,
+                    // never the first one that had an answer. Returning here
+                    // read a failed corner as "not blocked".
+                    candidates.retain(|candidate| !candidate.is_monte_carlo);
+                    let other_blocks =
+                        !candidates.is_empty() && status_blocks(status_of(&mut candidates));
+                    return yield_percent < percent || other_blocks;
+                }
             }
+
+            status_blocks(verdict.status)
         })
 }
 
@@ -670,6 +696,53 @@ mod tests {
         );
     }
 
+    /// A passing yield does not clear the corner evidence beside it.
+    ///
+    /// The yield gate judges the trials. A specification is routinely governed
+    /// by corner and parametric evidence as well, and that evidence gets no
+    /// statistical treatment — one point out of bound is out of bound. The gate
+    /// used to `return` as soon as the yield held, so a blocking specification
+    /// whose corner run failed outright read as "not blocked".
+    #[test]
+    fn a_passing_yield_does_not_waive_the_non_monte_carlo_evidence() {
+        let source_id = AnalysisInstanceId::new();
+        let specifications = governed_gain_at_least(10.0);
+        let tolerant = SpecificationPolicy {
+            monte_carlo: MonteCarloSpecificationGate::YieldAtLeast { percent: 70.0 },
+            ..SpecificationPolicy::default()
+        };
+
+        // 75% of the trials hold the floor, which clears the 70% gate.
+        let trials = monte_carlo_trials(source_id, &[(0, 12.0), (1, 8.5), (2, 11.0), (3, 10.5)]);
+        let monte_carlo_only = [trials.clone()];
+        let verdicts = evaluate_specifications(&specifications, &monte_carlo_only);
+        assert!(
+            !acceptance_is_blocked(&specifications, &tolerant, &verdicts, &monte_carlo_only),
+            "75% yield clears a 70% gate"
+        );
+
+        // The same trials, beside a corner that measured 7 dB against a 10 dB
+        // floor. The yield is unchanged and the corner is out of bound.
+        let mixed = [trials, result(7, source_id, 7.0)];
+        let verdicts = evaluate_specifications(&specifications, &mixed);
+        assert!(
+            acceptance_is_blocked(&specifications, &tolerant, &verdicts, &mixed),
+            "a corner out of bound blocks acceptance however the trials distributed"
+        );
+
+        // And the corner passing puts it back: the OR must not have become an
+        // unconditional block.
+        let passing = [
+            monte_carlo_trials(source_id, &[(0, 12.0), (1, 8.5), (2, 11.0), (3, 10.5)]),
+            result(7, source_id, 12.5),
+        ];
+        let verdicts = evaluate_specifications(&specifications, &passing);
+        assert!(
+            !acceptance_is_blocked(&specifications, &tolerant, &verdicts, &passing),
+            "a passing corner beside a passing yield blocks nothing"
+        );
+    }
+
     /// An in-analysis sweep answers a limit over every point it solved.
     #[test]
     fn an_in_analysis_sweep_is_judged_over_its_points_not_its_last_one() {
@@ -729,6 +802,52 @@ mod tests {
                 index: 1,
                 value: 75.0
             })
+        );
+    }
+
+    /// A verdict from history that names no member restores as naming none.
+    ///
+    /// `worst_member` was added after verdicts were already being persisted,
+    /// so every retained verdict from before it carries no such key. The
+    /// honest reading is "unnamed", never "the first member" — and the field
+    /// is `serde(default)` for exactly that reason. This removes the key from
+    /// a real serialized verdict rather than writing `null`, because `null`
+    /// exercises a present field and would pass even with the default gone.
+    #[test]
+    fn a_verdict_stating_no_worst_member_restores_as_naming_none() {
+        use crate::state::FamilyMemberId;
+
+        let source_id = AnalysisInstanceId::new();
+        let analyses = [monte_carlo_trials(source_id, &[(0, 12.0), (2, 8.5)])];
+        let verdict = evaluate_specifications(&gain_at_least(10.0), &analyses)
+            .pop()
+            .expect("one specification, one verdict");
+        assert_eq!(
+            verdict.worst_member(),
+            Some(&FamilyMemberId::MonteCarloTrial {
+                index: 2,
+                seed: 4_002
+            }),
+            "the fixture must name one for its removal to mean anything"
+        );
+
+        let mut document: serde_json::Value =
+            serde_json::to_value(&verdict).expect("a verdict serializes");
+        assert!(
+            document
+                .as_object_mut()
+                .expect("a verdict is written as an object")
+                .remove("worst_member")
+                .is_some()
+        );
+
+        let restored: SpecificationVerdict =
+            serde_json::from_value(document).expect("a verdict from before members still loads");
+        assert_eq!(restored.worst_member(), None);
+        assert_eq!(
+            restored.status(),
+            verdict.status(),
+            "and everything else about it is unchanged"
         );
     }
 
