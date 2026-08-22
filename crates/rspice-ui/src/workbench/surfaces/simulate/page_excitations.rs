@@ -12,7 +12,7 @@
 
 use egui::Ui;
 
-use crate::simulation::placed_sources::{PlacedSource, placed_sources};
+use crate::simulation::placed_sources::{PlacedSource, SourceConsumer};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
@@ -21,12 +21,16 @@ use super::page_kit::{Tone, card, card_note, ledger_head, ledger_row};
 /// Reference, quantity, waveform, terminals, and what reads it.
 const EXCITATION_COLUMNS: [f32; 5] = [0.14, 0.06, 0.26, 0.24, 0.30];
 
-pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
-    let sources = placed_sources(&state.schematic, state.sim_setup.analysis_plan.as_ref());
-    let unread = sources
-        .iter()
-        .filter(|source| source.consumers.is_empty())
-        .count();
+/// The page renders the list its own heading counted.
+///
+/// Lent by [`super::pages::show`] rather than resolved again here: resolving it
+/// walks the design's nets, and the heading above this table needs the same
+/// answer, so a frame showing this page used to pay for the walk twice.
+pub(super) fn show(ui: &mut Ui, state: &mut AppState, sources: &[PlacedSource]) {
+    // Readership is run-scoped: a disabled instance is not in the run this plan
+    // would dispatch, so a source only it names is one the run drives without
+    // reading.
+    let unread = sources.iter().filter(|source| !source.is_read()).count();
     let status = if sources.is_empty() {
         Some(("no sources placed", Tone::Warn))
     } else if unread > 0 {
@@ -49,7 +53,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
             &EXCITATION_COLUMNS,
             &["Reference", "", "Waveform", "Terminals", "Read by"],
         );
-        for source in &sources {
+        for source in sources {
             let row = excitation_row(ui, state, source);
             if row.clicked() {
                 reveal(state, source);
@@ -59,9 +63,10 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
             card_note(
                 ui,
                 &format!(
-                    "{unread} of {} sources are named by no analysis in this plan, and this plan \
-                     holds no analysis that reads every source. They are still netlisted and \
-                     still drive the circuit.",
+                    "{unread} of {} sources are read by no enabled analysis in this plan \u{2014} \
+                     named by none, and with no enabled analysis that reads every source. A \
+                     disabled instance that names one is listed on its row and does not count. \
+                     They are still netlisted and still drive the circuit.",
                     sources.len()
                 ),
             );
@@ -72,13 +77,19 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 /// One source's row. The reader column carries the finding, so it is the only
 /// cell that takes a tone.
 fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui::Response {
-    let (readers, tone) = match source.consumers.len() {
+    // Only the instances the run contains are counted. A disabled one is named
+    // in the tooltip, marked disabled, because it is the thing a reader
+    // re-enables to change this answer.
+    let reading: Vec<&SourceConsumer> = source.reading_consumers().collect();
+    let disabled = source.consumers.len() - reading.len();
+    let (readers, tone) = match reading.len() {
+        0 if disabled > 0 => (
+            format!("no reader \u{00b7} {disabled} disabled"),
+            Tone::Warn,
+        ),
         0 => ("no reader".to_owned(), Tone::Warn),
         1 => (
-            format!(
-                "{} \u{00b7} {}",
-                source.consumers[0].analysis, source.consumers[0].role
-            ),
+            format!("{} \u{00b7} {}", reading[0].analysis, reading[0].role),
             Tone::Neutral,
         ),
         // The roles differ once whole-design readers are listed beside named
@@ -86,11 +97,8 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
         // state a part the other analyses do not play. The tooltip has room
         // for the full reading.
         count => {
-            let first = source.consumers[0].role;
-            let uniform = source
-                .consumers
-                .iter()
-                .all(|consumer| consumer.role == first);
+            let first = reading[0].role;
+            let uniform = reading.iter().all(|consumer| consumer.role == first);
             (
                 if uniform {
                     format!("{count} analyses \u{00b7} {first}")
@@ -131,7 +139,16 @@ fn row_tooltip(source: &PlacedSource) -> String {
         );
     } else {
         for consumer in &source.consumers {
-            lines.push(format!("{} \u{00b7} {}", consumer.analysis, consumer.role));
+            lines.push(format!(
+                "{} \u{00b7} {}{}",
+                consumer.analysis,
+                consumer.role,
+                if consumer.reads() {
+                    ""
+                } else {
+                    " \u{00b7} disabled"
+                }
+            ));
         }
     }
     lines.push("Click to select it on the schematic".to_owned());

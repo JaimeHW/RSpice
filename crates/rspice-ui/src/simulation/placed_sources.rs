@@ -55,6 +55,23 @@ pub struct SourceConsumer {
     pub analysis: String,
     /// The part the source plays in that analysis.
     pub role: &'static str,
+    /// Whether the instance is enabled in the plan.
+    ///
+    /// A disabled instance is not a reader: the run it would belong to does not
+    /// contain it, so a source only it names is a source this plan runs without
+    /// looking at. It is still listed, dimmed, because deleting the row instead
+    /// would make a disabled transient look like a plan that never read the
+    /// source at all — and re-enabling it is the one edit that changes the
+    /// answer.
+    pub enabled: bool,
+}
+
+impl SourceConsumer {
+    /// Whether this consumer's analysis is in the run the plan would dispatch.
+    #[must_use]
+    pub const fn reads(&self) -> bool {
+        self.enabled
+    }
 }
 
 /// One independent source placed in the design.
@@ -74,6 +91,21 @@ pub struct PlacedSource {
 }
 
 impl PlacedSource {
+    /// Whether the run this plan would dispatch reads this source.
+    ///
+    /// Disabled instances do not count. `consumers` used to be walked as a
+    /// whole here, so one disabled transient in the plan marked every placed
+    /// source "read" — which is the opposite of the finding this list exists to
+    /// surface.
+    #[must_use]
+    pub fn is_read(&self) -> bool {
+        self.consumers.iter().any(SourceConsumer::reads)
+    }
+
+    /// The consumers the run actually contains.
+    pub fn reading_consumers(&self) -> impl Iterator<Item = &SourceConsumer> {
+        self.consumers.iter().filter(|consumer| consumer.reads())
+    }
     /// The quantity letter, for a column that has room for one character.
     pub const fn quantity(&self) -> &'static str {
         if self.is_voltage { "V" } else { "I" }
@@ -155,10 +187,12 @@ fn consumers_for(
     let mut consumers = Vec::new();
     for instance in plan.instances() {
         let analysis = instance.display_name().to_owned();
+        let enabled = instance.enabled();
         let mut record = |role: &'static str| {
             consumers.push(SourceConsumer {
                 analysis: analysis.clone(),
                 role,
+                enabled,
             });
         };
         match instance.draft() {
@@ -736,6 +770,62 @@ mod tests {
         assert!(names_any("VLO,\nV1", "V1"));
         assert!(!names_any("VLO, V10", "V1"));
         assert!(!names_any("", "V1"));
+    }
+
+    /// A disabled analysis is not a reader.
+    ///
+    /// The consumer walk read every instance the plan holds, so one disabled
+    /// transient — a whole-design reader — marked every placed source "read".
+    /// That is the exact opposite of the finding this list exists to surface:
+    /// the run the plan would dispatch does not contain that analysis, so a
+    /// source only it names is one the run drives without looking at.
+    ///
+    /// The row still lists it, dimmed, because re-enabling the instance is the
+    /// one edit that changes the answer.
+    #[test]
+    fn a_disabled_analysis_is_listed_but_does_not_read_a_source() {
+        let mut plan = SimulationPlan::empty();
+        let (transient, _) = plan
+            .insert(AnalysisKind::Transient)
+            .expect("a transient inserts");
+        plan.set_enabled(transient, false)
+            .expect("the fixture transient disables");
+        let schematic = schematic_with(vec![source(
+            1,
+            ComponentType::VoltageSourcePulse,
+            "V1",
+            "per=1m",
+        )]);
+
+        let listed = placed_sources(&schematic, Some(&plan));
+
+        assert_eq!(
+            listed[0]
+                .consumers
+                .iter()
+                .map(|consumer| consumer.role)
+                .collect::<Vec<_>>(),
+            vec!["transient drive"],
+            "the disabled instance is still named"
+        );
+        assert!(
+            !listed[0].is_read(),
+            "a disabled instance is not in the run, so it does not read anything"
+        );
+        assert_eq!(
+            listed[0].reading_consumers().count(),
+            0,
+            "and it is not one of the run's readers"
+        );
+
+        plan.set_enabled(transient, true)
+            .expect("the fixture transient re-enables");
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert!(
+            listed[0].is_read(),
+            "re-enabling the instance is what makes the source read"
+        );
+        assert_eq!(listed[0].reading_consumers().count(), 1);
     }
 
     #[test]

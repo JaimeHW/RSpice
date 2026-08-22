@@ -639,9 +639,12 @@ fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppS
         return;
     }
     for source in sources {
-        let readers = match source.consumers.len() {
+        // Run-scoped, exactly as the studio's Excitations page counts it: a
+        // disabled instance is not in the run this plan would dispatch.
+        let reading: Vec<_> = source.reading_consumers().collect();
+        let readers = match reading.len() {
             0 => "no reader".to_owned(),
-            1 => source.consumers[0].role.to_owned(),
+            1 => reading[0].role.to_owned(),
             count => format!("{count} analyses"),
         };
         let meta = format!(
@@ -692,7 +695,16 @@ fn excitation_tooltip(source: &crate::simulation::placed_sources::PlacedSource) 
         );
     } else {
         for consumer in &source.consumers {
-            lines.push(format!("{} \u{00b7} {}", consumer.analysis, consumer.role));
+            lines.push(format!(
+                "{} \u{00b7} {}{}",
+                consumer.analysis,
+                consumer.role,
+                if consumer.reads() {
+                    ""
+                } else {
+                    " \u{00b7} disabled"
+                }
+            ));
         }
     }
     lines.join("\n")
