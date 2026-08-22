@@ -19,12 +19,13 @@
 //! ## Determinism
 //!
 //! Generation must be reproducible, because staleness is detected by digest
-//! rather than by timestamp: the manifest pairs a digest of the model sources
-//! with `RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST`, computed in `build.rs` over
-//! this crate's own source, so editing the generator invalidates its output
-//! exactly as editing a model does. Emission is therefore ordered, writes are
-//! skipped when content is unchanged, and stale device folders are removed
-//! rather than left behind.
+//! rather than by timestamp: the manifest pairs `source_tree_digest`, over the
+//! model tree, with `generator_digest`, computed at generation time over the
+//! `GENERATOR_SOURCE_DIGEST_INPUTS` list in `builtins` — this crate's own
+//! sources and manifest plus the workspace `Cargo.toml`/`Cargo.lock` — so
+//! editing the generator invalidates its output exactly as editing a model
+//! does. Emission is therefore ordered, writes are skipped when content is
+//! unchanged, and stale device folders are removed rather than left behind.
 
 mod builtins;
 pub mod canonical;

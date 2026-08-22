@@ -293,12 +293,13 @@ compiling the full model corpus under the dev profile is impractically
 slow.
 
 Staleness is detected by two digests recorded in `manifest.txt`. The
-`source_tree_digest` covers the model sources; the `generator_digest` is
-`RSPICE_VERILOGA_GENERATOR_SOURCE_DIGEST`, computed in `build.rs` over
-this crate's own sources plus the workspace `Cargo.toml`/`Cargo.lock`, so
-that editing the compiler invalidates its output exactly like editing a
-model does. `check-builtins` compares both and fails with the exact
-regeneration command when either has moved.
+`source_tree_digest` covers the model sources under `--models`; the
+`generator_digest` is computed at generation time over the
+`GENERATOR_SOURCE_DIGEST_INPUTS` list in `src/rust_backend/builtins.rs` —
+this crate's own sources, `build.rs` and `Cargo.toml`, plus the workspace
+`Cargo.toml`/`Cargo.lock` — so that editing the compiler invalidates its
+output exactly like editing a model does. `check-builtins` compares both
+and fails with the exact regeneration command when either has moved.
 
 Two markers steer discovery inside the model tree: a `.rspice-veriloga-skip`
 file excludes a directory, and a `.rspice-veriloga-profile` file supplies
