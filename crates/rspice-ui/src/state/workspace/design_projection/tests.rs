@@ -344,11 +344,11 @@ fn a_memo_slot_is_built_once_per_cell_view_and_folds_its_key() {
     assert!(!Arc::ptr_eq(&first, &other));
 }
 
-/// Timing guard for the memo being load-bearing. Ignored by default because it
-/// reports a wall clock rather than asserting one; run it with `--ignored
-/// --nocapture` when changing what the projection key covers.
+/// Timing guard for the memo being load-bearing. Ignored by default because a
+/// wall clock is not a property a shared build machine can be held to; run it
+/// with `--ignored` when changing what the projection key covers.
 #[test]
-#[ignore = "reports a wall clock rather than asserting one"]
+#[ignore = "wall-clock timing is not a property a shared machine can be held to"]
 fn two_hundred_projections_over_thirty_cell_views() {
     const CELL_VIEWS: usize = 30;
     const CALLS: usize = 200;
@@ -377,7 +377,9 @@ fn two_hundred_projections_over_thirty_cell_views() {
     }
     let cold = started.elapsed();
 
-    println!(
-        "{CALLS} projections over {CELL_VIEWS} cell views: memoized {memoized:?}, cold {cold:?}"
+    assert!(
+        memoized < cold,
+        "the memo is what makes the projection cheap: {CALLS} projections over {CELL_VIEWS} \
+         cell views took {memoized:?} memoized and {cold:?} cold"
     );
 }
