@@ -351,10 +351,12 @@ impl ProjectWorkspace {
         root_library: &str,
         top_cell: &str,
     ) -> Self {
-        let mut project = ProjectDescriptor::default();
-        project.name = name.to_owned();
-        project.root_library = root_library.to_owned();
-        project.top_cell = top_cell.to_owned();
+        let project = ProjectDescriptor {
+            name: name.to_owned(),
+            root_library: root_library.to_owned(),
+            top_cell: top_cell.to_owned(),
+            ..ProjectDescriptor::default()
+        };
         let active_view = CellViewRef::new(root_library, top_cell, DEFAULT_SCHEMATIC_VIEW);
         let mut schematic_buffers = HashMap::new();
         schematic_buffers.insert(active_view.key(), SchematicState::default());
