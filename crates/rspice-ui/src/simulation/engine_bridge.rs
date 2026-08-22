@@ -35,9 +35,17 @@ mod pole_zero;
 mod sensitivity;
 mod transient;
 
-/// The complete configuration an `.OP` solve resolves to, for a reader that
-/// must report what a run will actually use rather than what the deck alone
-/// resolves to. See [`dc::resolved_op_config`].
+/// The complete configuration an `.OP` solve resolves to — what a run actually
+/// uses, rather than what the deck alone resolves to. See
+/// [`dc::resolved_op_config`], which `configured_op_engine` builds its engine
+/// from.
+///
+/// Re-exported for the option ratchet in `plan::numeric_override::tests`,
+/// which is the only reader outside this module and is the reason the fold was
+/// separated from the construction at all. Production callers inside
+/// `engine_bridge` reach it directly, so the re-export is test-gated rather
+/// than left unused.
+#[cfg(test)]
 pub(in crate::simulation) use dc::resolved_op_config;
 
 /// Bridge between UI and rspice-core engine
