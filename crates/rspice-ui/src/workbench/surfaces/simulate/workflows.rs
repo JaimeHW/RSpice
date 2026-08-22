@@ -102,7 +102,7 @@ pub(super) fn rename_analysis_dialog(
             "Name",
             "Unique within this plan, ignoring case.",
             |ui| {
-                mono_input(ui, &mut draft.name, ui.available_width().min(330.0));
+                mono_input(ui, "Name", &mut draft.name, ui.available_width().min(330.0));
             },
         );
         workflow_setting_row(ui, "Use kind label", &default_note, |ui| {
@@ -233,7 +233,7 @@ pub(super) fn clone_plan_dialog(
     .primary_enabled(enabled)
     .show(ctx, |ui| {
         workflow_setting_row(ui, "New plan name", "Unique within this project.", |ui| {
-            mono_input(ui, &mut draft.name, ui.available_width().min(330.0));
+            mono_input(ui, "New plan name", &mut draft.name, ui.available_width().min(330.0));
         });
         workflow_setting_row(
             ui,
@@ -1915,24 +1915,26 @@ pub(super) fn workflow_setting_row(
 pub(super) fn workflow_text_field(ui: &mut Ui, label: &str, value: &mut String, monospace: bool) {
     workflow_field_label(ui, label);
     if monospace {
-        mono_input(ui, value, ui.available_width());
+        mono_input(ui, label, value, ui.available_width());
     } else {
         let height = Tokens::get(ui.ctx()).metrics.ctl_h;
-        ui.add_sized(
+        let response = ui.add_sized(
             vec2(ui.available_width(), height),
             egui::TextEdit::singleline(value).margin(egui::Margin::symmetric(8, 4)),
         );
+        crate::ui::widgets::name_control(ui, &response, label);
     }
 }
 
 pub(super) fn workflow_multiline_field(ui: &mut Ui, label: &str, value: &mut String) {
     workflow_field_label(ui, label);
-    ui.add_sized(
+    let response = ui.add_sized(
         vec2(ui.available_width(), 74.0),
         egui::TextEdit::multiline(value)
             .font(egui::TextStyle::Monospace)
             .margin(egui::Margin::symmetric(8, 6)),
     );
+    crate::ui::widgets::name_control(ui, &response, label);
 }
 
 pub(super) fn workflow_select_field(

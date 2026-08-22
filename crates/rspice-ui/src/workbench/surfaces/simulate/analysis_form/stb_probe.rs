@@ -86,7 +86,7 @@ fn control(
                 }
             }
             ui.add_enabled_ui(*reference == StbProbeReference::Entered, |ui| {
-                mono_input(ui, name, editor_width);
+                mono_input(ui, label, name, editor_width);
             });
         },
     );

@@ -187,7 +187,7 @@ fn new_plan_group(
     kit::section_head(ui, "New plan", None);
     let name = |ui: &mut Ui, name: &mut String| {
         workflow_setting_row(ui, "Plan name", NAME_DETAIL, |ui| {
-            mono_input(ui, name, ui.available_width());
+            mono_input(ui, "Plan name", name, ui.available_width());
         });
     };
     let point = |ui: &mut Ui, point: &mut ReferencePoint| {

@@ -500,7 +500,8 @@ fn editor_row(
     } else {
         let width = input.available_width();
         let mut text = value.borrow_mut();
-        mono_input(&mut input, &mut text, width).on_hover_text(row.option.value_hint());
+        mono_input(&mut input, row.option.label(), &mut text, width)
+            .on_hover_text(row.option.value_hint());
     }
 
     // The hint sits where the origin does on a read-only row: an editing row

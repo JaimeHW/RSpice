@@ -5,6 +5,7 @@
 //! screen, and the numerical controls resolve to exactly the values the run
 //! will use.
 
+mod accessibility;
 mod capture_groups;
 mod settings_switch;
 
@@ -2352,96 +2353,5 @@ fn a_plan_written_before_run_set_participation_still_loads() {
             .find(|instance| instance.id() == id)
             .map(crate::simulation::plan::FrozenAnalysisInstance::run_at),
         round_tripped.instance(id).map(AnalysisInstance::run_at),
-    );
-}
-
-/// Nothing the Analyses page offers may sit outside the surface it is drawn on.
-///
-/// The title row reserved a fixed width for its five actions that the group had
-/// outgrown, so at the 1000-point gate the accent action was cut by the surface
-/// edge and the analysis rail beside it lost its enable switches off the right.
-/// A clipped control is not a control: there is no horizontal scroll on this
-/// surface to reach it with.
-///
-/// Measured through AccessKit rather than through painted shapes, because the
-/// question is about controls: a decorative shape may legitimately be clipped,
-/// and a button may not.
-#[test]
-fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
-    // The 1000-point gate, the widths either side of it, and the band where a
-    // fixed reservation is widest relative to the surface. A row that reserves
-    // a constant for its actions overflows wherever that constant plus the
-    // heading's floor exceeds the surface, and where that band falls depends on
-    // how wide the labels happen to be -- so this sweeps rather than sampling
-    // one width.
-    const GATE_WIDTHS: [f32; 6] = [620.0, 700.0, 820.0, 960.0, 1000.0, 1024.0];
-    // Sub-pixel: a control resting exactly on the edge is inside it, and
-    // rounding in the layout must not read as a defect.
-    const TOLERANCE: f64 = 0.5;
-
-    let mut offenders = Vec::new();
-    for width in GATE_WIDTHS {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.simulation_page = SimulationPage::Analyses;
-
-        let mut run = || {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        vec2(width, RENDER_VIEWPORT_HEIGHT),
-                    )),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| super::show(ui, &mut app));
-                },
-            )
-        };
-        // The surface resolves its content width against the scrollbar track it
-        // reserves, which it only knows on a second pass.
-        let _ = run();
-        let output = run();
-
-        let nodes = output
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit tree update")
-            .nodes;
-        for (_, node) in &nodes {
-            // Only things a reader acts on. A container legitimately extends
-            // past the viewport; the page scrolls vertically to reach it.
-            if !matches!(
-                node.role(),
-                egui::accesskit::Role::Button
-                    | egui::accesskit::Role::CheckBox
-                    | egui::accesskit::Role::ComboBox
-                    | egui::accesskit::Role::Link
-            ) {
-                continue;
-            }
-            let Some(bounds) = node.bounds() else {
-                continue;
-            };
-            if bounds.x1 > f64::from(width) + TOLERANCE || bounds.x0 < -TOLERANCE {
-                offenders.push(format!(
-                    "{width:.0}pt surface: {:?} {:?} spans {:.1}..{:.1}",
-                    node.role(),
-                    node.label().unwrap_or_default(),
-                    bounds.x0,
-                    bounds.x1
-                ));
-            }
-        }
-    }
-    assert!(
-        offenders.is_empty(),
-        "controls drawn outside the surface they belong to:\n{}",
-        offenders.join("\n")
     );
 }

@@ -389,6 +389,7 @@ fn criterion_row(
     let width = value_rect.width();
     let response = mono_input(
         &mut cell,
+        meaning,
         field(&mut app.state.sim_setup.options_draft),
         width,
     );
@@ -487,6 +488,7 @@ fn budget_row(
     let width = value_rect.width();
     let response = mono_input(
         &mut cell,
+        meaning,
         field(&mut app.state.sim_setup.options_draft),
         width,
     );
@@ -731,6 +733,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     ("Minimum timestep", &mut |ui: &mut Ui, width: f32| {
                         min_response = Some(mono_input(
                             ui,
+                            "Minimum timestep",
                             &mut app.state.sim_setup.options_draft.min_timestep,
                             width,
                         ));
@@ -738,6 +741,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     Some(("Maximum timestep", &mut |ui: &mut Ui, width: f32| {
                         max_response = Some(mono_input(
                             ui,
+                            "Maximum timestep",
                             &mut app.state.sim_setup.options_draft.max_timestep,
                             width,
                         ));
@@ -777,6 +781,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     ("Bypass relative bound", &mut |ui: &mut Ui, width: f32| {
                         bypass_reltol = Some(mono_input(
                             ui,
+                            "Bypass relative bound",
                             &mut app.state.sim_setup.options_draft.bypass_reltol,
                             width,
                         ));
@@ -784,6 +789,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     Some(("Bypass voltage floor", &mut |ui: &mut Ui, width: f32| {
                         bypass_abstol = Some(mono_input(
                             ui,
+                            "Bypass voltage floor",
                             &mut app.state.sim_setup.options_draft.bypass_abstol,
                             width,
                         ));
@@ -853,6 +859,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                     Some(("GMIN floor", &mut |ui: &mut Ui, width: f32| {
                         gmin_response = Some(mono_input(
                             ui,
+                            "GMIN floor",
                             &mut app.state.sim_setup.options_draft.gmin,
                             width,
                         ));
@@ -875,6 +882,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         &mut |ui: &mut Ui, width: f32| {
                             pivrel_response = Some(mono_input(
                                 ui,
+                                "Relative pivot \u{b7} PIVREL",
                                 &mut app.state.sim_setup.options_draft.pivrel,
                                 width,
                             ));
@@ -885,6 +893,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         &mut |ui: &mut Ui, width: f32| {
                             pivtol_response = Some(mono_input(
                                 ui,
+                                "Absolute pivot \u{b7} PIVTOL",
                                 &mut app.state.sim_setup.options_draft.pivtol,
                                 width,
                             ));
@@ -934,7 +943,12 @@ fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
                     (
                         "Model reference temperature · TNOM",
                         &mut |ui: &mut Ui, width: f32| {
-                            tnom = Some(mono_input(ui, &mut setup.options_draft.tnom, width));
+                            tnom = Some(mono_input(
+                                ui,
+                                "Model reference temperature \u{b7} TNOM",
+                                &mut setup.options_draft.tnom,
+                                width,
+                            ));
                         },
                     ),
                     None,
@@ -1850,7 +1864,7 @@ fn override_editor_row(
             }
 
             let mut buffer = value.borrow_mut();
-            let response = mono_input(ui, &mut buffer, OVERRIDE_CONTROL_WIDTH);
+            let response = mono_input(ui, "Override value", &mut buffer, OVERRIDE_CONTROL_WIDTH);
             drop(buffer);
             if Button::new("Apply").accent().show(ui).clicked()
                 || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))

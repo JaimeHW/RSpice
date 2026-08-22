@@ -9,15 +9,57 @@ use crate::ui::tokens::{self, Tokens};
 /// Label column width of inspector form grids.
 const LABEL_COL: f32 = 92.0;
 
+/// Announce `name` as a control's accessible name.
+///
+/// Every label in this design system is painted rather than laid out as a
+/// widget, so there is no label node for a control to be `labelled_by`. A
+/// screen reader that reaches an input therefore hears whatever the widget
+/// publishes for itself, which for [`TextEdit`] is nothing at all and for
+/// [`egui::Checkbox`] is the word it happens to be showing — "Enabled" as the
+/// name of the control rather than as its state.
+///
+/// Naming the node is the only route that survives that, and it belongs to the
+/// constructors below so a call site cannot forget it: `mono_input` and
+/// `tick_box` take the row's own label and there is no spelling of either that
+/// omits one.
+pub(crate) fn name_control(ui: &Ui, response: &Response, name: &str) {
+    debug_assert!(
+        !name.trim().is_empty(),
+        "a control announces the label its row states; an unnamed one is unreachable"
+    );
+    let name = name.to_owned();
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_label(name));
+}
+
 /// A monospace value input filling `width`, styled as an inset well.
-pub fn mono_input(ui: &mut Ui, value: &mut String, width: f32) -> Response {
+///
+/// `label` is what the row states beside or above the well, and becomes the
+/// control's accessible name — see [`name_control`].
+pub fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> Response {
     let t = Tokens::get(ui.ctx());
-    ui.add_sized(
+    let response = ui.add_sized(
         vec2(width, t.metrics.ctl_h),
         TextEdit::singleline(value)
             .font(egui::TextStyle::Monospace)
             .margin(egui::Margin::symmetric(8, 4)),
-    )
+    );
+    name_control(ui, &response, label);
+    response
+}
+
+/// A tick box whose accessible name is `name` and whose painted text is `text`.
+///
+/// The two are separate on purpose. A tick box that shows its own state —
+/// "Enabled" / "Disabled" — publishes that word as its name through
+/// [`egui::Checkbox`], so the control is announced as whichever value it
+/// currently holds and its identity is never stated. One that shows nothing at
+/// all, because its row already names it in a column beside it, publishes an
+/// empty name and cannot be reached by name in the first place.
+pub fn tick_box(ui: &mut Ui, name: &str, text: &str, value: &mut bool) -> Response {
+    let response = ui.add(egui::Checkbox::new(value, text));
+    name_control(ui, &response, name);
+    response
 }
 
 /// An inspector form row: dimmed label in a fixed column, editable mono
@@ -40,7 +82,7 @@ pub fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
                 theme::sans(tokens::FS_1, FontWeight::Regular),
                 c.text_dim,
             );
-            mono_input(ui, value, ui.available_width())
+            mono_input(ui, label, value, ui.available_width())
         },
     )
     .inner

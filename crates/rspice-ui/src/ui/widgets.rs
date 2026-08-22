@@ -38,7 +38,8 @@ pub use button::{Button, IconButton};
 pub use chip::chip;
 pub use dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone};
 pub use docbar::docbar_at_height;
-pub use form::{check_row, choice_row, input_row, kv_row, mono_input};
+pub(crate) use form::name_control;
+pub use form::{check_row, choice_row, input_row, kv_row, mono_input, tick_box};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
     pane_section_label, two_pane,

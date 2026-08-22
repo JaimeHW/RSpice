@@ -97,7 +97,7 @@ pub(super) fn render_value_editor(
             quantity_policy,
             number_locale,
         ),
-        PropertyType::String => render_string_editor(ui, current, width),
+        PropertyType::String => render_string_editor(ui, def, current, width),
         PropertyType::Expression => render_expression_editor(
             ui,
             def,
@@ -127,7 +127,7 @@ fn render_number_editor(
         .unwrap_or_else(|| editor_source_text(def, current, quantity_policy, number_locale));
 
     let mut new_text = text.clone();
-    let response = mono_input(ui, &mut new_text, width);
+    let response = mono_input(ui, &def.display_name, &mut new_text, width);
 
     if response.changed() && new_text != text {
         return match parse_number_source(def, &new_text, quantity_policy, number_locale) {
@@ -176,14 +176,19 @@ fn has_incomplete_exponent(source: &str) -> bool {
 }
 
 /// String editor.
-fn render_string_editor(ui: &mut Ui, current: &PropertyValue, width: f32) -> ValueEditorOutput {
+fn render_string_editor(
+    ui: &mut Ui,
+    def: &PropertyDefinition,
+    current: &PropertyValue,
+    width: f32,
+) -> ValueEditorOutput {
     let text = match current {
         PropertyValue::String(s) => s.clone(),
         _ => current.display_string(),
     };
 
     let mut new_text = text.clone();
-    let response = mono_input(ui, &mut new_text, width);
+    let response = mono_input(ui, &def.display_name, &mut new_text, width);
     if response.changed() && new_text != text {
         return ValueEditorOutput::control(response.id, Some(PropertyValue::String(new_text)));
     }
@@ -206,7 +211,7 @@ fn render_expression_editor(
         .unwrap_or_else(|| editor_source_text(def, current, quantity_policy, number_locale));
 
     let mut new_text = text.clone();
-    let response = mono_input(ui, &mut new_text, width);
+    let response = mono_input(ui, &def.display_name, &mut new_text, width);
 
     if response.changed() && new_text != text {
         return match parse_expression_source(def, &new_text, quantity_policy, number_locale) {

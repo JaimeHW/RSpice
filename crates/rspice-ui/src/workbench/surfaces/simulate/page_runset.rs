@@ -952,10 +952,11 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                 field_pair(
                     ui,
                     ("Name", &mut |ui: &mut Ui, width: f32| {
-                        name_released |= mono_input(ui, &mut name, width).lost_focus();
+                        name_released |= mono_input(ui, "Name", &mut name, width).lost_focus();
                     }),
                     Some(("Source authority", &mut |ui: &mut Ui, width: f32| {
-                        source_released |= mono_input(ui, &mut source, width).lost_focus();
+                        source_released |=
+                            mono_input(ui, "Source authority", &mut source, width).lost_focus();
                     })),
                 );
                 if name_released && name != dimension.name {
@@ -1047,6 +1048,11 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                         .desired_rows(5)
                         .desired_width(ui.available_width())
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                );
+                crate::ui::widgets::name_control(
+                    ui,
+                    &response,
+                    &format!("{} \u{b7} typed values", dimension.name),
                 );
                 if response.changed() {
                     app.state.workbench.run_set_values_draft = Some((id.clone(), text.clone()));
@@ -1165,7 +1171,8 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                     let mut edited = current_composition.clone();
                     let mut predicate = edited.predicate.clone();
                     let released =
-                        mono_input(ui, &mut predicate, ui.available_width()).lost_focus();
+                        mono_input(ui, "Predicate", &mut predicate, ui.available_width())
+                            .lost_focus();
                     super::page_kit::note_line(
                         ui,
                         "Predicate grammar: dimension-id == value; join clauses with &&",
@@ -1196,7 +1203,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                 if mode == RunSetCompositionMode::Nested {
                     let mut edited = current_composition.clone();
                     let mut depth = edited.maximum_depth.to_string();
-                    if mono_input(ui, &mut depth, 120.0).lost_focus()
+                    if mono_input(ui, "Maximum depth", &mut depth, 120.0).lost_focus()
                         && let Ok(parsed) = depth.trim().parse::<u8>()
                         && parsed != edited.maximum_depth
                     {
@@ -1225,13 +1232,16 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui,
                         ("Policy ID", &mut |ui: &mut Ui, width: f32| {
                             released.set(
-                                released.get() | mono_input(ui, &mut policy.id, width).lost_focus(),
+                                released.get()
+                                    | mono_input(ui, "Policy ID", &mut policy.id, width)
+                                        .lost_focus(),
                             );
                         }),
                         Some(("Objective", &mut |ui: &mut Ui, width: f32| {
                             released.set(
                                 released.get()
-                                    | mono_input(ui, &mut policy.objective, width).lost_focus(),
+                                    | mono_input(ui, "Objective", &mut policy.objective, width)
+                                        .lost_focus(),
                             );
                         })),
                     );
@@ -1239,12 +1249,15 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui,
                         ("Seed", &mut |ui: &mut Ui, width: f32| {
                             released.set(
-                                released.get() | mono_input(ui, &mut seed, width).lost_focus(),
+                                released.get()
+                                    | mono_input(ui, "Seed", &mut seed, width).lost_focus(),
                             );
                         }),
                         Some(("Maximum proposals", &mut |ui: &mut Ui, width: f32| {
                             released.set(
-                                released.get() | mono_input(ui, &mut maximum, width).lost_focus(),
+                                released.get()
+                                    | mono_input(ui, "Maximum proposals", &mut maximum, width)
+                                        .lost_focus(),
                             );
                         })),
                     );
@@ -1253,13 +1266,20 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         ("Bounds · JSON", &mut |ui: &mut Ui, width: f32| {
                             released.set(
                                 released.get()
-                                    | mono_input(ui, &mut policy.bounds, width).lost_focus(),
+                                    | mono_input(
+                                        ui,
+                                        "Bounds \u{b7} JSON",
+                                        &mut policy.bounds,
+                                        width,
+                                    )
+                                    .lost_focus(),
                             );
                         }),
                         Some(("Stop rule", &mut |ui: &mut Ui, width: f32| {
                             released.set(
                                 released.get()
-                                    | mono_input(ui, &mut policy.stop_rule, width).lost_focus(),
+                                    | mono_input(ui, "Stop rule", &mut policy.stop_rule, width)
+                                        .lost_focus(),
                             );
                         })),
                     );
@@ -1353,13 +1373,20 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                     ("Maximum tasks", &mut |ui: &mut Ui, width: f32| {
                         released.set(
                             released.get()
-                                | mono_input(ui, &mut drafts.maximum_tasks, width).lost_focus(),
+                                | mono_input(ui, "Maximum tasks", &mut drafts.maximum_tasks, width)
+                                    .lost_focus(),
                         );
                     }),
                     Some(("Maximum storage", &mut |ui: &mut Ui, width: f32| {
                         released.set(
                             released.get()
-                                | mono_input(ui, &mut drafts.maximum_storage, width).lost_focus(),
+                                | mono_input(
+                                    ui,
+                                    "Maximum storage",
+                                    &mut drafts.maximum_storage,
+                                    width,
+                                )
+                                .lost_focus(),
                         );
                     })),
                 );
@@ -1368,13 +1395,25 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                     ("Cost / task · ms", &mut |ui: &mut Ui, width: f32| {
                         released.set(
                             released.get()
-                                | mono_input(ui, &mut drafts.cost_per_point_ms, width).lost_focus(),
+                                | mono_input(
+                                    ui,
+                                    "Cost \u{b7} ms per task",
+                                    &mut drafts.cost_per_point_ms,
+                                    width,
+                                )
+                                .lost_focus(),
                         );
                     }),
                     Some(("Storage / task", &mut |ui: &mut Ui, width: f32| {
                         released.set(
                             released.get()
-                                | mono_input(ui, &mut drafts.bytes_per_point, width).lost_focus(),
+                                | mono_input(
+                                    ui,
+                                    "Storage per task",
+                                    &mut drafts.bytes_per_point,
+                                    width,
+                                )
+                                .lost_focus(),
                         );
                     })),
                 );
@@ -1926,8 +1965,10 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     {
         let mut child = super::page_kit::cell_ui(ui, cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)));
         let mut included = !row.excluded;
-        if child
-            .add(egui::Checkbox::without_text(&mut included))
+        // Named for the point it keeps: twenty-seven boxes that publish an
+        // empty name are twenty-seven controls a reader cannot tell apart.
+        let name = format!("Run point {:03}", row.index + 1);
+        if crate::ui::widgets::tick_box(&mut child, &name, "", &mut included)
             .on_hover_text(if row.excluded {
                 "Restore this point to the run"
             } else {

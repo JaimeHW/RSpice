@@ -503,12 +503,14 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                 field_pair(
                     ui,
                     ("Name", &mut |ui: &mut Ui, width: f32| {
-                        released
-                            .set(released.get() | mono_input(ui, &mut name, width).lost_focus());
+                        released.set(
+                            released.get() | mono_input(ui, "Name", &mut name, width).lost_focus(),
+                        );
                     }),
                     Some(("Expression", &mut |ui: &mut Ui, width: f32| {
                         released.set(
-                            released.get() | mono_input(ui, &mut expression, width).lost_focus(),
+                            released.get()
+                                | mono_input(ui, "Expression", &mut expression, width).lost_focus(),
                         );
                     })),
                 );

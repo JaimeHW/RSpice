@@ -334,7 +334,7 @@ fn auto_binding(headers: &[String]) -> Result<Vec<Option<usize>>, VariableImport
 /// Reading a sheet changes nothing, so this takes the application immutably and
 /// hands back what the dialog should show. The caller decides that the dialog
 /// opens; this only decides what is in it.
-fn import_draft_for_sheet(
+pub(super) fn import_draft_for_sheet(
     app: &RSpiceApp,
     plan_id: SimulationPlanId,
     file_name: &str,
@@ -782,8 +782,14 @@ fn row_table(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
                 ui.horizontal(|ui| {
                     let adoptable = row.is_adoptable();
                     let mut accepted = row.accepted;
+                    // Named for the sheet line it adopts: a column of boxes
+                    // that publish nothing cannot be told apart by name.
+                    let name = format!("Adopt line {} \u{b7} {}", row.line, row.name);
                     if ui
-                        .add_enabled(adoptable, egui::Checkbox::without_text(&mut accepted))
+                        .add_enabled_ui(adoptable, |ui| {
+                            crate::ui::widgets::tick_box(ui, &name, "", &mut accepted)
+                        })
+                        .inner
                         .changed()
                     {
                         row.accepted = accepted;

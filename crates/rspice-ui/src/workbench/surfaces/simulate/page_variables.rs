@@ -329,7 +329,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             field_pair(
                 ui,
                 ("Expression", &mut |ui: &mut Ui, width: f32| {
-                    released.set(released.get() | mono_input(ui, &mut draft, width).lost_focus());
+                    released.set(
+                        released.get()
+                            | mono_input(ui, "Expression", &mut draft, width).lost_focus(),
+                    );
                 }),
                 Some(("Quantity", &mut |ui: &mut Ui, width: f32| {
                     if let Some(index) = select(
@@ -400,12 +403,16 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             field_pair(
                 ui,
                 ("Minimum", &mut |ui: &mut Ui, width: f32| {
-                    released
-                        .set(released.get() | mono_input(ui, &mut bounds.0, width).lost_focus());
+                    released.set(
+                        released.get()
+                            | mono_input(ui, "Minimum", &mut bounds.0, width).lost_focus(),
+                    );
                 }),
                 Some(("Maximum", &mut |ui: &mut Ui, width: f32| {
-                    released
-                        .set(released.get() | mono_input(ui, &mut bounds.1, width).lost_focus());
+                    released.set(
+                        released.get()
+                            | mono_input(ui, "Maximum", &mut bounds.1, width).lost_focus(),
+                    );
                 })),
             );
             // Unit handling and out-of-bounds handling are stated, not

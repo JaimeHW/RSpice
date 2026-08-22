@@ -147,9 +147,9 @@ fn render_new_point_row(
     };
     if compact {
         ui.label("Time (s)");
-        let time_response = mono_input(ui, &mut state.new_time, ui.available_width());
+        let time_response = mono_input(ui, "Time", &mut state.new_time, ui.available_width());
         ui.label(format!("Value ({})", state.value_unit));
-        let value_response = mono_input(ui, &mut state.new_value, ui.available_width());
+        let value_response = mono_input(ui, "Value", &mut state.new_value, ui.available_width());
         ui.horizontal(|ui| actions(ui, state));
         annotate_pwl_input(
             ui,
@@ -172,8 +172,8 @@ fn render_new_point_row(
             ui.spacing_mut().item_spacing.x = 6.0;
             let cell = ((ui.available_width() - INDEX_COL - 170.0) * 0.5).max(70.0);
             ui.add_space(INDEX_COL);
-            let time_response = mono_input(ui, &mut state.new_time, cell);
-            let value_response = mono_input(ui, &mut state.new_value, cell);
+            let time_response = mono_input(ui, "Time", &mut state.new_time, cell);
+            let value_response = mono_input(ui, "Value", &mut state.new_value, cell);
             actions(ui, state);
             annotate_pwl_input(
                 ui,
@@ -332,9 +332,13 @@ fn render_points_table(
                     }
 
                     let cell = ((ui.available_width() - 6.0) * 0.5).max(70.0);
-                    let time_response = mono_input(ui, &mut state.edit_buffers[i].0, cell);
-                    let value_response =
-                        mono_input(ui, &mut state.edit_buffers[i].1, ui.available_width());
+                    let time_response = mono_input(ui, "Time", &mut state.edit_buffers[i].0, cell);
+                    let value_response = mono_input(
+                        ui,
+                        "Value",
+                        &mut state.edit_buffers[i].1,
+                        ui.available_width(),
+                    );
                     if time_response.changed() || value_response.changed() {
                         *result =
                             apply_existing_pair_edit(state, i, quantity_policy, number_locale);

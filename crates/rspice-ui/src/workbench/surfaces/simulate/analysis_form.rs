@@ -356,7 +356,7 @@ fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
         return inspector_input_row(ui, label, value);
     }
     field_cell(ui, label, None, |ui| {
-        mono_input(ui, value, ui.available_width())
+        mono_input(ui, label, value, ui.available_width())
     })
 }
 
@@ -367,8 +367,10 @@ fn input_row_enabled(ui: &mut Ui, label: &str, value: &mut String, enabled: bool
             .inner;
     }
     field_cell(ui, label, None, |ui| {
-        ui.add_enabled_ui(enabled, |ui| mono_input(ui, value, ui.available_width()))
-            .inner
+        ui.add_enabled_ui(enabled, |ui| {
+            mono_input(ui, label, value, ui.available_width())
+        })
+        .inner
     })
 }
 
@@ -377,7 +379,7 @@ fn engineering_input_row(ui: &mut Ui, label: &str, value: &mut String) -> Respon
         return inspector_input_row(ui, label, value);
     }
     field_cell(ui, label, Some("engineering notation"), |ui| {
-        mono_input(ui, value, ui.available_width())
+        mono_input(ui, label, value, ui.available_width())
     })
 }
 
@@ -393,8 +395,10 @@ fn engineering_input_row_enabled(
             .inner;
     }
     field_cell(ui, label, Some("engineering notation"), |ui| {
-        ui.add_enabled_ui(enabled, |ui| mono_input(ui, value, ui.available_width()))
-            .inner
+        ui.add_enabled_ui(enabled, |ui| {
+            mono_input(ui, label, value, ui.available_width())
+        })
+        .inner
     })
 }
 
@@ -544,7 +548,7 @@ fn noise_domain_control(
                 }
             }
             ui.add_enabled_ui(custom_selected, |ui| {
-                mono_input(ui, value, editor_width);
+                mono_input(ui, label, value, editor_width);
             });
         },
     );
@@ -599,7 +603,13 @@ fn noise_sweep_control(ui: &mut Ui, sweep: &mut NoiseSweepType, explicit_frequen
         *sweep = NoiseSweepType::from_selection_index(index);
     }
     ui.add_enabled_ui(explicit, |ui| {
-        mono_input(ui, explicit_frequencies, editor_width).on_hover_text(if explicit {
+        mono_input(
+            ui,
+            NOISE_FIELD_LABELS[0],
+            explicit_frequencies,
+            editor_width,
+        )
+        .on_hover_text(if explicit {
             "Comma- or space-separated frequencies in Hz"
         } else {
             "Select Explicit frequency list to edit this retained axis"
@@ -730,7 +740,12 @@ fn op_temperature_row(ui: &mut Ui, setup: &mut crate::simulation::dialog::OpDial
                     }
                 }
                 ui.add_enabled_ui(setup.temperature_mode_idx == 2, |ui| {
-                    mono_input(ui, &mut setup.temperature, ui.available_width())
+                    mono_input(
+                        ui,
+                        OP_FIELD_LABELS[0],
+                        &mut setup.temperature,
+                        ui.available_width(),
+                    )
                 });
             },
         );
@@ -759,13 +774,18 @@ fn op_temperature_row(ui: &mut Ui, setup: &mut crate::simulation::dialog::OpDial
                 }
             }
             ui.add_enabled_ui(setup.temperature_mode_idx == 2, |ui| {
-                mono_input(ui, &mut setup.temperature, input_width)
+                mono_input(ui, OP_FIELD_LABELS[0], &mut setup.temperature, input_width)
             });
         });
     });
 }
 
-fn mono_input_with_suffix(ui: &mut Ui, value: &mut String, suffix: &'static str) -> Response {
+fn mono_input_with_suffix(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    suffix: &'static str,
+) -> Response {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
     let suffix_font = theme::mono(tokens::FS_0, FontWeight::Regular);
@@ -780,7 +800,7 @@ fn mono_input_with_suffix(ui: &mut Ui, value: &mut String, suffix: &'static str)
         |ui| {
             ui.spacing_mut().item_spacing.x = ENVELOPE_INLINE_CONTROL_GAP;
             let input_width = (width - suffix_width - ENVELOPE_INLINE_CONTROL_GAP).max(1.0);
-            let response = mono_input(ui, value, input_width);
+            let response = mono_input(ui, label, value, input_width);
             let (suffix_rect, _) =
                 ui.allocate_exact_size(vec2(suffix_width, t.metrics.ctl_h), egui::Sense::hover());
             ui.painter().text(
@@ -824,7 +844,7 @@ fn envelope_time_input_row(
 ) -> Response {
     let response = if uses_two_column_fields(ui) {
         field_cell(ui, label, Some("engineering notation"), |ui| {
-            mono_input_with_suffix(ui, value, "s")
+            mono_input_with_suffix(ui, label, value, "s")
         })
     } else {
         let t = Tokens::get(ui.ctx());
@@ -844,7 +864,7 @@ fn envelope_time_input_row(
                     theme::sans(tokens::FS_1, FontWeight::Regular),
                     color,
                 );
-                mono_input_with_suffix(ui, value, "s")
+                mono_input_with_suffix(ui, label, value, "s")
             },
         )
         .inner
@@ -861,7 +881,7 @@ fn envelope_harmonic_order_row(ui: &mut Ui, value: &mut String) -> Response {
         ui,
         ENVELOPE_FIELD_LABELS[3],
         Some(ENVELOPE_HARMONIC_ORDER_HELPER),
-        |ui| mono_input(ui, value, ui.available_width()),
+        |ui| mono_input(ui, ENVELOPE_FIELD_LABELS[3], value, ui.available_width()),
     )
 }
 
@@ -956,7 +976,7 @@ fn named_periodic_source_row(
                     }
                 }
                 if selected == declared_index {
-                    mono_input(ui, value, editor_width);
+                    mono_input(ui, label, value, editor_width);
                 } else {
                     ui.allocate_exact_size(vec2(editor_width, 1.0), egui::Sense::hover());
                 }
@@ -1010,10 +1030,16 @@ fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
             // The cell owns the full grid column, but the checkbox keeps its
             // natural compact width at the leading edge. `add_sized` would
             // center its contents across an oversized half-column.
-            ui.add(egui::Checkbox::new(
-                value,
+            //
+            // The word beside the box is the state, not the name: named by the
+            // box itself this control announced "Enabled" and a reader had no
+            // way to tell which of a form's tick boxes they had reached.
+            crate::ui::widgets::tick_box(
+                ui,
+                label,
                 if *value { "Enabled" } else { "Disabled" },
-            ))
+                value,
+            )
             .changed()
         })
         .inner
