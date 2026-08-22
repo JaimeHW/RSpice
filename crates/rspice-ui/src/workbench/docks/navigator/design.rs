@@ -698,36 +698,15 @@ fn excitation_tooltip(source: &crate::simulation::placed_sources::PlacedSource) 
     lines.join("\n")
 }
 
+/// The saved probes this plan reads, which is what "named signal" means once
+/// the Excitations section above owns every placed source.
+///
+/// This section used to list the sources too, so a drawing with eight sources
+/// carried each of them twice in one rail -- once under Excitations with its
+/// reader count, and once here saying only "source". The second listing said
+/// strictly less than the first.
 fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(app.state.workbench.navigator_filter());
-    let sources = app
-        .state
-        .schematic
-        .components
-        .iter()
-        .filter(|component| is_named_source(component.kind))
-        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
-        .filter(|component| {
-            matches_query(
-                &query,
-                &[
-                    component.name.as_str(),
-                    component.value.as_str(),
-                    component.kind.display_name(),
-                    "source",
-                ],
-            )
-        })
-        .map(|component| {
-            (
-                component.id,
-                component.pos,
-                component.name.clone(),
-                component.value.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
     // A saved output belongs to the run plan rather than to a sheet, so the
     // sheet scope has nothing to say about it and it is listed either way.
     let probes = app
@@ -756,53 +735,17 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .unwrap_or_default();
 
-    navigator_section_header(
-        ui,
-        "Named signals",
-        &(sources.len() + probes.len()).to_string(),
-    );
-    if sources.is_empty() && probes.is_empty() {
+    navigator_section_header(ui, "Named signals", &probes.len().to_string());
+    if probes.is_empty() {
         empty_navigator_row(
             ui,
             if query.is_empty() {
-                "No named sources or saved probes"
+                "No saved probes"
             } else {
-                "No named sources or probes match this filter"
+                "No probe matches this filter"
             },
         );
         return;
-    }
-    for (component_id, position, name, value) in sources {
-        let meta = if value.trim().is_empty() {
-            "source".to_owned()
-        } else {
-            format!("source \u{00b7} {value}")
-        };
-        let response = nav_row_indented_mono_response(
-            ui,
-            WorkbenchIcon::ArrowRight,
-            &name,
-            app.state.schematic.selection.has_component(component_id),
-            Some(&meta),
-            1,
-        );
-        if response.clicked() {
-            app.state
-                .schematic
-                .selection
-                .select_only_component(component_id);
-            app.state.schematic.net_highlight.clear();
-            app.state.schematic.center_request = Some(position);
-        }
-        navigator_object_context_menu(
-            &response,
-            app,
-            NavigatorObject::Component {
-                id: component_id,
-                label: name,
-                position,
-            },
-        );
     }
     for (name, expression) in probes {
         let response = nav_row_indented_mono_response(
@@ -822,34 +765,6 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
             NavigatorObject::SavedOutput { name, expression },
         );
     }
-}
-
-const fn is_named_source(kind: ComponentType) -> bool {
-    matches!(
-        kind,
-        ComponentType::VoltageSource
-            | ComponentType::CurrentSource
-            | ComponentType::VoltageSourceAc
-            | ComponentType::VoltageSourcePulse
-            | ComponentType::VoltageSourceSin
-            | ComponentType::VoltageSourcePwl
-            | ComponentType::VoltageSourceExp
-            | ComponentType::VoltageSourceSffm
-            | ComponentType::VoltageSourceAm
-            | ComponentType::VoltageSourcePat
-            | ComponentType::VoltageSourceNoise
-            | ComponentType::CurrentSourceAc
-            | ComponentType::CurrentSourcePulse
-            | ComponentType::CurrentSourceSin
-            | ComponentType::CurrentSourcePwl
-            | ComponentType::CurrentSourceExp
-            | ComponentType::CurrentSourceSffm
-            | ComponentType::CurrentSourceAm
-            | ComponentType::CurrentSourcePat
-            | ComponentType::CurrentSourceNoise
-            | ComponentType::BehavioralSource
-            | ComponentType::RfPort
-    )
 }
 
 fn reveal_probe_expression(app: &mut RSpiceApp, expression: &str) {
