@@ -468,14 +468,14 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         open_task_deck = deck
             .on_hover_text(format!(
                 "Opens the exact source this run handed its first task, as a read-only document \
-                 sealed with the run. This session holds {executed_deck_points} of them."
+                 sealed with the run. The archive holds {executed_deck_points} of them."
             ))
             .clicked();
     } else {
-        deck.on_hover_text(
-            "The source this run executed is retained for the session that ran it, and this \
-             session does not hold it.",
-        );
+        deck.on_hover_text(format!(
+            "This run has no executed source to open: {}.",
+            crate::state::absent_deck_reason()
+        ));
     }
 
     if let Some((run_id, analysis_id, analysis_label, receipts)) = saved_outputs
@@ -536,7 +536,8 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         )
     {
         state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "The source Run {run_sequence} executed is no longer retained in this session."
+            "The source Run {run_sequence} executed cannot be opened: {}.",
+            crate::state::absent_deck_reason()
         )));
     }
 }

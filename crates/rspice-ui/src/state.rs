@@ -154,8 +154,8 @@ pub use simulation::{
     DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalEventPointEvidence,
     DigitalEventTraceEvidence, EvidenceDomain, ExecutedDeck, ExecutedDeckArchive,
     ExecutedDeckPoint, ExecutionTarget, FamilyMeasurementEvidence, FamilyMemberId,
-    FamilyMemberMeasurements, HierarchyMapRow, MAX_RETAINED_RUNS, MonteCarloVariableMetadata,
-    NoiseContributorRow, NoiseSummary, OccurrenceProbeSpelling, OperatingPointAccuracyEvidence,
+    FamilyMemberMeasurements, HierarchyMapRow, MonteCarloVariableMetadata, NoiseContributorRow,
+    NoiseSummary, OccurrenceProbeSpelling, OperatingPointAccuracyEvidence,
     OperatingPointAnnotationEvidence, OperatingPointDeviceDetailEvidence,
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
     OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,
@@ -171,7 +171,7 @@ pub use simulation::{
     SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
     SpecificationVerdict, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence, WaveformData, ac_bode_summary_for_analysis,
+    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_summary_for_analysis,
     ac_bode_summary_for_selection, sealed_model_sources,
 };
 pub use symbol::{

@@ -356,7 +356,7 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
     assert_eq!(
         Command::OpenTaskDeck.availability(&app),
         CommandAvailability::Disabled(
-            "the source the selected run executed is no longer retained in this session"
+            crate::state::absent_deck_reason()
         ),
         "a run whose deck was released has something to open and cannot"
     );

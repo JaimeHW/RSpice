@@ -56,6 +56,27 @@ use crate::state::model_library::SEALED_MODEL_SOURCE_MARKER;
 /// application holds per point.
 pub const MAX_RETAINED_RUNS: usize = 4;
 
+/// Why a run's executed source cannot be opened.
+///
+/// One sentence, in one place, for every surface that reports the absence: the
+/// Results manifest, the jobs manager, the inspector, the corner report, the
+/// netlist run strip and the command palette. It lives beside the archive
+/// because the archive is what decides the answer — decks are written to the
+/// project file, so a reopened project reopens the decks its retained runs
+/// executed, and an absent one is this module's retention policy rather than a
+/// fact about which session ran the dataset. `7d1f952ae` retracted that claim
+/// and corrected one of the surfaces making it; the rest went on saying it.
+#[must_use]
+pub fn absent_deck_reason() -> &'static str {
+    static REASON: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        format!(
+            "the archive keeps the last {MAX_RETAINED_RUNS} runs' decks, so this run's was \
+             dropped or predates deck retention"
+        )
+    });
+    &REASON
+}
+
 /// The total distinct deck text one session keeps, across every retained run.
 pub const MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 

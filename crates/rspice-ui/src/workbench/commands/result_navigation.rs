@@ -65,9 +65,9 @@ pub(crate) fn producing_plan_hop(app: &RSpiceApp) -> Result<ProducingPlanHop, &'
 /// none.
 ///
 /// The two refusals are different facts. A session with no run selected has
-/// nothing to open. A selected run whose deck was released has something to
-/// open and cannot, and the reader has to be told which of the two it is
-/// rather than left to infer it from a control that does nothing.
+/// nothing to open. A selected run whose deck the archive no longer holds has
+/// something to open and cannot, and the reader has to be told which of the two
+/// it is rather than left to infer it from a control that does nothing.
 pub(crate) fn task_deck_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
     let run = app
         .state
@@ -75,7 +75,7 @@ pub(crate) fn task_deck_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
         .active_run()
         .ok_or("no run is selected")?;
     if app.state.simulation.executed_decks.get(run.id).is_none() {
-        return Err("the source the selected run executed is no longer retained in this session");
+        return Err(crate::state::absent_deck_reason());
     }
     Ok(run.id)
 }
@@ -91,7 +91,8 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
         return true;
     }
     state.push_user_message(ConsoleMessage::warning(format!(
-        "The source Run {sequence} executed is no longer retained in this session."
+        "The source Run {sequence} executed cannot be opened: {}.",
+        crate::state::absent_deck_reason()
     )));
     false
 }

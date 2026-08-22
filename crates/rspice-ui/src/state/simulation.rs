@@ -53,7 +53,7 @@ pub use convergence_attribution::ConvergenceAttribution;
 pub use convergence_attribution::ConvergenceFailureClass;
 pub use cross_probe::{CrossProbeIndex, CrossProbeMapping, OccurrenceProbeSpelling};
 pub use executed_deck::{
-    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, MAX_RETAINED_RUNS, sealed_model_sources,
+    ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, absent_deck_reason, sealed_model_sources,
 };
 pub use family_measurements::{
     FamilyMeasurementEvidence, FamilyMemberId, FamilyMemberMeasurements,

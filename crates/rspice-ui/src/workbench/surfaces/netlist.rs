@@ -44,9 +44,10 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             if !crate::workbench::documents::netlist_document::open_run_deck_snapshot(
                 &mut app.state,
             ) {
-                app.state.push_user_message(ConsoleMessage::warning(
-                    "The deck this run used is no longer retained in this session.",
-                ));
+                app.state.push_user_message(ConsoleMessage::warning(format!(
+                    "The deck this run used cannot be opened: {}.",
+                    crate::state::absent_deck_reason()
+                )));
             }
         }
         Some(RunStripAction::Compare) => {
@@ -65,7 +66,8 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 point,
             ) {
                 app.state.push_user_message(ConsoleMessage::warning(format!(
-                    "The decks Run {run_id} executed are no longer retained in this project."
+                    "The source Run {run_id} executed cannot be opened: {}.",
+                    crate::state::absent_deck_reason()
                 )));
             }
         }

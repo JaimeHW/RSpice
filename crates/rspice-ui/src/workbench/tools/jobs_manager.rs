@@ -88,10 +88,10 @@ struct RunRow {
     tasks: Vec<TaskRow>,
     plan_id: Option<crate::product::SimulationPlanId>,
     campaign: Option<crate::state::SimulationCampaignMembership>,
-    /// How many per-task decks this session still holds for the run. Zero is
-    /// the ordinary case for a run restored from a project: the executed
-    /// source is retained for the session that ran it, so the route is offered
-    /// only when there is a document behind it.
+    /// How many per-task decks the archive still holds for the run. Zero is the
+    /// ordinary case for an old run: the archive keeps the last few runs'
+    /// decks and drops the oldest first, so the route is offered only when
+    /// there is a document behind it.
     executed_deck_points: usize,
 }
 
@@ -943,10 +943,10 @@ fn render_inspector(
                             *requested_open_deck = Some(row.sequence);
                         }
                     } else {
-                        deck.on_hover_text(
-                            "The source this run executed is retained for the session that ran \
-                             it, and this session does not hold it.",
-                        );
+                        deck.on_hover_text(format!(
+                            "This run has no executed source to open: {}.",
+                            crate::state::absent_deck_reason()
+                        ));
                     }
                 } else {
                     crate::workbench::design_system::property_row(

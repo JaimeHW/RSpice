@@ -352,6 +352,79 @@ mod tests {
         }
     }
 
+    /// Nothing this crate ships says an executed deck is a property of the
+    /// session that ran it.
+    ///
+    /// Decks are written to the project file, so a reopened project reopens the
+    /// decks its retained runs executed and an absent one is the archive's
+    /// retention policy. `7d1f952ae` retracted the session claim and fixed one
+    /// of the five surfaces that made it; the other four kept saying it for
+    /// another wave, which is what a scan rather than a fix-by-hand prevents.
+    ///
+    /// The one owner is
+    /// `state::simulation::executed_deck::absent_deck_reason`.
+    /// Test files are exempt, because a test asserting the retraction has to be
+    /// able to name what was retracted.
+    #[test]
+    fn no_shipped_code_says_an_executed_deck_belongs_to_one_session() {
+        const RETRACTED: [&str; 3] = [
+            "retained for the session that ran",
+            "this session did not run",
+            "session does not hold it",
+        ];
+
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut paths = Vec::new();
+        rust_sources(&source_root, &mut paths);
+        paths.sort();
+        assert!(
+            paths.len() > 100,
+            "the crate-wide scan found only {} files under {}; a scan that reaches nothing \
+             passes forever",
+            paths.len(),
+            source_root.display()
+        );
+
+        let sources = paths
+            .iter()
+            .map(|path| {
+                let source = std::fs::read_to_string(path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                (path.clone(), source)
+            })
+            .collect::<Vec<_>>();
+        let roots = sources
+            .iter()
+            .flat_map(|(path, source)| test_only_roots(path, source))
+            .collect::<Vec<_>>();
+
+        let mut found = Vec::new();
+        for (path, source) in &sources {
+            if !ships(path, &roots) {
+                continue;
+            }
+            for (number, line) in without_test_items(source).lines().enumerate() {
+                let lowered = line.to_ascii_lowercase();
+                for phrase in RETRACTED {
+                    if lowered.contains(phrase) {
+                        found.push(format!(
+                            "{}:{}: shipped copy still ties an executed deck to a session",
+                            path.display(),
+                            number + 1,
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            found.is_empty(),
+            "an executed deck's absence is the archive's retention policy, not a fact about \
+             which session ran the dataset \u{2014} read \
+             `state::simulation::executed_deck::absent_deck_reason`:\n  {}",
+            found.join("\n  ")
+        );
+    }
     /// Nothing this crate ships names a circuit out of the design-reference
     /// mockup.
     ///

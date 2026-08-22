@@ -192,7 +192,10 @@ fn executed_deck_section(ui: &mut Ui, state: &mut AppState, run_id: u64) {
         property_row(
             ui,
             "Executed deck",
-            "not retained — this session did not run it",
+            &format!(
+                "not retained \u{2014} {}",
+                crate::state::absent_deck_reason()
+            ),
         );
         return;
     };
@@ -242,8 +245,9 @@ fn executed_deck_section(ui: &mut Ui, state: &mut AppState, run_id: u64) {
                 state, run_id, selected,
             ) {
                 state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "The deck Run {run_id} executed at '{}' is no longer retained in this project.",
-                    labels.get(selected).map_or("this point", String::as_str)
+                    "The deck Run {run_id} executed at '{}' cannot be opened: {}.",
+                    labels.get(selected).map_or("this point", String::as_str),
+                    crate::state::absent_deck_reason()
                 )));
             }
         }

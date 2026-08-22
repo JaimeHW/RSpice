@@ -31,13 +31,13 @@ use super::super::super::design_system::{property_row, section_header};
 /// stated rather than papered over: the working deck is a different document
 /// and showing it here would be a confident lie.
 ///
-/// It used to be stated as "this session did not run this dataset", which was
-/// true only while decks lived on the controller. They are written to the
-/// project file now ([`crate::state::ExecutedDeckArchive`]), so a reopened
+/// It used to be stated as a fact about which session had run the dataset,
+/// which was true only while decks lived on the controller. They are written to
+/// the project file now ([`crate::state::ExecutedDeckArchive`]), so a reopened
 /// project reopens the decks its retained runs executed and a missing one means
-/// something else: the archive keeps the last
-/// [`crate::state::MAX_RETAINED_RUNS`] runs and drops the oldest first, and a
-/// run recorded before it existed never had one to keep.
+/// something else — which
+/// [`crate::state::absent_deck_reason`] now says once, for every surface that
+/// reports the absence.
 pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> Option<u64> {
     section_header(ui, "Executed deck", None);
     let Some(sources) = executed else {
@@ -45,9 +45,8 @@ pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> O
             ui,
             "Deck",
             &format!(
-                "not retained \u{2014} the archive keeps {} runs' decks; this run's was dropped, \
-                 or it predates deck retention",
-                crate::state::MAX_RETAINED_RUNS
+                "not retained \u{2014} {}",
+                crate::state::absent_deck_reason()
             ),
         );
         return None;
@@ -86,6 +85,7 @@ pub(super) fn reveal(state: &mut crate::workbench::AppState, run_id: u64) {
         return;
     }
     state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-        "The decks Run {run_id} executed are no longer retained in this project."
+        "The source Run {run_id} executed cannot be opened: {}.",
+        crate::state::absent_deck_reason()
     )));
 }
