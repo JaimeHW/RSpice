@@ -137,11 +137,25 @@ impl PssConfig {
     }
 
     pub fn to_spice(&self) -> String {
+        // An autonomous run has no driven tone, and an empty `tones=` is not
+        // the same card as no `tones` key at all. The deck reader accepts a
+        // keyword argument written with spaces around the sign, so a `tones=`
+        // followed by a space takes the *next* key as its value: an autonomous
+        // card written that way read back carrying one tone source literally
+        // named `tstab_periods=20`, and a periodic spec that names a tone is a
+        // driven solve rather than an oscillator. So the key is omitted, which
+        // is how "no tones" is spelled — the same job `oscnode=-` does for the
+        // node, which the reader knows to discard.
+        let tones = if self.tone_sources.is_empty() {
+            String::new()
+        } else {
+            format!(" tones={}", self.tone_sources.join(","))
+        };
         format!(
-            ".pss {} mode={} tones={} tstab_periods={} points_per_period={} tolerance={:.17e} autonomous={} oscnode={} save_harmonics={}",
+            ".pss {} mode={}{} tstab_periods={} points_per_period={} tolerance={:.17e} autonomous={} oscnode={} save_harmonics={}",
             format_freq(self.fund_freq),
             self.method.spice_keyword(),
-            self.tone_sources.join(","),
+            tones,
             self.tstab_periods,
             self.points_per_period,
             self.tolerance,
