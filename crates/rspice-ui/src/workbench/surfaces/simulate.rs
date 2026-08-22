@@ -458,7 +458,7 @@ fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
         Err(error) => {
             flat_notice(ui, |ui| {
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
-                ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
+                page_kit::note_line(ui, &error, page_kit::Tone::Error);
             });
             return;
         }
@@ -472,7 +472,11 @@ fn ordered_instance_stack(ui: &mut Ui, app: &mut RSpiceApp) {
         if rows.is_empty() {
             flat_notice(ui, |ui| {
                 status_dot(ui, t.color.warn, "No analysis instances");
-                ui.label("Add an analysis from the Simulation Studio navigator.");
+                page_kit::note_line(
+                    ui,
+                    "Add an analysis from the Simulation Studio navigator.",
+                    page_kit::Tone::Dim,
+                );
             });
         } else {
             let mut displayed_position = 0usize;
@@ -1413,7 +1417,11 @@ fn analysis_editor(
                     Tokens::get(ui.ctx()).color.warn,
                     "No active analysis instance",
                 );
-                ui.label("The stable plan is empty. Add an analysis from Simulation Studio.");
+                page_kit::note_line(
+                    ui,
+                    "The stable plan is empty. Add an analysis from Simulation Studio.",
+                    page_kit::Tone::Dim,
+                );
             });
             lifecycle_receipt_strip(ui, app);
             preflight_strip(ui, app);
@@ -1424,7 +1432,7 @@ fn analysis_editor(
             record_failure(&mut app.state, "Analysis editor", &error);
             flat_notice(ui, |ui| {
                 status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
-                ui.label(egui::RichText::new(error).color(Tokens::get(ui.ctx()).color.err));
+                page_kit::note_line(ui, &error, page_kit::Tone::Error);
             });
             lifecycle_receipt_strip(ui, app);
             preflight_strip(ui, app);

@@ -34,6 +34,9 @@ pub(super) const TWO_COLUMN_BREAKPOINT: f32 = 780.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tone {
     Neutral,
+    /// Secondary text: a label, a caption, prose beside a control. One step
+    /// above [`Self::Neutral`], which is the metadata register.
+    Dim,
     Ok,
     Warn,
     Error,
@@ -45,12 +48,36 @@ impl Tone {
         let c = Tokens::get(ui.ctx()).color;
         match self {
             Self::Neutral => c.text_faint,
+            Self::Dim => c.text_dim,
             Self::Ok => c.ok,
             Self::Warn => c.warn,
             Self::Error => c.err,
             Self::Accent => c.accent,
         }
     }
+}
+
+/// One line of studio prose, in the studio's own type.
+///
+/// `ui.label` with a bare string or an unfonted `RichText` paints in egui's
+/// default text style: 13 px of a family the theme assigns no weight to, which
+/// is a step and a half above every caption beside it and a register the token
+/// scale does not name. Ten lines shipped that way — a search's empty state, a
+/// predicate hint, two field labels, four plan-unavailable notices — each one
+/// slightly larger than the text it sat next to for no reason a reader could
+/// find.
+///
+/// Wrapped rather than elided: these are sentences, and half of one says less
+/// than none.
+pub(super) fn note_line(ui: &mut Ui, text: &str, tone: Tone) -> egui::Response {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(tone.color(ui)),
+        )
+        .wrap(),
+    )
 }
 
 /// Wrap a setup page.
@@ -792,4 +819,176 @@ pub(super) fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
         response.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    /// Every `.rs` file the Simulation Studio ships, read at test time.
+    ///
+    /// Walked rather than listed with `include_str!`, so a page added to the
+    /// studio is scanned the day it lands rather than the day someone
+    /// remembers to add it here.
+    fn studio_sources() -> Vec<(PathBuf, String)> {
+        fn walk(directory: &Path, out: &mut Vec<PathBuf>) {
+            let entries = std::fs::read_dir(directory)
+                .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
+            for entry in entries {
+                let path = entry.expect("directory entry").path();
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench/surfaces");
+        let mut paths = vec![root.join("simulate.rs")];
+        walk(&root.join("simulate"), &mut paths);
+        paths.sort();
+        let sources: Vec<(PathBuf, String)> = paths
+            .into_iter()
+            .map(|path| {
+                let source = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+                (path, source)
+            })
+            .collect();
+        // A test-only file is free to author whatever it needs to author. Which
+        // ones those are is read from the module that declared them, not from a
+        // list here that would go stale.
+        let roots: Vec<PathBuf> = sources
+            .iter()
+            .flat_map(|(path, source)| crate::source_guard::test_only_roots(path, source))
+            .collect();
+        sources
+            .iter()
+            .filter(|(path, _)| crate::source_guard::ships(path, &roots))
+            .map(|(path, source)| {
+                (
+                    path.clone(),
+                    without_line_comments(&crate::source_guard::without_test_items(source)),
+                )
+            })
+            .collect()
+    }
+
+    /// `source` with every `//` tail removed, line for line.
+    ///
+    /// A doc comment that quotes a control constructor is prose about it, not a
+    /// call to it, and two of them are how this module explains why the raw
+    /// ones are not used. Line numbers are kept, because the failure names the
+    /// line a match sits on.
+    fn without_line_comments(source: &str) -> String {
+        source
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Every `call` in `source`, as `(line, argument list)`.
+    fn calls<'a>(source: &'a str, call: &str) -> Vec<(usize, &'a str)> {
+        let mut found = Vec::new();
+        for (index, _) in source.match_indices(call) {
+            let rest = &source[index + call.len()..];
+            let mut depth = 1usize;
+            let mut end = rest.len();
+            for (offset, character) in rest.char_indices() {
+                match character {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = offset;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            found.push((1 + source[..index].matches('\n').count(), &rest[..end]));
+        }
+        found
+    }
+
+    /// Nothing the studio paints falls back to egui's default text style.
+    ///
+    /// `ui.label` with a bare string, or with a `RichText` that never names a
+    /// font, paints at 13 px in a family the theme assigns no weight to. That
+    /// is a register the token scale does not have: the line sits a step and a
+    /// half above the captions beside it, and nothing chose it. Ten shipped
+    /// that way — a search's empty state, a predicate hint, two field labels,
+    /// four plan-unavailable notices — and each was a place someone reached
+    /// for egui instead of [`super::note_line`].
+    ///
+    /// The check is on the source rather than the render because a font is a
+    /// literal at its call site, and a rendered galley cannot say whether the
+    /// size it carries was chosen or inherited.
+    #[test]
+    fn the_studio_names_the_font_of_every_line_it_paints() {
+        let sources = studio_sources();
+        assert!(
+            sources.len() >= 20,
+            "the studio scan found only {} files; the walk has stopped reaching them",
+            sources.len()
+        );
+
+        let mut scanned = 0usize;
+        let mut untyped = Vec::new();
+        for (path, source) in &sources {
+            for (line, argument) in calls(source, "ui.label(") {
+                scanned += 1;
+                if !argument.contains(".font(") {
+                    untyped.push(format!("{}:{line}", path.display()));
+                }
+            }
+        }
+        assert!(
+            scanned >= 25,
+            "the scan matched only {scanned} label calls; the pattern has stopped matching"
+        );
+        assert!(
+            untyped.is_empty(),
+            "these lines paint in egui's default text style — give them a token \
+             size through `page_kit::note_line` or a `RichText::font`:\n  {}",
+            untyped.join("\n  ")
+        );
+    }
+
+    /// The studio authors no raw egui action control.
+    ///
+    /// `ui.button` paints egui's own chrome, which is a different height, fill
+    /// and focus ring from every other control on the page — the one place
+    /// that reached past [`crate::ui::widgets::Button`], the executed-deck
+    /// record in the inspector, shipped a control that did not look like the
+    /// surface it sat on.
+    ///
+    /// `ui.checkbox` is deliberately not here. The studio's tick boxes belong
+    /// to named row constructors that wrap it, and whether those rows stay tick
+    /// boxes at all is a question about the design rather than about the call
+    /// site; a ban here would answer it by accident.
+    #[test]
+    fn the_studio_authors_no_raw_egui_action_control() {
+        let raw: Vec<String> = studio_sources()
+            .iter()
+            .flat_map(|(path, source)| {
+                ["ui.button(", "ui.selectable_label(", "ui.link("]
+                    .into_iter()
+                    .flat_map(move |call| {
+                        calls(source, call)
+                            .into_iter()
+                            .map(move |(line, _)| format!("{}:{line}: {call}", path.display()))
+                    })
+            })
+            .collect();
+        assert!(
+            raw.is_empty(),
+            "these lines author a raw egui control; the design system has one for \
+             each of them:\n  {}",
+            raw.join("\n  ")
+        );
+    }
 }

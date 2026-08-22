@@ -1064,7 +1064,7 @@ fn sub_header(ui: &mut Ui, text: &str) {
             ..Default::default()
         },
     );
-    ui.label(job);
+    ui.add(egui::Label::new(job));
 }
 
 /// A full-width advisory under the rows it is about.

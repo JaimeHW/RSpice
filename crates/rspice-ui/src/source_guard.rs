@@ -133,6 +133,61 @@ pub(crate) fn without_test_items(source: &str) -> String {
     kept.join("\n")
 }
 
+/// Whether this path is a file the crate ships.
+///
+/// Two things say a file is test-only: its own name, and the parent module
+/// that declared it under `#[cfg(test)]`. [`test_only_roots`] carries the
+/// second, as path prefixes.
+#[cfg(test)]
+pub(crate) fn ships(path: &std::path::Path, test_only_roots: &[std::path::PathBuf]) -> bool {
+    let named_tests = path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|part| part == "tests")
+    });
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    !named_tests
+        && stem != "tests"
+        && !stem.ends_with("_tests")
+        && !test_only_roots
+            .iter()
+            .any(|root| path == root.with_extension("rs") || path.starts_with(root))
+}
+
+/// Where the `#[cfg(test)] mod <name>;` children of `path` would live.
+#[cfg(test)]
+pub(crate) fn test_only_roots(path: &std::path::Path, source: &str) -> Vec<std::path::PathBuf> {
+    const ATTRIBUTE: &str = "#[cfg(test)]";
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    let directory = match stem {
+        "lib" | "mod" => path.parent().map(std::path::Path::to_path_buf),
+        _ => path.parent().map(|parent| parent.join(stem)),
+    };
+    let Some(directory) = directory else {
+        return Vec::new();
+    };
+    source
+        .match_indices(ATTRIBUTE)
+        .filter_map(|(index, _)| {
+            let rest = source[index + ATTRIBUTE.len()..].trim_start();
+            let declaration = rest.strip_prefix("mod ")?;
+            let name = declaration.split(';').next()?.trim();
+            (!name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
+            .then(|| directory.join(name))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -282,59 +337,6 @@ mod tests {
             let after = haystack.as_bytes().get(start + needle.len()).copied();
             !before.is_some_and(identifier) && !after.is_some_and(identifier)
         })
-    }
-
-    /// Whether this path is a file the crate ships.
-    ///
-    /// Two things say a file is test-only: its own name, and the parent module
-    /// that declared it under `#[cfg(test)]`. `test_only_roots` carries the
-    /// second, as path prefixes.
-    fn ships(path: &Path, test_only_roots: &[PathBuf]) -> bool {
-        let named_tests = path.components().any(|component| {
-            component
-                .as_os_str()
-                .to_str()
-                .is_some_and(|part| part == "tests")
-        });
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("");
-        !named_tests
-            && stem != "tests"
-            && !stem.ends_with("_tests")
-            && !test_only_roots
-                .iter()
-                .any(|root| path == root.with_extension("rs") || path.starts_with(root))
-    }
-
-    /// Where the `#[cfg(test)] mod <name>;` children of `path` would live.
-    fn test_only_roots(path: &Path, source: &str) -> Vec<PathBuf> {
-        const ATTRIBUTE: &str = "#[cfg(test)]";
-        let stem = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("");
-        let directory = match stem {
-            "lib" | "mod" => path.parent().map(Path::to_path_buf),
-            _ => path.parent().map(|parent| parent.join(stem)),
-        };
-        let Some(directory) = directory else {
-            return Vec::new();
-        };
-        source
-            .match_indices(ATTRIBUTE)
-            .filter_map(|(index, _)| {
-                let rest = source[index + ATTRIBUTE.len()..].trim_start();
-                let declaration = rest.strip_prefix("mod ")?;
-                let name = declaration.split(';').next()?.trim();
-                (!name.is_empty()
-                    && name
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
-                .then(|| directory.join(name))
-            })
-            .collect()
     }
 
     fn rust_sources(directory: &Path, out: &mut Vec<PathBuf>) {

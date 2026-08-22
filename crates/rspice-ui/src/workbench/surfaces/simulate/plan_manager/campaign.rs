@@ -215,7 +215,7 @@ fn campaign_name_row(ui: &mut Ui, name: &mut String) {
     let t = Tokens::get(ui.ctx());
     let count = name.chars().count();
     ui.horizontal(|ui| {
-        ui.label("Campaign name");
+        super::super::page_kit::note_line(ui, "Campaign name", super::super::page_kit::Tone::Dim);
         mono_input(ui, name, ui.available_width().min(360.0));
         ui.label(
             egui::RichText::new(format!("{count} / {MAX_CAMPAIGN_NAME_CHARS}"))

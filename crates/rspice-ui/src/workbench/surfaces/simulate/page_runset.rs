@@ -1166,12 +1166,16 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                     let mut predicate = edited.predicate.clone();
                     let released =
                         mono_input(ui, &mut predicate, ui.available_width()).lost_focus();
-                    ui.label("Predicate grammar: dimension-id == value; join clauses with &&");
+                    super::page_kit::note_line(
+                        ui,
+                        "Predicate grammar: dimension-id == value; join clauses with &&",
+                        Tone::Neutral,
+                    );
                     if released && predicate != edited.predicate {
                         edited.predicate = predicate;
                         action = Some(RunSetAction::SetComposition(edited.clone()));
                     }
-                    ui.label("Authorized upstream dimensions");
+                    super::page_kit::note_line(ui, "Authorized upstream dimensions", Tone::Dim);
                     for dimension in app.state.sim_setup.run_set.enabled_dimensions() {
                         let mut selected = edited
                             .upstream_dimension_ids

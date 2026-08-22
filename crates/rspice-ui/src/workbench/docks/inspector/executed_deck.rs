@@ -21,6 +21,8 @@
 
 use egui::Ui;
 
+use crate::ui::widgets::Button;
+
 use super::super::super::design_system::{property_row, section_header};
 
 /// The run's sealed model sources, and the control that opens its deck.
@@ -57,7 +59,9 @@ pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> O
             property_row(ui, "Sealed model source", source);
         }
     }
-    ui.button("Open executed deck")
+    Button::new("Open executed deck")
+        .min_width(ui.available_width())
+        .show(ui)
         .on_hover_text(
             "Opens the exact source this run's engine read, as a read-only document sealed with \
              the run.",

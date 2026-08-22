@@ -141,9 +141,10 @@ pub(super) fn analysis_catalog_window(
                         ui.set_width(ui.available_width());
                         if filtered.is_empty() {
                             ui.add_space(12.0);
-                            ui.label(
-                                egui::RichText::new("No analysis matches this search.")
-                                    .color(Tokens::get(ui.ctx()).color.text_dim),
+                            super::page_kit::note_line(
+                                ui,
+                                "No analysis matches this search.",
+                                super::page_kit::Tone::Dim,
                             );
                             return;
                         }

@@ -280,7 +280,11 @@ pub(super) fn clone_plan_dialog(
             "Results",
             "Result datasets are never duplicated with a plan.",
             |ui| {
-                ui.label("none · manifests remain linked");
+                super::page_kit::note_line(
+                    ui,
+                    "none \u{b7} manifests remain linked",
+                    super::page_kit::Tone::Dim,
+                );
             },
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());

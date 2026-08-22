@@ -284,7 +284,7 @@ fn plan_picker_row(
         ) {
             draft.comparison.base_plan_id = Some(picked);
         }
-        ui.label("against");
+        super::super::page_kit::note_line(ui, "against", super::super::page_kit::Tone::Dim);
         if let Some(picked) = plan_picker(
             ui,
             "simulation.plan-manager.compare.target",
