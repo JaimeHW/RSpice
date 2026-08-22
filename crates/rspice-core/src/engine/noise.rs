@@ -240,6 +240,33 @@ impl Engine {
         )
     }
 
+    /// Canonical mechanism name for an interpreted Verilog-A noise source.
+    ///
+    /// The label is whatever string literal the module passed to
+    /// `white_noise()`/`flicker_noise()`, so it may carry spaces and
+    /// punctuation no saved result can be written with. Every byte outside the
+    /// persistable shape becomes `_` and the rest is upper-cased, which is how
+    /// the code generator composes the compiled catalog's own mechanism names,
+    /// so a ranked contributor row can always carry what this names.
+    #[cfg(feature = "veriloga")]
+    fn canonical_veriloga_noise_mechanism(label: &str) -> String {
+        let mut mechanism = label
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'#') {
+                    byte.to_ascii_uppercase() as char
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        mechanism.truncate(crate::analysis::NOISE_MECHANISM_MAX_BYTES);
+        if mechanism.is_empty() {
+            mechanism.push_str("NOISE");
+        }
+        mechanism
+    }
+
     #[inline]
     fn add_port_noise_outer_product(
         covariance: &mut [Vec<Complex64>],
@@ -986,10 +1013,21 @@ impl Engine {
                 ))
             })?;
             for source in sources {
-                let name = format!("{instance}:{}", source.name);
-                noise_sources.push(match (source.table, source.exponent) {
+                // The module's own label is the mechanism and the instance is
+                // the device. Folding the two together -- `x1:thermal` as the
+                // device -- is what a `DNO(X1)` probe cannot resolve, and it
+                // left the whole-device query nothing to sum over. The label
+                // arrives as the string literal the model author passed to
+                // `white_noise()`, so it is canonicalized into the shape a
+                // saved result can be written with, which is the shape the code
+                // generator composes the compiled catalog's names in.
+                let mechanism = Self::canonical_veriloga_noise_mechanism(&source.name);
+                let device = instance.to_string();
+                let identity =
+                    crate::analysis::NoiseSourceIdentity::mechanism(device.clone(), mechanism);
+                let noise = match (source.table, source.exponent) {
                     (Some((points, log_interp)), _) => NoiseSource::tabulated(
-                        name,
+                        device,
                         source.node_pos,
                         source.node_neg,
                         source.psd,
@@ -997,16 +1035,17 @@ impl Engine {
                         log_interp,
                     ),
                     (None, None) => {
-                        NoiseSource::white(name, source.node_pos, source.node_neg, source.psd)
+                        NoiseSource::white(device, source.node_pos, source.node_neg, source.psd)
                     }
                     (None, Some(ef)) => NoiseSource::flicker_psd(
-                        name,
+                        device,
                         source.node_pos,
                         source.node_neg,
                         source.psd,
                         ef,
                     ),
-                });
+                };
+                noise_sources.push(noise.with_identity(identity));
             }
         }
 
