@@ -25,6 +25,7 @@ use crate::simulation::config::{NoiseContributionDetail, NoiseIntegrationMode, N
 use crate::simulation::plan::{
     AnalysisDraft, FrequencySweepDraft, NetworkPortDraft, PeriodicNetworkDraft,
 };
+use crate::state::format_engineering;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -411,16 +412,7 @@ fn quantity_input_row(
     locale: UiNumberLocale,
 ) -> Response {
     let response = engineering_input_row(ui, label, value);
-    if response.lost_focus()
-        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
-    {
-        let schema_value = if kind == QuantityInputKind::Temperature {
-            parsed - 273.15
-        } else {
-            parsed
-        };
-        *value = format!("{schema_value:.17e}");
-    }
+    normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
     response
 }
 
@@ -434,16 +426,8 @@ fn quantity_input_row_enabled(
     enabled: bool,
 ) -> Response {
     let response = engineering_input_row_enabled(ui, label, value, enabled);
-    if enabled
-        && response.lost_focus()
-        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
-    {
-        let schema_value = if kind == QuantityInputKind::Temperature {
-            parsed - 273.15
-        } else {
-            parsed
-        };
-        *value = format!("{schema_value:.17e}");
+    if enabled {
+        normalize_quantity_on_focus_loss(&response, value, kind, policy, locale);
     }
     response
 }
@@ -816,6 +800,27 @@ fn mono_input_with_suffix(
     .inner
 }
 
+/// Rewrite a quantity field on focus loss, but only where the operator's
+/// spelling and the schema's reading of it are two different numbers.
+///
+/// The one rule for every quantity row on this form. A field holds the draft
+/// text the deck is generated from, so what it says has to mean the same thing
+/// to `parse_si_value` — which is what the controller reads it back with — as
+/// it did to the reader who typed it. Where it already does, and `5ms`, `2u`
+/// and `1e-3` all do, the spelling belongs to the operator and nothing here
+/// touches it.
+///
+/// Where it does not, the field is rewritten, because a field that reads one
+/// value and runs another is the worse failure. Three spellings this form
+/// accepts are not deck spellings: a comma decimal separator under a locale
+/// that allows one, a temperature carrying its unit (`25 °C`, `77 °F` — the
+/// draft is bare Celsius), and an angular frequency in `rad/s`. Those are
+/// written back through [`format_engineering`], the deck's own formatter.
+///
+/// The rule used to be "rewrite always", so typing `5ms` into Stop time and
+/// pressing Tab left `5.00000000000000010e-3` behind while `2u` beside it was
+/// untouched: a field that could not be relied on to hold what was typed into
+/// it, in the one notation the row's own helper text advertises.
 fn normalize_quantity_on_focus_loss(
     response: &Response,
     value: &mut String,
@@ -823,16 +828,65 @@ fn normalize_quantity_on_focus_loss(
     policy: QuantityPresentationPolicy,
     locale: UiNumberLocale,
 ) {
-    if response.lost_focus()
-        && let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale)
-    {
-        let schema_value = if kind == QuantityInputKind::Temperature {
-            parsed - 273.15
-        } else {
-            parsed
-        };
-        *value = format!("{schema_value:.17e}");
+    if response.lost_focus() {
+        normalize_quantity(value, kind, policy, locale);
     }
+}
+
+/// The rule itself, without the focus it is applied on.
+///
+/// Separated so it can be asked directly: whether a spelling survives is a
+/// question about two parsers, and the cases worth pinning — a unit the deck
+/// cannot read, a value it can — are not all reachable by typing into a
+/// rendered field. Returns whether `value` was rewritten.
+pub(super) fn normalize_quantity(
+    value: &mut String,
+    kind: QuantityInputKind,
+    policy: QuantityPresentationPolicy,
+    locale: UiNumberLocale,
+) -> bool {
+    let Ok(parsed) = parse_ui_quantity(value, kind, policy, locale) else {
+        // A field that does not parse keeps what was typed. The form states the
+        // refusal beside it, and rewriting the text would take away the thing
+        // the reader has to correct.
+        return false;
+    };
+    let schema_value = if kind == QuantityInputKind::Temperature {
+        parsed - 273.15
+    } else {
+        parsed
+    };
+    if schema_reads(value, schema_value) {
+        return false;
+    }
+    *value = format_engineering(schema_value);
+    true
+}
+
+/// Whether a draft reader would get `schema_value` back out of `text`.
+///
+/// Two readers, because two of them are in the controller: an analysis's
+/// numeric drafts reach the engine through
+/// [`crate::simulation::spice_value::parse_spice_value_checked`] on most paths
+/// and through [`crate::simulation::dialog::parse_si_value`] on the rest, and
+/// the two do not accept exactly the same spellings — `x` and `µ` are SI-side
+/// only, `gig` and `tera` are SPICE-side. Asking both is the fail-closed
+/// reading: a spelling is kept only where nothing downstream could read it as
+/// something else.
+///
+/// Compared within a relative tolerance rather than by bits: each parser
+/// reaches the number by its own arithmetic, and a field rewritten because two
+/// of them rounded differently in the last place would be exactly the churn
+/// this exists to stop.
+fn schema_reads(text: &str, schema_value: f64) -> bool {
+    let agrees = |read: f64| {
+        read == schema_value || {
+            let scale = read.abs().max(schema_value.abs());
+            (read - schema_value).abs() <= scale * 1e-12
+        }
+    };
+    crate::simulation::spice_value::parse_spice_value_checked(text).is_ok_and(agrees)
+        && crate::simulation::dialog::parse_si_value(text).is_ok_and(agrees)
 }
 
 fn envelope_time_input_row(

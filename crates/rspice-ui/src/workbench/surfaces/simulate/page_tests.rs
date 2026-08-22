@@ -7,6 +7,7 @@
 
 mod accessibility;
 mod capture_groups;
+mod field_editing;
 mod settings_switch;
 
 use egui::{Rect, vec2};
