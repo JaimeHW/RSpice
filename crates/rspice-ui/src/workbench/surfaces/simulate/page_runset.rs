@@ -256,7 +256,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     };
     let mut action = None;
     let mut selection = None;
-    let ceiling_per_point = task_ceiling_per_point(app);
+    let worst_point_tasks = worst_point_task_cost(app);
 
     super::page_kit::card_with_head(
         ui,
@@ -310,7 +310,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
                                     }
                                     rect
                                 }
-                                None => forecast_tile(ui, validation, ceiling_per_point),
+                                None => forecast_tile(ui, validation, worst_point_tasks),
                             };
                             if let Some(pending) = pending {
                                 pending.settle(ui, placed);
@@ -661,7 +661,7 @@ fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) -> PendingOperator {
 fn forecast_tile(
     ui: &mut Ui,
     validation: &RunSetValidation,
-    ceiling_per_point: Option<usize>,
+    worst_point_tasks: Option<usize>,
 ) -> Rect {
     let t = Tokens::get(ui.ctx());
     let forecast = validation.forecast;
@@ -724,13 +724,16 @@ fn forecast_tile(
                     let mut rows = vec![("Tasks", forecast.task_count.to_string())];
                     // Stated only where it is a bound the reader cannot derive
                     // from the two numbers above. With every analysis at every
-                    // point the ceiling is just tasks ÷ points, and a row
+                    // point every point costs tasks ÷ points, and a row
                     // restating that is noise on a tile this small.
-                    if let Some(ceiling) = ceiling_per_point
+                    if let Some(ceiling) = worst_point_tasks
                         && forecast.exact
                         && forecast.task_count != ceiling.saturating_mul(forecast.point_count)
                     {
-                        rows.push(("Per point", format!("\u{2264} {ceiling} tasks")));
+                        rows.push((
+                            "Worst point",
+                            format!("{ceiling} task{}", if ceiling == 1 { "" } else { "s" }),
+                        ));
                     }
                     rows.push(("Cost", run_set::format_duration_ms(forecast.cost_ms)));
                     rows.push(("Storage", run_set::format_bytes(forecast.storage_bytes)));
@@ -2150,27 +2153,28 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
         .map(Some)
 }
 
-/// The most tasks any one point of the declared space can cost.
+/// The most tasks any one point of the declared space actually costs.
 ///
-/// The ceiling is the plan with every analysis participating, which is what the
-/// whole plan cost per point before participation existed. It is stated as a
-/// ceiling rather than as an average because the operator budgets against the
-/// worst point, and because an average over a matrix where half the analyses
-/// run nominal-only describes no point that actually exists.
+/// The worst point, not the plan: an operator budgets against the point that
+/// costs most, and stating a bound no point reaches is a bound they cannot act
+/// on. Summing every enabled instance's rate answered a different question —
+/// what a point would cost if every analysis ran at it — so a plan whose
+/// transient is nominal-only priced its worst point at 8 tasks when no point
+/// in the matrix cost more than 7.
 ///
-/// The rate comes from [`super::workload::instance_task_rate`] rather than from
-/// a copy of its PSS arm, so the tile's bound and the point table's cells are
-/// the same arithmetic read at two altitudes. The copy here knew about the
-/// retained spectrum and not about a Temperature or Corner instance walking its
-/// own points, so it under-stated the ceiling for exactly the plans that have
-/// one worth stating.
-fn task_ceiling_per_point(app: &RSpiceApp) -> Option<usize> {
-    let mut ceiling = 0usize;
-    for instance in app.state.sim_setup.enabled_analysis_instances() {
-        let rate = super::workload::instance_task_rate(app, instance.draft())?;
-        ceiling = ceiling.checked_add(rate)?;
-    }
-    Some(ceiling)
+/// The cost of one point is [`super::workload::PlanWorkload::tasks_at_point`],
+/// which is the point table's own cell, so the tile's bound and the table under
+/// it are the same arithmetic read at two altitudes rather than two derivations
+/// that can disagree. `None` where the space does not expand exactly, which is
+/// a refusal the page already reports on its own terms.
+pub(super) fn worst_point_task_cost(app: &RSpiceApp) -> Option<usize> {
+    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok()?;
+    participation
+        .point_keys
+        .iter()
+        .map(|key| workload.tasks_at_point(&participation, key))
+        .max()
 }
 
 pub(super) fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {

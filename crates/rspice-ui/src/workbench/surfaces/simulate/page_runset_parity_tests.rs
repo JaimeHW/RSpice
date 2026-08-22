@@ -15,7 +15,7 @@ use crate::simulation::run_set::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-use super::page_runset::exact_plan_task_count;
+use super::page_runset::{exact_plan_task_count, worst_point_task_cost};
 
 /// An app whose design is checked, whose technology is attached, and whose
 /// plan holds exactly the requested analyses.
@@ -543,5 +543,56 @@ fn a_space_with_no_reference_point_refuses_a_nominal_only_instance() {
     assert!(
         error.message().contains("reference condition"),
         "the refusal must name the reference it looked for: {error}"
+    );
+}
+
+/// The forecast tile's worst point is a point the plan actually has.
+///
+/// The tile stated a per-point bound by summing every enabled instance's rate,
+/// which is what a point would cost if every analysis ran at it. Participation
+/// means they do not: here the operating point runs at the first declared point
+/// and the PSS at the others, so no point in the space pays both, and the tile
+/// promised an operator a worst point that does not exist. The bound is now the
+/// maximum of the point table's own cells, so the two agree by construction and
+/// the number names a row the operator can go and look at.
+#[test]
+fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
+    let mut app = app_with(&[AnalysisKind::OperatingPoint, AnalysisKind::Pss]);
+    drive_pss_from_the_fixture_supply(&mut app.state);
+    let points = enable_only_the_temperature_axis(&mut app.state);
+    assert!(points >= 3, "the fixture space must hold points to split");
+    put_the_reference_on_a_declared_temperature(&mut app.state);
+    scope_to_points(&mut app.state, AnalysisKind::OperatingPoint, &[0]);
+    scope_to_points(&mut app.state, AnalysisKind::Pss, &[1, 2]);
+
+    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let workload = super::workload::PlanWorkload::resolve_with(&app, &participation)
+        .expect("the split plan prices");
+    let per_point: Vec<usize> = participation
+        .point_keys
+        .iter()
+        .map(|key| workload.tasks_at_point(&participation, key))
+        .collect();
+    let observed = per_point
+        .iter()
+        .copied()
+        .max()
+        .expect("the declared space expands to at least one point");
+
+    let mut rate_sum = 0usize;
+    for instance in app.state.sim_setup.enabled_analysis_instances() {
+        rate_sum += super::workload::instance_task_rate(&app, instance.draft())
+            .expect("every enabled instance has a rate");
+    }
+    assert!(
+        rate_sum > observed,
+        "the fixture must separate the rate sum ({rate_sum}) from the worst point \
+         ({observed}); per-point costs were {per_point:?}"
+    );
+
+    assert_eq!(
+        worst_point_task_cost(&app),
+        Some(observed),
+        "the tile prices the worst point of {per_point:?}, not the rate sum"
     );
 }
