@@ -115,18 +115,27 @@ fn outputs_detail(
     mode: crate::state::OutputSelectionMode,
 ) -> String {
     match (saved, bound_contracts) {
-        (0, _) => match mode {
-            crate::state::OutputSelectionMode::Automatic => {
-                "nothing saved · bounded automatic set".to_owned()
-            }
-            crate::state::OutputSelectionMode::ExplicitOnly
-            | crate::state::OutputSelectionMode::SaveAll => {
-                "nothing saved · full dataset retained".to_owned()
-            }
-        },
+        (0, _) => format!("nothing saved · {}", empty_registry_outcome(mode)),
         (saved, None) => format!("{saved} saved · run preflight to bind"),
         (saved, Some(0)) => format!("{saved} saved · none bound to the queue"),
         (saved, Some(contracts)) => format!("{saved} saved · {contracts} bound across the queue"),
+    }
+}
+
+/// What a run stores when the plan's output registry holds nothing.
+///
+/// One owner for two surfaces. The Outputs page's empty row stated "the run
+/// stores nothing", which is false under `Automatic`: the run synthesizes the
+/// bounded set this cell already names, so the registry and the preflight cell
+/// contradicted each other about the same plan — and the registry, which is
+/// where an engineer goes to check what will be captured, was the wrong one.
+pub(super) const fn empty_registry_outcome(
+    mode: crate::state::OutputSelectionMode,
+) -> &'static str {
+    match mode {
+        crate::state::OutputSelectionMode::Automatic => "bounded automatic set",
+        crate::state::OutputSelectionMode::ExplicitOnly
+        | crate::state::OutputSelectionMode::SaveAll => "full dataset retained",
     }
 }
 
@@ -763,6 +772,33 @@ mod tests {
                 "3 saved \u{00b7} 7 bound across the queue"
             );
         }
+    }
+
+    /// The Outputs registry's empty row and this cell say the same thing in
+    /// every mode.
+    ///
+    /// The registry hard-coded "the run stores nothing", which under
+    /// `Automatic` is precisely what the run does not do — so an engineer
+    /// checking what would be captured was told the opposite of what the
+    /// preflight cell beside it said.
+    #[test]
+    fn the_outputs_registry_and_the_preflight_cell_agree_in_every_mode() {
+        for mode in OutputSelectionMode::ALL {
+            let outcome = super::empty_registry_outcome(mode);
+            assert!(
+                outputs_detail(0, None, mode).ends_with(outcome),
+                "the preflight cell states {outcome:?}"
+            );
+            assert!(
+                super::super::page_outputs::empty_registry_text(mode).ends_with(outcome),
+                "and so must the registry's empty row"
+            );
+        }
+        assert_eq!(
+            super::empty_registry_outcome(OutputSelectionMode::Automatic),
+            "bounded automatic set",
+            "the automatic mode saves a set, so no surface may say the run stores nothing"
+        );
     }
 }
 

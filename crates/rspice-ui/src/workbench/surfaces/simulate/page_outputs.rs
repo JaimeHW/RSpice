@@ -244,7 +244,16 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             // fragment. An empty state has one thing to say, so it says it
             // across the row it replaces.
             if outputs.is_empty() {
-                empty_registry_row(ui, "No saved outputs · the run stores nothing", Tone::Warn);
+                // What an empty registry means is the selection mode's answer,
+                // not this row's. It read "the run stores nothing", which under
+                // `Automatic` is exactly what the run does not do — it
+                // synthesizes a bounded set — and the preflight cell two
+                // surfaces away had been saying so all along.
+                empty_registry_row(
+                    ui,
+                    &empty_registry_text(app.state.sim_setup.save_policy.output_selection_mode),
+                    Tone::Warn,
+                );
             } else if shown == 0 {
                 empty_registry_row(
                     ui,
@@ -386,6 +395,20 @@ fn output_registry_summary<'a>(
     } else {
         (format!("{expected} saved · all resolve"), Tone::Ok)
     }
+}
+
+/// What an empty registry means, which is the selection mode's answer.
+///
+/// Read from [`super::readiness::empty_registry_outcome`], the same owner the
+/// preflight Outputs cell reads. This row stated "the run stores nothing"
+/// unconditionally, and under `Automatic` the run stores a bounded synthesized
+/// set — so two surfaces contradicted each other about one plan, and the one an
+/// engineer checks before dispatching was the wrong one.
+pub(super) fn empty_registry_text(mode: crate::state::OutputSelectionMode) -> String {
+    format!(
+        "No saved outputs \u{b7} {}",
+        super::readiness::empty_registry_outcome(mode)
+    )
 }
 
 /// One statement across the width of the registry, in place of its rows.

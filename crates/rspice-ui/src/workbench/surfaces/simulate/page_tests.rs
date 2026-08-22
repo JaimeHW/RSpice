@@ -1979,14 +1979,18 @@ fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
 
 /// "You have no outputs" and "your filter matched none of them" are different
 /// facts with different fixes. A registry that reported the second as the
-/// first would tell an engineer their run stores nothing while it stores
-/// everything.
+/// first would tell an engineer their filtered view was the whole plan.
 #[test]
 fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry() {
     let empty = render_with(SimulationPage::Outputs, 1200.0, |_| {});
+    // What an empty registry means is the selection mode's answer, and the
+    // default mode saves a bounded synthesized set rather than nothing.
     assert!(
-        empty.contains("No saved outputs") && empty.contains("the run stores nothing"),
-        "a plan with no outputs still says the run stores nothing:\n{empty}"
+        empty.contains("No saved outputs")
+            && empty.contains(super::readiness::empty_registry_outcome(
+                crate::state::OutputSelectionMode::default()
+            )),
+        "a plan with no outputs states what its selection mode will save:\n{empty}"
     );
     assert!(
         !empty.contains("No output matches the filter"),
