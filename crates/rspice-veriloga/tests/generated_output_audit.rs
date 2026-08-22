@@ -629,7 +629,7 @@ fn generated_state_files_use_compact_tab_indentation() {
         }
     });
 
-    assert_eq!(state_files, 42, "audit every generated state file");
+    assert_eq!(state_files, 43, "audit every generated state file");
     assert!(
         tab_indented_lines > 0,
         "generated state files must be indented"
@@ -676,7 +676,7 @@ fn generated_static_parameter_bounds_are_interned() {
         }
     });
 
-    assert_eq!(state_files, 42, "audit every generated state file");
+    assert_eq!(state_files, 43, "audit every generated state file");
     assert_eq!(pooled_state_files, state_files);
     assert!(
         failures.is_empty(),
@@ -803,7 +803,7 @@ fn generated_parameter_names_use_sorted_compact_lookup_tables() {
         total_entries += names_count;
     });
 
-    assert_eq!(state_files, 42, "audit every generated state file");
+    assert_eq!(state_files, 43, "audit every generated state file");
     assert!(total_entries > 0, "lookup corpus must not be empty");
     assert!(
         failures.is_empty(),
