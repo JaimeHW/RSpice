@@ -127,7 +127,7 @@ fn an_authored_option_outranks_the_plan_in_its_own_row() {
         rows.iter()
             .find(|(option, _, _)| *option == O::Reltol)
             .map(|(_, effective, _)| effective.as_str()),
-        Some("4e-9"),
+        Some("4n"),
         "the row must show the authored value, not the plan's"
     );
     // Its neighbours are untouched and still follow the plan.

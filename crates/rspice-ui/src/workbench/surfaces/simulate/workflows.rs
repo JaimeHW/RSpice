@@ -302,11 +302,14 @@ pub(super) fn design_variable_dialog(
             |_| "unresolved".to_owned(),
             // Engineering notation: `1.00000000e4 SI` spent eight mantissa
             // digits and an exponent on `10k`, which is what the author typed
-            // and how every other surface shows the same quantity.
+            // and how every other surface shows the same quantity. The display
+            // spelling, not the deck's: this row is read, not parsed, and the
+            // deck spelling put `1.000Meg SI` in front of a reader who writes
+            // that quantity `1.000M`.
             |value| {
                 format!(
                     "{} SI",
-                    crate::state::property_types::format_engineering(value)
+                    crate::state::property_types::format_engineering_display(value)
                 )
             },
         );

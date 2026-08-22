@@ -1318,7 +1318,7 @@ fn selected_analysis_options_open_the_exact_instance_in_the_typed_solver_editor(
         .expect("typed override editor is open");
     assert_eq!(draft.instance, transient);
     assert_eq!(draft.option, NumericOverrideOption::Reltol);
-    assert_eq!(draft.value, "2e-4");
+    assert_eq!(draft.value, "200u");
 }
 
 /// An override the analysis's solve would never read must be refused, not

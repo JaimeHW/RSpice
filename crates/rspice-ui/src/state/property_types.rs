@@ -544,7 +544,28 @@ pub fn format_engineering(value: f64) -> String {
 /// shared spelling exists to prevent.
 #[must_use]
 pub fn format_engineering_display(value: f64) -> String {
-    let spice = format_engineering(value);
+    display_spelling(format_engineering(value))
+}
+
+/// [`format_engineering_display`] under a chosen decimal policy.
+///
+/// The three-decimal default lines a column up, which is what a field wants
+/// and what a name does not: a swept point named "Point 27.500" pads a value
+/// the operator typed as 27.5, and four significant digits cannot tell two
+/// neighbouring points of a fine sweep apart. A name takes the digits it needs
+/// and drops the trailing zeros it does not.
+#[must_use]
+pub fn format_engineering_display_with(
+    value: f64,
+    precision: crate::quantity::EngineeringPrecision,
+) -> String {
+    display_spelling(crate::quantity::format_engineering_value_with(
+        value, precision,
+    ))
+}
+
+/// Retype a deck magnitude's suffix for a reader.
+fn display_spelling(spice: String) -> String {
     // Longest suffix first, so `Meg` is never read as something shorter.
     for (deck, display) in [("Meg", "M"), ("u", "µ")] {
         if let Some(digits) = spice.strip_suffix(deck) {

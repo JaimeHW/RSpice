@@ -60,9 +60,18 @@ impl FamilyMemberId {
 
     /// How the member is named where a verdict reports it.
     ///
-    /// A swept value is rendered at full `f64` precision rather than rounded
-    /// for width: this string is the operator's route back to the exact point,
-    /// and a rounded one can name a point the sweep never solved.
+    /// A swept value is rendered in engineering notation, to twelve significant
+    /// digits. This string is the operator's route back to the point, so it
+    /// carries far more precision than a column would: twelve digits separate
+    /// any two values a sweep declares, while a rounded three would name a
+    /// point the sweep never solved.
+    ///
+    /// It is not the exact double, and that is the trade. `Display` for `f64`
+    /// never uses an exponent, so the exact spelling put
+    /// "Point 0.000000000001" on a picofarad sweep and
+    /// "Point 0.30000000000000004" on a step the driver accumulated. Neither
+    /// is a name a reader can hold, and the digits they add past the twelfth
+    /// are the accumulation's, not the declaration's.
     ///
     /// A trial carries its seed for the same reason. "Trial 47" is not a route
     /// back to anything — the index counts trials as the driver requested them
@@ -72,7 +81,13 @@ impl FamilyMemberId {
     pub fn label(&self) -> String {
         match self {
             Self::MonteCarloTrial { index, seed } => format!("Trial {index} \u{00b7} seed {seed}"),
-            Self::SweepPoint { value, .. } => format!("Point {value}"),
+            Self::SweepPoint { value, .. } => format!(
+                "Point {}",
+                crate::state::property_types::format_engineering_display_with(
+                    *value,
+                    crate::quantity::EngineeringPrecision::UpTo(9),
+                )
+            ),
             Self::Corner { label, .. } => label.clone(),
         }
     }
@@ -186,6 +201,28 @@ mod tests {
 
         assert_eq!(point.index(), 2);
         assert_eq!(point.label(), "Point 27.5");
+    }
+
+    /// A swept point is named in engineering notation.
+    ///
+    /// `Display` for `f64` never uses an exponent, so a picofarad sweep was
+    /// named "Point 0.000000000001" and a step the driver accumulated
+    /// "Point 0.30000000000000004". Both are the exact double and neither is
+    /// a name. Twelve significant digits keep every value a sweep declares
+    /// distinguishable and stop naming the accumulation's last bits.
+    #[test]
+    fn a_swept_point_is_named_in_engineering_notation() {
+        let named = |value: f64| FamilyMemberId::SweepPoint { index: 0, value }.label();
+
+        assert_eq!(named(1e-12), "Point 1p");
+        assert_eq!(named(4.7e-9), "Point 4.7n");
+        assert_eq!(named(2.5e-6), "Point 2.5µ");
+        assert_eq!(named(1.8), "Point 1.8");
+        assert_eq!(named(2.5e6), "Point 2.5M");
+        assert_eq!(named(0.1 + 0.2), "Point 300m");
+        assert_eq!(named(1.000_000_1), "Point 1.0000001");
+        assert_eq!(named(0.0), "Point 0");
+        assert_eq!(named(-40.0), "Point -40");
     }
 
     #[test]

@@ -179,18 +179,15 @@ impl AnalysisNumericOverride {
     pub fn value(&self, option: NumericOverrideOption) -> Option<String> {
         let stated = self.stated(option)?;
         Some(match stated {
-            // A step bound is a physical quantity, so it reads in the same
-            // engineering notation as the transient form's own Max step
-            // rather than as a bare exponent.
-            OverrideValue::Real(value)
-                if matches!(
-                    option,
-                    NumericOverrideOption::MaximumTimestep | NumericOverrideOption::MinTimestep
-                ) =>
-            {
-                format_si_value(value)
-            }
-            OverrideValue::Real(value) => format!("{value:e}"),
+            // Engineering notation for every real, the same spelling the
+            // preset it is reported beside is written in. Two options were
+            // spelled that way and the rest fell back to a bare exponent, so
+            // the solver ledger set an authored RELTOL of `1e-4` against a
+            // plan preset of `1m` and asked the reader to convert one of them
+            // before they could tell which was tighter. `format_si_value`
+            // shifts the decimal point rather than dividing, so the exponent
+            // form loses nothing by being retired here.
+            OverrideValue::Real(value) => format_si_value(value),
             OverrideValue::Count(value) => value.to_string(),
             OverrideValue::Flag(value) => if value { "on" } else { "off" }.to_owned(),
             OverrideValue::Method(method) => method.spice_name().to_owned(),

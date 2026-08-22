@@ -740,7 +740,7 @@ fn a_record_persisted_before_the_advanced_options_still_opens() {
     assert_eq!(
         record.entries(),
         vec![
-            (NumericOverrideOption::Reltol, "2e-4".to_owned()),
+            (NumericOverrideOption::Reltol, "200u".to_owned()),
             (NumericOverrideOption::Itl4, "12".to_owned()),
             (NumericOverrideOption::IntegrationMethod, "GEAR2".to_owned()),
             (
@@ -817,4 +817,39 @@ fn every_option_belongs_to_exactly_one_section() {
         NumericOverrideOption::all().count(),
         "an option is in two sections, or in none"
     );
+}
+
+/// Every real an override states is spelled the way its preset is spelled.
+///
+/// The solver ledger puts the authored value beside the plan preset it departs
+/// from, and only two of the options reached a shared spelling: a RELTOL of
+/// 1e-4 was reported as "1e-4" against a preset of "1m", so a reader had to
+/// convert one of the two numbers in their head before they could tell which
+/// was tighter. `format_si_value` moves the decimal point rather than
+/// dividing, so nothing is lost by using it for all of them.
+#[test]
+fn a_real_override_is_spelled_the_way_the_preset_beside_it_is() {
+    for (authored, expected) in [
+        ("1e-4", "100u"),
+        ("2e-4", "200u"),
+        ("1e-3", "1m"),
+        ("4e-9", "4n"),
+        ("1.5", "1.5"),
+        ("2.5e6", "2.5Meg"),
+    ] {
+        let mut record = AnalysisNumericOverride::default();
+        record
+            .set_for_instance(
+                AnalysisKind::Ac,
+                SolverOwnership::NONE,
+                NumericOverrideOption::Reltol,
+                authored,
+            )
+            .expect("every kind carries an update bound");
+        assert_eq!(
+            record.value(NumericOverrideOption::Reltol).as_deref(),
+            Some(expected),
+            "{authored} is reported as {expected}"
+        );
+    }
 }
