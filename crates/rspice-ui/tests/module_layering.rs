@@ -1510,7 +1510,7 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("io/project_io/tests/migration.rs", 2_712),
     ("results/report_document.rs", 2_551),
     ("simulation/controller/prepared_run.rs", 2_993),
-    ("simulation/execution/snapshot.rs", 3_119),
+    ("simulation/execution/snapshot.rs", 3_047),
     ("state/model_library/manager.rs", 3_859),
     ("state/pdk_config/technology_package.rs", 4_742),
     ("state/workspace.rs", 3_459),

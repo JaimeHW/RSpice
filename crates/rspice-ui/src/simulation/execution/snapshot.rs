@@ -1121,7 +1121,7 @@ impl PreparedRunSnapshot {
             // resolver rather than from a second reading of it here, so the
             // points an analysis is dispatched at are the points the Run Set
             // page priced it at.
-            let participation = resolve_run_set_participation(
+            let participation = participation::resolve_run_set_participation(
                 &parts.tasks,
                 &pvt_points,
                 parts.run_set.as_ref(),
@@ -2489,72 +2489,6 @@ fn analysis_id_metadata_digest(instance_id: AnalysisInstanceId) -> ContentDigest
     writer.uuid(instance_id.as_uuid());
     writer.finish()
 }
-
-/// Which positions of the declared space each prepared task runs at.
-///
-/// One entry per task, or a refusal naming the analysis. The resolution itself
-/// belongs to `run_set::participating_point_keys` — this only turns the keys it
-/// returns into the positions the expansion indexes by, and attaches the
-/// analysis label to whatever it refuses, because "point selection resolves to
-/// nothing" is unactionable without the name of the analysis that holds it.
-fn resolve_run_set_participation(
-    tasks: &[PreparedTask],
-    pvt_points: &[PreparedPvtPoint],
-    run_set: Option<&PreparedRunSet>,
-    reference_process: ProcessCorner,
-    reference_temperature_celsius: f64,
-) -> Result<RunSetParticipation, PreparationError> {
-    let run_set = run_set.ok_or_else(|| {
-        PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            "Global Run Set expansion was requested without a prepared Run Set",
-        )
-    })?;
-    let points = crate::simulation::run_set::resolve(&run_set.state).ok_or_else(|| {
-        PreparationError::new(
-            PreparationStage::AnalysisPlan,
-            "Run Set could not be expanded into exact execution points",
-        )
-    })?;
-    let positions: HashMap<&str, usize> = pvt_points
-        .iter()
-        .enumerate()
-        .filter_map(|(index, point)| point.run_set_point_key.as_deref().map(|key| (key, index)))
-        .collect();
-    let reference = crate::simulation::run_set::ReferencePoint {
-        process: reference_process,
-        temperature_celsius: reference_temperature_celsius,
-    };
-
-    let mut resolved = RunSetParticipation::with_capacity(tasks.len());
-    for task in tasks {
-        let keys =
-            crate::simulation::run_set::participating_point_keys(&task.run_at, &points, reference)
-                .map_err(|refusal| {
-                    PreparationError::new(
-                        PreparationStage::AnalysisPlan,
-                        format!("{}: {}", task.label, refusal.message),
-                    )
-                })?;
-        let mut visited = HashSet::with_capacity(keys.len());
-        for key in keys {
-            let position = positions.get(key.as_str()).copied().ok_or_else(|| {
-                PreparationError::new(
-                    PreparationStage::AnalysisPlan,
-                    format!(
-                        "{} is scoped to Run Set point {key}, which the prepared point list does \
-                         not contain",
-                        task.label
-                    ),
-                )
-            })?;
-            visited.insert(position);
-        }
-        resolved.insert(task.instance_id, visited);
-    }
-    Ok(resolved)
-}
-
 fn derive_pvt_points(
     tasks: &[PreparedTask],
     reference_process: ProcessCorner,

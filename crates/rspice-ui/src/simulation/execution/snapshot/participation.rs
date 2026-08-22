@@ -7,12 +7,13 @@
 //! metadata — is what makes the forecasted matrix and the authorized worker
 //! queue one actual expansion.
 //!
-//! Participation enters as a set of point positions per authored analysis,
-//! resolved by [`crate::simulation::run_set::participating_point_keys`] before
-//! anything is minted. A point an analysis does not declare itself at simply
-//! does not mint a task: no identity is derived for it, so it cannot be
-//! dispatched, cannot appear in a receipt, and cannot be re-derived at project
-//! load. That is the whole of the mechanism — there is no second place where a
+//! Participation is resolved here — [`resolve_run_set_participation`] turns
+//! the keys [`crate::simulation::run_set::participating_point_keys`] returns
+//! into the positions the expansion indexes by — and it is resolved in full
+//! before anything is minted. A point an analysis does not declare itself
+//! at simply does not mint a task: no identity is derived for it, so it
+//! cannot be dispatched, cannot appear in a receipt, and cannot be re-derived
+//! at project load. That is the whole of the mechanism — there is no second place where a
 //! task is filtered out after being built, because a task that was built and
 //! then dropped would already have consumed an identity.
 
@@ -373,4 +374,69 @@ fn point_count(count: usize) -> String {
     } else {
         format!("{count} points")
     }
+}
+
+/// Which positions of the declared space each prepared task runs at.
+///
+/// One entry per task, or a refusal naming the analysis. The resolution itself
+/// belongs to `run_set::participating_point_keys` — this only turns the keys it
+/// returns into the positions the expansion indexes by, and attaches the
+/// analysis label to whatever it refuses, because "point selection resolves to
+/// nothing" is unactionable without the name of the analysis that holds it.
+pub(super) fn resolve_run_set_participation(
+    tasks: &[PreparedTask],
+    pvt_points: &[PreparedPvtPoint],
+    run_set: Option<&PreparedRunSet>,
+    reference_process: ProcessCorner,
+    reference_temperature_celsius: f64,
+) -> Result<RunSetParticipation, PreparationError> {
+    let run_set = run_set.ok_or_else(|| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Global Run Set expansion was requested without a prepared Run Set",
+        )
+    })?;
+    let points = crate::simulation::run_set::resolve(&run_set.state).ok_or_else(|| {
+        PreparationError::new(
+            PreparationStage::AnalysisPlan,
+            "Run Set could not be expanded into exact execution points",
+        )
+    })?;
+    let positions: HashMap<&str, usize> = pvt_points
+        .iter()
+        .enumerate()
+        .filter_map(|(index, point)| point.run_set_point_key.as_deref().map(|key| (key, index)))
+        .collect();
+    let reference = crate::simulation::run_set::ReferencePoint {
+        process: reference_process,
+        temperature_celsius: reference_temperature_celsius,
+    };
+
+    let mut resolved = RunSetParticipation::with_capacity(tasks.len());
+    for task in tasks {
+        let keys =
+            crate::simulation::run_set::participating_point_keys(&task.run_at, &points, reference)
+                .map_err(|refusal| {
+                    PreparationError::new(
+                        PreparationStage::AnalysisPlan,
+                        format!("{}: {}", task.label, refusal.message),
+                    )
+                })?;
+        let mut visited = HashSet::with_capacity(keys.len());
+        for key in keys {
+            let position = positions.get(key.as_str()).copied().ok_or_else(|| {
+                PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!(
+                        "{} is scoped to Run Set point {key}, which the prepared point list does \
+                         not contain",
+                        task.label
+                    ),
+                )
+            })?;
+            visited.insert(position);
+        }
+        resolved.insert(task.instance_id, visited);
+    }
+    Ok(resolved)
 }
