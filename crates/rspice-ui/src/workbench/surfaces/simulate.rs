@@ -55,12 +55,17 @@ use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row, property_row_toned,
-    status_dot, workspace_title_row,
+    PROPERTY_ROW_TRAILING_PAD, StatusMark, WorkbenchIcon, heading, paint_status_mark, property_row,
+    property_row_control_columns, property_row_toned, property_row_wrapped, status_dot,
+    workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
+const TITLE_ACTION_SPACING: f32 = 6.0;
+/// The narrowest the plan heading is allowed to become before the title row
+/// gives up on holding the actions beside it.
+const TITLE_HEADING_MIN_WIDTH: f32 = 220.0;
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
 const ANALYSIS_GROUP_HEADER_HEIGHT: f32 = 26.0;
 const ANALYSIS_INDEX_DIAMETER: f32 = 22.0;
@@ -1019,10 +1024,16 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let mut validate = false;
     let mut open_prior = false;
     let mut toggle_split = false;
-    if surface_width > TITLE_ACTION_STACK_BREAKPOINT {
+    let actions_width = title_action_group_width(
+        ui,
+        &open_prior_label,
+        split_label,
+        TITLE_ACTION_SPACING,
+    );
+    let heading_width = ui.available_width() - actions_width - TITLE_ACTION_SPACING;
+    if surface_width > TITLE_ACTION_STACK_BREAKPOINT && heading_width >= TITLE_HEADING_MIN_WIDTH {
         ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let heading_width = (ui.available_width() - 310.0 - 260.0).max(220.0);
+            ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
             ui.allocate_ui_with_layout(
                 vec2(heading_width, 0.0),
                 Layout::top_down(Align::Min),
@@ -1050,7 +1061,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         heading(ui, &eyebrow, &plan_name, &description);
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
             let action_width = ((ui.available_width() - 12.0) / 3.0).max(1.0);
             open_prior = prior_run_button(ui, &open_prior_label, prior.is_some());
             toggle_split = split_button(ui, split_label, split_enabled, split_reason);
@@ -1101,6 +1112,33 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     if toggle_split {
         Command::ToggleResultsSplit.execute(app);
     }
+}
+
+/// What the five title-row actions will take, asked before the heading beside
+/// them is laid out.
+///
+/// The heading grows into whatever the actions leave, so the row cannot be laid
+/// out until their real extent is known. The width this replaces was authored
+/// beside the row — a second account of the same arithmetic, and one that had
+/// drifted: it reserved 570 points for a group that measures more, so at the
+/// 1000-point gate the accent action was clipped by the surface edge.
+fn title_action_group_width(
+    ui: &mut Ui,
+    open_prior_label: &str,
+    split_label: &str,
+    spacing: f32,
+) -> f32 {
+    let widths = [
+        Button::new(open_prior_label).measured_width(ui),
+        Button::new(split_label).measured_width(ui),
+        Button::new("Plans").measured_width(ui),
+        Button::new("Clone plan").icon(Icon::Copy).measured_width(ui),
+        Button::new("Validate plan")
+            .icon(Icon::Check)
+            .accent()
+            .measured_width(ui),
+    ];
+    widths.iter().sum::<f32>() + spacing * (widths.len() - 1) as f32
 }
 
 /// The hop to the dataset this plan last produced.
