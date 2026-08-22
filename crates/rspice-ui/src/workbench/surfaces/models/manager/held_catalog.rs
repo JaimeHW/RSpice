@@ -220,28 +220,6 @@ fn refusal_contract(host: browser::Host) -> String {
         host.install_failure_detail()
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn each_host_states_its_own_failed_install_after_the_shared_promise() {
-        for host in [browser::Host::Desktop, browser::Host::Browser] {
-            let sentence = refusal_contract(host);
-            assert!(
-                sentence.starts_with("A refused or failed refresh leaves the held snapshot"),
-                "{host:?} keeps the promise that is true on both"
-            );
-            assert!(sentence.ends_with(host.install_failure_detail()));
-        }
-        assert_ne!(
-            refusal_contract(browser::Host::Desktop),
-            refusal_contract(browser::Host::Browser)
-        );
-    }
-}
-
 /// What the last hub or model-source operation did, and what that left.
 ///
 /// One attempt rather than a journal, because one attempt is what this client
@@ -286,4 +264,25 @@ fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             ),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_host_states_its_own_failed_install_after_the_shared_promise() {
+        for host in [browser::Host::Desktop, browser::Host::Browser] {
+            let sentence = refusal_contract(host);
+            assert!(
+                sentence.starts_with("A refused or failed refresh leaves the held snapshot"),
+                "{host:?} keeps the promise that is true on both"
+            );
+            assert!(sentence.ends_with(host.install_failure_detail()));
+        }
+        assert_ne!(
+            refusal_contract(browser::Host::Desktop),
+            refusal_contract(browser::Host::Browser)
+        );
+    }
 }
