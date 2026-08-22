@@ -521,6 +521,39 @@ pub fn format_engineering(value: f64) -> String {
     crate::quantity::format_engineering_value_with(value, EngineeringPrecision::Fixed(3))
 }
 
+/// The magnitude [`format_engineering`] produces, spelled for a reader rather
+/// than for a parser.
+///
+/// Two suffixes differ, and both differences are the point.
+///
+/// `Meg` is SPICE's unambiguous spelling of 10^6, and in a deck it has to be:
+/// `M` there means *milli*, so a megahertz written back as `1M` is a
+/// thousandth of what it was. That constraint belongs to the deck. Beside a
+/// unit on a surface it is worse than noise — `≥ 1.000 Meg Hz` is not how a
+/// limit of one megahertz is written anywhere in the field, and a reader has
+/// to translate it before they can hold it against a datasheet.
+///
+/// `u` is the ASCII stand-in the SPICE input grammar requires for micro; `µ`
+/// is the prefix itself, and the bundled face carries that glyph — the plot
+/// axes and the layout formatter already paint it.
+///
+/// So deck text keeps [`format_engineering`] and display text beside a unit
+/// takes this. The digits are the other function's, derived rather than
+/// recomputed: two formatters rounding independently would eventually print
+/// two different numbers for one value on two surfaces, which is the failure a
+/// shared spelling exists to prevent.
+#[must_use]
+pub fn format_engineering_display(value: f64) -> String {
+    let spice = format_engineering(value);
+    // Longest suffix first, so `Meg` is never read as something shorter.
+    for (deck, display) in [("Meg", "M"), ("u", "µ")] {
+        if let Some(digits) = spice.strip_suffix(deck) {
+            return format!("{digits}{display}");
+        }
+    }
+    spice
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -529,6 +562,7 @@ pub fn format_engineering(value: f64) -> String {
 mod tests {
     use super::{
         ComponentType, PropertyDefinition, PropertyRegistry, PropertyValue, format_engineering,
+        format_engineering_display,
     };
 
     #[test]
@@ -572,6 +606,72 @@ mod tests {
             crate::quantity::parse_engineering_value("3.3M").unwrap(),
             3.3e-3
         );
+    }
+
+    /// The display spelling differs from the deck spelling in exactly two
+    /// places, and agrees with it everywhere else.
+    ///
+    /// The two are the ones that would otherwise be read wrong beside a unit:
+    /// `Meg`, which reads as a word rather than a prefix, and `u`, which is
+    /// the ASCII stand-in for a prefix the bundled face can actually paint.
+    /// Every other decade has to come through untouched, because a display
+    /// formatter that quietly rounded differently from the deck one would put
+    /// two numbers for one value on two surfaces.
+    #[test]
+    fn the_display_spelling_changes_the_prefix_and_never_the_number() {
+        assert_eq!(format_engineering_display(1.0e6), "1M");
+        assert_eq!(format_engineering_display(1.5e3), "1.500k");
+        assert_eq!(format_engineering_display(2.5e-3), "2.500m");
+        assert_eq!(format_engineering_display(4.7e-6), "4.700µ");
+        assert_eq!(format_engineering_display(-3.3e6), "-3.300M");
+
+        // Every decade the deck formatter can reach, walked: the digits are
+        // its digits, and only a `Meg` or a `u` is allowed to move.
+        for exponent in -18..=13 {
+            for mantissa in [1.0_f64, 1.5, -4.7] {
+                let value = mantissa * 10.0_f64.powi(exponent);
+                let deck = format_engineering(value);
+                let display = format_engineering_display(value);
+                let expected = deck
+                    .strip_suffix("Meg")
+                    .map(|digits| format!("{digits}M"))
+                    .or_else(|| deck.strip_suffix('u').map(|digits| format!("{digits}µ")))
+                    .unwrap_or_else(|| deck.clone());
+                assert_eq!(display, expected, "{value:e} deck `{deck}`");
+                assert!(
+                    !display.contains("Meg"),
+                    "{value:e} still reads as a word beside a unit: {display}"
+                );
+                assert!(
+                    !display.ends_with('u'),
+                    "{value:e} still uses the ASCII stand-in: {display}"
+                );
+            }
+        }
+    }
+
+    /// The one glyph this formatter introduces has to be one the bundled face
+    /// can paint, or every spec limit under a millisecond shows a box where
+    /// its prefix should be.
+    ///
+    /// Asked by rasterizing it, not by asking the font. The face is
+    /// monospaced, so a missing glyph advances exactly as far as a present
+    /// one and layout width cannot tell them apart; and `Fonts::has_glyph`
+    /// answers for one face rather than for the family's fallbacks, so it says
+    /// "no" to characters this application demonstrably paints. What the
+    /// prefix actually has to do is leave ink, and that is what is measured.
+    #[test]
+    fn the_micro_prefix_is_a_glyph_the_bundled_face_carries() {
+        let rows = |text: &str| crate::ui::raster::glyph_ink_rows(text, crate::ui::tokens::FS_0);
+        let micro = rows("µ");
+        assert!(
+            micro.len() >= 3,
+            "the micro prefix rasterized to {} row(s) of ink: {micro:?}",
+            micro.len()
+        );
+        // A control that is definitely not the prefix, so a harness that
+        // reported ink for everything fails here rather than passing.
+        assert!(rows(" ").is_empty(), "a space rasterized ink");
     }
 
     #[test]

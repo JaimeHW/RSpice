@@ -6,17 +6,22 @@
 //! and its value is finite. No measurement, a failed one, or a non-finite
 //! value are all "not a pass" — never a pass by omission.
 
-/// A measured or authored quantity, spelled the way this workbench spells
-/// every quantity.
+/// A measured or authored quantity, spelled the way this workbench spells one
+/// it is *showing* somebody.
 ///
 /// Engineering notation rather than six fixed decimals. A bound of one
 /// megahertz printed as `1000000.000000 Hz` claims six digits of precision the
-/// author never wrote, and buries the magnitude — which is the thing a reader
-/// checks — in a run of zeros. This is the workbench's one engineering
-/// formatter, so a limit reads the way the same quantity reads on every other
-/// surface and parses back through the editor unchanged.
+/// author never wrote and buries the magnitude — the thing a reader checks —
+/// in a run of zeros.
+///
+/// The display spelling, not the deck's. Every value this returns is printed
+/// beside `spec.unit`, and beside a unit SPICE's `Meg` is not how anybody
+/// writes a megahertz: `≥ 1.000 Meg Hz` has to be translated before it can be
+/// held against a datasheet. `format_engineering_display` derives its digits
+/// from the deck spelling, so the number is the same number and only the
+/// prefix changes.
 pub(super) fn quantity(value: f64) -> String {
-    crate::state::property_types::format_engineering(value)
+    crate::state::property_types::format_engineering_display(value)
 }
 
 /// The specification's bound, spelled the way the page shows it.
