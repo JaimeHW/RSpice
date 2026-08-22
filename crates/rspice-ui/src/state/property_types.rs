@@ -7,6 +7,7 @@
 //! - Per-component property sheets
 //! - Expression parsing and validation
 
+use crate::quantity::EngineeringPrecision;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -508,49 +509,16 @@ impl Default for PropertyRegistry {
 }
 
 // =============================================================================
-// Engineering Value Formatting (local helper)
+// Engineering Value Formatting
 // =============================================================================
 
-/// Format a value with engineering notation (SI prefixes)
+/// Format a property value with engineering notation (SI prefixes).
+///
+/// Three decimals, so a field's text does not change width as the value
+/// behind it changes, and `Meg` rather than the `M` a SPICE-compatible
+/// parser reads back as milli.
 pub fn format_engineering(value: f64) -> String {
-    let abs_value = value.abs();
-
-    let (scaled, suffix) = if abs_value >= 1e12 {
-        (value / 1e12, "T")
-    } else if abs_value >= 1e9 {
-        (value / 1e9, "G")
-    } else if abs_value >= 1e6 {
-        // `M` is milli in SPICE-compatible engineering input. Emit the
-        // unambiguous spelling so a displayed property round-trips through
-        // the editor parser without a nine-order-of-magnitude change.
-        (value / 1e6, "Meg")
-    } else if abs_value >= 1e3 {
-        (value / 1e3, "k")
-    } else if abs_value >= 1.0 || abs_value == 0.0 {
-        (value, "")
-    } else if abs_value >= 1e-3 {
-        (value * 1e3, "m")
-    } else if abs_value >= 1e-6 {
-        (value * 1e6, "u")
-    } else if abs_value >= 1e-9 {
-        (value * 1e9, "n")
-    } else if abs_value >= 1e-12 {
-        (value * 1e12, "p")
-    } else if abs_value >= 1e-15 {
-        (value * 1e15, "f")
-    } else {
-        (value * 1e18, "a")
-    };
-
-    // Format with appropriate precision
-    let eps = 1e-9;
-    let is_int = (scaled.round() - scaled).abs() < eps;
-
-    if is_int {
-        format!("{:.0}{}", scaled.round(), suffix)
-    } else {
-        format!("{:.3}{}", scaled, suffix)
-    }
+    crate::quantity::format_engineering_value_with(value, EngineeringPrecision::Fixed(3))
 }
 
 // =============================================================================
