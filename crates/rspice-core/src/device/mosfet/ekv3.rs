@@ -5,6 +5,16 @@
 //! `ekv3_rf` DC current equations, and the existing Xyce NMOS VANOISE
 //! small-signal/noise operating point.
 //! Other EKV3 cards and analyses fail closed in the builder/engine.
+//!
+//! The complete model is not this file. `models/veriloga/ekv3_302.00/` is
+//! transpiled to the generated `ekv3_rf` device
+//! (`crates/rspice-veriloga-models/models/ekv3-rf/`, feature
+//! `veriloga-model-ekv3-rf`), which carries all 262 parameters, the extrinsic
+//! diode/RC network, gate and GIDL leakage, the edge device, and the noise
+//! model at version 302.00. What this slice still serves is the `LEVEL` card:
+//! a generated device is instantiated by module name on an `X` line, so a deck
+//! that says `M1 d g s b NMOS150` with `LEVEL=301` has no route to it. Retiring
+//! this file means giving those decks one, not reimplementing the physics.
 
 use super::mosfet::MosType;
 use crate::NodeId;
