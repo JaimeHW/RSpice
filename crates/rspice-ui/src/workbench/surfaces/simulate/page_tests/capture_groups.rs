@@ -544,3 +544,109 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
         "and the outputs it named directly survive too"
     );
 }
+
+/// The Outputs registry's `Est. size` cell and the Save ledger's row are one
+/// number.
+///
+/// They were two. The registry multiplied the *authored* record's estimate by
+/// the declared point count; the ledger priced the *group-projected* output at
+/// each producing analysis's own participation. So a plan whose group overrode
+/// a member's precision, or whose analysis ran nominal-only, read one size on
+/// the page that lists its outputs and another on the page that totals them —
+/// under a comment on the first claiming "nothing here is a second forecast".
+///
+/// Both halves are exercised: the group in this fixture rewrites its member's
+/// point policy, and the run set narrows one analysis to the nominal point.
+#[test]
+fn the_registry_size_and_the_ledger_row_price_one_output_once() {
+    use crate::simulation::plan::{AnalysisInstance, AnalysisKind};
+    use crate::simulation::run_set::{AnalysisRunAt, RunSetDimensionKind};
+
+    let mut app = RSpiceApp::test_instance();
+    seed_capture_group(&mut app);
+
+    // A declared space with more than one point, and one analysis narrowed to
+    // the nominal one — the case a scalar point count prices wrongly.
+    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
+    }
+    let nominal_only = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| {
+            plan.instances()
+                .iter()
+                .find(|instance| instance.kind() == AnalysisKind::Transient)
+                .map(AnalysisInstance::id)
+        })
+        .expect("the test plan runs a transient");
+    if let Some(plan) = app.state.sim_setup.analysis_plan.as_mut() {
+        let _ = plan.set_run_at(nominal_only, AnalysisRunAt::NominalPoint);
+    }
+    assert!(
+        app.state.sim_setup.run_set.point_count() > 1,
+        "the space has to multiply, or the two arithmetics cannot disagree"
+    );
+
+    let payload = app
+        .state
+        .workspace
+        .plan_data(plan_id(&app))
+        .cloned()
+        .expect("payload");
+    let ledger = page_capture_ledger(&app);
+    let registry = super::super::page_outputs::projected_output_bytes_for(&app, &payload);
+    assert!(
+        !registry.is_empty(),
+        "the registry has to be pricing something for this to mean anything"
+    );
+
+    // The two arithmetics have to actually differ here, or this pins nothing:
+    // the old cell was the authored record's own estimate times the declared
+    // point count, and at least one output must not price that way.
+    let matrix =
+        u64::try_from(app.state.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
+    let flat: Vec<u64> = app
+        .simulation_controller
+        .saved_outputs_preflight(&app.state, &payload.saved_outputs)
+        .iter()
+        .filter_map(|report| match report.storage_estimate() {
+            crate::simulation::SavedOutputStorageEstimate::ExactBytes(bytes) => {
+                Some(bytes.saturating_mul(matrix))
+            }
+            crate::simulation::SavedOutputStorageEstimate::Indeterminate { .. } => None,
+        })
+        .collect();
+    let projected: Vec<u64> = payload
+        .saved_outputs
+        .iter()
+        .filter_map(|output| registry.get(&output.id).copied().flatten())
+        .collect();
+    assert_ne!(
+        flat, projected,
+        "the fixture must be one the old per-record arithmetic gets wrong"
+    );
+
+    // Every group row is the sum of the registry cells of the outputs it owns,
+    // so no output is priced twice and none is priced two ways.
+    let membership = crate::state::CaptureGroupMembership::resolve(
+        &payload.capture_groups,
+        &payload.saved_outputs,
+    );
+    for row in ledger.rows() {
+        let from_registry: u64 = payload
+            .saved_outputs
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| membership.owner(*index) == row.group)
+            .filter_map(|(_, output)| registry.get(&output.id).copied().flatten())
+            .sum();
+        assert_eq!(
+            row.bytes, from_registry,
+            "the group '{}' totals {} bytes while its rows' cells add to {from_registry}",
+            row.name, row.bytes
+        );
+    }
+}

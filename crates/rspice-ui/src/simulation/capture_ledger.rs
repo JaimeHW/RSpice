@@ -141,6 +141,43 @@ impl CaptureWorkload {
     }
 }
 
+/// What one output's bounded estimate costs over the queue that retains it.
+///
+/// `None` where the size cannot be bounded before the solve — an output whose
+/// cost is not a number is not a number this may invent.
+///
+/// The one owner of "bytes × participation", so a surface that prices a single
+/// output and the ledger that sums them cannot disagree. The Outputs registry's
+/// `Est. size` cell used to multiply the *authored* record's estimate by the
+/// declared point count, which is neither of the two things this does: it
+/// priced the record rather than the group-projected output a run executes, and
+/// it charged a nominal-only analysis for every corner. Two forecasts of one
+/// output, and the one on the page that lists them was the wrong one.
+///
+/// A report that names no analysis — a fixture, or an output whose parts could
+/// not be attributed — is priced at the caller's default, which is the whole
+/// declared space.
+#[must_use]
+pub fn priced_output_bytes(
+    report: &SavedOutputPreflightReport,
+    workload: &CaptureWorkload,
+) -> Option<u64> {
+    let SavedOutputStorageEstimate::ExactBytes(bytes) = report.storage_estimate() else {
+        return None;
+    };
+    if report.bytes_by_analysis().is_empty() {
+        return Some(bytes.saturating_mul(workload.default_points()));
+    }
+    Some(
+        report
+            .bytes_by_analysis()
+            .iter()
+            .fold(0u64, |total, (analysis, analysis_bytes)| {
+                total.saturating_add(analysis_bytes.saturating_mul(workload.points_for(*analysis)))
+            }),
+    )
+}
+
 /// The plan's retained-evidence forecast, partitioned the way it is printed.
 pub struct CaptureLedger {
     rows: Vec<CaptureLedgerRow>,
@@ -195,33 +232,19 @@ impl CaptureLedger {
                 continue;
             };
             row.outputs += 1;
-            match report.storage_estimate() {
-                SavedOutputStorageEstimate::ExactBytes(bytes) => {
-                    // Each producing analysis at its own participation, not
-                    // the sum at the whole matrix. A report that names no
-                    // analysis — a fixture, or an output whose parts could not
-                    // be attributed — is priced at the caller's default.
-                    let priced = if report.bytes_by_analysis().is_empty() {
-                        bytes.saturating_mul(workload.default_points())
-                    } else {
-                        report.bytes_by_analysis().iter().fold(
-                            0u64,
-                            |total, (analysis, analysis_bytes)| {
-                                total.saturating_add(
-                                    analysis_bytes.saturating_mul(workload.points_for(*analysis)),
-                                )
-                            },
-                        )
-                    };
-                    row.bytes = row.bytes.saturating_add(priced);
-                }
-                SavedOutputStorageEstimate::Indeterminate { reason } => {
+            match (
+                priced_output_bytes(report, workload),
+                report.storage_estimate(),
+            ) {
+                (Some(priced), _) => row.bytes = row.bytes.saturating_add(priced),
+                (None, SavedOutputStorageEstimate::Indeterminate { reason }) => {
                     row.indeterminate += 1;
                     indeterminate.push(IndeterminateOutput {
                         name: output.name.clone(),
                         reason: reason.clone(),
                     });
                 }
+                (None, SavedOutputStorageEstimate::ExactBytes(_)) => {}
             }
             shared_source_analyses
                 .extend(report.retained_engine_source_analysis_ids().iter().copied());

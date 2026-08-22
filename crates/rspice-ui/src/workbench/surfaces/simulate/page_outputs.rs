@@ -8,7 +8,7 @@
 use egui::Ui;
 
 use crate::simulation::SavedOutputSemanticStatus;
-use crate::simulation::SavedOutputStorageEstimate;
+use crate::simulation::capture_ledger;
 use crate::simulation::output_contract::SavedOutputPreflightReport;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
@@ -65,6 +65,49 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
         .unwrap_or_default()
 }
 
+/// What each authored output will cost the run, by the output's own identity.
+///
+/// `Some(None)` is an output whose size cannot be bounded before the solve; a
+/// missing key is an output the projection does not carry at all.
+///
+/// This is the Save page's ledger answering, not a second forecast: the outputs
+/// are the *group-projected* ones a run executes, priced by
+/// [`capture_ledger::priced_output_bytes`] over the same participation-aware
+/// workload the ledger and the preparation gate charge. The registry used to
+/// multiply the authored record's own estimate by the declared point count,
+/// which ignored both the group's overrides and every analysis's participation
+/// — so the page that lists the outputs and the page that totals them stated
+/// different numbers for the same plan, and the comment here claimed otherwise.
+///
+/// Keyed by identity rather than by position because the effective set is not
+/// the authored one: schematic probes are appended to it, and an `Automatic`
+/// plan synthesizes it outright.
+pub(super) fn projected_output_bytes_for(
+    app: &RSpiceApp,
+    payload: &SimulationPlanPayload,
+) -> std::collections::HashMap<crate::product::SavedOutputId, Option<u64>> {
+    let (workload, _) = super::page_save::capture_workload(app);
+    app.simulation_controller
+        .effective_saved_outputs_preflight(
+            &app.state,
+            &payload.saved_outputs,
+            &payload.capture_groups,
+        )
+        .map(|(effective, reports, _, _)| {
+            effective
+                .iter()
+                .zip(&reports)
+                .map(|(output, report)| {
+                    (
+                        output.id,
+                        capture_ledger::priced_output_bytes(report, &workload),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let outputs = &payload.saved_outputs;
     let reports = app
@@ -75,12 +118,9 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     // only after selecting a row, so the registry could not be scanned for the
     // one output that dominates the forecast or for the one that landed in the
     // wrong group. Membership comes from the resolver the Save page's ledger
-    // uses, and the estimate from the preflight report already in hand, priced
-    // over the same run-set points the ledger charges — nothing here is a
-    // second forecast.
+    // uses.
     let membership = CaptureGroupMembership::resolve(&payload.capture_groups, outputs);
-    let points =
-        u64::try_from(app.state.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
+    let projected = projected_output_bytes_for(app, payload);
     let group_name = |index: usize| -> String {
         let owner = membership.owner(index);
         payload
@@ -89,17 +129,12 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             .find(|group| group.id == owner)
             .map_or_else(|| UNGROUPED_NAME.to_owned(), |group| group.name.clone())
     };
-    let size_cell = |report: Option<&SavedOutputPreflightReport>| -> (String, Tone) {
-        match report.map(SavedOutputPreflightReport::storage_estimate) {
-            Some(SavedOutputStorageEstimate::ExactBytes(bytes)) => (
-                super::page_save::format_bytes(bytes.saturating_mul(points)),
-                Tone::Neutral,
-            ),
+    let size_cell = |output: &SavedOutput| -> (String, Tone) {
+        match projected.get(&output.id) {
+            Some(Some(bytes)) => (super::page_save::format_bytes(*bytes), Tone::Neutral),
             // Named rather than dashed: an output whose size cannot be proven
             // before the solve is the one the budget cannot be checked against.
-            Some(SavedOutputStorageEstimate::Indeterminate { .. }) => {
-                ("indeterminate".to_owned(), Tone::Warn)
-            }
+            Some(None) => ("indeterminate".to_owned(), Tone::Warn),
             None => ("—".to_owned(), Tone::Neutral),
         }
     };
@@ -109,7 +144,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         .map(|(index, output)| {
             let (status, status_tone) = status_cell(reports.get(index));
             let group = group_name(index);
-            let (size, size_tone) = size_cell(reports.get(index));
+            let (size, size_tone) = size_cell(output);
             // Which enabled analyses would write this output, from the
             // derivation the Add-output dialog previews it with.
             let consumers =
@@ -200,9 +235,9 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             );
             // An empty registry and a filter that matched nothing are
             // different facts with different fixes, so they cannot share a
-            // row: one says the run will store nothing, the other says the
-            // reader is looking through a narrowed view of outputs that are
-            // still there.
+            // row: one says what the run stores when nothing is authored, the
+            // other says the reader is looking through a narrowed view of
+            // outputs that are still there.
             // Each of these is a sentence, and a name column is a name's
             // width: laid out as a row of cells they were elided to a
             // fragment, and the wider the registry grew the shorter the
@@ -356,9 +391,9 @@ fn output_registry_summary<'a>(
 /// One statement across the width of the registry, in place of its rows.
 ///
 /// An empty registry and a filter that matched nothing are different facts
-/// with different fixes, so they never share a row: one says the run will
-/// store nothing, the other says the reader is looking through a narrowed view
-/// of outputs that are all still there.
+/// with different fixes, so they never share a row: one says what the run
+/// stores when nothing is authored, the other says the reader is looking
+/// through a narrowed view of outputs that are all still there.
 fn empty_registry_row(ui: &mut Ui, statement: &str, tone: Tone) {
     let _ = ledger_row(ui, &[1.0], &[(statement, tone)], false);
 }
@@ -1040,45 +1075,51 @@ fn replace_output(
     })
 }
 
-/// What a run will retain, summed from the same per-output preflight reports
-/// the registry shows.
+/// What a run will retain.
 ///
-/// Outputs whose size is indeterminate are counted separately rather than
-/// folded in as zero: a total that silently omitted them would understate the
-/// budget by exactly the outputs the plan knows least about.
+/// A projection of [`capture_ledger::CaptureLedger::total_bytes`], which is
+/// where the arithmetic lives: this card used to fold the authored records'
+/// estimates and multiply by the declared point count, which priced a
+/// nominal-only analysis at every corner and ignored the group overrides a run
+/// actually executes under — so the number here, the Save page's ledger and the
+/// preparation gate were three opinions that happened to be within a factor of
+/// each other.
+///
+/// Outputs whose size is indeterminate are still listed rather than folded in
+/// as zero: a total that silently omitted them would understate the budget by
+/// exactly the outputs the plan knows least about.
 fn storage_read(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
-    use crate::simulation::SavedOutputStorageEstimate;
-
-    let reports = app
-        .simulation_controller
-        .saved_outputs_preflight(&app.state, &payload.saved_outputs);
-    let mut exact_bytes: u64 = 0;
-    let mut indeterminate = Vec::new();
-    let mut tasks = 0usize;
-    let mut retained_engine_source_analyses = std::collections::HashSet::new();
-    for (output, report) in payload.saved_outputs.iter().zip(&reports) {
-        tasks += report.compatible_analysis_count();
-        match report.storage_estimate() {
-            SavedOutputStorageEstimate::ExactBytes(bytes) => {
-                exact_bytes = exact_bytes.saturating_add(*bytes);
-            }
-            SavedOutputStorageEstimate::Indeterminate { .. } => {
-                indeterminate.push(output.name.clone());
-            }
+    let selection = app.simulation_controller.effective_saved_outputs_preflight(
+        &app.state,
+        &payload.saved_outputs,
+        &payload.capture_groups,
+    );
+    let (workload, _) = super::page_save::capture_workload(app);
+    let (exact_bytes, indeterminate, tasks) = match selection {
+        Ok((effective, reports, _, membership)) => {
+            let tasks = reports
+                .iter()
+                .map(SavedOutputPreflightReport::compatible_analysis_count)
+                .sum::<usize>();
+            let ledger = capture_ledger::CaptureLedger::resolve(
+                &payload.capture_groups,
+                &effective,
+                &reports,
+                &membership,
+                app.state.sim_setup.save_policy.output_selection_mode,
+                &workload,
+            );
+            let named = ledger
+                .indeterminate()
+                .iter()
+                .map(|output| output.name.clone())
+                .collect::<Vec<_>>();
+            (ledger.total_bytes(), named, tasks)
         }
-        retained_engine_source_analyses
-            .extend(report.retained_engine_source_analysis_ids().iter().copied());
-    }
-    exact_bytes = exact_bytes.saturating_add(
-        crate::simulation::output_contract::retained_engine_source_upper_bound_bytes(
-            retained_engine_source_analyses.len(),
-        ),
-    );
-    exact_bytes = exact_bytes.saturating_mul(
-        u64::try_from(app.state.sim_setup.run_set.point_count())
-            .unwrap_or(u64::MAX)
-            .max(1),
-    );
+        // A plan whose effective set cannot be resolved has no forecast, and
+        // this card says so rather than pricing the authored records instead.
+        Err(_) => (0, Vec::new(), 0),
+    };
     card(
         ui,
         "What a run will retain",
