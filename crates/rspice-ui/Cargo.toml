@@ -101,7 +101,7 @@ egui_extras = "0.35.0"
 # SVG parsing and deterministic software rendering. System font discovery stays
 # disabled: hardcopy rendering loads only RSpice's pinned IBM Plex assets.
 usvg = { version = "0.47", default-features = false, features = ["text"] }
-resvg = { version = "0.47", default-features = false, features = ["text"] }
+resvg = { version = "0.48", default-features = false, features = ["text"] }
 tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 ttf-parser = "0.25.1"
 
