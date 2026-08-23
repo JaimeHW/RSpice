@@ -722,11 +722,16 @@ fn scope_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
         |ui| {
             let mut override_scope = draft.override_scope || !sheet_declares;
             if ui
-                .add_enabled(
-                    sheet_declares,
-                    egui::Checkbox::new(&mut override_scope, "Override the sheet"),
-                )
-                .changed()
+                .add_enabled_ui(sheet_declares, |ui| {
+                    crate::ui::widgets::tick_box(
+                        ui,
+                        "Override the sheet",
+                        "Override the sheet",
+                        &mut override_scope,
+                    )
+                    .changed()
+                })
+                .inner
             {
                 draft.override_scope = override_scope;
                 changed = true;

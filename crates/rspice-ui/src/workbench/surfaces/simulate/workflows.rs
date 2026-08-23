@@ -1996,7 +1996,7 @@ pub(super) fn workflow_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
         vec2(ui.available_width(), height),
         Layout::left_to_right(Align::Center),
         |ui| {
-            ui.checkbox(value, label);
+            crate::ui::widgets::tick_box(ui, label, label, value);
         },
     );
 }

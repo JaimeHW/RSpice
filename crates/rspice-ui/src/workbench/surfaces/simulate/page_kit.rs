@@ -766,9 +766,10 @@ pub(super) fn command_popup(
 /// It does not serve every boolean the studio paints, and the doc used to say
 /// it did — "a tick box on four rows and a switch on every other" was true of
 /// the four rows and false of the rest. Five tick-box call sites remain in the
-/// studio: the analysis form's own `check_row`, the resolved point table's
-/// include tick, the workflow dialogs' `workflow_checkbox`, and the variable
-/// importer's scope control and per-row accept ticks — plus
+/// studio, every one of them through [`crate::ui::widgets::tick_box`] so that
+/// it announces a name: the analysis form's own `check_row`, the resolved
+/// point table's include tick, the workflow dialogs' `workflow_checkbox`, and
+/// the variable importer's scope control and per-row accept ticks — plus
 /// [`crate::ui::widgets::check_row`], which the analysis form falls back to in
 /// its one-column layout and which several surfaces outside the studio share.
 /// [`tests::the_studio_s_remaining_tick_boxes_are_the_ones_this_doc_names`]
@@ -1026,7 +1027,7 @@ mod tests {
         let mut sites: Vec<String> = studio_sources()
             .iter()
             .flat_map(|(path, source)| {
-                ["ui.checkbox(", "egui::Checkbox::"]
+                ["ui.checkbox(", "egui::Checkbox::", "widgets::tick_box("]
                     .into_iter()
                     .flat_map(move |call| {
                         calls(source, call).into_iter().map(move |(line, _)| {
