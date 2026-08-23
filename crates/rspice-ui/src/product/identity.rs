@@ -139,6 +139,23 @@ define_raw_uuid_id!(ResultDocumentId);
 define_derivable_uuid_id!(VerificationEvidenceId);
 define_derivable_uuid_id!(ModelSourceId);
 
+/// How an identity is spelled where it has to fit beside prose.
+///
+/// The first eight characters, which is what every surface that elides one
+/// already takes: the navigator's dataset column, the analysis stack's instance
+/// chip, the visualization stage's dataset label, the specification band's
+/// verdict. Written once so a reader holding two of those surfaces side by side
+/// is comparing the same prefix, and so a surface cannot elide to a length of
+/// its own and read as a different identity.
+///
+/// Not a method on the identity types: they are declared by a macro, and a
+/// method every one of them carries would be dead code on the ones that never
+/// have to fit anywhere.
+#[must_use]
+pub fn short_identity(id: impl fmt::Display) -> String {
+    id.to_string().chars().take(8).collect()
+}
+
 /// A type-erased reference used by receipts and cross-domain links. Domain
 /// records retain their strongly typed IDs; erasure occurs only at boundaries
 /// that must carry heterogeneous objects.

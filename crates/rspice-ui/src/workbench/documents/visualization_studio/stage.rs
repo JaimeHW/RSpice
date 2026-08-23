@@ -541,8 +541,11 @@ pub(super) fn exact_pole_zero_rows(
     rows
 }
 
+/// A dataset identity as a stage label spells it, elided by
+/// [`crate::product::short_identity`] so it reads as the same prefix the
+/// navigator and the specification band show for the same dataset.
 pub(super) fn short_dataset(id: DatasetId) -> String {
-    id.to_string().chars().take(8).collect()
+    crate::product::short_identity(id)
 }
 
 pub(super) struct ResultEntityRow {

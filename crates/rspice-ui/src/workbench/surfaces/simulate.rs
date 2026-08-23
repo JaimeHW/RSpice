@@ -999,11 +999,12 @@ fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunS
 
 /// The leading characters of an instance identity, for the rail's meta line.
 ///
-/// Eight, which is the width every other short digest in this workbench is
-/// abbreviated to. Not a second identity: nothing resolves an instance by this
-/// string, and the row's accessibility name still carries the whole one.
+/// Elided by [`crate::product::short_identity`], which is where the width every
+/// short identity in this workbench is abbreviated to is decided. Not a second
+/// identity: nothing resolves an instance by this string, and the row's
+/// accessibility name still carries the whole one.
 fn short_instance_id(id: AnalysisInstanceId) -> String {
-    id.to_string().chars().take(8).collect()
+    crate::product::short_identity(id)
 }
 
 fn analysis_stack_rows(
