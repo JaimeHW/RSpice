@@ -1044,13 +1044,14 @@ pub(super) fn resolved_step_ceiling(authored: &str, plan_ceiling: f64) -> (Strin
 
 /// What a transient that authors no ceiling actually steps at.
 ///
-/// `auto` does not mean "the plan's ceiling". The bridge writes no `.tran`
-/// max-step for it, so the deck carries the analysis's own output step time in
-/// that field instead — `simulation/engine_bridge/transient.rs:118` reads
-/// `config.max_timestep.unwrap_or(config.step_time)` — and the engine then mins
-/// *that* with the plan's `MAXTIMESTEP` exactly as it mins an authored one. The
-/// run steps at `min(step time, plan preset)`, which for the stock transient is
-/// 10 ns rather than the plan's 1 ms.
+/// `auto` does not mean "the plan's ceiling". The `.tran` line carries no
+/// max-step at all for it. The ceiling is an argument of the engine call the
+/// bridge makes, and `simulation/engine_bridge/transient.rs:114-119` resolves
+/// that argument as `config.max_timestep.unwrap_or(config.step_time)` — so the
+/// analysis's own output step time arrives as the ceiling, and the engine then
+/// mins *that* with the plan's `MAXTIMESTEP` exactly as it mins an authored
+/// one. The run steps at `min(step time, plan preset)`, which for the stock
+/// transient is 10 ns rather than the plan's 1 ms.
 ///
 /// `None` where the step time does not parse: such a plan has no ceiling to
 /// state, and its run is refused before it acquires one.
@@ -1113,6 +1114,36 @@ enum OverrideStorage {
     TransientStepCeiling,
 }
 
+/// The head that sits over the resolution ledger, derived from the rows it
+/// heads.
+///
+/// It used to count the rows this card can *remove* — authored overrides — and
+/// so read "every analysis resolves to the plan policy" over a default plan
+/// whose own rows said otherwise: the operating point resolves its Newton
+/// budget from an accuracy tier (`50` → `150 · Balanced`) and the transient
+/// steps at its own output step rather than the plan's ceiling (`1m` → `10n`).
+/// Neither is authored, and neither resolves to the plan policy. A head that
+/// contradicts the two rows under it is worse than no head at all.
+///
+/// So it counts what the ledger's own columns show: the analyses named by rows
+/// whose effective value differs from the preset beside it. Analyses rather
+/// than rows, because one analysis can depart on two options and a reader
+/// counting names would find fewer than the head claimed.
+fn resolution_summary(rows: &[PolicyRow]) -> String {
+    let mut departed: Vec<&str> = rows
+        .iter()
+        .filter(|row| row.effective != row.preset)
+        .map(|row| row.analysis.as_str())
+        .collect();
+    departed.sort_unstable();
+    departed.dedup();
+    match departed.len() {
+        0 => "every analysis resolves to the plan policy".to_owned(),
+        1 => "1 analysis resolves away from the plan policy".to_owned(),
+        count => format!("{count} analyses resolve away from the plan policy"),
+    }
+}
+
 fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut rows = plan_policy_rows(app);
     // The overrides the page's own title promises. An analysis that carries its
@@ -1129,12 +1160,7 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .is_some_and(|target| target.instance == instance && target.option == option)
         })
     });
-    let departures = rows.iter().filter(|row| row.target.is_some()).count();
-    let status = if departures == 0 {
-        "every analysis resolves to the plan policy".to_owned()
-    } else {
-        format!("{departures} authored departures from the plan policy")
-    };
+    let status = resolution_summary(&rows);
 
     // Every control writes through a cell: `card_with_head` takes two closures
     // and neither may hold `&mut app` while the other runs.
@@ -1437,11 +1463,11 @@ pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
             }
             // A transient that names its own step ceiling departs from the
             // plan's, though it can only tighten it. `auto` does not mean it
-            // steps at the plan's ceiling either: the deck then carries the
-            // analysis's output step time in that field and the engine mins
-            // the two, so there is a row to state in both cases — and the
-            // ledger emitted none for `auto`, which is where the largest gap
-            // between the reported and the honoured ceiling was.
+            // steps at the plan's ceiling either — see
+            // [`inherited_step_ceiling`], which owns that derivation — so there
+            // is a row to state in both cases, and the ledger emitted none for
+            // `auto`, which is where the largest gap between the reported and
+            // the honoured ceiling was.
             AnalysisDraft::Transient(setup) => {
                 let ceiling = setup.max_step.trim();
                 let authored = !(ceiling.is_empty() || ceiling.eq_ignore_ascii_case("auto"));
@@ -1976,6 +2002,118 @@ pub(super) fn commit_draft(app: &mut RSpiceApp) {
                 ));
         }
         PendingChange::Ready(options) => apply_options(app, &options),
+    }
+}
+
+#[cfg(test)]
+mod ledger_head_tests {
+    use super::{PolicyRow, analysis_overrides, plan_policy_rows, resolution_summary};
+    use crate::workbench::RSpiceApp;
+
+    /// Every row of one plan's ledger, as the card assembles them.
+    fn ledger_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
+        let mut rows = plan_policy_rows(app);
+        rows.extend(analysis_overrides(app));
+        rows
+    }
+
+    /// The departures a ledger shows, spelled the way its columns spell them.
+    fn departures(rows: &[PolicyRow]) -> Vec<String> {
+        let mut named: Vec<String> = rows
+            .iter()
+            .filter(|row| row.effective != row.preset)
+            .map(|row| {
+                format!(
+                    "{} \u{b7} {} \u{b7} {} \u{2192} {}",
+                    row.analysis, row.option, row.preset, row.effective
+                )
+            })
+            .collect();
+        named.sort();
+        named
+    }
+
+    /// The ledger's head agrees with the rows it heads.
+    ///
+    /// The default plan is the case, and it authors no override at all: the
+    /// head counted the rows it can *remove*, found none, and printed "every
+    /// analysis resolves to the plan policy" directly above `Transient · Step
+    /// ceiling · 1m → 10n`. Add an operating point and a second row disagrees
+    /// with it — `ITL1 · 50 → 150 · Balanced` — and the head still said none.
+    #[test]
+    fn the_ledger_head_counts_the_analyses_its_rows_show_departing() {
+        let app = RSpiceApp::test_instance();
+        let rows = ledger_rows(&app);
+
+        // The shape that made the old head wrong: nothing here is removable,
+        // so counting authored rows answers zero over a ledger that shows one.
+        // Both halves are asserted rather than assumed.
+        assert_eq!(
+            rows.iter().filter(|row| row.target.is_some()).count(),
+            0,
+            "the default plan authors no override"
+        );
+        assert_eq!(
+            departures(&rows),
+            vec!["Transient \u{b7} Step ceiling \u{b7} 1m \u{2192} 10n".to_owned()]
+        );
+        assert_eq!(
+            resolution_summary(&rows),
+            "1 analysis resolves away from the plan policy"
+        );
+
+        let mut app = app;
+        app.state
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("the test instance holds a stable plan")
+            .insert(crate::simulation::plan::AnalysisKind::OperatingPoint)
+            .expect("an operating point joins the plan");
+        let rows = ledger_rows(&app);
+        assert_eq!(
+            rows.iter().filter(|row| row.target.is_some()).count(),
+            0,
+            "an inserted operating point authors no override either"
+        );
+        assert_eq!(
+            departures(&rows),
+            vec![
+                "Operating point \u{b7} Newton budget \u{b7} ITL1 \u{b7} 50 \u{2192} 150 \u{b7} Balanced"
+                    .to_owned(),
+                "Transient \u{b7} Step ceiling \u{b7} 1m \u{2192} 10n".to_owned(),
+            ]
+        );
+        assert_eq!(
+            resolution_summary(&rows),
+            "2 analyses resolve away from the plan policy"
+        );
+    }
+
+    /// A ledger whose rows all resolve to the preset says so, and one departure
+    /// is spelled in the singular.
+    #[test]
+    fn the_ledger_head_agrees_with_its_own_verb() {
+        let mut rows = ledger_rows(&RSpiceApp::test_instance());
+        for row in &mut rows {
+            row.effective = row.preset.clone();
+        }
+        assert_eq!(
+            resolution_summary(&rows),
+            "every analysis resolves to the plan policy"
+        );
+
+        // Two rows, one analysis: a reader counting names must find the number
+        // the head states.
+        let analysis = rows[0].analysis.clone();
+        for row in rows.iter_mut().take(2) {
+            row.analysis = analysis.clone();
+            row.effective = format!("{} \u{b7} elsewhere", row.preset);
+        }
+        assert_eq!(
+            resolution_summary(&rows),
+            "1 analysis resolves away from the plan policy"
+        );
     }
 }
 
