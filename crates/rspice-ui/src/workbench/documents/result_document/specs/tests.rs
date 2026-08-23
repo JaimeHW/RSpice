@@ -455,6 +455,12 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
 /// megahertz requirement read `≥ 1.000 M Hz` here while the studio page
 /// that authored it read `≥ 1M Hz` — one number, two spellings, and the one
 /// here is not how a limit is written beside a unit anywhere in the field.
+///
+/// The row is asserted, not only the spelling: pinning `limit_text` alone
+/// proves the studio's spelling exists, not that this table prints it, and the
+/// defect was that the table did not. Both the measured row and the row for a
+/// measurement the dataset never retained carry it, because a bound is a bound
+/// whether or not anything met it.
 #[test]
 fn a_limit_is_spelled_the_same_here_as_on_the_page_that_authored_it() {
     let spec = crate::state::SpecEntry {
@@ -470,6 +476,26 @@ fn a_limit_is_spelled_the_same_here_as_on_the_page_that_authored_it() {
         !spec.limit_text().contains("Meg"),
         "`Meg` is the deck's prefix and belongs in a deck, not beside a unit"
     );
+
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "ac").with_measurements(vec![
+            rspice_core::MeasureResult::success("bandwidth_3db", 2.0e6),
+        ]),
+    );
+    let measured = result_row(&run, "bandwidth_3db".to_owned(), Some(&spec));
+    assert_eq!(
+        measured.limit,
+        spec.limit_text(),
+        "the row prints the bound the page that authored it prints"
+    );
+    let unmeasured = result_row(&run, "slew_rate".to_owned(), Some(&spec));
+    assert_eq!(
+        unmeasured.status,
+        SpecResultStatus::Missing,
+        "no retained analysis evaluated it"
+    );
+    assert_eq!(unmeasured.limit, spec.limit_text());
 }
 
 // ---------------------------------------------------- the band over the table
