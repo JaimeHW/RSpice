@@ -1149,7 +1149,7 @@ fn storage_read(
                 &reports,
                 &membership,
                 app.state.sim_setup.save_policy.output_selection_mode,
-                &workload,
+                workload,
             );
             let named = ledger
                 .indeterminate()
