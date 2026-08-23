@@ -376,10 +376,7 @@ pub fn validate_with_task_count(
         }
     }
 
-    let lengths: Vec<usize> = state
-        .enabled_dimensions()
-        .map(|dimension| dimension.values.len().max(1))
-        .collect();
+    let lengths: Vec<usize> = axis_lengths(state);
 
     if state.composition.mode == RunSetCompositionMode::Zipped {
         let mut non_scalar: Vec<usize> = lengths.iter().copied().filter(|len| *len != 1).collect();
@@ -458,16 +455,7 @@ pub fn validate_with_task_count(
         ));
     }
 
-    let composed_count = if lengths.is_empty() {
-        1
-    } else if state.composition.mode == RunSetCompositionMode::Zipped {
-        lengths.iter().copied().max().unwrap_or(1)
-    } else {
-        lengths
-            .iter()
-            .try_fold(1usize, |total, length| total.checked_mul(*length))
-            .unwrap_or(usize::MAX)
-    };
+    let composed_count = composed_point_count(state);
 
     let excluded = classify_exclusions(state);
     if !excluded.unknown.is_empty() {
@@ -488,24 +476,9 @@ pub fn validate_with_task_count(
         });
     }
 
-    let deterministic_point_count = if state.composition.mode == RunSetCompositionMode::Conditional
-        && super::points::validate_conditional_predicate(state).is_ok()
-    {
-        super::points::resolve(state).map_or(0, |points| points.len())
-    } else {
-        composed_count.saturating_sub(excluded.applied)
-    };
-    let adaptive_proposals = if state.composition.mode == RunSetCompositionMode::Adaptive {
-        state
-            .composition
-            .adaptive_policy
-            .as_ref()
-            .map_or(0, |policy| policy.maximum_proposals)
-    } else {
-        0
-    };
+    let deterministic_point_count = deterministic_point_count(state);
     let point_count_minimum = deterministic_point_count;
-    let point_count_maximum = deterministic_point_count.saturating_add(adaptive_proposals);
+    let point_count_maximum = deterministic_point_count.saturating_add(adaptive_proposals(state));
     let point_count = point_count_maximum;
     if deterministic_point_count == 0 {
         errors.push(RunSetError::global(
@@ -622,6 +595,76 @@ struct ExclusionStanding {
 /// Only a filtered composition subtracts anything, so the other modes report an
 /// empty standing: their exclusions are stored, not applied, and reporting them
 /// as stranded would refuse a space that is composing exactly as declared.
+/// How many values each enabled axis contributes. A scalar axis counts as one.
+fn axis_lengths(state: &RunSetState) -> Vec<usize> {
+    state
+        .enabled_dimensions()
+        .map(|dimension| dimension.values.len().max(1))
+        .collect()
+}
+
+/// How many points the declared space composes to, before any exclusion.
+///
+/// A product, not a walk: the size of a matrix follows from the lengths of its
+/// axes, and a zipped composition pairs them instead, so its size is the
+/// longest. Nothing here expands anything.
+#[must_use]
+fn composed_point_count(state: &RunSetState) -> usize {
+    let lengths = axis_lengths(state);
+    if lengths.is_empty() {
+        1
+    } else if state.composition.mode == RunSetCompositionMode::Zipped {
+        lengths.iter().copied().max().unwrap_or(1)
+    } else {
+        lengths
+            .iter()
+            .try_fold(1usize, |total, length| total.checked_mul(*length))
+            .unwrap_or(usize::MAX)
+    }
+}
+
+/// The points the space resolves to without any adaptive proposal.
+///
+/// The composed size less the exclusions that apply — or, where a conditional
+/// composition's predicate parses, the resolution itself, because a predicate
+/// decides point by point and cannot be subtracted arithmetically.
+#[must_use]
+fn deterministic_point_count(state: &RunSetState) -> usize {
+    if state.composition.mode == RunSetCompositionMode::Conditional
+        && super::points::validate_conditional_predicate(state).is_ok()
+    {
+        return super::points::resolve(state).map_or(0, |points| points.len());
+    }
+    composed_point_count(state).saturating_sub(classify_exclusions(state).applied)
+}
+
+/// How many further points an adaptive policy may propose. None from any other
+/// composition.
+fn adaptive_proposals(state: &RunSetState) -> usize {
+    if state.composition.mode == RunSetCompositionMode::Adaptive {
+        state
+            .composition
+            .adaptive_policy
+            .as_ref()
+            .map_or(0, |policy| policy.maximum_proposals)
+    } else {
+        0
+    }
+}
+
+/// The point count the forecast reports — the number an unnarrowed analysis is
+/// priced at — without the findings around it.
+///
+/// The studio's workload projection needs exactly this and was running a whole
+/// validation to read it: a second set of errors and warnings, allocated and
+/// thrown away, on every frame that drew a task-rate card. Deriving it here
+/// rather than there keeps the number the page prices with and the number the
+/// page validates against the same one.
+#[must_use]
+pub fn forecast_point_count(state: &RunSetState) -> usize {
+    deterministic_point_count(state).saturating_add(adaptive_proposals(state))
+}
+
 fn classify_exclusions(state: &RunSetState) -> ExclusionStanding {
     if state.composition.mode != RunSetCompositionMode::Filtered {
         return ExclusionStanding::default();

@@ -45,12 +45,16 @@ struct OutputRegistryRow {
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let payload = plan_payload(app);
-    registry(ui, app, &payload);
+    // Priced once for the route. Pricing the capture workload expands the
+    // declared space, and both halves of this page price against it: the
+    // registry to give each row its size, the storage card to total them.
+    let (workload, _) = super::page_save::capture_workload(app);
+    registry(ui, app, &payload, &workload);
     card_row(
         ui,
         app,
         |ui, app| selected_record(ui, app, &payload),
-        |ui, app| storage_read(ui, app, &payload),
+        |ui, app| storage_read(ui, app, &payload, &workload),
     );
     super::pages::plan_configuration_receipts(ui, app);
 }
@@ -85,8 +89,8 @@ fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
 pub(super) fn projected_output_bytes_for(
     app: &RSpiceApp,
     payload: &SimulationPlanPayload,
+    workload: &crate::simulation::capture_ledger::CaptureWorkload,
 ) -> std::collections::HashMap<crate::product::SavedOutputId, Option<u64>> {
-    let (workload, _) = super::page_save::capture_workload(app);
     app.simulation_controller
         .effective_saved_outputs_preflight(
             &app.state,
@@ -100,7 +104,7 @@ pub(super) fn projected_output_bytes_for(
                 .map(|(output, report)| {
                     (
                         output.id,
-                        capture_ledger::priced_output_bytes(report, &workload),
+                        capture_ledger::priced_output_bytes(report, workload),
                     )
                 })
                 .collect()
@@ -108,7 +112,12 @@ pub(super) fn projected_output_bytes_for(
         .unwrap_or_default()
 }
 
-fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
+fn registry(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    payload: &SimulationPlanPayload,
+    workload: &crate::simulation::capture_ledger::CaptureWorkload,
+) {
     let outputs = &payload.saved_outputs;
     let reports = app
         .simulation_controller
@@ -120,7 +129,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     // wrong group. Membership comes from the resolver the Save page's ledger
     // uses.
     let membership = CaptureGroupMembership::resolve(&payload.capture_groups, outputs);
-    let projected = projected_output_bytes_for(app, payload);
+    let projected = projected_output_bytes_for(app, payload, workload);
     let group_name = |index: usize| -> String {
         let owner = membership.owner(index);
         payload
@@ -1117,13 +1126,17 @@ fn replace_output(
 /// Outputs whose size is indeterminate are still listed rather than folded in
 /// as zero: a total that silently omitted them would understate the budget by
 /// exactly the outputs the plan knows least about.
-fn storage_read(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) {
+fn storage_read(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    payload: &SimulationPlanPayload,
+    workload: &crate::simulation::capture_ledger::CaptureWorkload,
+) {
     let selection = app.simulation_controller.effective_saved_outputs_preflight(
         &app.state,
         &payload.saved_outputs,
         &payload.capture_groups,
     );
-    let (workload, _) = super::page_save::capture_workload(app);
     let (exact_bytes, indeterminate, tasks) = match selection {
         Ok((effective, reports, _, membership)) => {
             let tasks = reports

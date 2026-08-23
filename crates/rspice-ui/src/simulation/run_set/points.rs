@@ -157,7 +157,30 @@ fn expandable_dimensions(state: &RunSetState) -> Vec<&RunSetDimension> {
 /// shorter list. Nothing else in the module removes points.
 #[must_use]
 pub fn resolve(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
-    let mut points = compose(state)?;
+    retained(state, &compose(state)?)
+}
+
+/// The points of an already-composed space that the run executes.
+///
+/// [`resolve`] is [`compose`] followed by this. They are separate because a
+/// surface that needs both lists — the Run Set page draws the composed space
+/// and prices the retained one — would otherwise compose it twice, and
+/// composing is the expensive half: its cost is the size of the space, not the
+/// size of the declaration.
+///
+/// The subtraction lives here and nowhere else, so the point table, the
+/// forecast and the corner configuration all see the same shorter list.
+#[must_use]
+pub fn retained<'a>(
+    state: &RunSetState,
+    composed: &[RunSetPoint<'a>],
+) -> Option<Vec<RunSetPoint<'a>>> {
+    // An adaptive declaration requires feedback from completed proposals and
+    // therefore cannot be flattened into an authorized queue up front.
+    if state.composition.mode == RunSetCompositionMode::Adaptive {
+        return None;
+    }
+    let mut points = composed.to_vec();
     if state.composition.filters() {
         points.retain(|point| {
             !state
@@ -168,11 +191,6 @@ pub fn resolve(state: &RunSetState) -> Option<Vec<RunSetPoint<'_>>> {
     }
     if state.composition.mode == RunSetCompositionMode::Conditional {
         points.retain(|point| conditional_predicate_matches(state, point).unwrap_or(false));
-    }
-    // An adaptive declaration requires feedback from completed proposals and
-    // therefore cannot be flattened into an authorized queue up front.
-    if state.composition.mode == RunSetCompositionMode::Adaptive {
-        return None;
     }
     Some(points)
 }

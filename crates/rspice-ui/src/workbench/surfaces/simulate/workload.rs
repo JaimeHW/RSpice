@@ -244,10 +244,12 @@ impl PlanWorkload {
         // composition proposes its points from feedback — there is nothing to
         // narrow against, so every analysis is priced at the whole declared
         // space, which is what the validator's own forecast counts.
+        // The forecast's own point count, not a validation run to read it: the
+        // findings a whole validation allocates are thrown away here, and this
+        // card is drawn beside five other things that price against the same
+        // space.
         let all_points = if global_axes_active {
-            run_set::validate(run_set, instances.len())
-                .forecast
-                .point_count
+            run_set::forecast_point_count(run_set)
         } else {
             1
         };
@@ -520,10 +522,18 @@ pub(super) fn composition_refusals(
         .map(|error| error.message.as_str())
 }
 
+/// The plan's queue, priced per analysis.
+///
+/// `resolved` is the workload the route already priced, handed in rather than
+/// asked for. Pricing one expands the declared space, and the Run Set route
+/// draws this card beside five other things that want the same workload — six
+/// expansions a frame, each costing the size of the space rather than the size
+/// of the declaration.
 pub(super) fn task_rate_card(
     ui: &mut egui::Ui,
     app: &RSpiceApp,
     validation: &run_set::RunSetValidation,
+    resolved: Result<&PlanWorkload, &String>,
 ) {
     let refusals: Vec<&str> = composition_refusals(validation).collect();
     if !refusals.is_empty() {
@@ -546,8 +556,7 @@ pub(super) fn task_rate_card(
         return;
     }
 
-    let resolved = PlanWorkload::resolve(app);
-    let (status, tone) = match &resolved {
+    let (status, tone) = match resolved {
         Ok(workload) => match workload.total_tasks() {
             Ok(tasks) => (
                 format!(
@@ -565,7 +574,7 @@ pub(super) fn task_rate_card(
     };
 
     super::page_kit::card(ui, "Task rate", Some((status.as_str(), tone)), |ui| {
-        let Ok(workload) = &resolved else {
+        let Ok(workload) = resolved else {
             // The refusal is already the card's status line. Repeating it in
             // the body would state one fault twice and imply two.
             return;

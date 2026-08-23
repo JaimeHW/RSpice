@@ -81,12 +81,23 @@ impl PlanParticipation {
     /// reads a frame, a controller or a document, and a resolver that took the
     /// whole app could not be called from a place holding only the state.
     pub(super) fn resolve(app: &AppState) -> Self {
+        let points: Vec<RunSetPoint<'_>> =
+            run_set::resolve(&app.sim_setup.run_set).unwrap_or_default();
+        Self::from_points(app, &points)
+    }
+
+    /// The same report, against points the caller has already expanded.
+    ///
+    /// Expanding the declared space costs the size of the space, so a route
+    /// that has one list in hand must not pay for another. The Run Set page
+    /// composes once for its point table and hands the retained half here;
+    /// [`Self::resolve`] is this with that expansion done for the caller.
+    pub(super) fn from_points(app: &AppState, points: &[RunSetPoint<'_>]) -> Self {
         let state = &app.sim_setup.run_set;
         let reference = app.sim_setup.reference_pvt;
         let has_axes = state.enabled_dimensions().next().is_some();
-        let points: Vec<RunSetPoint<'_>> = run_set::resolve(state).unwrap_or_default();
         let point_keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
-        let nominal_key = run_set::nominal_point_key(&points, reference);
+        let nominal_key = run_set::nominal_point_key(points, reference);
         let corner_keys: Vec<(String, String)> = points
             .iter()
             .map(|point| {
@@ -109,7 +120,7 @@ impl PlanParticipation {
             .map(|instance| {
                 let run_at = instance.run_at().clone();
                 let display_name = instance.display_name().to_owned();
-                match run_set::participating_point_keys(&run_at, &points, reference) {
+                match run_set::participating_point_keys(&run_at, points, reference) {
                     Ok(keys) => InstanceParticipation {
                         id: instance.id(),
                         display_name,

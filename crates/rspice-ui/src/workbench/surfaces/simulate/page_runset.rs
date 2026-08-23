@@ -67,17 +67,100 @@ const ANALYSIS_SWITCH_HIT_H: f32 = 20.0;
 const AXIS_CARD_SLOT_H: f32 = 130.0;
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let validation = plan_run_set_validation(app);
+    let frame = RunSetFrame::resolve(app);
 
-    toolbar(ui, app, &validation);
-    if !validation.errors.is_empty() || !validation.warnings.is_empty() {
-        issue_summary(ui, app, &validation);
+    toolbar(ui, app, &frame.validation);
+    if !frame.validation.errors.is_empty() || !frame.validation.warnings.is_empty() {
+        issue_summary(ui, app, &frame.validation);
     }
-    run_space(ui, app, &validation);
-    super::workload::task_rate_card(ui, app, &validation);
+    run_space(ui, app, &frame);
+    super::workload::task_rate_card(ui, app, &frame.validation, frame.workload.as_ref());
     card_row(ui, app, selected_dimension, composition);
-    card_row(ui, app, budgets, receipts);
-    point_table(ui, app, &validation);
+    card_row(ui, app, |ui, app| budgets(ui, app, &frame), receipts);
+    point_table(ui, app, &frame);
+}
+
+/// One composed point of the declared space, owned for the frame.
+///
+/// The page draws the composed space and prices the retained half of it, and
+/// both come from one expansion — so the list has to outlive the borrow of the
+/// run set it was expanded from. A [`run_set::RunSetPoint`] borrows the
+/// declaration; this is the three things the table prints, kept.
+struct ComposedPoint {
+    key: String,
+    label: String,
+    /// One entry per coordinate, in declared order: the axis's identity, the
+    /// axis's name, and the value as it was authored. Exactly what the Family
+    /// control hands the run it opens.
+    coordinates: Vec<(String, String, String)>,
+}
+
+/// Everything one frame of the Run Set route derives, derived once.
+///
+/// The route expanded the declared space six times a frame and validated it
+/// seven: the toolbar's status line, the run-space card's worst point, the
+/// task-rate card, the budgets card, the receipts card and the point table each
+/// asked for themselves. An expansion costs the size of the space rather than
+/// the size of the declaration, so a plan over a few hundred points paid for
+/// the whole matrix six times over on every frame it was drawn — and nothing
+/// the page painted was different for it, which is why the cost probe counts
+/// this rather than a test reading the page.
+///
+/// Not a cache: it is built at the page entry, holds no key, and does not
+/// survive the frame. A route cannot serve a reader a space the plan no longer
+/// declares.
+struct RunSetFrame {
+    /// The composed space, before any exclusion — the point table's own rows.
+    /// `None` where the declaration does not expand exactly, which the table
+    /// reports on its own terms.
+    composed: Option<Vec<ComposedPoint>>,
+    /// Which points each enabled analysis visits, against the retained half.
+    participation: super::participation::PlanParticipation,
+    workload: Result<super::workload::PlanWorkload, String>,
+    validation: RunSetValidation,
+}
+
+impl RunSetFrame {
+    fn resolve(app: &RSpiceApp) -> Self {
+        let state = &app.state.sim_setup.run_set;
+        // The one expansion. `run_set::retained` subtracts the exclusions from
+        // this list rather than composing a second one.
+        let composed = run_set::compose(state);
+        let retained = composed
+            .as_ref()
+            .and_then(|points| run_set::retained(state, points))
+            .unwrap_or_default();
+        let participation =
+            super::participation::PlanParticipation::from_points(&app.state, &retained);
+        let workload = super::workload::PlanWorkload::resolve_with(app, &participation);
+        let validation = plan_run_set_validation_from(app, &workload);
+        let composed = composed.map(|points| {
+            points
+                .iter()
+                .map(|point| ComposedPoint {
+                    key: point.point_key(),
+                    label: point.label(),
+                    coordinates: point
+                        .coordinates
+                        .iter()
+                        .map(|(dimension, value)| {
+                            (
+                                dimension.id.clone(),
+                                dimension.name.clone(),
+                                value.lexical.clone(),
+                            )
+                        })
+                        .collect(),
+                })
+                .collect()
+        });
+        Self {
+            composed,
+            participation,
+            workload,
+            validation,
+        }
+    }
 }
 
 // ------------------------------------------------------------------ toolbar
@@ -246,7 +329,8 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
 
 /// The composed space: one card per axis, the operator between them, and the
 /// forecast they resolve to.
-fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
+fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
+    let validation = &frame.validation;
     let mode = app.state.sim_setup.run_set.composition.mode;
     let status = format!("{} composition", mode.as_str());
     let tone = match validation.status {
@@ -256,7 +340,11 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     };
     let mut action = None;
     let mut selection = None;
-    let worst_point_tasks = worst_point_task_cost(app);
+    let worst_point_tasks = frame
+        .workload
+        .as_ref()
+        .ok()
+        .and_then(|workload| worst_point_task_cost_of(&frame.participation, workload));
 
     super::page_kit::card_with_head(
         ui,
@@ -1336,9 +1424,9 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
 
 // ----------------------------------------------------------------- budgets
 
-fn budgets(ui: &mut Ui, app: &mut RSpiceApp) {
+fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     let current = app.state.sim_setup.run_set.budgets;
-    let validation = plan_run_set_validation(app);
+    let validation = &frame.validation;
     let exceeded = validation
         .errors
         .iter()
@@ -1512,9 +1600,10 @@ fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
 
 // ---------------------------------------------------------- resolved points
 
-fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
+fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
+    let validation = &frame.validation;
     let state: &RunSetState = &app.state.sim_setup.run_set;
-    let Some(points) = run_set::compose(state) else {
+    let Some(points) = frame.composed.as_ref() else {
         card(
             ui,
             "Resolved point table",
@@ -1544,12 +1633,12 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     // a large space does not become a scrolling wall, but an exclusion the user
     // cannot see is one they cannot undo, and hiding it would be the silent
     // drop this whole feature refuses.
-    let rows: Vec<(usize, &run_set::RunSetPoint<'_>, String, bool)> = points
+    let rows: Vec<(usize, &ComposedPoint, &str, bool)> = points
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let key = point.point_key();
-            let is_excluded = excludable && excluded.contains(&key);
+            let key = point.key.as_str();
+            let is_excluded = excludable && excluded.contains(&point.key);
             (index, point, key, is_excluded)
         })
         .filter(|(index, _, _, is_excluded)| *index < POINT_TABLE_LIMIT || *is_excluded)
@@ -1623,14 +1712,14 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
     headers.push("Tasks".to_owned());
     headers.push("Family".to_owned());
     let header_refs: Vec<&str> = headers.iter().map(String::as_str).collect();
-    // Resolved once for the table, like the family target above: a per-row
-    // resolution would re-expand the declared space on every frame.
-    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    // Resolved once for the route, not once for the table: the page entry hands
+    // both of these down, because expanding the declared space to resolve a
+    // participation costs the size of the space.
+    let participation = &frame.participation;
     // What a point costs is the workload's arithmetic, not the plan's instance
     // count: an instance that does not run here contributes nothing, and one
-    // that mints two tasks per point contributes two. Resolved once for the
-    // table and folded per row.
-    let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok();
+    // that mints two tasks per point contributes two. Folded per row.
+    let workload = frame.workload.as_ref().ok();
     let enabled_analyses = participation.instances.len();
     // Resolved once for the table: the answer is the same for every point, and
     // it is what both the "At" count and the "Tasks" cell are missing.
@@ -1664,9 +1753,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                         excludable,
                         axes: &axes,
                         fractions: &fractions,
-                        tasks: workload
-                            .as_ref()
-                            .map(|workload| workload.tasks_at_point(&participation, key)),
+                        tasks: workload.map(|workload| workload.tasks_at_point(participation, key)),
                         participation: (participation.analyses_at(key), enabled_analyses),
                         absent: &absent,
                         refused: &refused_names,
@@ -1676,19 +1763,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) 
                     },
                     &mut action,
                 ) {
-                    family_request = Some(
-                        point
-                            .coordinates
-                            .iter()
-                            .map(|(dimension, value)| {
-                                (
-                                    dimension.id.clone(),
-                                    dimension.name.clone(),
-                                    value.lexical.clone(),
-                                )
-                            })
-                            .collect(),
-                    );
+                    family_request = Some(point.coordinates.clone());
                 }
             }
             card_note(
@@ -1844,7 +1919,7 @@ pub(super) fn family_query_for_point(
 /// Everything one point row draws from.
 struct PointRow<'a> {
     index: usize,
-    point: &'a run_set::RunSetPoint<'a>,
+    point: &'a ComposedPoint,
     key: &'a str,
     excluded: bool,
     excludable: bool,
@@ -1893,8 +1968,8 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
             row.point
                 .coordinates
                 .iter()
-                .find(|(dimension, _)| dimension.id == axis.id)
-                .map(|(_, value)| value.lexical.clone())
+                .find(|(dimension, _, _)| *dimension == axis.id)
+                .map(|(_, _, value)| value.clone())
                 .unwrap_or_else(|| "—".to_owned()),
         );
     }
@@ -1965,7 +2040,7 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     // The row's own hover is registered before the controls so each keeps its
     // tooltip: within a layer, the later widget wins the pointer.
     ui.interact(rect, ui.id().with(row.key), Sense::hover())
-        .on_hover_text(row.point.label());
+        .on_hover_text(row.point.label.clone());
     if !row.excluded
         && visiting < enabled
         && let Some(cell) = columns.get(participation_cell)
@@ -2048,7 +2123,7 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
         egui::WidgetInfo::labeled(
             egui::WidgetType::Link,
             openable,
-            format!("Open {} in the family view", row.point.label()),
+            format!("Open {} in the family view", row.point.label),
         )
     });
     theme::paint_focus_ring(ui, &response, cell);
@@ -2266,19 +2341,58 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
 /// it are the same arithmetic read at two altitudes rather than two derivations
 /// that can disagree. `None` where the space does not expand exactly, which is
 /// a refusal the page already reports on its own terms.
+///
+/// Test-only: the tile reads [`worst_point_task_cost_of`] against the
+/// participation and workload [`RunSetFrame`] already resolved, because
+/// resolving either expands the declared space. This is that same function with
+/// the two resolutions done for a caller that is not drawing a frame. Not a
+/// second answer — a second way of asking for the one below.
+#[cfg(test)]
 pub(super) fn worst_point_task_cost(app: &RSpiceApp) -> Option<usize> {
     let participation = super::participation::PlanParticipation::resolve(&app.state);
     let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok()?;
+    worst_point_task_cost_of(&participation, &workload)
+}
+
+/// The most tasks any one point costs, from a participation and a workload the
+/// frame already resolved. What the tile actually reads.
+fn worst_point_task_cost_of(
+    participation: &super::participation::PlanParticipation,
+    workload: &super::workload::PlanWorkload,
+) -> Option<usize> {
     participation
         .point_keys
         .iter()
-        .map(|key| workload.tasks_at_point(&participation, key))
+        .map(|key| workload.tasks_at_point(participation, key))
         .max()
 }
 
+/// The plan's run-set validation, pricing the workload for the caller.
+///
+/// Test-only, for the same reason as [`worst_point_task_cost`]: the route
+/// prices the workload once at its entry and hands it to
+/// [`plan_run_set_validation_from`], which is the one that runs on a frame.
+#[cfg(test)]
 pub(super) fn plan_run_set_validation(app: &RSpiceApp) -> RunSetValidation {
+    plan_run_set_validation_from(app, &super::workload::PlanWorkload::resolve(app))
+}
+
+/// The same validation, against a workload the frame already priced.
+///
+/// Validating is cheap per call — the point count is a product rather than a
+/// walk — but the exact queue cardinality it is given is not: that is the
+/// workload, and pricing one expands the declared space. The route resolves
+/// both once and every card reads them.
+fn plan_run_set_validation_from(
+    app: &RSpiceApp,
+    workload: &Result<super::workload::PlanWorkload, String>,
+) -> RunSetValidation {
     let kinds = enabled_analysis_kinds(app);
-    match exact_plan_task_count(app) {
+    let exact = workload
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|workload| workload.total_tasks().map(Some));
+    match exact {
         Ok(exact_task_count) => {
             run_set::validate_for_plan(&app.state.sim_setup.run_set, &kinds, exact_task_count)
         }

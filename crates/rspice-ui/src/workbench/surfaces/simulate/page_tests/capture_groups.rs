@@ -597,7 +597,11 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
         .cloned()
         .expect("payload");
     let ledger = page_capture_ledger(&app);
-    let registry = super::super::page_outputs::projected_output_bytes_for(&app, &payload);
+    let registry = super::super::page_outputs::projected_output_bytes_for(
+        &app,
+        &payload,
+        &super::super::page_save::capture_workload(&app).0,
+    );
     assert!(
         !registry.is_empty(),
         "the registry has to be pricing something for this to mean anything"

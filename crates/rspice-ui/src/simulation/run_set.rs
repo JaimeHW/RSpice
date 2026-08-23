@@ -28,13 +28,13 @@ pub use model::{
 #[cfg(test)]
 pub use model::{NETLIST_SUPPLY_SOURCE_PREFIX, RunSetComposition};
 pub use participation::{AnalysisRunAt, nominal_point_key, participating_point_keys};
-pub use points::{RunSetPoint, compose, point_key_label, resolve};
+pub use points::{RunSetPoint, compose, point_key_label, resolve, retained};
 #[cfg(test)]
 pub use transaction::dispatch;
 pub use transaction::{RunSetAction, RunSetReceipt, RunSetReceiptStatus, dispatch_for_plan};
 pub use validate::{
-    RunSetForecast, RunSetStatus, RunSetValidation, validate, validate_for_plan,
-    validate_with_task_count,
+    RunSetForecast, RunSetStatus, RunSetValidation, forecast_point_count, validate,
+    validate_for_plan, validate_with_task_count,
 };
 
 use crate::product::ProcessCorner;
