@@ -563,7 +563,7 @@ impl AnalysisKind {
     ///
     /// Delegated to the execution tag rather than restated here, because the
     /// same question is asked of a *finished* run, where only the tag survives:
-    /// `PreparedRunReceipt::is_sign_off_eligible` reads it off the tasks it
+    /// `PreparedRunReceipt::sign_off_blocker` reads it off the tasks it
     /// authenticated. Two tables would let the studio's catalog offer an
     /// analysis as production-grade while the receipt stamped its results
     /// preview, or the reverse.

@@ -798,27 +798,24 @@ impl PreparedRunReceipt {
         kinds
     }
 
-    /// Whether results from this run may be presented as sign-off evidence.
+    /// Why this run may not be cited as sign-off evidence, naming the objects.
     ///
-    /// The one predicate. Two things disqualify a run and both are stamped on
-    /// the receipt: a project model that had not cleared its qualification gate
-    /// when the run was prepared, and an analysis whose engine is still preview.
-    /// Verify's sign-off tile, the Results manifest and the requirements pages
-    /// all read this rather than re-deriving half of it, because a surface that
-    /// checks only the models calls a preview run eligible while a surface that
-    /// checks only the kind calls a qualified one ineligible.
-    #[must_use]
-    pub fn is_sign_off_eligible(&self) -> bool {
-        self.sign_off_blocker().is_none()
-    }
-
-    /// Why this run may not be cited as sign-off, naming the objects.
+    /// The one predicate, and it answers with its reason rather than with a
+    /// bare verdict. Two things disqualify a run and both are stamped on the
+    /// receipt: a project model that had not cleared its qualification gate
+    /// when the run was prepared, and an analysis whose engine is still
+    /// preview. Verify's sign-off tile, the Results manifest, the Results specs
+    /// table and the requirements page all read this rather than re-deriving
+    /// half of it, because a surface that checks only the models calls a
+    /// preview run eligible while one that checks only the kind calls a
+    /// qualified one ineligible — and a stamp reading "NOT SIGN-OFF" with
+    /// nothing after it is what a surface says when it knows the answer and not
+    /// the cause.
     ///
-    /// `None` exactly when [`Self::is_sign_off_eligible`] is true, because that
-    /// is the same question asked the other way round. Carried on the receipt so
-    /// no surface has to reconstruct the reason from half the verdict: a stamp
-    /// reading "NOT SIGN-OFF · 0 unqualified model(s)" is what a surface says
-    /// when it knows the answer and not the cause.
+    /// There was an `is_sign_off_eligible` beside this returning
+    /// `self.sign_off_blocker().is_none()`. Every surface that reached for it
+    /// wanted the reason too, so each either asked twice or asked this and
+    /// discarded half the answer.
     #[must_use]
     pub fn sign_off_blocker(&self) -> Option<String> {
         let mut reasons = Vec::new();

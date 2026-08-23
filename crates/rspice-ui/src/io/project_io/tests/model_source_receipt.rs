@@ -95,7 +95,7 @@ fn prepared_run_receipt_round_trip_retains_exact_project_model_sources() {
          sign-off evidence"
     );
     assert!(
-        !restored.is_sign_off_eligible(),
+        restored.sign_off_blocker().is_some(),
         "a restored run with an unqualified model is still not sign-off"
     );
     assert_eq!(restored.unqualified_model_sources().len(), 1);

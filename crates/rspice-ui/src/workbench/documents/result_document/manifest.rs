@@ -229,7 +229,7 @@ impl ManifestViewModel {
             inventory_title: inventory_title(run.lifecycle).to_owned(),
             inventory_status: inventory_status(run.lifecycle).to_owned(),
             integrity,
-            qualification: qualification_label(run, provenance_is_valid).to_owned(),
+            qualification: qualification_label(run, provenance_is_valid),
             task_count,
             retained_result_count: run.analyses.len(),
             rows,
@@ -1092,39 +1092,41 @@ const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static st
 /// The run-wide qualification line.
 ///
 /// A valid receipt never *grants* sign-off — nothing here retains a sign-off
-/// record — so the terminal case still reports it unavailable. What it now also
-/// does is name a blocker when the receipt carries one, read from the single
-/// owner [`crate::state::PreparedRunReceipt::is_sign_off_eligible`] so this line
-/// cannot say a run is merely unqualified while Verify's tile calls the same run
-/// eligible.
-fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> &'static str {
+/// record — so the terminal case still reports it unavailable. What it also
+/// does is name the blocker the receipt carries, read from the one owner
+/// [`crate::state::PreparedRunReceipt::sign_off_blocker`].
+///
+/// Its doc said that before this. What the code did was rebuild the verdict out
+/// of `unqualified_model_sources()` and `preview_engine_kinds()` — the two
+/// halves that owner is a fold of — and restate them in a vocabulary of its
+/// own, so a third disqualifying condition added to the receipt would leave
+/// this line calling the run merely unqualified while Verify's tile refused it,
+/// and the blocker named the objects while this named only their category.
+fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> String {
     match run.lifecycle {
         SimulationRunLifecycle::LegacyUnknown => {
-            "unavailable · legacy lifecycle unknown · non-sign-off"
+            "unavailable · legacy lifecycle unknown · non-sign-off".to_owned()
         }
         SimulationRunLifecycle::Preparing
         | SimulationRunLifecycle::Running
-        | SimulationRunLifecycle::Cancelling => "unavailable · run is not terminal · non-sign-off",
+        | SimulationRunLifecycle::Cancelling => {
+            "unavailable · run is not terminal · non-sign-off".to_owned()
+        }
         SimulationRunLifecycle::Completed
         | SimulationRunLifecycle::Failed
         | SimulationRunLifecycle::Aborted
         | SimulationRunLifecycle::Interrupted => {
             let Some(receipt) = run.prepared_receipt() else {
-                return "unavailable · no retained qualification authority · non-sign-off";
+                return "unavailable · no retained qualification authority · non-sign-off"
+                    .to_owned();
             };
             if !provenance_is_valid {
-                return "blocked · receipt integrity mismatch · non-sign-off";
+                return "blocked · receipt integrity mismatch · non-sign-off".to_owned();
             }
-            let unqualified = !receipt.unqualified_model_sources().is_empty();
-            let preview = !receipt.preview_engine_kinds().is_empty();
-            match (unqualified, preview) {
-                (true, true) => {
-                    "blocked · unqualified project model and preview engine · non-sign-off"
-                }
-                (true, false) => "blocked · unqualified project model · non-sign-off",
-                (false, true) => "blocked · preview engine · non-sign-off",
-                (false, false) => "unavailable · no retained sign-off qualification",
-            }
+            receipt.sign_off_blocker().map_or_else(
+                || "unavailable · no retained sign-off qualification".to_owned(),
+                |blocker| format!("blocked · {blocker} · non-sign-off"),
+            )
         }
     }
 }
@@ -1257,11 +1259,17 @@ mod tests {
     }
 
     /// A preview-engine run must not read as merely "no retained qualification"
-    /// here while Verify's tile calls the same receipt eligible. Both read
-    /// [`PreparedRunReceipt::is_sign_off_eligible`], and this line names which
-    /// of its two inputs refused.
+    /// here while Verify's tile calls the same receipt eligible — and the two
+    /// must say it in the same words.
+    ///
+    /// This line's doc said it read the receipt; what it did was rebuild the
+    /// verdict from the two halves `sign_off_blocker` folds and restate them in
+    /// a vocabulary of its own. So it named the *category* — "preview engine" —
+    /// where the owner names the object, and a third disqualifying condition
+    /// added to the receipt would have left it calling the run merely
+    /// unqualified while Verify refused it.
     #[test]
-    fn a_preview_engine_run_is_blocked_rather_than_merely_unqualified() {
+    fn a_preview_engine_run_is_blocked_in_the_words_the_receipt_uses() {
         let instance_id = AnalysisInstanceId::new();
         let revision = ObjectRevision::INITIAL;
         let snapshot = digest(0x51);
@@ -1285,10 +1293,9 @@ mod tests {
             ],
         )
         .expect("valid receipt");
-        assert!(
-            !receipt.is_sign_off_eligible(),
-            "a preview kind blocks sign-off"
-        );
+        let blocker = receipt
+            .sign_off_blocker()
+            .expect("a preview kind blocks sign-off");
         let provenance = AnalysisResultProvenance::new(instance_id, revision, snapshot, Vec::new())
             .expect("valid provenance");
         let mut run = SimulationRun::new_prepared(11, receipt);
@@ -1299,9 +1306,11 @@ mod tests {
 
         let manifest = ManifestViewModel::from_run(&run);
 
-        assert_eq!(
-            manifest.qualification,
-            "blocked · preview engine · non-sign-off"
+        assert_eq!(manifest.qualification, format!("blocked · {blocker} · non-sign-off"));
+        assert!(
+            manifest.qualification.contains("Envelope"),
+            "the owner names the object, so this line does too: {}",
+            manifest.qualification
         );
         assert_eq!(
             manifest.rows[0].eligibility,

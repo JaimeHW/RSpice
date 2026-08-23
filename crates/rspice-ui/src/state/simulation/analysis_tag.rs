@@ -218,7 +218,7 @@ impl CanonicalAnalysisKind {
     /// The tag is what a sealed receipt retains, so this is the only spelling
     /// of the question a *finished* run can be asked — the plan's
     /// `AnalysisKind::availability` reads it through `canonical_kind`, and
-    /// `PreparedRunReceipt::is_sign_off_eligible` reads it through the tasks it
+    /// `PreparedRunReceipt::sign_off_blocker` reads it through the tasks it
     /// authenticated. Keeping the answer on the tag is what stops the studio's
     /// catalog, Verify's sign-off tile and the Results manifest from holding
     /// three opinions about one run.

@@ -828,7 +828,7 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
 /// thing that must not happen is such output being carried into a sign-off
 /// package as though it had cleared the bar.
 ///
-/// The verdict is [`crate::state::PreparedRunReceipt::is_sign_off_eligible`] and
+/// The verdict is [`crate::state::PreparedRunReceipt::sign_off_blocker`] and
 /// nothing else. This tile used to ask only about models, so a run of a preview
 /// kind — which the studio's own catalog offers as `Preview engine ·
 /// non-sign-off`, and which the Results manifest reports as unavailable — was
