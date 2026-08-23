@@ -1,4 +1,4 @@
-//! SPECS â the active retained dataset's governed measurement results.
+//! SPECS — the active retained dataset's governed measurement results.
 //!
 //! Each row binds an authored `.MEAS` expression and project-owned limit to
 //! the exact retained value and worst source in the active immutable dataset.
@@ -30,14 +30,14 @@ use super::{ResultViewer, well_hint};
 ///
 /// A pair per column rather than one number, because the two were the same
 /// number and the table was therefore a fixed 1042 points wide however narrow
-/// the pane was. Below that width the last column â STATUS, which is the
-/// verdict the whole table exists to state â was simply cut off by the pane
+/// the pane was. Below that width the last column — STATUS, which is the
+/// verdict the whole table exists to state — was simply cut off by the pane
 /// edge, at 1600 as well as at 1000, and a horizontal scroll bar under a table
 /// is not where a reader looks for a pass/fail.
 ///
 /// The floors are what each column can still be read at: a measurement name
 /// and an expression elide legibly, a value and a margin are right-aligned
-/// numbers, and the status word does not elide at all â so it keeps its width
+/// numbers, and the status word does not elide at all — so it keeps its width
 /// and the prose columns give theirs up.
 const SPEC_COLUMNS: [(f32, f32); 7] = [
     (160.0, 104.0),
@@ -395,8 +395,8 @@ fn candidates_share_source_lineage(candidates: &[MeasurementCandidate<'_>]) -> b
 fn result_row(run: &SimulationRun, measurement: String, spec: Option<&SpecEntry>) -> SpecResultRow {
     let candidates = measurement_candidates(run, &measurement);
     // The one spelling of a bound. This table formatted its own with a
-    // plot-axis formatter, so a megahertz limit read "â¥ 1.000 M Hz" here and
-    // "â¥ 1M Hz" on the studio page that authored it â a number a reader has to
+    // plot-axis formatter, so a megahertz limit read "≥ 1.000 M Hz" here and
+    // "≥ 1M Hz" on the studio page that authored it — a number a reader has to
     // translate before holding it against a datasheet.
     let limit = spec.map_or_else(|| "\u{2014}".to_owned(), SpecEntry::limit_text);
     let unit = spec.map_or_else(String::new, |entry| entry.unit.clone());
@@ -718,7 +718,7 @@ pub(crate) fn hardcopy_table(run: &SimulationRun, specs: &[SpecEntry]) -> super:
         })
         .collect();
     super::ResultSheetTable {
-        title: format!("Specifications Â· {}", run.label),
+        title: format!("Specifications · {}", run.label),
         columns: [
             "Measurement",
             "Expression",
@@ -769,7 +769,7 @@ fn table_width() -> f32 {
 ///
 /// Above the preferred total every column has what it wants. Below it, the
 /// shortfall is taken from the columns in proportion to how much each has to
-/// give â its preferred width less its floor â so the columns that elide
+/// give — its preferred width less its floor — so the columns that elide
 /// legibly give up the room and the verdict column keeps all of it. Below the
 /// floors nothing more can be taken and the caller's horizontal scroll is what
 /// is left.
@@ -825,7 +825,7 @@ fn paint_clipped_table_text(
 
 fn value_text(row: &SpecResultRow) -> String {
     row.value
-        .map_or_else(|| "â".to_owned(), |value| fmt_si(value, &row.unit, 4))
+        .map_or_else(|| "—".to_owned(), |value| fmt_si(value, &row.unit, 4))
 }
 
 fn margin_text(row: &SpecResultRow) -> String {
@@ -834,7 +834,7 @@ fn margin_text(row: &SpecResultRow) -> String {
             if row.status == SpecResultStatus::Unbound {
                 "unbound".to_owned()
             } else {
-                "â".to_owned()
+                "—".to_owned()
             }
         },
         |margin| fmt_si(margin, &row.unit, 4),
@@ -979,7 +979,7 @@ fn paint_result_row(
     );
 
     let expression = if row.expression.is_empty() {
-        "â"
+        "—"
     } else {
         &row.expression
     };
@@ -991,7 +991,7 @@ fn paint_result_row(
         value.as_str(),
         row.limit.as_str(),
         margin.as_str(),
-        row.worst_corner.as_deref().unwrap_or("â"),
+        row.worst_corner.as_deref().unwrap_or("—"),
         row.status.label(),
     ];
     for (index, label) in cell_values.iter().enumerate() {
@@ -1114,7 +1114,7 @@ fn paint_result_row(
             ui,
             corner_cell,
             egui::Align2::LEFT_CENTER,
-            "â",
+            "—",
             theme::mono(tokens::FS_0, FontWeight::Regular),
             c.text_faint,
         );
@@ -1164,7 +1164,7 @@ fn show_table_shell(
     // The pane's width, floored at what the columns can still be read in
     // rather than at what they would prefer. Floored at the preferred width,
     // the table was a fixed 1042 points and the pane simply cut the last
-    // column â the verdict â off its right edge at every width below that.
+    // column — the verdict — off its right edge at every width below that.
     let content_width = ui.available_width().max(table_minimum_width());
     let max_margin = rows
         .iter()
@@ -1261,8 +1261,8 @@ fn paint_summary(
     );
     // The detail gets the room the title does not take, not half the row. It
     // used to start at the centre and is right-aligned, so a status line longer
-    // than half the band was clipped from its left â "3 / 5 pass Â· 2
-    // unavailable Â· failed Â· dataset â¦" arrived as "s Â· 2 unavailable Â· â¦",
+    // than half the band was clipped from its left — "3 / 5 pass · 2
+    // unavailable · failed · dataset …" arrived as "s · 2 unavailable · …",
     // which loses the count the line exists to state.
     let title_font = theme::sans(tokens::FS_1, FontWeight::Medium);
     let title_width = ui
@@ -1314,7 +1314,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         paint_summary(
             ui,
             "Specifications",
-            &format!("0 / {bounded} pass Â· no active dataset"),
+            &format!("0 / {bounded} pass · no active dataset"),
             format!(
                 "Specifications: zero of {bounded} bounded measurements pass; no active dataset"
             ),
@@ -1325,7 +1325,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &[],
             "no-active-dataset",
             Some(
-                "No active dataset â select a retained run or run the simulation to evaluate specifications",
+                "No active dataset — select a retained run or run the simulation to evaluate specifications",
             ),
             None,
         );
@@ -1349,15 +1349,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let bounded = summary.bounded;
     let unavailable = summary.unavailable;
     let unavailable_text = if unavailable > 0 {
-        format!(" Â· {unavailable} unavailable")
+        format!(" · {unavailable} unavailable")
     } else {
         String::new()
     };
     paint_summary(
         ui,
-        &format!("Specifications Â· Run #{run_id}"),
+        &format!("Specifications · Run #{run_id}"),
         &format!(
-            "{passing} / {bounded} pass{unavailable_text} Â· {} Â· dataset {dataset_id}",
+            "{passing} / {bounded} pass{unavailable_text} · {} · dataset {dataset_id}",
             lifecycle_label(lifecycle)
         ),
         format!(
@@ -1370,8 +1370,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             c.warn
         },
     );
-    // The studio's Requirements page and this table read one fact â which
-    // limit is being looked at â rather than each keeping a selection of its
+    // The studio's Requirements page and this table read one fact — which
+    // limit is being looked at — rather than each keeping a selection of its
     // own, so a hop from either side arrives on the row the other named.
     let carried = state.workbench.selected_specification.clone();
     let focus_analysis = show_table_shell(
@@ -1379,7 +1379,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &rows,
         dataset_id,
         Some(
-            "No measurements â add .MEAS statements, run the simulation, then bind requirement limits",
+            "No measurements — add .MEAS statements, run the simulation, then bind requirement limits",
         ),
         carried.as_deref(),
     );
@@ -1444,7 +1444,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     (
                         instance.id(),
                         format!(
-                            "{} Â· {}",
+                            "{} · {}",
                             plan.instance_list_label(index)
                                 .unwrap_or_else(|| instance.display_name().to_owned()),
                             instance.id()
@@ -1529,7 +1529,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                 };
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
-                    field(ui, &mut draft.requirement_key, 130.0, "SPEC-â¦");
+                    field(ui, &mut draft.requirement_key, 130.0, "SPEC-…");
                     field(ui, &mut draft.requirement_name, 180.0, "requirement name");
                     field(ui, &mut draft.measurement, 150.0, "measurement");
                     field(ui, &mut draft.expression, 230.0, ".MEAS expression");
@@ -1615,7 +1615,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         .map_or_else(
                             || match &draft.scope {
                                 SpecPointScope::SelectedCorners { corners } => {
-                                    format!("Corners {}", corners.join(" Â· "))
+                                    format!("Corners {}", corners.join(" · "))
                                 }
                                 SpecPointScope::AllPoints => "All PVT points".to_owned(),
                                 SpecPointScope::Nominal => "Nominal only".to_owned(),
@@ -1642,7 +1642,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                                 .iter()
                                 .find(|(candidate, _)| *candidate == id)
                                 .map_or_else(
-                                    || format!("Missing analysis Â· {id}"),
+                                    || format!("Missing analysis · {id}"),
                                     |(_, label)| label.clone(),
                                 )
                         },
@@ -1670,7 +1670,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         || "authored in this plan".to_owned(),
                         |source| {
                             format!(
-                                "{}:{} Â· revision {} Â· digest {}",
+                                "{}:{} · revision {} · digest {}",
                                 source.logical_path,
                                 source.row,
                                 source.imported_revision,
@@ -1682,7 +1682,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         || "none".to_owned(),
                         |waiver| {
                             format!(
-                                "{} Â· owner {} Â· {}",
+                                "{} · owner {} · {}",
                                 waiver.reference, waiver.owner, waiver.rationale
                             )
                         },
@@ -1691,7 +1691,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         ui.add_space(10.0);
                         ui.label(
                             egui::RichText::new(format!(
-                                "Stable ID {} Â· source {source} Â· waiver/disposition {waiver}",
+                                "Stable ID {} · source {source} · waiver/disposition {waiver}",
                                 original.id
                             ))
                             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
@@ -1836,7 +1836,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             measurement_table(ui, &[("Bounds", "none defined")]);
             return;
         }
-        section_header(ui, "Specs Â· active dataset", None);
+        section_header(ui, "Specs · active dataset", None);
         let bounded = specs
             .iter()
             .filter(|spec| spec.min.is_some() || spec.max.is_some())
@@ -1868,7 +1868,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     });
     let specs = frozen_specs.as_deref().unwrap_or(&state.workspace.specs);
     if specs.is_empty() {
-        section_header(ui, "Specs Â· active dataset", None);
+        section_header(ui, "Specs · active dataset", None);
         measurement_table(
             ui,
             &[("Bounds", "none were frozen into this dataset's run receipt")],
@@ -1887,7 +1887,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .filter_map(|row| row.margin.map(|margin| (row, margin)))
         .min_by(|(_, left), (_, right)| left.total_cmp(right));
 
-    section_header(ui, "Specs Â· active dataset", None);
+    section_header(ui, "Specs · active dataset", None);
     let specs_n = specs.len().to_string();
     // The results panel is where a spec table gets read into a sign-off
     // package, so it is where an unqualified model has to be visible. It
@@ -2078,7 +2078,7 @@ mod tests {
     fn bounded_row_uses_the_exact_worst_retained_source_and_corner() {
         let mut run = SimulationRun::new(4);
         let source = AnalysisInstanceId::new();
-        for (value, corner) in [(0.8, "TT Â· 27 Â°C"), (1.2, "SS Â· 125 Â°C")] {
+        for (value, corner) in [(0.8, "TT · 27 °C"), (1.2, "SS · 125 °C")] {
             run.add_analysis(
                 AnalysisResult::new(1, AnalysisType::Corner, corner)
                     .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
@@ -2120,7 +2120,7 @@ mod tests {
         );
         assert_eq!(row.status, SpecResultStatus::Fail);
         assert_eq!(row.source_analysis_index, Some(1));
-        assert_eq!(row.worst_corner.as_deref(), Some("SS Â· 125 Â°C"));
+        assert_eq!(row.worst_corner.as_deref(), Some("SS · 125 °C"));
     }
 
     #[test]
