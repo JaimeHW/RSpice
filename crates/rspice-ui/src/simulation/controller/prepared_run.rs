@@ -23,7 +23,7 @@ use crate::simulation::execution::{
 };
 
 mod dependency_expansion;
-mod occurrence_outputs;
+pub(crate) mod occurrence_outputs;
 
 use dependency_expansion::expand_manual_dependencies;
 use occurrence_outputs::{effective_plan_capture, projection_occurrence_nets};

@@ -114,6 +114,48 @@ pub(super) fn effective_plan_capture(
     Ok((outputs, automatic_fallback, membership))
 }
 
+/// The distinct expressions the enabled schematic probes would have a run save.
+///
+/// Keyed by [`prepared_output_expression_key`], so two probes on one net are
+/// one output and the ground probe is none. The value is the authored spelling
+/// and whether any probe on that expression asked to be plotted.
+///
+/// Read by [`effective_plan_saved_outputs`], which mints the outputs, and by
+/// [`enabled_probe_output_count`], which is how the studio's Outputs surfaces
+/// learn that a plan with an empty registry still saves something.
+fn enabled_probe_expressions(
+    probes: &[crate::state::SchematicProbe],
+) -> std::collections::BTreeMap<String, (String, bool)> {
+    let mut expressions = std::collections::BTreeMap::new();
+    for probe in probes.iter().filter(|probe| probe.enabled) {
+        let Some(expression) = probe.source_expression.as_deref().map(str::trim) else {
+            continue;
+        };
+        let expression_key = prepared_output_expression_key(expression);
+        if expression_key == "v(0)" {
+            continue;
+        }
+        expressions
+            .entry(expression_key)
+            .and_modify(|(_, plot): &mut (String, bool)| *plot |= probe.plot_on_materialization)
+            .or_insert_with(|| (expression.to_owned(), probe.plot_on_materialization));
+    }
+    expressions
+}
+
+/// How many outputs the enabled schematic probes alone would have a run save.
+///
+/// A plan whose own registry is empty is not therefore a plan that saves
+/// nothing: an enabled probe mints an output here, and once the set is
+/// non-empty [`effective_plan_saved_outputs`] returns it in every selection
+/// mode — so the run saves the probe set rather than the bounded automatic set
+/// or the whole dataset. The studio's Outputs row and its preflight cell both
+/// stated one of those two instead, on a plan that would do neither.
+#[must_use]
+pub(crate) fn enabled_probe_output_count(probes: &[crate::state::SchematicProbe]) -> usize {
+    enabled_probe_expressions(probes).len()
+}
+
 /// Resolve the plan's effective saved-output set without mutating project
 /// data. Automatic outputs belong to the prepared snapshot, use stable IDs,
 /// and therefore remain deterministic for an unchanged plan and topology.
@@ -126,7 +168,7 @@ pub(super) fn effective_plan_saved_outputs(
 ) -> Result<(Vec<crate::state::SavedOutput>, bool), PreparationError> {
     let mut enabled_probe_outputs =
         std::collections::HashMap::<crate::product::SavedOutputId, HashSet<String>>::new();
-    let mut enabled_probe_expressions = std::collections::BTreeMap::new();
+    let enabled_probe_expressions = enabled_probe_expressions(probes);
     for probe in probes.iter().filter(|probe| probe.enabled) {
         let Some(expression) = probe.source_expression.as_deref().map(str::trim) else {
             continue;
@@ -135,10 +177,6 @@ pub(super) fn effective_plan_saved_outputs(
         if expression_key == "v(0)" {
             continue;
         }
-        enabled_probe_expressions
-            .entry(expression_key.clone())
-            .and_modify(|(_, plot): &mut (String, bool)| *plot |= probe.plot_on_materialization)
-            .or_insert_with(|| (expression.to_owned(), probe.plot_on_materialization));
         if probe.plan_id == Some(plan_id)
             && let Some(output_id) = probe.saved_output_id
         {

@@ -251,7 +251,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                 // surfaces away had been saying so all along.
                 empty_registry_row(
                     ui,
-                    &empty_registry_text(app.state.sim_setup.save_policy.output_selection_mode),
+                    &empty_registry_text(
+                        app.state.sim_setup.save_policy.output_selection_mode,
+                        super::readiness::enabled_schematic_probe_outputs(app),
+                    ),
                     Tone::Warn,
                 );
             } else if shown == 0 {
@@ -404,10 +407,13 @@ fn output_registry_summary<'a>(
 /// unconditionally, and under `Automatic` the run stores a bounded synthesized
 /// set — so two surfaces contradicted each other about one plan, and the one an
 /// engineer checks before dispatching was the wrong one.
-pub(super) fn empty_registry_text(mode: crate::state::OutputSelectionMode) -> String {
+pub(super) fn empty_registry_text(
+    mode: crate::state::OutputSelectionMode,
+    schematic_probes: usize,
+) -> String {
     format!(
         "No saved outputs \u{b7} {}",
-        super::readiness::empty_registry_outcome(mode)
+        super::readiness::empty_registry_outcome(mode, schematic_probes)
     )
 }
 

@@ -1987,8 +1987,9 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
     // default mode saves a bounded synthesized set rather than nothing.
     assert!(
         empty.contains("No saved outputs")
-            && empty.contains(super::readiness::empty_registry_outcome(
-                crate::state::OutputSelectionMode::default()
+            && empty.contains(&super::readiness::empty_registry_outcome(
+                crate::state::OutputSelectionMode::default(),
+                0
             )),
         "a plan with no outputs states what its selection mode will save:\n{empty}"
     );

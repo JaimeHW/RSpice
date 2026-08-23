@@ -113,9 +113,13 @@ fn outputs_detail(
     saved: usize,
     bound_contracts: Option<usize>,
     mode: crate::state::OutputSelectionMode,
+    schematic_probes: usize,
 ) -> String {
     match (saved, bound_contracts) {
-        (0, _) => format!("nothing saved · {}", empty_registry_outcome(mode)),
+        (0, _) => format!(
+            "nothing saved · {}",
+            empty_registry_outcome(mode, schematic_probes)
+        ),
         (saved, None) => format!("{saved} saved · run preflight to bind"),
         (saved, Some(0)) => format!("{saved} saved · none bound to the queue"),
         (saved, Some(contracts)) => format!("{saved} saved · {contracts} bound across the queue"),
@@ -129,14 +133,46 @@ fn outputs_detail(
 /// bounded set this cell already names, so the registry and the preflight cell
 /// contradicted each other about the same plan — and the registry, which is
 /// where an engineer goes to check what will be captured, was the wrong one.
-pub(super) const fn empty_registry_outcome(
+///
+/// `schematic_probes` is how many outputs the sheet's enabled probes alone
+/// would mint — see
+/// [`crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count`].
+/// It is not decoration either. Once the probes mint an output the effective
+/// set is non-empty, and a non-empty set is what the preparation returns in
+/// *every* selection mode: a plan with no authored output and one enabled probe
+/// saves that probe, which is neither the bounded automatic set nor the whole
+/// dataset — and those two were the only things these surfaces could say.
+pub(super) fn empty_registry_outcome(
     mode: crate::state::OutputSelectionMode,
-) -> &'static str {
-    match mode {
-        crate::state::OutputSelectionMode::Automatic => "bounded automatic set",
-        crate::state::OutputSelectionMode::ExplicitOnly
-        | crate::state::OutputSelectionMode::SaveAll => "full dataset retained",
+    schematic_probes: usize,
+) -> String {
+    if schematic_probes > 0 {
+        return format!(
+            "{schematic_probes} schematic probe{} saved",
+            if schematic_probes == 1 { "" } else { "s" }
+        );
     }
+    match mode {
+        crate::state::OutputSelectionMode::Automatic => "bounded automatic set".to_owned(),
+        crate::state::OutputSelectionMode::ExplicitOnly
+        | crate::state::OutputSelectionMode::SaveAll => "full dataset retained".to_owned(),
+    }
+}
+
+/// The outputs the simulation root's enabled probes would have a run save.
+///
+/// The root the run would execute, not the sheet on screen: the two are the
+/// same sheet most of the time, and where they are not it is the run this row
+/// is about.
+pub(super) fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
+    app.state
+        .workspace
+        .simulation_root_schematic(&app.state.workspace.active_view, &app.state.schematic)
+        .map_or(0, |schematic| {
+            crate::simulation::controller::prepared_run::occurrence_outputs::enabled_probe_output_count(
+                &schematic.probes,
+            )
+        })
 }
 
 pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
@@ -285,6 +321,7 @@ pub(super) fn preflight_strip(ui: &mut Ui, app: &RSpiceApp) {
                 saved_outputs.len(),
                 bound_output_contracts,
                 app.state.sim_setup.save_policy.output_selection_mode,
+                enabled_schematic_probe_outputs(app),
             ),
         ),
         (
@@ -740,17 +777,46 @@ mod tests {
     #[test]
     fn an_empty_registry_reports_what_the_selection_mode_will_actually_save() {
         assert_eq!(
-            outputs_detail(0, None, OutputSelectionMode::Automatic),
+            outputs_detail(0, None, OutputSelectionMode::Automatic, 0),
             "nothing saved \u{00b7} bounded automatic set"
         );
         assert_eq!(
-            outputs_detail(0, None, OutputSelectionMode::ExplicitOnly),
+            outputs_detail(0, None, OutputSelectionMode::ExplicitOnly, 0),
             "nothing saved \u{00b7} full dataset retained"
         );
         assert_eq!(
-            outputs_detail(0, None, OutputSelectionMode::SaveAll),
+            outputs_detail(0, None, OutputSelectionMode::SaveAll, 0),
             "nothing saved \u{00b7} full dataset retained"
         );
+    }
+
+    /// An enabled probe is what the run saves, in every mode.
+    ///
+    /// A plan whose registry is empty is not a plan that saves nothing. An
+    /// enabled schematic probe mints an output in the preparation, and once
+    /// that set is non-empty it is returned in every selection mode — so this
+    /// cell said "bounded automatic set" or "full dataset retained" over a run
+    /// that would do neither.
+    #[test]
+    fn an_enabled_probe_is_what_an_empty_registry_actually_saves() {
+        for mode in OutputSelectionMode::ALL {
+            assert_eq!(
+                outputs_detail(0, None, mode, 1),
+                "nothing saved \u{00b7} 1 schematic probe saved",
+                "{mode:?}"
+            );
+            assert_eq!(
+                outputs_detail(0, None, mode, 3),
+                "nothing saved \u{00b7} 3 schematic probes saved",
+                "{mode:?}"
+            );
+            assert!(
+                !outputs_detail(0, None, mode, 2).contains("automatic set")
+                    && !outputs_detail(0, None, mode, 2).contains("full dataset"),
+                "neither of those is what the run does: {}",
+                outputs_detail(0, None, mode, 2)
+            );
+        }
     }
 
     /// Once the plan owns outputs the mode no longer decides the answer — the
@@ -759,18 +825,20 @@ mod tests {
     #[test]
     fn a_populated_registry_reads_the_same_in_every_mode() {
         for mode in OutputSelectionMode::ALL {
-            assert_eq!(
-                outputs_detail(3, None, mode),
-                "3 saved \u{00b7} run preflight to bind"
-            );
-            assert_eq!(
-                outputs_detail(3, Some(0), mode),
-                "3 saved \u{00b7} none bound to the queue"
-            );
-            assert_eq!(
-                outputs_detail(3, Some(7), mode),
-                "3 saved \u{00b7} 7 bound across the queue"
-            );
+            for probes in [0, 2] {
+                assert_eq!(
+                    outputs_detail(3, None, mode, probes),
+                    "3 saved \u{00b7} run preflight to bind"
+                );
+                assert_eq!(
+                    outputs_detail(3, Some(0), mode, probes),
+                    "3 saved \u{00b7} none bound to the queue"
+                );
+                assert_eq!(
+                    outputs_detail(3, Some(7), mode, probes),
+                    "3 saved \u{00b7} 7 bound across the queue"
+                );
+            }
         }
     }
 
@@ -784,18 +852,24 @@ mod tests {
     #[test]
     fn the_outputs_registry_and_the_preflight_cell_agree_in_every_mode() {
         for mode in OutputSelectionMode::ALL {
-            let outcome = super::empty_registry_outcome(mode);
-            assert!(
-                outputs_detail(0, None, mode).ends_with(outcome),
-                "the preflight cell states {outcome:?}"
-            );
-            assert!(
-                super::super::page_outputs::empty_registry_text(mode).ends_with(outcome),
-                "and so must the registry's empty row"
-            );
+            // With and without a probe: the probe case is the one the two
+            // surfaces would drift apart on next, because it is the one that
+            // does not follow from the mode.
+            for probes in [0, 1, 4] {
+                let outcome = super::empty_registry_outcome(mode, probes);
+                assert!(
+                    outputs_detail(0, None, mode, probes).ends_with(&outcome),
+                    "the preflight cell states {outcome:?}"
+                );
+                assert!(
+                    super::super::page_outputs::empty_registry_text(mode, probes)
+                        .ends_with(&outcome),
+                    "and so must the registry's empty row"
+                );
+            }
         }
         assert_eq!(
-            super::empty_registry_outcome(OutputSelectionMode::Automatic),
+            super::empty_registry_outcome(OutputSelectionMode::Automatic, 0),
             "bounded automatic set",
             "the automatic mode saves a set, so no surface may say the run stores nothing"
         );
