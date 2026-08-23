@@ -845,6 +845,21 @@ impl PreparedRunReceipt {
         (!reasons.is_empty()).then(|| reasons.join(" \u{00b7} "))
     }
 
+    /// This run's sign-off standing, in the words every surface states it in.
+    ///
+    /// [`Self::sign_off_blocker`] answers `None` for a run that qualifies, and
+    /// each surface was left to invent a sentence for that `None`. They
+    /// invented opposite ones: Verify's tile stamped `Eligible` while the
+    /// Results manifest, for the same receipt, printed `unavailable · no
+    /// retained sign-off qualification`. Two surfaces of one workbench
+    /// disagreeing about whether a dataset may be cited as evidence is a worse
+    /// fault than either sentence on its own.
+    #[must_use]
+    pub fn sign_off_standing(&self) -> SignOffStanding {
+        self.sign_off_blocker()
+            .map_or(SignOffStanding::Eligible, SignOffStanding::Blocked)
+    }
+
     /// Exact specification rows that were in force when this run was sealed.
     #[must_use]
     pub fn specifications(&self) -> &[PreparedSpecification] {
@@ -899,6 +914,57 @@ impl PreparedRunReceipt {
             }
         }
         Ok(())
+    }
+}
+
+/// Whether a retained run may be cited as sign-off evidence, and why not.
+///
+/// Both cases carry their words here, beside each other, so a surface cannot
+/// author a third spelling of either. Verify's tile leads with
+/// [`Self::verdict`] and explains with [`Self::cause`]; the Results manifest's
+/// qualification cell takes [`Self::qualification`], which is the same two
+/// facts in that ledger's own grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignOffStanding {
+    /// Nothing on the receipt disqualifies the run.
+    Eligible,
+    /// Why it may not be cited, naming the objects — see
+    /// [`PreparedRunReceipt::sign_off_blocker`].
+    Blocked(String),
+}
+
+impl SignOffStanding {
+    /// The verdict a status line leads with.
+    #[must_use]
+    pub const fn verdict(&self) -> &'static str {
+        match self {
+            Self::Eligible => "Eligible",
+            Self::Blocked(_) => "Not sign-off",
+        }
+    }
+
+    /// The sentence under that verdict: what disqualifies the run, or what
+    /// being eligible means.
+    #[must_use]
+    pub fn cause(&self) -> String {
+        match self {
+            Self::Eligible => "Every project model this run consumed was released, and every \
+                               analysis it ran is production"
+                .to_owned(),
+            Self::Blocked(blocker) => blocker.clone(),
+        }
+    }
+
+    /// The same standing as a qualification cell states it.
+    #[must_use]
+    pub fn qualification(&self) -> String {
+        match self {
+            Self::Eligible => {
+                "eligible \u{00b7} every model released \u{00b7} every analysis production"
+                    .to_owned()
+            }
+            Self::Blocked(blocker) => format!("blocked \u{00b7} {blocker} \u{00b7} non-sign-off"),
+        }
     }
 }
 

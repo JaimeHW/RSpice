@@ -1102,6 +1102,11 @@ const fn missing_result_status(lifecycle: SimulationRunLifecycle) -> &'static st
 /// own, so a third disqualifying condition added to the receipt would leave
 /// this line calling the run merely unqualified while Verify's tile refused it,
 /// and the blocker named the objects while this named only their category.
+///
+/// The eligible case then stayed behind: it read "unavailable · no retained
+/// sign-off qualification" for a receipt nothing disqualifies. Both cases come
+/// from [`crate::state::SignOffStanding`] now, which is where Verify's tile
+/// reads them too.
 fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> String {
     match run.lifecycle {
         SimulationRunLifecycle::LegacyUnknown => {
@@ -1123,10 +1128,13 @@ fn qualification_label(run: &SimulationRun, provenance_is_valid: bool) -> String
             if !provenance_is_valid {
                 return "blocked · receipt integrity mismatch · non-sign-off".to_owned();
             }
-            receipt.sign_off_blocker().map_or_else(
-                || "unavailable · no retained sign-off qualification".to_owned(),
-                |blocker| format!("blocked · {blocker} · non-sign-off"),
-            )
+            // Both cases from the one owner. This cell wrote its own sentence
+            // for the eligible one — "unavailable · no retained sign-off
+            // qualification" — over the same receipt Verify's tile was
+            // stamping `Eligible`, which is two surfaces of one workbench
+            // disagreeing about whether the dataset in front of the reader may
+            // be cited as evidence.
+            receipt.sign_off_standing().qualification()
         }
     }
 }
@@ -1306,7 +1314,10 @@ mod tests {
 
         let manifest = ManifestViewModel::from_run(&run);
 
-        assert_eq!(manifest.qualification, format!("blocked · {blocker} · non-sign-off"));
+        assert_eq!(
+            manifest.qualification,
+            format!("blocked · {blocker} · non-sign-off")
+        );
         assert!(
             manifest.qualification.contains("Envelope"),
             "the owner names the object, so this line does too: {}",
@@ -1318,8 +1329,15 @@ mod tests {
         );
     }
 
+    /// A receipt nothing disqualifies is called eligible here too.
+    ///
+    /// This line printed "unavailable · no retained sign-off qualification" for
+    /// exactly the receipt Verify's tile stamps `Eligible`, so a reader with
+    /// both surfaces open was told the same dataset may and may not be cited.
+    /// Both sentences come from [`crate::state::SignOffStanding`] now, and this
+    /// asserts the pair together.
     #[test]
-    fn valid_prepared_receipt_does_not_invent_sign_off_qualification() {
+    fn an_eligible_receipt_is_called_eligible_in_the_words_both_surfaces_use() {
         let instance_id = AnalysisInstanceId::new();
         let revision = ObjectRevision::INITIAL;
         let snapshot = digest(0x41);
@@ -1345,11 +1363,25 @@ mod tests {
                 .with_provenance(provenance),
         );
 
+        let standing = run
+            .prepared_receipt()
+            .expect("the run carries its receipt")
+            .sign_off_standing();
         let manifest = ManifestViewModel::from_run(&run);
 
+        // What Verify's tile stamps, and what this cell prints, for the one
+        // receipt.
+        assert_eq!(standing.verdict(), "Eligible");
         assert_eq!(
             manifest.qualification,
-            "unavailable · no retained sign-off qualification"
+            "eligible · every model released · every analysis production"
+        );
+        assert_eq!(manifest.qualification, standing.qualification());
+        assert!(
+            !manifest.qualification.contains("unavailable")
+                && !manifest.qualification.contains("blocked"),
+            "nothing disqualifies this run: {}",
+            manifest.qualification
         );
         assert_eq!(
             manifest.rows[0].eligibility,

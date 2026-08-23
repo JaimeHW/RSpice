@@ -828,12 +828,15 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
 /// thing that must not happen is such output being carried into a sign-off
 /// package as though it had cleared the bar.
 ///
-/// The verdict is [`crate::state::PreparedRunReceipt::sign_off_blocker`] and
-/// nothing else. This tile used to ask only about models, so a run of a preview
-/// kind — which the studio's own catalog offers as `Preview engine ·
-/// non-sign-off`, and which the Results manifest reports as unavailable — was
-/// stamped `Eligible` here.
+/// The verdict is [`crate::state::PreparedRunReceipt::sign_off_standing`] and
+/// nothing else — both cases of it. This tile used to ask only about models, so
+/// a run of a preview kind — which the studio's own catalog offers as `Preview
+/// engine · non-sign-off` — was stamped `Eligible` here; and once it read the
+/// blocker, the eligible case was still a sentence of its own, which the
+/// Results manifest wrote as `unavailable` for the same receipt.
 fn sign_off_tile(app: &RSpiceApp, t: &Tokens) -> (String, String, String, egui::Color32) {
+    use crate::state::SignOffStanding;
+
     let label = "Sign-off".to_owned();
     let Some(receipt) =
         verification_run(app).and_then(crate::state::SimulationRun::prepared_receipt)
@@ -845,17 +848,12 @@ fn sign_off_tile(app: &RSpiceApp, t: &Tokens) -> (String, String, String, egui::
             t.color.text_faint,
         );
     };
-    match receipt.sign_off_blocker() {
-        None => (
-            label,
-            "Eligible".to_owned(),
-            "Every project model this run consumed was released, and every analysis it ran is \
-             production"
-                .to_owned(),
-            t.color.ok,
-        ),
-        Some(blocker) => (label, "Not sign-off".to_owned(), blocker, t.color.warn),
-    }
+    let standing = receipt.sign_off_standing();
+    let tone = match standing {
+        SignOffStanding::Eligible => t.color.ok,
+        SignOffStanding::Blocked(_) => t.color.warn,
+    };
+    (label, standing.verdict().to_owned(), standing.cause(), tone)
 }
 
 fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::Color32)]) {

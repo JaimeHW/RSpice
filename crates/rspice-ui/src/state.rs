@@ -165,7 +165,7 @@ pub use simulation::{
     PreparedSpecificationPolicy, RealEventPointEvidence, RealEventTraceEvidence,
     ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
     ReliabilityStressEvidence, RunRetention, SavedOutputMaterializationStatus, SavedOutputReceipt,
-    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues,
+    SensitivityResultMode, SensitivityResultRow, SharedWaveformValues, SignOffStanding,
     SimulationCampaignMembership, SimulationRun, SimulationRunIntent, SimulationRunLifecycle,
     SimulationRunProvenance, SimulationState, SoaEvaluationEvidence, SoaParameterEvidence,
     SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,

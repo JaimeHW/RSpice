@@ -65,7 +65,7 @@ pub use run::{
 pub use run_receipt::{
     HierarchyMapRow, PreparedModelQualification, PreparedModelSourceIdentity, PreparedRunReceipt,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification,
-    PreparedSpecificationPolicy, SimulationRunProvenance,
+    PreparedSpecificationPolicy, SignOffStanding, SimulationRunProvenance,
 };
 pub use saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt};
 pub use specification_verdict::{SpecificationVerdict, SpecificationVerdictStatus};
