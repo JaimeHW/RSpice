@@ -419,7 +419,14 @@ pub(super) fn resolve_run_set_participation(
                 .map_err(|refusal| {
                     PreparationError::new(
                         PreparationStage::AnalysisPlan,
-                        format!("{}: {}", task.label, refusal.message),
+                        // Named against the declaration, so the refusal the
+                        // preparation reports and the one the studio's point
+                        // table prints spell the same points the same way.
+                        format!(
+                            "{}: {}",
+                            task.label,
+                            refusal.named_in(&run_set.state).message
+                        ),
                     )
                 })?;
         let mut visited = HashSet::with_capacity(keys.len());

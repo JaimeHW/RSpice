@@ -22,7 +22,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use super::ReferencePoint;
-use super::model::RunSetDimensionKind;
+use super::model::{RunSetDimensionKind, RunSetState};
 use super::points::RunSetPoint;
 
 /// Which points of the declared space an analysis instance runs at.
@@ -151,6 +151,56 @@ pub struct ParticipationRefusal {
     pub message: String,
 }
 
+impl ParticipationRefusal {
+    /// The refusal a selection earns by naming points the declared space no
+    /// longer contains.
+    ///
+    /// `named` is how each orphaned point is spelled in the sentence. One
+    /// sentence, two spellings of its list: the resolver is handed a list of
+    /// points rather than the declaration they were composed from, so all it
+    /// can print is the value identities the selection stores. A caller that
+    /// holds the run set re-spells them through [`Self::named_in`].
+    fn orphaned(orphaned_keys: Vec<String>, named: &[String]) -> Self {
+        Self {
+            message: format!(
+                "This analysis is scoped to {} point{} the declared space no longer contains: {}. \
+                 Re-open its point selection, or restore the axis values those points were \
+                 composed from.",
+                orphaned_keys.len(),
+                if orphaned_keys.len() == 1 { "" } else { "s" },
+                named.join(", "),
+            ),
+            orphaned_keys,
+        }
+    }
+
+    /// The same refusal with every orphaned point named the way the point table
+    /// names it.
+    ///
+    /// A point key is value identities:
+    /// `dimension-cload-value-001+dimension-temp-value-000` names a row under a
+    /// name the operator has never seen, on a message whose whole purpose is to
+    /// tell them which points to go and look at. This is reachable from a
+    /// project document that names undeclared values, which is what a
+    /// hand-edited or truncated document leaves behind.
+    ///
+    /// Applied by every caller that holds the declaration — the studio's
+    /// participation report and the prepared expansion — so the two say the
+    /// same thing about the same selection.
+    #[must_use]
+    pub fn named_in(self, state: &RunSetState) -> Self {
+        if self.orphaned_keys.is_empty() {
+            return self;
+        }
+        let named: Vec<String> = self
+            .orphaned_keys
+            .iter()
+            .map(|key| super::point_key_label(state, key))
+            .collect();
+        Self::orphaned(self.orphaned_keys, &named)
+    }
+}
+
 /// The points of `points` that an instance with this participation visits.
 ///
 /// The order is the declared order, so a caller that indexes back into `points`
@@ -203,17 +253,8 @@ pub fn participating_point_keys(
                 .cloned()
                 .collect();
             if !orphaned_keys.is_empty() {
-                return Err(ParticipationRefusal {
-                    message: format!(
-                        "This analysis is scoped to {} point{} the declared space no longer \
-                         contains: {}. Re-open its point selection, or restore the axis values \
-                         those points were composed from.",
-                        orphaned_keys.len(),
-                        if orphaned_keys.len() == 1 { "" } else { "s" },
-                        orphaned_keys.join(", "),
-                    ),
-                    orphaned_keys,
-                });
+                let named = orphaned_keys.clone();
+                return Err(ParticipationRefusal::orphaned(orphaned_keys, &named));
             }
             let chosen: HashSet<&String> = selected.iter().collect();
             Ok(points

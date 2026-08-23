@@ -117,12 +117,16 @@ impl PlanParticipation {
                         keys,
                         refusal: None,
                     },
+                    // Named against the declaration before a reader sees it:
+                    // the resolver can only spell an orphaned point as the
+                    // value identity the selection stores, and this report is
+                    // what the point table prints.
                     Err(refusal) => InstanceParticipation {
                         id: instance.id(),
                         display_name,
                         run_at,
                         keys: Vec::new(),
-                        refusal: Some(refusal.message),
+                        refusal: Some(refusal.named_in(state).message),
                     },
                 }
             })

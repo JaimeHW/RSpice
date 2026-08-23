@@ -1101,6 +1101,59 @@ fn an_empty_point_selection_is_refused_by_name() {
     assert!(refusal.orphaned_keys.is_empty());
 }
 
+/// An orphaned selection names its points the way the point table names them.
+///
+/// The refusal printed the keys the selection stores —
+/// `dimension-temp-value-000`, which is a value identity — on a message whose
+/// whole purpose is to send the reader to look at particular rows. This is
+/// reachable from a project document naming values the space no longer
+/// declares, which is what a hand-edited or truncated document leaves behind.
+#[test]
+fn an_orphaned_selection_names_its_points_the_way_the_table_does() {
+    let mut state = bound_default();
+    enable(&mut state, RunSetDimensionKind::Temperature, true);
+    let points = resolve(&state).expect("the declared space expands");
+    let live = points[0].point_key();
+
+    // A key composed the way a stored one is, naming a value this declaration
+    // still holds and one it never did.
+    let orphan = format!("{live}+dimension-vdd-value-009");
+    let refusal = participating_point_keys(
+        &AnalysisRunAt::SelectedPoints(vec![orphan.clone()]),
+        &points,
+        reference(),
+    )
+    .expect_err("the space does not contain that point");
+    assert_eq!(refusal.orphaned_keys, vec![orphan.clone()]);
+    assert!(
+        refusal.message.contains(&orphan),
+        "the resolver holds no declaration, so all it can spell is the identity: {}",
+        refusal.message
+    );
+
+    let label = crate::simulation::run_set::point_key_label(&state, &orphan);
+    assert!(
+        !label.is_empty() && label != orphan,
+        "the declaration spells the live half of the key: {label}"
+    );
+    let named = refusal.clone().named_in(&state);
+    assert!(
+        named.message.contains(&label),
+        "the reader is sent to a row named the way the table names it: {}",
+        named.message
+    );
+    assert!(
+        !named.message.contains("dimension-vdd-value-009+")
+            && !named.message.contains("+dimension-"),
+        "and never to one spelled as a composed value identity: {}",
+        named.message
+    );
+    assert_eq!(
+        named.orphaned_keys, refusal.orphaned_keys,
+        "naming the points does not change which points they are"
+    );
+}
+
 /// Every named point that the space still declares resolves, in declared order,
 /// and a non-empty unorphaned selection can never resolve to nothing.
 #[test]
