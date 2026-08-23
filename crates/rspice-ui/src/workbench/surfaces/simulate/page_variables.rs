@@ -673,13 +673,22 @@ fn commit_expression(
 /// is counted separately rather than dropped: the reader who wonders where the
 /// other six went has to be told, and told that a disabled analysis is not
 /// waiting to be re-run.
+///
+/// The verb agrees with the count it follows: a plan with one enabled analysis
+/// of ten read "1 of 10 enabled · those resolve these values", which names a
+/// group where there is one.
 fn enabled_reader_summary(enabled: usize, disabled: usize) -> String {
     if disabled == 0 {
         format!("{enabled} \u{b7} every one resolves these values")
     } else {
         format!(
-            "{enabled} of {} enabled \u{b7} those resolve these values",
-            enabled + disabled
+            "{enabled} of {} enabled \u{b7} {} these values",
+            enabled + disabled,
+            if enabled == 1 {
+                "that one resolves"
+            } else {
+                "those resolve"
+            }
         )
     }
 }
@@ -773,12 +782,24 @@ mod tests {
             "4 of 10 enabled \u{b7} those resolve these values"
         );
         assert_eq!(
-            enabled_reader_summary(1, 9),
-            "1 of 10 enabled \u{b7} those resolve these values"
-        );
-        assert_eq!(
             enabled_reader_summary(0, 3),
             "0 of 3 enabled \u{b7} those resolve these values"
+        );
+    }
+
+    /// The verb agrees with the count it follows.
+    ///
+    /// One enabled analysis of ten read "1 of 10 enabled · those resolve these
+    /// values", which names a group where there is one.
+    #[test]
+    fn one_enabled_analysis_is_not_a_group() {
+        assert_eq!(
+            enabled_reader_summary(1, 9),
+            "1 of 10 enabled \u{b7} that one resolves these values"
+        );
+        assert_eq!(
+            enabled_reader_summary(2, 8),
+            "2 of 10 enabled \u{b7} those resolve these values"
         );
     }
 }
