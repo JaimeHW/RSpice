@@ -2099,11 +2099,12 @@ pub(super) fn point_table_note(
     };
     if refused > 0 {
         note.push_str(&format!(
-            " {refused} enabled analys{} refused {} participation and runs at no point here, so \
+            " {refused} enabled analys{} refused {} participation and {} at no point here, so \
              {} in no row's cells — while the plan total above is still priced at the whole \
              matrix, which is the direction a budget may not shrink in.",
             if refused == 1 { "is" } else { "es" },
             if refused == 1 { "its" } else { "their" },
+            if refused == 1 { "runs" } else { "run" },
             if refused == 1 { "it is" } else { "they are" },
         ));
     }
@@ -2362,5 +2363,32 @@ mod run_space_layout_tests {
         let rows = space_rows(2540.0, 4);
         assert_eq!(rows.len(), 1, "four axes and the total fit 2540 points");
         assert_eq!(rows[0].terms.len(), 5);
+    }
+}
+
+#[cfg(test)]
+mod point_table_note_tests {
+    use super::point_table_note;
+
+    /// The note's refusal sentence agrees with its own count.
+    ///
+    /// The subject was pluralized and the verb was not: "2 enabled analyses
+    /// refused their participation and runs at no point here".
+    #[test]
+    fn the_refusal_sentence_agrees_with_the_count_it_states() {
+        let one = point_table_note(4, 4, true, 1);
+        assert!(
+            one.contains("1 enabled analysis refused its participation and runs at no point here"),
+            "{one}"
+        );
+        let two = point_table_note(4, 4, true, 2);
+        assert!(
+            two.contains("2 enabled analyses refused their participation and run at no point here"),
+            "{two}"
+        );
+        assert!(
+            !point_table_note(4, 4, true, 0).contains("refused"),
+            "nothing refused, nothing to reconcile"
+        );
     }
 }
