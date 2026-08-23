@@ -60,12 +60,32 @@ impl SimulationController {
         state: &AppState,
         draft: &crate::simulation::plan::AnalysisDraft,
     ) -> Result<String, String> {
-        let spec = match self.build_manifest_preview_spec(state, draft) {
-            Ok(Some(spec)) => spec,
-            Ok(None) => self.build_analysis_spec_for_index(state, draft.kind().legacy_index())?,
-            Err(error) => return Err(error),
-        };
+        let spec = self.analysis_draft_spec(state, draft)?;
         self.analysis_spec_to_spice_line(state, &spec)
+    }
+
+    /// The analysis specification one draft resolves to, against an
+    /// already-projected state.
+    ///
+    /// Two of the three steps above: the manifest preview spec, and the
+    /// legacy-index fallback for the kinds that have no preview. It is a
+    /// function of its own because the queue builder needs the spec as well as
+    /// the line — the execution options a task carries are read off the spec —
+    /// and so could not simply call [`Self::analysis_draft_directive`]. What it
+    /// did instead was write the fallback out a second time, and one derivation
+    /// in two places is exactly the drift this pair exists to stop: the queue
+    /// and the statement an operator is shown have to resolve the same spec, or
+    /// the studio is displaying a deck it will not dispatch.
+    pub(super) fn analysis_draft_spec(
+        &self,
+        state: &AppState,
+        draft: &crate::simulation::plan::AnalysisDraft,
+    ) -> Result<AnalysisSpec, String> {
+        match self.build_manifest_preview_spec(state, draft) {
+            Ok(Some(spec)) => Ok(spec),
+            Ok(None) => self.build_analysis_spec_for_index(state, draft.kind().legacy_index()),
+            Err(error) => Err(error),
+        }
     }
 
     pub(super) fn analysis_spec_to_spice_line(

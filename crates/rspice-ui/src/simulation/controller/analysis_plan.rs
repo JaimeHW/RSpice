@@ -120,25 +120,19 @@ impl SimulationController {
                 .map(|dependency| dependency.target())
                 .collect();
 
-            // Projected, like every other builder below it. The three steps a
-            // directive is built from — preview spec, legacy-index fallback,
-            // spice line — are one derivation, and
-            // `SimulationController::analysis_draft_directive` states the
-            // contract they share: the builders read the projection, not the
-            // draft. Handing the first of them the unprojected state made the
-            // queue capable of dispatching a directive the plan never
+            // Projected, like every other builder below it, and resolved
+            // through the one owner. The three steps a directive is built from
+            // — preview spec, legacy-index fallback, spice line — are one
+            // derivation, and this loop wrote the first two out a second time:
+            // the queue and the statement the plan displays beside it were two
+            // spellings of the same thing. `analysis_draft_spec` is that pair,
+            // and `analysis_draft_directive` is it plus the line. Both state
+            // the contract they share: the builders read the projection, never
+            // the draft. Handing the first of them the unprojected state made
+            // the queue capable of dispatching a directive the plan never
             // displayed and the parse ratchet never read.
-            let spec = match self.build_manifest_preview_spec(&projected_state, instance.draft()) {
-                Ok(Some(spec)) => spec,
-                Ok(None) => match self
-                    .build_analysis_spec_for_index(&projected_state, instance.kind().legacy_index())
-                {
-                    Ok(spec) => spec,
-                    Err(error) => {
-                        errors.push(format!("{}: {error}", instance.display_name()));
-                        continue;
-                    }
-                },
+            let spec = match self.analysis_draft_spec(&projected_state, instance.draft()) {
+                Ok(spec) => spec,
                 Err(error) => {
                     errors.push(format!("{}: {error}", instance.display_name()));
                     continue;
