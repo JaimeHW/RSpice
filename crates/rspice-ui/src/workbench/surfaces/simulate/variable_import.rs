@@ -1685,10 +1685,12 @@ mod tests {
              IBIAS,current,banana,,,testbench,not a current\n\
              VREF,voltage,2.5V,3V,2V,testbench,inverted bounds\n";
 
-        // The two widths at which the dialog lays its panes side by side. Below
-        // that the split stacks, the table follows the column mapping down the
-        // body, and the body's own scroll is what reaches it.
-        for width in [1600.0f32, 2560.0] {
+        // The 1000-point gate as well as the two widths the panes sit side by
+        // side at. Below the split the dialog stacks, the table follows the
+        // column mapping down the body, and the body's own scroll is what
+        // reaches it — a different layout, with its own way of leaving a
+        // refusal below the fold, and the one this was not measuring.
+        for width in [1000.0f32, 1600.0, 2560.0] {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
             ctx.enable_accesskit();
