@@ -770,80 +770,113 @@ fn scope_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
     changed
 }
 
+/// The height the row table takes, and why it is not a constant.
+///
+/// The dialog gives its body a fixed height and the split hands each pane the
+/// room under the header; this table used a hard 220 points of it and left the
+/// rest of the surface blank. A five-row sheet showed two rows over three
+/// hundred points of empty dialog — and the rows it hid were the refused ones,
+/// which are the reason the import is being refused.
+///
+/// The body's own scroll viewport is the honest bound. Inside it `clip_rect` is
+/// that viewport, so this is the room the split actually left, less what the
+/// note under the table needs. Floored, because a stacked layout can put this
+/// pane where almost nothing is left and a table of no height states nothing.
+fn row_table_height(ui: &Ui) -> f32 {
+    /// What the sentence under the table takes at its two-line worst.
+    const NOTE_RESERVE: f32 = 56.0;
+    /// Enough for two rows and the edge of a third, so a table that is
+    /// scrollable looks scrollable.
+    const MINIMUM: f32 = 140.0;
+    (ui.clip_rect().bottom() - ui.cursor().top() - NOTE_RESERVE).max(MINIMUM)
+}
+
 /// One line per sheet row: what it would become, or why it cannot be adopted.
 fn row_table(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
     let mut ticks_changed = false;
     let tokens = Tokens::get(ui.ctx());
-    egui::ScrollArea::vertical()
-        .max_height(220.0)
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            for row in &mut draft.rows {
-                ui.horizontal(|ui| {
-                    let adoptable = row.is_adoptable();
-                    let mut accepted = row.accepted;
-                    // Named for the sheet line it adopts: a column of boxes
-                    // that publish nothing cannot be told apart by name.
-                    let name = format!("Adopt line {} \u{b7} {}", row.line, row.name);
-                    if ui
-                        .add_enabled_ui(adoptable, |ui| {
-                            crate::ui::widgets::tick_box(ui, &name, "", &mut accepted)
-                        })
-                        .inner
-                        .changed()
-                    {
-                        row.accepted = accepted;
-                        ticks_changed = true;
-                    }
-                    ui.label(
-                        egui::RichText::new(format!("{:>4}", row.line))
-                            .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-                            .color(tokens.color.text_dim),
-                    );
-                    ui.label(
-                        egui::RichText::new(&row.name)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
-                    );
-                    // The last cell takes the room the row has left and no
-                    // more. A refusal detail is a sentence, and an egui row
-                    // extends its items rather than wrapping them: laid out at
-                    // its natural width one sentence carried the row past the
-                    // pane, and the pane's own width out with it, so the note
-                    // beneath the table wrapped at a width the pane never had
-                    // and the surface's border was drawn two hundred points
-                    // outside the header and footer it belongs to.
-                    match &row.refusal {
-                        Some(refusal) => {
-                            ui.label(
-                                egui::RichText::new(refusal.id())
-                                    .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
-                                    .color(tokens.color.err),
-                            );
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(refusal.detail())
-                                        .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                                        .color(tokens.color.text_dim),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_text(refusal.detail());
+    // The height is given to the pane rather than to the scroll area alone:
+    // the split hands each pane a `Ui` of no height at all, so a scroll area
+    // asked only for a maximum collapsed to two rows whatever that maximum
+    // said. `auto_shrink` still shrinks it to a short sheet.
+    let height = row_table_height(ui);
+    ui.allocate_ui(egui::vec2(ui.available_width(), height), |ui| {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for row in &mut draft.rows {
+                    ui.horizontal(|ui| {
+                        let adoptable = row.is_adoptable();
+                        let mut accepted = row.accepted;
+                        // Named for the sheet line it adopts: a column of boxes
+                        // that publish nothing cannot be told apart by name.
+                        let name = format!("Adopt line {} \u{b7} {}", row.line, row.name);
+                        if ui
+                            .add_enabled_ui(adoptable, |ui| {
+                                crate::ui::widgets::tick_box(ui, &name, "", &mut accepted)
+                            })
+                            .inner
+                            .changed()
+                        {
+                            row.accepted = accepted;
+                            ticks_changed = true;
                         }
-                        None => {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(&row.draft.expression)
-                                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-                                        .color(tokens.color.text_dim),
+                        ui.label(
+                            egui::RichText::new(format!("{:>4}", row.line))
+                                .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
+                                .color(tokens.color.text_dim),
+                        );
+                        ui.label(
+                            egui::RichText::new(&row.name)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium)),
+                        );
+                        // The last cell takes the room the row has left and no
+                        // more. A refusal detail is a sentence, and an egui row
+                        // extends its items rather than wrapping them: laid out at
+                        // its natural width one sentence carried the row past the
+                        // pane, and the pane's own width out with it, so the note
+                        // beneath the table wrapped at a width the pane never had
+                        // and the surface's border was drawn two hundred points
+                        // outside the header and footer it belongs to.
+                        match &row.refusal {
+                            Some(refusal) => {
+                                ui.label(
+                                    egui::RichText::new(refusal.id())
+                                        .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
+                                        .color(tokens.color.err),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(refusal.detail())
+                                            .font(theme::sans(
+                                                tokens::FS_MICRO,
+                                                FontWeight::Regular,
+                                            ))
+                                            .color(tokens.color.text_dim),
+                                    )
+                                    .truncate(),
                                 )
-                                .truncate(),
-                            )
-                            .on_hover_text(&row.draft.expression);
+                                .on_hover_text(refusal.detail());
+                            }
+                            None => {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&row.draft.expression)
+                                            .font(theme::mono(
+                                                tokens::FS_MICRO,
+                                                FontWeight::Regular,
+                                            ))
+                                            .color(tokens.color.text_dim),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(&row.draft.expression);
+                            }
                         }
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
+    });
     ticks_changed
 }
 
@@ -1625,6 +1658,122 @@ mod tests {
                 surface.x1,
                 escaped.join("\n")
             );
+        }
+    }
+
+    /// Every refused row is reachable inside the dialog it is refused in.
+    ///
+    /// The table's scroll viewport was a hard 220 points regardless of the room
+    /// the split gave it, so a five-row sheet showed two rows over three hundred
+    /// points of blank dialog. The rows below the fold were the refusals, which
+    /// is what the import is being refused for — an operator was shown a
+    /// refusal count and none of the refusals.
+    ///
+    /// Measured through the tick box each row publishes: it is the control the
+    /// row is reached by, and the one that has to be inside the surface.
+    #[test]
+    fn every_refused_row_is_inside_the_dialog_that_refuses_it() {
+        const SHEET: &str = "name,quantity,expression,minimum,maximum,scope,description\n\
+             RFB,resistance,47k,10k,100k,testbench,feedback resistor\n\
+             CFB,capacitance,2.2p,,,testbench,feedback capacitor\n\
+             RLOAD,resistance,1k,,,project,collides with the plan\n\
+             IBIAS,current,banana,,,testbench,not a current\n\
+             VREF,voltage,2.5V,3V,2V,testbench,inverted bounds\n";
+
+        // The two widths at which the dialog lays its panes side by side. Below
+        // that the split stacks, the table follows the column mapping down the
+        // body, and the body's own scroll is what reaches it.
+        for width in [1600.0f32, 2560.0] {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut app = RSpiceApp::test_instance();
+            let plan_id = plan(&app);
+            let rows = open(&mut app, plan_id, SHEET).rows.len();
+            assert!(
+                rows >= 5,
+                "the fixture sheet must actually produce a table worth scrolling"
+            );
+
+            let mut run = || {
+                ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 1_000.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| super::super::show_workflow_dialogs(ctx, &mut app),
+                )
+            };
+            let _ = run();
+            let _ = run();
+            let output = run();
+
+            // Measured against what is painted, not against what the tree
+            // publishes: a row scrolled out of the table's viewport still has
+            // AccessKit bounds, and it is exactly the row nobody can read.
+            fn painted(
+                shape: &egui::epaint::Shape,
+                clip: egui::Rect,
+                out: &mut Vec<(String, egui::Rect)>,
+            ) {
+                match shape {
+                    egui::epaint::Shape::Text(text) => {
+                        let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        if clip.contains_rect(rect) {
+                            out.push((text.galley.job.text.clone(), rect));
+                        }
+                    }
+                    egui::epaint::Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            painted(shape, clip, out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            let mut spans = Vec::new();
+            for shape in &output.shapes {
+                painted(&shape.shape, shape.clip_rect, &mut spans);
+            }
+            let missing: Vec<&str> = ["RFB", "CFB", "RLOAD", "IBIAS", "VREF"]
+                .into_iter()
+                .filter(|name| !spans.iter().any(|(text, _)| text == name))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "on a {width:.0}-point viewport the dialog refuses {rows} rows and paints none \
+                 of {missing:?}"
+            );
+
+            // And what it paints is inside the surface it is painted on.
+            let surface = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("AccessKit tree update")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
+                .and_then(|(_, node)| node.bounds())
+                .expect("the dialog publishes its bounds");
+            for (text, rect) in &spans {
+                if !["RFB", "CFB", "RLOAD", "IBIAS", "VREF"].contains(&text.as_str()) {
+                    continue;
+                }
+                assert!(
+                    f64::from(rect.bottom()) <= surface.y1 + 0.5
+                        && f64::from(rect.top()) >= surface.y0 - 0.5,
+                    "{text} is painted at {:.0}..{:.0}, outside a surface spanning {:.0}..{:.0}",
+                    rect.top(),
+                    rect.bottom(),
+                    surface.y0,
+                    surface.y1
+                );
+            }
         }
     }
 }
