@@ -307,12 +307,6 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
     );
 }
 
-/// The retention ledger's rows, its unlisted tail, and what both cost.
-///
-/// One pass, so the printed rows and the printed total are the same
-/// measurement partitioned rather than two walks of the history that could
-/// disagree about which runs belong to the plan. Separated from the painter so
-/// the arithmetic can be checked without one.
 /// What the Retention card's "Executed decks" row states.
 ///
 /// `retained` is this plan's datasets; `unattributed` is the runs the project
@@ -321,11 +315,16 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
 /// the first was zero, and the Specifications page was citing one of the second
 /// as evidence on the same project — two true facts under one sentence that
 /// could only be read as one of them.
+///
+/// Every count here agrees with its noun. The row read "12 kB across 1 of 1
+/// datasets" on the project a first run leaves behind, which is the state most
+/// readers see this row in first.
 fn executed_deck_summary(
     retained: usize,
     unattributed: usize,
     decks: &ExecutedDeckStorage,
 ) -> String {
+    let datasets = if retained == 1 { "dataset" } else { "datasets" };
     if retained == 0 && unattributed == 0 {
         return "no dataset retained yet \u{b7} a run's decks are kept with its dataset".to_owned();
     }
@@ -338,11 +337,11 @@ fn executed_deck_summary(
     }
     if decks.held == 0 {
         return format!(
-            "none held \u{b7} this project holds no deck for its {retained} retained datasets"
+            "none held \u{b7} this project holds no deck for its {retained} retained {datasets}"
         );
     }
     format!(
-        "{} across {} of {retained} datasets \u{b7} {} listed \u{b7} {} summarized",
+        "{} across {} of {retained} {datasets} \u{b7} {} listed \u{b7} {} summarized",
         format_bytes(decks.total()),
         decks.held,
         format_bytes(decks.listed),
@@ -350,6 +349,12 @@ fn executed_deck_summary(
     )
 }
 
+/// The retention ledger's rows, its unlisted tail, and what both cost.
+///
+/// One pass, so the printed rows and the printed total are the same
+/// measurement partitioned rather than two walks of the history that could
+/// disagree about which runs belong to the plan. Separated from the painter so
+/// the arithmetic can be checked without one.
 fn retention_ledger(
     simulation: &crate::state::SimulationState,
     plan_id: crate::product::SimulationPlanId,
@@ -673,6 +678,41 @@ mod tests {
         assert!(
             executed_deck_summary(2, 3, &none).starts_with("none held"),
             "a plan with datasets of its own reports on those"
+        );
+    }
+
+    /// One dataset is one dataset.
+    ///
+    /// The row read "12 kB across 1 of 1 datasets" on the project a first run
+    /// leaves behind, which is the state most readers see this row in first.
+    #[test]
+    fn the_executed_deck_row_agrees_with_the_count_it_states() {
+        let one = ExecutedDeckStorage {
+            listed: 12_000,
+            summarized: 0,
+            held: 1,
+        };
+        assert_eq!(
+            executed_deck_summary(1, 0, &one),
+            "11.72 KiB across 1 of 1 dataset \u{b7} 11.72 KiB listed \u{b7} 0 B summarized"
+        );
+        assert_eq!(
+            executed_deck_summary(2, 0, &one),
+            "11.72 KiB across 1 of 2 datasets \u{b7} 11.72 KiB listed \u{b7} 0 B summarized"
+        );
+
+        let none = ExecutedDeckStorage {
+            listed: 0,
+            summarized: 0,
+            held: 0,
+        };
+        assert_eq!(
+            executed_deck_summary(1, 0, &none),
+            "none held \u{b7} this project holds no deck for its 1 retained dataset"
+        );
+        assert_eq!(
+            executed_deck_summary(2, 0, &none),
+            "none held \u{b7} this project holds no deck for its 2 retained datasets"
         );
     }
 
