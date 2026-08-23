@@ -628,7 +628,7 @@ fn stateless_xspice_checkpoint_resume_tracks_unsegmented_gain() {
     }
     assert!(
         worst < 1e-9,
-        "stateless XSPICE gain checkpoint resume must track the full run (worst |Î”| = {worst})"
+        "stateless XSPICE gain checkpoint resume must track the full run (worst |Δ| = {worst})"
     );
 
     let v_seam_first = *first.voltages[out_index(&first)].last().unwrap();

@@ -551,6 +551,14 @@ mod tests {
     /// Only a scan of the bytes catches that, so this is that scan. It covers
     /// test code as well as shipped code: a fixture spelled in mojibake is how
     /// a re-encoded expectation gets frozen into a passing test.
+    ///
+    /// It covers the engine crate as well as this one. Re-encoding happens to
+    /// whatever a tool opens, not to whatever ships a user interface, and the
+    /// engine carried two of its own: an approximation sign in a
+    /// discretization comment and a delta in a checkpoint assertion. The roots
+    /// are reached from `CARGO_MANIFEST_DIR` rather than named absolutely, and
+    /// each is asserted to have contributed files — a root that stops
+    /// resolving is a scan that has stopped scanning.
     #[test]
     fn no_source_file_carries_double_encoded_utf8() {
         // The pairs the scan is looking for, written as escapes so this file
@@ -578,16 +586,32 @@ mod tests {
         );
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let crates = manifest
+            .parent()
+            .expect("this crate sits in the workspace's crates/ directory");
         let mut paths = Vec::new();
-        rust_sources(&manifest.join("src"), &mut paths);
-        rust_sources(&manifest.join("tests"), &mut paths);
+        for root in [
+            manifest.join("src"),
+            manifest.join("tests"),
+            crates.join("rspice-core").join("src"),
+            crates.join("rspice-core").join("tests"),
+        ] {
+            let before = paths.len();
+            rust_sources(&root, &mut paths);
+            assert!(
+                paths.len() > before + 2,
+                "the scan found {} files under {}; a root that stops resolving is a scan \
+                 that has stopped scanning",
+                paths.len() - before,
+                root.display()
+            );
+        }
         paths.sort();
         assert!(
-            paths.len() > 100,
-            "the crate-wide scan found only {} files under {}; a scan that reaches \
-             nothing passes forever",
-            paths.len(),
-            manifest.display()
+            paths.len() > 400,
+            "the two-crate scan found only {} files; a scan that reaches nothing passes \
+             forever",
+            paths.len()
         );
 
         let mut found = Vec::new();

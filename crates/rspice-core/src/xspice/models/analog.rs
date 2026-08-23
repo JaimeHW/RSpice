@@ -5364,7 +5364,7 @@ impl CodeModel for Differentiator {
         let (raw_out, raw_partial) = if ctx.is_dc() || ctx.time == 0.0 {
             (0.0, 0.0)
         } else {
-            // Backward difference: dy/dt â‰ˆ (y[n] - y[n-1]) / dt
+            // Backward difference: dy/dt ≈ (y[n] - y[n-1]) / dt
             if dt > 1e-18 {
                 (gain * (v_in - prev_in) / dt + out_offset, gain / dt)
             } else {
