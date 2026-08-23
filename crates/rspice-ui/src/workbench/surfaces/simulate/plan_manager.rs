@@ -126,6 +126,12 @@ const PLAN_COLUMNS: [TableColumn; 7] = [
 /// guess.
 const PLAN_FILTER_HINT: &str = "Name, identity, revision, or run set…";
 
+/// What that field is called, as against what may be typed into it.
+///
+/// The hint above is a placeholder and egui publishes it as one, so it is not a
+/// name and a reader arriving on this control by keyboard heard nothing.
+const PLAN_FILTER_LABEL: &str = "Filter plans";
+
 /// The narrowest the filter field is ever laid out at.
 ///
 /// The field grows into whatever the fixed controls leave, as the authored
@@ -543,6 +549,10 @@ fn plan_manager_toolbar_controls(
 /// The mark replaces the word "Filter" that stood beside the field: a label
 /// spending a control's worth of width to name the one control on the row whose
 /// purpose its own placeholder already states.
+///
+/// It still announces a name. A painted mark is not a label and egui publishes
+/// `hint_text` as a placeholder, so removing the word left the dialog's only
+/// text field unreachable by name.
 fn plan_filter_field(ui: &mut Ui, filter: &mut String, width: f32) {
     let t = Tokens::get(ui.ctx());
     let response = ui.add_sized(
@@ -557,6 +567,7 @@ fn plan_filter_field(ui: &mut Ui, filter: &mut String, width: f32) {
             })
             .hint_text(PLAN_FILTER_HINT),
     );
+    crate::ui::widgets::name_control(ui, &response, PLAN_FILTER_LABEL);
     WorkbenchIcon::Search.paint(
         ui.painter(),
         Rect::from_center_size(

@@ -74,6 +74,14 @@ pub(super) fn analysis_catalog_window(
                                 vec2(input_width, 48.0),
                                 analysis_catalog_search_field(&mut query),
                             );
+                            // The hint text is published as a placeholder, not
+                            // as a name: the first control of the overlay a
+                            // keystroke opens announced nothing at all.
+                            crate::ui::widgets::name_control(
+                                ui,
+                                &search,
+                                ANALYSIS_CATALOG_SEARCH_LABEL,
+                            );
                             search_id = Some(search.id);
                             if search.changed() {
                                 active = 0;
@@ -197,6 +205,14 @@ pub(super) fn analysis_catalog_window(
     app.state.sim_setup.palette_active = active;
     app.state.sim_setup.palette_scroll_to_active = false;
 }
+
+/// What the catalogue's search field is called.
+///
+/// Separate from its hint text because the two are different things: the hint
+/// says what may be typed, the name says which control the reader is on. egui
+/// publishes `hint_text` as a placeholder, so a field with only a hint
+/// announces no name at all.
+pub(super) const ANALYSIS_CATALOG_SEARCH_LABEL: &str = "Search the analysis catalogue";
 
 pub(super) fn analysis_catalog_search_field(query: &mut String) -> egui::TextEdit<'_> {
     egui::TextEdit::singleline(query)

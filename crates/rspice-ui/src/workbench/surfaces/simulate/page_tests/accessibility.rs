@@ -1,13 +1,19 @@
-//! What every studio route announces, and whether it is drawn inside its
-//! surface.
+//! What every studio surface announces, and whether it is drawn inside the
+//! surface it belongs to.
 //!
 //! Split from the page's other route tests because these two claims are
 //! measured the same way and from one fixture: both read the AccessKit tree a
-//! route publishes, one asking whether every control carries a name and the
+//! surface publishes, one asking whether every control carries a name and the
 //! other whether every control's bounds are inside the viewport. The fixture
-//! they share holds one instance of every analysis kind, because the forms that
-//! overflowed and the controls that went unnamed were on exactly the instances
-//! a default plan does not hold.
+//! they share seeds the analyses a default plan does not hold, because the
+//! forms that overflowed and the controls that went unnamed were on exactly
+//! those.
+//!
+//! What counts as a surface is wider than a route. The name sweep runs the
+//! overlays and the workflow dialogs as well — the analysis catalogue and the
+//! plan manager each had a nameless text field behind one — and the overflow
+//! sweep opens a form for every kind the catalogue offers rather than the nine
+//! the fixture starts with.
 
 use egui::{Rect, vec2};
 
@@ -111,6 +117,56 @@ fn studio_fixture() -> RSpiceApp {
     app
 }
 
+/// The fixture with an instance of `kind` in it, and that instance selected.
+///
+/// The overflow gate sweeps every kind the catalogue offers, and the fixture
+/// holds nine — so a kind it does not hold is inserted here, with whatever
+/// prerequisites the plan asks for bound to an instance already present. `None`
+/// where the plan refuses the insert outright, which is a kind that cannot be
+/// on a form for this fixture and therefore has no form to measure.
+fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp> {
+    use crate::simulation::plan::AnalysisInstance;
+
+    let mut app = studio_fixture();
+    app.state.workbench.simulation_page = SimulationPage::Analyses;
+    let existing = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| {
+            plan.instances()
+                .iter()
+                .find(|instance| instance.kind() == kind)
+                .map(AnalysisInstance::id)
+        });
+    let selected = match existing {
+        Some(id) => id,
+        None => {
+            let plan = app
+                .state
+                .sim_setup
+                .analysis_plan
+                .as_mut()
+                .expect("the test instance holds a stable plan");
+            let (id, _) = plan.insert(kind).ok()?;
+            for prerequisite in kind.prerequisites() {
+                if let Some(target) = plan
+                    .instances()
+                    .iter()
+                    .find(|instance| instance.kind() == *prerequisite)
+                    .map(AnalysisInstance::id)
+                {
+                    let _ = plan.bind_dependency(id, *prerequisite, target);
+                }
+            }
+            id
+        }
+    };
+    app.state.workbench.active_analysis_instance = Some(selected);
+    Some(app)
+}
+
 /// Every analysis kind the fixture holds a form for.
 ///
 /// Kinds rather than instance identities: every call to [`studio_fixture`]
@@ -159,6 +215,10 @@ fn studio_route_nodes(
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| super::super::show(ui, &mut app));
+                // The dialogs are drawn outside the surface, so a sweep that
+                // ran only the surface reached none of their controls — which
+                // is where two nameless text fields were living.
+                super::super::show_workflow_dialogs(ctx, &mut app);
             },
         );
         nodes = output
@@ -219,6 +279,94 @@ fn studio_routes() -> Vec<(
     routes
 }
 
+/// The first enabled analysis of a fixture, for the overlays that open on one.
+fn first_enabled_instance(app: &RSpiceApp) -> crate::product::AnalysisInstanceId {
+    use crate::simulation::plan::AnalysisInstance;
+    app.state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| {
+            plan.instances()
+                .iter()
+                .find(|instance| instance.enabled())
+                .map(AnalysisInstance::id)
+        })
+        .expect("the fixture holds an enabled analysis")
+}
+
+/// Every overlay and dialog the studio draws over its routes, each on the route
+/// it opens from.
+///
+/// The name sweep ran the surface and nothing else, so the catalogue the
+/// palette opens, the advanced-options panel and every workflow dialog were
+/// outside it — and two of the nameless text fields it exists to catch were
+/// living in exactly those two places. A gate that cannot reach a surface is
+/// not a gate over it.
+fn studio_overlays() -> Vec<(String, RSpiceApp)> {
+    use crate::workbench::state::{
+        DesignVariableDraft, RenameAnalysisDraft, SavedOutputDraft, SimulationPlanManagerDraft,
+        SimulationWorkflowDialog,
+    };
+
+    let mut overlays: Vec<(String, RSpiceApp)> = Vec::new();
+
+    // The analysis catalogue, which a keystroke opens over the Analyses route.
+    let mut app = studio_route(SimulationPage::Analyses, None);
+    app.state.sim_setup.palette_open = true;
+    overlays.push(("analysis catalogue".to_owned(), app));
+
+    // The advanced-options panel, opened on one analysis from the Solver page.
+    let mut app = studio_route(SimulationPage::Solver, None);
+    let instance = first_enabled_instance(&app);
+    super::super::advanced_options::open_for_analysis(&mut app.state.workbench, instance);
+    overlays.push(("advanced options".to_owned(), app));
+
+    // The plan manager.
+    let mut app = studio_route(SimulationPage::Analyses, None);
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the fixture holds a stable plan")
+        .id();
+    let plan_name = app.state.sim_setup.active_plan_name().to_string();
+    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(
+        SimulationPlanManagerDraft::new(plan_id, plan_name),
+    ));
+    overlays.push(("plan manager".to_owned(), app));
+
+    // Renaming an analysis.
+    let mut app = studio_route(SimulationPage::Analyses, None);
+    let instance = first_enabled_instance(&app);
+    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
+        RenameAnalysisDraft::for_instance(instance, "Transient", "Startup transient"),
+    ));
+    overlays.push(("rename analysis".to_owned(), app));
+
+    // The run-points picker.
+    let mut app = studio_route(SimulationPage::Analyses, None);
+    let instance = first_enabled_instance(&app);
+    super::super::participation::open_point_picker(&mut app.state, instance);
+    overlays.push(("run points".to_owned(), app));
+
+    // A new design variable.
+    let mut app = studio_route(SimulationPage::Variables, None);
+    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariable(
+        DesignVariableDraft::default(),
+    ));
+    overlays.push(("design variable".to_owned(), app));
+
+    // A new saved output.
+    let mut app = studio_route(SimulationPage::Outputs, None);
+    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::SavedOutput(
+        SavedOutputDraft::default(),
+    ));
+    overlays.push(("saved output".to_owned(), app));
+
+    overlays
+}
+
 /// Every text field and tick box in the studio announces the row that names it.
 ///
 /// A `TextEdit` publishes no accessible name of its own and `egui::Checkbox`
@@ -236,8 +384,21 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
     let mut unnamed = Vec::new();
     let mut inputs = 0usize;
     let mut boxes = 0usize;
-    for (page, kind) in studio_routes() {
-        for (_, node) in studio_route_nodes(studio_route(page, kind), 1280.0) {
+    let mut surfaces: Vec<(String, RSpiceApp)> = studio_routes()
+        .into_iter()
+        .map(|(page, kind)| {
+            let label =
+                kind.map_or_else(|| format!("{page:?}"), |kind| format!("{page:?}/{kind:?}"));
+            (label, studio_route(page, kind))
+        })
+        .collect();
+    // The overlays and dialogs, which the sweep did not reach: the catalogue's
+    // search field and the plan manager's filter were nameless behind it.
+    surfaces.extend(studio_overlays());
+    let mut swept = 0usize;
+    for (surface, app) in surfaces {
+        swept += 1;
+        for (_, node) in studio_route_nodes(app, 1280.0) {
             let role = node.role();
             if !matches!(
                 role,
@@ -256,7 +417,7 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
                 inputs += 1;
             }
             if node.label().is_none_or(|label| label.trim().is_empty()) {
-                unnamed.push(format!("{page:?}: {role:?} announces no name"));
+                unnamed.push(format!("{surface}: {role:?} announces no name"));
             }
         }
     }
@@ -267,11 +428,16 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
         "controls a reader cannot reach by name:\n{}",
         unnamed.join("\n")
     );
-    // A sweep that reached nothing would pass forever.
+    // A sweep that reached nothing would pass forever, and one that quietly
+    // stopped opening the overlays would pass just as well.
     assert!(
-        inputs >= 8 && boxes >= 4,
+        inputs >= 12 && boxes >= 4,
         "the sweep reached {inputs} text fields and {boxes} tick boxes; it is not \
-         reaching the routes it claims to check"
+         reaching the surfaces it claims to check"
+    );
+    assert!(
+        swept >= studio_routes().len() + 7,
+        "the sweep ran {swept} surfaces; every route and every overlay is one"
     );
 }
 
@@ -308,11 +474,14 @@ fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
 
     let mut offenders = Vec::new();
     let mut measured = 0usize;
+    let mut forms = 0usize;
     for width in GATE_WIDTHS {
-        for kind in studio_analysis_kinds() {
-            for (_, node) in
-                studio_route_nodes(studio_route(SimulationPage::Analyses, Some(kind)), width)
-            {
+        for kind in crate::simulation::plan::AnalysisKind::ALL {
+            let Some(app) = studio_form(kind) else {
+                continue;
+            };
+            forms += 1;
+            for (_, node) in studio_route_nodes(app, width) {
                 // Only things a reader acts on. A container legitimately
                 // extends past the viewport; the page scrolls vertically to
                 // reach it.
@@ -333,7 +502,7 @@ fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
                 measured += 1;
                 if bounds.x1 > f64::from(width) + TOLERANCE || bounds.x0 < -TOLERANCE {
                     offenders.push(format!(
-                        "{width:.0}pt surface: {:?} {:?} spans {:.1}..{:.1}",
+                        "{width:.0}pt surface, {kind:?} form: {:?} {:?} spans {:.1}..{:.1}",
                         node.role(),
                         node.label().unwrap_or_default(),
                         bounds.x0,
@@ -350,11 +519,21 @@ fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
         "controls drawn outside the surface they belong to:\n{}",
         offenders.join("\n")
     );
-    // A sweep that measured nothing would pass forever.
+    // A sweep that measured nothing would pass forever, and one that reached
+    // only the nine forms the fixture starts with would have missed the STB and
+    // Noise overflow entirely -- which is how it got here.
     assert!(
         measured > 300,
         "the sweep measured only {measured} controls across {} widths and every form; \
          it is not reaching the forms it claims to check",
+        GATE_WIDTHS.len()
+    );
+    let kinds = crate::simulation::plan::AnalysisKind::ALL.len();
+    assert!(
+        forms >= (kinds - 4) * GATE_WIDTHS.len(),
+        "the sweep opened {forms} forms across {} widths; every one of the {kinds} kinds the \
+         catalogue offers has a form, and a plan that refuses more than a handful of inserts is \
+         a fixture that has stopped reaching them",
         GATE_WIDTHS.len()
     );
 }
