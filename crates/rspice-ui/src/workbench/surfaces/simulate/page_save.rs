@@ -313,6 +313,43 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
 /// measurement partitioned rather than two walks of the history that could
 /// disagree about which runs belong to the plan. Separated from the painter so
 /// the arithmetic can be checked without one.
+/// What the Retention card's "Executed decks" row states.
+///
+/// `retained` is this plan's datasets; `unattributed` is the runs the project
+/// still holds whose receipt names no plan, which is what a run recorded before
+/// receipts existed looks like. The row said "no dataset retained yet" whenever
+/// the first was zero, and the Specifications page was citing one of the second
+/// as evidence on the same project — two true facts under one sentence that
+/// could only be read as one of them.
+fn executed_deck_summary(
+    retained: usize,
+    unattributed: usize,
+    decks: &ExecutedDeckStorage,
+) -> String {
+    if retained == 0 && unattributed == 0 {
+        return "no dataset retained yet \u{b7} a run's decks are kept with its dataset".to_owned();
+    }
+    if retained == 0 {
+        return format!(
+            "no dataset for this plan yet \u{b7} {unattributed} earlier run{} retained without a \
+             plan receipt",
+            if unattributed == 1 { "" } else { "s" }
+        );
+    }
+    if decks.held == 0 {
+        return format!(
+            "none held \u{b7} this project holds no deck for its {retained} retained datasets"
+        );
+    }
+    format!(
+        "{} across {} of {retained} datasets \u{b7} {} listed \u{b7} {} summarized",
+        format_bytes(decks.total()),
+        decks.held,
+        format_bytes(decks.listed),
+        format_bytes(decks.summarized)
+    )
+}
+
 fn retention_ledger(
     simulation: &crate::state::SimulationState,
     plan_id: crate::product::SimulationPlanId,
@@ -417,21 +454,24 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
     } else {
         "the oldest unpinned dataset is discarded when a new run exceeds it".to_owned()
     };
+    // A run whose receipt names no plan is retained and is not counted above:
+    // `retained_plan_dataset_count` counts this plan's datasets, and a legacy
+    // run predates the receipt that would attribute it. The Specifications
+    // page reads exactly such a run as evidence, so a row that said "no
+    // dataset retained yet" while another page cited one was reporting two
+    // different facts under one sentence.
+    let unattributed = simulation
+        .runs
+        .iter()
+        .filter(|run| {
+            run.prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                .is_none()
+        })
+        .count();
     // The deck sentence names both halves of what is drawn below it, so the
     // ledger can be added up against it rather than believed.
-    let deck_storage = if retained == 0 {
-        "no dataset retained yet · a run's decks are kept with its dataset".to_owned()
-    } else if decks.held == 0 {
-        format!("none held · this project holds no deck for its {retained} retained datasets")
-    } else {
-        format!(
-            "{} across {} of {retained} datasets · {} listed · {} summarized",
-            format_bytes(decks.total()),
-            decks.held,
-            format_bytes(decks.listed),
-            format_bytes(decks.summarized)
-        )
-    };
+    let deck_storage = executed_deck_summary(retained, unattributed, &decks);
     let note = if rows.is_empty() {
         RETENTION_NOTE.to_owned()
     } else {
@@ -596,8 +636,45 @@ pub(super) fn format_bytes(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DATASETS_LISTED, commit_save_policy, format_bytes, retention_ledger};
+    use super::{
+        DATASETS_LISTED, ExecutedDeckStorage, commit_save_policy, executed_deck_summary,
+        format_bytes, retention_ledger,
+    };
     use crate::workbench::app::RSpiceApp;
+
+    /// The Executed decks row does not call a project empty that is not.
+    ///
+    /// `retained` counts this plan's datasets, which is not the same as the
+    /// runs the project holds: a run recorded before prepared receipts existed
+    /// carries no plan, so it is retained and uncounted. The Specifications
+    /// page cites exactly such a run as evidence, and this row said "no
+    /// dataset retained yet" on the same project — two true facts under one
+    /// sentence, which a reader can only take as one of them.
+    #[test]
+    fn the_executed_deck_row_states_the_runs_it_does_not_count() {
+        let none = ExecutedDeckStorage {
+            listed: 0,
+            summarized: 0,
+            held: 0,
+        };
+
+        assert_eq!(
+            executed_deck_summary(0, 0, &none),
+            "no dataset retained yet \u{b7} a run's decks are kept with its dataset"
+        );
+        assert_eq!(
+            executed_deck_summary(0, 1, &none),
+            "no dataset for this plan yet \u{b7} 1 earlier run retained without a plan receipt"
+        );
+        assert_eq!(
+            executed_deck_summary(0, 3, &none),
+            "no dataset for this plan yet \u{b7} 3 earlier runs retained without a plan receipt"
+        );
+        assert!(
+            executed_deck_summary(2, 3, &none).starts_with("none held"),
+            "a plan with datasets of its own reports on those"
+        );
+    }
 
     fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
         app.state

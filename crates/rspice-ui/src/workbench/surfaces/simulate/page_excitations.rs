@@ -60,18 +60,29 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState, sources: &[PlacedSource]) 
             }
         }
         if unread > 0 {
-            card_note(
-                ui,
-                &format!(
-                    "{unread} of {} sources are read by no enabled analysis in this plan \u{2014} \
-                     named by none, and with no enabled analysis that reads every source. A \
-                     disabled instance that names one is listed on its row and does not count. \
-                     They are still netlisted and still drive the circuit.",
-                    sources.len()
-                ),
-            );
+            card_note(ui, &unread_source_note(unread, sources.len()));
         }
     });
+}
+
+/// What the page says about the sources no enabled analysis reads.
+///
+/// The verb follows the count, not the noun it was attached to: "1 of 3
+/// sources are read by no enabled analysis" is the sentence a reader stops
+/// trusting before they reach the finding it carries. The closing clause
+/// follows the same count, because one source is an "it".
+fn unread_source_note(unread: usize, total: usize) -> String {
+    let (verb, subject, netlisted) = if unread == 1 {
+        ("is", "It is", "drives")
+    } else {
+        ("are", "They are", "drive")
+    };
+    format!(
+        "{unread} of {total} sources {verb} read by no enabled analysis in this plan \u{2014} \
+         named by none, and with no enabled analysis that reads every source. A disabled \
+         instance that names one is listed on its row and does not count. {subject} still \
+         netlisted and still {netlisted} the circuit."
+    )
 }
 
 /// One source's row. The reader column carries the finding, so it is the only
@@ -174,4 +185,27 @@ fn reveal(state: &mut AppState, source: &PlacedSource) {
     state.schematic.net_highlight.clear();
     state.schematic.center_request = position;
     state.workbench.activate(Workspace::Design);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unread_source_note;
+
+    /// The finding agrees with the number in front of it.
+    ///
+    /// The note read "1 of 3 sources are read by no enabled analysis", which is
+    /// the sentence a reader stops trusting before they reach the finding it
+    /// carries — and the finding is the whole reason the note is on the page.
+    #[test]
+    fn the_unread_source_note_agrees_with_its_own_count() {
+        let one = unread_source_note(1, 3);
+        assert!(one.starts_with("1 of 3 sources is read by"), "{one}");
+        assert!(one.contains("It is still netlisted"), "{one}");
+        assert!(one.contains("still drives the circuit"), "{one}");
+
+        let many = unread_source_note(2, 3);
+        assert!(many.starts_with("2 of 3 sources are read by"), "{many}");
+        assert!(many.contains("They are still netlisted"), "{many}");
+        assert!(many.contains("still drive the circuit"), "{many}");
+    }
 }
