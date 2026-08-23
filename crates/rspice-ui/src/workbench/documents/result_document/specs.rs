@@ -1,4 +1,4 @@
-//! SPECS — the active retained dataset's governed measurement results.
+//! SPECS â the active retained dataset's governed measurement results.
 //!
 //! Each row binds an authored `.MEAS` expression and project-owned limit to
 //! the exact retained value and worst source in the active immutable dataset.
@@ -26,7 +26,28 @@ use crate::workbench::design_system::{StatusMark, WorkbenchIcon, icon_button, pa
 
 use super::{ResultViewer, well_hint};
 
-const SPEC_COLUMN_WIDTHS: [f32; 7] = [160.0, 200.0, 116.0, 150.0, 140.0, 168.0, 92.0];
+/// The width each column wants, and the floor it may not be squeezed below.
+///
+/// A pair per column rather than one number, because the two were the same
+/// number and the table was therefore a fixed 1042 points wide however narrow
+/// the pane was. Below that width the last column â STATUS, which is the
+/// verdict the whole table exists to state â was simply cut off by the pane
+/// edge, at 1600 as well as at 1000, and a horizontal scroll bar under a table
+/// is not where a reader looks for a pass/fail.
+///
+/// The floors are what each column can still be read at: a measurement name
+/// and an expression elide legibly, a value and a margin are right-aligned
+/// numbers, and the status word does not elide at all â so it keeps its width
+/// and the prose columns give theirs up.
+const SPEC_COLUMNS: [(f32, f32); 7] = [
+    (160.0, 104.0),
+    (200.0, 112.0),
+    (116.0, 84.0),
+    (150.0, 96.0),
+    (140.0, 88.0),
+    (168.0, 96.0),
+    (92.0, 92.0),
+];
 const SPEC_TABLE_GUTTER: f32 = 16.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,7 +394,11 @@ fn candidates_share_source_lineage(candidates: &[MeasurementCandidate<'_>]) -> b
 
 fn result_row(run: &SimulationRun, measurement: String, spec: Option<&SpecEntry>) -> SpecResultRow {
     let candidates = measurement_candidates(run, &measurement);
-    let limit = spec.map_or_else(|| "—".to_owned(), rail_text);
+    // The one spelling of a bound. This table formatted its own with a
+    // plot-axis formatter, so a megahertz limit read "â¥ 1.000 M Hz" here and
+    // "â¥ 1M Hz" on the studio page that authored it â a number a reader has to
+    // translate before holding it against a datasheet.
+    let limit = spec.map_or_else(|| "\u{2014}".to_owned(), SpecEntry::limit_text);
     let unit = spec.map_or_else(String::new, |entry| entry.unit.clone());
     let expression = spec.map_or_else(String::new, |entry| entry.expression.clone());
     let is_bounded = spec.is_some_and(|entry| entry.min.is_some() || entry.max.is_some());
@@ -693,7 +718,7 @@ pub(crate) fn hardcopy_table(run: &SimulationRun, specs: &[SpecEntry]) -> super:
         })
         .collect();
     super::ResultSheetTable {
-        title: format!("Specifications · {}", run.label),
+        title: format!("Specifications Â· {}", run.label),
         columns: [
             "Measurement",
             "Expression",
@@ -730,15 +755,46 @@ fn lifecycle_label(lifecycle: SimulationRunLifecycle) -> &'static str {
     }
 }
 
-fn table_width() -> f32 {
-    SPEC_COLUMN_WIDTHS.iter().sum::<f32>() + SPEC_TABLE_GUTTER
+/// The narrowest the table can be laid out at without cutting a column off.
+fn table_minimum_width() -> f32 {
+    SPEC_COLUMNS.iter().map(|(_, floor)| floor).sum::<f32>() + SPEC_TABLE_GUTTER
 }
 
-fn column_rect(row: egui::Rect, index: usize) -> egui::Rect {
-    let left = row.left() + SPEC_COLUMN_WIDTHS[..index].iter().sum::<f32>();
+/// The width the table lays itself out at when nothing squeezes it.
+fn table_width() -> f32 {
+    SPEC_COLUMNS.iter().map(|(want, _)| want).sum::<f32>() + SPEC_TABLE_GUTTER
+}
+
+/// What each column gets in a table `content_width` wide.
+///
+/// Above the preferred total every column has what it wants. Below it, the
+/// shortfall is taken from the columns in proportion to how much each has to
+/// give â its preferred width less its floor â so the columns that elide
+/// legibly give up the room and the verdict column keeps all of it. Below the
+/// floors nothing more can be taken and the caller's horizontal scroll is what
+/// is left.
+fn spec_columns(content_width: f32) -> [f32; 7] {
+    let preferred = table_width();
+    let mut widths = SPEC_COLUMNS.map(|(want, _)| want);
+    if content_width >= preferred {
+        return widths;
+    }
+    let shortfall = preferred - content_width.max(table_minimum_width());
+    let give: f32 = SPEC_COLUMNS.iter().map(|(want, floor)| want - floor).sum();
+    if shortfall <= 0.0 || give <= 0.0 {
+        return widths;
+    }
+    for (width, (want, floor)) in widths.iter_mut().zip(SPEC_COLUMNS) {
+        *width = want - shortfall * (want - floor) / give;
+    }
+    widths
+}
+
+fn column_rect(row: egui::Rect, widths: &[f32; 7], index: usize) -> egui::Rect {
+    let left = row.left() + widths[..index].iter().sum::<f32>();
     egui::Rect::from_min_size(
         egui::pos2(left, row.top()),
-        egui::vec2(SPEC_COLUMN_WIDTHS[index], row.height()),
+        egui::vec2(widths[index], row.height()),
     )
 }
 
@@ -769,7 +825,7 @@ fn paint_clipped_table_text(
 
 fn value_text(row: &SpecResultRow) -> String {
     row.value
-        .map_or_else(|| "—".to_owned(), |value| fmt_si(value, &row.unit, 4))
+        .map_or_else(|| "â".to_owned(), |value| fmt_si(value, &row.unit, 4))
 }
 
 fn margin_text(row: &SpecResultRow) -> String {
@@ -778,7 +834,7 @@ fn margin_text(row: &SpecResultRow) -> String {
             if row.status == SpecResultStatus::Unbound {
                 "unbound".to_owned()
             } else {
-                "—".to_owned()
+                "â".to_owned()
             }
         },
         |margin| fmt_si(margin, &row.unit, 4),
@@ -804,6 +860,7 @@ fn row_accessibility_label(row: &SpecResultRow) -> String {
 }
 
 fn paint_table_header(ui: &mut Ui, content_width: f32, row_height: f32) {
+    let widths = spec_columns(content_width);
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let (header, response) =
@@ -837,7 +894,7 @@ fn paint_table_header(ui: &mut Ui, content_width: f32, row_height: f32) {
     .iter()
     .enumerate()
     {
-        let cell = column_rect(header, index);
+        let cell = column_rect(header, &widths, index);
         let cell_response = ui.interact(cell, response.id.with(index), egui::Sense::hover());
         cell_response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), *label)
@@ -872,6 +929,7 @@ fn paint_result_row(
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let widths = spec_columns(content_width);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(content_width, row_height), egui::Sense::hover());
     let accessible_label = row_accessibility_label(row);
@@ -921,7 +979,7 @@ fn paint_result_row(
     );
 
     let expression = if row.expression.is_empty() {
-        "—"
+        "â"
     } else {
         &row.expression
     };
@@ -933,14 +991,14 @@ fn paint_result_row(
         value.as_str(),
         row.limit.as_str(),
         margin.as_str(),
-        row.worst_corner.as_deref().unwrap_or("—"),
+        row.worst_corner.as_deref().unwrap_or("â"),
         row.status.label(),
     ];
     for (index, label) in cell_values.iter().enumerate() {
         if index == 5 && row.source_analysis_index.is_some() {
             continue;
         }
-        let cell = column_rect(rect, index);
+        let cell = column_rect(rect, &widths, index);
         let cell_response = ui.interact(
             cell,
             response.id.with(("cell", index)),
@@ -957,7 +1015,7 @@ fn paint_result_row(
 
     paint_clipped_table_text(
         ui,
-        column_rect(rect, 0).shrink2(egui::vec2(9.0, 0.0)),
+        column_rect(rect, &widths, 0).shrink2(egui::vec2(9.0, 0.0)),
         egui::Align2::LEFT_CENTER,
         &row.measurement,
         theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -965,7 +1023,7 @@ fn paint_result_row(
     );
     paint_clipped_table_text(
         ui,
-        column_rect(rect, 1).shrink2(egui::vec2(9.0, 0.0)),
+        column_rect(rect, &widths, 1).shrink2(egui::vec2(9.0, 0.0)),
         egui::Align2::LEFT_CENTER,
         expression,
         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -977,7 +1035,7 @@ fn paint_result_row(
     );
     paint_clipped_table_text(
         ui,
-        column_rect(rect, 2).shrink2(egui::vec2(9.0, 0.0)),
+        column_rect(rect, &widths, 2).shrink2(egui::vec2(9.0, 0.0)),
         egui::Align2::RIGHT_CENTER,
         &value,
         theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -989,14 +1047,14 @@ fn paint_result_row(
     );
     paint_clipped_table_text(
         ui,
-        column_rect(rect, 3).shrink2(egui::vec2(9.0, 0.0)),
+        column_rect(rect, &widths, 3).shrink2(egui::vec2(9.0, 0.0)),
         egui::Align2::LEFT_CENTER,
         &row.limit,
         theme::mono(tokens::FS_0, FontWeight::Regular),
         c.text_dim,
     );
 
-    let margin_cell = column_rect(rect, 4).shrink2(egui::vec2(9.0, 5.0));
+    let margin_cell = column_rect(rect, &widths, 4).shrink2(egui::vec2(9.0, 5.0));
     if let Some(value) = row.margin {
         let fraction = (value.abs() / max_margin).clamp(0.04, 1.0) as f32;
         let color = if value >= 0.0 { c.ok } else { c.err };
@@ -1027,7 +1085,7 @@ fn paint_result_row(
         );
     }
 
-    let corner_cell = column_rect(rect, 5).shrink2(egui::vec2(6.0, 2.0));
+    let corner_cell = column_rect(rect, &widths, 5).shrink2(egui::vec2(6.0, 2.0));
     let focused = if let Some(analysis_index) = row.source_analysis_index {
         let label = row.worst_corner.as_deref().unwrap_or("Open source");
         let button = ui.put(
@@ -1056,14 +1114,14 @@ fn paint_result_row(
             ui,
             corner_cell,
             egui::Align2::LEFT_CENTER,
-            "—",
+            "â",
             theme::mono(tokens::FS_0, FontWeight::Regular),
             c.text_faint,
         );
         None
     };
 
-    let status_cell = column_rect(rect, 6).shrink2(egui::vec2(9.0, 0.0));
+    let status_cell = column_rect(rect, &widths, 6).shrink2(egui::vec2(9.0, 0.0));
     let (status_color, mark) = match row.status {
         SpecResultStatus::Pass => (c.ok, StatusMark::Success),
         SpecResultStatus::Fail | SpecResultStatus::Invalid => (c.err, StatusMark::Failure),
@@ -1103,7 +1161,11 @@ fn show_table_shell(
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let row_height = spec_table_row_height(t.metrics.ctl_h);
-    let content_width = ui.available_width().max(table_width());
+    // The pane's width, floored at what the columns can still be read in
+    // rather than at what they would prefer. Floored at the preferred width,
+    // the table was a fixed 1042 points and the pane simply cut the last
+    // column â the verdict â off its right edge at every width below that.
+    let content_width = ui.available_width().max(table_minimum_width());
     let max_margin = rows
         .iter()
         .filter_map(|row| row.margin)
@@ -1197,21 +1259,33 @@ fn paint_summary(
         rect.bottom() - 0.5,
         egui::Stroke::new(1.0, c.border_strong),
     );
+    // The detail gets the room the title does not take, not half the row. It
+    // used to start at the centre and is right-aligned, so a status line longer
+    // than half the band was clipped from its left â "3 / 5 pass Â· 2
+    // unavailable Â· failed Â· dataset â¦" arrived as "s Â· 2 unavailable Â· â¦",
+    // which loses the count the line exists to state.
+    let title_font = theme::sans(tokens::FS_1, FontWeight::Medium);
+    let title_width = ui
+        .painter()
+        .layout_no_wrap(title.to_owned(), title_font.clone(), c.text)
+        .size()
+        .x;
+    let split = (rect.left() + 10.0 + title_width + 16.0).min(rect.right() - 10.0);
     paint_clipped_table_text(
         ui,
         egui::Rect::from_min_max(
             egui::pos2(rect.left() + 10.0, rect.top()),
-            egui::pos2(rect.center().x, rect.bottom()),
+            egui::pos2(split, rect.bottom()),
         ),
         egui::Align2::LEFT_CENTER,
         title,
-        theme::sans(tokens::FS_1, FontWeight::Medium),
+        title_font,
         c.text,
     );
     paint_clipped_table_text(
         ui,
         egui::Rect::from_min_max(
-            egui::pos2(rect.center().x, rect.top()),
+            egui::pos2(split, rect.top()),
             egui::pos2(rect.right() - 10.0, rect.bottom()),
         ),
         egui::Align2::RIGHT_CENTER,
@@ -1240,7 +1314,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         paint_summary(
             ui,
             "Specifications",
-            &format!("0 / {bounded} pass · no active dataset"),
+            &format!("0 / {bounded} pass Â· no active dataset"),
             format!(
                 "Specifications: zero of {bounded} bounded measurements pass; no active dataset"
             ),
@@ -1251,7 +1325,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &[],
             "no-active-dataset",
             Some(
-                "No active dataset — select a retained run or run the simulation to evaluate specifications",
+                "No active dataset â select a retained run or run the simulation to evaluate specifications",
             ),
             None,
         );
@@ -1275,15 +1349,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let bounded = summary.bounded;
     let unavailable = summary.unavailable;
     let unavailable_text = if unavailable > 0 {
-        format!(" · {unavailable} unavailable")
+        format!(" Â· {unavailable} unavailable")
     } else {
         String::new()
     };
     paint_summary(
         ui,
-        &format!("Specifications · Run #{run_id}"),
+        &format!("Specifications Â· Run #{run_id}"),
         &format!(
-            "{passing} / {bounded} pass{unavailable_text} · {} · dataset {dataset_id}",
+            "{passing} / {bounded} pass{unavailable_text} Â· {} Â· dataset {dataset_id}",
             lifecycle_label(lifecycle)
         ),
         format!(
@@ -1296,8 +1370,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             c.warn
         },
     );
-    // The studio's Requirements page and this table read one fact — which
-    // limit is being looked at — rather than each keeping a selection of its
+    // The studio's Requirements page and this table read one fact â which
+    // limit is being looked at â rather than each keeping a selection of its
     // own, so a hop from either side arrives on the row the other named.
     let carried = state.workbench.selected_specification.clone();
     let focus_analysis = show_table_shell(
@@ -1305,7 +1379,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &rows,
         dataset_id,
         Some(
-            "No measurements — add .MEAS statements, run the simulation, then bind requirement limits",
+            "No measurements â add .MEAS statements, run the simulation, then bind requirement limits",
         ),
         carried.as_deref(),
     );
@@ -1352,26 +1426,6 @@ fn source_viewer(state: &AppState, analysis_type: AnalysisType) -> ResultViewer 
     }
 }
 
-/// The rail text: `≥ min · ≤ max unit` with whichever bounds exist.
-fn rail_text(spec: &SpecEntry) -> String {
-    let mut parts = Vec::new();
-    if let Some(min) = spec.min {
-        parts.push(format!("≥ {}", fmt_si(min, "", 3).trim()));
-    }
-    if let Some(max) = spec.max {
-        parts.push(format!("≤ {}", fmt_si(max, "", 3).trim()));
-    }
-    if parts.is_empty() {
-        return "—".to_owned();
-    }
-    let mut text = parts.join(" · ");
-    if !spec.unit.is_empty() {
-        text.push(' ');
-        text.push_str(&spec.unit);
-    }
-    text
-}
-
 /// The inline governed-requirement editor. Exact comparison kind, limits,
 /// guard band, role, and durable requirement identity remain explicit rather
 /// than being flattened through the legacy min/max projection.
@@ -1390,7 +1444,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     (
                         instance.id(),
                         format!(
-                            "{} · {}",
+                            "{} Â· {}",
                             plan.instance_list_label(index)
                                 .unwrap_or_else(|| instance.display_name().to_owned()),
                             instance.id()
@@ -1475,7 +1529,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                 };
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
-                    field(ui, &mut draft.requirement_key, 130.0, "SPEC-…");
+                    field(ui, &mut draft.requirement_key, 130.0, "SPEC-â¦");
                     field(ui, &mut draft.requirement_name, 180.0, "requirement name");
                     field(ui, &mut draft.measurement, 150.0, "measurement");
                     field(ui, &mut draft.expression, 230.0, ".MEAS expression");
@@ -1561,7 +1615,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         .map_or_else(
                             || match &draft.scope {
                                 SpecPointScope::SelectedCorners { corners } => {
-                                    format!("Corners {}", corners.join(" · "))
+                                    format!("Corners {}", corners.join(" Â· "))
                                 }
                                 SpecPointScope::AllPoints => "All PVT points".to_owned(),
                                 SpecPointScope::Nominal => "Nominal only".to_owned(),
@@ -1588,7 +1642,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                                 .iter()
                                 .find(|(candidate, _)| *candidate == id)
                                 .map_or_else(
-                                    || format!("Missing analysis · {id}"),
+                                    || format!("Missing analysis Â· {id}"),
                                     |(_, label)| label.clone(),
                                 )
                         },
@@ -1616,7 +1670,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         || "authored in this plan".to_owned(),
                         |source| {
                             format!(
-                                "{}:{} · revision {} · digest {}",
+                                "{}:{} Â· revision {} Â· digest {}",
                                 source.logical_path,
                                 source.row,
                                 source.imported_revision,
@@ -1628,7 +1682,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         || "none".to_owned(),
                         |waiver| {
                             format!(
-                                "{} · owner {} · {}",
+                                "{} Â· owner {} Â· {}",
                                 waiver.reference, waiver.owner, waiver.rationale
                             )
                         },
@@ -1637,7 +1691,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                         ui.add_space(10.0);
                         ui.label(
                             egui::RichText::new(format!(
-                                "Stable ID {} · source {source} · waiver/disposition {waiver}",
+                                "Stable ID {} Â· source {source} Â· waiver/disposition {waiver}",
                                 original.id
                             ))
                             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
@@ -1782,7 +1836,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             measurement_table(ui, &[("Bounds", "none defined")]);
             return;
         }
-        section_header(ui, "Specs · active dataset", None);
+        section_header(ui, "Specs Â· active dataset", None);
         let bounded = specs
             .iter()
             .filter(|spec| spec.min.is_some() || spec.max.is_some())
@@ -1814,7 +1868,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     });
     let specs = frozen_specs.as_deref().unwrap_or(&state.workspace.specs);
     if specs.is_empty() {
-        section_header(ui, "Specs · active dataset", None);
+        section_header(ui, "Specs Â· active dataset", None);
         measurement_table(
             ui,
             &[("Bounds", "none were frozen into this dataset's run receipt")],
@@ -1833,7 +1887,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .filter_map(|row| row.margin.map(|margin| (row, margin)))
         .min_by(|(_, left), (_, right)| left.total_cmp(right));
 
-    section_header(ui, "Specs · active dataset", None);
+    section_header(ui, "Specs Â· active dataset", None);
     let specs_n = specs.len().to_string();
     // The results panel is where a spec table gets read into a sign-off
     // package, so it is where an unqualified model has to be visible. It
@@ -2019,7 +2073,7 @@ mod tests {
     fn bounded_row_uses_the_exact_worst_retained_source_and_corner() {
         let mut run = SimulationRun::new(4);
         let source = AnalysisInstanceId::new();
-        for (value, corner) in [(0.8, "TT · 27 °C"), (1.2, "SS · 125 °C")] {
+        for (value, corner) in [(0.8, "TT Â· 27 Â°C"), (1.2, "SS Â· 125 Â°C")] {
             run.add_analysis(
                 AnalysisResult::new(1, AnalysisType::Corner, corner)
                     .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
@@ -2061,7 +2115,7 @@ mod tests {
         );
         assert_eq!(row.status, SpecResultStatus::Fail);
         assert_eq!(row.source_analysis_index, Some(1));
-        assert_eq!(row.worst_corner.as_deref(), Some("SS · 125 °C"));
+        assert_eq!(row.worst_corner.as_deref(), Some("SS Â· 125 Â°C"));
     }
 
     #[test]
@@ -2084,8 +2138,11 @@ mod tests {
 
     #[test]
     fn seven_column_geometry_is_stable_and_does_not_depend_on_row_state() {
-        assert_eq!(super::SPEC_COLUMN_WIDTHS.len(), 7);
+        assert_eq!(super::SPEC_COLUMNS.len(), 7);
         assert_eq!(table_width(), 1042.0);
+        // And the table can be laid out in a pane narrower than that, which at
+        // both gate widths is what the pane is.
+        assert!(super::table_minimum_width() < 1042.0);
     }
 
     #[test]
@@ -2320,5 +2377,62 @@ mod tests {
         assert_eq!(retained.waiver, original.waiver);
         assert_eq!(retained.producing_analysis, Some(producer));
         assert_eq!(retained.scope, crate::state::SpecPointScope::Nominal);
+    }
+
+    /// Every column of the spec table is inside the pane at both gate widths.
+    ///
+    /// The columns were seven fixed widths summing to 1042 points, and the pane
+    /// simply cut the last of them — STATUS, the verdict the table exists to
+    /// state — off its right edge at 1600 as well as at 1000. A horizontal
+    /// scroll bar under a table is not where a reader looks for a pass/fail.
+    #[test]
+    fn every_column_is_inside_the_pane_at_both_gate_widths() {
+        for pane in [1000.0f32, 1600.0] {
+            let content = pane.max(super::table_minimum_width());
+            let widths = super::spec_columns(content);
+            let total: f32 = widths.iter().sum();
+            assert!(
+                total <= content + 0.5,
+                "in a {pane:.0}-point pane the columns take {total:.0} of {content:.0}: {widths:?}"
+            );
+            // The verdict never gives up a point: it is one word, it does not
+            // elide, and it is the answer. The prose columns shrink instead.
+            assert!(
+                (widths[6] - super::SPEC_COLUMNS[6].0).abs() < 0.5,
+                "the status column keeps its width at {pane:.0}"
+            );
+            for (width, (_, floor)) in widths.iter().zip(super::SPEC_COLUMNS) {
+                assert!(
+                    *width >= floor - 0.5,
+                    "a column shrank to {width:.0}, below the {floor:.0} it can be read at"
+                );
+            }
+        }
+        // And where nothing squeezes them, every column has what it wants.
+        let ample = super::spec_columns(super::table_width() + 200.0);
+        assert_eq!(ample, super::SPEC_COLUMNS.map(|(want, _)| want));
+    }
+
+    /// One spelling of a bound, wherever it is printed.
+    ///
+    /// This table formatted its own limits with the plot-axis formatter, so a
+    /// megahertz requirement read `≥ 1.000 M Hz` here while the studio page
+    /// that authored it read `≥ 1M Hz` — one number, two spellings, and the one
+    /// here is not how a limit is written beside a unit anywhere in the field.
+    #[test]
+    fn a_limit_is_spelled_the_same_here_as_on_the_page_that_authored_it() {
+        let spec = crate::state::SpecEntry {
+            measurement: "bandwidth_3db".to_owned(),
+            expression: String::new(),
+            min: Some(1.0e6),
+            max: None,
+            unit: "Hz".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        };
+        assert_eq!(spec.limit_text(), "\u{2265} 1M Hz");
+        assert!(
+            !spec.limit_text().contains("Meg"),
+            "`Meg` is the deck's prefix and belongs in a deck, not beside a unit"
+        );
     }
 }

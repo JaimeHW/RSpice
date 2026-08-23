@@ -592,6 +592,34 @@ impl SpecEntry {
         validate_bounded_text("unit", &self.unit, 64, true)
     }
 
+    /// The bound, spelled the way every surface states it.
+    ///
+    /// One owner. The studio's requirement registry and the Results specs table
+    /// print the same limit and printed it two ways: `≥ 1M Hz` from the
+    /// engineering formatter here, `≥ 1.000 M Hz` from a plot-axis formatter
+    /// there, and a two-sided bound as `min … max` against `≥ min · ≤ max`. A
+    /// limit a reader has to translate before holding it against a datasheet is
+    /// stated badly; two spellings of one number is worse.
+    ///
+    /// [`crate::state::format_engineering_display`] is the spelling: `Meg` is
+    /// the deck's unambiguous megohm/megahertz prefix and belongs in a deck,
+    /// not beside a unit on a surface.
+    #[must_use]
+    pub fn limit_text(&self) -> String {
+        let quantity = crate::state::format_engineering_display;
+        match (self.min, self.max) {
+            (Some(minimum), Some(maximum)) => format!(
+                "{} \u{2026} {} {}",
+                quantity(minimum),
+                quantity(maximum),
+                self.unit
+            ),
+            (Some(minimum), None) => format!("\u{2265} {} {}", quantity(minimum), self.unit),
+            (None, Some(maximum)) => format!("\u{2264} {} {}", quantity(maximum), self.unit),
+            (None, None) => "waveform \u{b7} no scalar bound".to_owned(),
+        }
+    }
+
     /// Spec verdict for one measured value.
     pub fn passes(&self, value: f64) -> bool {
         self.min.is_none_or(|min| value >= min) && self.max.is_none_or(|max| value <= max)

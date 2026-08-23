@@ -25,20 +25,14 @@ pub(super) fn quantity(value: f64) -> String {
 }
 
 /// The specification's bound, spelled the way the page shows it.
+///
+/// A projection of [`crate::state::SpecEntry::limit_text`], which is where the
+/// spelling lives. The Results specs table states the same bound and cannot
+/// reach this module — it sits below `surfaces` in the layer order — so a
+/// second formatter grew there, and `≥ 1.000 M Hz` came to sit opposite
+/// `≥ 1M Hz` for one requirement.
 pub(super) fn specification_limit(spec: &crate::state::SpecEntry) -> String {
-    match (spec.min, spec.max) {
-        (Some(minimum), Some(maximum)) => {
-            format!(
-                "{} … {} {}",
-                quantity(minimum),
-                quantity(maximum),
-                spec.unit
-            )
-        }
-        (Some(minimum), None) => format!("≥ {} {}", quantity(minimum), spec.unit),
-        (None, Some(maximum)) => format!("≤ {} {}", quantity(maximum), spec.unit),
-        (None, None) => "waveform · no scalar bound".to_owned(),
-    }
+    spec.limit_text()
 }
 
 /// The active retained dataset only when its frozen receipt belongs to the
