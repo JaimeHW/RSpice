@@ -175,7 +175,7 @@ define_messages! {
     NetlistRunStripExecutedPointShort => "{point} · {revision}",
     NetlistRunStripOpenDeck => "Open the deck this run used",
     NetlistRunStripOpenResults => "Open in Results",
-    NetlistRunStripOpenTaskDeck => "Open task deck",
+    NetlistRunStripOpenTaskDeck => crate::workbench::commands::vocabulary::OPEN_TASK_DECK,
     NetlistRunStripOpenTaskDeckTooltip => "Opens the exact source Run {id} handed its first task, as a read-only document sealed with the run.",
     NetlistRunStripNextTask => "Task {index}/{count}",
     NetlistRunStripNextTaskTooltip => "Showing task {index} of {count}. Opens the next task's executed deck.",

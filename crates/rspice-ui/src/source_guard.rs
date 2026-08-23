@@ -493,6 +493,67 @@ mod tests {
         );
     }
 
+    /// Only the command vocabulary spells the task-deck action.
+    ///
+    /// Four surfaces printed the same words as a literal of their own: the
+    /// palette entry, the netlist run strip's catalog message, the Results
+    /// manifest's button and the jobs manager's. All four are the same command,
+    /// and four literals is four chances for an operator to meet it under two
+    /// names.
+    ///
+    /// The label is decided in `commands::vocabulary`, which is where a
+    /// command's label is decided, and this is what stops a fifth literal
+    /// appearing beside it. The needle is assembled rather than written, so
+    /// this file is not itself a match — a detector that matched itself would
+    /// be a detector nobody could keep green.
+    #[test]
+    fn only_the_command_vocabulary_spells_the_task_deck_action() {
+        let needle = format!("\"{}\"", ["Open", "task", "deck"].join(" "));
+        let owner = Path::new("workbench")
+            .join("commands")
+            .join("vocabulary.rs");
+
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut paths = Vec::new();
+        rust_sources(&source_root, &mut paths);
+        paths.sort();
+        assert!(
+            paths.len() > 100,
+            "the crate-wide scan found only {} files; a scan that reaches nothing passes \
+             forever",
+            paths.len()
+        );
+
+        let mut found = Vec::new();
+        let mut owner_spellings = 0usize;
+        for path in &paths {
+            let source = std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            for (number, line) in source.lines().enumerate() {
+                if !line.contains(&needle) {
+                    continue;
+                }
+                if path.ends_with(&owner) {
+                    owner_spellings += 1;
+                    continue;
+                }
+                found.push(format!("{}:{}", path.display(), number + 1));
+            }
+        }
+
+        assert_eq!(
+            owner_spellings, 1,
+            "the vocabulary states the label once; {owner_spellings} spellings there is the \
+             same duplication moved indoors"
+        );
+        assert!(
+            found.is_empty(),
+            "these spell the task-deck action themselves — read \
+             `workbench::commands::vocabulary::OPEN_TASK_DECK`:\n  {}",
+            found.join("\n  ")
+        );
+    }
+
     /// The character a double-encoded UTF-8 sequence starts with.
     ///
     /// A UTF-8 lead byte read back as Latin-1 and written out as UTF-8 again

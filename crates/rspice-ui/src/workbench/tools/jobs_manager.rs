@@ -927,9 +927,11 @@ fn render_inspector(
                     // control uses, so the document a reader reaches from here
                     // is byte-identical to the one they reach from there.
                     let deck_held = row.executed_deck_points > 0;
-                    let deck = crate::ui::widgets::Button::new("Open task deck")
-                        .enabled(deck_held)
-                        .show(ui);
+                    let deck = crate::ui::widgets::Button::new(
+                        crate::workbench::commands::vocabulary::OPEN_TASK_DECK,
+                    )
+                    .enabled(deck_held)
+                    .show(ui);
                     if deck_held {
                         if deck
                             .on_hover_text(format!(

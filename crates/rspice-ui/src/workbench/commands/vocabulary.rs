@@ -708,7 +708,7 @@ impl Command {
                 "Open producing simulation plan",
                 "Results",
             ),
-            Self::OpenTaskDeck => spec("open-task-deck", "Open task deck", "Results"),
+            Self::OpenTaskDeck => spec("open-task-deck", OPEN_TASK_DECK, "Results"),
             Self::RevealProducerLog => {
                 spec("reveal-producer-log", "Reveal producer log", "Results")
             }
@@ -1019,6 +1019,15 @@ pub(in crate::workbench) const fn spec(
 ) -> CommandSpec {
     CommandSpec { id, label, group }
 }
+
+/// The one spelling of the action that opens a run's executed task deck.
+///
+/// Four surfaces printed it as a literal of their own: this vocabulary's
+/// palette entry, the netlist run strip's catalog message, the Results
+/// manifest's button and the jobs manager's. Four literals is four chances for
+/// an operator to meet the same command under two names, and the vocabulary is
+/// where a command's label is decided — so it is decided here, once.
+pub(in crate::workbench) const OPEN_TASK_DECK: &str = "Open task deck";
 
 /// Every command registered with application chrome. Search, menus,
 /// accessibility help, and keyboard resolution all project from this list.

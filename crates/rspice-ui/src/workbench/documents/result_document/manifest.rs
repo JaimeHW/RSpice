@@ -461,9 +461,10 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
     // run carries no prepared authority and its executed source is exactly as
     // worth reading.
     section_header(ui, "Executed source", None);
-    let deck = crate::ui::widgets::Button::new("Open task deck")
-        .enabled(executed_deck_points > 0)
-        .show(ui);
+    let deck =
+        crate::ui::widgets::Button::new(crate::workbench::commands::vocabulary::OPEN_TASK_DECK)
+            .enabled(executed_deck_points > 0)
+            .show(ui);
     if executed_deck_points > 0 {
         open_task_deck = deck
             .on_hover_text(format!(
