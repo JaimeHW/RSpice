@@ -1525,7 +1525,7 @@ fn analysis_editor(
                 sequence: prior_run.map(|(_, sequence)| sequence),
                 open: &mut open_prior_dataset,
             },
-            &resolved_participation,
+            resolved_participation,
             &mut participation_action,
             viewport_width <= 760.0,
             &mut action,
