@@ -49,6 +49,7 @@ pub use builder::{
 mod config_resolver;
 mod convergence;
 mod core;
+mod data;
 mod dc;
 mod distortion;
 mod error;

@@ -379,29 +379,24 @@ impl Engine {
                 .parameter_redefinition_diagnostic_policy(),
             resource_limits,
         };
-        let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
-            Netlist::parse_with_path_and_options_and_abort(
-                &overridden_source,
-                source_path,
-                parse_options,
-                abort,
-            )
-        } else {
-            Netlist::parse_with_options_and_abort(&overridden_source, parse_options, abort)
-        }
-        .map_err(|error| match error {
-            crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
-            crate::netlist::ParseWithAbortError::Parse(
-                crate::netlist::ParseError::ResourceLimit(error),
-            ) => SimulationError::ResourceLimit(error),
-            crate::netlist::ParseWithAbortError::Parse(error) => SimulationError::Netlist(format!(
-                "Failed to reparse netlist for parameter override set {:?}: {}",
-                param_overrides, error
-            )),
-        })?;
+        let mut reparsed = netlist
+            .replay_root_source_with_options_and_abort(&overridden_source, parse_options, abort)
+            .map_err(|error| match error {
+                crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+                crate::netlist::ParseWithAbortError::Parse(
+                    crate::netlist::ParseError::ResourceLimit(error),
+                ) => SimulationError::ResourceLimit(error),
+                crate::netlist::ParseWithAbortError::Parse(error) => {
+                    SimulationError::Netlist(format!(
+                        "Failed to reparse netlist for parameter override set {:?}: {}",
+                        param_overrides, error
+                    ))
+                }
+            })?;
         for (name, value) in &param_overrides {
             reparsed.params.set(name, *value);
         }
+        Self::reapply_ast_overlay_with_abort(&mut reparsed, &netlist.ast_overlay, abort)?;
         let applied_device_overrides = Self::apply_device_parameter_overrides_with_abort(
             &mut reparsed,
             &device_overrides,
@@ -439,14 +434,46 @@ impl Engine {
                         device_name, param_name
                     ))
                 })?;
-            Self::apply_device_step_value(&mut element.kind, Some(param_name), *value)?;
+            let canonical_parameter =
+                Self::canonical_device_parameter(&element.kind, Some(param_name));
+            Self::apply_device_step_value(&mut element.kind, Some(&canonical_parameter), *value)?;
+            netlist.ast_overlay.device_parameters.insert(
+                (
+                    element.name.to_ascii_uppercase(),
+                    canonical_parameter.to_ascii_uppercase(),
+                ),
+                *value,
+            );
             applied += 1;
         }
-        if applied > 0 {
-            netlist.source_text = None;
-            netlist.source_path = None;
-        }
         Ok(applied)
+    }
+
+    fn reapply_ast_overlay_with_abort(
+        netlist: &mut Netlist,
+        overlay: &crate::netlist::NetlistAstOverlay,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        for (index, ((device_name, parameter_name), value)) in
+            overlay.device_parameters.iter().enumerate()
+        {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let element = netlist
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case(device_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "retained device override '{}:{}' no longer resolves after source replay",
+                        device_name, parameter_name
+                    ))
+                })?;
+            Self::apply_device_step_value(&mut element.kind, Some(parameter_name), *value)?;
+        }
+        netlist.ast_overlay = overlay.clone();
+        Ok(())
     }
 
     pub(in crate::engine) fn logical_lines_after_title(source: &str) -> Vec<String> {
@@ -549,9 +576,13 @@ impl Engine {
     }
 
     fn is_parameter_assignment_command(upper_trimmed_line: &str) -> bool {
-        upper_trimmed_line.starts_with(".PARAM")
-            || upper_trimmed_line.starts_with(".CSPARAM")
-            || upper_trimmed_line.starts_with(".GLOBAL_PARAM")
+        matches!(
+            upper_trimmed_line
+                .split_whitespace()
+                .next()
+                .unwrap_or_default(),
+            ".PARAM" | ".PARAMS" | ".CSPARAM" | ".GLOBAL_PARAM"
+        )
     }
 
     pub(in crate::engine) fn source_references_param(source: &str, param_name: &str) -> bool {

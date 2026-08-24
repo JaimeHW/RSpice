@@ -1,3 +1,4 @@
+use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::noise::{
@@ -1756,6 +1757,9 @@ impl Engine {
         let points = netlist
             .frequency_data_table_points(table_name)
             .map_err(|error| SimulationError::Circuit(format!(".NOISE DATA {error}")))?;
+        self.ensure_analysis_points(points.len())?;
+        self.ensure_batch_runs(points.len())?;
+        let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;
 
         let mut row_netlists = Vec::with_capacity(points.len());
         let mut results = Vec::with_capacity(points.len());
@@ -1763,8 +1767,8 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (row_netlist, _) =
-                Self::create_perturbed_netlist_multi_with_abort(netlist, &point.overrides, abort)?;
+            let row_netlist =
+                materialize_frequency_data_row_with_abort(netlist, &override_plan, point, abort)?;
             let temperature = row_netlist
                 .options
                 .temp

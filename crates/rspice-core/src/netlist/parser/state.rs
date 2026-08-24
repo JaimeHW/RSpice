@@ -234,6 +234,8 @@ impl ParseState {
             pspice_chebyshev_source_count: self.pspice_chebyshev_source_count,
             source_text: Some(input.to_string()),
             source_path: None,
+            replay_context: None,
+            ast_overlay: Default::default(),
         };
         apply_temp_directive_to_options(&mut netlist);
         let ground_policy = netlist.ground_policy();

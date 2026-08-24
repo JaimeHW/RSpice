@@ -6,6 +6,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
+use super::data::{FrequencyDataOverridePlan, materialize_frequency_data_row_with_abort};
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::ac::AcResult;
@@ -2764,14 +2765,17 @@ impl Engine {
         let points = netlist
             .frequency_data_table_points(table_name)
             .map_err(|error| SimulationError::Circuit(format!(".AC DATA {error}")))?;
+        self.ensure_analysis_points(points.len())?;
+        self.ensure_batch_runs(points.len())?;
+        let override_plan = FrequencyDataOverridePlan::resolve(netlist, &points)?;
         let mut row_netlists = Vec::with_capacity(points.len());
         let mut results = Vec::with_capacity(points.len());
         for (row_index, point) in points.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let (row_netlist, _) =
-                Self::create_perturbed_netlist_multi_with_abort(netlist, &point.overrides, abort)?;
+            let row_netlist =
+                materialize_frequency_data_row_with_abort(netlist, &override_plan, point, abort)?;
             let mut row_results =
                 self.run_ac_with_abort(&row_netlist, &[point.frequency], abort)?;
             if row_results.len() != 1 {
@@ -3187,5 +3191,256 @@ mod tests {
             error.to_string(),
             "Circuit error: .AC DATA references unknown .DATA table 'missing'"
         );
+    }
+
+    #[test]
+    fn ac_data_resolves_globals_and_bare_passive_primary_values_atomically() {
+        let netlist = Netlist::parse_with_options(
+            "AC DATA parameter and device deck\n\
+             .GLOBAL_PARAM mag=1 phase=0.1\n\
+             Isrc 1 0 AC {mag} {phase}\n\
+             R1 1 0 1k\n\
+             C1 1 0 2u\n\
+             .DATA table\n\
+             + mag phase FREQ r1 c1\n\
+             + 1 0.1 1 1k 2u\n\
+             + 2 0.2 10 2k 3u\n\
+             + 3 0.3 100 3k 4u\n\
+             + 4 0.4 1k 4k 5u\n\
+             + 5 0.5 10k 5k 6u\n\
+             + 6 0.6 100k 6k 7u\n\
+             .ENDDATA\n\
+             .AC DATA=table\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect("BUG_1043-shaped AC DATA deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let (rows, results) = engine
+            .run_ac_data(&netlist, "table")
+            .expect("all typed DATA targets resolve and solve");
+        assert_eq!(rows.len(), 6);
+        assert_eq!(results.len(), 6);
+
+        for (index, (row, result)) in rows.iter().zip(&results).enumerate() {
+            let scale = (index + 1) as Value;
+            assert_eq!(result.frequency, 10.0f64.powi(index as i32));
+            assert_eq!(row.params.get("mag"), Some(scale));
+            assert!(
+                (row.params.get("phase").expect("phase row parameter") - 0.1 * scale).abs()
+                    <= Value::EPSILON * scale
+            );
+
+            let source = row
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("Isrc"))
+                .expect("row retains current source");
+            let crate::netlist::ElementKind::CurrentSource(crate::netlist::SourceSpec::Ac {
+                magnitude,
+                phase,
+            }) = &source.kind
+            else {
+                panic!("row current source lost its AC specification");
+            };
+            assert_eq!(*magnitude, scale);
+            let expected_phase_radians = (0.1 * scale).to_radians();
+            assert!(
+                (*phase - expected_phase_radians).abs() <= 4.0 * Value::EPSILON * scale,
+                "row {} source phase expected {}, got {}",
+                index + 1,
+                expected_phase_radians,
+                phase
+            );
+            let resistance = row
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    crate::netlist::ElementKind::Resistor { value, .. }
+                        if element.name.eq_ignore_ascii_case("R1") =>
+                    {
+                        Some(*value)
+                    }
+                    _ => None,
+                })
+                .expect("row retains resistor");
+            let capacitance = row
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    crate::netlist::ElementKind::Capacitor { value, .. }
+                        if element.name.eq_ignore_ascii_case("C1") =>
+                    {
+                        Some(*value)
+                    }
+                    _ => None,
+                })
+                .expect("row retains capacitor");
+            assert_eq!(resistance, scale * 1.0e3);
+            assert_eq!(capacitance, (scale + 1.0) * 1.0e-6);
+
+            let omega = 2.0 * PI * result.frequency;
+            let impedance_magnitude =
+                1.0 / (resistance.recip().powi(2) + (omega * capacitance).powi(2)).sqrt();
+            let expected_voltage_magnitude = scale * impedance_magnitude;
+            assert!(
+                (result.voltages[0].norm() - expected_voltage_magnitude).abs()
+                    <= expected_voltage_magnitude * 1.0e-11,
+                "row {} voltage magnitude is not the analytic parallel-RC result",
+                index + 1
+            );
+        }
+    }
+
+    #[test]
+    fn ac_data_target_resolution_honors_parameter_precedence_and_rejects_ambiguity() {
+        let parameter_wins = Netlist::parse(
+            "DATA precedence\n\
+             .PARAM R1=10\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             .DATA points\n\
+             + FREQ R1\n\
+             + 1 20\n\
+             .ENDDATA\n\
+             .AC DATA=points\n\
+             .END\n",
+        )
+        .expect("parameter/device collision deck parses");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let (rows, _) = engine
+            .run_ac_data(&parameter_wins, "points")
+            .expect("declared parameter wins over same-named device");
+        assert_eq!(rows[0].params.get("R1"), Some(20.0));
+        assert!(matches!(
+            &rows[0].elements[1].kind,
+            crate::netlist::ElementKind::Resistor { value, .. }
+                if value.to_bits() == 1.0e3f64.to_bits()
+        ));
+
+        let alias_collision = Netlist::parse(
+            "DATA canonical collision\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             .DATA points\n\
+             + FREQ R1 R1:R\n\
+             + 1 2k 3k\n\
+             .ENDDATA\n\
+             .AC DATA=points\n\
+             .END\n",
+        )
+        .expect("duplicate target deck parses lexically");
+        let error = engine
+            .run_ac_data(&alias_collision, "points")
+            .expect_err("bare and explicit primary aliases must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("duplicates canonical target 'DEVICE:R1:R'")
+        );
+
+        let unknown = Netlist::parse(
+            "DATA unknown target\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             .DATA points\n\
+             + FREQ missing\n\
+             + 1 2\n\
+             .ENDDATA\n\
+             .AC DATA=points\n\
+             .END\n",
+        )
+        .expect("unknown target deck parses lexically");
+        let error = engine
+            .run_ac_data(&unknown, "points")
+            .expect_err("unknown DATA target must fail closed");
+        assert!(error.to_string().contains("does not resolve"));
+    }
+
+    #[test]
+    fn sealed_include_data_device_overlay_survives_later_parameter_replay() {
+        use std::path::PathBuf;
+
+        use crate::abort_signal::NoAbort;
+        use crate::netlist::{SealedSourceBundle, SealedSourceEdge};
+
+        let root = PathBuf::from(r"C:\rspice-sealed-tests\data-root.cir");
+        let include = PathBuf::from(r"C:\rspice-sealed-tests\passive.inc");
+        let source = "sealed DATA replay\n\
+                      .GLOBAL_PARAM mag=1\n\
+                      .include passive.inc\n\
+                      I1 out 0 AC {mag}\n\
+                      .DATA points\n\
+                      + FREQ mag R1\n\
+                      + 10 2 2k\n\
+                      .ENDDATA\n\
+                      .AC DATA=points\n\
+                      .END\n";
+        let bundle = SealedSourceBundle::try_new_with_edges(
+            [
+                (root.clone(), source.to_owned()),
+                (include.clone(), "R1 out 0 1k\n".to_owned()),
+            ],
+            [SealedSourceEdge {
+                owner: root.clone(),
+                requested_path: "passive.inc".to_owned(),
+                target: include,
+            }],
+        )
+        .expect("sealed source graph is valid");
+        let netlist = Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+            source,
+            &root,
+            bundle,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+            &NoAbort,
+        )
+        .expect("sealed include deck parses without filesystem access");
+        let engine = Engine::new(
+            crate::engine::SimulationConfig::default()
+                .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+        );
+        let (rows, _) = engine
+            .run_ac_data(&netlist, "points")
+            .expect("sealed DATA row materializes");
+        let row = &rows[0];
+        assert_eq!(row.params.get("mag"), Some(2.0));
+        assert!(matches!(
+            row.elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("R1"))
+                .map(|element| &element.kind),
+            Some(crate::netlist::ElementKind::Resistor { value, .. })
+                if value.to_bits() == 2.0e3f64.to_bits()
+        ));
+        assert!(row.source_text.is_some());
+        assert_eq!(row.source_path.as_deref(), Some(root.as_path()));
+
+        let (replayed, _) = Engine::create_perturbed_netlist_multi(row, &[("mag".to_owned(), 3.0)])
+            .expect("later parameter change replays the sealed graph and retained device overlay");
+        assert_eq!(replayed.params.get("mag"), Some(3.0));
+        assert!(matches!(
+            replayed
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("R1"))
+                .map(|element| &element.kind),
+            Some(crate::netlist::ElementKind::Resistor { value, .. })
+                if value.to_bits() == 2.0e3f64.to_bits()
+        ));
+        assert!(replayed.source_text.is_some());
+        assert_eq!(replayed.source_path.as_deref(), Some(root.as_path()));
     }
 }

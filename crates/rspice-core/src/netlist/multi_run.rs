@@ -659,7 +659,11 @@ fn rewrite_top_level_param_assignments_with_abort(
             _ => {}
         }
         let continues = in_param_statement && line.trim_start().starts_with('+');
-        if token == ".param" || continues {
+        if matches!(
+            token.as_str(),
+            ".param" | ".params" | ".csparam" | ".global_param"
+        ) || continues
+        {
             in_param_statement = true;
             if subckt_depth == 0 && rewrite_assignment(line, name, value) {
                 replaced = true;
@@ -1236,6 +1240,24 @@ mod tests {
         assert!(!decks[0].source.to_lowercase().contains("data=tbl"));
         // The table block itself is stripped from the emitted decks.
         assert!(!decks[0].source.to_lowercase().contains(".enddata"));
+    }
+
+    #[test]
+    fn data_global_parameter_binding_precedes_same_named_device() {
+        let source = "DATA global precedence\n\
+                      .GLOBAL_PARAM R1=1\n\
+                      V1 n 0 1\n\
+                      R1 n 0 1k\n\
+                      .DATA values R1\n\
+                      2\n\
+                      .ENDDATA\n\
+                      .DC DATA=values\n\
+                      .END\n";
+        let decks = try_expand_multi_run(source).expect("DATA row expands");
+        assert_eq!(decks.len(), 1);
+        assert!(decks[0].source.contains(".GLOBAL_PARAM R1=2"));
+        assert!(decks[0].source.contains("R1 n 0 1k"));
+        assert!(!decks[0].source.contains(" R=2"));
     }
 
     // What a deck expands into is asserted here. That an expanded row then

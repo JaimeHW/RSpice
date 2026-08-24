@@ -642,7 +642,10 @@ impl Engine {
         ))
     }
 
-    fn canonical_device_parameter(kind: &ElementKind, param_name: Option<&str>) -> String {
+    pub(in crate::engine) fn canonical_device_parameter(
+        kind: &ElementKind,
+        param_name: Option<&str>,
+    ) -> String {
         let raw = param_name.unwrap_or("VALUE").trim().to_ascii_uppercase();
         macro_rules! alias {
             ($names:expr, $canonical:expr) => {

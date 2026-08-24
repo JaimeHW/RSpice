@@ -567,8 +567,33 @@ pub(crate) fn map_abort_parse_error(
 }
 
 use measure::MeasureStatement;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// The source resolver that produced a parsed netlist.
+///
+/// Derived analyses reparse the root when parameter values change. Retaining
+/// the resolver contract prevents an in-memory/sealed project from silently
+/// acquiring filesystem access and preserves the original desktop include
+/// search semantics.
+#[derive(Debug, Clone)]
+pub(crate) enum NetlistReplayContext {
+    InMemory,
+    Path,
+    PathWithExecutionDir(PathBuf),
+    SearchPaths(Vec<PathBuf>),
+    Sealed(SealedSourceBundle),
+}
+
+/// Canonical AST overrides that are not represented by the authored source.
+///
+/// Device DATA/STEP overrides are applied after parameter-driven reparsing.
+/// Keeping the overlay on the netlist makes a later reparse compositional: no
+/// previously applied electrical change can disappear behind stale source.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NetlistAstOverlay {
+    pub(crate) device_parameters: BTreeMap<(String, String), crate::Value>,
+}
 
 /// Effective dialect-specific node-zero alias policy after parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -822,6 +847,10 @@ pub struct Netlist {
     /// Optional source path for the netlist used to resolve relative includes
     /// and model-file references during reparsing workflows.
     pub source_path: Option<PathBuf>,
+    /// Resolver provenance for safe, behaviorally identical source replay.
+    pub(crate) replay_context: Option<NetlistReplayContext>,
+    /// Canonical electrical overrides layered over the parsed source AST.
+    pub(crate) ast_overlay: NetlistAstOverlay,
 }
 
 impl Netlist {
@@ -1092,6 +1121,7 @@ impl Netlist {
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = None;
+        netlist.replay_context = Some(NetlistReplayContext::InMemory);
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
@@ -1197,6 +1227,7 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
+        let replay_sources = sources.clone();
         let include_processor = IncludeProcessor::new_sealed(file_path, sources.clone())
             .with_resource_limits(options.resource_limits);
         let mut initcond_resource_limits = options.resource_limits;
@@ -1213,6 +1244,7 @@ impl Netlist {
             include_processor,
             initcond_source_provider,
             false,
+            NetlistReplayContext::Sealed(replay_sources),
         )
     }
 
@@ -1288,6 +1320,9 @@ impl Netlist {
             include_processor,
             initcond_source_provider,
             true,
+            execution_dir.map_or(NetlistReplayContext::Path, |directory| {
+                NetlistReplayContext::PathWithExecutionDir(directory.to_path_buf())
+            }),
         )
     }
 
@@ -1299,6 +1334,7 @@ impl Netlist {
         mut include_processor: IncludeProcessor,
         initcond_source_provider: IncludeProcessor,
         allow_filesystem_spef: bool,
+        replay_context: NetlistReplayContext,
     ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
         let expanded =
@@ -1332,8 +1368,65 @@ impl Netlist {
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
+        netlist.replay_context = Some(replay_context);
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
+    }
+
+    /// Reparse a rewritten root source through the same resolver contract that
+    /// produced this netlist.
+    ///
+    /// This is intentionally crate-private: callers must layer any AST-only
+    /// overrides back onto the returned netlist before exposing it as a
+    /// materialized analysis row.
+    pub(crate) fn replay_root_source_with_options_and_abort(
+        &self,
+        input: &str,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
+        match (&self.replay_context, self.source_path.as_deref()) {
+            (Some(NetlistReplayContext::InMemory), _) | (None, None) => {
+                Self::parse_with_options_and_abort(input, options, abort)
+            }
+            (Some(NetlistReplayContext::Sealed(sources)), Some(path)) => {
+                Self::parse_with_path_and_sealed_sources_and_options_and_abort(
+                    input,
+                    path,
+                    sources.clone(),
+                    options,
+                    abort,
+                )
+            }
+            (Some(NetlistReplayContext::PathWithExecutionDir(execution_dir)), Some(path)) => {
+                Self::parse_with_path_and_execution_dir_and_abort(
+                    input,
+                    path,
+                    execution_dir,
+                    options,
+                    abort,
+                )
+            }
+            (Some(NetlistReplayContext::SearchPaths(search_paths)), Some(path)) => {
+                Self::parse_with_search_paths_and_options_and_abort(
+                    input,
+                    path,
+                    search_paths,
+                    options,
+                    abort,
+                )
+            }
+            (Some(NetlistReplayContext::Path), Some(path)) | (None, Some(path)) => {
+                Self::parse_with_path_and_options_and_abort(input, path, options, abort)
+            }
+            (Some(context), None) => Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "netlist replay context {context:?} requires a retained root source path"
+                ),
+            }
+            .into()),
+        }
     }
 
     /// Back-annotate every `.spef_include` referenced by the deck
@@ -1567,6 +1660,7 @@ impl Netlist {
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
+        netlist.replay_context = Some(NetlistReplayContext::SearchPaths(search_paths.to_vec()));
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
@@ -2857,6 +2951,8 @@ impl Default for Netlist {
             pspice_chebyshev_source_count: 0,
             source_text: None,
             source_path: None,
+            replay_context: None,
+            ast_overlay: NetlistAstOverlay::default(),
         }
     }
 }
