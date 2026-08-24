@@ -81,6 +81,13 @@ pub struct Bsim3v3Model {
     pub tox: Value,
     pub toxm: Value,
 
+    /// Xyce's MOSFET_B3 extension allows `L` and `W` on the model card and
+    /// copies them into instances that omit the corresponding geometry.
+    /// Ngspice BSIM3 does not expose that model-level fallback, so the engine
+    /// only consumes these values for [`Bsim3v3EquationSet::XyceV322`].
+    pub instance_length_default: Option<Value>,
+    pub instance_width_default: Option<Value>,
+
     // Binned families (defaults per b3set.c; b3temp.c order).
     pub cdsc: Binned,
     pub cdscb: Binned,
@@ -474,6 +481,8 @@ impl Bsim3v3Model {
                 .unwrap_or_else(|| equation_set.default_version().to_string()),
             tox,
             toxm: val(p, "TOXM", tox),
+            instance_length_default: get(p, "L"),
+            instance_width_default: get(p, "W"),
 
             cdsc: binned(p, "CDSC", 2.4e-4),
             cdscb: binned(p, "CDSCB", 0.0),

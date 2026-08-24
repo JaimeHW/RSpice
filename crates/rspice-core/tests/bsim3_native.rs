@@ -125,6 +125,35 @@ fn bsim3_nmos_op_id(instance_suffix: &str) -> Result<f64, String> {
     bsim3_nmos_op_id_with_models(&models018(), instance_suffix)
 }
 
+fn xyce_bsim3_model_geometry_op_id(model_l: f64, model_w: f64) -> f64 {
+    let deck = format!(
+        "* Xyce BSIM3 model geometry alias\n\
+         .global_param model_l={model_l:.17e} model_w={model_w:.17e}\n\
+         .param effective_l={{model_l}} effective_w={{model_w}}\n\
+         vd d 0 dc 1.2\n\
+         vg g 0 dc 1.2\n\
+         m1 d g 0 0 n9\n\
+         .model n9 nmos level=9 version=3.2.2 l={{effective_l}} w={{effective_w}} \
+             tox=4.1n nch=2.35e17 vth0=0.5 capmod=3\n\
+         .op\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("Xyce BSIM3 model geometry deck parses");
+    let (_, report) = engine_with_dialect(SpiceDialect::Xyce)
+        .run_dc_op_with_report(&netlist)
+        .expect("Xyce BSIM3 model geometry deck solves");
+    report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 op entry")
+        .params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| *value)
+        .expect("m1 id op param")
+}
+
 #[test]
 fn native_bsim3_rejects_unresolved_model_params_before_defaulting() {
     let models = models018().replace(
@@ -386,6 +415,42 @@ fn level9_default_bsim3_current_matches_xyce710() {
     assert!(
         rel < 1e-6,
         "LEVEL=9 id: RSpice={id:.9e} Xyce7.10={reference:.9e} rel={rel:.2e}"
+    );
+}
+
+#[test]
+fn xyce_bsim3_model_geometry_aliases_change_device_physics() {
+    let narrow = xyce_bsim3_model_geometry_op_id(0.35e-6, 8.0e-6);
+    let nominal = xyce_bsim3_model_geometry_op_id(0.35e-6, 10.0e-6);
+    let wide = xyce_bsim3_model_geometry_op_id(0.35e-6, 12.0e-6);
+    let long = xyce_bsim3_model_geometry_op_id(0.4e-6, 10.0e-6);
+
+    for (label, current) in [
+        ("narrow", narrow),
+        ("nominal", nominal),
+        ("wide", wide),
+        ("long", long),
+    ] {
+        assert!(
+            current.is_finite() && current > 1.0e-9,
+            "{label} Xyce BSIM3 geometry must produce finite conducting current, got {current}"
+        );
+    }
+    assert!(
+        narrow < nominal && nominal < wide,
+        "drain current must increase with inherited model width: {narrow}, {nominal}, {wide}"
+    );
+    assert!(
+        long < nominal,
+        "drain current must decrease with inherited model length: long={long}, nominal={nominal}"
+    );
+    assert!(
+        wide - narrow > nominal.abs() * 1.0e-3,
+        "model-width aliases must have a nontrivial electrical effect"
+    );
+    assert!(
+        nominal - long > nominal.abs() * 1.0e-3,
+        "model-length aliases must have a nontrivial electrical effect"
     );
 }
 

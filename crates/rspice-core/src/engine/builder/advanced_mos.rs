@@ -696,9 +696,22 @@ impl Engine {
                 std::sync::Arc::clone(&entry.model)
             };
         let defaults = Bsim3v3Geometry::default();
+        let (model_length_default, model_width_default) =
+            if equation_set == crate::device::Bsim3v3EquationSet::XyceV322 {
+                (
+                    effective_model.instance_length_default,
+                    effective_model.instance_width_default,
+                )
+            } else {
+                (None, None)
+            };
         let geom = Bsim3v3Geometry {
-            l: instance_param(instance_params, &["L"]).unwrap_or(defaults.l),
-            w: instance_param(instance_params, &["W"]).unwrap_or(defaults.w),
+            l: instance_param(instance_params, &["L"])
+                .or(model_length_default)
+                .unwrap_or(defaults.l),
+            w: instance_param(instance_params, &["W"])
+                .or(model_width_default)
+                .unwrap_or(defaults.w),
             m: multiplier,
             drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
             source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),

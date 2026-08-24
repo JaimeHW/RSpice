@@ -3834,6 +3834,36 @@ mod tests {
         Ok(device.core.model.equation_set)
     }
 
+    fn built_bsim3_geometry(
+        level: i32,
+        instance_tail: &str,
+        model_tail: &str,
+        dialect: SpiceDialect,
+    ) -> Result<(f64, f64), SimulationError> {
+        let deck = format!(
+            "BSIM3 model geometry defaults\n\
+             M1 d g s 0 MOD {instance_tail}\n\
+             .MODEL MOD NMOS LEVEL={level} {model_tail}\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("BSIM3 geometry deck parses");
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let circuit = engine.build_circuit(&netlist)?;
+        let [device] = circuit.bsim3v3.devices.as_slice() else {
+            panic!("expected exactly one native BSIM3 device")
+        };
+        Ok((device.core.geom.l, device.core.geom.w))
+    }
+
+    fn assert_bsim3_geometry(actual: (f64, f64), expected: (f64, f64)) {
+        for (axis, actual, expected) in [("L", actual.0, expected.0), ("W", actual.1, expected.1)] {
+            assert!(
+                (actual - expected).abs() <= 1.0e-18,
+                "BSIM3 {axis} geometry mismatch: actual={actual:.17e}, expected={expected:.17e}"
+            );
+        }
+    }
+
     #[test]
     fn bsim3_equation_family_is_selected_by_simulator_front_and_level() {
         use crate::device::Bsim3v3EquationSet::{NgspiceV330, XyceV322};
@@ -3860,6 +3890,33 @@ mod tests {
                 .expect("auto-detected BSIM3 LEVEL=9 builds"),
             XyceV322
         );
+    }
+
+    #[test]
+    fn xyce_bsim3_model_geometry_defaults_obey_instance_precedence() {
+        let model_geometry = built_bsim3_geometry(9, "", "L=0.35u W=10u", SpiceDialect::Xyce)
+            .expect("Xyce BSIM3 model geometry builds");
+        assert_bsim3_geometry(model_geometry, (0.35e-6, 10.0e-6));
+
+        let mixed_geometry = built_bsim3_geometry(9, "L=0.4u", "L=0.35u W=10u", SpiceDialect::Xyce)
+            .expect("Xyce BSIM3 mixed instance/model geometry builds");
+        assert_bsim3_geometry(mixed_geometry, (0.4e-6, 10.0e-6));
+
+        let native_defaults = built_bsim3_geometry(9, "", "", SpiceDialect::Xyce)
+            .expect("Xyce BSIM3 native geometry defaults build");
+        assert_bsim3_geometry(native_defaults, (5.0e-6, 5.0e-6));
+    }
+
+    #[test]
+    fn ngspice_bsim3_does_not_inherit_xyce_model_geometry_extension() {
+        let model_geometry = built_bsim3_geometry(8, "", "L=0.35u W=10u", SpiceDialect::Ngspice)
+            .expect("ngspice BSIM3 model with compatibility parameters builds");
+        assert_bsim3_geometry(model_geometry, (5.0e-6, 5.0e-6));
+
+        let instance_geometry =
+            built_bsim3_geometry(8, "L=0.4u W=12u", "L=0.35u W=10u", SpiceDialect::Ngspice)
+                .expect("ngspice BSIM3 instance geometry builds");
+        assert_bsim3_geometry(instance_geometry, (0.4e-6, 12.0e-6));
     }
 
     #[test]
