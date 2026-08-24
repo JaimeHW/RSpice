@@ -143,62 +143,24 @@ pub(super) fn run_disto(
 }
 
 pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), CliError> {
-    let table = ctx
+    let points = ctx
         .netlist
-        .data_tables
-        .iter()
-        .find(|table| table.name.eq_ignore_ascii_case(table_name))
-        .ok_or_else(|| invalid_ac_data(format!(".AC DATA table '{table_name}' not found")))?;
-    let freq_col = table
-        .params
-        .iter()
-        .position(|param| param.eq_ignore_ascii_case("FREQ"))
-        .ok_or_else(|| {
-            invalid_ac_data(format!(
-                ".AC DATA table '{}' must contain a FREQ column",
-                table.name
-            ))
-        })?;
-
-    if table.rows.is_empty() {
-        return Err(invalid_ac_data(format!(
-            ".AC DATA table '{}' has no rows",
-            table.name
-        )));
-    }
-
-    let mut frequencies = Vec::with_capacity(table.rows.len());
-    for (row_idx, row) in table.rows.iter().enumerate() {
-        if row.len() != table.params.len() {
-            return Err(invalid_ac_data(format!(
-                ".AC DATA table '{}' row {} has {} value(s), expected {}",
-                table.name,
-                row_idx + 1,
-                row.len(),
-                table.params.len()
-            )));
-        }
-        let frequency = row[freq_col];
-        if !frequency.is_finite() || frequency < 0.0 {
-            return Err(invalid_ac_data(format!(
-                ".AC DATA table '{}' row {} has invalid frequency {}",
-                table.name,
-                row_idx + 1,
-                frequency
-            )));
-        }
-        frequencies.push(frequency);
-    }
+        .frequency_data_table_points(table_name)
+        .map_err(|error| invalid_ac_data(format!(".AC DATA {error}")))?;
 
     if !ctx.quiet {
         println!(
             "Running AC DATA analysis from table {} ({} points)...",
-            table.name,
-            frequencies.len()
+            table_name,
+            points.len()
         );
     }
 
-    run_ac_frequencies(ctx, frequencies)
+    let (_row_netlists, results) = ctx
+        .engine
+        .run_ac_data(ctx.netlist, table_name)
+        .map_err(|error| CliError::simulation_error_in(error.to_string(), "AC"))?;
+    finish_ac_results(ctx, results)
 }
 
 fn invalid_ac_data(message: String) -> CliError {
@@ -227,93 +189,99 @@ pub(super) fn run_ac(
 }
 
 fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(), CliError> {
-    match ctx.engine.run_ac(ctx.netlist, &frequencies) {
-        Ok(results) => {
-            if !ctx.args.allow_nonfinite {
-                for result in &results {
-                    for (node, voltage) in result.voltages.iter().enumerate() {
-                        if !voltage.re.is_finite() || !voltage.im.is_finite() {
-                            let name = result
-                                .node_names
-                                .get(node)
-                                .map(|n| n.as_str())
-                                .unwrap_or("node");
-                            return Err(CliError::SimulationError {
-                                message: format!(
-                                    "{name} is non-finite at {:e} Hz; the solution is \
-                                     not physical. Use --allow-nonfinite to export anyway.",
-                                    result.frequency
-                                ),
-                                analysis: Some("AC".to_string()),
-                            });
-                        }
-                    }
-                }
-            }
+    let results = ctx
+        .engine
+        .run_ac(ctx.netlist, &frequencies)
+        .map_err(|error| CliError::simulation_error_in(error.to_string(), "AC"))?;
+    finish_ac_results(ctx, results)
+}
 
-            ctx.record_measurements(
-                "AC",
-                rspice_core::analysis::evaluate_ac_measurements(ctx.netlist, &results),
-            );
-
-            if !ctx.quiet {
-                println!("AC Analysis: {} frequency points", results.len());
-                if ctx.verbose && !results.is_empty() {
-                    let first = &results[0];
-                    let last = results.last().unwrap();
-                    let first_label = first
+fn finish_ac_results(
+    ctx: &RunContext<'_>,
+    results: Vec<rspice_core::analysis::AcResult>,
+) -> Result<(), CliError> {
+    if !ctx.args.allow_nonfinite {
+        for result in &results {
+            for (node, voltage) in result.voltages.iter().enumerate() {
+                if !voltage.re.is_finite() || !voltage.im.is_finite() {
+                    let name = result
                         .node_names
-                        .first()
-                        .map_or_else(|| "V(1)".to_string(), |name| voltage_display_name(name, 1));
-                    println!(
-                        "  @ {:e} Hz: |{}| = {:.4}",
-                        first.frequency,
-                        first_label,
-                        first.voltage_magnitude(1)
-                    );
-                    println!(
-                        "  @ {:e} Hz: |{}| = {:.4}",
-                        last.frequency,
-                        first_label,
-                        last.voltage_magnitude(1)
-                    );
+                        .get(node)
+                        .map(|n| n.as_str())
+                        .unwrap_or("node");
+                    return Err(CliError::SimulationError {
+                        message: format!(
+                            "{name} is non-finite at {:e} Hz; the solution is \
+                                     not physical. Use --allow-nonfinite to export anyway.",
+                            result.frequency
+                        ),
+                        analysis: Some("AC".to_string()),
+                    });
                 }
             }
-
-            if let Some(ref output_path) = ctx.output_path_for("ac") {
-                let signals = crate::commands::run_signals::apply_save_set_complex(
-                    ac_signals(&results),
-                    &ctx.netlist.saves,
-                );
-                let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
-                if matches!(ctx.format, OutputFormat::Hdf5) {
-                    let mut data = Hdf5SimulationData::new();
-                    data.title = "AC Analysis".to_string();
-
-                    let mut ac = Hdf5AcSection::new(frequencies);
-                    for signal in &signals {
-                        ac.add_signal(
-                            signal.display_name.clone(),
-                            signal.real.clone(),
-                            signal.imag.clone(),
-                        );
-                    }
-                    data.ac = Some(ac);
-
-                    write_hdf5(output_path, &data)
-                        .map_err(|err| map_hdf5_output_error(output_path, err))?;
-                } else {
-                    super::export::complex_table("ac", "AC Analysis", frequencies, &signals)
-                        .write(output_path, ctx.format)?;
-                }
-                if !ctx.quiet {
-                    println!("  AC response exported to: {}", output_path.display());
-                }
-            }
-            Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "AC")),
     }
+
+    ctx.record_measurements(
+        "AC",
+        rspice_core::analysis::evaluate_ac_measurements(ctx.netlist, &results),
+    );
+
+    if !ctx.quiet {
+        println!("AC Analysis: {} frequency points", results.len());
+        if ctx.verbose && !results.is_empty() {
+            let first = &results[0];
+            let last = results.last().unwrap();
+            let first_label = first
+                .node_names
+                .first()
+                .map_or_else(|| "V(1)".to_string(), |name| voltage_display_name(name, 1));
+            println!(
+                "  @ {:e} Hz: |{}| = {:.4}",
+                first.frequency,
+                first_label,
+                first.voltage_magnitude(1)
+            );
+            println!(
+                "  @ {:e} Hz: |{}| = {:.4}",
+                last.frequency,
+                first_label,
+                last.voltage_magnitude(1)
+            );
+        }
+    }
+
+    if let Some(ref output_path) = ctx.output_path_for("ac") {
+        let signals = crate::commands::run_signals::apply_save_set_complex(
+            ac_signals(&results),
+            &ctx.netlist.saves,
+        );
+        let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
+        if matches!(ctx.format, OutputFormat::Hdf5) {
+            let mut data = Hdf5SimulationData::new();
+            data.title = "AC Analysis".to_string();
+
+            let mut ac = Hdf5AcSection::new(frequencies);
+            for signal in &signals {
+                ac.add_signal(
+                    signal.display_name.clone(),
+                    signal.real.clone(),
+                    signal.imag.clone(),
+                );
+            }
+            data.ac = Some(ac);
+
+            write_hdf5(output_path, &data)
+                .map_err(|err| map_hdf5_output_error(output_path, err))?;
+        } else {
+            super::export::complex_table("ac", "AC Analysis", frequencies, &signals)
+                .write(output_path, ctx.format)?;
+        }
+        if !ctx.quiet {
+            println!("  AC response exported to: {}", output_path.display());
+        }
+    }
+    Ok(())
 }
 
 /// Run `.STB`: Tian double-injection loop gain at a designated 0 V probe

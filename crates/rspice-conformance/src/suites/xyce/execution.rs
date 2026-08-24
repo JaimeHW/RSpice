@@ -3749,60 +3749,59 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         };
+        let Some(table_name) = netlist.analyses.iter().find_map(|analysis| match analysis {
+            AnalysisCommand::AcData { table_name } => Some(table_name.as_str()),
+            _ => None,
+        }) else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                ".AC DATA comparison has no typed AcData analysis".to_string(),
+                Vec::new(),
+            );
+        };
 
         let engine = self.create_xyce_engine();
-        let mut point_results = Vec::with_capacity(data_points.len());
-        for (row_index, point) in data_points.iter().enumerate() {
-            let row_netlist =
-                match Engine::create_perturbed_netlist_multi(&netlist, &point.overrides) {
-                    Ok((row_netlist, _)) => row_netlist,
-                    Err(err) => {
-                        return self.failure_result(
-                            deck,
-                            start,
-                            contract,
-                            format!(
-                                ".AC DATA row {} parameter override error: {err}",
-                                row_index + 1
-                            ),
-                            Vec::new(),
-                        );
-                    }
-                };
-            let mut results = match engine.run_ac(&row_netlist, &[point.frequency]) {
-                Ok(results) => results,
-                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_runtime",
-                        &format!("RSpice runtime does not yet support this .AC DATA deck: {err}"),
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("simulation error in .AC DATA row {}: {err}", row_index + 1),
-                        Vec::new(),
-                    );
-                }
-            };
-            let Some(result) = results.pop() else {
+        let (row_netlists, results) = match engine.run_ac_data(&netlist, table_name) {
+            Ok(rows) => rows,
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this .AC DATA deck: {err}"),
+                );
+            }
+            Err(err) => {
                 return self.failure_result(
                     deck,
                     start,
                     contract,
-                    format!(".AC DATA row {} produced no AC result", row_index + 1),
+                    format!("simulation error in .AC DATA: {err}"),
                     Vec::new(),
                 );
-            };
-            point_results.push(XyceAcDataPointResult {
-                netlist: row_netlist,
-                result,
-            });
+            }
+        };
+        if row_netlists.len() != data_points.len() || results.len() != data_points.len() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    ".AC DATA produced {} row netlist(s) and {} result(s), expected {}",
+                    row_netlists.len(),
+                    results.len(),
+                    data_points.len()
+                ),
+                Vec::new(),
+            );
         }
+        let point_results = row_netlists
+            .into_iter()
+            .zip(results)
+            .map(|(netlist, result)| XyceAcDataPointResult { netlist, result })
+            .collect::<Vec<_>>();
 
         let mismatches = match self.compare_ac_data_prn_reference(
             &reference,
@@ -11754,32 +11753,30 @@ impl XyceTestRunner {
                     kind.name()
                 ));
             }
-            let mut points = Vec::with_capacity(data_points.len());
-            for (row, point) in data_points.iter().enumerate() {
-                let (point_netlist, _) =
-                    Engine::create_perturbed_netlist_multi(netlist, &point.overrides).map_err(
-                        |err| format!("DATA relational AC row {} override failed: {err}", row + 1),
-                    )?;
-                let mut results =
-                    engine
-                        .run_ac(&point_netlist, &[point.frequency])
-                        .map_err(|err| {
-                            format!("DATA relational AC row {} solve failed: {err}", row + 1)
-                        })?;
-                let result = results.pop().ok_or_else(|| {
-                    format!("DATA relational AC row {} produced no result", row + 1)
-                })?;
-                if !results.is_empty() {
-                    return Err(format!(
-                        "DATA relational AC row {} produced multiple results",
-                        row + 1
-                    ));
-                }
-                points.push(XyceAcDataPointResult {
-                    netlist: point_netlist,
-                    result,
-                });
+            let table_name = netlist
+                .analyses
+                .iter()
+                .find_map(|analysis| match analysis {
+                    AnalysisCommand::AcData { table_name } => Some(table_name.as_str()),
+                    _ => None,
+                })
+                .ok_or_else(|| "DATA relational AC plan has no typed AcData analysis".to_owned())?;
+            let (row_netlists, results) = engine
+                .run_ac_data(netlist, table_name)
+                .map_err(|err| format!("DATA relational AC execution failed: {err}"))?;
+            if row_netlists.len() != data_points.len() || results.len() != data_points.len() {
+                return Err(format!(
+                    "DATA relational AC produced {} row netlist(s) and {} result(s), expected {}",
+                    row_netlists.len(),
+                    results.len(),
+                    data_points.len()
+                ));
             }
+            let points = row_netlists
+                .into_iter()
+                .zip(results)
+                .map(|(netlist, result)| XyceAcDataPointResult { netlist, result })
+                .collect::<Vec<_>>();
             return Self::ac_family_data_points_to_prn_table(&plan.print, &points);
         }
 
