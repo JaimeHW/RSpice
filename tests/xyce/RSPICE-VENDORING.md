@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 221 such decks. Those rows use
+exact native contracts for 250 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -359,6 +359,15 @@ top-level scope, and first-reference position; it never matches reconstructed
 RSpice diagnostic text. The exact two-file retained family, 30-second harness
 limit, removed ordered-error wrapper, activation metadata, and direct Tools.pm
 dependency are provenance-bound, and an invented OutputData family is rejected.
+
+Certification BUG 113 reconstructs the Release-7.10 voltage-switch initial-
+junction wrapper. RSpice independently executes the unmarked and explicit-ON
+workers, requires the historical three and two Jacobian evaluations exactly,
+and proves both settle at the same finite one-point DC current. The typed
+oracle binds the authored `ON` state separately from the converged control-
+driven state; the empty wrapper owner, both independently qualified workers,
+complete retained family, removed wrapper, exclusion evidence, and absence of
+numerical gold are provenance-bound.
 
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper

@@ -9963,6 +9963,56 @@ fn test_xyce_bug48_level54_native_bsim4_success_oracle() {
 }
 
 #[test]
+fn test_xyce_bug113_switch_initial_state_jacobian_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = "Netlists/Certification_Tests/BUG_113/VSWITCH.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(owner),
+        "BUG113 empty owner must remain owned by its removed historical wrapper"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join(owner))
+            .expect("inspect BUG113 owner")
+            .len(),
+        0,
+        "BUG113 owner must remain an exact zero-byte wrapper placeholder"
+    );
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            owner,
+            "bug113_switch_initial_state_jacobian_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_113/VSWITCH_NOIC.cir",
+            "bug113_switch_initial_state_noic_baseline",
+            Some("Netlists/Certification_Tests/BUG_113/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_113/VSWITCH_ON_OFF.cir",
+            "bug113_switch_initial_state_explicit_on_member",
+            Some("Netlists/Certification_Tests/BUG_113/exclude"),
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} must reproduce the exact BUG113 3/2-Jacobian relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug159_bjt_tnom_default_equivalence_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
