@@ -930,6 +930,20 @@ impl TokenStream {
         }
     }
 
+    /// Borrow the unconsumed tokens on the current logical line.
+    ///
+    /// Parsers that only need to inspect the remainder of a command can use
+    /// this view without cloning the entire token stream or advancing it.
+    pub(crate) fn remaining_line_tokens(&self) -> &[Token] {
+        let start = self.pos.min(self.tokens.len() - 1);
+        let remaining = &self.tokens[start..];
+        let end = remaining
+            .iter()
+            .position(|token| matches!(token.kind, TokenKind::Newline | TokenKind::Eof))
+            .unwrap_or(remaining.len());
+        &remaining[..end]
+    }
+
     /// Collect tokens until end of line as a vec
     pub fn collect_line(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();

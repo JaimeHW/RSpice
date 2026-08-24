@@ -1,6 +1,7 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
 use crate::config::DampingStrategy;
+use crate::netlist::lexer::Token;
 use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 use crate::numerics::integration::TransientLteReference;
 use crate::solver::RealSolverBackend;
@@ -646,23 +647,32 @@ fn startup_directive_record<'a>(
 }
 
 fn remaining_command_source(stream: &TokenStream) -> String {
-    let mut copy = stream.clone();
-    copy.collect_line()
-        .into_iter()
-        .map(|token| token.lexeme)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let tokens = stream.remaining_line_tokens();
+    let capacity = tokens.iter().map(|token| token.lexeme.len()).sum::<usize>()
+        + tokens.len().saturating_sub(1);
+    let mut source = String::with_capacity(capacity);
+    for token in tokens {
+        push_command_token(&mut source, token);
+    }
+    source
 }
 
 fn remaining_command_expressions(stream: &TokenStream) -> Vec<String> {
-    let mut copy = stream.clone();
-    copy.collect_line()
-        .into_iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Expression(expression) => Some(expression),
+    stream
+        .remaining_line_tokens()
+        .iter()
+        .filter_map(|token| match &token.kind {
+            TokenKind::Expression(expression) => Some(expression.clone()),
             _ => None,
         })
         .collect()
+}
+
+fn push_command_token(source: &mut String, token: &Token) {
+    if !source.is_empty() {
+        source.push(' ');
+    }
+    source.push_str(&token.lexeme);
 }
 
 /// Return only the authored output operands from a `.PRINT`/`.PLOT` tail.
@@ -672,15 +682,17 @@ fn remaining_command_expressions(stream: &TokenStream) -> Vec<String> {
 /// typed dependency graph, so remove the leading analysis selector and every
 /// recognized output option assignment before constructing `OutputRequest`.
 fn remaining_print_operand_source(stream: &TokenStream) -> (String, Vec<String>) {
-    let mut copy = stream.clone();
-    let tokens = copy.collect_line();
-    let mut kept = Vec::new();
+    let tokens = stream.remaining_line_tokens();
+    let capacity = tokens.iter().map(|token| token.lexeme.len()).sum::<usize>()
+        + tokens.len().saturating_sub(1);
+    let mut source = String::with_capacity(capacity);
+    let mut expressions = Vec::new();
     let mut index = 0usize;
     let mut first_operand = true;
 
     while index < tokens.len() {
         if matches!(tokens[index].kind, TokenKind::Comma) {
-            kept.push(tokens[index].clone());
+            push_print_operand(&mut source, &mut expressions, &tokens[index]);
             index += 1;
             continue;
         }
@@ -688,7 +700,7 @@ fn remaining_print_operand_source(stream: &TokenStream) -> (String, Vec<String>)
             let upper = raw.to_ascii_uppercase();
             if first_operand && OutputAnalysisKind::from_keyword(&upper).is_some() {
                 first_operand = false;
-                kept.push(tokens[index].clone());
+                push_print_operand(&mut source, &mut expressions, &tokens[index]);
                 index += 1;
                 continue;
             }
@@ -707,23 +719,18 @@ fn remaining_print_operand_source(stream: &TokenStream) -> (String, Vec<String>)
         } else {
             first_operand = false;
         }
-        kept.push(tokens[index].clone());
+        push_print_operand(&mut source, &mut expressions, &tokens[index]);
         index += 1;
     }
 
-    let source = kept
-        .iter()
-        .map(|token| token.lexeme.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let expressions = kept
-        .into_iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Expression(expression) => Some(expression),
-            _ => None,
-        })
-        .collect();
     (source, expressions)
+}
+
+fn push_print_operand(source: &mut String, expressions: &mut Vec<String>, token: &Token) {
+    push_command_token(source, token);
+    if let TokenKind::Expression(expression) = &token.kind {
+        expressions.push(expression.clone());
+    }
 }
 
 fn parse_preprocess_command(
