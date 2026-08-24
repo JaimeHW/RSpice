@@ -2491,7 +2491,9 @@ impl XyceTestRunner {
                 };
                 (index, probe)
             };
-            used_probe_indices.insert(matched_index);
+            if !ordered_print_columns {
+                used_probe_indices.insert(matched_index);
+            }
             data_columns.push(XyceReferenceColumn::Probe {
                 name: probe.clone(),
             });

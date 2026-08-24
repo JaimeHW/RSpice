@@ -1359,6 +1359,9 @@ impl XyceTestRunner {
     where
         F: FnMut(&Netlist) -> Vec<rspice_core::analysis::ContinuousMeasureResult>,
     {
+        if netlist.measurements.is_empty() {
+            return Ok(BTreeMap::new());
+        }
         let requested = requested_names
             .into_iter()
             .map(str::to_ascii_uppercase)

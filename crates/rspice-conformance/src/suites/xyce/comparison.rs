@@ -3410,15 +3410,23 @@ impl XyceTestRunner {
         let mut mismatches = Vec::new();
         let mut global_row_index = 0usize;
         for (batch_index, batch) in batches.iter().enumerate() {
-            let equation_sweep = batch
-                .results
-                .iter()
-                .map(|point| (point.sweep_value, point.result.clone()))
-                .collect::<Vec<_>>();
-            let equation_traces = rspice_core::analysis::evaluate_dc_equation_measurements(
-                &batch.netlist,
-                &equation_sweep,
-            )?;
+            let equation_sweep = if batch.netlist.measurements.is_empty() {
+                Vec::new()
+            } else {
+                batch
+                    .results
+                    .iter()
+                    .map(|point| (point.sweep_value, point.result.clone()))
+                    .collect::<Vec<_>>()
+            };
+            let equation_traces = if equation_sweep.is_empty() {
+                Vec::new()
+            } else {
+                rspice_core::analysis::evaluate_dc_equation_measurements(
+                    &batch.netlist,
+                    &equation_sweep,
+                )?
+            };
             let accepted_axis = batch
                 .results
                 .iter()
@@ -5532,6 +5540,10 @@ impl XyceTestRunner {
         source: &str,
         columns: &[XyceReferenceColumn],
     ) -> Result<BTreeMap<String, XyceComparisonTolerance>, String> {
+        let directives = Self::logical_comp_directives(source);
+        if directives.is_empty() {
+            return Ok(BTreeMap::new());
+        }
         let mut compared_probes = BTreeSet::new();
         for column in columns {
             let XyceReferenceColumn::Probe { name } = column else {
@@ -5541,7 +5553,7 @@ impl XyceTestRunner {
         }
 
         let mut tolerances = BTreeMap::new();
-        for line in Self::logical_comp_directives(source) {
+        for line in directives {
             let rest = Self::comp_directive_body(&line)
                 .expect("logical COMP collector only returns COMP directives");
             let Some((probe, options)) = Self::split_comp_directive(rest) else {
