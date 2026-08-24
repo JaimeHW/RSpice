@@ -10397,6 +10397,48 @@ fn test_xyce_bug806_dc_data_baseline_relation() {
 }
 
 #[test]
+fn test_xyce_bug1043_ac_data_parameter_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params.cir",
+            "bug1043_ac_data_parameter_relational_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_expr.cir",
+            "bug1043_ac_data_parameter_relational_expression_baseline",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1043_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir",
+            "wrapper_static_fd_prn_ac",
+            true,
+            None,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy its BUG_1043 AC DATA parameter disposition, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug1957_multiwinding_mutual_inductor_relation() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

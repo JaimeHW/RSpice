@@ -6,6 +6,18 @@
 
 use super::*;
 
+impl XyceBaselineFamilyKind {
+    /// Whether this relational AC family intentionally compares a runtime
+    /// frequency-bound sweep with an authored `.AC DATA` representation.
+    ///
+    /// Ordinary relational AC families require identical static analysis
+    /// tuples. These families instead prove the two representations are
+    /// semantically equivalent through their dedicated typed snapshots.
+    pub(super) fn admits_frequency_data_pair(self) -> bool {
+        matches!(self, Self::AbmFrequency | Self::Bug1043AcDataParameters)
+    }
+}
+
 impl XyceTestRunner {
     /// Create a runner rooted at `tests/xyce`.
     pub fn new<P: AsRef<Path>>(root: P, config: XyceRunnerConfig) -> Self {
@@ -1601,8 +1613,8 @@ impl XyceTestRunner {
         kind: XyceBaselineFamilyKind,
         path: &Path,
     ) -> Result<XyceRelationalAcPlan, String> {
-        if kind == XyceBaselineFamilyKind::AbmFrequency {
-            self.abm_frequency_relational_ac_plan_for_path(path)
+        if kind.admits_frequency_data_pair() {
+            self.frequency_data_relational_ac_plan_for_path(path, kind.name())
         } else {
             self.relational_ac_plan_for_path(path)
         }
@@ -1616,21 +1628,35 @@ impl XyceTestRunner {
         &self,
         path: &Path,
     ) -> Result<XyceRelationalAcPlan, String> {
+        self.frequency_data_relational_ac_plan_for_path(path, "ABM_FREQ")
+    }
+
+    pub(super) fn bug1043_relational_ac_plan_for_path(
+        &self,
+        path: &Path,
+    ) -> Result<XyceRelationalAcPlan, String> {
+        self.frequency_data_relational_ac_plan_for_path(path, "BUG_1043_SON AC DATA parameter")
+    }
+
+    fn frequency_data_relational_ac_plan_for_path(
+        &self,
+        path: &Path,
+        label: &str,
+    ) -> Result<XyceRelationalAcPlan, String> {
         let source = fs::read_to_string(path)
-            .map_err(|err| format!("failed to read ABM_FREQ relational deck: {err}"))?;
+            .map_err(|err| format!("failed to read {label} relational deck: {err}"))?;
         if Self::contains_control_block(&source) {
-            return Err(
-                "ABM_FREQ relational comparison does not interpret control blocks".to_string(),
-            );
+            return Err(format!(
+                "{label} relational comparison does not interpret control blocks"
+            ));
         }
         Self::reject_unsupported_source_directives(&source)?;
         let output = Self::canonical_print_output_request(&source, "AC", false)?
-            .ok_or_else(|| "ABM_FREQ deck has no primary .PRINT AC request".to_string())?;
+            .ok_or_else(|| format!("{label} deck has no primary .PRINT AC request"))?;
         if output.format.is_some() || output.file.is_some() || output.probes.is_empty() {
-            return Err(
-                "ABM_FREQ requires one nonempty primary .PRINT AC using default PRN output"
-                    .to_string(),
-            );
+            return Err(format!(
+                "{label} requires one nonempty primary .PRINT AC using default PRN output"
+            ));
         }
         let print = XycePrintRequest {
             probes: output.probes,
@@ -1651,40 +1677,40 @@ impl XyceTestRunner {
             {
                 let bound = Self::source_with_ac_frequency_bindings(&source, 1.0);
                 Self::parse_xyce_netlist(&bound, path)
-                    .map_err(|err| format!("ABM_FREQ frequency-bound parse failed: {err}"))?
+                    .map_err(|err| format!("{label} frequency-bound parse failed: {err}"))?
             }
             Ok(netlist) => netlist,
             Err(err) if Self::parse_error_is_unbound_ac_frequency_dependency(&source, &err) => {
                 let bound = Self::source_with_ac_frequency_bindings(&source, 1.0);
                 Self::parse_xyce_netlist(&bound, path)
-                    .map_err(|retry| format!("ABM_FREQ frequency-bound parse failed: {retry}"))?
+                    .map_err(|retry| format!("{label} frequency-bound parse failed: {retry}"))?
             }
-            Err(err) => return Err(format!("ABM_FREQ parser rejected relational deck: {err}")),
+            Err(err) => return Err(format!("{label} parser rejected relational deck: {err}")),
         };
-        // The historical pair assigns roles by the authored AC representation:
-        // the GOODFILE owner is a DEC sweep and the TESTFILE control is AC DATA.
-        // Expression storage is deliberately not the role discriminator because
-        // a parser stage may resolve or retain a direct {FREQ}/{HERTZ} value. The
-        // strict authored-source snapshot still requires the exact runtime
-        // expression for every owner.
+        // Family-specific validators assign historical GOODFILE/TESTFILE roles.
+        // The shared adapter records only the authored representation here.
+        // Expression storage is deliberately not the discriminator because a
+        // parser stage may resolve or retain a FREQ/HERTZ expression; the strict
+        // typed snapshot validates the complete runtime relation separately.
         let frequency_bound = match netlist.analyses.as_slice() {
             [AnalysisCommand::Ac { .. }] => true,
             [AnalysisCommand::AcData { .. }] => false,
             _ => {
-                return Err(
-                    "ABM_FREQ requires exactly one DEC owner or one DATA control analysis"
-                        .to_string(),
-                );
+                return Err(format!(
+                    "{label} requires exactly one ordinary AC representation or one DATA representation"
+                ));
             }
         };
         let ac = Self::single_ac_analysis(&netlist)?;
         if !Self::step_commands(&netlist)?.is_empty() {
-            return Err("ABM_FREQ relational comparison does not admit .STEP".to_string());
+            return Err(format!(
+                "{label} relational comparison does not admit .STEP"
+            ));
         }
         if frequency_bound == ac.data_points().is_some() {
-            return Err(
-                "ABM_FREQ AC representation and resolved point provenance disagree".to_string(),
-            );
+            return Err(format!(
+                "{label} AC representation and resolved point provenance disagree"
+            ));
         }
         Ok(XyceRelationalAcPlan {
             deck_path: path.to_path_buf(),
@@ -1698,10 +1724,28 @@ impl XyceTestRunner {
     pub(super) fn relational_ac_plan_netlist(
         plan: &XyceRelationalAcPlan,
     ) -> Result<Netlist, String> {
-        // Relational snapshots qualify the authored representation, including
-        // retained FREQ/HERTZ expressions. Pointwise execution performs its own
-        // bound reparse for every frequency and must not erase that structure.
         Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
+            .map_err(|err| format!("relational AC plan parse failed: {err}"))
+    }
+
+    pub(super) fn relational_ac_plan_netlist_for_kind(
+        kind: XyceBaselineFamilyKind,
+        plan: &XyceRelationalAcPlan,
+    ) -> Result<Netlist, String> {
+        // Relational snapshots qualify the authored representation, including
+        // retained FREQ/HERTZ expressions. BUG_1043's transitive global
+        // expression graph needs one concrete parse-time axis value before its
+        // source and passive fields can be materialized. Direct ABM_FREQ device
+        // expressions deliberately stay unbound here so their authored
+        // FREQ/HERTZ dependency remains visible to the strict snapshot.
+        if kind != XyceBaselineFamilyKind::Bug1043AcDataParameters || !plan.frequency_bound {
+            return Self::relational_ac_plan_netlist(plan);
+        }
+        let frequency = plan.ac.frequencies.first().copied().ok_or_else(|| {
+            "frequency-bound relational AC plan has no frequency points".to_string()
+        })?;
+        let bound_source = Self::source_with_ac_frequency_bindings(&plan.source, frequency);
+        Self::parse_xyce_netlist(&bound_source, &plan.deck_path)
             .map_err(|err| format!("relational AC plan parse failed: {err}"))
     }
 

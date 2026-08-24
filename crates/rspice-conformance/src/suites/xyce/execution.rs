@@ -1824,6 +1824,36 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug1043_ac_data_parameter_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug1043_ac_data_parameter_family_contract(deck, contract, start)
+                }
+                Err(reason) => {
+                    let (_, role) = XyceBug1043AcDataParameterRole::for_record(&deck.relative_path)
+                        .expect("BUG_1043_SON detection selects only recognized records");
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "BUG_1043_SON AC DATA parameter family provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.baseline_family_contract(deck) {
             let result = self.run_baseline_family_contract(deck, contract, start);
             if self.config.verbose {
@@ -11117,6 +11147,43 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_bug1043_ac_data_parameter_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBug1043AcDataParameterFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_bug1043_ac_data_parameter_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "BUG_1043_SON AC DATA parameter provenance changed before execution: {reason}"
+                ),
+                Vec::new(),
+            );
+        }
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_bug1043_ac_data_parameter_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "BUG_1043_SON AC DATA parameter provenance changed during execution: {reason}"
+                    ),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_switch_state_case_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11209,10 +11276,9 @@ impl XyceTestRunner {
                 );
             }
         };
-        if matches!(
-            contract.kind,
-            XyceBaselineFamilyKind::AbmFrequency | XyceBaselineFamilyKind::AcAnalysisExpression
-        ) && analysis != XyceBaselineFamilyAnalysis::Ac
+        if (contract.kind.admits_frequency_data_pair()
+            || contract.kind == XyceBaselineFamilyKind::AcAnalysisExpression)
+            && analysis != XyceBaselineFamilyAnalysis::Ac
         {
             return self.failure_result(
                 deck,
@@ -11704,7 +11770,7 @@ impl XyceTestRunner {
     ) -> Result<XycePrnTable, String> {
         let engine = self.create_xyce_engine();
         if plan.frequency_bound {
-            if kind != XyceBaselineFamilyKind::AbmFrequency || plan.ac.data_points().is_some() {
+            if !kind.admits_frequency_data_pair() || plan.ac.data_points().is_some() {
                 return Err(format!(
                     "family kind {} does not admit this frequency-bound relational AC plan",
                     kind.name()
@@ -11747,7 +11813,7 @@ impl XyceTestRunner {
         }
 
         if let Some(data_points) = plan.ac.data_points() {
-            if kind != XyceBaselineFamilyKind::AbmFrequency {
+            if !kind.admits_frequency_data_pair() {
                 return Err(format!(
                     "family kind {} does not admit a DATA relational AC plan",
                     kind.name()
@@ -11836,10 +11902,11 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
-        let baseline_netlist = match Self::relational_ac_plan_netlist(&baseline_plan) {
-            Ok(netlist) => netlist,
-            Err(err) => {
-                return self.failure_result(
+        let baseline_netlist =
+            match Self::relational_ac_plan_netlist_for_kind(contract.kind, &baseline_plan) {
+                Ok(netlist) => netlist,
+                Err(err) => {
+                    return self.failure_result(
                     deck,
                     start,
                     wrapper_contract,
@@ -11849,8 +11916,8 @@ impl XyceTestRunner {
                     ),
                     Vec::new(),
                 );
-            }
-        };
+                }
+            };
         let baseline_snapshot =
             match Self::strict_ac_family_snapshot(contract.kind, &baseline_netlist, &baseline_plan)
             {
@@ -11937,7 +12004,7 @@ impl XyceTestRunner {
             }
             if target_plan.print.probes != baseline_plan.print.probes
                 || target_plan.ac.frequencies.len() != baseline_plan.ac.frequencies.len()
-                || (contract.kind != XyceBaselineFamilyKind::AbmFrequency
+                || (!contract.kind.admits_frequency_data_pair()
                     && !target_plan
                         .ac
                         .frequencies
@@ -11957,7 +12024,10 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
-            let target_netlist = match Self::relational_ac_plan_netlist(&target_plan) {
+            let target_netlist = match Self::relational_ac_plan_netlist_for_kind(
+                contract.kind,
+                &target_plan,
+            ) {
                 Ok(netlist) => netlist,
                 Err(err) => {
                     return self.failure_result(
@@ -11973,7 +12043,7 @@ impl XyceTestRunner {
                     );
                 }
             };
-            if contract.kind != XyceBaselineFamilyKind::AbmFrequency
+            if !contract.kind.admits_frequency_data_pair()
                 && !Self::ac_analyses_match_exactly(&baseline_netlist, &target_netlist)
             {
                 return self.failure_result(

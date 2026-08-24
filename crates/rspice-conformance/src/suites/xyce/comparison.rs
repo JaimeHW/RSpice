@@ -1901,6 +1901,10 @@ impl XyceTestRunner {
                 XyceStrictAcFamilySnapshot::AbmFrequency(target),
             ) => Self::compare_abm_frequency_snapshots(baseline, target),
             (
+                XyceStrictAcFamilySnapshot::Bug1043AcDataParameters(baseline),
+                XyceStrictAcFamilySnapshot::Bug1043AcDataParameters(target),
+            ) => Self::compare_bug1043_ac_data_parameter_snapshots(baseline, target),
+            (
                 XyceStrictAcFamilySnapshot::AcAnalysisExpression(baseline),
                 XyceStrictAcFamilySnapshot::AcAnalysisExpression(target),
             ) => Self::compare_ac_analysis_expression_snapshots(baseline, target),
@@ -1943,6 +1947,43 @@ impl XyceTestRunner {
             return Err(
                 "ABM_FREQ runtime-expression and DATA-row provenance is not canonical".to_string(),
             );
+        }
+        Ok(())
+    }
+
+    pub(super) fn compare_bug1043_ac_data_parameter_snapshots(
+        baseline: &XyceBug1043AcDataParameterSnapshot,
+        target: &XyceBug1043AcDataParameterSnapshot,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG_1043_SON AC DATA parameter family";
+        if baseline.representation
+            != XyceBug1043AcDataParameterRepresentation::RuntimeExpressionBaseline
+            || target.representation != XyceBug1043AcDataParameterRepresentation::DataTableOwner
+        {
+            return Err(format!(
+                "{LABEL} must compare the runtime-expression baseline as GOODFILE against the DATA owner as TESTFILE"
+            ));
+        }
+        if baseline.frequency_bits != target.frequency_bits
+            || baseline.effective_rows != target.effective_rows
+            || baseline.source_nodes != target.source_nodes
+            || baseline.resistor_nodes != target.resistor_nodes
+            || baseline.capacitor_nodes != target.capacitor_nodes
+            || baseline.ordered_probes != target.ordered_probes
+        {
+            return Err(format!(
+                "{LABEL} changes its frequency grid, effective row values, topology, or ordered probes"
+            ));
+        }
+        if baseline.runtime_expressions.len() != 4
+            || !baseline.data_overrides.is_empty()
+            || !target.runtime_expressions.is_empty()
+            || target.data_overrides.len() != baseline.effective_rows.len()
+            || target.data_overrides.iter().any(|row| row.len() != 5)
+        {
+            return Err(format!(
+                "{LABEL} runtime-expression and five-column DATA-row provenance is not canonical"
+            ));
         }
         Ok(())
     }

@@ -5191,6 +5191,309 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn bug1043_ac_data_parameter_family_snapshot(
+        plan: &XyceRelationalAcPlan,
+        netlist: &Netlist,
+    ) -> Result<XyceBug1043AcDataParameterSnapshot, String> {
+        const LABEL: &str = "BUG_1043_SON AC DATA parameter family";
+        const GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
+        const MAGNITUDES: [Value; 6] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        const PHASES: [Value; 6] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        const RESISTANCES: [Value; 6] = [1.0e3, 2.0e3, 3.0e3, 4.0e3, 5.0e3, 6.0e3];
+        const CAPACITANCES: [Value; 6] = [2.0e-6, 3.0e-6, 4.0e-6, 5.0e-6, 6.0e-6, 7.0e-6];
+
+        if netlist.title.trim().is_empty()
+            || netlist.elements.len() != 3
+            || netlist.analyses.len() != 1
+            || !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.fft_analyses.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+            || !netlist.params.all_parameter_expressions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires one flat three-element diagnostic-free AC circuit without auxiliary state"
+            ));
+        }
+
+        let mut elements = netlist
+            .elements
+            .iter()
+            .map(|element| (Self::normalize_device_instance_name(&element.name), element))
+            .collect::<BTreeMap<_, _>>();
+        if elements.len() != 3 {
+            return Err(format!("{LABEL} contains duplicate element identities"));
+        }
+
+        let source = elements
+            .remove("isrc")
+            .ok_or_else(|| format!("{LABEL} has no canonical Isrc"))?;
+        let resistor = elements
+            .remove("r1")
+            .ok_or_else(|| format!("{LABEL} has no canonical R1"))?;
+        let capacitor = elements
+            .remove("c1")
+            .ok_or_else(|| format!("{LABEL} has no canonical C1"))?;
+        if !elements.is_empty() {
+            return Err(format!("{LABEL} has an unqualified extra element"));
+        }
+
+        let normalized_nodes = |nodes: &[String]| {
+            nodes
+                .iter()
+                .map(|node| node.trim().to_ascii_lowercase())
+                .collect::<Vec<_>>()
+        };
+        let source_nodes = normalized_nodes(&source.nodes);
+        let resistor_nodes = normalized_nodes(&resistor.nodes);
+        let capacitor_nodes = normalized_nodes(&capacitor.nodes);
+        let ElementKind::CurrentSource(rspice_core::netlist::SourceSpec::Ac {
+            magnitude: source_magnitude,
+            phase: source_phase,
+        }) = &source.kind
+        else {
+            return Err(format!(
+                "{LABEL} requires Isrc to retain one canonical AC magnitude/phase specification"
+            ));
+        };
+        let expected_source_phase = PHASES[0].to_radians();
+        if source_nodes != ["1", "0"]
+            || resistor_nodes != ["1", "0"]
+            || capacitor_nodes != ["1", "0"]
+            || source_magnitude.to_bits() != MAGNITUDES[0].to_bits()
+            || (*source_phase - expected_source_phase).abs()
+                > 4.0 * Value::EPSILON * expected_source_phase.abs().max(1.0)
+        {
+            return Err(format!(
+                "{LABEL} requires canonical Isrc AC defaults and Isrc/R1/C1 in parallel from node 1 to literal ground"
+            ));
+        }
+
+        let ElementKind::Resistor {
+            value: resistance,
+            value_expr: resistance_expression,
+            model: resistance_model,
+            instance_params: resistance_params,
+            deferred_params: resistance_deferred,
+        } = &resistor.kind
+        else {
+            return Err(format!("{LABEL} R1 is not a resistor"));
+        };
+        let ElementKind::Capacitor {
+            value: capacitance,
+            value_expr: capacitance_expression,
+            initial_voltage,
+            model: capacitance_model,
+            instance_params: capacitance_params,
+            deferred_params: capacitance_deferred,
+        } = &capacitor.kind
+        else {
+            return Err(format!("{LABEL} C1 is not a capacitor"));
+        };
+        if resistance_model.is_some()
+            || !resistance_params.is_empty()
+            || !resistance_deferred.is_empty()
+            || initial_voltage.is_some()
+            || capacitance_model.is_some()
+            || !capacitance_params.is_empty()
+            || !capacitance_deferred.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} passive model, initial-condition, or instance-parameter state changed"
+            ));
+        }
+
+        let effective_rows = (0..GRID.len())
+            .map(|index| XyceBug1043AcDataParameterRow {
+                frequency_bits: GRID[index].to_bits(),
+                magnitude_bits: MAGNITUDES[index].to_bits(),
+                phase_bits: PHASES[index].to_bits(),
+                resistance_bits: RESISTANCES[index].to_bits(),
+                capacitance_bits: CAPACITANCES[index].to_bits(),
+            })
+            .collect::<Vec<_>>();
+        let frequency_bits = GRID.iter().copied().map(Value::to_bits).collect::<Vec<_>>();
+
+        let representation = if plan.frequency_bound {
+            XyceBug1043AcDataParameterRepresentation::RuntimeExpressionBaseline
+        } else {
+            XyceBug1043AcDataParameterRepresentation::DataTableOwner
+        };
+        let (runtime_expressions, data_overrides) = match representation {
+            XyceBug1043AcDataParameterRepresentation::RuntimeExpressionBaseline => {
+                if plan.ac.data_points().is_some()
+                    || !netlist.data_tables.is_empty()
+                    || resistance.to_bits() != RESISTANCES[0].to_bits()
+                    || capacitance.to_bits() != CAPACITANCES[0].to_bits()
+                    || resistance_expression.as_deref().is_some_and(|expression| {
+                        !expression
+                            .trim()
+                            .trim_matches(|character| character == '{' || character == '}')
+                            .eq_ignore_ascii_case("r1val")
+                    })
+                    || capacitance_expression.as_deref().is_some_and(|expression| {
+                        !expression
+                            .trim()
+                            .trim_matches(|character| character == '{' || character == '}')
+                            .eq_ignore_ascii_case("c1val")
+                    })
+                {
+                    return Err(format!(
+                        "{LABEL} runtime baseline lost its expression-only parameter/device representation"
+                    ));
+                }
+
+                let mut actual = BTreeMap::new();
+                for (name, expression) in netlist.params.all_global_expressions() {
+                    let ast = rspice_core::netlist::expr::parse_expression(&expression).map_err(
+                        |error| {
+                            format!(
+                                "{LABEL} global expression {name}='{expression}' is invalid: {error}"
+                            )
+                        },
+                    )?;
+                    if actual
+                        .insert(
+                            name.to_ascii_lowercase(),
+                            Self::expression_ast_fingerprint(&ast),
+                        )
+                        .is_some()
+                    {
+                        return Err(format!(
+                            "{LABEL} runtime baseline contains duplicate global expression {name}"
+                        ));
+                    }
+                }
+                let mut expected = BTreeMap::new();
+                for (name, expression) in [
+                    ("mag", "log10(freq)+1"),
+                    ("phase", "0.1*mag"),
+                    ("r1val", "mag*1.0e3"),
+                    ("c1val", "(1.0+mag)*1.0e-6"),
+                ] {
+                    let ast = rspice_core::netlist::expr::parse_expression(expression)
+                        .expect("canonical BUG_1043_SON expression parses");
+                    expected.insert(name.to_string(), Self::expression_ast_fingerprint(&ast));
+                }
+                if actual != expected {
+                    return Err(format!("{LABEL} runtime global-expression graph changed"));
+                }
+                (actual, Vec::new())
+            }
+            XyceBug1043AcDataParameterRepresentation::DataTableOwner => {
+                if resistance.to_bits() != RESISTANCES[0].to_bits()
+                    || capacitance.to_bits() != CAPACITANCES[0].to_bits()
+                    || resistance_expression.is_some()
+                    || capacitance_expression.is_some()
+                    || !netlist.params.all_global_expressions().is_empty()
+                {
+                    return Err(format!(
+                        "{LABEL} DATA owner lost its literal passive/default-global representation"
+                    ));
+                }
+                let mut numeric = netlist.params.all_params();
+                numeric.sort_by(|left, right| left.0.cmp(&right.0));
+                let expected_numeric = vec![
+                    ("MAG".to_string(), MAGNITUDES[0]),
+                    ("PHASE".to_string(), PHASES[0]),
+                ];
+                if numeric != expected_numeric {
+                    return Err(format!(
+                        "{LABEL} DATA owner default MAG/PHASE globals changed"
+                    ));
+                }
+
+                let [table] = netlist.data_tables.as_slice() else {
+                    return Err(format!("{LABEL} DATA owner requires exactly one table"));
+                };
+                let expected_columns = ["mag", "phase", "freq", "r1", "c1"];
+                if !table.name.eq_ignore_ascii_case("table")
+                    || table.params.len() != expected_columns.len()
+                    || !table
+                        .params
+                        .iter()
+                        .zip(expected_columns)
+                        .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+                    || table.rows.len() != GRID.len()
+                {
+                    return Err(format!(
+                        "{LABEL} DATA table name, column schema, or row count changed"
+                    ));
+                }
+                let points = plan
+                    .ac
+                    .data_points()
+                    .ok_or_else(|| format!("{LABEL} DATA owner lost its resolved points"))?;
+                let mut overrides = Vec::with_capacity(points.len());
+                for (index, point) in points.iter().enumerate() {
+                    let expected = [
+                        MAGNITUDES[index],
+                        PHASES[index],
+                        GRID[index],
+                        RESISTANCES[index],
+                        CAPACITANCES[index],
+                    ];
+                    if point.frequency.to_bits() != GRID[index].to_bits()
+                        || point.overrides.len() != expected_columns.len()
+                        || point
+                            .overrides
+                            .iter()
+                            .zip(expected_columns.iter().zip(expected))
+                            .any(|((name, actual), (expected_name, expected_value))| {
+                                !name.eq_ignore_ascii_case(expected_name)
+                                    || actual.to_bits() != expected_value.to_bits()
+                            })
+                        || table.rows[index]
+                            .iter()
+                            .zip(expected)
+                            .any(|(actual, expected)| actual.to_bits() != expected.to_bits())
+                    {
+                        return Err(format!("{LABEL} DATA row {} changed", index + 1));
+                    }
+                    overrides.push(
+                        point
+                            .overrides
+                            .iter()
+                            .map(|(name, value)| (name.to_ascii_lowercase(), value.to_bits()))
+                            .collect(),
+                    );
+                }
+                (BTreeMap::new(), overrides)
+            }
+        };
+
+        Ok(XyceBug1043AcDataParameterSnapshot {
+            representation,
+            frequency_bits,
+            effective_rows,
+            source_nodes: source_nodes
+                .try_into()
+                .expect("qualified two-terminal Isrc"),
+            resistor_nodes: resistor_nodes
+                .try_into()
+                .expect("qualified two-terminal R1"),
+            capacitor_nodes: capacitor_nodes
+                .try_into()
+                .expect("qualified two-terminal C1"),
+            runtime_expressions,
+            data_overrides,
+            ordered_probes: plan
+                .print
+                .probes
+                .iter()
+                .map(|probe| Self::normalize_probe(probe))
+                .collect(),
+        })
+    }
+
     pub(super) fn strict_ac_family_snapshot(
         kind: XyceBaselineFamilyKind,
         netlist: &Netlist,
@@ -5201,6 +5504,10 @@ impl XyceTestRunner {
                 Self::abm_frequency_family_snapshot(plan, netlist)
                     .map(Box::new)
                     .map(XyceStrictAcFamilySnapshot::AbmFrequency)
+            }
+            XyceBaselineFamilyKind::Bug1043AcDataParameters => {
+                Self::bug1043_ac_data_parameter_family_snapshot(plan, netlist)
+                    .map(XyceStrictAcFamilySnapshot::Bug1043AcDataParameters)
             }
             XyceBaselineFamilyKind::AcAnalysisExpression => {
                 Self::ac_analysis_expression_snapshot(netlist)

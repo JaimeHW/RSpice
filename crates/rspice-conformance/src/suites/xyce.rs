@@ -62,15 +62,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 246;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 247;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "e5e4b098663aefc4a5cb42314260f99d61e01fafd537bcd3ce8f81e2af19b35a";
+    "577f92c2c3d189657860294ca3ad362c2cf18cee80f2f18dd5b4231e214e839d";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "2f6a31a07fd99e3da71481263e7e3251bdd480d3b3a929402953d2a38e8a82de";
+    "667b7273e9de660a9217d8a21998fc436316b0a9436d51bfedb2778f9b9186d2";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "c8342516a581300a6137dbc189fba5e7c83a90b98dc220e707f9bce06474e3d9";
+    "5a2cda1e920ca17771ed76f32046ca9efd448263c280615fd8fe7432dfc2078f";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -427,6 +427,115 @@ const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_BLAKE3: &str =
     "e08dd112070ff4b275d29c41cb5cc623c81687dda49aeb40460a4092c4655676";
 const XYCE_ABM_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
 const XYCE_ABM_FREQUENCY_GRID_RELATIVE_ROUNDOFF: Value = 64.0 * f64::EPSILON;
+
+// Release 7.10's BUG_1043_SON wrapper runs the frequency-expression deck as
+// ACComparator's directional GOODFILE and the AC DATA parameter-sweep deck as
+// TESTFILE.  The analytic sibling has its own checked-in .FD.prn oracle and is
+// deliberately not a member of this relational pair.
+const XYCE_BUG1043_AC_DATA_PARAMETER_WRAPPER_OWNER_CONTRACT: &str =
+    "bug1043_ac_data_parameter_relational_wrapper_owner";
+const XYCE_BUG1043_AC_DATA_PARAMETER_EXPRESSION_BASELINE_CONTRACT: &str =
+    "bug1043_ac_data_parameter_relational_expression_baseline";
+const XYCE_BUG1043_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
+const XYCE_BUG1043_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG1043_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG1043_FAMILY_DIR: &str = "Netlists/Certification_Tests/BUG_1043_SON";
+const XYCE_BUG1043_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params.cir";
+const XYCE_BUG1043_EXPRESSION_BASELINE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_expr.cir";
+const XYCE_BUG1043_ANALYTIC_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir";
+const XYCE_BUG1043_ANALYTIC_ORACLE_PATH: &str =
+    "OutputData/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir.FD.prn";
+const XYCE_BUG1043_HISTORICAL_EXCLUDE_PATH: &str =
+    "Netlists/Certification_Tests/BUG_1043_SON/exclude";
+const XYCE_BUG1043_OWNER_RECORD: &str =
+    "netlists/certification_tests/bug_1043_son/rc_ac_params.cir";
+const XYCE_BUG1043_EXPRESSION_BASELINE_RECORD: &str =
+    "netlists/certification_tests/bug_1043_son/rc_ac_params_expr.cir";
+const XYCE_BUG1043_ANALYTIC_RECORD: &str =
+    "netlists/certification_tests/bug_1043_son/rc_ac_params_analytic.cir";
+const XYCE_BUG1043_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
+const XYCE_BUG1043_FREQUENCY_GRID_RELATIVE_ROUNDOFF: Value = 64.0 * f64::EPSILON;
+const XYCE_BUG1043_HISTORICAL_RECORD_COUNT: usize = 7;
+const XYCE_BUG1043_HISTORICAL_RECORD_BYTES: usize = 1_716;
+const XYCE_BUG1043_HISTORICAL_RECORDS_SHA256: &str =
+    "3d7d4bc314d8e1a6a83aa0341b8ff118d6ef0d44165e8d61b1e23bbf7344e31e";
+const XYCE_BUG1043_HISTORICAL_RECORDS_BLAKE3: &str =
+    "594c953743f5b4dc7ce3e13f3402a55da3507e6db0819bfe8b6842a2edefd164";
+
+const XYCE_BUG1043_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
+    (
+        "Netlists/Certification_Tests/BUG_1043_SON/Manifest.txt",
+        158,
+        "6b34b89d6f8adeae3c6434280a8f9fac8c85c23e5a229cf895b605fb98dbfe67",
+        "d629139ef9c93c48e9d640bdb1b6ab805078b9030bac86881909f0f4cde6b9a0",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params.cir.sh",
+        2_876,
+        "b703dcca118b5a16f6c1ffb8d402c4fb99ec568db21b2dccd825939f80114b57",
+        "0ae40d014a8b9ffaa74627d710ce3b2e6593ed6496655306b2a2c3a3623cba70",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir.sh",
+        2_196,
+        "bcdf24c7279b9c4702a7f59ee174495a4f2a3c510d2a4fe77bf0840ca075a95f",
+        "33bc99393271bee1e5160fb6c2891d6b312a122ea2b8ae7292b073c1c7d9adca",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir.tags",
+        55,
+        "c38bdc58bde3bee682c7196d3bce6bb0caf028c19a6444b71952439fa8c005cf",
+        "00c81a30052f4110e4d8c66513ea01747f65b3fceeb431d527e568feb23cfde5",
+    ),
+    (
+        XYCE_BUG1043_HISTORICAL_EXCLUDE_PATH,
+        22,
+        "b78d4e00b18ef27ff71bcf5c4d823d80946364421414c6c4b8dc4db4c28733d7",
+        "1052573d2b22c1371958f3ecb1ec656c15f72e77f3ae242665cd0fc06ec3968f",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_1043_SON/tags",
+        45,
+        "596cae8652fd11a8d05526f881f5e02cdf39f1275fc953c36d298790e94a92b7",
+        "7e72fa9e9bada1a6eb458907e99ccaeafdbcd3439c4f1957bd8943be939530ba",
+    ),
+    (
+        "TestScripts/ACComparator.pl",
+        14_308,
+        "265c0c24ac886ad44bf3827f2cbe0c0f1c75c80971d5bdb3429e8048b36e1571",
+        "6a1c8fdfa65116f6729343a759d172be939eb81a8617cea5a52f3572577ba926",
+    ),
+];
+
+const XYCE_BUG1043_RETAINED_SOURCE_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "RC_AC_params.cir",
+        604,
+        "8488f1f8e782ddf8697d346f72faf18afecb0f9da72341feea405dc1dc009fd7",
+        "9af9c44bb2d799ecc2e1bf25ea9535c48cdac2323e81c24f0c3372b2cfbae057",
+    ),
+    (
+        "RC_AC_params_analytic.cir",
+        1_196,
+        "caf82e0f07da37e3398988244bd3ef386c36154c7de76596eb642d2fbdd60758",
+        "485931b49884a5cfcf81ddd0dc12c7e42d3d64602c85127b6cc1e26dcbfa6efe",
+    ),
+    (
+        "RC_AC_params_expr.cir",
+        460,
+        "f7c2cfbcaf1f524d46d624b171f89dc771e830a22c9bb458550dce2b462ab2c2",
+        "0a049b4a280380dbf2d3027e5aaef6fd4ea97be804d1f1f9371799b0b3d1485d",
+    ),
+];
+
+const XYCE_BUG1043_ANALYTIC_ORACLE_ARTIFACT: (&str, usize, &str, &str) = (
+    "RC_AC_params_analytic.cir.FD.prn",
+    471,
+    "4b43d6e4d3489148a88749aa2d449f3b80ec8e07b902f5845d7016d7f102d286",
+    "2ee40573c63fd9fd8ac46081edb528589ed4fef43596cf602e8a6676f223a1d0",
+);
 
 // Release 7.10's ABM_SPLINES ordering wrappers run each authored out-of-order
 // inline lookup deck first, then its ordered control, and require their default
@@ -4243,6 +4352,28 @@ const XYCE_ABM_FREQUENCY_CASES: [XyceAbmFrequencyCaseSpec; 4] = [
         variable: XyceAbmFrequencyVariable::Hertz,
     },
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceBug1043AcDataParameterCaseSpec {
+    family: &'static str,
+    owner_path: &'static str,
+    baseline_path: &'static str,
+    owner_record: &'static str,
+    baseline_record: &'static str,
+    owner_content_blake3: &'static str,
+    baseline_content_blake3: &'static str,
+}
+
+const XYCE_BUG1043_AC_DATA_PARAMETER_CASE: XyceBug1043AcDataParameterCaseSpec =
+    XyceBug1043AcDataParameterCaseSpec {
+        family: "Certification_Tests/BUG_1043_SON/RC_AC_params",
+        owner_path: XYCE_BUG1043_OWNER_PATH,
+        baseline_path: XYCE_BUG1043_EXPRESSION_BASELINE_PATH,
+        owner_record: XYCE_BUG1043_OWNER_RECORD,
+        baseline_record: XYCE_BUG1043_EXPRESSION_BASELINE_RECORD,
+        owner_content_blake3: "9af9c44bb2d799ecc2e1bf25ea9535c48cdac2323e81c24f0c3372b2cfbae057",
+        baseline_content_blake3: "0a049b4a280380dbf2d3027e5aaef6fd4ea97be804d1f1f9371799b0b3d1485d",
+    };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceSourceMultiplicityCaseSpec {
@@ -9739,6 +9870,15 @@ struct XyceAbmFrequencyFamilyContract {
 }
 
 #[derive(Debug, Clone)]
+struct XyceBug1043AcDataParameterFamilyContract {
+    relational: XyceBaselineFamilyContract,
+    owner_path: PathBuf,
+    baseline_path: PathBuf,
+    spec: &'static XyceBug1043AcDataParameterCaseSpec,
+    role: XyceBug1043AcDataParameterRole,
+}
+
+#[derive(Debug, Clone)]
 struct XyceAbmLookupOrderFamilyContract {
     relational: XyceBaselineFamilyContract,
     owner_path: PathBuf,
@@ -10064,6 +10204,35 @@ impl XyceAbmFrequencyRole {
                 None
             }
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug1043AcDataParameterRole {
+    DataWrapperOwner,
+    ExpressionBaseline,
+}
+
+impl XyceBug1043AcDataParameterRole {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::DataWrapperOwner => XYCE_BUG1043_AC_DATA_PARAMETER_WRAPPER_OWNER_CONTRACT,
+            Self::ExpressionBaseline => XYCE_BUG1043_AC_DATA_PARAMETER_EXPRESSION_BASELINE_CONTRACT,
+        }
+    }
+
+    fn for_record(
+        relative_path: &str,
+    ) -> Option<(&'static XyceBug1043AcDataParameterCaseSpec, Self)> {
+        let relative = XyceTestRunner::normalize_manifest_key(relative_path);
+        let spec = &XYCE_BUG1043_AC_DATA_PARAMETER_CASE;
+        if relative == spec.owner_record {
+            Some((spec, Self::DataWrapperOwner))
+        } else if relative == spec.baseline_record {
+            Some((spec, Self::ExpressionBaseline))
+        } else {
+            None
+        }
     }
 }
 
@@ -10814,6 +10983,34 @@ struct XyceAbmFrequencySnapshot {
     ordered_probes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBug1043AcDataParameterRepresentation {
+    DataTableOwner,
+    RuntimeExpressionBaseline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug1043AcDataParameterRow {
+    frequency_bits: u64,
+    magnitude_bits: u64,
+    phase_bits: u64,
+    resistance_bits: u64,
+    capacitance_bits: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBug1043AcDataParameterSnapshot {
+    representation: XyceBug1043AcDataParameterRepresentation,
+    frequency_bits: Vec<u64>,
+    effective_rows: Vec<XyceBug1043AcDataParameterRow>,
+    source_nodes: [String; 2],
+    resistor_nodes: [String; 2],
+    capacitor_nodes: [String; 2],
+    runtime_expressions: BTreeMap<String, XyceExpressionAstFingerprint>,
+    data_overrides: Vec<Vec<(String, u64)>>,
+    ordered_probes: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceThermalResistorRuntimeFingerprint {
     name: String,
@@ -11083,6 +11280,7 @@ struct XyceNestedIncludeSubcircuitFingerprint {
 enum XyceStrictAcFamilySnapshot {
     AcAnalysisExpression(XyceAcAnalysisExpressionSnapshot),
     AbmFrequency(Box<XyceAbmFrequencySnapshot>),
+    Bug1043AcDataParameters(XyceBug1043AcDataParameterSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11242,6 +11440,7 @@ enum XyceBjtExternalNodeRepresentation {
 enum XyceBaselineFamilyKind {
     AbmFrequency,
     AbmLookupOrder,
+    Bug1043AcDataParameters,
     AgeCap,
     DiodeModelAlias,
     SwitchStateCase,
@@ -11334,6 +11533,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::AbmFrequency => "ABM_FREQUENCY_RELATIONAL",
             Self::AbmLookupOrder => "ABM_SPLINES_INLINE_LOOKUP_ORDER",
+            Self::Bug1043AcDataParameters => "BUG1043_AC_DATA_PARAMETERS",
             Self::AgeCap => "AGE_CAP_EQUIVALENCE",
             Self::DiodeModelAlias => "DIODE_MODEL_ALIAS_EQUIVALENCE",
             Self::SwitchStateCase => "SWITCH_STATE_CASE_EQUIVALENCE",
@@ -11365,6 +11565,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::AbmFrequency => XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT,
             Self::AbmLookupOrder => XYCE_ABM_LOOKUP_ORDER_WRAPPER_OWNER_CONTRACT,
+            Self::Bug1043AcDataParameters => XYCE_BUG1043_AC_DATA_PARAMETER_WRAPPER_OWNER_CONTRACT,
             Self::AgeCap => "age_cap_family_anchor",
             Self::DiodeModelAlias => "diode_model_alias_family_anchor",
             Self::SwitchStateCase => "switch_state_case_family_anchor",
@@ -11396,6 +11597,9 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::AbmFrequency => XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT,
             Self::AbmLookupOrder => XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT,
+            Self::Bug1043AcDataParameters => {
+                XYCE_BUG1043_AC_DATA_PARAMETER_EXPRESSION_BASELINE_CONTRACT
+            }
             Self::AgeCap => "age_cap_family_aged_baseline",
             Self::DiodeModelAlias => "diode_model_alias_family_canonical_baseline",
             Self::SwitchStateCase => "switch_state_case_family_uppercase_baseline",
@@ -11460,6 +11664,7 @@ impl XyceBaselineFamilyKind {
             Self::AgeCap => XyceStaticTranPlanPurpose::AgeCapRelationalFamily,
             Self::AbmFrequency
             | Self::AbmLookupOrder
+            | Self::Bug1043AcDataParameters
             | Self::AcAnalysisExpression
             | Self::BjtExternalNode
             | Self::DcAnalysisExpression
@@ -12174,6 +12379,7 @@ mod comparison;
 mod contracts;
 mod contracts_bug1025;
 mod contracts_bug1040;
+mod contracts_bug1043;
 mod contracts_bug1116;
 mod contracts_bug1162;
 mod contracts_bug1398;

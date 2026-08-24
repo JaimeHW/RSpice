@@ -2400,6 +2400,7 @@ impl XyceTestRunner {
             ),
             XyceBaselineFamilyKind::AbmFrequency
             | XyceBaselineFamilyKind::AbmLookupOrder
+            | XyceBaselineFamilyKind::Bug1043AcDataParameters
             | XyceBaselineFamilyKind::AcAnalysisExpression
             | XyceBaselineFamilyKind::BjtExternalNode
             | XyceBaselineFamilyKind::DcAnalysisExpression

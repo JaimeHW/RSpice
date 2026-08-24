@@ -917,12 +917,82 @@ impl XyceTestRunner {
         Self::abm_frequency_family_snapshot(plan, &netlist).map(|_| ())
     }
 
+    pub(super) fn validate_bug1043_ac_data_parameter_ac_plan(
+        plan: &XyceRelationalAcPlan,
+    ) -> Result<(), String> {
+        const LABEL: &str = "BUG_1043_SON AC DATA parameter family";
+        if !Self::abm_frequency_grid_matches(&plan.ac.frequencies) {
+            return Err(format!(
+                "{LABEL} requires the exact six-point 1 Hz through 100 kHz decade grid, got {:?}",
+                plan.ac.frequencies
+            ));
+        }
+        let netlist = Self::relational_ac_plan_netlist_for_kind(
+            XyceBaselineFamilyKind::Bug1043AcDataParameters,
+            plan,
+        )?;
+        match (
+            plan.frequency_bound,
+            plan.ac.data_points(),
+            netlist.analyses.as_slice(),
+        ) {
+            (
+                true,
+                None,
+                [
+                    AnalysisCommand::Ac {
+                        variation: FreqVariation::Dec,
+                        points: 1,
+                        start_freq,
+                        stop_freq,
+                    },
+                ],
+            ) if start_freq.to_bits() == 1.0f64.to_bits()
+                && stop_freq.to_bits() == 1.0e5f64.to_bits() => {}
+            (false, Some(points), [AnalysisCommand::AcData { .. }])
+                if points.len() == XYCE_ABM_FREQUENCY_GRID.len() => {}
+            _ => {
+                return Err(format!(
+                    "{LABEL} requires one runtime-expression DEC baseline or one six-row DATA owner"
+                ));
+            }
+        }
+        let normalized = plan
+            .print
+            .probes
+            .iter()
+            .map(|probe| Self::normalize_probe(probe))
+            .collect::<Vec<_>>();
+        let expected = [
+            "mag",
+            "phase",
+            "isrc:acmag",
+            "isrc:acphase",
+            "r1:r",
+            "c1:c",
+            "v(1)",
+        ];
+        if normalized
+            .iter()
+            .map(String::as_str)
+            .ne(expected.into_iter())
+        {
+            return Err(format!(
+                "{LABEL} ordered .PRINT AC probe schema is not the exact seven-column parameter/device/voltage schema"
+            ));
+        }
+        Self::bug1043_ac_data_parameter_family_snapshot(plan, &netlist).map(|_| ())
+    }
+
     pub(super) fn validate_baseline_family_ac_plan(
         kind: XyceBaselineFamilyKind,
         plan: &XyceRelationalAcPlan,
     ) -> Result<(), String> {
         match kind {
             XyceBaselineFamilyKind::AbmFrequency => Self::validate_abm_frequency_ac_plan(plan),
+            XyceBaselineFamilyKind::Bug1043AcDataParameters => {
+                Self::validate_bug1043_ac_data_parameter_ac_plan(plan)
+            }
             XyceBaselineFamilyKind::AcAnalysisExpression => {
                 Self::validate_ac_analysis_expression_plan(plan)
             }
