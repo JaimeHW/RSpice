@@ -282,6 +282,13 @@ pub struct Diode {
     /// - **Breakdown matching.** Xyce solves the knee against the bottom
     ///   saturation current alone; ngspice solves it against `totalSatCur`.
     xyce_dialect: bool,
+    /// Evaluate the diode's implementation-defined extensions exactly as
+    /// ngspice rather than using the best-available reference equations.
+    ///
+    /// In particular, ngspice clamps the `ISR` contribution at `-3*N*Vt` in
+    /// reverse bias, while Cadence's PSpice reference equation evaluates it at
+    /// the actual junction voltage.
+    ngspice_dialect: bool,
     /// Use Xyce's native transient device status semantics for this circuit.
     ///
     /// Xyce's classic diode reports only its limiter/origFlag status to the
@@ -448,6 +455,7 @@ impl Diode {
             level: DiodeLevel::Legacy,
             temperature_model: DiodeTemperatureModel::default(),
             xyce_dialect: false,
+            ngspice_dialect: false,
             native_xyce_transient_convergence: false,
             tbv1: 0.0,
             tbv2: 0.0,
@@ -1058,6 +1066,17 @@ impl Diode {
     /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
     pub fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_dialect = enabled;
+        if enabled {
+            self.ngspice_dialect = false;
+        }
+    }
+
+    /// Select ngspice's native diode extension semantics.
+    pub(crate) fn set_ngspice_compatibility(&mut self, enabled: bool) {
+        self.ngspice_dialect = enabled;
+        if enabled {
+            self.xyce_dialect = false;
+        }
     }
 
     /// Select Xyce's native transient device-convergence status policy for
@@ -1625,21 +1644,27 @@ impl Diode {
     /// junction voltage. That distinction matters for high-injection limiting
     /// and for the sidewall current shape.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        // Bottom junction: exponential + recombination + tunneling, then the
-        // IKF/IKR high-injection knee. ngspice applies the knee to the bottom
-        // branch alone, after every bottom mechanism has been summed.
+        // Bottom junction. ngspice applies IKF/IKR after summing its bottom
+        // mechanisms; the Cadence PSpice law and Xyce apply the knee to the
+        // normal current and add recombination separately.
         let (mut bottom_i, mut bottom_g) =
             self.exponential_current_and_conductance(vd, self.bottom_saturation_current(), self.n);
         let (recombination_i, recombination_g) = self.recombination_current_and_conductance(vd);
-        bottom_i += recombination_i;
-        bottom_g += recombination_g;
         if self.tunneling.bottom_given {
             let (tunnel_i, tunnel_g) =
                 self.tunnel_current_and_conductance(vd, self.tunnel_bottom());
             bottom_i += tunnel_i;
             bottom_g += tunnel_g;
         }
-        let (bottom_i, bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
+        if self.ngspice_dialect {
+            bottom_i += recombination_i;
+            bottom_g += recombination_g;
+            (bottom_i, bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
+        } else {
+            (bottom_i, bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
+            bottom_i += recombination_i;
+            bottom_g += recombination_g;
+        }
 
         // Sidewall junction: its own exponential plus sidewall tunneling,
         // then the IKP knee.
@@ -1802,13 +1827,15 @@ impl Diode {
         self.is + sidewall
     }
 
-    /// Xyce/PSpice depletion-region recombination current.
+    /// PSpice depletion-region recombination current.
     ///
-    /// Xyce evaluates this branch only in its forward/near-zero region,
-    /// selected by the ordinary emission voltage `N*Vt`. The exponential
-    /// itself uses `NR*Vt`, then the depletion generation factor shapes both
-    /// the current and its analytic Jacobian. Linear reverse bias and
-    /// avalanche breakdown deliberately omit ISR in Xyce 7.10.
+    /// Cadence's PSpice reference law adds `Irec*Kgen` to the diode current at
+    /// the actual junction voltage without a reverse-bias cutoff. ngspice
+    /// instead freezes that contribution at `-3*N*Vt` in reverse, while Xyce
+    /// 7.10 omits it there. Explicit dialect selection retains each published
+    /// behavior; best-available mode follows the Cadence equation. The
+    /// exponential uses `NR*Vt`, then the depletion generation factor shapes
+    /// both the current and its analytic Jacobian.
     fn recombination_current_and_conductance(&self, vd: Value) -> (Value, Value) {
         let isr = self.recombination_saturation_current;
         let nr = self.recombination_emission_coefficient;
@@ -1821,17 +1848,27 @@ impl Diode {
             && self.vt > 0.0
             && self.vj.is_finite()
             && self.vj > 0.0
-            && vd >= forward_boundary)
+            && (!self.xyce_dialect || vd >= forward_boundary))
         {
             return (0.0, 0.0);
         }
 
+        // ngspice freezes the recombination contribution at the ordinary
+        // diode's -3*N*Vt boundary throughout reverse and breakdown. Cadence's
+        // PSpice equation uses the actual junction voltage; Xyce was handled by
+        // the early return above.
+        let evaluation_vd = if self.ngspice_dialect && vd < forward_boundary {
+            forward_boundary
+        } else {
+            vd
+        };
         let nr_vt = nr * self.vt;
-        let (exponential, exponential_derivative) = Self::limited_exp(vd / nr_vt, MAX_EXP_ARG);
+        let (exponential, exponential_derivative) =
+            Self::limited_exp(evaluation_vd / nr_vt, MAX_EXP_ARG);
         let base_current = isr * (exponential - 1.0);
         let base_conductance = (isr / nr_vt) * exponential_derivative;
 
-        let normalized_depletion = 1.0 - vd / self.vj;
+        let normalized_depletion = 1.0 - evaluation_vd / self.vj;
         let generation_base = normalized_depletion * normalized_depletion + 0.005;
         let generation_exponent = 0.5 * self.m;
         let generation_factor = generation_base.powf(generation_exponent);
@@ -1841,10 +1878,13 @@ impl Diode {
             return (0.0, 0.0);
         }
 
-        (
-            base_current * generation_factor,
-            base_conductance * generation_factor + base_current * generation_derivative,
-        )
+        let current = base_current * generation_factor;
+        let conductance = if self.ngspice_dialect && vd < forward_boundary {
+            0.0
+        } else {
+            base_conductance * generation_factor + base_current * generation_derivative
+        };
+        (current, conductance)
     }
 
     fn exponential_current_and_conductance(
@@ -2368,6 +2408,84 @@ mod tests {
         let d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
 
         assert_eq!(d.tnom_c, Some(27.0));
+    }
+
+    #[test]
+    fn pspice_recombination_extends_through_reverse_bias_but_xyce_retains_its_cutoff() {
+        let mut diode = test_diode();
+        diode.n = 1.0136;
+        diode.vj = 1.0542;
+        diode.m = 0.55916;
+        diode.recombination_saturation_current = 564.09e-9;
+        diode.recombination_emission_coefficient = 4.995;
+
+        let vd = -10.0;
+        let nr_vt = diode.recombination_emission_coefficient * diode.vt;
+        let exponential = (vd / nr_vt).exp();
+        let base_current = diode.recombination_saturation_current * (exponential - 1.0);
+        let base_conductance = diode.recombination_saturation_current * exponential / nr_vt;
+        let normalized_depletion = 1.0 - vd / diode.vj;
+        let generation_base = normalized_depletion * normalized_depletion + 0.005;
+        let generation_exponent = 0.5 * diode.m;
+        let generation_factor = generation_base.powf(generation_exponent);
+        let generation_derivative = -diode.m * normalized_depletion / diode.vj
+            * generation_base.powf(generation_exponent - 1.0);
+        let expected_current = base_current * generation_factor;
+        let expected_conductance =
+            base_conductance * generation_factor + base_current * generation_derivative;
+
+        let (native_current, native_conductance) = diode.recombination_current_and_conductance(vd);
+        assert!((native_current - expected_current).abs() <= expected_current.abs() * 1.0e-12);
+        assert!(
+            (native_conductance - expected_conductance).abs()
+                <= expected_conductance.abs() * 1.0e-12
+        );
+
+        diode.set_ngspice_compatibility(true);
+        let boundary = -3.0 * diode.n * diode.vt;
+        let boundary_exponential = (boundary / nr_vt).exp();
+        let boundary_base_current =
+            diode.recombination_saturation_current * (boundary_exponential - 1.0);
+        let boundary_normalized = 1.0 - boundary / diode.vj;
+        let boundary_generation =
+            (boundary_normalized * boundary_normalized + 0.005).powf(generation_exponent);
+        let (ngspice_current, ngspice_conductance) =
+            diode.recombination_current_and_conductance(vd);
+        let ngspice_expected = boundary_base_current * boundary_generation;
+        assert!((ngspice_current - ngspice_expected).abs() <= ngspice_expected.abs() * 1.0e-12);
+        assert_eq!(ngspice_conductance, 0.0);
+
+        diode.set_xyce_compatibility(true);
+        assert_eq!(diode.recombination_current_and_conductance(vd), (0.0, 0.0));
+    }
+
+    #[test]
+    fn pspice_high_injection_limits_normal_current_before_adding_recombination() {
+        let mut diode = test_diode();
+        diode.is = 1.0e-6;
+        diode.n = 1.0;
+        diode.forward_knee_current = 1.0e-4;
+        diode.recombination_saturation_current = 1.0e-6;
+        diode.recombination_emission_coefficient = 2.0;
+        let vd = 0.2;
+
+        let normal = diode.exponential_current_and_conductance(vd, diode.is, diode.n);
+        let recombination = diode.recombination_current_and_conductance(vd);
+        let limited_normal = diode.apply_high_injection_knee(vd, normal.0, normal.1);
+        let expected_pspice = (
+            limited_normal.0 + recombination.0,
+            limited_normal.1 + recombination.1,
+        );
+        let actual_pspice = diode.current_and_conductance(vd);
+        assert_eq!(actual_pspice.0.to_bits(), expected_pspice.0.to_bits());
+        assert_eq!(actual_pspice.1.to_bits(), expected_pspice.1.to_bits());
+
+        diode.set_ngspice_compatibility(true);
+        let combined = (normal.0 + recombination.0, normal.1 + recombination.1);
+        let expected_ngspice = diode.apply_high_injection_knee(vd, combined.0, combined.1);
+        let actual_ngspice = diode.current_and_conductance(vd);
+        assert_eq!(actual_ngspice.0.to_bits(), expected_ngspice.0.to_bits());
+        assert_eq!(actual_ngspice.1.to_bits(), expected_ngspice.1.to_bits());
     }
 
     /// Tunneling is the dominant reverse mechanism in a foundry junction

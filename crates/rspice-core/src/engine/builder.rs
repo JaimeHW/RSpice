@@ -5854,6 +5854,9 @@ impl Engine {
                         );
                     }
                     diode.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
+                    diode.set_ngspice_compatibility(
+                        self.config.spice_dialect == SpiceDialect::Ngspice,
+                    );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         diode.set_temperature_xyce_7(temp_k, tnom_k);
                     } else {

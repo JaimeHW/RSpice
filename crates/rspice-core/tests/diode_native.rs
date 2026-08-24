@@ -1,6 +1,6 @@
-//! Native SPICE diode validation against ngspice 46.
+//! Native diode validation against Cadence PSpice, ngspice 46, and Xyce 7.10.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::solver::SimulationResult;
 
@@ -104,6 +104,68 @@ fn diode_ikr_limits_reverse_high_injection_current_like_ngspice46() {
         4.989_091_488_361_717e-15,
         2.0e-6,
         1.0e-20,
+    );
+}
+
+fn isr_reverse_branch_current(dialect: SpiceDialect, voltage: f64) -> f64 {
+    let deck = format!(
+        "* diode ISR/NR dialect oracle\n\
+         .options gmin=0\n\
+         V1 anode 0 {voltage:.15e}\n\
+         D1 anode 0 DM\n\
+         .model DM D(IS=1e-30 N=1.0136 RS=0 CJO=0 M=.55916 VJ=1.0542 ISR=564.09e-9 NR=4.9950)\n\
+         .op\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("ISR dialect deck parses");
+    let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+    config.convergence_config.gmin_target = 0.0;
+    let result = Engine::new(config)
+        .run_dc_op(&netlist)
+        .expect("ISR dialect operating point converges");
+    branch_current(&result, "v1")
+}
+
+fn pspice_recombination_current(vd: f64) -> f64 {
+    let vt = (1.38064852e-23 / 1.6021766208e-19) * 300.15;
+    let isr = 564.09e-9;
+    let nr = 4.9950;
+    let vj = 1.0542;
+    let grading = 0.55916;
+    let irec = isr * ((vd / (nr * vt)).exp() - 1.0);
+    let kgen = ((1.0 - vd / vj).powi(2) + 0.005).powf(grading / 2.0);
+    irec * kgen
+}
+
+#[test]
+fn diode_isr_reverse_current_keeps_pspice_ngspice_and_xyce_semantics_distinct() {
+    let vd = -10.0;
+    let pspice_expected = -pspice_recombination_current(vd);
+    assert_close(
+        "best-available PSpice ISR reverse current",
+        isr_reverse_branch_current(SpiceDialect::BestAvailable, vd),
+        pspice_expected,
+        2.0e-10,
+        1.0e-18,
+    );
+
+    let vt = (1.38064852e-23 / 1.6021766208e-19) * 300.15;
+    let ngspice_boundary = -3.0 * 1.0136 * vt;
+    let ngspice_expected = -pspice_recombination_current(ngspice_boundary);
+    assert_close(
+        "explicit ngspice ISR reverse-current clamp",
+        isr_reverse_branch_current(SpiceDialect::Ngspice, vd),
+        ngspice_expected,
+        2.0e-10,
+        1.0e-18,
+    );
+
+    assert_close(
+        "explicit Xyce ISR reverse-current omission",
+        isr_reverse_branch_current(SpiceDialect::Xyce, vd),
+        1.0e-30,
+        0.0,
+        1.0e-28,
     );
 }
 
