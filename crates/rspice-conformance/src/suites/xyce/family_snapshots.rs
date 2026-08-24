@@ -6397,6 +6397,12 @@ impl XyceTestRunner {
                 Self::transient_analysis_expression_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::TransientAnalysisExpression)
             }
+            XyceBaselineFamilyKind::Bug1085UserFunctionI0 => {
+                contracts_bug1085::XyceBug1085UserFunctionSnapshot::from_plan_and_netlist(
+                    plan, netlist,
+                )
+                .map(XyceStrictTransientFamilySnapshot::Bug1085)
+            }
             XyceBaselineFamilyKind::Bug38SubcktFormalParentheses => {
                 Self::bug38_family_snapshot(netlist, plan)
                     .map(XyceStrictTransientFamilySnapshot::Bug38)

@@ -11111,6 +11111,33 @@ fn test_xyce_capacitor_dtemp_relational_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_bug1085_i0_user_function_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/BUG_1085_SON/bug1085son.cir",
+            "bug1085_user_function_i0_relational_wrapper_owner",
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1085_SON/bug1085sonRef.cir",
+            "bug1085_user_function_alpha_renamed_reference_baseline",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact BUG_1085 I0 user-function relational contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

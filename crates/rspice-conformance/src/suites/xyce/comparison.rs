@@ -2368,6 +2368,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::TransientAnalysisExpression(target),
             ) => Self::compare_transient_analysis_expression_snapshots(baseline, target),
             (
+                XyceStrictTransientFamilySnapshot::Bug1085(baseline),
+                XyceStrictTransientFamilySnapshot::Bug1085(target),
+            ) => Self::compare_bug1085_user_function_snapshots(baseline, target),
+            (
                 XyceStrictTransientFamilySnapshot::Bug38(baseline),
                 XyceStrictTransientFamilySnapshot::Bug38(target),
             ) => Self::compare_bug38_family_snapshots(baseline, target),

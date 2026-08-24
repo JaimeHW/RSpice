@@ -1854,6 +1854,38 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.bug1085_user_function_family_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_bug1085_user_function_family_contract(deck, contract, start)
+                }
+                Err(reason) => {
+                    let role = contracts_bug1085::XyceBug1085UserFunctionRole::for_record(
+                        &deck.relative_path,
+                    )
+                    .expect("BUG_1085_SON detection selects only recognized records");
+                    self.failure_result(
+                        deck,
+                        start,
+                        role.result_contract(),
+                        format!(
+                            "BUG_1085_SON user-function family provenance qualification failed: {reason}"
+                        ),
+                        Vec::new(),
+                    )
+                }
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.baseline_family_contract(deck) {
             let result = self.run_baseline_family_contract(deck, contract, start);
             if self.config.verbose {
@@ -11184,6 +11216,41 @@ impl XyceTestRunner {
         result
     }
 
+    pub(super) fn run_bug1085_user_function_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: contracts_bug1085::XyceBug1085UserFunctionFamilyContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        let result_contract = contract.role.result_contract();
+        if let Err(reason) = self.validate_bug1085_user_function_provenance(&contract) {
+            return self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!("BUG_1085_SON user-function provenance changed before execution: {reason}"),
+                Vec::new(),
+            );
+        }
+        let mut result =
+            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        if result.passed && !result.expected_unsupported {
+            if let Err(reason) = self.validate_bug1085_user_function_provenance(&contract) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "BUG_1085_SON user-function provenance changed during execution: {reason}"
+                    ),
+                    Vec::new(),
+                );
+            }
+            result.contract = result_contract.to_string();
+        }
+        result
+    }
+
     pub(super) fn run_switch_state_case_family_contract(
         &self,
         deck: &XyceDeck,
@@ -11326,6 +11393,7 @@ impl XyceTestRunner {
                 | XyceBaselineFamilyKind::PassiveCapPrimaryValue
                 | XyceBaselineFamilyKind::PassiveTemperatureOverride
                 | XyceBaselineFamilyKind::TransientAnalysisExpression
+                | XyceBaselineFamilyKind::Bug1085UserFunctionI0
                 | XyceBaselineFamilyKind::Bug38SubcktFormalParentheses
         ) && analysis != XyceBaselineFamilyAnalysis::Tran
         {
@@ -13396,6 +13464,68 @@ impl XyceTestRunner {
                             wrapper_contract,
                             format!(
                                 "{kind_name} family '{}' member {} exact comparison error: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
+            } else if let Some(tolerance) = contract.comparison.release_710_file_compare_tolerance()
+            {
+                let target_table = match Self::transient_family_result_to_prn_table(
+                    &target_plan,
+                    &target_netlist,
+                    &target_result,
+                ) {
+                    Ok(table) => table,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} Release 7.10 file_compare output conversion failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if contract.kind == XyceBaselineFamilyKind::Bug1085UserFunctionI0 {
+                    for (role, table) in [
+                        ("reference GOODFILE", &baseline_table),
+                        ("owner TESTFILE", &target_table),
+                    ] {
+                        if let Err(err) = Self::validate_bug1085_user_function_analytic_table(table)
+                        {
+                            return self.failure_result(
+                                deck,
+                                start,
+                                wrapper_contract,
+                                format!(
+                                    "{kind_name} family '{}' {role} analytic qualification failed: {err}",
+                                    contract.family
+                                ),
+                                Vec::new(),
+                            );
+                        }
+                    }
+                }
+                match self.compare_release_7_10_file_compare_tables(
+                    &baseline_table,
+                    &target_table,
+                    tolerance,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} Release 7.10 file_compare error: {err}",
                                 contract.family,
                                 self.display_path(&target_path)
                             ),

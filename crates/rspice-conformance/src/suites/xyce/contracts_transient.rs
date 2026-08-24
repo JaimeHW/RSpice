@@ -2434,6 +2434,13 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStatic
                 )
             ),
+            XyceBaselineFamilyKind::Bug1085UserFunctionI0 => matches!(
+                (baseline, target),
+                (
+                    XyceStaticTranContract::PlainStatic,
+                    XyceStaticTranContract::WrapperStatic
+                )
+            ),
             XyceBaselineFamilyKind::SourceMultiplicity => matches!(
                 (baseline, target),
                 (

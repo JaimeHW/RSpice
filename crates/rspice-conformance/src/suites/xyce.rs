@@ -62,15 +62,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 247;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 248;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "577f92c2c3d189657860294ca3ad362c2cf18cee80f2f18dd5b4231e214e839d";
+    "b54680d7de2d3775383d00a50eec0c9f4bfdfd6b96d7af72e42f36528be0c475";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "667b7273e9de660a9217d8a21998fc436316b0a9436d51bfedb2778f9b9186d2";
+    "c3d6c4794b2b7c4f93906d3a0ebde21f0fd9aedccf360bc26a5031234b056808";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "5a2cda1e920ca17771ed76f32046ca9efd448263c280615fd8fe7432dfc2078f";
+    "01104e4ab8729e6422a49b14a92697ecd82e612ef09a047454cf84c37a7b1ba3";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -9511,6 +9511,12 @@ struct XyceFileCompareTolerance {
 }
 
 impl XyceFileCompareTolerance {
+    const BUG1085_USER_FUNCTION: Self = Self {
+        absolute: 1.0e-6,
+        relative: 1.0e-2,
+        zero: 1.0e-12,
+    };
+
     const BUG1190_MUTUAL_INDUCTOR: Self = Self {
         absolute: 1.0e-6,
         relative: 1.0e-2,
@@ -11186,6 +11192,7 @@ enum XyceStrictTransientFamilySnapshot {
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
     PassiveTemperatureOverride(XycePassiveTemperatureOverrideSnapshot),
     TransientAnalysisExpression(XyceTransientAnalysisExpressionSnapshot),
+    Bug1085(contracts_bug1085::XyceBug1085UserFunctionSnapshot),
     Bug38(XyceBug38FamilySnapshot),
 }
 
@@ -11441,6 +11448,7 @@ enum XyceBaselineFamilyKind {
     AbmFrequency,
     AbmLookupOrder,
     Bug1043AcDataParameters,
+    Bug1085UserFunctionI0,
     AgeCap,
     DiodeModelAlias,
     SwitchStateCase,
@@ -11474,9 +11482,10 @@ enum XyceBaselineFamilyAnalysis {
     Tran,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum XyceBaselineFamilyComparison {
     AcComparator(XyceAcComparatorTolerance),
+    Release710FileCompare(XyceFileCompareTolerance),
     Toleranced,
     TolerancedStrict,
     Exact,
@@ -11523,6 +11532,13 @@ impl XyceBaselineFamilyComparison {
         matches!(self, Self::TolerancedStrict)
     }
 
+    fn release_710_file_compare_tolerance(self) -> Option<XyceFileCompareTolerance> {
+        match self {
+            Self::Release710FileCompare(tolerance) => Some(tolerance),
+            _ => None,
+        }
+    }
+
     fn permits_locked_time_retry(self) -> bool {
         matches!(self, Self::Toleranced)
     }
@@ -11534,6 +11550,7 @@ impl XyceBaselineFamilyKind {
             Self::AbmFrequency => "ABM_FREQUENCY_RELATIONAL",
             Self::AbmLookupOrder => "ABM_SPLINES_INLINE_LOOKUP_ORDER",
             Self::Bug1043AcDataParameters => "BUG1043_AC_DATA_PARAMETERS",
+            Self::Bug1085UserFunctionI0 => "BUG1085_USER_FUNCTION_I0_ALPHA_EQUIVALENCE",
             Self::AgeCap => "AGE_CAP_EQUIVALENCE",
             Self::DiodeModelAlias => "DIODE_MODEL_ALIAS_EQUIVALENCE",
             Self::SwitchStateCase => "SWITCH_STATE_CASE_EQUIVALENCE",
@@ -11566,6 +11583,7 @@ impl XyceBaselineFamilyKind {
             Self::AbmFrequency => XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT,
             Self::AbmLookupOrder => XYCE_ABM_LOOKUP_ORDER_WRAPPER_OWNER_CONTRACT,
             Self::Bug1043AcDataParameters => XYCE_BUG1043_AC_DATA_PARAMETER_WRAPPER_OWNER_CONTRACT,
+            Self::Bug1085UserFunctionI0 => contracts_bug1085::XYCE_BUG1085_WRAPPER_OWNER_CONTRACT,
             Self::AgeCap => "age_cap_family_anchor",
             Self::DiodeModelAlias => "diode_model_alias_family_anchor",
             Self::SwitchStateCase => "switch_state_case_family_anchor",
@@ -11599,6 +11617,9 @@ impl XyceBaselineFamilyKind {
             Self::AbmLookupOrder => XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT,
             Self::Bug1043AcDataParameters => {
                 XYCE_BUG1043_AC_DATA_PARAMETER_EXPRESSION_BASELINE_CONTRACT
+            }
+            Self::Bug1085UserFunctionI0 => {
+                contracts_bug1085::XYCE_BUG1085_REFERENCE_BASELINE_CONTRACT
             }
             Self::AgeCap => "age_cap_family_aged_baseline",
             Self::DiodeModelAlias => "diode_model_alias_family_canonical_baseline",
@@ -11665,6 +11686,7 @@ impl XyceBaselineFamilyKind {
             Self::AbmFrequency
             | Self::AbmLookupOrder
             | Self::Bug1043AcDataParameters
+            | Self::Bug1085UserFunctionI0
             | Self::AcAnalysisExpression
             | Self::BjtExternalNode
             | Self::DcAnalysisExpression
@@ -12380,6 +12402,7 @@ mod contracts;
 mod contracts_bug1025;
 mod contracts_bug1040;
 mod contracts_bug1043;
+mod contracts_bug1085;
 mod contracts_bug1116;
 mod contracts_bug1162;
 mod contracts_bug1398;

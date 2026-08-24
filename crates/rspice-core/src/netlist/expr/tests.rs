@@ -441,6 +441,71 @@ fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
 }
 
 #[test]
+fn xyce_i0_user_function_is_not_a_current_probe_accessor() {
+    let options = crate::netlist::NetlistParseOptions {
+        expression_dialect: ExpressionDialect::Xyce,
+        ..crate::netlist::NetlistParseOptions::default()
+    };
+    let netlist = crate::netlist::Netlist::parse_with_options(
+        "Xyce I0 user function\n\
+         .FUNC I0(x,y) {y}\n\
+         .FUNC diff(x,y) {x-y}\n\
+         .FUNC f(x,y,z) {diff(y,z)-4+I0(z,x)**2}\n\
+         VX x 0 1\n\
+         VY y 0 2\n\
+         VZ z 0 3\n\
+         BF f 0 V={f(V(x),V(y),V(z))}\n\
+         .OP\n\
+         .END\n",
+        options,
+    )
+    .expect("Xyce I0 function deck parses");
+
+    let i0 = netlist
+        .params
+        .get_function("I0")
+        .expect("I0 remains a user-defined function");
+    assert_eq!(i0.args, ["X", "Y"]);
+    assert_eq!(i0.body, "y");
+
+    let expression = netlist
+        .elements
+        .iter()
+        .find_map(|element| match &element.kind {
+            crate::netlist::ElementKind::BehavioralVoltage { expression, .. }
+                if element.name.eq_ignore_ascii_case("BF") =>
+            {
+                Some(expression.as_str())
+            }
+            _ => None,
+        })
+        .expect("behavioral voltage source parsed");
+    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+        .expect("I0 user-function call expands");
+    let ast = crate::expr::parse_expression_strict(&prepared)
+        .unwrap_or_else(|error| panic!("prepared expression `{prepared}` parses: {error}"));
+    let program = crate::expr::compile(&ast);
+    assert!(
+        program.branch_map.is_empty(),
+        "I0 must not compile as an I(...) current-probe accessor: {prepared}"
+    );
+
+    let mut voltages = vec![0.0; program.node_map.len()];
+    for (node, value) in [("x", 1.0), ("y", 2.0), ("z", 3.0)] {
+        let index = *program
+            .node_map
+            .get(node)
+            .unwrap_or_else(|| panic!("prepared expression lost V({node}): {prepared}"));
+        voltages[index] = value;
+    }
+    let mut vm = crate::expr::Vm::new();
+    assert_eq!(
+        vm.execute(&program, &crate::expr::Context::dc(&voltages, &[])),
+        -4.0
+    );
+}
+
+#[test]
 fn behavioral_preparation_handles_deep_acyclic_function_graphs_without_recursion() {
     let mut ctx = ParamContext::new();
     ctx.set("B", 1.0);
