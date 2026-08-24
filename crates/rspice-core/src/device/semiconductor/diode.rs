@@ -261,7 +261,7 @@ pub struct Diode {
     pub xti: Value,
     /// Activation energy in eV (EG)
     pub eg: Value,
-    /// Model nominal temperature override in Celsius (TNOM/TREF)
+    /// Model nominal temperature override in Celsius (TNOM/TREF/T_MEASURED)
     pub tnom_c: Option<Value>,
     /// Which formulation the `.model` card's LEVEL selector chose.
     pub level: DiodeLevel,
@@ -836,7 +836,11 @@ impl Diode {
         if let Some(&v) = params.get("EG") {
             self.eg = v;
         }
-        if let Some(&v) = params.get("TNOM").or_else(|| params.get("TREF")) {
+        if let Some(&v) = params
+            .get("TNOM")
+            .or_else(|| params.get("TREF"))
+            .or_else(|| params.get("T_MEASURED"))
+        {
             self.tnom_c = Some(v);
         }
 
@@ -2353,6 +2357,17 @@ mod tests {
         assert_eq!(d.temperature_model.cta, 1.5e-3);
         assert_eq!(d.temperature_model.tpb, 2.5e-3);
         assert_eq!(d.temperature_model.trs1, 4e-5);
+    }
+
+    #[test]
+    fn vishay_t_measured_alias_sets_the_model_nominal_temperature() {
+        let params: std::collections::HashMap<String, Value> = [("T_MEASURED", 27.0)]
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect();
+        let d = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+
+        assert_eq!(d.tnom_c, Some(27.0));
     }
 
     /// Tunneling is the dominant reverse mechanism in a foundry junction

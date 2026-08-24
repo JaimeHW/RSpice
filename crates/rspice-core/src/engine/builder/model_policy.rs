@@ -989,6 +989,7 @@ fn xyce_level2_native_diode_param(name: &str) -> bool {
             | "XTI"
             | "EG"
             | "TNOM"
+            | "T_MEASURED"
             | "TBV1"
             | "TBV2"
     )
@@ -1458,10 +1459,15 @@ mod tests {
 
     #[test]
     fn diode_policy_accepts_xyce_level2_native_subset() {
-        let params = diode_params(&[("LEVEL", 2.0), ("IS", 1.0e-18), ("N", 1.0)]);
+        let params = diode_params(&[
+            ("LEVEL", 2.0),
+            ("IS", 1.0e-18),
+            ("N", 1.0),
+            ("T_MEASURED", 27.0),
+        ]);
 
         validate_diode_model_level("D1", "DXX", &params, &[], &[], false)
-            .expect("Xyce/HSPICE diode LEVEL=2 with native params is supported");
+            .expect("Xyce/HSPICE diode LEVEL=2 with native params and aliases is supported");
     }
 
     /// LEVEL=3 carries the full ngspice geometric parameter set, so unlike
