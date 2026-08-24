@@ -75,7 +75,7 @@ pub(super) fn run_step(
     use rspice_core::netlist::{StepSweep, StepTarget};
 
     let is_data_sweep = matches!(step_cmd.sweep, StepSweep::Data { .. });
-    let values = generate_step_values(&step_cmd.sweep)?;
+    let values = generate_step_values(&step_cmd.sweep, ctx.args.timeout)?;
     if values.is_empty() && !is_data_sweep {
         return Err(CliError::SimulationError {
             message: ".STEP produced no sweep values".to_string(),

@@ -1339,9 +1339,15 @@ impl DcSweepSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SweepPointGenerationError {
+/// Failure while materializing a bounded sweep grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SweepPointGenerationError {
+    /// The caller's cooperative cancellation signal fired.
+    #[error("sweep point generation was aborted")]
     Aborted,
+    /// The requested grid does not fit the caller's explicit resource limit.
+    #[error("sweep requires at least {requested} points, exceeding the {limit}-point limit")]
     LimitExceeded { requested: usize, limit: usize },
 }
 
@@ -1403,14 +1409,17 @@ fn linear_sweep_points_controlled(
     }
 
     let mut points = Vec::new();
-    let eps = (step.abs() * 1e-9).max(1e-18);
+    let eps = (step.abs() * 1e-9).max(f64::EPSILON * start.abs().max(stop.abs()));
     let mut point_index = 0usize;
 
     let done = |x: Value| -> bool {
+        if !x.is_finite() {
+            return true;
+        }
         if step > 0.0 {
-            x > stop + eps
+            x > stop && x - stop > eps
         } else {
-            x < stop - eps
+            x < stop && stop - x > eps
         }
     };
 
@@ -2344,7 +2353,21 @@ impl StepSweep {
         }
     }
 
-    pub(crate) fn values_bounded_with_abort(
+    /// Materialize this sweep without exceeding `max_values`.
+    ///
+    /// Unlike [`Self::values`], this entry point fails before returning a
+    /// truncated grid. It is a resource bound, not semantic validation:
+    /// frontends must still reject invalid sweep specifications according to
+    /// their dialect and user-facing diagnostics policy.
+    pub fn values_bounded(
+        &self,
+        max_values: usize,
+    ) -> Result<Vec<Value>, SweepPointGenerationError> {
+        self.values_bounded_with_abort(max_values, &NoAbort)
+    }
+
+    /// Materialize a bounded sweep while polling cooperative cancellation.
+    pub fn values_bounded_with_abort(
         &self,
         max_values: usize,
         abort: &dyn AbortSignal,
@@ -2421,6 +2444,59 @@ mod controlled_step_sweep_tests {
         .values();
         assert_eq!(decade.len(), 21);
         assert!((decade[20] - 10_000.0).abs() <= 1.0e-10);
+    }
+
+    #[test]
+    fn linear_sweep_tolerance_scales_below_the_atto_range() {
+        let sweep = StepSweep::Linear {
+            start: 1.0e-20,
+            stop: 3.0e-20,
+            step: 1.0e-20,
+        };
+        let expected = vec![1.0e-20, 2.0e-20, 3.0e-20];
+        assert_eq!(sweep.values(), expected);
+        assert_eq!(
+            sweep.values_bounded(3).expect("three tiny points fit"),
+            expected
+        );
+        assert!(matches!(
+            sweep.values_bounded(2),
+            Err(SweepPointGenerationError::LimitExceeded {
+                requested: 3,
+                limit: 2
+            })
+        ));
+
+        let min_subnormal = f64::from_bits(1);
+        let subnormal = StepSweep::Linear {
+            start: min_subnormal,
+            stop: f64::from_bits(3),
+            step: min_subnormal,
+        }
+        .values_bounded(3)
+        .expect("three subnormal points fit");
+        assert_eq!(
+            subnormal
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn linear_sweep_termination_is_overflow_safe_at_finite_extremes() {
+        for (start, stop, step) in [
+            (f64::MAX * 0.90, f64::MAX, f64::MAX * 0.06),
+            (-f64::MAX * 0.90, -f64::MAX, -f64::MAX * 0.06),
+        ] {
+            let values = StepSweep::Linear { start, stop, step }
+                .values_bounded(3)
+                .expect("finite extreme grid terminates before overflow");
+            assert_eq!(values.len(), 2);
+            assert_eq!(values[0].to_bits(), start.to_bits());
+            assert!(values.iter().all(|value| value.is_finite()));
+        }
     }
 
     #[test]
