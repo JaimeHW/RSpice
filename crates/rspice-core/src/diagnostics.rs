@@ -248,7 +248,8 @@ impl ConvergenceDiagnostic {
 /// Detailed convergence quality metrics for a simulation
 #[derive(Debug, Clone, Default)]
 pub struct ConvergenceQuality {
-    /// Total Newton-Raphson iterations across all solves
+    /// Total nonlinear Newton Jacobian assemblies across the analysis.
+    /// Residual-only verification probes are deliberately excluded.
     pub total_iterations: usize,
     /// Number of times GMIN stepping was used
     pub gmin_stepping_count: usize,

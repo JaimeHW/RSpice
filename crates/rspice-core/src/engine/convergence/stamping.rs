@@ -159,6 +159,13 @@ impl Engine {
         analysis: crate::xspice::AnalysisType,
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
+        // One call assembles one complete nonlinear Newton Jacobian. Keep the
+        // public convergence metric at this common assembly boundary so DC,
+        // startup, and continuation paths cannot silently omit successful
+        // iterations or double-count residual-only probes.
+        self.record_convergence(|quality| {
+            quality.total_iterations = quality.total_iterations.saturating_add(1);
+        });
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
@@ -232,13 +239,14 @@ impl Engine {
     ) {
         let junction_gmin =
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
-        self.update_device_states_for_operating_point(
-            circuit,
-            solution,
-            time,
-            analysis,
-            junction_gmin,
-        );
+        circuit.begin_switch_initial_junction_load();
+        circuit.set_b3soi_operating_point_mode(true);
+        circuit.set_xyce_memristor_operating_point_mode(true);
+        circuit.set_semiconductor_junction_gmin(junction_gmin);
+        circuit.prime_nonlinear_operating_point(solution);
+        if circuit.has_xspice_devices() {
+            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
+        }
     }
 
     #[inline]

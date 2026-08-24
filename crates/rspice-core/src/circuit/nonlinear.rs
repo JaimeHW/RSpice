@@ -668,8 +668,11 @@ impl CircuitData {
     /// Classic JFETs already use ngspice-style local gate-branch limiting
     /// (`DEVpnjlim`/`DEVfetlim`). For circuits made only from those devices,
     /// global line-search damping adds substantial cost without improving the
-    /// Newton path. Keep it enabled for other compact models and mixed
-    /// nonlinear circuits where device-local limiting is not sufficient.
+    /// Newton path. Voltage/current switches are likewise bounded
+    /// conductances: globally clipping their ideal-source node updates hides
+    /// the authored initial-junction state behind artificial 0.5 V steps.
+    /// Keep damping enabled for compact models and mixed nonlinear circuits
+    /// where device-local limiting is not sufficient.
     #[inline]
     pub fn requires_conservative_solution_damping(&self) -> bool {
         if !self.diodes.is_empty()
@@ -684,8 +687,6 @@ impl CircuitData {
             || !self.ekv3s.is_empty()
             || !self.vdmoses.is_empty()
             || !self.xyce_memristors.is_empty()
-            || !self.vswitches.is_empty()
-            || !self.iswitches.is_empty()
             || self
                 .xspice_instances
                 .iter()
@@ -966,6 +967,21 @@ impl CircuitData {
         snapshot: NonlinearDeviceStateSnapshot,
         preserve_xyce_core_carry: bool,
     ) {
+        let vswitch_initial_loads = self
+            .vswitches
+            .iter()
+            .map(crate::device::VoltageSwitch::initial_load_phase)
+            .collect::<Vec<_>>();
+        let iswitch_initial_loads = self
+            .iswitches
+            .iter()
+            .map(crate::device::CurrentSwitch::initial_load_phase)
+            .collect::<Vec<_>>();
+        let generic_switch_initial_loads = self
+            .generic_switches
+            .iter()
+            .map(crate::device::GenericSwitch::initial_load_phase)
+            .collect::<Vec<_>>();
         let core_mag_updates = if preserve_xyce_core_carry {
             self.jiles_atherton_inductors
                 .iter()
@@ -1039,6 +1055,19 @@ impl CircuitData {
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
         self.generic_switches = snapshot.generic_switches;
+        for (switch, phase) in self.vswitches.iter_mut().zip(vswitch_initial_loads) {
+            switch.retain_initial_load_progress(phase);
+        }
+        for (switch, phase) in self.iswitches.iter_mut().zip(iswitch_initial_loads) {
+            switch.retain_initial_load_progress(phase);
+        }
+        for (switch, phase) in self
+            .generic_switches
+            .iter_mut()
+            .zip(generic_switch_initial_loads)
+        {
+            switch.retain_initial_load_progress(phase);
+        }
         self.behavioral_sources = snapshot.behavioral_sources;
         self.xspice_instances = snapshot.xspice_instances;
         self.xspice_digital_values = snapshot.xspice_digital_values;
@@ -1061,7 +1090,30 @@ impl CircuitData {
 
     /// Update all nonlinear devices with current solution
     pub fn update_nonlinear(&mut self, voltages: &[Value]) {
-        self.update_nonlinear_impl(voltages, None);
+        self.update_nonlinear_impl(voltages, None, false);
+    }
+
+    /// Prime device history from a solver seed while preserving the one-shot
+    /// switch initial-junction load. Preparatory seed evaluation is not a
+    /// matrix load and therefore must not consume instance `ON`/`OFF`.
+    pub(crate) fn prime_nonlinear_operating_point(&mut self, voltages: &[Value]) {
+        self.update_nonlinear_impl(voltages, None, true);
+    }
+
+    /// Enter the one-shot SPICE initial-junction phase for every switch in a
+    /// freshly built circuit. Each device ignores repeated calls after the
+    /// phase starts, so continuation retries and sweep points cannot replay
+    /// an authored initial state.
+    pub(crate) fn begin_switch_initial_junction_load(&mut self) {
+        for switch in &mut self.vswitches {
+            switch.begin_initial_junction_load();
+        }
+        for switch in &mut self.iswitches {
+            switch.begin_initial_junction_load();
+        }
+        for switch in &mut self.generic_switches {
+            switch.begin_initial_junction_load();
+        }
     }
 
     #[cfg(feature = "parallel")]
@@ -1070,13 +1122,14 @@ impl CircuitData {
         voltages: &[Value],
         worker_count: usize,
     ) {
-        self.update_nonlinear_impl(voltages, Some(worker_count));
+        self.update_nonlinear_impl(voltages, Some(worker_count), false);
     }
 
     fn update_nonlinear_impl(
         &mut self,
         voltages: &[Value],
         parallel_classic_mos_workers: Option<usize>,
+        preserve_switch_initial_load: bool,
     ) {
         use crate::device::NonlinearDevice;
         self.diodes.update_all(voltages);
@@ -1113,10 +1166,18 @@ impl CircuitData {
             }
         }
         for vswitch in &mut self.vswitches {
-            vswitch.update(voltages);
+            if preserve_switch_initial_load {
+                vswitch.prime_operating_point_seed(voltages);
+            } else {
+                vswitch.update(voltages);
+            }
         }
         for iswitch in &mut self.iswitches {
-            iswitch.update(voltages);
+            if preserve_switch_initial_load {
+                iswitch.prime_operating_point_seed(voltages);
+            } else {
+                iswitch.update(voltages);
+            }
         }
         #[cfg(feature = "veriloga")]
         {

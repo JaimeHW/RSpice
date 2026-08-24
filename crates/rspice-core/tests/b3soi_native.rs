@@ -1701,9 +1701,9 @@ fn a_device_parked_at_vds_zero_converges_the_same_either_way() {
     let baseline = off
         .run_tran(&netlist, 12.0e-9, 2.0e-11)
         .expect("the vds = 0 case must converge with bypass off");
-    // Timestep cuts, not Newton iterations: `ConvergenceQuality` declares a
-    // `total_iterations` field that no analysis ever writes. A device
-    // limit-cycling at the boundary would show up as rejected steps.
+    // Timestep cuts, not operating-point Jacobian assemblies: this transient
+    // comparison is about a boundary-timepoint retry and a device
+    // limit-cycling there would show up as rejected steps.
     let off_cuts = off.convergence_quality().timestep_reductions;
 
     let on = bypass_engine(1.0e-3, 1.0e-6);

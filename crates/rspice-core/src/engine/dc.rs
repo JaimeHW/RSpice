@@ -741,6 +741,7 @@ impl Engine {
         sweep2: Option<&crate::netlist::DcSecondSweep>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        self.reset_convergence_quality();
         let Some(sweep2) = sweep2 else {
             return self.run_dc_sweep_spec_with_report_and_abort(
                 netlist,
@@ -886,6 +887,7 @@ impl Engine {
         step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        self.reset_convergence_quality();
         let spec = crate::netlist::DcSweepSpec::linear(start, stop, step);
         self.run_dc_sweep_spec_with_report_and_abort(netlist, source_name, &spec, abort)
     }
@@ -1254,6 +1256,62 @@ mod tests {
         assert!(
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    #[test]
+    fn switch_initial_junction_state_controls_first_dc_jacobian_only() {
+        fn deck(initial_state: &str) -> Netlist {
+            Netlist::parse(&format!(
+                "switch initial-junction regression\n\
+                 V1 1 0 5\n\
+                 S1 1 2 3 0 SW {initial_state}\n\
+                 R1 2 0 100\n\
+                 V2 3 0 1\n\
+                 R2 3 0 100\n\
+                 .MODEL SW VSWITCH(RON=1u ROFF=1MEG VON=1 VOFF=0)\n\
+                 .DC V1 5 5 1\n\
+                 .PRINT DC I(V1)\n\
+                 .END\n"
+            ))
+            .expect("switch initial-junction deck parses")
+        }
+
+        let engine = xyce_engine();
+        let no_initial_state = engine
+            .run_dc_sweep(&deck(""), "V1", 5.0, 5.0, 1.0)
+            .expect("unmarked switch sweep solves");
+        assert_eq!(
+            engine.convergence_quality().total_iterations,
+            3,
+            "an unmarked switch needs OFF load, ON correction, and confirmation"
+        );
+
+        let explicit_on = engine
+            .run_dc_sweep(&deck("ON"), "V1", 5.0, 5.0, 1.0)
+            .expect("explicit-ON switch sweep solves");
+        assert_eq!(
+            engine.convergence_quality().total_iterations,
+            2,
+            "the authored ON state must remove exactly the OFF-to-ON correction"
+        );
+
+        let no_initial_current = no_initial_state[0]
+            .1
+            .branch_current_named("V1")
+            .expect("unmarked sweep retains I(V1)");
+        let explicit_on_current = explicit_on[0]
+            .1
+            .branch_current_named("V1")
+            .expect("explicit-ON sweep retains I(V1)");
+        assert!(
+            (no_initial_current - explicit_on_current).abs() <= 1.0e-15,
+            "initial state may change startup work, not the converged DC point: \
+             no-initial={no_initial_current:.17e}, ON={explicit_on_current:.17e}"
+        );
+        assert!(
+            (explicit_on_current - -0.05).abs() <= 1.0e-9,
+            "the final switch must be ON: I(V1)={explicit_on_current:.17e}"
         );
     }
 

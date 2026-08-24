@@ -53,6 +53,16 @@ pub enum SwitchState {
     Transitioning,
 }
 
+/// Monotonic phase of the one-shot SPICE initial-junction switch load.
+/// Device-history rollback may restore electrical state, but it must never
+/// move this solver phase backwards and replay instance `ON`/`OFF`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum SwitchInitialLoadPhase {
+    Available,
+    Pending,
+    Consumed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceSwitchHysteresisSide {
     Off,
@@ -341,6 +351,11 @@ pub struct VoltageSwitch {
     current_resistance: Value,
     prev_resistance: Value,
     current_dg_dcontrol: Value,
+    authored_initial_state: Option<SwitchState>,
+    initial_load_started: bool,
+    /// Whether the next nonlinear load must use the SPICE initial-junction
+    /// state instead of evaluating the control quantity.
+    initial_load_pending: bool,
 }
 
 impl VoltageSwitch {
@@ -370,6 +385,9 @@ impl VoltageSwitch {
             current_resistance: 1e6,
             prev_resistance: 1e6,
             current_dg_dcontrol: 0.0,
+            authored_initial_state: None,
+            initial_load_started: false,
+            initial_load_pending: false,
         }
     }
 
@@ -443,6 +461,47 @@ impl VoltageSwitch {
         self
     }
 
+    /// Prime ordinary operating-point history without consuming the one-shot
+    /// initial-junction load. Xyce's `initJctFlag_` and ngspice's
+    /// `MODEINITJCT` both keep instance `ON`/`OFF` authoritative for that
+    /// first load; the solver's preparatory seed update is not itself a load.
+    pub(crate) fn prime_operating_point_seed(&mut self, voltages: &[Value]) {
+        if !self.initial_load_pending {
+            self.update_from_solution(voltages);
+        }
+    }
+
+    pub(crate) fn begin_initial_junction_load(&mut self) {
+        if self.initial_load_started {
+            return;
+        }
+        self.initial_load_started = true;
+        self.initial_load_pending = true;
+        self.install_initial_state(self.authored_initial_state.unwrap_or(SwitchState::Off));
+    }
+
+    pub(crate) fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
+        match (self.initial_load_started, self.initial_load_pending) {
+            (false, _) => SwitchInitialLoadPhase::Available,
+            (true, true) => SwitchInitialLoadPhase::Pending,
+            (true, false) => SwitchInitialLoadPhase::Consumed,
+        }
+    }
+
+    /// Keep initial-load phase monotonic across nonlinear rollback.
+    pub(crate) fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
+        if phase <= self.initial_load_phase() {
+            return;
+        }
+        if phase == SwitchInitialLoadPhase::Pending {
+            self.initial_load_started = false;
+            self.begin_initial_junction_load();
+        } else {
+            self.initial_load_started = true;
+            self.initial_load_pending = false;
+        }
+    }
+
     /// Set thresholds
     pub fn with_thresholds(mut self, vt: Value, vh: Value) -> Self {
         self.vt = vt;
@@ -467,6 +526,14 @@ impl VoltageSwitch {
 
     /// Set initial hysteresis state.
     pub fn with_initial_state(mut self, state: SwitchState) -> Self {
+        self.authored_initial_state = Some(state);
+        self.initial_load_started = false;
+        self.initial_load_pending = false;
+        self.install_initial_state(state);
+        self
+    }
+
+    fn install_initial_state(&mut self, state: SwitchState) {
         self.state = state;
         self.in_hysteresis_band = false;
         self.current_resistance = match self.state {
@@ -480,7 +547,6 @@ impl VoltageSwitch {
         self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
-        self
     }
 
     /// Get current state
@@ -599,10 +665,8 @@ impl VoltageSwitch {
             }
         }
     }
-}
 
-impl NonlinearDevice for VoltageSwitch {
-    fn update(&mut self, voltages: &[Value]) {
+    fn update_from_solution(&mut self, voltages: &[Value]) {
         let vctrl_pos = if self.ctrl_pos > 0 {
             voltages[self.ctrl_pos - 1]
         } else {
@@ -628,6 +692,18 @@ impl NonlinearDevice for VoltageSwitch {
             self.current_resistance = self.calculate_resistance(vctrl);
             self.current_dg_dcontrol = 0.0;
         }
+    }
+}
+
+impl NonlinearDevice for VoltageSwitch {
+    fn update(&mut self, voltages: &[Value]) {
+        if self.initial_load_pending {
+            self.initial_load_pending = false;
+            self.prev_state = self.state;
+            self.prev_resistance = self.current_resistance;
+            return;
+        }
+        self.update_from_solution(voltages);
     }
 
     fn stamp_nonlinear(
@@ -741,6 +817,9 @@ pub struct CurrentSwitch {
     current_resistance: Value,
     prev_resistance: Value,
     current_dg_dictrl: Value,
+    authored_initial_state: Option<SwitchState>,
+    initial_load_started: bool,
+    initial_load_pending: bool,
 }
 
 impl CurrentSwitch {
@@ -766,6 +845,9 @@ impl CurrentSwitch {
             current_resistance: 1e6,
             prev_resistance: 1e6,
             current_dg_dictrl: 0.0,
+            authored_initial_state: None,
+            initial_load_started: false,
+            initial_load_pending: false,
         }
     }
 
@@ -870,6 +952,14 @@ impl CurrentSwitch {
 
     /// Set initial hysteresis state.
     pub fn with_initial_state(mut self, state: SwitchState) -> Self {
+        self.authored_initial_state = Some(state);
+        self.initial_load_started = false;
+        self.initial_load_pending = false;
+        self.install_initial_state(state);
+        self
+    }
+
+    fn install_initial_state(&mut self, state: SwitchState) {
         self.state = state;
         self.in_hysteresis_band = false;
         self.current_resistance = match self.state {
@@ -883,7 +973,42 @@ impl CurrentSwitch {
         self.current_dg_dictrl = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
-        self
+    }
+
+    pub(crate) fn prime_operating_point_seed(&mut self, voltages: &[Value]) {
+        if !self.initial_load_pending {
+            self.update_from_solution(voltages);
+        }
+    }
+
+    pub(crate) fn begin_initial_junction_load(&mut self) {
+        if self.initial_load_started {
+            return;
+        }
+        self.initial_load_started = true;
+        self.initial_load_pending = true;
+        self.install_initial_state(self.authored_initial_state.unwrap_or(SwitchState::Off));
+    }
+
+    pub(crate) fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
+        match (self.initial_load_started, self.initial_load_pending) {
+            (false, _) => SwitchInitialLoadPhase::Available,
+            (true, true) => SwitchInitialLoadPhase::Pending,
+            (true, false) => SwitchInitialLoadPhase::Consumed,
+        }
+    }
+
+    pub(crate) fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
+        if phase <= self.initial_load_phase() {
+            return;
+        }
+        if phase == SwitchInitialLoadPhase::Pending {
+            self.initial_load_started = false;
+            self.begin_initial_junction_load();
+        } else {
+            self.initial_load_started = true;
+            self.initial_load_pending = false;
+        }
     }
 
     /// Get current state
@@ -1000,10 +1125,8 @@ impl CurrentSwitch {
             }
         }
     }
-}
 
-impl NonlinearDevice for CurrentSwitch {
-    fn update(&mut self, voltages: &[Value]) {
+    fn update_from_solution(&mut self, voltages: &[Value]) {
         let ictrl = if let Some(branch) = self.ctrl_branch {
             if branch > 0 && branch <= voltages.len() {
                 voltages[branch - 1]
@@ -1027,6 +1150,18 @@ impl NonlinearDevice for CurrentSwitch {
             self.current_resistance = self.calculate_resistance(ictrl);
             self.current_dg_dictrl = 0.0;
         }
+    }
+}
+
+impl NonlinearDevice for CurrentSwitch {
+    fn update(&mut self, voltages: &[Value]) {
+        if self.initial_load_pending {
+            self.initial_load_pending = false;
+            self.prev_state = self.state;
+            self.prev_resistance = self.current_resistance;
+            return;
+        }
+        self.update_from_solution(voltages);
     }
 
     fn stamp_nonlinear(
@@ -1156,6 +1291,9 @@ pub struct GenericSwitch {
     /// stamps and rejected steps from consuming hysteresis history.
     trial_state: Value,
     current_conductance: Value,
+    authored_initial_state: Option<SwitchState>,
+    initial_load_started: bool,
+    initial_load_pending: bool,
 }
 
 impl GenericSwitch {
@@ -1202,6 +1340,9 @@ impl GenericSwitch {
             current_state: 0.0,
             trial_state: 0.0,
             current_conductance: 1.0e-6,
+            authored_initial_state: None,
+            initial_load_started: false,
+            initial_load_pending: false,
         })
     }
 
@@ -1455,6 +1596,14 @@ impl GenericSwitch {
 
     /// Set initial ON/OFF state.
     pub fn with_initial_state(mut self, state: SwitchState) -> Self {
+        self.authored_initial_state = Some(state);
+        self.initial_load_started = false;
+        self.initial_load_pending = false;
+        self.install_initial_state(state);
+        self
+    }
+
+    fn install_initial_state(&mut self, state: SwitchState) {
         match state {
             SwitchState::On => {
                 self.last_state = 1.0;
@@ -1469,7 +1618,36 @@ impl GenericSwitch {
                 self.current_conductance = 1.0 / self.roff;
             }
         }
-        self
+    }
+
+    pub(crate) fn begin_initial_junction_load(&mut self) {
+        if self.initial_load_started {
+            return;
+        }
+        self.initial_load_started = true;
+        self.initial_load_pending = true;
+        self.install_initial_state(self.authored_initial_state.unwrap_or(SwitchState::Off));
+    }
+
+    pub(crate) fn initial_load_phase(&self) -> SwitchInitialLoadPhase {
+        match (self.initial_load_started, self.initial_load_pending) {
+            (false, _) => SwitchInitialLoadPhase::Available,
+            (true, true) => SwitchInitialLoadPhase::Pending,
+            (true, false) => SwitchInitialLoadPhase::Consumed,
+        }
+    }
+
+    pub(crate) fn retain_initial_load_progress(&mut self, phase: SwitchInitialLoadPhase) {
+        if phase <= self.initial_load_phase() {
+            return;
+        }
+        if phase == SwitchInitialLoadPhase::Pending {
+            self.initial_load_started = false;
+            self.begin_initial_junction_load();
+        } else {
+            self.initial_load_started = true;
+            self.initial_load_pending = false;
+        }
     }
 
     /// Set the fixed analysis context used by the retained CONTROL expression.
@@ -1743,6 +1921,11 @@ impl GenericSwitch {
 
     /// Stamp the switch conductance for a given analysis time.
     pub fn stamp_time_dependent(&mut self, time: Value, matrix: &mut impl MatrixStamper) {
+        if self.initial_load_pending {
+            self.initial_load_pending = false;
+            self.stamp_conductance(self.current_conductance, matrix);
+            return;
+        }
         self.refresh_expression_inputs(&[]);
         let control = self.evaluate_control(time);
         let (g, _) = self.conductance_sensitivity_for_control(control);
@@ -1760,6 +1943,11 @@ impl GenericSwitch {
         solution: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        if self.initial_load_pending {
+            self.initial_load_pending = false;
+            self.stamp_conductance(self.current_conductance, matrix);
+            return;
+        }
         self.refresh_expression_inputs(solution);
         let control = self.linearize_control(time);
         let (g, dg_dcontrol) = self.conductance_sensitivity_for_control(control);
