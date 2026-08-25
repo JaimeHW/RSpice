@@ -324,19 +324,7 @@ impl Engine {
     }
 
     pub(crate) fn simulation_result_value_count(result: &crate::solver::SimulationResult) -> usize {
-        result
-            .node_voltages
-            .len()
-            .saturating_add(result.branch_currents.len())
-            .saturating_add(result.dc_observables.len())
-            .saturating_add(result.time_points.len())
-            .saturating_add(
-                result
-                    .voltage_waveforms
-                    .iter()
-                    .map(Vec::len)
-                    .fold(0usize, usize::saturating_add),
-            )
+        result.retained_value_count()
     }
 
     /// Get a reference to the simulation configuration

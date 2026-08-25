@@ -70,6 +70,24 @@ impl SimulationResult {
         }
     }
 
+    /// Number of scalar result values retained by this result.
+    ///
+    /// Names and lookup indexes are metadata; this count tracks numerical
+    /// payloads for aggregate resource accounting.
+    pub fn retained_value_count(&self) -> usize {
+        self.node_voltages
+            .len()
+            .saturating_add(self.branch_currents.len())
+            .saturating_add(self.dc_observables.len())
+            .saturating_add(self.time_points.len())
+            .saturating_add(
+                self.voltage_waveforms
+                    .iter()
+                    .map(Vec::len)
+                    .fold(0usize, usize::saturating_add),
+            )
+    }
+
     /// Append an engine-owned DC observable and update its lookup index.
     pub(crate) fn push_dc_observable(&mut self, name: String, value: Value) {
         self.dc_observable_index

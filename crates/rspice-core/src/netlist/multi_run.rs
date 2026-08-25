@@ -231,6 +231,26 @@ fn expand_variant(
     abort: &dyn AbortSignal,
 ) -> Result<(), MultiRunError> {
     ensure_not_aborted(abort)?;
+    let has_step_data = has_step_data_reference(source_lines);
+    let has_textual_data_sweep = source_lines.iter().any(|line| references_data_table(line));
+    if has_step_data {
+        if has_textual_data_sweep {
+            return Err(MultiRunError::new(
+                ".STEP DATA cannot be combined with textual .DC/.TRAN DATA expansion in one deck",
+            ));
+        }
+        // `.STEP DATA` is expanded by the typed engine planner. Preserve the
+        // complete table block so the parser can attach it to the netlist;
+        // textual multi-run expansion must not consume its ownership first.
+        return push_assembled_deck(
+            decks,
+            retained_source_bytes,
+            label,
+            source_lines,
+            resource_limits,
+            abort,
+        );
+    }
     let (tables, mut lines) = extract_data_tables(source_lines.to_vec(), resource_limits, abort)?;
     let references = find_data_references(&lines, &tables, abort)?;
 
@@ -1034,6 +1054,86 @@ fn is_sweep_analysis(line: &str) -> bool {
     token.eq_ignore_ascii_case(".dc") || token.eq_ignore_ascii_case(".tran")
 }
 
+/// Whether any logical `.STEP` statement owns a `.DATA` table. Blank and
+/// full-line comment cards do not terminate a pending logical statement, and
+/// every `+` fragment is assembled before assignment scanning. Inside a table
+/// body, a leading `+` remains row data rather than netlist continuation.
+fn has_step_data_reference(lines: &[String]) -> bool {
+    let mut in_data_table = false;
+    let mut logical_statement = String::new();
+
+    for line in lines {
+        let trimmed = strip_multi_run_inline_comment(line).trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('*')
+            || trimmed.starts_with('$')
+            || trimmed.starts_with("//")
+        {
+            continue;
+        }
+        let token = first_token(trimmed);
+
+        if in_data_table {
+            if token.eq_ignore_ascii_case(".enddata") {
+                in_data_table = false;
+            }
+            continue;
+        }
+
+        if token.eq_ignore_ascii_case(".data") {
+            if logical_step_references_data(&logical_statement) {
+                return true;
+            }
+            logical_statement.clear();
+            in_data_table = true;
+            continue;
+        }
+
+        if let Some(continuation) = trimmed.strip_prefix('+') {
+            if !logical_statement.is_empty() {
+                logical_statement.push(' ');
+                logical_statement.push_str(continuation.trim());
+            }
+            continue;
+        }
+
+        if logical_step_references_data(&logical_statement) {
+            return true;
+        }
+        logical_statement.clear();
+        logical_statement.push_str(trimmed);
+    }
+
+    logical_step_references_data(&logical_statement)
+}
+
+fn logical_step_references_data(statement: &str) -> bool {
+    first_token(statement).eq_ignore_ascii_case(".step") && data_reference_name(statement).is_some()
+}
+
+/// Strip semicolon comments without treating markers inside authored strings
+/// as comments. Multi-run expansion precedes dialect selection, so full-line
+/// `*`, `$`, and `//` handling stays in the logical-line owner above.
+fn strip_multi_run_inline_comment(line: &str) -> &str {
+    let mut single_quoted = false;
+    let mut double_quoted = false;
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' if single_quoted || double_quoted => escaped = true,
+            '\'' if !double_quoted => single_quoted = !single_quoted,
+            '"' if !single_quoted => double_quoted = !double_quoted,
+            ';' if !single_quoted && !double_quoted => return &line[..index],
+            _ => {}
+        }
+    }
+    line
+}
+
 /// The table name referenced by `DATA=<name>` on this line, if any.
 fn data_reference_name(line: &str) -> Option<String> {
     scan_assignments(line)
@@ -1240,6 +1340,118 @@ mod tests {
         assert!(!decks[0].source.to_lowercase().contains("data=tbl"));
         // The table block itself is stripped from the emitted decks.
         assert!(!decks[0].source.to_lowercase().contains(".enddata"));
+    }
+
+    #[test]
+    fn step_data_preserves_its_table_for_typed_cartesian_planning() {
+        let source = "typed STEP DATA\n\
+            .param rval=1k\n\
+            V1 in 0 1\n\
+            R1 in 0 {rval}\n\
+            .data coordinates rval\n\
+            1k\n\
+            2k\n\
+            .enddata\n\
+            .step data=coordinates\n\
+            .op\n\
+            .end\n";
+        let decks = try_expand_multi_run(source).expect("STEP DATA ownership is preserved");
+        assert_eq!(decks.len(), 1);
+        assert!(decks[0].label.is_none());
+        assert!(decks[0].source.contains(".data coordinates rval"));
+        assert!(decks[0].source.contains(".enddata"));
+        assert!(decks[0].source.contains(".step data=coordinates"));
+
+        let parsed = crate::Netlist::parse(&decks[0].source).expect("preserved deck parses");
+        assert_eq!(parsed.data_tables.len(), 1);
+        assert!(matches!(
+            parsed.analyses.as_slice(),
+            [
+                crate::netlist::AnalysisCommand::Step(_),
+                crate::netlist::AnalysisCommand::Op
+            ]
+        ));
+    }
+
+    #[test]
+    fn continued_step_data_preserves_its_table_for_typed_cartesian_planning() {
+        let source = "continued typed STEP DATA\n\
+            .param rval=1k\n\
+            V1 in 0 1\n\
+            R1 in 0 {rval}\n\
+            .data coordinates rval\n\
+            1k\n\
+            2k\n\
+            .enddata\n\
+            .step\n\
+            + data=coordinates\n\
+            .op\n\
+            .end\n";
+        let decks = try_expand_multi_run(source).expect("continued STEP DATA is preserved");
+        assert_eq!(decks.len(), 1);
+        assert!(decks[0].source.contains(".data coordinates rval"));
+        assert!(decks[0].source.contains(".enddata"));
+        assert!(decks[0].source.contains(".step\n"));
+        assert!(decks[0].source.contains("+ data=coordinates"));
+
+        let parsed = crate::Netlist::parse(&decks[0].source).expect("preserved deck parses");
+        assert_eq!(parsed.data_tables.len(), 1);
+        assert!(matches!(
+            parsed.analyses.as_slice(),
+            [
+                crate::netlist::AnalysisCommand::Step(_),
+                crate::netlist::AnalysisCommand::Op
+            ]
+        ));
+    }
+
+    #[test]
+    fn fragmented_step_data_continuations_cross_comments_and_blank_lines() {
+        let source = "fragmented typed STEP DATA\n\
+            .param rval=1k\n\
+            V1 in 0 1\n\
+            R1 in 0 {rval}\n\
+            .data coordinates rval\n\
+            1k\n\
+            2k\n\
+            .enddata\n\
+            .step\n\
+            * continuation comment\n\
+            \n\
+            + data\n\
+            $ another continuation comment\n\
+            + = coordinates\n\
+            .op\n\
+            .end\n";
+        let decks = try_expand_multi_run(source).expect("fragmented STEP DATA is preserved");
+        assert_eq!(decks.len(), 1);
+        assert!(decks[0].source.contains(".data coordinates rval"));
+        assert!(decks[0].source.contains("+ data"));
+        assert!(decks[0].source.contains("+ = coordinates"));
+
+        let parsed = crate::Netlist::parse(&decks[0].source).expect("preserved deck parses");
+        assert_eq!(parsed.data_tables.len(), 1);
+        assert!(matches!(
+            parsed.analyses.as_slice(),
+            [
+                crate::netlist::AnalysisCommand::Step(_),
+                crate::netlist::AnalysisCommand::Op
+            ]
+        ));
+    }
+
+    #[test]
+    fn step_data_and_textual_data_expansion_fail_before_consuming_the_table() {
+        let source = "ambiguous DATA ownership\n\
+            V1 in 0 1\n\
+            .data coordinates rval\n\
+            1k\n\
+            .enddata\n\
+            .step data=coordinates\n\
+            .dc data=coordinates\n\
+            .end\n";
+        let error = try_expand_multi_run(source).expect_err("mixed DATA owners reject");
+        assert!(error.to_string().contains(".STEP DATA cannot be combined"));
     }
 
     #[test]

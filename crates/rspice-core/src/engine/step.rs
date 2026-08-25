@@ -54,6 +54,17 @@ impl StepPlanLimits {
     pub const fn max_stored_values(self) -> usize {
         self.max_stored_values
     }
+
+    /// Derive a STEP planning budget from the engine's general resource
+    /// policy. This keeps frontends aligned on one authoritative mapping.
+    pub const fn from_resource_limits(limits: crate::ResourceLimits) -> Self {
+        Self::new(
+            limits.max_batch_runs,
+            limits.max_netlist_lines,
+            limits.max_result_values,
+            limits.max_result_values,
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -321,13 +332,14 @@ impl Engine {
                     StepPlanDimension::Values(values)
                 }
             };
-            total_runs = checked_step_cardinality(
-                total_runs,
-                dimension.len(),
-                limits.max_runs,
-                dimension_index,
-            )?;
+            total_runs = checked_step_cardinality(total_runs, dimension.len(), dimension_index)?;
             self.ensure_batch_runs(total_runs)?;
+            if total_runs > limits.max_runs {
+                return Err(SimulationError::Circuit(format!(
+                    ".STEP Cartesian expansion requests {total_runs} run(s), exceeding configured limit {}",
+                    limits.max_runs
+                )));
+            }
             dimensions.push(dimension);
         }
 
@@ -2038,7 +2050,6 @@ fn validate_step_values(values: &[Value]) -> Result<(), SimulationError> {
 fn checked_step_cardinality(
     current: usize,
     dimension_len: usize,
-    max_runs: usize,
     dimension_index: usize,
 ) -> Result<usize, SimulationError> {
     if dimension_len == 0 {
@@ -2049,15 +2060,10 @@ fn checked_step_cardinality(
     }
     let requested = current.checked_mul(dimension_len).ok_or_else(|| {
         SimulationError::Circuit(format!(
-            ".STEP Cartesian run count overflows usize at dimension {}; configured limit is {max_runs}",
+            ".STEP Cartesian run count overflows usize at dimension {}",
             dimension_index + 1
         ))
     })?;
-    if requested > max_runs {
-        return Err(SimulationError::Circuit(format!(
-            ".STEP Cartesian expansion requests {requested} run(s), exceeding configured limit {max_runs}"
-        )));
-    }
     Ok(requested)
 }
 
@@ -2147,6 +2153,19 @@ mod tests {
     }
 
     #[test]
+    fn general_resource_policy_maps_to_step_planning_limits() {
+        let mut resources = crate::ResourceLimits::default();
+        resources.max_batch_runs = 17;
+        resources.max_netlist_lines = 23;
+        resources.max_result_values = 101;
+        let limits = StepPlanLimits::from_resource_limits(resources);
+        assert_eq!(limits.max_runs(), 17);
+        assert_eq!(limits.max_dimensions(), 23);
+        assert_eq!(limits.max_bindings_per_run(), 101);
+        assert_eq!(limits.max_stored_values(), 101);
+    }
+
+    #[test]
     fn step_plan_is_checked_and_uses_xyce_mixed_radix_order() {
         let netlist = Netlist::parse(
             "step plan ordering\n\
@@ -2193,7 +2212,7 @@ mod tests {
 
     #[test]
     fn step_cardinality_overflow_is_rejected_without_allocation() {
-        let error = checked_step_cardinality(usize::MAX, 2, usize::MAX, 1)
+        let error = checked_step_cardinality(usize::MAX, 2, 1)
             .expect_err("overflow must fail before run allocation");
         assert!(error.to_string().contains("overflows usize"));
     }
