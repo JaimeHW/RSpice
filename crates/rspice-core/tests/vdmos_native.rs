@@ -1965,6 +1965,141 @@ fn ngspice_vdmos_rejects_non_numeric_native_model_params() {
     );
 }
 
+fn portable_vdmos_model_card() -> &'static str {
+    ".model dut VDMOS (NCHAN VTO=2 KP=0.2 RD=2.35 RS=0 RG=0 LAMBDA=0.02\n\
+     + MTRIODE=1.4 SUBSHIFT=0.04 KSUBTHRES=0.1\n\
+     + CGS=27.5p CGDMIN=2.795p CGDMAX=24.6p A=1.2\n\
+     + IS=0.25n RB=0.15 N=1.5 TT=123n\n\
+     + CJO=10.44p VJ=1.11 M=0.5 FC=0.5 TNOM=25)"
+}
+
+#[test]
+fn ngspice_vdmos_standard_body_diode_parameters_use_external_terminals() {
+    let deck = format!(
+        "* portable VDMOS body-diode operating point\n\
+         .options temp=25 tnom=25\n\
+         ibody d 0 dc 0.3\n\
+         vg g 0 dc 0\n\
+         m1 d g 0 0 dut\n\
+         {}\n\
+         .op\n\
+         .end\n",
+        portable_vdmos_model_card()
+    );
+
+    let netlist = Netlist::parse(&deck).expect("body-diode deck parses");
+    let (result, report) = Engine::new(SimulationConfig::default())
+        .run_dc_op_with_report(&netlist)
+        .expect("body-diode operating point converges");
+    let drain = result.try_voltage_named("d").expect("drain voltage");
+    assert!(
+        (drain + 0.850_677).abs() < 3.0e-5,
+        "portable VDMOS body diode should match ngspice at 0.3 A, got V(d)={drain}"
+    );
+    let m1 = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("M1 operating-point report");
+    let diode_current = m1
+        .params
+        .iter()
+        .find_map(|(name, value)| (*name == "idiode").then_some(*value))
+        .expect("M1 body-diode current report");
+    assert!(
+        (diode_current - 0.3).abs() < 1.0e-4,
+        "body-diode report must use the internal RB junction voltage, got {diode_current} A"
+    );
+    let power = m1
+        .params
+        .iter()
+        .find_map(|(name, value)| (*name == "power").then_some(*value))
+        .expect("M1 power report");
+    assert!(
+        (power - 0.255_196).abs() < 2.0e-5,
+        "body-diode power must include the external diode branch, got {power} W"
+    );
+}
+
+#[test]
+fn ngspice_vdmos_standard_mtriode_channel_matches_reference_operating_points() {
+    for (gate_voltage, drain_current, expected_drain) in
+        [(10.0, 0.5, 1.402_885), (4.5, 0.075, 0.288_475)]
+    {
+        let deck = format!(
+            "* portable VDMOS MTRIODE operating point\n\
+             .options temp=25 tnom=25\n\
+             ion 0 d dc {drain_current}\n\
+             vg g 0 dc {gate_voltage}\n\
+             m1 d g 0 0 dut\n\
+             {}\n\
+             .op\n\
+             .end\n",
+            portable_vdmos_model_card()
+        );
+        let drain = vdmos_dc_node_voltage(&deck, "d");
+        assert!(
+            (drain - expected_drain).abs() < 1.0e-6,
+            "portable MTRIODE channel mismatch at VGS={gate_voltage} V, ID={drain_current} A: V(d)={drain}"
+        );
+    }
+}
+
+#[test]
+fn ngspice_vdmos_standard_capacitance_parameters_match_table_points() {
+    let ciss_crss_deck = format!(
+        "* portable VDMOS Ciss/Crss at VDS=10 V\n\
+         .options temp=25 tnom=25\n\
+         vd d 0 dc 10 ac 0\n\
+         vg g 0 dc 0 ac 1\n\
+         m1 d g 0 0 dut\n\
+         {}\n\
+         .ac lin 1 1Meg 1Meg\n\
+         .end\n",
+        portable_vdmos_model_card()
+    );
+    let netlist = Netlist::parse(&ciss_crss_deck).expect("Ciss/Crss deck parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[1.0e6])
+        .expect("Ciss/Crss deck runs")
+        .pop()
+        .expect("one Ciss/Crss point");
+    let omega = 2.0 * std::f64::consts::PI * 1.0e6;
+    let ciss = ac_branch_current_named(&point, "vg").im.abs() / omega;
+    let crss = ac_branch_current_named(&point, "vd").im.abs() / omega;
+
+    let coss_deck = format!(
+        "* portable VDMOS Coss at VDS=10 V\n\
+         .options temp=25 tnom=25\n\
+         vd d 0 dc 10 ac 1\n\
+         vg g 0 dc 0 ac 0\n\
+         m1 d g 0 0 dut\n\
+         {}\n\
+         .ac lin 1 1Meg 1Meg\n\
+         .end\n",
+        portable_vdmos_model_card()
+    );
+    let netlist = Netlist::parse(&coss_deck).expect("Coss deck parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[1.0e6])
+        .expect("Coss deck runs")
+        .pop()
+        .expect("one Coss point");
+    let coss = ac_branch_current_named(&point, "vd").im.abs() / omega;
+
+    for (name, got, expected) in [
+        ("Ciss", ciss, 31.000_188e-12),
+        ("Crss", crss, 3.500_188e-12),
+        ("Coss", coss, 6.800_120e-12),
+    ] {
+        let relative_error = (got - expected).abs() / expected;
+        assert!(
+            relative_error < 2.0e-4,
+            "{name} standard VDMOS mapping moved: got {got:.12e} F, expected {expected:.12e} F"
+        );
+    }
+}
+
 #[test]
 fn vdmos_participates_in_ac_small_signal_linearization() {
     let deck = "* vdmos ac small signal\n\

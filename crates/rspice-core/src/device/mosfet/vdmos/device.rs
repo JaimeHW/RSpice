@@ -85,8 +85,14 @@ pub struct Vdmos {
     pub rg: Value,
     /// Channel length modulation (V⁻¹)
     pub lambda: Value,
-    /// Triode region exponent
+    /// ngspice VDMOS triode-region drain-voltage multiplier.
     pub mtriode: Value,
+    /// ngspice VDMOS mobility-degradation coefficient.
+    pub ngspice_theta: Value,
+    /// ngspice VDMOS weak-inversion gate-axis shift (V).
+    pub ngspice_subshift: Value,
+    /// ngspice VDMOS weak-inversion softplus slope (V).
+    pub ngspice_ksubthres: Value,
     /// Quasi-saturation resistance (Ω)
     pub rq: Value,
     /// Quasi-saturation onset voltage (V)
@@ -136,6 +142,14 @@ pub struct Vdmos {
     pub cgs0: Value,
     /// Zero-bias gate-drain (Miller) capacitance (F)
     pub cgd0: Value,
+    /// ngspice/LTspice VDMOS minimum gate-drain capacitance (F).
+    pub ngspice_cgd_min: Value,
+    /// ngspice/LTspice VDMOS maximum gate-drain capacitance parameter (F).
+    pub ngspice_cgd_max: Value,
+    /// ngspice/LTspice VDMOS gate-drain capacitance curvature (1/V).
+    pub ngspice_cgd_a: Value,
+    /// Select the standard VDMOS Cgd law and constant Cgs semantics.
+    pub ngspice_capacitance_law: bool,
     /// Gate-source junction potential (V)
     pub cgs_pb: Value,
     /// Gate-drain junction potential (V)
@@ -324,7 +338,10 @@ impl Vdmos {
             rs: 0.01,
             rg: 1.0,
             lambda: 0.01,
-            mtriode: 1.5,
+            mtriode: 1.0,
+            ngspice_theta: 0.0,
+            ngspice_subshift: 0.0,
+            ngspice_ksubthres: 0.1,
             rq: 0.0,
             vq: 5.0,
             velocity_saturation_voltage: Value::INFINITY,
@@ -349,12 +366,16 @@ impl Vdmos {
             // Nonlinear capacitance defaults (typical power MOSFET)
             cgs0: 1e-9,    // 1nF zero-bias Cgs
             cgd0: 100e-12, // 100pF zero-bias Cgd (Miller)
-            cgs_pb: 0.8,   // Gate-source junction potential
-            cgd_pb: 0.8,   // Gate-drain junction potential
-            cgs_m: 0.5,    // Grading coefficient
-            cgd_m: 0.5,    // Grading coefficient
-            fc: 0.5,       // Forward bias limit coefficient
-            cds: 50e-12,   // Drain-source capacitance (fixed)
+            ngspice_cgd_min: 20e-12,
+            ngspice_cgd_max: 2e-9,
+            ngspice_cgd_a: 1.0,
+            ngspice_capacitance_law: false,
+            cgs_pb: 0.8, // Gate-source junction potential
+            cgd_pb: 0.8, // Gate-drain junction potential
+            cgs_m: 0.5,  // Grading coefficient
+            cgd_m: 0.5,  // Grading coefficient
+            fc: 0.5,     // Forward bias limit coefficient
+            cds: 50e-12, // Drain-source capacitance (fixed)
             cbs0: 0.0,
             cbd0: 0.0,
             cbs_given: false,
@@ -482,7 +503,13 @@ impl Vdmos {
             self.lambda = v;
         }
         if let Some(&v) = params.get("MTRIODE") {
-            self.mtriode = v;
+            self.mtriode = v.max(1.0e-12);
+        }
+        if let Some(&v) = params.get("SUBSHIFT") {
+            self.ngspice_subshift = v;
+        }
+        if let Some(&v) = params.get("KSUBTHRES") {
+            self.ngspice_ksubthres = v.max(1.0e-12);
         }
         if let Some(&v) = params.get("RQ") {
             self.rq = v;
@@ -542,7 +569,11 @@ impl Vdmos {
         if let Some(&v) = params.get("THETA")
             && v.is_finite()
         {
-            self.xyce_theta = v;
+            if is_xyce_level18 {
+                self.xyce_theta = v;
+            } else {
+                self.ngspice_theta = v;
+            }
         }
         if let Some(&v) = params.get("DRIFTPARAMA")
             && v.is_finite()
@@ -574,6 +605,21 @@ impl Vdmos {
         }
         if let Some(&v) = params.get("CGD0") {
             self.cgd0 = v;
+        }
+        if let Some(&v) = params.get("CGDMIN") {
+            self.ngspice_cgd_min = v.max(0.0);
+            self.ngspice_capacitance_law = true;
+            self.cds = 0.0;
+        }
+        if let Some(&v) = params.get("CGDMAX") {
+            self.ngspice_cgd_max = v.max(0.0);
+            self.ngspice_capacitance_law = true;
+            self.cds = 0.0;
+        }
+        if let Some(&v) = params.get("A") {
+            self.ngspice_cgd_a = v;
+            self.ngspice_capacitance_law = true;
+            self.cds = 0.0;
         }
         if let Some(&v) = params.get("CGSO") {
             self.cgs_overlap = v;
@@ -609,6 +655,9 @@ impl Vdmos {
         }
         if let Some(&v) = params.get("FC") {
             self.fc = v;
+            if !is_xyce_level18 && self.ngspice_capacitance_law {
+                self.d1_fc = v.min(0.95);
+            }
         }
         if let Some(&v) = params.get("CDS") {
             self.cds = v;
@@ -694,15 +743,62 @@ impl Vdmos {
         }
         if let Some(&v) = params.get("IS") {
             self.is = v;
+            if !is_xyce_level18 {
+                self.d1_is = v;
+                self.d1_current_enabled = true;
+            }
         }
         if let Some(&v) = params.get("N") {
             self.n = v;
+            if !is_xyce_level18 {
+                self.d1_n = v;
+                self.d1_current_enabled = true;
+            }
         }
         if let Some(&v) = params.get("TT") {
             self.tt = v;
+            if !is_xyce_level18 {
+                self.d1_tt = v;
+                if v != 0.0 {
+                    self.d1_current_enabled = true;
+                }
+            }
         }
         if let Some(&v) = params.get("BV") {
             self.bv = v;
+            if !is_xyce_level18 {
+                self.d1_bv = v;
+                self.d1_bv_given = true;
+                self.d1_current_enabled = true;
+            }
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("IBV") {
+            self.d1_ibv = v;
+            self.d1_current_enabled = true;
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("RB") {
+            self.d1_rs = v.max(0.0);
+            self.d1_current_enabled = true;
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("CJO") {
+            self.d1_cjo = v.max(0.0);
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("VJ") {
+            self.d1_vj = v.max(1.0e-12);
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("EG") {
+            self.d1_eg = v.max(0.1);
+        }
+        if !is_xyce_level18 && let Some(&v) = params.get("XTI") {
+            self.d1_xti = v;
+        }
+        if !is_xyce_level18 && self.ngspice_capacitance_law {
+            if let Some(&v) = params.get("M") {
+                self.d1_m = v.min(0.9);
+            }
+            if let Some(&v) = params.get("FC") {
+                self.d1_fc = v.min(0.95);
+            }
         }
 
         // Thermal model parameters
@@ -1628,6 +1724,52 @@ impl Vdmos {
         self.calculate_id_with_body(vgs, vds, 0.0)
     }
 
+    #[inline]
+    fn calculate_id_ngspice_forward(&self, vgs: Value, vds: Value) -> (Value, VdmosRegion) {
+        let raw_overdrive = vgs - self.vth;
+        let vdsat = raw_overdrive.max(0.0);
+        let slope = self.ngspice_ksubthres.max(1.0e-12);
+        let scaled_overdrive = (raw_overdrive - self.ngspice_subshift) / slope;
+        let overdrive = if scaled_overdrive > 40.0 {
+            raw_overdrive - self.ngspice_subshift
+        } else if scaled_overdrive < -40.0 {
+            slope * scaled_overdrive.exp()
+        } else {
+            slope * scaled_overdrive.exp().ln_1p()
+        };
+        let scaled_vds = vds * self.mtriode.max(1.0e-12);
+        let mobility_denominator = (1.0 + self.ngspice_theta * vdsat).max(1.0e-12);
+        let beta = self.kp * (1.0 + self.lambda * vds) / mobility_denominator;
+
+        let (mut current, region) = if overdrive <= scaled_vds {
+            (
+                0.5 * beta * overdrive * overdrive,
+                if raw_overdrive <= 0.0 {
+                    VdmosRegion::Cutoff
+                } else {
+                    VdmosRegion::Saturation
+                },
+            )
+        } else {
+            (
+                beta * scaled_vds * (overdrive - 0.5 * scaled_vds),
+                if raw_overdrive <= 0.0 {
+                    VdmosRegion::Cutoff
+                } else {
+                    VdmosRegion::Triode
+                },
+            )
+        };
+
+        if vds > self.vq && self.rq > 0.0 {
+            let excess = vds - self.vq;
+            current /= 1.0 + current * self.rq / excess.max(0.001);
+            (current, VdmosRegion::QuasiSaturation)
+        } else {
+            (current, region)
+        }
+    }
+
     fn calculate_id_with_body(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, VdmosRegion) {
         let p = self.polarity();
         let vgs_eff = p * vgs;
@@ -1640,7 +1782,7 @@ impl Vdmos {
         }
 
         // Check for body diode conduction (reverse Vds)
-        if vds_eff < -0.3 {
+        if vds_eff < -0.3 && !self.d1_current_enabled {
             // Body diode conducting
             let vd = -vds_eff; // Forward diode voltage
             let vt = 0.0259; // Thermal voltage at 300K
@@ -1648,51 +1790,14 @@ impl Vdmos {
             return (p * (-id_diode), VdmosRegion::BodyDiode);
         }
 
-        let vgt = vgs_eff - self.vth;
-
-        // Cutoff region
-        if vgt <= 0.0 {
-            // Subthreshold leakage (simplified)
-            let vt = 0.0259;
-            let i_sub = 1e-12 * (vgt / (1.5 * vt)).exp().min(1e-6);
-            return (p * i_sub, VdmosRegion::Cutoff);
-        }
-
-        // Saturation voltage. Xyce Level 18 supplies VMAX; translate it to
-        // a continuous velocity-saturated Vdsat rather than a discontinuous
-        // current clamp.
-        let vdsat = if self.velocity_saturation_voltage.is_finite()
-            && self.velocity_saturation_voltage > 0.0
-        {
-            vgt / (1.0 + vgt / self.velocity_saturation_voltage)
+        if vds_eff >= 0.0 {
+            let (current, region) = self.calculate_id_ngspice_forward(vgs_eff, vds_eff);
+            (p * current, region)
         } else {
-            vgt
-        };
-
-        if vds_eff < vdsat {
-            // Triode (linear) region. Use the standard square-law MOS
-            // expression so conductance is finite and well-conditioned at
-            // Vds ~= 0.
-            let id =
-                self.kp * (vgt * vds_eff - 0.5 * vds_eff * vds_eff) * (1.0 + self.lambda * vds_eff);
-            (p * id, VdmosRegion::Triode)
-        } else {
-            // Saturation or quasi-saturation
-            let id_sat =
-                self.kp * (vgt * vdsat - 0.5 * vdsat * vdsat) * (1.0 + self.lambda * vds_eff);
-
-            // Check for quasi-saturation (drift region limiting)
-            if vds_eff > self.vq && self.rq > 0.0 {
-                // In quasi-saturation, current is limited by drift region
-                // Solve: Id = Id_sat / (1 + Id * Rq / (Vds - Vq))
-                // This requires iteration, use simplified model:
-                let vexcess = vds_eff - self.vq;
-                let _id_drift = vexcess / self.rq;
-                let id = id_sat.min(id_sat / (1.0 + id_sat * self.rq / vexcess.max(0.001)));
-                (p * id, VdmosRegion::QuasiSaturation)
-            } else {
-                (p * id_sat, VdmosRegion::Saturation)
-            }
+            // ngspice evaluates reverse mode by exchanging drain and source;
+            // VGD = VGS - VDS is then the controlling gate voltage.
+            let (current, region) = self.calculate_id_ngspice_forward(vgs_eff - vds_eff, -vds_eff);
+            (-p * current, region)
         }
     }
 
@@ -1744,6 +1849,9 @@ impl Vdmos {
     /// inverts and the effective oxide area increases.
     #[inline]
     pub fn cgs_effective(&self, vgs: Value) -> Value {
+        if self.ngspice_capacitance_law {
+            return self.cgs0.max(0.0);
+        }
         self.junction_capacitance(self.cgs0, vgs, self.cgs_pb, self.cgs_m, self.fc)
     }
 
@@ -1757,6 +1865,18 @@ impl Vdmos {
     /// The "Miller plateau" during switching occurs when Cgd is charging/discharging.
     #[inline]
     pub fn cgd_effective(&self, vgd: Value) -> Value {
+        if self.ngspice_capacitance_law {
+            let cgd_min = self.ngspice_cgd_min.max(0.0);
+            let cgd_max = self.ngspice_cgd_max.max(cgd_min);
+            let slope = (cgd_max - cgd_min) / (1.0 + std::f64::consts::FRAC_PI_2);
+            let intercept = cgd_max - slope;
+            return if vgd > 0.0 {
+                slope * (self.ngspice_cgd_a * vgd).tanh() + intercept
+            } else {
+                slope * (self.ngspice_cgd_a * vgd).atan() + intercept
+            }
+            .max(0.0);
+        }
         self.junction_capacitance(self.cgd0, vgd, self.cgd_pb, self.cgd_m, self.fc)
     }
 
@@ -2010,7 +2130,7 @@ impl Vdmos {
         &self,
         voltages: &[Value],
     ) -> Option<(NodeId, NodeId, Value, Value)> {
-        if !self.xyce_level18 || !self.d1_current_enabled {
+        if !self.d1_current_enabled {
             return None;
         }
 
@@ -2731,8 +2851,29 @@ impl NonlinearDevice for Vdmos {
         self.power = id * eval_vds;
         self.has_branch_history = true;
 
-        // Update body diode current
-        if eval_vds < 0.0 {
+        // Update body-diode reporting from the same branch voltage and
+        // temperature-scaled law used by the matrix stamp. Standard VDMOS
+        // cards may place RB between the source and the diode junction, so
+        // evaluating the legacy ideal diode at external VDS can over-report
+        // current by orders of magnitude.
+        if self.d1_current_enabled {
+            let vd = if self.drain > 0 {
+                voltages[self.drain - 1]
+            } else {
+                0.0
+            };
+            let d1p = self.d1_prime_node();
+            let vp = if d1p > 0 { voltages[d1p - 1] } else { 0.0 };
+            let normalized_vds = self.polarity() * (vd - vp);
+            self.id_diode = self.d1_current_and_conductance(-normalized_vds).0;
+            let vs = if self.source > 0 {
+                voltages[self.source - 1]
+            } else {
+                0.0
+            };
+            let normalized_external_vds = self.polarity() * (vd - vs);
+            self.power += -normalized_external_vds * self.id_diode;
+        } else if eval_vds < 0.0 {
             let vt = 0.0259;
             let vd = -eval_vds;
             self.id_diode = self.is * ((vd / (self.n * vt)).exp() - 1.0);
@@ -3067,6 +3208,72 @@ mod tests {
         assert_close_derivative("pmos gm", linearization.gm, gm);
         assert_close_derivative("pmos gds", linearization.gds, gds);
         assert_close_derivative("pmos gmb", linearization.gmb, gmb);
+    }
+
+    #[test]
+    fn ngspice_vdmos_capacitance_and_body_diode_parameters_map_without_dialect_duplication() {
+        let mut params = HashMap::new();
+        params.insert("CGS".to_string(), 27.5e-12);
+        params.insert("CGDMIN".to_string(), 2.0e-12);
+        params.insert("CGDMAX".to_string(), 24.6e-12);
+        params.insert("A".to_string(), 0.58);
+        params.insert("IS".to_string(), 1.8e-9);
+        params.insert("N".to_string(), 1.5);
+        params.insert("RB".to_string(), 0.4);
+        params.insert("TT".to_string(), 100.0e-9);
+        params.insert("CJO".to_string(), 10.44e-12);
+        params.insert("VJ".to_string(), 1.11);
+        params.insert("M".to_string(), 0.5);
+        params.insert("FC".to_string(), 0.5);
+
+        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let slope = (24.6e-12 - 2.0e-12) / (1.0 + std::f64::consts::FRAC_PI_2);
+        let intercept = 24.6e-12 - slope;
+        let expected_cgd = slope * (-5.8_f64).atan() + intercept;
+
+        assert!(vdmos.ngspice_capacitance_law);
+        assert_eq!(vdmos.cds, 0.0);
+        assert_eq!(vdmos.cgs_effective(0.0), 27.5e-12);
+        assert!((vdmos.cgd_effective(-10.0) - expected_cgd).abs() < 1.0e-24);
+        assert_eq!(vdmos.d1_is, 1.8e-9);
+        assert_eq!(vdmos.d1_n, 1.5);
+        assert_eq!(vdmos.d1_rs, 0.4);
+        assert_eq!(vdmos.d1_tt, 100.0e-9);
+        assert_eq!(vdmos.d1_cjo, 10.44e-12);
+        assert_eq!(vdmos.d1_vj, 1.11);
+        assert_eq!(vdmos.d1_m, 0.5);
+        assert_eq!(vdmos.d1_fc, 0.5);
+        assert!(vdmos.d1_current_enabled);
+    }
+
+    #[test]
+    fn ngspice_vdmos_mtriode_and_weak_inversion_follow_the_reference_equations() {
+        let mut params = HashMap::new();
+        params.insert("VTO".to_string(), 2.0);
+        params.insert("KP".to_string(), 0.2);
+        params.insert("LAMBDA".to_string(), 0.0);
+        params.insert("MTRIODE".to_string(), 1.375);
+        params.insert("KSUBTHRES".to_string(), 0.1);
+        params.insert("SUBSHIFT".to_string(), 0.0);
+
+        let vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let (saturated, saturation_region) = vdmos.calculate_id(4.0, 10.0);
+        let strong_overdrive = 0.1 * 20.0_f64.exp().ln_1p();
+        let expected_saturated = 0.5 * 0.2 * strong_overdrive.powi(2);
+        assert!((saturated - expected_saturated).abs() < 1.0e-12);
+        assert_eq!(saturation_region, VdmosRegion::Saturation);
+
+        let (linear, linear_region) = vdmos.calculate_id(4.0, 1.0e-3);
+        let scaled_vds = 1.375e-3;
+        let expected_linear = 0.2 * scaled_vds * (strong_overdrive - 0.5 * scaled_vds);
+        assert!((linear - expected_linear).abs() < 1.0e-12);
+        assert_eq!(linear_region, VdmosRegion::Triode);
+
+        let (threshold_current, threshold_region) = vdmos.calculate_id(2.0, 10.0);
+        let soft_overdrive = 0.1 * 2.0_f64.ln();
+        let expected_threshold = 0.5 * 0.2 * soft_overdrive.powi(2);
+        assert!((threshold_current - expected_threshold).abs() < 1.0e-12);
+        assert_eq!(threshold_region, VdmosRegion::Cutoff);
     }
 
     #[test]
