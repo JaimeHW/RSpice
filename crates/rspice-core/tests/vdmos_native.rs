@@ -1965,6 +1965,36 @@ fn ngspice_vdmos_rejects_non_numeric_native_model_params() {
     );
 }
 
+#[test]
+fn ngspice_vdmos_accepts_ltspice_mfg_catalog_metadata() {
+    let deck = "* exact LTspice-style VDMOS metadata compatibility\n\
+                vd d 0 dc 10\n\
+                vg g 0 dc 10\n\
+                m1 d g 0 0 2n7002\n\
+                .model 2N7002 VDMOS(Rg=3 Vto=1.6 Rd=0 Rs=.75 Rb=.14 Kp=.17 mtriode=1.25 Cgdmax=80p Cgdmin=12p Cgs=50p Cjo=50p Is=.04p mfg=Fairchild Vds=60 Ron=2 Qg=1.5n)\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("LTspice VDMOS metadata deck parses");
+    let (_result, report) = Engine::new(SimulationConfig::default())
+        .run_dc_op_with_report(&netlist)
+        .expect("bare MFG metadata must not block the electrical model");
+
+    let m1 = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 operating-point entry");
+    let id = m1
+        .params
+        .iter()
+        .find_map(|(name, value)| (*name == "id").then_some(*value))
+        .expect("m1 drain current");
+    assert!(
+        (id - 3.120_85).abs() < 2.0e-4,
+        "catalog metadata must not perturb LTspice/ngspice VDMOS behavior, got id={id}"
+    );
+}
+
 fn portable_vdmos_model_card() -> &'static str {
     ".model dut VDMOS (NCHAN VTO=2 KP=0.2 RD=2.35 RS=0 RG=0 LAMBDA=0.02\n\
      + MTRIODE=1.4 SUBSHIFT=0.04 KSUBTHRES=0.1\n\

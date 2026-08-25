@@ -479,6 +479,50 @@ impl Vdmos {
             self.cgs0 = 0.0;
             self.cgd0 = 0.0;
             self.cds = 0.0;
+        } else {
+            // A `.model ... VDMOS` card is the ngspice/LTspice dialect, so
+            // omitted parameters must use that device's documented defaults
+            // rather than the convenience values used by `Vdmos::new`.
+            self.vth = 3.0;
+            self.kp = match self.vdmos_type {
+                VdmosType::NVdmos => 20.0,
+                VdmosType::PVdmos => 10.0,
+            };
+            self.rd = 0.0;
+            self.rs = 0.0;
+            self.rg = 0.0;
+            self.lambda = 0.0;
+            self.mtriode = 1.0;
+            self.ngspice_theta = 0.0;
+            self.ngspice_subshift = 0.0;
+            self.ngspice_ksubthres = 0.1;
+
+            self.cgs0 = 1.4e-9;
+            self.ngspice_cgd_min = 20.0e-12;
+            self.ngspice_cgd_max = 2.0e-9;
+            self.ngspice_cgd_a = 1.0;
+            self.ngspice_capacitance_law = true;
+            self.cds = 0.0;
+
+            self.d1_is = 1.0e-14;
+            self.d1_rs = 0.0;
+            self.d1_n = 1.0;
+            self.d1_tt = 0.0;
+            self.d1_bv = 1.0e99;
+            self.d1_ibv = 1.0e-10;
+            self.d1_bv_given = false;
+            self.d1_cjo = 500.0e-12;
+            self.d1_vj = 0.8;
+            self.d1_m = 0.5;
+            self.d1_fc = 0.5;
+            self.d1_eg = 1.11;
+            self.d1_xti = 3.0;
+            self.d1_current_enabled = true;
+
+            self.is = self.d1_is;
+            self.n = self.d1_n;
+            self.tt = self.d1_tt;
+            self.bv = self.d1_bv;
         }
 
         if let Some(&v) = params.get("VTH") {
