@@ -14,8 +14,8 @@
 use rspice_core::analysis::s_param;
 
 use super::RunContext;
-use super::basic::{run_dc_op, run_temp};
-use super::shared::{generate_frequency_sweep, generate_step_values};
+use super::basic::run_dc_op;
+use super::shared::generate_frequency_sweep;
 use crate::cli::CliError;
 
 pub(super) fn run_hb_from_command(
@@ -68,140 +68,10 @@ pub(super) fn run_hb_from_command(
     run_hb_with_config(ctx, config)
 }
 
-pub(super) fn run_step(
-    ctx: &RunContext<'_>,
-    step_cmd: &rspice_core::netlist::StepCommand,
-) -> Result<(), CliError> {
-    use rspice_core::netlist::{StepSweep, StepTarget};
-
-    let is_data_sweep = matches!(step_cmd.sweep, StepSweep::Data { .. });
-    let values = generate_step_values(&step_cmd.sweep, ctx.args.timeout)?;
-    if values.is_empty() && !is_data_sweep {
-        return Err(CliError::SimulationError {
-            message: ".STEP produced no sweep values".to_string(),
-            analysis: Some("Step".to_string()),
-        });
-    }
-
-    match step_cmd.target {
-        StepTarget::Param | StepTarget::Device | StepTarget::Model => {
-            let target_desc = match step_cmd.target {
-                StepTarget::Param => format!("PARAM {}", step_cmd.name),
-                StepTarget::Device => {
-                    if let Some(param) = &step_cmd.param_name {
-                        format!("DEVICE {}.{}", step_cmd.name, param)
-                    } else {
-                        format!("DEVICE {}", step_cmd.name)
-                    }
-                }
-                StepTarget::Model => {
-                    if let Some(param) = &step_cmd.param_name {
-                        format!("MODEL {}.{}", step_cmd.name, param)
-                    } else {
-                        format!("MODEL {}", step_cmd.name)
-                    }
-                }
-                StepTarget::Temp => unreachable!("handled separately"),
-            };
-
-            if !ctx.quiet {
-                if let StepSweep::Data { table_name } = &step_cmd.sweep {
-                    println!("Running .STEP DATA sweep from table {}...", table_name);
-                } else {
-                    println!(
-                        "Running .STEP sweep on {}: {} values ({:.3e} to {:.3e})...",
-                        target_desc,
-                        values.len(),
-                        values.first().unwrap_or(&0.0),
-                        values.last().unwrap_or(&0.0)
-                    );
-                }
-            }
-
-            let sweep_results = ctx
-                .engine
-                .run_step_command(ctx.netlist, step_cmd, &values)
-                .map_err(|e| CliError::simulation_error_in(e.to_string(), "Step"))?;
-            if sweep_results.len() != values.len() {
-                return Err(CliError::simulation_error_in(
-                    format!(
-                        ".STEP sweep on {} converged {} / {} requested points; refusing to report a truncated sweep as success",
-                        target_desc,
-                        sweep_results.len(),
-                        values.len()
-                    ),
-                    "Step",
-                ));
-            }
-
-            for (_, point) in &sweep_results {
-                super::shared::ensure_finite_series(
-                    ctx.args.allow_nonfinite,
-                    "Step",
-                    (1..point.node_voltages.len()).map(|node| {
-                        let name = point
-                            .node_names
-                            .get(node)
-                            .map(|n| n.as_str())
-                            .unwrap_or("node");
-                        (name, std::slice::from_ref(&point.node_voltages[node]))
-                    }),
-                )?;
-            }
-
-            let requested_points = if is_data_sweep {
-                sweep_results.len()
-            } else {
-                values.len()
-            };
-            for (i, (value, result)) in sweep_results.iter().enumerate() {
-                if ctx.verbose && !ctx.quiet {
-                    if is_data_sweep {
-                        println!(
-                            "  Step {}/{}: DATA row {:.0}",
-                            i + 1,
-                            requested_points,
-                            value
-                        );
-                    } else {
-                        println!(
-                            "  Step {}/{}: {} = {:.4e}",
-                            i + 1,
-                            requested_points,
-                            target_desc,
-                            value
-                        );
-                    }
-                    if result.node_voltages.len() > 1 {
-                        let name = result
-                            .node_names
-                            .get(1)
-                            .cloned()
-                            .unwrap_or_else(|| "1".to_string());
-                        println!("    V({}) = {:.6} V", name, result.voltage(1));
-                    }
-                }
-            }
-
-            if !ctx.quiet {
-                println!(
-                    ".STEP sweep complete: {} converged / {} requested",
-                    sweep_results.len(),
-                    requested_points
-                );
-            }
-
-            export_step_sweep(ctx, &step_cmd.name, &sweep_results)?;
-            Ok(())
-        }
-        StepTarget::Temp => run_temp(ctx, &values),
-    }
-}
-
 /// Write the .STEP sweep table: one row per step value, one column per
 /// node voltage — the same shape as a DC sweep with the stepped quantity
 /// as the abscissa.
-fn export_step_sweep(
+pub(super) fn export_step_sweep(
     ctx: &RunContext<'_>,
     step_name: &str,
     sweep_results: &[(f64, rspice_core::solver::SimulationResult)],

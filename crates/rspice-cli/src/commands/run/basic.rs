@@ -21,7 +21,10 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
         println!("Running DC operating point...");
     }
 
-    match ctx.engine.run_dc_op_with_report(ctx.netlist) {
+    match ctx
+        .engine
+        .run_dc_op_with_report_and_abort(ctx.netlist, &crate::abort::ProcessAbort)
+    {
         Ok((result, op_report)) => {
             super::shared::ensure_finite_series(
                 ctx.args.allow_nonfinite,
@@ -80,7 +83,16 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
 
             Ok(())
         }
-        Err(e) => Err(CliError::simulation_error_in(e.to_string(), "DC OP")),
+        Err(error) => {
+            if matches!(error, rspice_core::SimulationError::Aborted) {
+                Err(super::cancellation_cli_error(ctx.args.timeout))
+            } else {
+                Err(CliError::CoreSimulationError {
+                    source: error,
+                    analysis: Some("DC OP".to_string()),
+                })
+            }
+        }
     }
 }
 

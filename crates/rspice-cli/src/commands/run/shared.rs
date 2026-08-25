@@ -83,13 +83,8 @@ pub(super) fn parse_voltage_probe_spec(spec: &str) -> Option<(String, Option<Str
     Some((trimmed.to_string(), None))
 }
 
-pub(super) fn generate_step_values(
-    sweep: &rspice_core::netlist::StepSweep,
-    timeout_seconds: Option<f64>,
-) -> Result<Vec<f64>, CliError> {
-    use rspice_core::netlist::{StepSweep, SweepPointGenerationError};
-
-    const MAX_STEP_POINTS: usize = 1_000_000;
+pub(super) fn validate_step_sweep(sweep: &rspice_core::netlist::StepSweep) -> Result<(), CliError> {
+    use rspice_core::netlist::StepSweep;
 
     match sweep {
         StepSweep::Linear { start, stop, step } => {
@@ -166,7 +161,24 @@ pub(super) fn generate_step_values(
                 });
             }
         }
-        StepSweep::Data { .. } => return Ok(Vec::new()),
+        StepSweep::Data { .. } => {}
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+fn generate_step_values(
+    sweep: &rspice_core::netlist::StepSweep,
+    timeout_seconds: Option<f64>,
+) -> Result<Vec<f64>, CliError> {
+    use rspice_core::netlist::{StepSweep, SweepPointGenerationError};
+
+    const MAX_STEP_POINTS: usize = 1_000_000;
+
+    validate_step_sweep(sweep)?;
+    if matches!(sweep, StepSweep::Data { .. }) {
+        return Ok(Vec::new());
     }
 
     sweep

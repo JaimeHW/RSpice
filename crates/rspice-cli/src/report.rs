@@ -300,6 +300,7 @@ fn write_measurement_json<W: Write>(
     for report in reports {
         for meas in &report.measurements {
             results.push(serde_json::json!({
+                "run": report.name,
                 "netlist": report.netlist,
                 "name": meas.name,
                 "value": meas.value,
@@ -338,7 +339,7 @@ impl CsvMeasReporter {
         write_line(
             &mut writer,
             path,
-            format_args!("netlist,name,value,expected,tolerance,passed,error"),
+            format_args!("netlist,name,value,expected,tolerance,passed,error,run"),
         )?;
 
         for report in reports {
@@ -347,7 +348,7 @@ impl CsvMeasReporter {
                     &mut writer,
                     path,
                     format_args!(
-                        "{},{},{},{},{},{},{}",
+                        "{},{},{},{},{},{},{},{}",
                         csv_escape(&report.netlist),
                         csv_escape(&meas.name),
                         meas.value.map(|v| format!("{:.9e}", v)).unwrap_or_default(),
@@ -359,6 +360,7 @@ impl CsvMeasReporter {
                             .unwrap_or_default(),
                         meas.passed,
                         csv_escape(meas.error.as_deref().unwrap_or("")),
+                        csv_escape(&report.name),
                     ),
                 )?;
             }
@@ -445,5 +447,48 @@ mod tests {
             !tap.contains("0.000000"),
             "TAP output must not round the measurement to zero: {tap}"
         );
+    }
+
+    #[test]
+    fn cancellation_run_status_is_failed_in_measurement_json_and_csv() {
+        let reports = [SimulationReport {
+            name: "deck [timed-out]".into(),
+            netlist: "deck.cir".into(),
+            passed: false,
+            duration_secs: 0.0,
+            error: Some("Simulation timed out after 1s".into()),
+            error_details: None,
+            measurements: vec![MeasurementReport {
+                name: "__rspice_run_status__".into(),
+                value: None,
+                expected: None,
+                tolerance: None,
+                passed: false,
+                error: Some("Simulation timed out after 1s".into()),
+            }],
+        }];
+
+        let mut json_bytes = Vec::new();
+        write_measurement_json(&mut json_bytes, Path::new("measurement.json"), &reports)
+            .expect("write measurement JSON");
+        let json: serde_json::Value =
+            serde_json::from_slice(&json_bytes).expect("parse measurement JSON");
+        assert_eq!(json["failed"], 1);
+        assert_eq!(json["measurements"][0]["name"], "__rspice_run_status__");
+        assert_eq!(json["measurements"][0]["passed"], false);
+        assert_eq!(json["measurements"][0]["run"], "deck [timed-out]");
+
+        let path = std::env::temp_dir().join(format!(
+            "rspice_cancel_measurement_{}.csv",
+            std::process::id()
+        ));
+        CsvMeasReporter::write(&reports, &path).expect("write measurement CSV");
+        let csv = std::fs::read_to_string(&path).expect("read measurement CSV");
+        assert!(csv.contains("__rspice_run_status__"), "{csv}");
+        assert!(
+            csv.contains(",false,Simulation timed out after 1s,deck [timed-out]"),
+            "{csv}"
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

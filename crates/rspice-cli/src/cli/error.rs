@@ -117,7 +117,13 @@ pub enum CliError {
         analysis: Option<String>,
     },
 
-    #[error("Simulation failed: {source}")]
+    #[error(
+        "Simulation failed{context}: {source}",
+        context = analysis
+            .as_ref()
+            .map(|analysis| format!(" during {analysis}"))
+            .unwrap_or_default()
+    )]
     CoreSimulationError {
         #[source]
         source: rspice_core::SimulationError,

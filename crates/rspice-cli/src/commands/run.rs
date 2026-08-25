@@ -21,6 +21,7 @@ use crate::report::{
 };
 
 use crate::cli::{CliError, Config, MeasFormat, OutputFormat, RunArgs};
+use rspice_core::engine::{StepPlan, StepPlanLimits};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
     ConvergencePreset, Engine, Netlist, SimulationConfig, SimulationConfigOverrides,
@@ -351,7 +352,12 @@ impl<'a> RunContext<'a> {
                 *transfer_type,
                 *analysis_type,
             )?,
-            AnalysisCommand::Step(step_cmd) => advanced::run_step(self, step_cmd)?,
+            AnalysisCommand::Step(_) => {
+                return Err(CliError::InternalError {
+                    message: ".STEP reached the physical-analysis dispatcher; Cartesian planning was bypassed"
+                        .to_string(),
+                });
+            }
             AnalysisCommand::Four {
                 fundamental,
                 outputs,
@@ -417,6 +423,11 @@ fn map_multi_run_error(
     }
 }
 
+struct DeckOutcome {
+    reports: Vec<SimulationReport>,
+    outputs: Vec<PathBuf>,
+}
+
 pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Result<(), CliError> {
     let from_stdin = crate::commands::is_stdin(&args.input);
     if !from_stdin && !args.input.exists() {
@@ -465,6 +476,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         // run can race another or leave a misleading partial artifact.
         for deck in &plan {
             let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
+            validate_step_frontend_compatibility(&netlist, &args, deck.label.as_deref())?;
             if netlist
                 .options
                 .add_resistors
@@ -509,31 +521,43 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             .map_err(|e| CliError::InternalError {
                 message: format!("failed to build the multi-run worker pool: {e}"),
             })?;
-        let outcomes: Vec<Result<(SimulationReport, Vec<PathBuf>), CliError>> =
-            pool.install(|| {
-                use rayon::prelude::*;
-                plan.par_iter()
-                    .map(|deck| {
-                        let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
-                        run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
-                    })
-                    .collect()
-            });
+        let outcomes: Vec<Result<DeckOutcome, CliError>> = pool.install(|| {
+            use rayon::prelude::*;
+            plan.par_iter()
+                .map(|deck| {
+                    let netlist = load_netlist_from_source(&deck.source, &args, config, false)?;
+                    run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
+                })
+                .collect()
+        });
         for (deck, outcome) in plan.iter().zip(outcomes) {
             let label = deck.label.as_deref().unwrap_or("base");
-            let (report, deck_outputs) = outcome?;
+            let outcome = outcome?;
             if !quiet {
-                if report.passed {
-                    println!("  ✓ {label} ({:.3}s)", report.duration_secs);
+                if outcome.reports.iter().all(|report| report.passed) {
+                    let duration: f64 = outcome
+                        .reports
+                        .iter()
+                        .map(|report| report.duration_secs)
+                        .sum();
+                    println!("  ✓ {label} ({duration:.3}s)");
                 } else {
-                    println!("  ✗ {label}: {}", status_failure_summary(&report));
+                    let failure = outcome
+                        .reports
+                        .iter()
+                        .find(|report| !report.passed)
+                        .expect("failed aggregate has a failed report");
+                    println!("  ✗ {label}: {}", status_failure_summary(failure));
                 }
             }
             if first_error.is_none() {
-                first_error = report.error.clone();
+                first_error = outcome
+                    .reports
+                    .iter()
+                    .find_map(|report| report.error.clone());
             }
-            reports.push(report);
-            outputs.extend(deck_outputs);
+            reports.extend(outcome.reports);
+            outputs.extend(outcome.outputs);
         }
     } else {
         for deck in &plan {
@@ -541,9 +565,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
             }
             let netlist = load_netlist_from_source(&deck.source, &args, config, !quiet)?;
+            validate_step_frontend_compatibility(&netlist, &args, deck.label.as_deref())?;
             let addresistors_artifact =
                 materialize_addresistors_artifact(&netlist, &args.input, from_stdin, args.timeout)?;
-            let (report, deck_outputs) = run_deck(
+            let outcome = run_deck(
                 &netlist,
                 &args,
                 config,
@@ -552,10 +577,13 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
                 deck.label.as_deref(),
             )?;
             if first_error.is_none() {
-                first_error = report.error.clone();
+                first_error = outcome
+                    .reports
+                    .iter()
+                    .find_map(|report| report.error.clone());
             }
-            reports.push(report);
-            outputs.extend(deck_outputs);
+            reports.extend(outcome.reports);
+            outputs.extend(outcome.outputs);
             if let Some(path) = addresistors_artifact {
                 outputs.push(path);
             }
@@ -563,6 +591,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     let duration = start_time.elapsed().as_secs_f64();
+    let abort_reason = crate::abort::reason();
+    if let Some(reason) = abort_reason {
+        ensure_cancellation_report(&mut reports, &args.input, args.timeout, reason);
+    }
     write_report_files(&reports, &args, verbose)?;
 
     let failed_measurements: Vec<&str> = reports
@@ -571,7 +603,6 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         .filter(|meas| !meas.passed)
         .map(|meas| meas.name.as_str())
         .collect();
-    let abort_reason = crate::abort::reason();
     let passed = first_error.is_none()
         && abort_reason.is_none()
         && (failed_measurements.is_empty() || args.allow_failed_meas);
@@ -624,6 +655,71 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     Ok(())
+}
+
+/// Ensure every machine-readable report family carries the same cancellation
+/// verdict as the process exit and JSON summary. Completed coordinate reports
+/// remain available, while a distinct failed record prevents partial work
+/// from being misclassified as a passing CI run.
+fn ensure_cancellation_report(
+    reports: &mut Vec<SimulationReport>,
+    input: &std::path::Path,
+    timeout_seconds: Option<f64>,
+    reason: crate::abort::AbortReason,
+) {
+    let error = match reason {
+        crate::abort::AbortReason::Interrupt => CliError::Interrupted,
+        crate::abort::AbortReason::Timeout => CliError::TimedOut {
+            seconds: timeout_seconds.unwrap_or(0.0),
+        },
+    };
+    let error_message = error.to_string();
+    let run_status_measurement = || MeasurementReport {
+        name: "__rspice_run_status__".to_string(),
+        value: None,
+        expected: None,
+        tolerance: None,
+        passed: false,
+        error: Some(error_message.clone()),
+    };
+    if let Some(report) = reports.iter_mut().find(|report| {
+        report
+            .error_details
+            .as_ref()
+            .is_some_and(|details| details.category == "cancellation")
+    }) {
+        report.passed = false;
+        if !report
+            .measurements
+            .iter()
+            .any(|measurement| measurement.name == "__rspice_run_status__")
+        {
+            report.measurements.push(run_status_measurement());
+        }
+        return;
+    }
+
+    let base_name = input
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| *stem != "-")
+        .unwrap_or("stdin");
+    let label = match reason {
+        crate::abort::AbortReason::Interrupt => "interrupted",
+        crate::abort::AbortReason::Timeout => "timed-out",
+    };
+    reports.push(SimulationReport {
+        name: format!("{base_name} [{label}]"),
+        netlist: input.display().to_string(),
+        passed: false,
+        duration_secs: 0.0,
+        error: Some(error_message.clone()),
+        error_details: Some(error.details()),
+        // Measurement-only JSON/CSV artifacts do not serialize report-level
+        // failures. A reserved run-status record keeps cancellation visible
+        // and failed in those formats as well as JUnit/TAP and summaries.
+        measurements: vec![run_status_measurement()],
+    });
 }
 
 fn materialize_addresistors_artifact(
@@ -1029,11 +1125,573 @@ fn resource_limits_summary(limits: rspice_core::ResourceLimits) -> serde_json::V
     })
 }
 
+fn requested_mode_name(args: &RunArgs) -> Option<&'static str> {
+    if args.monte_carlo.is_some() {
+        Some("--monte-carlo")
+    } else if args.pss_freq.is_some() {
+        Some("--pss-freq")
+    } else if args.hb_freq.is_some() {
+        Some("--hb-freq")
+    } else if args.pz_input.is_some() || args.pz_output.is_some() {
+        Some("--pz-input/--pz-output")
+    } else if args.sens_output.is_some() || args.sens_param.is_some() {
+        Some("--sens-output/--sens-param")
+    } else if args.sparam.is_some() {
+        Some("--sparam")
+    } else if args.corners.is_some() {
+        Some("--corners")
+    } else {
+        None
+    }
+}
+
+fn physical_step_analysis_kind(
+    analysis: &AnalysisCommand,
+) -> Result<Option<&'static str>, CliError> {
+    match analysis {
+        AnalysisCommand::Step(_) => Ok(None),
+        AnalysisCommand::Op => Ok(Some("op")),
+        AnalysisCommand::Dc { .. } => Ok(Some("dc")),
+        AnalysisCommand::Ac { .. } => Ok(Some("ac")),
+        AnalysisCommand::Tran { .. } => Ok(Some("tran")),
+        unsupported => Err(CliError::InvalidArgument {
+            message: format!(
+                ".STEP cannot yet wrap the authored analysis {unsupported:?} without ambiguous nested-run or output semantics"
+            ),
+            suggestion: Some(
+                "use an authored .OP, .DC, .AC, or .TRAN child analysis for this stepped run"
+                    .to_string(),
+            ),
+        }),
+    }
+}
+
+fn step_commands(netlist: &Netlist) -> Vec<rspice_core::netlist::StepCommand> {
+    netlist
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            AnalysisCommand::Step(step) => Some(step.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn step_analysis_signature(netlist: &Netlist) -> Result<Vec<&'static str>, CliError> {
+    let mut signature = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for analysis in &netlist.analyses {
+        let Some(kind) = physical_step_analysis_kind(analysis)? else {
+            continue;
+        };
+        if !seen.insert(kind) {
+            return Err(CliError::InvalidArgument {
+                message: format!(
+                    ".STEP deck contains more than one .{} analysis; their output paths would collide",
+                    kind.to_ascii_uppercase()
+                ),
+                suggestion: Some(
+                    "split repeated analysis cards into separate decks until ordinal output namespaces are configured"
+                        .to_string(),
+                ),
+            });
+        }
+        signature.push(kind);
+    }
+    Ok(signature)
+}
+
+fn validate_step_frontend_compatibility(
+    netlist: &Netlist,
+    args: &RunArgs,
+    run_label: Option<&str>,
+) -> Result<(), CliError> {
+    let steps = step_commands(netlist);
+    if steps.is_empty() {
+        return Ok(());
+    }
+    if let Some(mode) = requested_mode_name(args) {
+        return Err(CliError::InvalidArgument {
+            message: format!("{mode} cannot be combined with an authored .STEP deck"),
+            suggestion: Some(
+                "encode the desired .OP, .DC, .AC, or .TRAN child analysis in the deck".to_string(),
+            ),
+        });
+    }
+    if args.checkpoint.is_some() || args.resume.is_some() {
+        return Err(CliError::InvalidArgument {
+            message: ".STEP cannot share one --checkpoint/--resume path across several coordinates"
+                .to_string(),
+            suggestion: Some("run one materialized coordinate per checkpoint file".to_string()),
+        });
+    }
+    if run_label.is_some() {
+        return Err(CliError::InvalidArgument {
+            message: ".ALTER/.DATA textual multi-run expansion cannot yet be composed with .STEP"
+                .to_string(),
+            suggestion: Some(
+                "run each expanded outer deck separately so the global batch budget and output namespace remain unambiguous"
+                    .to_string(),
+            ),
+        });
+    }
+    if netlist
+        .options
+        .add_resistors
+        .as_ref()
+        .is_some_and(|policy| !policy.is_empty())
+    {
+        return Err(CliError::InvalidArgument {
+            message: ".PREPROCESS ADDRESISTORS cannot emit one canonical artifact for a .STEP deck"
+                .to_string(),
+            suggestion: Some(
+                "materialize each coordinate separately when generating ADDRESISTORS artifacts"
+                    .to_string(),
+            ),
+        });
+    }
+
+    for step in &steps {
+        shared::validate_step_sweep(&step.sweep)?;
+    }
+    let signature = step_analysis_signature(netlist)?;
+    if signature.is_empty() && steps.len() != 1 {
+        return Err(CliError::InvalidArgument {
+            message: "a multi-dimensional .STEP deck requires an explicit child analysis"
+                .to_string(),
+            suggestion: Some("add .OP, .DC, .AC, or .TRAN to the deck".to_string()),
+        });
+    }
+    Ok(())
+}
+
+fn map_step_core_error(
+    error: rspice_core::SimulationError,
+    timeout_seconds: Option<f64>,
+    analysis: impl Into<String>,
+) -> CliError {
+    if matches!(error, rspice_core::SimulationError::Aborted) {
+        cancellation_cli_error(timeout_seconds)
+    } else {
+        CliError::CoreSimulationError {
+            source: error,
+            analysis: Some(analysis.into()),
+        }
+    }
+}
+
+fn preflight_step_coordinates(
+    engine: &Engine,
+    plan: &StepPlan<'_>,
+    base_signature: &[&'static str],
+    aggregate_report_values: Option<usize>,
+    args: &RunArgs,
+) -> Result<Vec<Vec<&'static str>>, CliError> {
+    let mut signatures = Vec::with_capacity(plan.total_runs());
+    let mut retained_report_values = aggregate_report_values.unwrap_or(0);
+    let retained_limit = engine.config().resource_limits.max_result_values;
+    if retained_report_values > retained_limit {
+        return Err(map_step_core_error(
+            rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
+                resource: rspice_core::ResourceKind::ResultValues,
+                requested: retained_report_values,
+                limit: retained_limit,
+            }),
+            args.timeout,
+            "Step reporting preflight",
+        ));
+    }
+    for run_index in 0..plan.total_runs() {
+        let coordinate = step_coordinate_description(plan, run_index)?;
+        let materialized = engine
+            .materialize_step_run_with_abort(plan, run_index, &crate::abort::ProcessAbort)
+            .map_err(|error| {
+                map_step_core_error(error, args.timeout, format!(".STEP {coordinate} preflight"))
+            })?;
+        let (_, mut stepped) = materialized.into_parts();
+        stepped
+            .analyses
+            .retain(|analysis| !matches!(analysis, AnalysisCommand::Step(_)));
+        let signature = step_analysis_signature(&stepped)?;
+        if signature != base_signature {
+            return Err(CliError::InvalidArgument {
+                message: format!(
+                    ".STEP coordinate {} ({coordinate}) conditionally changes the child-analysis signature from {:?} to {:?}",
+                    run_index + 1,
+                    base_signature,
+                    signature
+                ),
+                suggestion: Some(
+                    "keep the authored .OP, .DC, .AC, or .TRAN card set unconditional across every coordinate"
+                        .to_string(),
+                ),
+            });
+        }
+        signatures.push(signature);
+
+        // Each report retains one duration plus up to value/goal/tolerance
+        // for every measurement. Bound the numeric reporting payload before
+        // any solver or output file starts.
+        if aggregate_report_values.is_none() {
+            retained_report_values = retained_report_values
+                .saturating_add(1)
+                .saturating_add(stepped.measurements.len().saturating_mul(3));
+            if retained_report_values > retained_limit {
+                return Err(map_step_core_error(
+                    rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
+                        resource: rspice_core::ResourceKind::ResultValues,
+                        requested: retained_report_values,
+                        limit: retained_limit,
+                    }),
+                    args.timeout,
+                    "Step reporting preflight",
+                ));
+            }
+        }
+    }
+    Ok(signatures)
+}
+
+fn step_coordinate_description(plan: &StepPlan<'_>, run_index: usize) -> Result<String, CliError> {
+    use rspice_core::netlist::StepSweep;
+
+    let values = plan
+        .step_values(run_index)
+        .ok_or_else(|| CliError::InternalError {
+            message: format!(
+                ".STEP plan omitted coordinate {} of {}",
+                run_index + 1,
+                plan.total_runs()
+            ),
+        })?;
+    if values.len() != plan.steps().len() {
+        return Err(CliError::InternalError {
+            message: format!(
+                ".STEP coordinate {} contains {} value(s) for {} dimension(s)",
+                run_index + 1,
+                values.len(),
+                plan.steps().len()
+            ),
+        });
+    }
+
+    Ok(plan
+        .steps()
+        .iter()
+        .zip(values)
+        .map(|(step, value)| match &step.sweep {
+            StepSweep::Data { table_name } => {
+                format!("DATA {table_name} row {}", value as usize + 1)
+            }
+            _ => format!("{} = {value}", step_target_description(step)),
+        })
+        .collect::<Vec<_>>()
+        .join(", "))
+}
+
+fn step_run_label(run_index: usize, total_runs: usize) -> String {
+    let width = total_runs.to_string().len().max(6);
+    format!("step-{:0width$}", run_index + 1)
+}
+
+fn step_target_description(step: &rspice_core::netlist::StepCommand) -> String {
+    use rspice_core::netlist::{StepSweep, StepTarget};
+
+    if let StepSweep::Data { table_name } = &step.sweep {
+        return format!("DATA {table_name}");
+    }
+    match step.target {
+        StepTarget::Param => format!("PARAM {}", step.name),
+        StepTarget::Device => match &step.param_name {
+            Some(param) => format!("DEVICE {}.{param}", step.name),
+            None => format!("DEVICE {}", step.name),
+        },
+        StepTarget::Model => match &step.param_name {
+            Some(param) => format!("MODEL {}.{param}", step.name),
+            None => format!("MODEL {}", step.name),
+        },
+        StepTarget::Temp => "TEMP".to_string(),
+    }
+}
+
+fn step_scale_name(step: &rspice_core::netlist::StepCommand) -> String {
+    use rspice_core::netlist::{StepSweep, StepTarget};
+
+    if let StepSweep::Data { table_name } = &step.sweep {
+        return format!("DATA({table_name})");
+    }
+    match step.target {
+        StepTarget::Temp => "TEMP".to_string(),
+        StepTarget::Param => step.name.clone(),
+        StepTarget::Device | StepTarget::Model => match &step.param_name {
+            Some(param) => format!("{}:{param}", step.name),
+            None => step.name.clone(),
+        },
+    }
+}
+
+fn run_implicit_step_op_table(
+    netlist: &Netlist,
+    args: &RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+    engine: &Engine,
+    plan: &StepPlan<'_>,
+) -> Result<DeckOutcome, CliError> {
+    let step = plan
+        .steps()
+        .first()
+        .expect("single-dimensional implicit STEP plan has one command");
+    let target = step_target_description(step);
+    let ctx = RunContext::new(engine, netlist, args, config, verbose, quiet, None)?;
+    let start_time = Instant::now();
+    let mut retained_values = 0usize;
+    let mut results = Vec::with_capacity(plan.total_runs());
+
+    for run_index in 0..plan.total_runs() {
+        if crate::abort::reason().is_some() {
+            break;
+        }
+        let value = plan
+            .step_values(run_index)
+            .and_then(|values| values.first().copied())
+            .ok_or_else(|| CliError::InternalError {
+                message: format!(
+                    "single-dimensional .STEP plan omitted coordinate {}",
+                    run_index + 1
+                ),
+            })?;
+        let materialized = match engine.materialize_step_run_with_abort(
+            plan,
+            run_index,
+            &crate::abort::ProcessAbort,
+        ) {
+            Ok(materialized) => materialized,
+            Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
+                break;
+            }
+            Err(error) => {
+                return Err(CliError::simulation_error_in(
+                    format!(".STEP {target} = {value}: {error}"),
+                    "Step",
+                ));
+            }
+        };
+        if materialized.step_values() != [value] {
+            return Err(CliError::InternalError {
+                message: format!(
+                    ".STEP coordinate {} changed between planning and materialization",
+                    run_index + 1
+                ),
+            });
+        }
+        let coordinate_engine =
+            Engine::try_new(build_sim_config(args, config, materialized.netlist()))?;
+        let result = match coordinate_engine
+            .run_dc_op_with_abort(materialized.netlist(), &crate::abort::ProcessAbort)
+        {
+            Ok(result) => result,
+            Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
+                break;
+            }
+            Err(error) => {
+                return Err(CliError::simulation_error_in(
+                    format!(".STEP {target} = {value}: {error}"),
+                    "Step",
+                ));
+            }
+        };
+        shared::ensure_finite_series(
+            args.allow_nonfinite,
+            "Step",
+            (1..result.node_voltages.len()).map(|node| {
+                let name = result
+                    .node_names
+                    .get(node)
+                    .map(String::as_str)
+                    .unwrap_or("node");
+                (name, std::slice::from_ref(&result.node_voltages[node]))
+            }),
+        )?;
+        retained_values = retained_values
+            .saturating_add(result.retained_value_count())
+            .saturating_add(1);
+        let retained_limit = engine.config().resource_limits.max_result_values;
+        if retained_values > retained_limit {
+            return Err(map_step_core_error(
+                rspice_core::SimulationError::ResourceLimit(rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::ResultValues,
+                    requested: retained_values,
+                    limit: retained_limit,
+                }),
+                args.timeout,
+                "Step result aggregation",
+            ));
+        }
+        results.push((value, result));
+    }
+
+    advanced::export_step_sweep(&ctx, &step_scale_name(step), &results)?;
+    ctx.record_unevaluated_measurements();
+    let measurements = ctx.measurements.borrow().clone();
+    let base_name = args
+        .input
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| *stem != "-")
+        .unwrap_or("stdin")
+        .to_string();
+    Ok(DeckOutcome {
+        reports: vec![SimulationReport {
+            name: base_name,
+            netlist: args.input.display().to_string(),
+            passed: measurements.iter().all(|measurement| measurement.passed),
+            duration_secs: start_time.elapsed().as_secs_f64(),
+            error: None,
+            error_details: None,
+            measurements,
+        }],
+        outputs: ctx.outputs.into_inner(),
+    })
+}
+
+fn run_deck(
+    netlist: &Netlist,
+    args: &RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+    run_label: Option<&str>,
+) -> Result<DeckOutcome, CliError> {
+    let steps = step_commands(netlist);
+    if steps.is_empty() {
+        let (report, outputs) =
+            run_concrete_deck(netlist, args, config, verbose, quiet, run_label)?;
+        return Ok(DeckOutcome {
+            reports: vec![report],
+            outputs,
+        });
+    }
+
+    validate_step_frontend_compatibility(netlist, args, run_label)?;
+    let base_signature = step_analysis_signature(netlist)?;
+    let sim_config = build_sim_config(args, config, netlist);
+    let engine = Engine::try_new(sim_config)?;
+    let limits = StepPlanLimits::from_resource_limits(config.resources.limits());
+    let plan = engine
+        .plan_step_commands_with_abort(netlist, &steps, limits, &crate::abort::ProcessAbort)
+        .map_err(|error| map_step_core_error(error, args.timeout, "Step planning"))?;
+    let aggregate_report_values = base_signature
+        .is_empty()
+        .then(|| 1usize.saturating_add(netlist.measurements.len().saturating_mul(3)));
+    let coordinate_signatures = preflight_step_coordinates(
+        &engine,
+        &plan,
+        &base_signature,
+        aggregate_report_values,
+        args,
+    )?;
+
+    if base_signature.is_empty() {
+        return run_implicit_step_op_table(netlist, args, config, verbose, quiet, &engine, &plan);
+    }
+
+    if !quiet {
+        println!(
+            "Cartesian .STEP plan: {} dimension(s), {} run(s); first authored dimension varies fastest",
+            steps.len(),
+            plan.total_runs()
+        );
+    }
+    let mut reports = Vec::with_capacity(plan.total_runs());
+    let mut outputs = Vec::new();
+    for run_index in 0..plan.total_runs() {
+        if crate::abort::reason().is_some() {
+            break;
+        }
+        let materialized = match engine.materialize_step_run_with_abort(
+            &plan,
+            run_index,
+            &crate::abort::ProcessAbort,
+        ) {
+            Ok(materialized) => materialized,
+            Err(rspice_core::SimulationError::Aborted) if crate::abort::reason().is_some() => {
+                break;
+            }
+            Err(error) => {
+                return Err(map_step_core_error(
+                    error,
+                    args.timeout,
+                    format!("Step coordinate {}", run_index + 1),
+                ));
+            }
+        };
+        let (values, mut stepped) = materialized.into_parts();
+        stepped
+            .analyses
+            .retain(|analysis| !matches!(analysis, AnalysisCommand::Step(_)));
+        let materialized_signature = step_analysis_signature(&stepped)?;
+        if materialized_signature != coordinate_signatures[run_index] {
+            return Err(CliError::InternalError {
+                message: format!(
+                    ".STEP coordinate {} changed its preflight physical-analysis signature from {:?} to {:?}",
+                    run_index + 1,
+                    coordinate_signatures[run_index],
+                    materialized_signature
+                ),
+            });
+        }
+        if values.len() != steps.len() {
+            return Err(CliError::InternalError {
+                message: format!(
+                    ".STEP coordinate {} materialized {} coordinate value(s) for {} dimension(s)",
+                    run_index + 1,
+                    values.len(),
+                    steps.len()
+                ),
+            });
+        }
+
+        let label = step_run_label(run_index, plan.total_runs());
+        if verbose && !quiet {
+            let coordinates = steps
+                .iter()
+                .zip(&values)
+                .map(|(step, value)| format!("{}={value}", step_target_description(step)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("\n=== {label}: {coordinates} ===");
+        }
+        let (report, run_outputs) =
+            match run_concrete_deck(&stepped, args, config, verbose, quiet, Some(&label)) {
+                Ok(outcome) => outcome,
+                Err(_) if crate::abort::reason().is_some() => break,
+                Err(error) => return Err(error),
+            };
+        reports.push(report);
+        outputs.extend(run_outputs);
+        if crate::abort::reason().is_some() {
+            break;
+        }
+    }
+    if reports.len() != plan.total_runs() && crate::abort::reason().is_none() {
+        return Err(CliError::InternalError {
+            message: format!(
+                ".STEP completed {} of {} planned coordinates without a cancellation or error",
+                reports.len(),
+                plan.total_runs()
+            ),
+        });
+    }
+    Ok(DeckOutcome { reports, outputs })
+}
+
 /// Run one concrete deck (all of its analyses) and assemble its report.
 /// Multi-run failures don't abort the remaining runs — HSPICE semantics —
 /// so errors land in the report instead of bubbling, except for setup
 /// errors (bad output paths, alternate-mode failures).
-fn run_deck(
+fn run_concrete_deck(
     netlist: &Netlist,
     args: &RunArgs,
     config: &Config,
@@ -1763,4 +2421,104 @@ fn resolve_node_pair(
         resolve_node(ctx, first, flag)?,
         resolve_node(ctx, second, flag)?,
     ))
+}
+
+#[cfg(test)]
+mod step_cancellation_report_tests {
+    use super::*;
+
+    fn passing_report() -> SimulationReport {
+        SimulationReport {
+            name: "deck [step-000001]".to_string(),
+            netlist: "deck.cir".to_string(),
+            passed: true,
+            duration_secs: 0.1,
+            error: None,
+            error_details: None,
+            measurements: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn timeout_appends_one_failed_typed_ci_report_after_partial_success() {
+        let mut reports = vec![passing_report()];
+        ensure_cancellation_report(
+            &mut reports,
+            std::path::Path::new("deck.cir"),
+            Some(2.5),
+            crate::abort::AbortReason::Timeout,
+        );
+        assert_eq!(reports.len(), 2);
+        assert!(reports[0].passed);
+        assert!(!reports[1].passed);
+        assert_eq!(reports[1].name, "deck [timed-out]");
+        assert!(
+            reports[1]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("2.5s"))
+        );
+        assert_eq!(
+            reports[1]
+                .error_details
+                .as_ref()
+                .map(|details| (details.code, details.category)),
+            Some(("timed_out", "cancellation"))
+        );
+        assert_eq!(reports[1].measurements.len(), 1);
+        assert_eq!(reports[1].measurements[0].name, "__rspice_run_status__");
+        assert!(!reports[1].measurements[0].passed);
+    }
+
+    #[test]
+    fn existing_typed_cancellation_report_is_not_duplicated() {
+        let interrupted = CliError::Interrupted;
+        let mut reports = vec![SimulationReport {
+            name: "deck [step-000002]".to_string(),
+            netlist: "deck.cir".to_string(),
+            passed: false,
+            duration_secs: 0.2,
+            error: Some(interrupted.to_string()),
+            error_details: Some(interrupted.details()),
+            measurements: Vec::new(),
+        }];
+        ensure_cancellation_report(
+            &mut reports,
+            std::path::Path::new("deck.cir"),
+            None,
+            crate::abort::AbortReason::Interrupt,
+        );
+        ensure_cancellation_report(
+            &mut reports,
+            std::path::Path::new("deck.cir"),
+            None,
+            crate::abort::AbortReason::Interrupt,
+        );
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].measurements.len(), 1);
+        assert_eq!(reports[0].measurements[0].name, "__rspice_run_status__");
+        assert!(!reports[0].measurements[0].passed);
+        assert_eq!(
+            reports[0]
+                .error_details
+                .as_ref()
+                .map(|details| (details.code, details.category)),
+            Some(("interrupted", "cancellation"))
+        );
+
+        let suffix = format!("{}_{}", std::process::id(), reports.len());
+        let json_path = std::env::temp_dir().join(format!("rspice_cancel_{suffix}.json"));
+        let csv_path = std::env::temp_dir().join(format!("rspice_cancel_{suffix}.csv"));
+        JsonMeasReporter::write(&reports, &json_path).expect("write cancellation JSON");
+        CsvMeasReporter::write(&reports, &csv_path).expect("write cancellation CSV");
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&json_path).expect("read cancellation JSON"))
+                .expect("parse cancellation JSON");
+        assert_eq!(json["failed"], 1);
+        let csv = std::fs::read_to_string(&csv_path).expect("read cancellation CSV");
+        assert!(csv.contains("__rspice_run_status__"), "{csv}");
+        assert!(csv.contains(",false,Simulation interrupted,"), "{csv}");
+        let _ = std::fs::remove_file(json_path);
+        let _ = std::fs::remove_file(csv_path);
+    }
 }

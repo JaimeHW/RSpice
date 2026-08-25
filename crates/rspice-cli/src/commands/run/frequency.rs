@@ -191,8 +191,17 @@ pub(super) fn run_ac(
 fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(), CliError> {
     let results = ctx
         .engine
-        .run_ac(ctx.netlist, &frequencies)
-        .map_err(|error| CliError::simulation_error_in(error.to_string(), "AC"))?;
+        .run_ac_with_abort(ctx.netlist, &frequencies, &crate::abort::ProcessAbort)
+        .map_err(|error| {
+            if matches!(error, rspice_core::SimulationError::Aborted) {
+                super::cancellation_cli_error(ctx.args.timeout)
+            } else {
+                CliError::CoreSimulationError {
+                    source: error,
+                    analysis: Some("AC".to_string()),
+                }
+            }
+        })?;
     finish_ac_results(ctx, results)
 }
 
