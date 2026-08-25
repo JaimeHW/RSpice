@@ -88,3 +88,66 @@ R_D_LEAK D 0 10T
         "unexpected final supply current: got {supply_current:.16e}, expected -{expected:.16e}"
     );
 }
+
+#[test]
+fn stiff_miller_bias_macro_keeps_the_physically_better_fixed_point() {
+    let deck = r#"
+* clean-room structural regression for a portable nonlinear Miller network
+VD D 0 10
+VG G 0 0
+VT T 0 25
+XPOWER D G 0 T STIFF_MILLER
+
+.SUBCKT STIFF_MILLER D G S T
+RG G GSHIFT 1
+RDU GTEMP GINT 1u
+MCHAN DINT GINT SCHAN SCHAN CORE L=1u W=1u
+.MODEL CORE NMOS(VTO=2.9 KP=0.82 THETA=0.05 VMAX=80k LEVEL=3)
+RD D DN 0.38
+RA DN DINT 0.38
+DDS SCHAN DN DLEAK
+.MODEL DLEAK D(M=0.478 VJ=1.22 CJO=27p)
+RS SCHAN SSENSE 0.5m
+LS SSENSE S 0.5n
+
+MUP GINT CUP CMID CMID AUX
+EUP CUP CMID DN GINT 2
+.MODEL AUX NMOS(VTO=0 KP=10 LEVEL=1)
+RUPPER COUT DN 10meg
+DMID CMID DN DCAP
+RMID CMID DN 10meg
+.MODEL DCAP D(M=0.425 VJ=0.0838 CJO=58p)
+MDOWN COUT CDOWN GINT GINT AUX
+EDOWN CDOWN GINT DN GINT -2
+
+ERES SCHAN RSENSE POLY(2) (KSHIFT,0) (ICOPY,0) 0 0 0 0 1
+FCOPY 0 ICOPY VSENSE 1
+RIN KSHIFT 0 1G
+VSENSE RSENSE SSENSE 0
+RREF ICOPY 0 10m
+
+ETDELTA TDELTA 0 VALUE={V(T,TREF)}
+VTREF TREF 0 25
+EKSHIFT KSHIFT 0 TDELTA 0 0.82
+EVSHIFT VSHIFT 0 TDELTA 0 0.005
+EGATE GTEMP GSHIFT VSHIFT 0 1
+.ENDS STIFF_MILLER
+.END
+"#;
+
+    let netlist = Netlist::parse(deck).expect("stiff Miller macro parses unchanged");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("stiff Miller macro converges without relaxed tolerances");
+
+    let gate_internal = result.node_voltages[node_index(&result, "XPOWER.GINT")];
+    let drain_current = result.branch_currents[branch_index(&result, "VD")];
+    assert!(
+        (gate_internal - 1.000_020_9e-6).abs() < 2.0e-9,
+        "unexpected internal gate bias: {gate_internal:.16e}"
+    );
+    assert!(
+        (drain_current + 1.000_052e-6).abs() < 2.0e-9,
+        "unexpected drain leakage: {drain_current:.16e}"
+    );
+}

@@ -5224,6 +5224,7 @@ dependencies = [
  "faer",
  "log",
  "num-complex",
+ "qd",
  "thiserror 2.0.20",
 ]
 

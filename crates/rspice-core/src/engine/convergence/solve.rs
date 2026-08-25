@@ -108,18 +108,26 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         match matrix.solve_into(rhs, solution) {
             Ok(()) => Ok(()),
-            Err(crate::solver::SolverError::InaccurateSolution(_))
-                if denominator_floors.is_some() =>
-            {
+            Err(crate::solver::SolverError::InaccurateSolution(original_error)) => {
+                if rhs.len() <= 128 {
+                    log::debug!(
+                        "sparse DC solve failed strict backward-error certification; retrying the small system with extended precision"
+                    );
+                    if let Ok(extended_solution) = matrix.solve_dense_extended(rhs) {
+                        *solution = extended_solution;
+                        return Ok(());
+                    }
+                }
+                let Some(denominator_floors) = denominator_floors else {
+                    return Err(SimulationError::Solver(
+                        crate::solver::SolverError::InaccurateSolution(original_error),
+                    ));
+                };
                 log::debug!(
                     "strict algebraic backward-error check rejected a behavioral DC Jacobian; retrying with physical row scales before the circuit residual audit"
                 );
                 matrix
-                    .solve_into_with_row_denominator_floors(
-                        rhs,
-                        denominator_floors.expect("guarded denominator floors"),
-                        solution,
-                    )
+                    .solve_into_with_row_denominator_floors(rhs, denominator_floors, solution)
                     .map_err(SimulationError::Solver)
             }
             Err(error) => Err(SimulationError::Solver(error)),
@@ -697,8 +705,10 @@ impl Engine {
             // semiconductor nonlinearities, but it can unnecessarily throttle
             // behavioral-only fixed-point updates (e.g., B-source macros that
             // legitimately require kilovolt-level solution jumps).
+            let should_project_damped_constraints =
+                requires_conservative_nonlinear_limiting && !junction_owns_steps;
             let mut damped_solution;
-            let new_solution = if requires_conservative_nonlinear_limiting && !junction_owns_steps {
+            let new_solution = if should_project_damped_constraints {
                 damped_solution = self.apply_damping_strategy_for_circuit(
                     circuit.has_b3soi_devices(),
                     &circuit.non_electrical_state_mask(),
@@ -712,7 +722,14 @@ impl Engine {
             } else {
                 &mut raw_solution
             };
-            circuit.enforce_dc_ideal_voltage_constraints(new_solution)?;
+            // A raw MNA solution already satisfies its ideal-source rows and
+            // must remain untouched: re-projecting a controlled voltage after
+            // the solve can sacrifice KCL at an adjacent stiff impedance.
+            // Damping, in contrast, deliberately blends node values and must
+            // restore the exact voltage constraints before the next iterate.
+            if should_project_damped_constraints {
+                circuit.enforce_dc_ideal_voltage_constraints(new_solution)?;
+            }
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {

@@ -3039,6 +3039,179 @@ impl StaticMatrix {
             ))
         }
     }
+
+    /// Solve a small, ill-conditioned real system with extended-precision
+    /// elimination, then certify the rounded binary64 result against the
+    /// original sparse matrix.
+    ///
+    /// This deliberately remains an explicit fallback rather than a regular
+    /// backend: the O(n^3) work and dense storage are appropriate only after
+    /// the production sparse solve reports that its result is inaccurate.
+    pub fn solve_dense_extended(&self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+        use qd::Quad;
+
+        self.check_stamping_error()?;
+        if self.nrows != rhs.len() || self.ncols != rhs.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Extended dense solve requires a square matrix matching RHS size, got {}x{} with RHS {}",
+                self.nrows,
+                self.ncols,
+                rhs.len()
+            )));
+        }
+        if rhs.iter().any(|value| !value.is_finite()) {
+            return Err(SolverError::Overflow);
+        }
+
+        let n = rhs.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut scaled_values = Vec::new();
+        let mut row_scale = Vec::new();
+        let mut col_scale = Vec::new();
+        equilibrate_sparse_system(
+            &self.csc,
+            &self.values,
+            &mut scaled_values,
+            &mut row_scale,
+            &mut col_scale,
+        )?;
+
+        let mut dense = vec![Quad::ZERO; n * n];
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        for col in 0..n {
+            for index in col_ptr[col]..col_ptr[col + 1] {
+                dense[row_idx[index] * n + col] = Quad::from_f64(scaled_values[index]);
+            }
+        }
+        let scaled_rhs: Vec<Quad> = rhs
+            .iter()
+            .zip(&row_scale)
+            .map(|(&value, &scale)| Quad::from_f64(value * scale))
+            .collect();
+
+        let mut scaled_solution = solve_gauss_extended(&dense, &scaled_rhs, n)?;
+        for _ in 0..8 {
+            let mut extended_residual = vec![Quad::ZERO; n];
+            let mut any_nonzero = false;
+            for row in 0..n {
+                let mut remainder = scaled_rhs[row];
+                for col in 0..n {
+                    remainder = remainder.sub_accurate(dense[row * n + col] * scaled_solution[col]);
+                }
+                extended_residual[row] = remainder;
+                any_nonzero |= remainder != Quad::ZERO;
+            }
+            if !any_nonzero {
+                break;
+            }
+            let correction = solve_gauss_extended(&dense, &extended_residual, n)?;
+            let mut changed = false;
+            for (value, correction) in scaled_solution.iter_mut().zip(correction) {
+                let refined = value.add_accurate(correction);
+                changed |= refined != *value;
+                *value = refined;
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        let solution: Vec<Value> = scaled_solution
+            .iter()
+            .zip(&col_scale)
+            .map(|(&value, &scale)| {
+                let unscaled = value * Quad::from_f64(scale);
+                unscaled.0 + unscaled.1
+            })
+            .collect();
+        if solution.iter().any(|value| !value.is_finite()) {
+            return Err(SolverError::Overflow);
+        }
+
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
+        let backward_error = componentwise_backward_error_with_layout(
+            &self.csc,
+            &self.residual_layout,
+            &self.values,
+            &solution,
+            rhs,
+            &mut residual,
+            &mut denominator,
+            &mut compensation,
+            &mut row_nnz,
+            RealSolveOp::Normal,
+        )?;
+        if backward_error.accepted() {
+            Ok(solution)
+        } else {
+            // Extended elimination can recover the meaningful digits while a
+            // mathematically zero auxiliary unknown still rounds to a tiny
+            // nonzero binary64 value. Try zero projections one coordinate at
+            // a time, retaining a projection only when it improves the same
+            // strict backward-error metric and returning it only when the
+            // original certificate passes. Legitimate small signals therefore
+            // cannot be erased merely because of their magnitude.
+            let solution_scale = solution
+                .iter()
+                .fold(1.0_f64, |scale, value| scale.max(value.abs()));
+            let snap_threshold = solution_scale * 256.0 * Value::EPSILON;
+            let mut snap_candidates: Vec<usize> = solution
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| {
+                    (*value != 0.0 && value.abs() <= snap_threshold).then_some(index)
+                })
+                .collect();
+            let mut projected_solution = solution.clone();
+            let mut projected_error = backward_error;
+            while !snap_candidates.is_empty() {
+                let mut best: Option<(usize, Vec<Value>, BackwardError)> = None;
+                for (candidate_position, &index) in snap_candidates.iter().enumerate() {
+                    let mut trial = projected_solution.clone();
+                    trial[index] = 0.0;
+                    let trial_error = componentwise_backward_error_with_layout(
+                        &self.csc,
+                        &self.residual_layout,
+                        &self.values,
+                        &trial,
+                        rhs,
+                        &mut residual,
+                        &mut denominator,
+                        &mut compensation,
+                        &mut row_nnz,
+                        RealSolveOp::Normal,
+                    )?;
+                    if trial_error.accepted() {
+                        return Ok(trial);
+                    }
+                    if best.as_ref().is_none_or(|(_, _, best_error)| {
+                        trial_error.acceptance_ratio < best_error.acceptance_ratio
+                    }) {
+                        best = Some((candidate_position, trial, trial_error));
+                    }
+                }
+                let Some((candidate_position, best_solution, best_error)) = best else {
+                    break;
+                };
+                if best_error.acceptance_ratio >= projected_error.acceptance_ratio {
+                    break;
+                }
+                snap_candidates.remove(candidate_position);
+                projected_solution = best_solution;
+                projected_error = best_error;
+            }
+            Err(SolverError::InaccurateSolution(
+                backward_error.componentwise,
+            ))
+        }
+    }
 }
 
 //=============================================================================
@@ -3938,6 +4111,195 @@ impl ComplexMatrix {
         Ok(solution)
     }
 
+    /// Solve a small complex system through an equivalent extended-precision
+    /// real block system, then certify the rounded complex result against the
+    /// original matrix.
+    ///
+    /// For `A = A_r + jA_i`, this solves
+    /// `[A_r -A_i; A_i A_r] [x_r; x_i] = [b_r; b_i]`. It is an explicit
+    /// fallback for ill-conditioned AC matrices after the sparse complex
+    /// backend reports an inaccurate result.
+    pub fn solve_dense_extended(&self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
+        use qd::Quad;
+
+        self.check_stamping_error()?;
+        if self.nrows != rhs.len() || self.ncols != rhs.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Extended complex solve requires a square matrix matching RHS size, got {}x{} with RHS {}",
+                self.nrows,
+                self.ncols,
+                rhs.len()
+            )));
+        }
+        if rhs.iter().copied().any(|value| !complex_is_finite(value)) {
+            return Err(SolverError::Overflow);
+        }
+
+        let n = rhs.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+        let block_size = n.checked_mul(2).ok_or(SolverError::OutOfMemory)?;
+        let coefficient_count = block_size
+            .checked_mul(block_size)
+            .ok_or(SolverError::OutOfMemory)?;
+
+        let mut scaled_values = Vec::new();
+        let mut row_scale = Vec::new();
+        let mut col_scale = Vec::new();
+        equilibrate_complex_matrix(
+            &self.csc,
+            &self.values,
+            &mut scaled_values,
+            &mut row_scale,
+            &mut col_scale,
+        )?;
+        let mut scaled_rhs = Vec::new();
+        scale_complex_rhs(rhs, &row_scale, &mut scaled_rhs)?;
+
+        let mut block = vec![Quad::ZERO; coefficient_count];
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
+        for col in 0..n {
+            for index in col_ptr[col]..col_ptr[col + 1] {
+                let row = row_idx[index];
+                let value = scaled_values[index];
+                block[row * block_size + col] = Quad::from_f64(value.re);
+                block[row * block_size + col + n] = Quad::from_f64(-value.im);
+                block[(row + n) * block_size + col] = Quad::from_f64(value.im);
+                block[(row + n) * block_size + col + n] = Quad::from_f64(value.re);
+            }
+        }
+        let mut block_rhs = vec![Quad::ZERO; block_size];
+        for row in 0..n {
+            block_rhs[row] = Quad::from_f64(scaled_rhs[row].re);
+            block_rhs[row + n] = Quad::from_f64(scaled_rhs[row].im);
+        }
+
+        let mut block_solution = solve_gauss_extended(&block, &block_rhs, block_size)?;
+        for _ in 0..8 {
+            let mut extended_residual = vec![Quad::ZERO; block_size];
+            let mut any_nonzero = false;
+            for row in 0..block_size {
+                let mut remainder = block_rhs[row];
+                for col in 0..block_size {
+                    remainder =
+                        remainder.sub_accurate(block[row * block_size + col] * block_solution[col]);
+                }
+                extended_residual[row] = remainder;
+                any_nonzero |= remainder != Quad::ZERO;
+            }
+            if !any_nonzero {
+                break;
+            }
+            let correction = solve_gauss_extended(&block, &extended_residual, block_size)?;
+            let mut changed = false;
+            for (value, correction) in block_solution.iter_mut().zip(correction) {
+                let refined = value.add_accurate(correction);
+                changed |= refined != *value;
+                *value = refined;
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        let mut solution = Vec::with_capacity(n);
+        for col in 0..n {
+            let scale = Quad::from_f64(col_scale[col]);
+            let real = block_solution[col] * scale;
+            let imag = block_solution[col + n] * scale;
+            solution.push(Complex64::new(real.0 + real.1, imag.0 + imag.1));
+        }
+        if solution
+            .iter()
+            .copied()
+            .any(|value| !complex_is_finite(value))
+        {
+            return Err(SolverError::Overflow);
+        }
+
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
+        let backward_error = complex_componentwise_backward_error(
+            &self.csc,
+            &self.values,
+            &solution,
+            rhs,
+            None,
+            &mut residual,
+            &mut denominator,
+            &mut compensation,
+            &mut row_nnz,
+            ComplexSolveOp::Normal,
+        )?;
+        if backward_error.accepted() {
+            return Ok(solution);
+        }
+
+        // As in the real fallback, a mathematically zero auxiliary unknown
+        // can retain a tiny rounded coordinate. Explore zero projections only
+        // while they improve the strict certificate, and return only a fully
+        // certified candidate.
+        let solution_scale = solution
+            .iter()
+            .copied()
+            .fold(1.0_f64, |scale, value| scale.max(complex_abs1(value)));
+        let snap_threshold = solution_scale * 256.0 * Value::EPSILON;
+        let mut snap_candidates: Vec<usize> = solution
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(index, value)| {
+                (value != Complex64::new(0.0, 0.0) && complex_abs1(value) <= snap_threshold)
+                    .then_some(index)
+            })
+            .collect();
+        let mut projected_solution = solution;
+        let mut projected_error = backward_error;
+        while !snap_candidates.is_empty() {
+            let mut best: Option<(usize, Vec<Complex64>, BackwardError)> = None;
+            for (candidate_position, &index) in snap_candidates.iter().enumerate() {
+                let mut trial = projected_solution.clone();
+                trial[index] = Complex64::new(0.0, 0.0);
+                let trial_error = complex_componentwise_backward_error(
+                    &self.csc,
+                    &self.values,
+                    &trial,
+                    rhs,
+                    None,
+                    &mut residual,
+                    &mut denominator,
+                    &mut compensation,
+                    &mut row_nnz,
+                    ComplexSolveOp::Normal,
+                )?;
+                if trial_error.accepted() {
+                    return Ok(trial);
+                }
+                if best.as_ref().is_none_or(|(_, _, best_error)| {
+                    trial_error.acceptance_ratio < best_error.acceptance_ratio
+                }) {
+                    best = Some((candidate_position, trial, trial_error));
+                }
+            }
+            let Some((candidate_position, best_solution, best_error)) = best else {
+                break;
+            };
+            if best_error.acceptance_ratio >= projected_error.acceptance_ratio {
+                break;
+            }
+            snap_candidates.remove(candidate_position);
+            projected_solution = best_solution;
+            projected_error = best_error;
+        }
+        Err(SolverError::InaccurateSolution(
+            backward_error.componentwise,
+        ))
+    }
+
     /// Solve multiple complex systems with one cached factorization and one
     /// batched triangular solve. Inputs and outputs are column-major with `n`
     /// consecutive values per right-hand side.
@@ -4664,6 +5026,76 @@ pub(crate) fn solve_gauss(
     finite_solution_or_singular(x)
 }
 
+fn solve_gauss_extended(
+    coefficients: &[qd::Quad],
+    rhs: &[qd::Quad],
+    n: usize,
+) -> Result<Vec<qd::Quad>, SolverError> {
+    use qd::Quad;
+
+    if coefficients.len() != n.saturating_mul(n) || rhs.len() != n {
+        return Err(SolverError::InvalidCircuit(format!(
+            "Extended dense solve requires {n}x{n} coefficients and an RHS of length {n}"
+        )));
+    }
+    if coefficients.iter().any(|value| !value.is_finite())
+        || rhs.iter().any(|value| !value.is_finite())
+    {
+        return Err(SolverError::Overflow);
+    }
+
+    let mut matrix = coefficients.to_vec();
+    let mut transformed_rhs = rhs.to_vec();
+    for pivot_col in 0..n {
+        let mut pivot_row = pivot_col;
+        let mut pivot_abs = matrix[pivot_col * n + pivot_col].abs();
+        for row in (pivot_col + 1)..n {
+            let candidate = matrix[row * n + pivot_col].abs();
+            if candidate > pivot_abs {
+                pivot_abs = candidate;
+                pivot_row = row;
+            }
+        }
+        if pivot_abs == Quad::ZERO || !pivot_abs.is_finite() {
+            return Err(SolverError::SingularMatrix);
+        }
+        if pivot_row != pivot_col {
+            for col in 0..n {
+                matrix.swap(pivot_col * n + col, pivot_row * n + col);
+            }
+            transformed_rhs.swap(pivot_col, pivot_row);
+        }
+
+        let pivot = matrix[pivot_col * n + pivot_col];
+        for row in (pivot_col + 1)..n {
+            let factor = matrix[row * n + pivot_col] / pivot;
+            if !factor.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            matrix[row * n + pivot_col] = Quad::ZERO;
+            for col in (pivot_col + 1)..n {
+                matrix[row * n + col] =
+                    matrix[row * n + col].sub_accurate(factor * matrix[pivot_col * n + col]);
+            }
+            transformed_rhs[row] =
+                transformed_rhs[row].sub_accurate(factor * transformed_rhs[pivot_col]);
+        }
+    }
+
+    let mut solution = vec![Quad::ZERO; n];
+    for row in (0..n).rev() {
+        let mut remainder = transformed_rhs[row];
+        for col in (row + 1)..n {
+            remainder = remainder.sub_accurate(matrix[row * n + col] * solution[col]);
+        }
+        solution[row] = remainder / matrix[row * n + row];
+        if !solution[row].is_finite() {
+            return Err(SolverError::Overflow);
+        }
+    }
+    Ok(solution)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4860,6 +5292,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(zero_error.componentwise.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn extended_dense_solve_certifies_an_ill_conditioned_cancellation_system() {
+        let delta = 2.0_f64.powi(-40);
+        let matrix = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 1.0),
+                (0, 1, -1.0),
+                (0, 2, 1.0e-6),
+                (1, 0, 1.0),
+                (1, 1, -1.0 + delta),
+                (2, 1, 1.0),
+                (2, 2, 1.0),
+            ],
+        )
+        .unwrap();
+        let expected = [1.000_001, 1.0, 2.0];
+        let rhs = [
+            expected[0] - expected[1] + 1.0e-6 * expected[2],
+            expected[0] + (-1.0 + delta) * expected[1],
+            expected[1] + expected[2],
+        ];
+
+        let actual = matrix
+            .solve_dense_extended(&rhs)
+            .expect("extended solution must satisfy strict backward-error certification");
+        assert_relative_solution(&actual, &expected);
     }
 
     #[test]
@@ -5907,6 +6369,72 @@ mod tests {
                     "complex solution[{index}] relative error {relative_error:.3e}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn extended_complex_solve_certifies_the_equivalent_real_block_system() {
+        let real = StaticMatrix::from_triplets(
+            3,
+            3,
+            &[
+                (0, 0, 0.0),
+                (0, 1, 0.0),
+                (0, 2, 0.0),
+                (1, 0, 0.0),
+                (1, 1, 0.0),
+                (1, 2, 0.0),
+                (2, 0, 0.0),
+                (2, 1, 0.0),
+                (2, 2, 0.0),
+            ],
+        )
+        .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        let delta = 2.0_f64.powi(-40);
+        let coefficients = [
+            [
+                Complex64::new(1.0, 0.5),
+                Complex64::new(-1.0, -0.5),
+                Complex64::new(1.0e-6, -2.0e-6),
+            ],
+            [
+                Complex64::new(1.0, -0.25),
+                Complex64::new(-1.0 + delta, 0.25 + delta),
+                Complex64::new(0.0, 1.0e-6),
+            ],
+            [
+                Complex64::new(0.5, 0.0),
+                Complex64::new(1.0, 0.25),
+                Complex64::new(1.0, -0.5),
+            ],
+        ];
+        for (row, row_values) in coefficients.iter().enumerate() {
+            for (col, &value) in row_values.iter().enumerate() {
+                matrix.add(row, col, value);
+            }
+        }
+        let expected = [
+            Complex64::new(1.000_001, -0.25),
+            Complex64::new(1.0, -0.25),
+            Complex64::new(2.0, 0.75),
+        ];
+        let mut rhs = [Complex64::new(0.0, 0.0); 3];
+        for row in 0..3 {
+            for col in 0..3 {
+                rhs[row] += coefficients[row][col] * expected[col];
+            }
+        }
+
+        let actual = matrix
+            .solve_dense_extended(&rhs)
+            .expect("extended complex result must pass strict certification");
+        for (index, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
+            let relative_error = (actual - expected).norm() / expected.norm();
+            assert!(
+                relative_error <= 1.0e-10,
+                "complex solution[{index}] relative error {relative_error:.3e}"
+            );
         }
     }
 

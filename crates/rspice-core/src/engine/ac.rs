@@ -2660,11 +2660,22 @@ impl Engine {
                 }
             }
             let rhs = Self::build_ac_excitation_rhs(circuit);
-            let mut solution = match ac_solve_denominator_floor.as_deref() {
+            let sparse_solution = match ac_solve_denominator_floor.as_deref() {
                 Some(floor) => ac_matrix.solve_with_row_denominator_floors(&rhs, floor),
                 None => ac_matrix.solve(&rhs),
-            }
-            .map_err(SimulationError::Solver)?;
+            };
+            let mut solution = match sparse_solution {
+                Ok(solution) => solution,
+                Err(SolverError::InaccurateSolution(_)) if rhs.len() <= 64 => {
+                    log::debug!(
+                        "sparse AC solve failed strict backward-error certification; retrying the small complex system with extended precision"
+                    );
+                    ac_matrix
+                        .solve_dense_extended(&rhs)
+                        .map_err(SimulationError::Solver)?
+                }
+                Err(error) => return Err(SimulationError::Solver(error)),
+            };
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
