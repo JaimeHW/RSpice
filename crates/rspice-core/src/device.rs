@@ -268,6 +268,7 @@ pub const fn engine_capabilities() -> &'static [&'static str] {
         "inductor",
         "jfet-level1",
         "mosfet-level1",
+        "mosfet-vdmos",
         "resistor",
         "subckt",
         "vccs",

@@ -357,9 +357,18 @@ impl Engine {
                 return false;
             }
 
-            let Ok(next_solution) = probe.solve(rhs) else {
+            let denominator_floors = Self::dc_solve_denominator_floors(circuit, rhs.len());
+            let mut next_solution = Vec::with_capacity(rhs.len());
+            if Self::solve_dc_linearization(
+                probe,
+                rhs,
+                denominator_floors.as_deref(),
+                &mut next_solution,
+            )
+            .is_err()
+            {
                 return false;
-            };
+            }
             if next_solution.iter().any(|value| !value.is_finite()) {
                 return false;
             }
@@ -391,9 +400,18 @@ impl Engine {
             return false;
         }
 
-        let Ok(next_solution) = probe.solve(rhs) else {
+        let denominator_floors = Self::dc_solve_denominator_floors(circuit, rhs.len());
+        let mut next_solution = Vec::with_capacity(rhs.len());
+        if Self::solve_dc_linearization(
+            probe,
+            rhs,
+            denominator_floors.as_deref(),
+            &mut next_solution,
+        )
+        .is_err()
+        {
             return false;
-        };
+        }
         let node_count = circuit
             .num_nodes()
             .min(solution.len())

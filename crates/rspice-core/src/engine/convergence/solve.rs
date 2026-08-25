@@ -93,6 +93,39 @@ fn singular_system_failure(
 }
 
 impl Engine {
+    pub(in crate::engine::convergence) fn dc_solve_denominator_floors(
+        circuit: &CircuitData,
+        size: usize,
+    ) -> Option<Vec<Value>> {
+        (!circuit.behavioral_sources.is_empty()).then(|| vec![1.0; size])
+    }
+
+    pub(in crate::engine::convergence) fn solve_dc_linearization(
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        denominator_floors: Option<&[Value]>,
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SimulationError> {
+        match matrix.solve_into(rhs, solution) {
+            Ok(()) => Ok(()),
+            Err(crate::solver::SolverError::InaccurateSolution(_))
+                if denominator_floors.is_some() =>
+            {
+                log::debug!(
+                    "strict algebraic backward-error check rejected a behavioral DC Jacobian; retrying with physical row scales before the circuit residual audit"
+                );
+                matrix
+                    .solve_into_with_row_denominator_floors(
+                        rhs,
+                        denominator_floors.expect("guarded denominator floors"),
+                        solution,
+                    )
+                    .map_err(SimulationError::Solver)
+            }
+            Err(error) => Err(SimulationError::Solver(error)),
+        }
+    }
+
     /// Refuse a singular system, recording which rows carry no equation.
     fn singular_system_error(
         &self,
@@ -464,6 +497,7 @@ impl Engine {
 
         let mut rhs = vec![0.0; size];
         let mut new_solution = Vec::with_capacity(size);
+        let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
@@ -479,9 +513,12 @@ impl Engine {
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
 
-            matrix
-                .solve_into(&rhs, &mut new_solution)
-                .map_err(SimulationError::Solver)?;
+            Self::solve_dc_linearization(
+                matrix,
+                &rhs,
+                solve_denominator_floors.as_deref(),
+                &mut new_solution,
+            )?;
             Self::clamp_solution_to_physical_bounds(circuit, &mut new_solution, node_count);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
@@ -578,6 +615,7 @@ impl Engine {
         }
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
+        let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
         let mut limited_nodes: Vec<usize> = Vec::new();
@@ -643,10 +681,15 @@ impl Engine {
             // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             // Solve linearized system
-            match matrix.solve_into(&rhs, &mut raw_solution) {
+            match Self::solve_dc_linearization(
+                matrix,
+                &rhs,
+                solve_denominator_floors.as_deref(),
+                &mut raw_solution,
+            ) {
                 Ok(()) => {}
                 Err(err) => {
-                    direct_solver_error = Some(SimulationError::Solver(err));
+                    direct_solver_error = Some(err);
                     break;
                 }
             }

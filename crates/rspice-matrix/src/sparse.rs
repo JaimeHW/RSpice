@@ -61,6 +61,7 @@ struct LuWorkspace {
     /// values can lose the pivot quality required by Newton iteration.
     scaled_values: Vec<Value>,
     scaled_rhs: Vec<Value>,
+    scaled_denominator_floor: Vec<Value>,
     row_scale: Vec<Value>,
     col_scale: Vec<Value>,
     /// Exact matrix values represented by `numeric`. Repeated RHS solves and
@@ -421,6 +422,31 @@ fn equilibrate_sparse_system(
     Ok(())
 }
 
+fn scale_real_denominator_floor(
+    floor: &[Value],
+    row_scale: &[Value],
+    scaled_floor: &mut Vec<Value>,
+) -> Result<(), SolverError> {
+    if floor.len() != row_scale.len() {
+        return Err(SolverError::InvalidCircuit(
+            "Real denominator-floor scaling dimension mismatch".to_string(),
+        ));
+    }
+    scaled_floor.resize(floor.len(), 0.0);
+    for ((scaled, &value), &scale) in scaled_floor.iter_mut().zip(floor).zip(row_scale) {
+        if !value.is_finite() || value < 0.0 || !scale.is_finite() || scale <= 0.0 {
+            return Err(SolverError::InvalidCircuit(
+                "Real solve denominator floors must be finite and non-negative".to_string(),
+            ));
+        }
+        *scaled = value * scale;
+        if !scaled.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+    }
+    Ok(())
+}
+
 #[inline]
 fn backward_error_tolerance(row_nnz: usize) -> Value {
     64.0 * Value::EPSILON * (row_nnz.saturating_add(1) as Value)
@@ -597,6 +623,7 @@ fn componentwise_backward_error(
         values,
         solution,
         rhs,
+        None,
         residual,
         denominator,
         compensation,
@@ -618,12 +645,42 @@ fn componentwise_backward_error_with_layout(
     row_nnz: &mut Vec<usize>,
     operation: RealSolveOp,
 ) -> Result<BackwardError, SolverError> {
+    componentwise_backward_error_with_layout_and_floors(
+        csc,
+        residual_layout,
+        values,
+        solution,
+        rhs,
+        None,
+        residual,
+        denominator,
+        compensation,
+        row_nnz,
+        operation,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn componentwise_backward_error_with_layout_and_floors(
+    csc: &SymbolicSparseColMat<usize>,
+    residual_layout: &ResidualLayout,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    denominator_floor: Option<&[Value]>,
+    residual: &mut Vec<Value>,
+    denominator: &mut Vec<Value>,
+    compensation: &mut Vec<Value>,
+    row_nnz: &mut Vec<usize>,
+    operation: RealSolveOp,
+) -> Result<BackwardError, SolverError> {
     componentwise_backward_error_impl(
         csc,
         Some(residual_layout),
         values,
         solution,
         rhs,
+        denominator_floor,
         residual,
         denominator,
         compensation,
@@ -639,18 +696,30 @@ fn componentwise_backward_error_impl(
     values: &[Value],
     solution: &[Value],
     rhs: &[Value],
+    denominator_floor: Option<&[Value]>,
     residual: &mut Vec<Value>,
     denominator: &mut Vec<Value>,
     compensation: &mut Vec<Value>,
     row_nnz: &mut Vec<usize>,
     operation: RealSolveOp,
 ) -> Result<BackwardError, SolverError> {
+    if let Some(floor) = denominator_floor
+        && (operation != RealSolveOp::Normal
+            || floor.len() != rhs.len()
+            || floor.iter().any(|value| !value.is_finite() || *value < 0.0))
+    {
+        return Err(SolverError::InvalidCircuit(
+            "Real backward-error denominator floors require a normal solve and must match the RHS with finite non-negative values"
+                .to_string(),
+        ));
+    }
     let fast = fast_componentwise_backward_error(
         csc,
         residual_layout,
         values,
         solution,
         rhs,
+        denominator_floor,
         residual,
         denominator,
         row_nnz,
@@ -665,6 +734,7 @@ fn componentwise_backward_error_impl(
         values,
         solution,
         rhs,
+        denominator_floor,
         residual,
         denominator,
         compensation,
@@ -684,6 +754,7 @@ fn fast_componentwise_backward_error(
     values: &[Value],
     solution: &[Value],
     rhs: &[Value],
+    denominator_floor: Option<&[Value]>,
     residual: &mut Vec<Value>,
     denominator: &mut Vec<Value>,
     row_nnz: &mut Vec<usize>,
@@ -745,7 +816,8 @@ fn fast_componentwise_backward_error(
                 return Err(SolverError::Overflow);
             }
             let rounding_bound = 4.0 * (nonzeros.saturating_add(1) as Value) * Value::EPSILON;
-            let row_error = residual_abs / row_denominator.max(safe1);
+            let scale = row_denominator.max(denominator_floor.map_or(0.0, |floor| floor[row]));
+            let row_error = residual_abs / scale.max(safe1);
             let certified_error = row_error + rounding_bound;
             error = error.max(row_error);
             acceptance_ratio =
@@ -798,7 +870,7 @@ fn fast_componentwise_backward_error(
     for row in 0..nrows {
         let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
         let residual_abs = residual[row].abs();
-        let scale = denominator[row];
+        let scale = denominator[row].max(denominator_floor.map_or(0.0, |floor| floor[row]));
         if !residual_abs.is_finite() || !scale.is_finite() {
             return Err(SolverError::Overflow);
         }
@@ -822,6 +894,7 @@ fn compensated_componentwise_backward_error(
     values: &[Value],
     solution: &[Value],
     rhs: &[Value],
+    denominator_floor: Option<&[Value]>,
     residual: &mut Vec<Value>,
     denominator: &mut Vec<Value>,
     compensation: &mut Vec<Value>,
@@ -878,7 +951,8 @@ fn compensated_componentwise_backward_error(
             if !residual_abs.is_finite() || !row_denominator.is_finite() {
                 return Err(SolverError::Overflow);
             }
-            let row_error = residual_abs / row_denominator.max(safe1);
+            let scale = row_denominator.max(denominator_floor.map_or(0.0, |floor| floor[row]));
+            let row_error = residual_abs / scale.max(safe1);
             error = error.max(row_error);
             acceptance_ratio = acceptance_ratio.max(row_error / backward_error_tolerance(nonzeros));
         }
@@ -936,7 +1010,7 @@ fn compensated_componentwise_backward_error(
         residual[row] += compensation[row];
         let safe1 = (row_nnz[row].saturating_add(1) as Value) * Value::MIN_POSITIVE;
         let residual_abs = residual[row].abs();
-        let scale = denominator[row];
+        let scale = denominator[row].max(denominator_floor.map_or(0.0, |floor| floor[row]));
         if !residual_abs.is_finite() || !scale.is_finite() {
             return Err(SolverError::Overflow);
         }
@@ -1926,6 +2000,7 @@ impl StaticMatrix {
             rhs: Mat::zeros(self.nrows, 1),
             scaled_values: Vec::new(),
             scaled_rhs: Vec::new(),
+            scaled_denominator_floor: Vec::new(),
             row_scale: Vec::new(),
             col_scale: Vec::new(),
             factored_values: Vec::new(),
@@ -2372,6 +2447,36 @@ impl StaticMatrix {
         self.solve_into_with_factorization(rhs, solution, FactorizationRequest::Automatic)
     }
 
+    /// Solve `A*x=b` while applying caller-supplied physical denominator
+    /// floors to selected rows of the backward-error check.
+    ///
+    /// The floors affect only acceptance of the equilibrated faer solve; they
+    /// do not alter the matrix, right-hand side, factorization, or returned
+    /// solution. Callers remain responsible for a physical residual audit.
+    pub fn solve_into_with_row_denominator_floors(
+        &mut self,
+        rhs: &[Value],
+        denominator_floor: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        if denominator_floor.len() != rhs.len()
+            || denominator_floor
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(SolverError::InvalidCircuit(
+                "Real solve denominator floors must match the RHS and be finite and non-negative"
+                    .to_string(),
+            ));
+        }
+        self.solve_faer_operation_into_with_floors(
+            rhs,
+            solution,
+            RealSolveOp::Normal,
+            Some(denominator_floor),
+        )
+    }
+
     /// Solve `A*x=b` with an explicit numeric-factor lifecycle request.
     pub fn solve_into_with_factorization(
         &mut self,
@@ -2505,6 +2610,21 @@ impl StaticMatrix {
         solution: &mut Vec<Value>,
         operation: RealSolveOp,
     ) -> Result<(), SolverError> {
+        self.solve_faer_operation_into_with_floors(rhs, solution, operation, None)
+    }
+
+    fn solve_faer_operation_into_with_floors(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+        operation: RealSolveOp,
+        denominator_floor: Option<&[Value]>,
+    ) -> Result<(), SolverError> {
+        if denominator_floor.is_some() && operation != RealSolveOp::Normal {
+            return Err(SolverError::InvalidCircuit(
+                "Real row denominator floors are supported only for A*x=b solves".to_string(),
+            ));
+        }
         self.ensure_lu_workspace()?;
 
         let par = get_global_parallelism();
@@ -2561,6 +2681,11 @@ impl StaticMatrix {
                 return Err(SolverError::Overflow);
             }
         }
+        if let Some(floor) = denominator_floor {
+            scale_real_denominator_floor(floor, &ws.row_scale, &mut ws.scaled_denominator_floor)?;
+        }
+        let scaled_denominator_floor =
+            denominator_floor.map(|_| ws.scaled_denominator_floor.as_slice());
         ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
         match operation {
             RealSolveOp::Normal => lu_ref.solve_in_place_with_conj(
@@ -2583,12 +2708,13 @@ impl StaticMatrix {
             return Err(SolverError::SingularMatrix);
         }
 
-        let mut backward_error = componentwise_backward_error_with_layout(
+        let mut backward_error = componentwise_backward_error_with_layout_and_floors(
             csc,
             residual_layout,
             &ws.scaled_values,
             solution,
             &ws.scaled_rhs,
+            scaled_denominator_floor,
             residual_scratch,
             residual_gross_scratch,
             residual_compensation_scratch,
@@ -2643,12 +2769,13 @@ impl StaticMatrix {
                 *value = refined;
             }
 
-            let refined_error = componentwise_backward_error_with_layout(
+            let refined_error = componentwise_backward_error_with_layout_and_floors(
                 csc,
                 residual_layout,
                 &ws.scaled_values,
                 solution,
                 &ws.scaled_rhs,
+                scaled_denominator_floor,
                 residual_scratch,
                 residual_gross_scratch,
                 residual_compensation_scratch,
@@ -4733,6 +4860,67 @@ mod tests {
         )
         .unwrap();
         assert_eq!(zero_error.componentwise.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
+    fn real_row_floors_rescue_only_physically_negligible_homogeneous_leakage() {
+        let matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)])
+            .expect("identity matrix builds");
+        let rhs = [1.0, 0.0];
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
+        let mut evaluate = |solution: &[Value], floor: Option<&[Value]>| {
+            componentwise_backward_error_with_layout_and_floors(
+                &matrix.csc,
+                &matrix.residual_layout,
+                &matrix.values,
+                solution,
+                &rhs,
+                floor,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                RealSolveOp::Normal,
+            )
+            .expect("backward error forms")
+        };
+
+        let negligible = [1.0, 1.0e-17];
+        let strict = evaluate(&negligible, None);
+        assert_eq!(strict.componentwise, 1.0);
+        assert!(!strict.accepted());
+
+        let homogeneous_row_floor = [0.0, 1.0];
+        assert!(evaluate(&negligible, Some(&homogeneous_row_floor)).accepted());
+        assert!(!evaluate(&[1.0, 1.0e-8], Some(&homogeneous_row_floor)).accepted());
+        assert!(!evaluate(&[1.0 + 1.0e-8, 1.0e-17], Some(&homogeneous_row_floor)).accepted());
+    }
+
+    #[test]
+    fn real_row_floors_follow_equilibration_and_public_solve_validation() {
+        let mut scaled = Vec::new();
+        scale_real_denominator_floor(&[0.0, 1.0, 4.0], &[2.0, 0.25, 8.0], &mut scaled)
+            .expect("floors scale");
+        assert_eq!(scaled, [0.0, 0.25, 32.0]);
+        assert!(matches!(
+            scale_real_denominator_floor(&[1.0], &[1.0, 1.0], &mut scaled),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 2.0), (1, 1, 3.0)])
+            .expect("diagonal matrix builds");
+        let mut solution = Vec::new();
+        matrix
+            .solve_into_with_row_denominator_floors(&[4.0, 9.0], &[1.0, 1.0], &mut solution)
+            .expect("floored solve succeeds");
+        assert_eq!(solution, [2.0, 3.0]);
+        assert!(matches!(
+            matrix.solve_into_with_row_denominator_floors(&[4.0, 9.0], &[1.0], &mut solution),
+            Err(SolverError::InvalidCircuit(_))
+        ));
     }
 
     #[test]
