@@ -2161,6 +2161,67 @@ fn ngspice_vdmos_standard_capacitance_parameters_match_table_points() {
 }
 
 #[test]
+fn pchannel_vdmos_ac_capacitances_use_polarity_normalized_biases() {
+    // ngspice 47 reference for these unchanged decks at 25 C:
+    // Ciss=15.353823 pF, Crss=3.353823 pF, Coss=10.407530 pF.
+    // A physical VDS=-25 V must deplete Cgd exactly as VDS=+25 V does
+    // for the polarity-dual N-channel card.
+    let model = ".model DUT VDMOS (PCHAN VTO=-2.35 KP=0.0405 RD=2.45 RS=2.45 RG=0 \
+                 LAMBDA=0.005 MTRIODE=1 KSUBTHRES=0.29 CGS=12p \
+                 CGDMIN=1.5p CGDMAX=28p A=0.22 IS=0.3p RB=0.3 N=1.3 TT=0 \
+                 CJO=41p VJ=0.071 M=0.3 FC=0.5 TNOM=25)";
+    let gate_deck = format!(
+        "* P-channel VDMOS AC polarity oracle\n\
+         .options temp=25 tnom=25\n\
+         vd d 0 dc -25 ac 0\n\
+         vg g 0 dc 0 ac 1\n\
+         m1 d g 0 0 dut\n\
+         {model}\n\
+         .ac lin 1 1Meg 1Meg\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&gate_deck).expect("P-channel Ciss/Crss deck parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[1.0e6])
+        .expect("P-channel Ciss/Crss deck runs")
+        .pop()
+        .expect("one P-channel Ciss/Crss point");
+    let omega = 2.0 * std::f64::consts::PI * 1.0e6;
+    let ciss = ac_branch_current_named(&point, "vg").im.abs() / omega;
+    let crss = ac_branch_current_named(&point, "vd").im.abs() / omega;
+
+    let drain_deck = format!(
+        "* P-channel VDMOS Coss AC polarity oracle\n\
+         .options temp=25 tnom=25\n\
+         vd d 0 dc -25 ac 1\n\
+         vg g 0 dc 0 ac 0\n\
+         m1 d g 0 0 dut\n\
+         {model}\n\
+         .ac lin 1 1Meg 1Meg\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&drain_deck).expect("P-channel Coss deck parses");
+    let point = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[1.0e6])
+        .expect("P-channel Coss deck runs")
+        .pop()
+        .expect("one P-channel Coss point");
+    let coss = ac_branch_current_named(&point, "vd").im.abs() / omega;
+
+    for (name, got, expected) in [
+        ("Ciss", ciss, 15.353_823e-12),
+        ("Crss", crss, 3.353_823e-12),
+        ("Coss", coss, 10.407_530e-12),
+    ] {
+        let relative_error = (got - expected).abs() / expected;
+        assert!(
+            relative_error < 2.0e-4,
+            "{name} P-channel VDMOS AC polarity mismatch: got {got:.12e} F, expected ngspice-47 {expected:.12e} F"
+        );
+    }
+}
+
+#[test]
 fn vdmos_participates_in_ac_small_signal_linearization() {
     let deck = "* vdmos ac small signal\n\
                 vdd vdd 0 dc 12\n\

@@ -1793,10 +1793,15 @@ impl Engine {
             }
             let drain = vdmos.drain_int.unwrap_or(vdmos.drain);
             let source = vdmos.source_int.unwrap_or(vdmos.source);
-            let vd = Self::ac_node_voltage(op_voltages, drain);
-            let vg = Self::ac_node_voltage(op_voltages, vdmos.gate);
-            let vs = Self::ac_node_voltage(op_voltages, source);
-            let (cgs, cgd, cds) = vdmos.capacitances(vg - vs, vd - vs);
+            // `Vdmos::capacitances` consumes the polarity-normalized charge
+            // biases used by the transient path.  Feeding physical terminal
+            // voltages directly happens to be correct for N-channel parts,
+            // but reverses the nonlinear Cgd law for P-channel parts and
+            // selects CGDMAX under reverse drain bias.  Reuse the canonical
+            // charge-coordinate conversion so AC and transient linearize the
+            // same physical device.
+            let (vgs, _vgd, _vgb, vds) = vdmos.transient_charge_branch_voltages_at(op_voltages);
+            let (cgs, cgd, cds) = vdmos.capacitances(vgs, vds);
             let cgb = vdmos.gate_bulk_capacitance();
             let (vbs, vbd) = vdmos.body_charge_branch_voltages_at(op_voltages);
             let (_, cbs) = vdmos.body_source_charge_and_capacitance_at(vbs);
