@@ -54,6 +54,24 @@ c1 out 0 1u
 .end
 ";
 
+const DC_ORDERED_PRINT_DECK: &str = "* ordered dc print export test
+V1 in 0 0
+R1 in out 1k
+R2 out 0 1k
+.dc V1 1 2 1
+.print dc I(V1) V(out) R1:R {V(out)+1} V(out)
+.end
+";
+
+const TRAN_ORDERED_PRINT_DECK: &str = "* ordered transient print export test
+V1 in 0 pulse(0 5 0 1n 1n 50u 100u)
+R1 in out 1k
+C1 out 0 1u
+.tran 10u 200u
+.print tran I ( V1 ) V ( out ) {V(out)+1} V(out)
+.end
+";
+
 const TRAN_OUTPUT_TIME_POINTS_DECK: &str = "* transient output schedule export test
 voff a 0 2
 vexp 1 a exp(0 5 0 1ms 1s)
@@ -394,6 +412,80 @@ fn current_column_index(header: &str, name: &str) -> usize {
         .unwrap_or_else(|| panic!("{name} column missing from header: {header:?}"))
 }
 
+fn numeric_csv_rows(text: &str) -> Vec<Vec<f64>> {
+    text.lines()
+        .skip(1)
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.split(',')
+                .map(|field| field.parse::<f64>().expect("numeric CSV field"))
+                .collect()
+        })
+        .collect()
+}
+
+fn assert_dc_ordered_print_projection(text: &str) {
+    let header = text.lines().next().expect("CSV header");
+    assert_eq!(
+        header, "V1,I(V1),V(out),R1:R,{V(out)+1},V(out)",
+        "PRINT operands must retain exact authored spelling, order, and duplicates"
+    );
+
+    let rows = numeric_csv_rows(text);
+    assert!(
+        !rows.is_empty(),
+        "projected CSV must contain samples: {text}"
+    );
+    for row in rows {
+        assert_eq!(row.len(), 6, "projected row must match its header: {row:?}");
+        assert!(
+            (row[3] - 1_000.0).abs() < 1e-12,
+            "R1:R must export its installed resistance: {row:?}"
+        );
+        assert!(
+            (row[4] - (row[2] + 1.0)).abs() < 1e-9,
+            "expression column must be evaluated from V(out): {row:?}"
+        );
+        assert_eq!(
+            row[2].to_bits(),
+            row[5].to_bits(),
+            "duplicate PRINT operands must produce duplicate columns"
+        );
+    }
+}
+
+fn assert_tran_ordered_print_projection(text: &str) {
+    let header = text.lines().next().expect("CSV header");
+    assert_eq!(
+        header, "time,I ( V1 ),V ( out ),{V(out)+1},V(out)",
+        "PRINT operands must retain exact authored spelling, order, and duplicates"
+    );
+
+    let rows = numeric_csv_rows(text);
+    assert!(
+        !rows.is_empty(),
+        "projected CSV must contain samples: {text}"
+    );
+    let mut saw_dynamic_sample = false;
+    for row in rows {
+        assert_eq!(row.len(), 5, "projected row must match its header: {row:?}");
+        assert!(
+            (row[3] - (row[2] + 1.0)).abs() < 1e-9,
+            "expression column must be evaluated from V(out): {row:?}"
+        );
+        assert_eq!(
+            row[2].to_bits(),
+            row[4].to_bits(),
+            "duplicate PRINT operands must produce duplicate columns"
+        );
+        saw_dynamic_sample |= row[1] != 0.0 || row[2] != 0.0;
+    }
+    assert!(
+        saw_dynamic_sample,
+        "transient projection must contain a nonzero current or voltage sample"
+    );
+}
+
 #[test]
 fn dc_sweep_print_exports_branch_current() {
     let dir = test_dir("dc_current_print");
@@ -429,6 +521,54 @@ fn transient_print_exports_branch_current() {
         }),
         "tran branch current column should contain non-zero source current: {text}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn dc_print_preserves_authored_projection_order_and_duplicates() {
+    let dir = test_dir("dc_ordered_print");
+    let path = run_export(&dir, "dc_ordered_print", DC_ORDERED_PRINT_DECK, "csv");
+    let text = std::fs::read_to_string(&path).expect("read CSV");
+    assert_dc_ordered_print_projection(&text);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn transient_print_preserves_authored_projection_order_and_duplicates() {
+    let dir = test_dir("tran_ordered_print");
+    let path = run_export(&dir, "tran_ordered_print", TRAN_ORDERED_PRINT_DECK, "csv");
+    let text = std::fs::read_to_string(&path).expect("read CSV");
+    assert_tran_ordered_print_projection(&text);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn spaced_print_operands_round_trip_through_raw_formats() {
+    let dir = test_dir("spaced_print_raw_round_trip");
+    for format in ["raw", "ascii"] {
+        let path = run_export(&dir, format, TRAN_ORDERED_PRINT_DECK, format);
+        let converted = dir.join(format!("{format}.csv"));
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .arg("--quiet")
+            .arg("convert")
+            .arg(&path)
+            .arg(&converted)
+            .arg("--to")
+            .arg("csv")
+            .output()
+            .expect("convert authored PRINT rawfile");
+        assert!(
+            output.status.success(),
+            "{format} round trip failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let csv = std::fs::read_to_string(&converted).expect("read converted CSV");
+        assert_eq!(
+            csv.lines().next(),
+            Some("time,I(V1),V(out),{V(out)+1},V(out)"),
+            "rawfile declarations must compact authored probe whitespace"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

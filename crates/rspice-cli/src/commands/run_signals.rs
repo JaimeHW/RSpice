@@ -17,6 +17,7 @@ pub(crate) enum SignalKind {
     Voltage,
     Current,
     Digital,
+    Scalar,
 }
 
 impl SignalKind {
@@ -25,6 +26,7 @@ impl SignalKind {
             Self::Voltage => "voltage",
             Self::Current => "current",
             Self::Digital => "digital",
+            Self::Scalar => "parameter",
         }
     }
 }
@@ -118,8 +120,41 @@ pub(crate) fn apply_save_set_complex(
     }
     with_differential_complex_signals(signals, saves)
         .into_iter()
-        .filter(|signal| saves.selects(&signal.display_name))
+        .filter(|signal| complex_signal_is_selected(signal, saves))
         .collect()
+}
+
+fn complex_signal_is_selected(signal: &ComplexSignal, saves: &SaveSet) -> bool {
+    if saves.selects(&signal.display_name) {
+        return true;
+    }
+
+    saves.signals.iter().any(|saved| {
+        let SaveSignal::Raw(authored) = saved else {
+            return false;
+        };
+        let compact = authored
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        let Some((operator, argument)) = compact
+            .split_once('(')
+            .and_then(|(operator, rest)| rest.strip_suffix(')').map(|arg| (operator, arg)))
+        else {
+            return false;
+        };
+        let operator = operator.to_ascii_uppercase();
+        let compatible_kind = match signal.kind {
+            SignalKind::Voltage => {
+                matches!(operator.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB")
+            }
+            SignalKind::Current => {
+                matches!(operator.as_str(), "I" | "IR" | "II" | "IM" | "IP" | "IDB")
+            }
+            SignalKind::Digital | SignalKind::Scalar => false,
+        };
+        compatible_kind && argument.eq_ignore_ascii_case(&signal.raw_name)
+    })
 }
 
 fn voltage_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
@@ -463,6 +498,89 @@ pub(crate) fn dc_sweep_signals(results: &[(Value, SimulationResult)]) -> Vec<Sca
     let mut signals = dc_sweep_voltage_signals(results);
     signals.extend(dc_sweep_current_signals(results));
     signals
+}
+
+fn authored_print_requests(
+    netlist: &rspice_core::Netlist,
+    analysis: rspice_core::netlist::OutputAnalysisKind,
+) -> Vec<&rspice_core::netlist::OutputRequest> {
+    netlist
+        .output_requests
+        .iter()
+        .filter(|request| {
+            request.directive == rspice_core::netlist::OutputDirectiveKind::Print
+                && request.analysis.is_none_or(|kind| kind == analysis)
+        })
+        .collect()
+}
+
+fn projected_output_signals(
+    projected: Vec<(String, &'static str, Vec<Value>)>,
+) -> Vec<ScalarSignal> {
+    projected
+        .into_iter()
+        .map(|(name, physical_type, values)| ScalarSignal {
+            display_name: name.clone(),
+            raw_name: name,
+            kind: match physical_type {
+                "voltage" => SignalKind::Voltage,
+                "current" => SignalKind::Current,
+                "parameter" => SignalKind::Scalar,
+                unexpected => {
+                    unreachable!("core returned unsupported physical output type '{unexpected}'")
+                }
+            },
+            values,
+        })
+        .collect()
+}
+
+pub(crate) fn dc_export_signals(
+    netlist: &rspice_core::Netlist,
+    results: &[(Value, SimulationResult)],
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let requests = authored_print_requests(netlist, rspice_core::netlist::OutputAnalysisKind::Dc);
+    if requests.is_empty()
+        || requests
+            .iter()
+            .flat_map(|request| &request.operands)
+            .any(|operand| {
+                matches!(
+                    rspice_core::netlist::parse_save_probe(operand),
+                    Some(rspice_core::netlist::SaveSignal::All)
+                )
+            })
+    {
+        return Ok(apply_save_set(dc_sweep_signals(results), &netlist.saves));
+    }
+    rspice_core::analysis::evaluate_dc_output_requests_with_abort(netlist, results, limits, abort)
+        .map(projected_output_signals)
+}
+
+pub(crate) fn transient_export_signals(
+    netlist: &rspice_core::Netlist,
+    result: &TransientResult,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ScalarSignal>, rspice_core::SimulationError> {
+    let requests = authored_print_requests(netlist, rspice_core::netlist::OutputAnalysisKind::Tran);
+    if requests.is_empty()
+        || requests
+            .iter()
+            .flat_map(|request| &request.operands)
+            .any(|operand| {
+                matches!(
+                    rspice_core::netlist::parse_save_probe(operand),
+                    Some(rspice_core::netlist::SaveSignal::All)
+                )
+            })
+    {
+        return Ok(apply_save_set(transient_signals(result), &netlist.saves));
+    }
+    rspice_core::analysis::evaluate_tran_output_requests_with_abort(netlist, result, limits, abort)
+        .map(projected_output_signals)
 }
 
 fn split_complex(values: impl Iterator<Item = Complex64>) -> (Vec<Value>, Vec<Value>) {

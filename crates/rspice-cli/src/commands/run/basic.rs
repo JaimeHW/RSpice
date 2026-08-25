@@ -9,12 +9,27 @@ use super::RunContext;
 use super::shared::{NodeResolver, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
-    dc_operating_point_current_signals, dc_operating_point_signals,
-    dc_operating_point_voltage_signals, dc_sweep_signals, transient_signals,
+    dc_export_signals, dc_operating_point_current_signals, dc_operating_point_signals,
+    dc_operating_point_voltage_signals, transient_export_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 use std::borrow::Cow;
 use std::path::Path;
+
+fn map_output_projection_error(
+    ctx: &RunContext<'_>,
+    error: rspice_core::SimulationError,
+    analysis: &str,
+) -> CliError {
+    if matches!(error, rspice_core::SimulationError::Aborted) {
+        super::cancellation_cli_error(ctx.args.timeout)
+    } else {
+        CliError::CoreSimulationError {
+            source: error,
+            analysis: Some(format!("{analysis} output projection")),
+        }
+    }
+}
 
 pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
     if !ctx.quiet {
@@ -370,10 +385,20 @@ pub(super) fn run_dc_sweep(
 
             if let Some(ref output_path) = ctx.output_path_for("dc") {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
-                let signals = crate::commands::run_signals::apply_save_set(
-                    dc_sweep_signals(&results),
-                    &ctx.netlist.saves,
-                );
+                let signals = dc_export_signals(
+                    ctx.netlist,
+                    &results,
+                    ctx.engine.config().resource_limits,
+                    &crate::abort::ProcessAbort,
+                )
+                .map_err(|error| map_output_projection_error(ctx, error, "DC"))?;
+                super::shared::ensure_finite_series(
+                    ctx.args.allow_nonfinite,
+                    "DC Sweep output projection",
+                    signals
+                        .iter()
+                        .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
+                )?;
                 match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
@@ -623,15 +648,25 @@ pub(super) fn run_transient(
                 let output_time = projection
                     .project(&result.time)
                     .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
-                let mut signals = crate::commands::run_signals::apply_save_set(
-                    transient_signals(&result),
-                    &ctx.netlist.saves,
-                );
+                let mut signals = transient_export_signals(
+                    ctx.netlist,
+                    &result,
+                    ctx.engine.config().resource_limits,
+                    &crate::abort::ProcessAbort,
+                )
+                .map_err(|error| map_output_projection_error(ctx, error, "Transient"))?;
                 for signal in &mut signals {
                     signal.values = projection
                         .project(&signal.values)
                         .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
                 }
+                super::shared::ensure_finite_series(
+                    ctx.args.allow_nonfinite,
+                    "Transient output projection",
+                    signals
+                        .iter()
+                        .map(|signal| (signal.display_name.as_str(), signal.values.as_slice())),
+                )?;
                 match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();

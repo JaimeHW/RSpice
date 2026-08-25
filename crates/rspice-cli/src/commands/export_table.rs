@@ -249,14 +249,9 @@ impl ExportTable {
         writeln!(writer, "Variables:").map_err(io_err)?;
         writeln!(writer, "\t0\t{}\t{}", self.scale_name, self.scale_type).map_err(io_err)?;
         for (index, column) in self.columns.iter().enumerate() {
-            writeln!(
-                writer,
-                "\t{}\t{}\t{}",
-                index + 1,
-                column.name,
-                column.var_type
-            )
-            .map_err(io_err)?;
+            let raw_name = raw_variable_name(&column.name);
+            writeln!(writer, "\t{}\t{}\t{}", index + 1, raw_name, column.var_type)
+                .map_err(io_err)?;
         }
 
         if binary {
@@ -385,6 +380,18 @@ impl ExportTable {
             .write_all(b"\n")
             .map_err(|e| CliError::output_error(path, e))?;
         Ok(())
+    }
+}
+
+/// SPICE rawfile variable declarations are whitespace-delimited and have no
+/// quoting convention. Output cards retain their exact authored spelling for
+/// CSV/TSV/JSON/HDF5 display, while rawfiles use the equivalent compact probe
+/// spelling so their own parser and third-party readers see one variable.
+fn raw_variable_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.chars().any(char::is_whitespace) {
+        std::borrow::Cow::Owned(name.chars().filter(|ch| !ch.is_whitespace()).collect())
+    } else {
+        std::borrow::Cow::Borrowed(name)
     }
 }
 
