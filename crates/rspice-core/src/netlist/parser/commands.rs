@@ -14,6 +14,7 @@ pub(super) fn parse_command(
     context: ParseCommandContext<'_>,
 ) -> Result<(), ParseError> {
     let ParseCommandContext {
+        logical_line,
         analyses,
         lin_analysis,
         fft_analyses,
@@ -455,7 +456,7 @@ pub(super) fn parse_command(
                 &remaining_command_source(stream),
                 remaining_command_expressions(stream),
             );
-            parse_save_command(stream, line_num, saves, false, None, None)?;
+            let _ = parse_save_command(stream, line_num, logical_line, saves, false, None, None)?;
             output_requests.push(request);
         }
         ".PRINT" | ".PLOT" => {
@@ -466,23 +467,23 @@ pub(super) fn parse_command(
             } else {
                 OutputDirectiveKind::Plot
             };
-            let (output_source, output_expressions) = remaining_print_operand_source(stream);
-            let delimiter = parse_save_command(
+            let parsed = parse_save_command(
                 stream,
                 line_num,
+                logical_line,
                 saves,
                 true,
                 Some(diagnostics),
                 Some(origin),
             )?;
             output_requests.push(
-                OutputRequest::from_source(
+                OutputRequest::from_ordered_operands(
                     directive,
                     origin.clone(),
-                    &output_source,
-                    output_expressions,
+                    parsed.analysis,
+                    parsed.operands,
                 )
-                .with_print_delimiter(delimiter),
+                .with_print_delimiter(parsed.delimiter),
             );
         }
         _ => {
@@ -673,64 +674,6 @@ fn push_command_token(source: &mut String, token: &Token) {
         source.push(' ');
     }
     source.push_str(&token.lexeme);
-}
-
-/// Return only the authored output operands from a `.PRINT`/`.PLOT` tail.
-///
-/// Formatting metadata can itself resemble an output expression (for example,
-/// `FILE="V(MISSING)"` or a custom delimiter string).  It must not enter the
-/// typed dependency graph, so remove the leading analysis selector and every
-/// recognized output option assignment before constructing `OutputRequest`.
-fn remaining_print_operand_source(stream: &TokenStream) -> (String, Vec<String>) {
-    let tokens = stream.remaining_line_tokens();
-    let capacity = tokens.iter().map(|token| token.lexeme.len()).sum::<usize>()
-        + tokens.len().saturating_sub(1);
-    let mut source = String::with_capacity(capacity);
-    let mut expressions = Vec::new();
-    let mut index = 0usize;
-    let mut first_operand = true;
-
-    while index < tokens.len() {
-        if matches!(tokens[index].kind, TokenKind::Comma) {
-            push_print_operand(&mut source, &mut expressions, &tokens[index]);
-            index += 1;
-            continue;
-        }
-        if let TokenKind::Ident(raw) = &tokens[index].kind {
-            let upper = raw.to_ascii_uppercase();
-            if first_operand && OutputAnalysisKind::from_keyword(&upper).is_some() {
-                first_operand = false;
-                push_print_operand(&mut source, &mut expressions, &tokens[index]);
-                index += 1;
-                continue;
-            }
-            first_operand = false;
-            if index + 1 < tokens.len()
-                && matches!(tokens[index + 1].kind, TokenKind::Equals)
-                && is_xyce_print_option_name(&upper)
-            {
-                index = (index + 3).min(tokens.len());
-                continue;
-            }
-            if upper == "NOINDEX" {
-                index += 1;
-                continue;
-            }
-        } else {
-            first_operand = false;
-        }
-        push_print_operand(&mut source, &mut expressions, &tokens[index]);
-        index += 1;
-    }
-
-    (source, expressions)
-}
-
-fn push_print_operand(source: &mut String, expressions: &mut Vec<String>, token: &Token) {
-    push_command_token(source, token);
-    if let TokenKind::Expression(expression) = &token.kind {
-        expressions.push(expression.clone());
-    }
 }
 
 fn parse_preprocess_command(
@@ -1027,20 +970,39 @@ fn decode_auto_bridge_template_field(raw: &str) -> Option<String> {
 /// - bare vector names (`out` is shorthand for `v(out)`)
 ///
 /// With `skip_analysis_type`, a leading analysis keyword (`TRAN`, `AC`, ...)
-/// is consumed and ignored, matching `.PRINT TRAN v(out)` usage.
+/// is consumed and returned as request metadata, matching `.PRINT TRAN
+/// v(out)` usage.
+pub(super) struct ParsedSaveCommand {
+    analysis: Option<OutputAnalysisKind>,
+    delimiter: PrintDelimiter,
+    operands: Vec<OutputOperand>,
+}
+
 pub(super) fn parse_save_command(
     stream: &mut TokenStream,
     line_num: usize,
+    logical_line: &str,
     saves: &mut super::SaveSet,
     skip_analysis_type: bool,
     mut diagnostics: Option<&mut Vec<ParseDiagnostic>>,
     origin: Option<&NetlistSourceLocation>,
-) -> Result<PrintDelimiter, ParseError> {
+) -> Result<ParsedSaveCommand, ParseError> {
     use super::SaveSignal;
 
     let mut first_token = true;
     let mut parsed_any = false;
     let mut delimiter = PrintDelimiter::Whitespace;
+    let mut analysis = None;
+    let mut operands = Vec::new();
+
+    let authored_slice = |start: usize, end: usize, fallback: &str| {
+        logical_line
+            .get(start..end)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(fallback)
+            .to_string()
+    };
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -1055,9 +1017,10 @@ pub(super) fn parse_save_command(
 
                 if first_token
                     && skip_analysis_type
-                    && OutputAnalysisKind::from_keyword(&upper).is_some()
+                    && let Some(parsed_analysis) = OutputAnalysisKind::from_keyword(&upper)
                 {
                     stream.advance();
+                    analysis = Some(parsed_analysis);
                     first_token = false;
                     continue;
                 }
@@ -1110,7 +1073,9 @@ pub(super) fn parse_save_command(
                     continue;
                 }
 
-                let raw_end = stream.peek().span.end;
+                let start = stream.peek().span.start;
+                let mut end = stream.peek().span.end;
+                let raw_end = end;
                 stream.advance();
 
                 // Differential-style bare node names commonly end in `+`
@@ -1123,35 +1088,46 @@ pub(super) fn parse_save_command(
                     match stream.peek().kind {
                         TokenKind::Plus => {
                             raw.push('+');
-                            stream.advance();
+                            end = stream.advance().span.end;
                         }
                         TokenKind::Minus => {
                             raw.push('-');
-                            stream.advance();
+                            end = stream.advance().span.end;
                         }
                         _ => {}
                     }
                 }
 
                 if upper == "ALL" {
-                    saves.signals.push(SaveSignal::All);
+                    let signal = SaveSignal::All;
+                    saves.signals.push(signal.clone());
+                    operands.push(OutputOperand {
+                        authored: authored_slice(start, end, &raw),
+                        kind: OutputOperandKind::Probe(signal),
+                    });
                     parsed_any = true;
                     continue;
                 }
 
-                // `v(...)` / `i(...)` may arrive either as one identifier or
-                // as an identifier followed by a parenthesized token run.
-                let is_probe_prefix = upper == "V" || upper == "I" || upper == "N";
-                if is_probe_prefix && matches!(stream.peek().kind, TokenKind::LParen) {
+                // Function-style output operands may arrive as an identifier
+                // followed by a parenthesized token run. Collect the complete
+                // run here so it remains exactly one ordered column. V/I and
+                // device-parameter N forms have a direct SaveSignal; the
+                // remaining Xyce accessors (including node-form N and derived
+                // currents such as IR) are evaluated through the expression
+                // engine, which owns their typed accessor semantics.
+                let is_direct_probe_prefix = upper == "V" || upper == "I" || upper == "N";
+                if matches!(stream.peek().kind, TokenKind::LParen) {
                     let mut probe = raw.clone();
                     probe.push('(');
-                    stream.advance(); // consume '('
+                    end = stream.advance().span.end; // consume '('
                     let mut depth = 1usize;
                     while depth > 0
                         && !stream.is_eof()
                         && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
                     {
-                        match &stream.peek().kind {
+                        let token = stream.peek().clone();
+                        match &token.kind {
                             TokenKind::LParen => {
                                 depth += 1;
                                 probe.push('(');
@@ -1162,37 +1138,63 @@ pub(super) fn parse_save_command(
                                     probe.push(')');
                                 }
                             }
-                            TokenKind::Ident(s) => probe.push_str(s),
-                            TokenKind::Number(n) => probe.push_str(&format!("{}", n)),
-                            TokenKind::Comma => probe.push(','),
-                            // Hierarchy wildcard: `v(x1.*)` must keep its star.
-                            TokenKind::Star => probe.push('*'),
-                            _ => {}
+                            _ => probe.push_str(&token.lexeme),
                         }
+                        end = token.span.end;
                         stream.advance();
                     }
-                    probe.push(')');
-                    if let Some(signal) = parse_save_probe(&probe) {
-                        saves.signals.push(signal);
-                        parsed_any = true;
+                    if depth != 0 {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!("Unterminated output probe '{probe}'"),
+                        });
                     }
+                    probe.push(')');
+                    let kind = match parse_save_probe(&probe) {
+                        Some(signal) if is_direct_probe_prefix => {
+                            saves.signals.push(signal.clone());
+                            OutputOperandKind::Probe(signal)
+                        }
+                        _ => {
+                            // A source-authored output directive must keep the
+                            // save set non-empty even when the operand is an
+                            // expression/accessor. Runtime capture is refined
+                            // by OutputRequest dependencies; this exact raw
+                            // selector preserves the directive's restrictive
+                            // (rather than implicit-ALL) storage contract.
+                            saves.signals.push(SaveSignal::Raw(probe.clone()));
+                            OutputOperandKind::Expression {
+                                body: probe.clone(),
+                            }
+                        }
+                    };
+                    operands.push(OutputOperand {
+                        authored: authored_slice(start, end, &probe),
+                        kind,
+                    });
+                    parsed_any = true;
                     continue;
                 }
 
                 if let Some(signal) = parse_save_probe(&raw) {
-                    saves.signals.push(signal);
+                    saves.signals.push(signal.clone());
+                    operands.push(OutputOperand {
+                        authored: authored_slice(start, end, &raw),
+                        kind: OutputOperandKind::Probe(signal),
+                    });
                     parsed_any = true;
                 }
             }
             TokenKind::AtSign => {
+                let start = stream.peek().span.start;
                 stream.advance();
                 first_token = false;
                 // @dev[param]: device then bracketed parameter name.
-                let device = match &stream.peek().kind {
+                let (device, mut end) = match &stream.peek().kind {
                     TokenKind::Ident(s) => {
                         let device = s.clone();
-                        stream.advance();
-                        device
+                        let end = stream.advance().span.end;
+                        (device, end)
                     }
                     _ => {
                         return Err(ParseError::Syntax {
@@ -1201,7 +1203,7 @@ pub(super) fn parse_save_command(
                         });
                     }
                 };
-                if stream.consume(&TokenKind::LBracket) {
+                let signal = if stream.consume(&TokenKind::LBracket) {
                     let param = match &stream.peek().kind {
                         TokenKind::Ident(s) => {
                             let param = s.clone();
@@ -1218,31 +1220,65 @@ pub(super) fn parse_save_command(
                             });
                         }
                     };
-                    stream.consume(&TokenKind::RBracket);
-                    saves
-                        .signals
-                        .push(SaveSignal::DeviceParam { device, param });
+                    if !matches!(stream.peek().kind, TokenKind::RBracket) {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Expected closing ']' in '@{device}[{param}]' save directive"
+                            ),
+                        });
+                    }
+                    end = stream.advance().span.end;
+                    SaveSignal::DeviceParam { device, param }
                 } else {
-                    saves.signals.push(SaveSignal::Raw(device));
-                }
+                    SaveSignal::Raw(device)
+                };
+                saves.signals.push(signal.clone());
+                let fallback = logical_line.get(start..end).unwrap_or_default();
+                operands.push(OutputOperand {
+                    authored: authored_slice(start, end, fallback),
+                    kind: OutputOperandKind::Probe(signal),
+                });
                 parsed_any = true;
             }
-            TokenKind::Number(_) => {
+            TokenKind::Number(n) => {
+                let start = stream.peek().span.start;
+                let end = stream.peek().span.end;
                 // Numeric node names (e.g. `.save 2`) select v(2).
-                if let TokenKind::Number(n) = &stream.peek().kind {
-                    let name = if n.fract() == 0.0 {
-                        format!("{}", *n as i64)
-                    } else {
-                        format!("{}", n)
-                    };
-                    saves.signals.push(SaveSignal::Raw(name));
-                    parsed_any = true;
-                }
+                let name = if n.fract() == 0.0 {
+                    format!("{}", *n as i64)
+                } else {
+                    format!("{}", n)
+                };
                 stream.advance();
+                let signal = SaveSignal::Raw(name.clone());
+                saves.signals.push(signal.clone());
+                operands.push(OutputOperand {
+                    authored: authored_slice(start, end, &name),
+                    kind: OutputOperandKind::Probe(signal),
+                });
+                parsed_any = true;
                 first_token = false;
             }
-            _ => {
+            TokenKind::Expression(body) | TokenKind::StringLit(body) => {
+                let body = body.clone();
+                let start = stream.peek().span.start;
+                let end = stream.advance().span.end;
+                operands.push(OutputOperand {
+                    authored: authored_slice(start, end, &body),
+                    kind: OutputOperandKind::Expression { body },
+                });
+                parsed_any = true;
+                first_token = false;
+            }
+            TokenKind::Comma => {
                 stream.advance();
+            }
+            unexpected => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unexpected token '{unexpected}' in output directive"),
+                });
             }
         }
     }
@@ -1253,7 +1289,11 @@ pub(super) fn parse_save_command(
         log::warn!("line {line_num}: save/print directive without output signals ignored");
     }
 
-    Ok(delimiter)
+    Ok(ParsedSaveCommand {
+        analysis,
+        delimiter,
+        operands,
+    })
 }
 
 fn is_xyce_print_option_name(name: &str) -> bool {

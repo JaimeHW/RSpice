@@ -148,6 +148,23 @@ pub struct OutputSymbolDependency {
     pub expression: bool,
 }
 
+/// One source-authored operand on an ordered output card.
+///
+/// `authored` is the exact slice of the parser's logical card. The typed kind
+/// is the execution contract, so exporters never need to reconstruct display
+/// names or guess whether a token was a direct getter or an expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OutputOperand {
+    pub(crate) authored: String,
+    pub(crate) kind: OutputOperandKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OutputOperandKind {
+    Probe(super::SaveSignal),
+    Expression { body: String },
+}
+
 /// Provenance sidecar for one source-level output request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputRequest {
@@ -161,6 +178,14 @@ pub struct OutputRequest {
     /// `.PRINT` card with no delimiter or an invalid delimiter, and `None`
     /// for directives that do not own Xyce print formatting.
     pub print_delimiter: Option<PrintDelimiter>,
+    /// Complete source-authored output operands in card order.
+    ///
+    /// Unlike `dependencies`, this retains one entry per rendered column, so
+    /// expressions remain interleaved with direct probes and duplicates stay
+    /// meaningful at the export boundary.
+    pub operands: Vec<String>,
+    /// Typed semantics aligned one-to-one with `operands`.
+    pub(crate) operand_kinds: Vec<OutputOperandKind>,
     /// Authored braced or quoted expression bodies in source order.
     ///
     /// Keeping these separately from circuit dependencies lets semantic
@@ -244,6 +269,8 @@ impl OutputRequest {
             name: None,
             print_delimiter: matches!(directive, OutputDirectiveKind::Print)
                 .then_some(PrintDelimiter::Whitespace),
+            operands: Vec::new(),
+            operand_kinds: Vec::new(),
             expressions,
             dependencies: extract_output_dependencies(source),
         }
@@ -273,6 +300,8 @@ impl OutputRequest {
             analysis: None,
             name: None,
             print_delimiter: None,
+            operands: Vec::new(),
+            operand_kinds: Vec::new(),
             expressions: extract_output_expressions(source),
             dependencies,
         }
@@ -306,6 +335,8 @@ impl OutputRequest {
             analysis: OutputAnalysisKind::from_keyword(&statement.analysis),
             name: Some(statement.name.clone()),
             print_delimiter: None,
+            operands: Vec::new(),
+            operand_kinds: Vec::new(),
             expressions: Vec::new(),
             dependencies,
         }
@@ -330,6 +361,8 @@ impl OutputRequest {
             analysis: None,
             name: None,
             print_delimiter: None,
+            operands: Vec::new(),
+            operand_kinds: Vec::new(),
             expressions: outputs
                 .iter()
                 .flat_map(|output| extract_output_expressions(output))
@@ -343,6 +376,42 @@ impl OutputRequest {
             self.print_delimiter = Some(delimiter);
         }
         self
+    }
+
+    pub(crate) fn from_ordered_operands(
+        directive: OutputDirectiveKind,
+        origin: NetlistSourceLocation,
+        analysis: Option<OutputAnalysisKind>,
+        operands: Vec<OutputOperand>,
+    ) -> Self {
+        let source = operands
+            .iter()
+            .map(|operand| operand.authored.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let expressions = operands
+            .iter()
+            .filter_map(|operand| match &operand.kind {
+                OutputOperandKind::Expression { body } => Some(body.clone()),
+                OutputOperandKind::Probe(_) => None,
+            })
+            .collect();
+        let (operands, operand_kinds) = operands
+            .into_iter()
+            .map(|operand| (operand.authored, operand.kind))
+            .unzip();
+        Self {
+            directive,
+            origin,
+            analysis,
+            name: None,
+            print_delimiter: matches!(directive, OutputDirectiveKind::Print)
+                .then_some(PrintDelimiter::Whitespace),
+            operands,
+            operand_kinds,
+            expressions,
+            dependencies: extract_output_dependencies(&source),
+        }
     }
 }
 
@@ -1467,22 +1536,34 @@ pub(crate) fn collect_interface_node_aliases(
 /// remains owned by the full collector. This projection matches Xyce's
 /// requested-alias materialization policy without scaling measurement setup
 /// with unrelated hierarchy.
-pub(crate) fn collect_requested_interface_node_aliases(
+#[cfg(test)]
+fn collect_requested_interface_node_aliases(
     netlist: &Netlist,
     requested: &HashSet<String>,
 ) -> Result<InterfaceNodeAliases, ParseError> {
-    let requested = requested
-        .iter()
-        .map(|alias| canonical_symbol(alias))
-        .collect::<HashSet<_>>();
+    super::finish_non_aborting_parse(collect_requested_interface_node_aliases_with_abort(
+        netlist,
+        requested,
+        &crate::abort_signal::NoAbort,
+    ))
+}
+
+pub(crate) fn collect_requested_interface_node_aliases_with_abort(
+    netlist: &Netlist,
+    requested: &HashSet<String>,
+    abort: &dyn AbortSignal,
+) -> Result<InterfaceNodeAliases, ParseWithAbortError> {
+    super::ensure_parse_not_aborted(abort)?;
+    let mut canonical_requested = HashSet::with_capacity(requested.len());
+    for (index, alias) in requested.iter().enumerate() {
+        super::poll_parse_abort(abort, index)?;
+        canonical_requested.insert(canonical_symbol(alias));
+    }
+    let requested = canonical_requested;
     if requested.is_empty() {
         return Ok(InterfaceNodeAliases::default());
     }
-    super::finish_non_aborting_parse(collect_interface_node_aliases_impl(
-        netlist,
-        Some(&requested),
-        &crate::abort_signal::NoAbort,
-    ))
+    collect_interface_node_aliases_impl(netlist, Some(&requested), abort)
 }
 
 fn collect_interface_node_aliases_with_abort(
@@ -3130,6 +3211,108 @@ V1 1 0 1
             .find(|request| request.directive == OutputDirectiveKind::Print)
             .expect("PRINT request retained");
         assert!(request.expressions.is_empty());
+    }
+
+    #[test]
+    fn print_operands_preserve_authored_column_order_and_duplicates() {
+        let source = "ordered print operands\n\
+V1 1 0 1\n\
+R1 1 0 1k\n\
+.DC V1 0 1 1\n\
+.PRINT DC FORMAT=STD I(V1) V(1) R1:R {V(1)/I(V1)} V(1)\n\
+.END\n";
+        let netlist = Netlist::parse_validated(source).expect("ordered PRINT validates");
+        let request = netlist
+            .output_requests
+            .iter()
+            .find(|request| request.directive == OutputDirectiveKind::Print)
+            .expect("PRINT request retained");
+        assert_eq!(
+            request.operands,
+            ["I(V1)", "V(1)", "R1:R", "{V(1)/I(V1)}", "V(1)"]
+        );
+        assert!(matches!(
+            request.operand_kinds[0],
+            OutputOperandKind::Probe(crate::netlist::SaveSignal::Current(_))
+        ));
+        assert!(matches!(
+            request.operand_kinds[3],
+            OutputOperandKind::Expression { .. }
+        ));
+    }
+
+    #[test]
+    fn print_operand_parser_owns_one_typed_ordered_grammar() {
+        let source = "typed print operand grammar\n\
+V1 out 0 1\n\
+VREF ref 0 0\n\
+R1 out ref 1k\n\
+.DC V1 0 1 1\n\
+.PRINT DC FILE=\"V(MISSING)\" FORMAT=CSV NOINDEX I ( V1 ) V ( out , ref ) R1:R @R1[r] {V(out) + I(V1)} 'I(V1)*2' \"V(out)/2\" V(out) V(out)\n\
+.END\n";
+        let netlist = Netlist::parse(source).expect("mixed PRINT card parses");
+        let request = netlist
+            .output_requests
+            .iter()
+            .find(|request| request.directive == OutputDirectiveKind::Print)
+            .expect("PRINT request retained");
+        assert_eq!(request.analysis, Some(OutputAnalysisKind::Dc));
+        assert_eq!(
+            request.operands,
+            [
+                "I ( V1 )",
+                "V ( out , ref )",
+                "R1:R",
+                "@R1[r]",
+                "{V(out) + I(V1)}",
+                "'I(V1)*2'",
+                "\"V(out)/2\"",
+                "V(out)",
+                "V(out)",
+            ]
+        );
+        assert!(matches!(
+            request.operand_kinds[0],
+            OutputOperandKind::Probe(crate::netlist::SaveSignal::Current(_))
+        ));
+        assert!(matches!(
+            request.operand_kinds[1],
+            OutputOperandKind::Probe(crate::netlist::SaveSignal::VoltageDiff(_, _))
+        ));
+        assert!(matches!(
+            request.operand_kinds[2],
+            OutputOperandKind::Probe(crate::netlist::SaveSignal::Raw(_))
+        ));
+        assert!(matches!(
+            request.operand_kinds[3],
+            OutputOperandKind::Probe(crate::netlist::SaveSignal::DeviceParam { .. })
+        ));
+        assert!(
+            request.operand_kinds[4..7]
+                .iter()
+                .all(|kind| matches!(kind, OutputOperandKind::Expression { .. }))
+        );
+        assert_eq!(
+            request.expressions,
+            ["V(out) + I(V1)", "I(V1)*2", "V(out)/2"]
+        );
+        assert!(
+            !request
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.symbol.eq_ignore_ascii_case("MISSING"))
+        );
+    }
+
+    #[test]
+    fn malformed_print_probe_delimiters_fail_closed() {
+        for malformed in [
+            "bad PRINT paren\nV1 1 0 1\n.DC V1 0 1 1\n.PRINT DC V(1\n.END\n",
+            "bad PRINT bracket\nV1 1 0 1\n.DC V1 0 1 1\n.PRINT DC @V1[current\n.END\n",
+        ] {
+            let error = Netlist::parse(malformed).expect_err("malformed PRINT must fail");
+            assert!(matches!(error, crate::netlist::ParseError::Syntax { .. }));
+        }
     }
 
     #[test]

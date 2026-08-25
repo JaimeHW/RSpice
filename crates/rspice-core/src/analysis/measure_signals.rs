@@ -20,14 +20,17 @@ use super::measure::{
     canonical_measure_signal_name,
 };
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
-use crate::engine::{TransientDeviceOpTrace, TransientResult};
+use crate::engine::{SimulationError, TransientDeviceOpTrace, TransientResult};
 use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression, is_real};
 use crate::netlist::{
-    InterfaceNodeAliases, Netlist, OutputAnalysisKind, canonical_symbol,
-    collect_requested_interface_node_aliases, is_current_output_accessor,
-    is_device_lead_current_accessor,
+    InterfaceNodeAliases, Netlist, NetlistSourceLocation, OutputAnalysisKind, OutputDirectiveKind,
+    OutputOperandKind, OutputRequest, SaveSignal, canonical_symbol,
+    collect_requested_interface_node_aliases_with_abort, is_current_output_accessor,
+    is_current_projection_accessor, is_device_lead_current_accessor,
 };
+use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use crate::solver::SimulationResult;
 
 /// Insert `key` plus its lower/upper-case spellings.
@@ -110,19 +113,60 @@ struct InterfaceNodeAliasProjection {
     ground_decibels: Option<Vec<Value>>,
 }
 
+enum InterfaceNodeAliasProjectionError {
+    Aborted,
+    Detail(String),
+}
+
 impl InterfaceNodeAliasProjection {
     fn new(
         netlist: &Netlist,
         analysis: OutputAnalysisKind,
         point_count: usize,
     ) -> Result<Self, String> {
-        let domain = MeasurementSignalDomain::for_analysis(analysis)?;
+        match Self::new_with_abort(netlist, analysis, point_count, &NoAbort) {
+            Ok(projection) => Ok(projection),
+            Err(InterfaceNodeAliasProjectionError::Detail(detail)) => Err(detail),
+            Err(InterfaceNodeAliasProjectionError::Aborted) => {
+                unreachable!("NoAbort cannot cancel interface-alias projection")
+            }
+        }
+    }
+
+    fn new_with_abort(
+        netlist: &Netlist,
+        analysis: OutputAnalysisKind,
+        point_count: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, InterfaceNodeAliasProjectionError> {
+        if abort.is_aborted() {
+            return Err(InterfaceNodeAliasProjectionError::Aborted);
+        }
+        let domain = MeasurementSignalDomain::for_analysis(analysis)
+            .map_err(InterfaceNodeAliasProjectionError::Detail)?;
         let mut requested_accessors = HashMap::<String, HashMap<String, HashSet<String>>>::new();
-        for request in netlist.output_requests.iter().filter(|request| {
-            request.directive == crate::netlist::OutputDirectiveKind::Measure
-                && request.analysis == Some(analysis)
-        }) {
-            for dependency in &request.dependencies {
+        for (request_index, request) in
+            netlist
+                .output_requests
+                .iter()
+                .enumerate()
+                .filter(|(_, request)| {
+                    request.analysis.is_none_or(|owned| owned == analysis)
+                        && matches!(
+                            request.directive,
+                            crate::netlist::OutputDirectiveKind::Measure
+                                | crate::netlist::OutputDirectiveKind::Print
+                                | crate::netlist::OutputDirectiveKind::Plot
+                        )
+                })
+        {
+            if request_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(InterfaceNodeAliasProjectionError::Aborted);
+            }
+            for (dependency_index, dependency) in request.dependencies.iter().enumerate() {
+                if dependency_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(InterfaceNodeAliasProjectionError::Aborted);
+                }
                 let accessor = dependency.operator.to_ascii_uppercase();
                 if dependency.kind == crate::netlist::OutputSymbolKind::Node
                     && domain.supports_voltage_accessor(&accessor)
@@ -143,8 +187,18 @@ impl InterfaceNodeAliasProjection {
             .filter(|alias| alias.as_str() != "0")
             .cloned()
             .collect::<HashSet<_>>();
-        let aliases = collect_requested_interface_node_aliases(netlist, &requested_aliases)
-            .map_err(|error| format!("failed to collect interface-node aliases: {error}"))?;
+        let aliases =
+            collect_requested_interface_node_aliases_with_abort(netlist, &requested_aliases, abort)
+                .map_err(|error| match error {
+                    crate::netlist::ParseWithAbortError::Aborted => {
+                        InterfaceNodeAliasProjectionError::Aborted
+                    }
+                    crate::netlist::ParseWithAbortError::Parse(error) => {
+                        InterfaceNodeAliasProjectionError::Detail(format!(
+                            "failed to collect interface-node aliases: {error}"
+                        ))
+                    }
+                })?;
         let direct_ground_accessors = requested_accessors.get("0");
         let mut needs_ground_zero = direct_ground_accessors
             .is_some_and(|accessors| accessors.keys().any(|accessor| accessor != "VDB"));
@@ -157,12 +211,26 @@ impl InterfaceNodeAliasProjection {
             needs_ground_zero |= accessors.keys().any(|accessor| accessor != "VDB");
             needs_ground_decibels |= accessors.contains_key("VDB");
         }
+        let allocate_ground = |value: Value| {
+            let mut waveform = Vec::with_capacity(point_count);
+            for index in 0..point_count {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(InterfaceNodeAliasProjectionError::Aborted);
+                }
+                waveform.push(value);
+            }
+            Ok(waveform)
+        };
         Ok(Self {
             aliases,
             requested_accessors,
             domain,
-            ground_zero: needs_ground_zero.then(|| vec![0.0; point_count]),
-            ground_decibels: needs_ground_decibels.then(|| vec![Value::NEG_INFINITY; point_count]),
+            ground_zero: needs_ground_zero
+                .then(|| allocate_ground(0.0))
+                .transpose()?,
+            ground_decibels: needs_ground_decibels
+                .then(|| allocate_ground(Value::NEG_INFINITY))
+                .transpose()?,
         })
     }
 
@@ -343,6 +411,16 @@ fn insert_device_op_trace_spellings<'a>(
     trace: &'a TransientDeviceOpTrace,
 ) {
     let operator = trace.parameter.to_ascii_uppercase();
+    insert_case_variants(
+        signals,
+        &format!("@{}[{}]", trace.device_name, trace.parameter),
+        trace.values.as_slice(),
+    );
+    insert_case_variants(
+        signals,
+        &format!("{}:{}", trace.device_name, trace.parameter),
+        trace.values.as_slice(),
+    );
     if is_device_lead_current_accessor(&operator) {
         insert_case_variants(
             signals,
@@ -395,6 +473,9 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
     // trace namespace rather than pretending that every lead is an MNA branch.
     for trace in &result.device_op_traces {
         insert_device_op_trace_spellings(&mut signals, trace);
+    }
+    for trace in &result.store_traces {
+        insert_case_variants(&mut signals, &trace.name, trace.values.as_slice());
     }
 
     signals
@@ -481,24 +562,47 @@ struct LiveExpressionParameter {
     context_value: Option<ComplexValue>,
 }
 
+enum LivePreparedExpressionCompileError {
+    Aborted,
+    Detail(String),
+}
+
 impl LivePreparedExpression {
     fn compile(
         expression: &NetExpr,
         params: &crate::netlist::ParamContext,
     ) -> Result<Self, String> {
+        match Self::compile_with_abort(expression, params, &NoAbort) {
+            Ok(expression) => Ok(expression),
+            Err(LivePreparedExpressionCompileError::Detail(detail)) => Err(detail),
+            Err(LivePreparedExpressionCompileError::Aborted) => {
+                unreachable!("NoAbort cannot cancel live expression compilation")
+            }
+        }
+    }
+
+    fn compile_with_abort(
+        expression: &NetExpr,
+        params: &crate::netlist::ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, LivePreparedExpressionCompileError> {
         fn rewrite_probes(
             expression: &NetExpr,
             probes: &mut HashMap<String, LiveRawOutputOperator>,
-        ) -> Result<NetExpr, String> {
+            abort: &dyn AbortSignal,
+        ) -> Result<NetExpr, LivePreparedExpressionCompileError> {
+            if abort.is_aborted() {
+                return Err(LivePreparedExpressionCompileError::Aborted);
+            }
             Ok(match expression {
                 NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
                     op: *op,
-                    operand: Box::new(rewrite_probes(operand, probes)?),
+                    operand: Box::new(rewrite_probes(operand, probes, abort)?),
                 },
                 NetExpr::BinOp { op, left, right } => NetExpr::BinOp {
                     op: *op,
-                    left: Box::new(rewrite_probes(left, probes)?),
-                    right: Box::new(rewrite_probes(right, probes)?),
+                    left: Box::new(rewrite_probes(left, probes, abort)?),
+                    right: Box::new(rewrite_probes(right, probes, abort)?),
                 },
                 NetExpr::FnCall { name, args }
                     if is_equation_probe_accessor(name)
@@ -510,7 +614,9 @@ impl LivePreparedExpression {
                         .iter()
                         .map(|argument| {
                             equation_probe_argument(Some(argument)).ok_or_else(|| {
-                                format!("{prefix}() in continuous measure has an invalid argument")
+                                LivePreparedExpressionCompileError::Detail(format!(
+                                    "{prefix}() in continuous measure has an invalid argument"
+                                ))
                             })
                         })
                         .collect::<Result<Vec<_>, _>>()?;
@@ -520,14 +626,18 @@ impl LivePreparedExpression {
                     // nodes, keeping the internal probe namespace disjoint
                     // from every authored parameter name.
                     let key = format!("\0RSPICE_LIVE_PROBE_{}", probes.len());
-                    probes.insert(key.clone(), LiveRawOutputOperator::compile(&authored)?);
+                    probes.insert(
+                        key.clone(),
+                        LiveRawOutputOperator::compile(&authored)
+                            .map_err(LivePreparedExpressionCompileError::Detail)?,
+                    );
                     NetExpr::Param(key)
                 }
                 NetExpr::FnCall { name, args } => NetExpr::FnCall {
                     name: name.clone(),
                     args: args
                         .iter()
-                        .map(|argument| rewrite_probes(argument, probes))
+                        .map(|argument| rewrite_probes(argument, probes, abort))
                         .collect::<Result<Vec<_>, _>>()?,
                 },
                 NetExpr::Number(_)
@@ -538,7 +648,10 @@ impl LivePreparedExpression {
         }
 
         let mut probes = HashMap::new();
-        let rewritten = rewrite_probes(expression, &mut probes)?;
+        let rewritten = rewrite_probes(expression, &mut probes, abort)?;
+        if abort.is_aborted() {
+            return Err(LivePreparedExpressionCompileError::Aborted);
+        }
         let external_parameters = probes.keys().cloned().collect::<HashSet<_>>();
         let evaluator = if external_parameters.is_empty() {
             PreparedExpression::compile(&rewritten, params)
@@ -549,9 +662,21 @@ impl LivePreparedExpression {
                 &external_parameters,
             )
         }
-        .map_err(|error| format!("failed to prepare live expression: {error}"))?;
+        .map_err(|error| {
+            LivePreparedExpressionCompileError::Detail(format!(
+                "failed to prepare live expression: {error}"
+            ))
+        })?;
+        if abort.is_aborted() {
+            return Err(LivePreparedExpressionCompileError::Aborted);
+        }
         let mut parameters = HashMap::new();
+        let mut compilation_aborted = false;
         evaluator.visit_runtime_parameters(|name| {
+            if abort.is_aborted() {
+                compilation_aborted = true;
+                return;
+            }
             if !probes.contains_key(name) {
                 let canonical_measure = name.to_ascii_uppercase();
                 parameters
@@ -567,6 +692,9 @@ impl LivePreparedExpression {
                     });
             }
         });
+        if compilation_aborted || abort.is_aborted() {
+            return Err(LivePreparedExpressionCompileError::Aborted);
+        }
         Ok(Self {
             evaluator,
             probes,
@@ -789,6 +917,7 @@ struct LiveRawOutputOperator {
     authored: String,
     canonical_signal: String,
     voltage: Option<LiveVoltageOutputOperator>,
+    current: Option<LiveCurrentOutputOperator>,
 }
 
 #[derive(Debug)]
@@ -803,6 +932,13 @@ struct LiveVoltageNode {
     voltage: String,
     real: String,
     imaginary: String,
+}
+
+#[derive(Debug)]
+struct LiveCurrentOutputOperator {
+    prefix: String,
+    authored: String,
+    canonical_signal: String,
 }
 
 impl LiveRawOutputOperator {
@@ -826,9 +962,10 @@ impl LiveRawOutputOperator {
                 ));
             }
             Some(LiveVoltageOutputOperator {
-                prefix,
+                prefix: prefix.clone(),
                 arguments: arguments
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|authored| LiveVoltageNode {
                         voltage: canonical_measure_signal_name(&format!("V({authored})")),
                         real: canonical_measure_signal_name(&format!("VR({authored})")),
@@ -840,10 +977,26 @@ impl LiveRawOutputOperator {
         } else {
             None
         };
+        let current = if is_current_projection_accessor(&prefix) {
+            if arguments.len() != 1 {
+                return Err(format!(
+                    "{prefix}() in continuous measure requires exactly one argument"
+                ));
+            }
+            let authored = format!("I({})", arguments[0]);
+            Some(LiveCurrentOutputOperator {
+                prefix,
+                canonical_signal: canonical_measure_signal_name(&authored),
+                authored,
+            })
+        } else {
+            None
+        };
         Ok(Self {
             authored: authored.to_string(),
             canonical_signal: canonical_measure_signal_name(authored),
             voltage,
+            current,
         })
     }
 
@@ -859,6 +1012,24 @@ impl LiveRawOutputOperator {
             row,
         )? {
             return Ok(value);
+        }
+        if let Some(current) = &self.current
+            && let Some(value) = lookup_equation_signal_canonical_optional(
+                signals,
+                &current.authored,
+                &current.canonical_signal,
+                row,
+            )?
+        {
+            let magnitude = value.abs();
+            return Ok(match current.prefix.as_str() {
+                "I" | "IR" => value,
+                "II" => 0.0,
+                "IM" => magnitude,
+                "IP" => 0.0_f64.atan2(value).to_degrees(),
+                "IDB" => 20.0 * magnitude.log10(),
+                _ => unreachable!(),
+            });
         }
         let Some(voltage) = &self.voltage else {
             return Err(format!(
@@ -1056,6 +1227,735 @@ pub fn evaluate_dc_equation_measurements(
         Some(dc_primary_sweep_is_ascending(netlist, series.axis())),
     )
     .map(|traces| retain_equation_traces(netlist, "DC", traces))
+}
+
+/// Physical type of one ordered scalar output column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputColumnKind {
+    Voltage,
+    Current,
+    Scalar,
+}
+
+/// One fully evaluated source-authored output column.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OutputColumn {
+    name: String,
+    kind: OutputColumnKind,
+    values: Vec<Value>,
+}
+
+/// Typed failure at the ordered output-projection boundary.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OutputProjectionError {
+    #[error("output projection aborted")]
+    Aborted,
+    #[error(transparent)]
+    ResourceLimit(#[from] ResourceLimitError),
+    #[error(
+        "{analysis:?} output operand {operand_index} '{operand}' at {origin} failed{row_suffix}: {detail}",
+        row_suffix = row.map(|row| format!(" at row {row}")).unwrap_or_default()
+    )]
+    Operand {
+        analysis: OutputAnalysisKind,
+        origin: NetlistSourceLocation,
+        operand_index: usize,
+        operand: String,
+        row: Option<usize>,
+        detail: String,
+    },
+}
+
+fn matching_print_requests(netlist: &Netlist, analysis: OutputAnalysisKind) -> Vec<&OutputRequest> {
+    netlist
+        .output_requests
+        .iter()
+        .filter(|request| {
+            request.directive == OutputDirectiveKind::Print
+                && request.analysis.is_none_or(|owned| owned == analysis)
+        })
+        .collect()
+}
+
+fn preflight_real_output_requests(
+    requests: &[&OutputRequest],
+    analysis: OutputAnalysisKind,
+    point_count: usize,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<usize, OutputProjectionError> {
+    if abort.is_aborted() {
+        return Err(OutputProjectionError::Aborted);
+    }
+    for request in requests {
+        if request.operands.len() != request.operand_kinds.len() {
+            return Err(output_request_error(
+                request,
+                analysis,
+                request.operands.len().min(request.operand_kinds.len()),
+                None,
+                format!(
+                    "authored operand count {} does not match typed operand count {}",
+                    request.operands.len(),
+                    request.operand_kinds.len()
+                ),
+            ));
+        }
+    }
+    let column_count = requests
+        .iter()
+        .map(|request| request.operands.len())
+        .try_fold(0usize, usize::checked_add)
+        .unwrap_or(usize::MAX);
+    let requested_values = point_count
+        .checked_mul(column_count.saturating_add(1))
+        .unwrap_or(usize::MAX);
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        requested_values,
+        limits.max_result_values,
+    )?;
+    Ok(column_count)
+}
+
+/// Evaluate source-authored real `.PRINT TRAN` requests in exact card and
+/// operand order with cancellation and result-allocation enforcement.
+fn evaluate_tran_output_columns_with_abort(
+    netlist: &Netlist,
+    result: &TransientResult,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<OutputColumn>, OutputProjectionError> {
+    let requests = matching_print_requests(netlist, OutputAnalysisKind::Tran);
+    if requests.is_empty() {
+        return Ok(Vec::new());
+    }
+    let column_count = preflight_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+        limits,
+        abort,
+    )?;
+    let alias_projection = InterfaceNodeAliasProjection::new_with_abort(
+        netlist,
+        OutputAnalysisKind::Tran,
+        result.time.len(),
+        abort,
+    )
+    .map_err(|error| match error {
+        InterfaceNodeAliasProjectionError::Aborted => OutputProjectionError::Aborted,
+        InterfaceNodeAliasProjectionError::Detail(detail) => {
+            output_request_error(requests[0], OutputAnalysisKind::Tran, 0, None, detail)
+        }
+    })?;
+    let mut signals = transient_signal_map(result);
+    alias_projection.augment(&mut signals).map_err(|detail| {
+        output_request_error(requests[0], OutputAnalysisKind::Tran, 0, None, detail)
+    })?;
+    evaluate_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Tran,
+        &result.time,
+        &signals,
+        &netlist.params,
+        column_count,
+        abort,
+    )
+}
+
+/// Evaluate ordered real `.PRINT TRAN` columns for frontend export.
+///
+/// Each tuple is `(authored_name, physical_type, values)`, where
+/// `physical_type` is one of `voltage`, `current`, or `parameter`.
+pub fn evaluate_tran_output_requests_with_abort(
+    netlist: &Netlist,
+    result: &TransientResult,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+    evaluate_tran_output_columns_with_abort(netlist, result, limits, abort)
+        .map(frontend_output_columns)
+        .map_err(frontend_output_error)
+}
+
+#[cfg(test)]
+pub(crate) fn evaluate_tran_output_requests(
+    netlist: &Netlist,
+    result: &TransientResult,
+) -> Result<Vec<OutputColumn>, OutputProjectionError> {
+    evaluate_tran_output_columns_with_abort(netlist, result, ResourceLimits::default(), &NoAbort)
+}
+
+/// Evaluate source-authored real `.PRINT DC` requests in exact card and
+/// operand order. DC columns are rebuilt by canonical name at every point;
+/// result-shape changes can therefore never be silently zero-filled.
+fn evaluate_dc_output_columns_with_abort(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<OutputColumn>, OutputProjectionError> {
+    let requests = matching_print_requests(netlist, OutputAnalysisKind::Dc);
+    if requests.is_empty() {
+        return Ok(Vec::new());
+    }
+    let column_count = preflight_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Dc,
+        sweep.len(),
+        limits,
+        abort,
+    )?;
+    let series =
+        DcOutputSeries::from_sweep_with_abort(sweep, limits, abort).map_err(
+            |error| match error {
+                DcOutputSeriesBuildError::Aborted => OutputProjectionError::Aborted,
+                DcOutputSeriesBuildError::ResourceLimit(error) => {
+                    OutputProjectionError::ResourceLimit(error)
+                }
+                DcOutputSeriesBuildError::Detail(detail) => {
+                    output_request_error(requests[0], OutputAnalysisKind::Dc, 0, None, detail)
+                }
+            },
+        )?;
+    let alias_projection = InterfaceNodeAliasProjection::new_with_abort(
+        netlist,
+        OutputAnalysisKind::Dc,
+        series.axis.len(),
+        abort,
+    )
+    .map_err(|error| match error {
+        InterfaceNodeAliasProjectionError::Aborted => OutputProjectionError::Aborted,
+        InterfaceNodeAliasProjectionError::Detail(detail) => {
+            output_request_error(requests[0], OutputAnalysisKind::Dc, 0, None, detail)
+        }
+    })?;
+    let mut signals = series.signal_map();
+    alias_projection.augment(&mut signals).map_err(|detail| {
+        output_request_error(requests[0], OutputAnalysisKind::Dc, 0, None, detail)
+    })?;
+    evaluate_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Dc,
+        &series.axis,
+        &signals,
+        &netlist.params,
+        column_count,
+        abort,
+    )
+}
+
+/// Evaluate ordered real `.PRINT DC` columns for frontend export.
+///
+/// Each tuple is `(authored_name, physical_type, values)`, where DC rows are
+/// resolved by canonical signal name rather than result-vector position.
+pub fn evaluate_dc_output_requests_with_abort(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<(String, &'static str, Vec<Value>)>, SimulationError> {
+    evaluate_dc_output_columns_with_abort(netlist, sweep, limits, abort)
+        .map(frontend_output_columns)
+        .map_err(frontend_output_error)
+}
+
+#[cfg(test)]
+pub(crate) fn evaluate_dc_output_requests(
+    netlist: &Netlist,
+    sweep: &[(Value, SimulationResult)],
+) -> Result<Vec<OutputColumn>, OutputProjectionError> {
+    evaluate_dc_output_columns_with_abort(netlist, sweep, ResourceLimits::default(), &NoAbort)
+}
+
+fn frontend_output_columns(columns: Vec<OutputColumn>) -> Vec<(String, &'static str, Vec<Value>)> {
+    columns
+        .into_iter()
+        .map(|column| {
+            let physical_type = match column.kind {
+                OutputColumnKind::Voltage => "voltage",
+                OutputColumnKind::Current => "current",
+                OutputColumnKind::Scalar => "parameter",
+            };
+            (column.name, physical_type, column.values)
+        })
+        .collect()
+}
+
+fn frontend_output_error(error: OutputProjectionError) -> SimulationError {
+    match error {
+        OutputProjectionError::Aborted => SimulationError::Aborted,
+        OutputProjectionError::ResourceLimit(error) => SimulationError::ResourceLimit(error),
+        error @ OutputProjectionError::Operand { .. } => {
+            SimulationError::Netlist(error.to_string())
+        }
+    }
+}
+
+fn output_request_error(
+    request: &OutputRequest,
+    analysis: OutputAnalysisKind,
+    operand_index: usize,
+    row: Option<usize>,
+    detail: String,
+) -> OutputProjectionError {
+    OutputProjectionError::Operand {
+        analysis,
+        origin: request.origin.clone(),
+        operand_index,
+        operand: request
+            .operands
+            .get(operand_index)
+            .cloned()
+            .unwrap_or_default(),
+        row,
+        detail,
+    }
+}
+
+fn output_column_kind(signal: &SaveSignal) -> OutputColumnKind {
+    match signal {
+        SaveSignal::Voltage(_) | SaveSignal::VoltageDiff(_, _) => OutputColumnKind::Voltage,
+        SaveSignal::Current(_) => OutputColumnKind::Current,
+        SaveSignal::DeviceParam { .. } => OutputColumnKind::Scalar,
+        SaveSignal::Raw(name) if name.contains(':') || name.starts_with('@') => {
+            OutputColumnKind::Scalar
+        }
+        SaveSignal::Raw(_) => OutputColumnKind::Voltage,
+        SaveSignal::All => OutputColumnKind::Scalar,
+    }
+}
+
+fn expression_output_column_kind(expression: &NetExpr) -> OutputColumnKind {
+    let NetExpr::FnCall { name, .. } = expression else {
+        return OutputColumnKind::Scalar;
+    };
+    let operator = name.to_ascii_uppercase();
+    if operator != "IF" && is_current_output_accessor(&operator) {
+        OutputColumnKind::Current
+    } else if matches!(operator.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB") {
+        OutputColumnKind::Voltage
+    } else {
+        OutputColumnKind::Scalar
+    }
+}
+
+fn evaluate_real_output_requests(
+    requests: &[&OutputRequest],
+    analysis: OutputAnalysisKind,
+    axis: &[Value],
+    signals: &HashMap<String, &[Value]>,
+    params: &crate::netlist::ParamContext,
+    column_count: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<OutputColumn>, OutputProjectionError> {
+    if abort.is_aborted() {
+        return Err(OutputProjectionError::Aborted);
+    }
+
+    let signal_index = CanonicalMeasureSignalIndex::new(signals);
+    let mut columns = Vec::with_capacity(column_count);
+    for request in requests {
+        for (operand_index, (authored, kind)) in request
+            .operands
+            .iter()
+            .zip(&request.operand_kinds)
+            .enumerate()
+        {
+            if abort.is_aborted() {
+                return Err(OutputProjectionError::Aborted);
+            }
+            let evaluated =
+                evaluate_output_operand(authored, kind, axis, &signal_index, params, abort)
+                    .map_err(|error| match error {
+                        OutputOperandEvaluationError::Aborted => OutputProjectionError::Aborted,
+                        OutputOperandEvaluationError::Detail { row, detail } => {
+                            output_request_error(request, analysis, operand_index, row, detail)
+                        }
+                    })?;
+            columns.push(evaluated);
+        }
+    }
+    if abort.is_aborted() {
+        return Err(OutputProjectionError::Aborted);
+    }
+    Ok(columns)
+}
+
+enum OutputOperandEvaluationError {
+    Aborted,
+    Detail { row: Option<usize>, detail: String },
+}
+
+impl From<(Option<usize>, String)> for OutputOperandEvaluationError {
+    fn from((row, detail): (Option<usize>, String)) -> Self {
+        Self::Detail { row, detail }
+    }
+}
+
+fn evaluate_output_operand(
+    authored: &str,
+    kind: &OutputOperandKind,
+    axis: &[Value],
+    signal_index: &CanonicalMeasureSignalIndex<'_>,
+    params: &crate::netlist::ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<OutputColumn, OutputOperandEvaluationError> {
+    match kind {
+        OutputOperandKind::Probe(signal) => {
+            if matches!(signal, SaveSignal::All) {
+                return Err((
+                    None,
+                    "the ALL selector cannot be represented as one scalar output column"
+                        .to_string(),
+                )
+                    .into());
+            }
+            let direct = direct_output_values(authored, signal, signal_index, axis.len(), abort)?;
+            let values = match direct {
+                DirectOutputValues::Borrowed(direct) => {
+                    let mut values = Vec::with_capacity(axis.len());
+                    for (row, value) in direct.iter().copied().enumerate() {
+                        if row.is_multiple_of(64) && abort.is_aborted() {
+                            return Err(OutputOperandEvaluationError::Aborted);
+                        }
+                        values.push(value);
+                    }
+                    values
+                }
+                DirectOutputValues::Owned(values) => values,
+            };
+            if abort.is_aborted() {
+                return Err(OutputOperandEvaluationError::Aborted);
+            }
+            Ok(OutputColumn {
+                name: authored.to_string(),
+                kind: output_column_kind(signal),
+                values,
+            })
+        }
+        OutputOperandKind::Expression { body } => {
+            if abort.is_aborted() {
+                return Err(OutputOperandEvaluationError::Aborted);
+            }
+            let protected_identifiers = params
+                .all_params()
+                .into_iter()
+                .map(|(name, _)| name.to_ascii_uppercase())
+                .collect::<HashSet<_>>();
+            if abort.is_aborted() {
+                return Err(OutputOperandEvaluationError::Aborted);
+            }
+            let expanded = crate::netlist::expr::expand_output_user_functions_with_abort(
+                body,
+                params,
+                &protected_identifiers,
+                abort,
+            )
+            .map_err(|error| match error {
+                crate::netlist::expr::BehavioralPreparationError::Aborted => {
+                    OutputOperandEvaluationError::Aborted
+                }
+                crate::netlist::expr::BehavioralPreparationError::Semantic(detail) => {
+                    (None, detail).into()
+                }
+            })?;
+            let parsed = crate::netlist::expr::parse_expression_with_abort(&expanded, abort)
+                .map_err(|error| match error {
+                    crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
+                        OutputOperandEvaluationError::Aborted
+                    }
+                    crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
+                        (None, format!("failed to parse expression: {error}")).into()
+                    }
+                })?;
+            let column_kind = expression_output_column_kind(&parsed);
+            let mut prepared = LivePreparedExpression::compile_with_abort(&parsed, params, abort)
+                .map_err(|error| match error {
+                LivePreparedExpressionCompileError::Aborted => {
+                    OutputOperandEvaluationError::Aborted
+                }
+                LivePreparedExpressionCompileError::Detail(detail) => (None, detail).into(),
+            })?;
+            let mut values = Vec::with_capacity(axis.len());
+            let mut programs = Vec::new();
+            let mut current_values = HashMap::new();
+            let program_indices = HashMap::new();
+            for row in 0..axis.len() {
+                if row.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(OutputOperandEvaluationError::Aborted);
+                }
+                let mut reads = LiveMeasureReadContext {
+                    programs: &mut programs,
+                    current_values: &mut current_values,
+                    program_indices: &program_indices,
+                    row,
+                    axis,
+                };
+                let value = prepared
+                    .value(row, signal_index, &mut reads, params)
+                    .map_err(|detail| (Some(row), detail))?;
+                values.push(crate::netlist::expr::normalize_xyce_expression_component(
+                    value.re,
+                ));
+            }
+            Ok(OutputColumn {
+                name: authored.to_string(),
+                kind: column_kind,
+                values,
+            })
+        }
+    }
+}
+
+enum DirectOutputValues<'a> {
+    Borrowed(&'a [Value]),
+    Owned(Vec<Value>),
+}
+
+fn direct_output_values<'a>(
+    authored: &str,
+    signal: &SaveSignal,
+    signals: &CanonicalMeasureSignalIndex<'a>,
+    point_count: usize,
+    abort: &dyn AbortSignal,
+) -> Result<DirectOutputValues<'a>, OutputOperandEvaluationError> {
+    let lookup = |name: &str| {
+        signals
+            .get(name)
+            .map_err(|detail| (None, detail))
+            .and_then(|values| {
+                values
+                    .map(|values| {
+                        if values.len() != point_count {
+                            Err((
+                                None,
+                                format!(
+                                    "signal '{name}' has {} value(s), expected {point_count}",
+                                    values.len()
+                                ),
+                            ))
+                        } else {
+                            Ok(DirectOutputValues::Borrowed(values))
+                        }
+                    })
+                    .transpose()
+            })
+    };
+    if let Some(values) = lookup(authored)? {
+        return Ok(values);
+    }
+    if let SaveSignal::DeviceParam { device, param } = signal {
+        for candidate in [
+            format!("@{device}[{param}]"),
+            format!("{device}:{param}"),
+            format!("N({device}:{param})"),
+        ] {
+            if let Some(values) = lookup(&candidate)? {
+                return Ok(values);
+            }
+        }
+    }
+    if let SaveSignal::Raw(raw) = signal {
+        if let Some(values) = lookup(raw)? {
+            return Ok(values);
+        }
+        let voltage = format!("V({raw})");
+        if let Some(values) = lookup(&voltage)? {
+            return Ok(values);
+        }
+    }
+    if matches!(
+        signal,
+        SaveSignal::Voltage(_) | SaveSignal::VoltageDiff(_, _) | SaveSignal::Current(_)
+    ) {
+        let canonical_probe = match signal {
+            SaveSignal::Voltage(node) => format!("V({node})"),
+            SaveSignal::VoltageDiff(positive, negative) => {
+                format!("V({positive},{negative})")
+            }
+            SaveSignal::Current(device) => format!("I({device})"),
+            _ => unreachable!(),
+        };
+        let operator =
+            LiveRawOutputOperator::compile(&canonical_probe).map_err(|detail| (None, detail))?;
+        let mut values = Vec::with_capacity(point_count);
+        for row in 0..point_count {
+            if row.is_multiple_of(64) && abort.is_aborted() {
+                return Err(OutputOperandEvaluationError::Aborted);
+            }
+            values.push(
+                operator
+                    .value(row, signals)
+                    .map_err(|detail| (Some(row), detail))?,
+            );
+        }
+        return Ok(DirectOutputValues::Owned(values));
+    }
+    Err((None, format!("signal '{authored}' is unavailable")).into())
+}
+
+struct DcOutputSeries {
+    axis: Vec<Value>,
+    columns: Vec<(String, Vec<Value>)>,
+}
+
+enum DcOutputSeriesBuildError {
+    Aborted,
+    ResourceLimit(ResourceLimitError),
+    Detail(String),
+}
+
+impl From<ResourceLimitError> for DcOutputSeriesBuildError {
+    fn from(error: ResourceLimitError) -> Self {
+        Self::ResourceLimit(error)
+    }
+}
+
+impl DcOutputSeries {
+    fn from_sweep_with_abort(
+        sweep: &[(Value, SimulationResult)],
+        limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, DcOutputSeriesBuildError> {
+        if abort.is_aborted() {
+            return Err(DcOutputSeriesBuildError::Aborted);
+        }
+        if sweep.is_empty() {
+            return Err(DcOutputSeriesBuildError::Detail(
+                "DC output projection requires at least one sweep point".to_string(),
+            ));
+        }
+        struct Slot {
+            name: String,
+            values: Vec<Option<Value>>,
+        }
+        let point_count = sweep.len();
+        let mut slots = HashMap::<String, Slot>::new();
+        for (row, (_, result)) in sweep.iter().enumerate() {
+            if row.is_multiple_of(64) && abort.is_aborted() {
+                return Err(DcOutputSeriesBuildError::Aborted);
+            }
+            if result.node_names.len() != result.node_voltages.len() {
+                return Err(DcOutputSeriesBuildError::Detail(format!(
+                    "DC row {row} has {} node name(s) and {} voltage value(s)",
+                    result.node_names.len(),
+                    result.node_voltages.len()
+                )));
+            }
+            if result.branch_names.len() != result.branch_currents.len() {
+                return Err(DcOutputSeriesBuildError::Detail(format!(
+                    "DC row {row} has {} branch name(s) and {} current value(s)",
+                    result.branch_names.len(),
+                    result.branch_currents.len()
+                )));
+            }
+            let mut row_values = Vec::<(String, Value)>::new();
+            for (item_index, (name, value)) in result
+                .node_names
+                .iter()
+                .zip(&result.node_voltages)
+                .enumerate()
+            {
+                if item_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(DcOutputSeriesBuildError::Aborted);
+                }
+                if !name.is_empty() {
+                    row_values.push((format!("V({name})"), *value));
+                    row_values.push((name.clone(), *value));
+                }
+            }
+            for (item_index, (name, value)) in result
+                .branch_names
+                .iter()
+                .zip(&result.branch_currents)
+                .enumerate()
+            {
+                if item_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(DcOutputSeriesBuildError::Aborted);
+                }
+                if !name.is_empty() {
+                    row_values.push((format!("I({name})"), *value));
+                }
+            }
+            for (item_index, observable) in result.dc_observables.iter().enumerate() {
+                if item_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(DcOutputSeriesBuildError::Aborted);
+                }
+                row_values.push(observable.clone());
+            }
+            for (item_index, (name, value)) in row_values.into_iter().enumerate() {
+                if item_index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(DcOutputSeriesBuildError::Aborted);
+                }
+                let canonical = canonical_measure_signal_name(&name);
+                if !slots.contains_key(&canonical) {
+                    let retained_values = point_count
+                        .checked_mul(slots.len().saturating_add(2))
+                        .unwrap_or(usize::MAX);
+                    ResourceLimitError::ensure(
+                        ResourceKind::ResultValues,
+                        retained_values,
+                        limits.max_result_values,
+                    )?;
+                }
+                let slot = slots.entry(canonical.clone()).or_insert_with(|| Slot {
+                    name: name.clone(),
+                    values: vec![None; point_count],
+                });
+                if let Some(existing) = slot.values[row]
+                    && existing.to_bits() != value.to_bits()
+                {
+                    return Err(DcOutputSeriesBuildError::Detail(format!(
+                        "DC row {row} has ambiguous signal '{name}' normalized as '{canonical}'"
+                    )));
+                }
+                slot.values[row] = Some(value);
+            }
+        }
+        if abort.is_aborted() {
+            return Err(DcOutputSeriesBuildError::Aborted);
+        }
+        let mut columns = Vec::with_capacity(slots.len());
+        for (slot_index, slot) in slots.into_values().enumerate() {
+            if slot_index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(DcOutputSeriesBuildError::Aborted);
+            }
+            let mut values = Vec::with_capacity(point_count);
+            let mut complete = true;
+            for (row, value) in slot.values.into_iter().enumerate() {
+                if row.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(DcOutputSeriesBuildError::Aborted);
+                }
+                let Some(value) = value else {
+                    complete = false;
+                    break;
+                };
+                values.push(value);
+            }
+            if complete {
+                columns.push((slot.name, values));
+            }
+        }
+        let mut axis = Vec::with_capacity(point_count);
+        for (row, (value, _)) in sweep.iter().enumerate() {
+            if row.is_multiple_of(64) && abort.is_aborted() {
+                return Err(DcOutputSeriesBuildError::Aborted);
+            }
+            axis.push(*value);
+        }
+        Ok(Self { axis, columns })
+    }
+
+    fn signal_map(&self) -> HashMap<String, &[Value]> {
+        let mut signals = HashMap::new();
+        insert_case_variants(&mut signals, "Time", &self.axis);
+        for (name, values) in &self.columns {
+            insert_case_variants(&mut signals, name, values);
+        }
+        signals
+    }
 }
 
 /// Evaluate Xyce continuous equation measurements over an AC sweep.
@@ -4662,6 +5562,218 @@ mod tests {
         assert!(signals.contains_key("v(OUT)"));
         assert!(signals.contains_key("I(v1)"));
         assert_eq!(signals["TIME"], result.time.as_slice());
+    }
+
+    #[test]
+    fn transient_output_operands_preserve_authored_order_and_expressions() {
+        let netlist = Netlist::parse(
+            "transient output operands\n\
+             V1 out 0 0\n\
+             R1 out 0 1k\n\
+             .TRAN 1 3\n\
+             .PRINT TRAN I ( V1 ) V ( out , 0 ) IR(V1) {V(out)-I(V1)} V(out)\n\
+             .END\n",
+        )
+        .expect("transient output deck parses");
+        let projected = evaluate_tran_output_requests(&netlist, &tran_result())
+            .expect("transient operands evaluate");
+        assert_eq!(
+            projected
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "I ( V1 )",
+                "V ( out , 0 )",
+                "IR(V1)",
+                "{V(out)-I(V1)}",
+                "V(out)"
+            ]
+        );
+        assert_eq!(projected[0].kind, OutputColumnKind::Current);
+        assert_eq!(projected[1].kind, OutputColumnKind::Voltage);
+        assert_eq!(projected[2].kind, OutputColumnKind::Current);
+        assert_eq!(projected[3].kind, OutputColumnKind::Scalar);
+        assert_eq!(projected[0].values, vec![0.0, -1.0, -2.0, -3.0]);
+        assert_eq!(projected[1].values, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(projected[2].values, projected[0].values);
+        assert_eq!(projected[3].values, vec![0.0, 2.0, 4.0, 6.0]);
+        assert_eq!(projected[4].values, projected[1].values);
+    }
+
+    #[test]
+    fn dc_output_operands_include_named_device_observables() {
+        let netlist = Netlist::parse(
+            "DC output operands\n\
+             V1 out 0 0\n\
+             R1 out 0 1k\n\
+             .DC V1 0 1 1\n\
+             .PRINT DC R1:R I(V1) {V(out)/I(V1)}\n\
+             .END\n",
+        )
+        .expect("DC output deck parses");
+        let point = |voltage: Value, current: Value, resistance: Value| {
+            let mut result = SimulationResult::new(1, 1);
+            result.node_names = vec!["0".to_string(), "out".to_string()];
+            result.node_voltages = vec![0.0, voltage];
+            result.branch_names = vec!["V1".to_string()];
+            result.branch_currents = vec![current];
+            result.push_dc_observable("R1:R".to_string(), resistance);
+            result
+        };
+        let sweep = vec![
+            (0.0, point(0.0, -1.0, 1_000.0)),
+            (1.0, point(1.0, -2.0, 2_000.0)),
+        ];
+        let projected =
+            evaluate_dc_output_requests(&netlist, &sweep).expect("DC operands evaluate");
+        assert_eq!(projected[0].values, vec![1_000.0, 2_000.0]);
+        assert_eq!(projected[1].values, vec![-1.0, -2.0]);
+        assert_eq!(projected[2].values, vec![0.0, -0.5]);
+    }
+
+    #[test]
+    fn ordered_output_projection_enforces_abort_and_result_limits() {
+        let netlist = Netlist::parse(
+            "bounded output projection\n\
+             V1 out 0 0\n\
+             .TRAN 1 3\n\
+             .PRINT TRAN V(out) {V(out)*2}\n\
+             .END\n",
+        )
+        .expect("bounded output deck parses");
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values = 11;
+        let error =
+            evaluate_tran_output_requests_with_abort(&netlist, &tran_result(), limits, &NoAbort)
+                .expect_err("axis plus two columns require twelve values");
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::ResultValues,
+                requested: 12,
+                limit: 11,
+            })
+        ));
+
+        let error = evaluate_tran_output_requests_with_abort(
+            &netlist,
+            &tran_result(),
+            ResourceLimits::default(),
+            &crate::abort_signal::ImmediateAbort,
+        )
+        .expect_err("pre-aborted projection must stop");
+        assert!(matches!(error, SimulationError::Aborted));
+
+        let counting_abort = crate::abort_signal::CountingAbort::new(3);
+        let error = evaluate_tran_output_requests_with_abort(
+            &netlist,
+            &tran_result(),
+            ResourceLimits::default(),
+            &counting_abort,
+        )
+        .expect_err("interface-alias setup must poll cancellation");
+        assert!(matches!(error, SimulationError::Aborted));
+        assert!(counting_abort.count() >= 4);
+
+        let mut misaligned = netlist.clone();
+        misaligned.output_requests[0]
+            .operands
+            .push("V(out)".to_string());
+        let error = evaluate_tran_output_requests(&misaligned, &tran_result())
+            .expect_err("public AST edits cannot desynchronize typed output metadata");
+        assert!(matches!(
+            error,
+            OutputProjectionError::Operand { detail, .. }
+                if detail.contains("does not match typed operand count")
+        ));
+    }
+
+    #[test]
+    fn dc_output_projection_bounds_and_cancels_series_materialization() {
+        let netlist = Netlist::parse(
+            "bounded DC projection\n\
+             V1 out 0 0\n\
+             R1 out 0 1k\n\
+             .DC V1 0 3 1\n\
+             .PRINT DC V(out)\n\
+             .END\n",
+        )
+        .expect("bounded DC deck parses");
+        let point = |value: Value| {
+            let mut result = SimulationResult::new(2, 1);
+            result.node_names = vec!["0".into(), "out".into(), "extra".into()];
+            result.node_voltages = vec![0.0, value, value * 2.0];
+            result.branch_names = vec!["V1".into()];
+            result.branch_currents = vec![-value];
+            result
+        };
+        let sweep = (0..4)
+            .map(|value| (Value::from(value), point(Value::from(value))))
+            .collect::<Vec<_>>();
+
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values = 8;
+        let error = evaluate_dc_output_requests_with_abort(&netlist, &sweep, limits, &NoAbort)
+            .expect_err("intermediate DC projection storage must share the result-value budget");
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::ResultValues,
+                requested: 12,
+                limit: 8,
+            })
+        ));
+
+        let counting_abort = crate::abort_signal::CountingAbort::new(4);
+        let error = evaluate_dc_output_requests_with_abort(
+            &netlist,
+            &sweep,
+            ResourceLimits::default(),
+            &counting_abort,
+        )
+        .expect_err("DC series materialization must poll cancellation");
+        assert!(matches!(error, SimulationError::Aborted));
+        assert!(counting_abort.count() >= 5);
+    }
+
+    #[test]
+    fn dc_output_projection_resolves_each_row_by_canonical_name() {
+        let netlist = Netlist::parse(
+            "name-aligned DC output\n\
+             V1 a 0 0\n\
+             R1 a b 1k\n\
+             R2 b 0 1k\n\
+             .DC V1 0 1 1\n\
+             .PRINT DC V(a) V(b)\n\
+             .END\n",
+        )
+        .expect("name-aligned output deck parses");
+        let mut first = SimulationResult::new(2, 0);
+        first.node_names = vec!["0".into(), "a".into(), "b".into()];
+        first.node_voltages = vec![0.0, 1.0, 2.0];
+        let mut second = SimulationResult::new(2, 0);
+        second.node_names = vec!["0".into(), "b".into(), "a".into()];
+        second.node_voltages = vec![0.0, 20.0, 10.0];
+        let projected =
+            evaluate_dc_output_requests(&netlist, &[(0.0, first.clone()), (1.0, second)])
+                .expect("reordered rows project by name");
+        assert_eq!(projected[0].values, vec![1.0, 10.0]);
+        assert_eq!(projected[1].values, vec![2.0, 20.0]);
+
+        let mut missing = first;
+        missing.node_names = vec!["0".into(), "b".into()];
+        missing.node_voltages = vec![0.0, 20.0];
+        let error = evaluate_dc_output_requests(&netlist, &[(0.0, missing)])
+            .expect_err("missing requested node must fail closed");
+        assert!(matches!(
+            error,
+            OutputProjectionError::Operand {
+                analysis: OutputAnalysisKind::Dc,
+                operand_index: 0,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -505,6 +505,7 @@ pub(super) fn parse_line(
             &mut stream,
             line_num,
             ParseCommandContext {
+                logical_line: line,
                 analyses,
                 lin_analysis,
                 fft_analyses,

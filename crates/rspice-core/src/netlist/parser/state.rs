@@ -355,6 +355,8 @@ pub(super) struct ParseLineContext<'a> {
 }
 
 pub(super) struct ParseCommandContext<'a> {
+    /// Complete logical card text used for byte-exact output operand slices.
+    pub(super) logical_line: &'a str,
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
     pub(super) lin_analysis: &'a mut Option<LinAnalysis>,
     pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,

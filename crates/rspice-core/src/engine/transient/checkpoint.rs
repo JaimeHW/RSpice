@@ -538,7 +538,7 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
 /// expanded include/SPEF content and public post-parse AST edits are included.
 pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-elaborated-netlist-v5\0");
+    hasher.update(b"rspice-transient-elaborated-netlist-v6\0");
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -571,7 +571,11 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
             .map(|request| {
                 (
                     request.directive,
+                    request.analysis,
                     request.name.as_deref(),
+                    request.print_delimiter.as_ref(),
+                    request.operands.as_slice(),
+                    request.operand_kinds.as_slice(),
                     request.expressions.as_slice(),
                     request.dependencies.as_slice(),
                 )
@@ -2990,6 +2994,35 @@ mod tests {
             netlist_checkpoint_identity(&base),
             netlist_checkpoint_identity(&enabled),
             "enabled REPLACEGROUND changes checkpoint semantic identity"
+        );
+    }
+
+    #[test]
+    fn output_request_analysis_and_delimiter_change_checkpoint_identity() {
+        let base = Netlist::parse(
+            "checkpoint output request\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .PRINT TRAN V(out)\n\
+             .END\n",
+        )
+        .expect("output-request deck parses");
+        let mut changed_analysis = base.clone();
+        changed_analysis.output_requests[0].analysis = Some(crate::netlist::OutputAnalysisKind::Dc);
+        assert_ne!(
+            netlist_checkpoint_identity(&base),
+            netlist_checkpoint_identity(&changed_analysis),
+            "analysis ownership changes retained transient output state"
+        );
+
+        let mut changed_delimiter = base.clone();
+        changed_delimiter.output_requests[0].print_delimiter =
+            Some(crate::netlist::PrintDelimiter::Comma);
+        assert_ne!(
+            netlist_checkpoint_identity(&base),
+            netlist_checkpoint_identity(&changed_delimiter),
+            "output serialization semantics belong to checkpoint provenance"
         );
     }
 
