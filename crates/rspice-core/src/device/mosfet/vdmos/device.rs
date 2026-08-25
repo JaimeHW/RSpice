@@ -93,6 +93,44 @@ pub struct Vdmos {
     pub ngspice_subshift: Value,
     /// ngspice VDMOS weak-inversion softplus slope (V).
     pub ngspice_ksubthres: Value,
+    /// Nominal-temperature threshold retained for repeatable temperature updates.
+    nominal_vth: Value,
+    /// Nominal-temperature transconductance retained for repeatable temperature updates.
+    nominal_kp: Value,
+    /// Nominal-temperature drain resistance retained for repeatable temperature updates.
+    nominal_rd: Value,
+    /// Nominal-temperature source resistance retained for repeatable temperature updates.
+    nominal_rs: Value,
+    /// Nominal-temperature gate resistance retained for repeatable temperature updates.
+    nominal_rg: Value,
+    /// Nominal-temperature weak-inversion slope retained for repeatable updates.
+    nominal_ngspice_ksubthres: Value,
+    /// Nominal-temperature quasi-saturation resistance.
+    nominal_rq: Value,
+    /// ngspice gain temperature exponent (`MU`, alias `BEX`).
+    ngspice_mu: Value,
+    /// ngspice linear threshold-temperature coefficient (`TCVTH`, alias `VTOTC`).
+    ngspice_tcvth: Value,
+    /// ngspice drain-resistance temperature exponent (`TEXP0`).
+    ngspice_texp0: Value,
+    /// True when `TEXP0` was explicitly supplied; otherwise RD uses TRD1/TRD2.
+    ngspice_texp0_given: bool,
+    /// ngspice quasi-saturation resistance temperature exponent (`TEXP1`).
+    ngspice_texp1: Value,
+    /// True when both RQ and VQ select ngspice's quasi-saturation branch.
+    ngspice_qs_given: bool,
+    /// Linear and quadratic drain-resistance temperature coefficients.
+    ngspice_trd1: Value,
+    ngspice_trd2: Value,
+    /// Linear and quadratic gate-resistance temperature coefficients.
+    ngspice_trg1: Value,
+    ngspice_trg2: Value,
+    /// Linear and quadratic source-resistance temperature coefficients.
+    ngspice_trs1: Value,
+    ngspice_trs2: Value,
+    /// Linear and quadratic weak-inversion-slope temperature coefficients.
+    ngspice_tksubthres1: Value,
+    ngspice_tksubthres2: Value,
     /// Quasi-saturation resistance (Ω)
     pub rq: Value,
     /// Quasi-saturation onset voltage (V)
@@ -342,6 +380,27 @@ impl Vdmos {
             ngspice_theta: 0.0,
             ngspice_subshift: 0.0,
             ngspice_ksubthres: 0.1,
+            nominal_vth: 2.0,
+            nominal_kp: 2.0,
+            nominal_rd: 0.1,
+            nominal_rs: 0.01,
+            nominal_rg: 1.0,
+            nominal_ngspice_ksubthres: 0.1,
+            nominal_rq: 0.0,
+            ngspice_mu: -1.5,
+            ngspice_tcvth: 0.0,
+            ngspice_texp0: 1.5,
+            ngspice_texp0_given: false,
+            ngspice_texp1: 0.3,
+            ngspice_qs_given: false,
+            ngspice_trd1: 0.0,
+            ngspice_trd2: 0.0,
+            ngspice_trg1: 0.0,
+            ngspice_trg2: 0.0,
+            ngspice_trs1: 0.0,
+            ngspice_trs2: 0.0,
+            ngspice_tksubthres1: 0.0,
+            ngspice_tksubthres2: 0.0,
             rq: 0.0,
             vq: 5.0,
             velocity_saturation_voltage: Value::INFINITY,
@@ -496,6 +555,20 @@ impl Vdmos {
             self.ngspice_theta = 0.0;
             self.ngspice_subshift = 0.0;
             self.ngspice_ksubthres = 0.1;
+            self.ngspice_mu = -1.5;
+            self.ngspice_tcvth = 0.0;
+            self.ngspice_texp0 = 1.5;
+            self.ngspice_texp0_given = false;
+            self.ngspice_texp1 = 0.3;
+            self.ngspice_qs_given = false;
+            self.ngspice_trd1 = 0.0;
+            self.ngspice_trd2 = 0.0;
+            self.ngspice_trg1 = 0.0;
+            self.ngspice_trg2 = 0.0;
+            self.ngspice_trs1 = 0.0;
+            self.ngspice_trs2 = 0.0;
+            self.ngspice_tksubthres1 = 0.0;
+            self.ngspice_tksubthres2 = 0.0;
 
             self.cgs0 = 1.4e-9;
             self.ngspice_cgd_min = 20.0e-12;
@@ -554,6 +627,43 @@ impl Vdmos {
         }
         if let Some(&v) = params.get("KSUBTHRES") {
             self.ngspice_ksubthres = v.max(1.0e-12);
+        }
+        if let Some(&v) = params.get("MU").or_else(|| params.get("BEX")) {
+            self.ngspice_mu = v;
+        }
+        if let Some(&v) = params.get("TCVTH").or_else(|| params.get("VTOTC")) {
+            self.ngspice_tcvth = v;
+        }
+        if let Some(&v) = params.get("TEXP0") {
+            self.ngspice_texp0 = v;
+            self.ngspice_texp0_given = true;
+        }
+        if let Some(&v) = params.get("TEXP1") {
+            self.ngspice_texp1 = v;
+        }
+        if let Some(&v) = params.get("TRD1") {
+            self.ngspice_trd1 = v;
+        }
+        if let Some(&v) = params.get("TRD2") {
+            self.ngspice_trd2 = v;
+        }
+        if let Some(&v) = params.get("TRG1") {
+            self.ngspice_trg1 = v;
+        }
+        if let Some(&v) = params.get("TRG2") {
+            self.ngspice_trg2 = v;
+        }
+        if let Some(&v) = params.get("TRS1") {
+            self.ngspice_trs1 = v;
+        }
+        if let Some(&v) = params.get("TRS2") {
+            self.ngspice_trs2 = v;
+        }
+        if let Some(&v) = params.get("TKSUBTHRES1") {
+            self.ngspice_tksubthres1 = v;
+        }
+        if let Some(&v) = params.get("TKSUBTHRES2") {
+            self.ngspice_tksubthres2 = v;
         }
         if let Some(&v) = params.get("RQ") {
             self.rq = v;
@@ -869,6 +979,8 @@ impl Vdmos {
             self.recovery.softness = v.clamp(0.0, 1.0);
         }
 
+        self.ngspice_qs_given = params.contains_key("RQ") && params.contains_key("VQ");
+        self.capture_nominal_temperature_values();
         self
     }
 
@@ -1023,6 +1135,7 @@ impl Vdmos {
             self.cgb_overlap *= effective_length.max(0.0) * multiplier;
         }
 
+        self.capture_nominal_temperature_values();
         self
     }
 
@@ -1051,6 +1164,53 @@ impl Vdmos {
         if nominal_temperature_kelvin.is_finite() && nominal_temperature_kelvin > 0.0 {
             self.d1_tnom_kelvin = nominal_temperature_kelvin;
         }
+
+        if self.xyce_level18 {
+            return;
+        }
+
+        let temperature = self.d1_temperature_kelvin;
+        let nominal_temperature = self.d1_tnom_kelvin;
+        let delta_temperature = temperature - nominal_temperature;
+        let temperature_ratio = temperature / nominal_temperature;
+
+        self.kp = self.nominal_kp * temperature_ratio.powf(self.ngspice_mu);
+        self.vth = self.nominal_vth + self.polarity() * self.ngspice_tcvth * delta_temperature;
+        self.ngspice_ksubthres = self.nominal_ngspice_ksubthres
+            * (1.0
+                + self.ngspice_tksubthres1 * delta_temperature
+                + self.ngspice_tksubthres2 * delta_temperature * delta_temperature);
+        self.rd = if self.ngspice_texp0_given {
+            self.nominal_rd * temperature_ratio.powf(self.ngspice_texp0)
+        } else {
+            self.nominal_rd
+                * (1.0
+                    + self.ngspice_trd1 * delta_temperature
+                    + self.ngspice_trd2 * delta_temperature * delta_temperature)
+        };
+        self.rg = self.nominal_rg
+            * (1.0
+                + self.ngspice_trg1 * delta_temperature
+                + self.ngspice_trg2 * delta_temperature * delta_temperature);
+        self.rs = self.nominal_rs
+            * (1.0
+                + self.ngspice_trs1 * delta_temperature
+                + self.ngspice_trs2 * delta_temperature * delta_temperature);
+        self.rq = if self.ngspice_qs_given {
+            self.nominal_rq * temperature_ratio.powf(self.ngspice_texp1)
+        } else {
+            self.nominal_rq
+        };
+    }
+
+    fn capture_nominal_temperature_values(&mut self) {
+        self.nominal_vth = self.vth;
+        self.nominal_kp = self.kp;
+        self.nominal_rd = self.rd;
+        self.nominal_rs = self.rs;
+        self.nominal_rg = self.rg;
+        self.nominal_ngspice_ksubthres = self.ngspice_ksubthres;
+        self.nominal_rq = self.rq;
     }
 
     pub fn set_bulk_node(&mut self, bulk: NodeId) {
@@ -3318,6 +3478,113 @@ mod tests {
         let expected_threshold = 0.5 * 0.2 * soft_overdrive.powi(2);
         assert!((threshold_current - expected_threshold).abs() < 1.0e-12);
         assert_eq!(threshold_region, VdmosRegion::Cutoff);
+    }
+
+    fn assert_temperature_value(label: &str, actual: Value, expected: Value) {
+        let tolerance = 2.0e-14 * actual.abs().max(expected.abs()).max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{label}: actual={actual:.16e} expected={expected:.16e} tolerance={tolerance:.3e}"
+        );
+    }
+
+    #[test]
+    fn ngspice_vdmos_default_channel_temperature_scaling_is_repeatable() {
+        let params = HashMap::from([
+            ("VTO".to_string(), 2.0),
+            ("KP".to_string(), 0.65),
+            ("RD".to_string(), 0.2),
+            ("RS".to_string(), 0.3),
+            ("RG".to_string(), 0.4),
+            ("KSUBTHRES".to_string(), 0.29),
+        ]);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+
+        vdmos.set_temperature(400.0, 300.0);
+        assert_temperature_value("default MU", vdmos.kp, 0.65 * (4.0_f64 / 3.0).powf(-1.5));
+        assert_temperature_value("default TCVTH", vdmos.vth, 2.0);
+        assert_temperature_value("default RD law", vdmos.rd, 0.2);
+        assert_temperature_value("default RS law", vdmos.rs, 0.3);
+        assert_temperature_value("default RG law", vdmos.rg, 0.4);
+        assert_temperature_value("default KSUBTHRES law", vdmos.ngspice_ksubthres, 0.29);
+
+        vdmos.set_temperature(300.0, 300.0);
+        assert_temperature_value("restored KP", vdmos.kp, 0.65);
+        assert_temperature_value("restored VTH", vdmos.vth, 2.0);
+        assert_temperature_value("restored RD", vdmos.rd, 0.2);
+        assert_temperature_value("restored RS", vdmos.rs, 0.3);
+        assert_temperature_value("restored RG", vdmos.rg, 0.4);
+        assert_temperature_value("restored KSUBTHRES", vdmos.ngspice_ksubthres, 0.29);
+
+        vdmos.set_temperature(400.0, 300.0);
+        assert_temperature_value(
+            "repeat KP does not compound",
+            vdmos.kp,
+            0.65 * (4.0_f64 / 3.0).powf(-1.5),
+        );
+    }
+
+    #[test]
+    fn ngspice_vdmos_explicit_temperature_coefficients_follow_vdmostemp() {
+        let params = HashMap::from([
+            ("VTO".to_string(), 2.5),
+            ("KP".to_string(), 0.8),
+            ("RD".to_string(), 0.2),
+            ("RS".to_string(), 0.3),
+            ("RG".to_string(), 0.4),
+            ("RQ".to_string(), 0.5),
+            ("VQ".to_string(), 4.0),
+            ("KSUBTHRES".to_string(), 0.25),
+            ("MU".to_string(), -1.2),
+            ("TCVTH".to_string(), -2.0e-3),
+            ("TEXP0".to_string(), 1.7),
+            ("TEXP1".to_string(), 0.3),
+            ("TRD1".to_string(), 9.0e-3),
+            ("TRD2".to_string(), 9.0e-5),
+            ("TRS1".to_string(), 1.0e-3),
+            ("TRS2".to_string(), 2.0e-5),
+            ("TRG1".to_string(), 3.0e-3),
+            ("TRG2".to_string(), 4.0e-5),
+            ("TKSUBTHRES1".to_string(), 5.0e-4),
+            ("TKSUBTHRES2".to_string(), 6.0e-6),
+        ]);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        let ratio = 350.0_f64 / 300.0;
+        let delta = 50.0_f64;
+
+        vdmos.set_temperature(350.0, 300.0);
+
+        assert_temperature_value("explicit MU", vdmos.kp, 0.8 * ratio.powf(-1.2));
+        assert_temperature_value("explicit TCVTH", vdmos.vth, 2.5 - 2.0e-3 * delta);
+        assert_temperature_value("explicit TEXP0 wins", vdmos.rd, 0.2 * ratio.powf(1.7));
+        assert_temperature_value(
+            "explicit TRS polynomial",
+            vdmos.rs,
+            0.3 * (1.0 + 1.0e-3 * delta + 2.0e-5 * delta * delta),
+        );
+        assert_temperature_value(
+            "explicit TRG polynomial",
+            vdmos.rg,
+            0.4 * (1.0 + 3.0e-3 * delta + 4.0e-5 * delta * delta),
+        );
+        assert_temperature_value("explicit TEXP1", vdmos.rq, 0.5 * ratio.powf(0.3));
+        assert_temperature_value(
+            "explicit TKSUBTHRES polynomial",
+            vdmos.ngspice_ksubthres,
+            0.25 * (1.0 + 5.0e-4 * delta + 6.0e-6 * delta * delta),
+        );
+    }
+
+    #[test]
+    fn ngspice_pvdmos_threshold_coefficient_is_polarity_normalized() {
+        let params = HashMap::from([("VTO".to_string(), -3.0), ("TCVTH".to_string(), 2.0e-3)]);
+        let mut vdmos = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+
+        vdmos.set_temperature(350.0, 300.0);
+
+        // ngspice stores -3 V + TCVTH*dT and multiplies by the PMOS type (-1)
+        // in the load equation, yielding a positive effective threshold of 2.9 V.
+        assert_temperature_value("PMOS effective threshold", vdmos.vth, 2.9);
     }
 
     #[test]

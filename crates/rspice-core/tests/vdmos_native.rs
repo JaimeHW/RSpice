@@ -2076,6 +2076,36 @@ fn ngspice_vdmos_standard_mtriode_channel_matches_reference_operating_points() {
 }
 
 #[test]
+fn ngspice_vdmos_standard_channel_temperature_matches_ngspice_47() {
+    // Unchanged ngspice 47 reference results for this same deck/model are
+    // V(D)=0.601032997 V at 25 C and V(D)=0.9492869 V at 125 C. The card
+    // intentionally relies on standard VDMOS's default MU=-1.5.
+    let model = r#".model 2N7000 VDMOS (NCHAN VTO=2.555 KP=0.65 RD=0 RS=0 RG=0 LAMBDA=0.005
++ MTRIODE=1.0105 THETA=0.6253 SUBSHIFT=0 KSUBTHRES=0.29069
++ CGS=16p CGDMIN=2.36p CGDMAX=37.71p A=0.336
++ IS=0.1p RB=0.137 N=1.09 TT=0
++ CJO=40.17p VJ=0.071 M=0.298 FC=0.5 TNOM=25)"#;
+    for (temperature, expected_drain) in [(25.0, 0.601_032_997), (125.0, 0.949_286_9)] {
+        let deck = format!(
+            "* standard VDMOS channel temperature oracle\n\
+             .options temp={temperature} tnom=25\n\
+             vg g 0 dc 10\n\
+             itest 0 d dc 0.5\n\
+             m1 d g 0 0 2N7000\n\
+             {model}\n\
+             .op\n\
+             .end\n"
+        );
+        let drain = vdmos_dc_node_voltage(&deck, "d");
+        let relative_error = (drain - expected_drain).abs() / expected_drain;
+        assert!(
+            relative_error < 2.0e-5,
+            "standard VDMOS temperature mismatch at {temperature} C: rspice={drain:.12e} ngspice47={expected_drain:.12e} relative_error={relative_error:.3e}"
+        );
+    }
+}
+
+#[test]
 fn ngspice_vdmos_standard_capacitance_parameters_match_table_points() {
     let ciss_crss_deck = format!(
         "* portable VDMOS Ciss/Crss at VDS=10 V\n\
