@@ -56,9 +56,11 @@ impl Mosfet {
             lambda: 0.0,    // Channel-length modulation (mos1set.c default)
             is_bulk: 1e-14, // Bulk diode saturation current
             js_bulk: 0.0,
-            // Oxide capacitance per area at the mos1set.c default
-            // TOX = 1e-7 m.
-            cox: 3.9 * 8.854214871e-12 / 1e-7,
+            // Berkeley MOS1 has no default oxide thickness. mos1temp.c
+            // therefore leaves the oxide-capacitance factor at zero until
+            // TOX is explicitly authored. MOS2/MOS3 install their distinct
+            // 100 nm defaults below in `with_params`.
+            cox: 0.0,
             cj: 0.0,
             cjsw: 0.0,
             pb: 0.8,
@@ -197,6 +199,9 @@ impl Mosfet {
 
     fn with_mos3_defaults(mut self, level: i32) -> Self {
         self.level = level;
+        // Berkeley MOS3/MOS9 default TOX to 100 nm, unlike MOS1 where an
+        // omitted TOX deliberately leaves the oxide-capacitance factor zero.
+        self.cox = 3.9 * 8.854_214_871e-12 / 1.0e-7;
         self.mos3_eta = 0.0;
         self.mos3_theta = 0.0;
         self.mos3_kappa = 0.2;
@@ -1573,11 +1578,17 @@ mod tests {
 
         let without_tox = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
         assert_eq!(without_tox.kp, 2.0e-5);
+        assert_eq!(
+            without_tox.cox, 0.0,
+            "Berkeley MOS1 must not invent intrinsic gate capacitance when TOX is omitted"
+        );
 
         let tox = 80.0e-9;
         params.insert("TOX".to_string(), tox);
         let with_tox = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
-        let expected = 700.0 * 1.0e-4 * (3.9 * 8.854_214_871e-12 / tox);
+        let expected_cox = 3.9 * 8.854_214_871e-12 / tox;
+        let expected = 700.0 * 1.0e-4 * expected_cox;
+        assert!((with_tox.cox - expected_cox).abs() <= expected_cox * 1.0e-14);
         assert!((with_tox.kp - expected).abs() <= expected * 1.0e-14);
     }
 
@@ -1720,6 +1731,8 @@ mod tests {
         assert_eq!(mos.mos3_length_adjust, 0.0);
         assert_eq!(mos.mos3_width_adjust, 0.0);
         assert_eq!(mos.mos3_width_narrow, 0.0);
+        let expected_cox = 3.9 * 8.854_214_871e-12 / 1.0e-7;
+        assert!((mos.cox - expected_cox).abs() <= expected_cox * 1.0e-14);
     }
 
     #[test]

@@ -535,6 +535,10 @@ mod tests {
         params.insert("GAMMA".to_string(), 0.4);
         params.insert("PHI".to_string(), 0.7);
         params.insert("LAMBDA".to_string(), 0.02);
+        // This fixture exercises the opt-in simplified short-channel path,
+        // whose current law uses oxide capacitance. Keep that input explicit
+        // now that Berkeley MOS1 correctly has no implicit TOX.
+        params.insert("TOX".to_string(), 100.0e-9);
         Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0)
             .with_level(7)
             .with_params(&params)

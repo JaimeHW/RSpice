@@ -372,6 +372,10 @@ mod tests {
             mos.w = 100.0e-6;
             mos.l = 12.7e-6;
             mos.ld = 2.4485e-6;
+            // Intrinsic charge is the subject of this fixture, so supply an
+            // explicit oxide capacitance instead of relying on a MOS1
+            // constructor default that Berkeley SPICE does not define.
+            mos.cox = 3.9 * 8.854_214_871e-12 / 100.0e-9;
             mos.cgso = 0.0;
             mos.cgdo = 0.0;
             mos.cgbo = 0.0;
