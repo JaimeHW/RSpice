@@ -422,6 +422,22 @@ impl Engine {
             result.push_dc_observable(format!("W({})", binding.name), power);
             result.push_dc_observable(format!("N({}:R)", binding.name), binding.resistance_store);
         }
+
+        // Static compact-model getters describe the installed device/model,
+        // not a value reconstructed from the source card.  This distinction
+        // matters when instance values inherit model expressions whose
+        // parameter context changes between batch coordinates.  Publish the
+        // effective BSIM3 geometry and the raw/defaulted BSIM4 body-network
+        // model parameters from the canonical native device objects.
+        for device in &circuit.bsim3v3.devices {
+            result.push_dc_observable(format!("{}:L", device.name), device.core.geom.l);
+            result.push_dc_observable(format!("{}:W", device.name), device.core.geom.w);
+        }
+        for device in &circuit.bsim4v8.devices {
+            result.push_dc_observable(format!("{}:RBDB", device.name), device.core.model.rbdb);
+            result.push_dc_observable(format!("{}:RBSB", device.name), device.core.model.rbsb);
+            result.push_dc_observable(format!("{}:RBPS", device.name), device.core.model.rbps);
+        }
         Ok(())
     }
 
@@ -1257,6 +1273,59 @@ mod tests {
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
         );
+    }
+
+    #[test]
+    fn native_bsim_static_getters_publish_installed_dc_parameters() {
+        let bsim3 = Netlist::parse(
+            "BSIM3 installed parameter outputs\n\
+             VDS d 0 0\n\
+             VGS g 0 1\n\
+             M3 d g 0 0 N3\n\
+             .MODEL N3 NMOS LEVEL=9 L=0.35u W=10u\n\
+             .DC VDS 0 0 1\n\
+             .END\n",
+        )
+        .expect("BSIM3 parameter-output deck parses");
+        let bsim3_result = &xyce_engine()
+            .run_dc_sweep(&bsim3, "VDS", 0.0, 0.0, 1.0)
+            .expect("BSIM3 parameter-output point solves")[0]
+            .1;
+        assert!(
+            (bsim3_result
+                .try_dc_observable_named("M3:L")
+                .expect("M3:L observable")
+                - 0.35e-6)
+                .abs()
+                <= 1.0e-21
+        );
+        assert!(
+            (bsim3_result
+                .try_dc_observable_named("m3:w")
+                .expect("M3:W observable")
+                - 10.0e-6)
+                .abs()
+                <= 1.0e-20
+        );
+
+        let bsim4 = Netlist::parse(
+            "BSIM4 installed parameter outputs\n\
+             VDS d 0 0\n\
+             VGS g 0 1\n\
+             VB b 0 0\n\
+             M4 d g 0 b N4 L=0.09u W=10u NF=5\n\
+             .MODEL N4 NMOS LEVEL=14 RBDB=14 RBSB=15 RBPS=16\n\
+             .DC VDS 0 0 1\n\
+             .END\n",
+        )
+        .expect("BSIM4 parameter-output deck parses");
+        let bsim4_result = &xyce_engine()
+            .run_dc_sweep(&bsim4, "VDS", 0.0, 0.0, 1.0)
+            .expect("BSIM4 parameter-output point solves")[0]
+            .1;
+        assert_eq!(bsim4_result.try_dc_observable_named("M4:RBDB"), Some(14.0));
+        assert_eq!(bsim4_result.try_dc_observable_named("m4:rbsb"), Some(15.0));
+        assert_eq!(bsim4_result.try_dc_observable_named("M4:RBPS"), Some(16.0));
     }
 
     #[test]
