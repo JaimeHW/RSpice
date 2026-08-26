@@ -316,7 +316,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     DesignNavigatorSection::Ports => port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
-                    DesignNavigatorSection::Excitations => excitation_section(ui, &mut app.state),
+                    DesignNavigatorSection::Excitations => excitation_section(ui, app),
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
                 }
             }
@@ -471,7 +471,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         let response = nav_row_indented_mono_response(
             ui,
             if net.class == crate::simulation::netlist_gen::NetClass::Ground {
-                WorkbenchIcon::Project
+                WorkbenchIcon::Supply
             } else {
                 WorkbenchIcon::Design
             },
@@ -604,18 +604,18 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// row itself is what makes that visible without opening anything, so the count
 /// is never elided.
 ///
-/// It takes the session rather than the application because everything a row
-/// does — select, clear the highlight, centre — is a schematic edit, and a rail
-/// that cannot reach past the session cannot grow a command that does.
-fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
+/// A source is an instance like any other row in these rails, so it carries the
+/// same object menu: the rail that could select a source but not open, rename
+/// or find it was the one rail whose rows answered to the pointer alone.
+fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(state.workbench.navigator_filter());
+    let query = normalized(app.state.workbench.navigator_filter());
     let sources = crate::simulation::placed_sources::placed_sources(
-        &state.schematic,
-        state.sim_setup.analysis_plan.as_ref(),
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
     )
     .into_iter()
-    .filter(|source| sheet_visibility::object_is_in_scope(state, scope, source.component_id))
+    .filter(|source| sheet_visibility::object_is_in_scope(&app.state, scope, source.component_id))
     .filter(|source| {
         matches_query(
             &query,
@@ -657,30 +657,60 @@ fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppS
             source.quantity(),
             source.summary()
         );
-        let position = state
-            .schematic
-            .components
-            .iter()
-            .find(|component| component.id == source.component_id)
-            .map(|component| component.pos);
+        let object = excitation_object(&app.state, &source);
         let response = nav_row_indented_mono_response(
             ui,
             WorkbenchIcon::ArrowRight,
             &source.reference,
-            state.schematic.selection.has_component(source.component_id),
+            app.state
+                .schematic
+                .selection
+                .has_component(source.component_id),
             Some(&meta),
             1,
         )
         .on_hover_text(excitation_tooltip(&source));
-        if response.clicked() {
-            state
-                .schematic
-                .selection
-                .select_only_component(source.component_id);
-            state.schematic.net_highlight.clear();
-            state.schematic.center_request = position;
+        match object {
+            Some(object) => {
+                if response.clicked() {
+                    select_navigator_object(app, &object);
+                }
+                navigator_object_context_menu(&response, app, object);
+            }
+            None => {
+                if response.clicked() {
+                    app.state
+                        .schematic
+                        .selection
+                        .select_only_component(source.component_id);
+                    app.state.schematic.net_highlight.clear();
+                    app.state.schematic.center_request = None;
+                }
+            }
         }
     }
+}
+
+/// The design object one excitation row stands for.
+///
+/// Every command the shared menu carries acts on a placed object, so a source
+/// the sheet holds no instance for stands for nothing: it is still listed,
+/// still selectable, and offered no menu rather than a menu of dead entries.
+fn excitation_object(
+    state: &crate::workbench::app_state::AppState,
+    source: &crate::simulation::placed_sources::PlacedSource,
+) -> Option<NavigatorObject> {
+    let position = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == source.component_id)
+        .map(|component| component.pos)?;
+    Some(NavigatorObject::Component {
+        id: source.component_id,
+        label: source.reference.clone(),
+        position,
+    })
 }
 
 /// The full reading of one excitation: its terminals, and every analysis that
@@ -866,7 +896,7 @@ fn reveal_probe_expression(app: &mut RSpiceApp, expression: &str) {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum NavigatorObject {
     Component {
         id: u64,

@@ -154,14 +154,14 @@ fn the_sheet_scope_narrows_the_object_rails_to_the_active_sheet() {
     crate::ui::Theme::default().apply(&ctx);
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::AllSheets);
-    let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.state));
+    let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app));
     assert!(
         every_sheet.contains("VIN") && every_sheet.contains("VBIAS"),
         "the default scope lists the whole cell view: {every_sheet}"
     );
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::ActiveSheet);
-    let this_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.state));
+    let this_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app));
     assert!(
         this_sheet.contains("VIN"),
         "an object on the active sheet is kept: {this_sheet}"
