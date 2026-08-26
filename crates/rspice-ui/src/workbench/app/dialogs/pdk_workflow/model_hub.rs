@@ -233,19 +233,12 @@ pub(super) fn model_hub_progress() -> &'static ModelHubProgress {
 }
 
 /// Human-readable byte count for a receipt.
+///
+/// Delegates to the one public spelling. This copy divided by 1024 and wrote
+/// decimal unit names, so a receipt and the hub ledger could describe the
+/// same archive with two different numbers.
 fn byte_size(bytes: u64) -> String {
-    const UNITS: [(&str, u64); 3] = [("MB", 1024 * 1024), ("kB", 1024), ("B", 1)];
-    for (unit, scale) in UNITS {
-        if bytes >= scale {
-            let value = bytes as f64 / scale as f64;
-            return if value >= 100.0 || scale == 1 {
-                format!("{value:.0} {unit}")
-            } else {
-                format!("{value:.1} {unit}")
-            };
-        }
-    }
-    "0 B".to_owned()
+    crate::simulation::run_set::format_bytes(bytes)
 }
 
 /// Runs one Model Hub operation to completion against its own hub.
