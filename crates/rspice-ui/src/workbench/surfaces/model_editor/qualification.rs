@@ -1337,7 +1337,7 @@ fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                 .commit_qualification_suite();
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
-            cancel_qualification_authoring(app);
+            cancel_qualification_authoring(&mut app.state.workbench.model_editor);
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -1623,12 +1623,11 @@ fn qualification_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, write_allowed:
     );
 }
 
-pub(super) fn cancel_qualification_authoring(app: &mut RSpiceApp) {
-    app.state
-        .workbench
-        .model_editor
-        .qualification_authoring_open = false;
-    app.state.workbench.model_editor.qualification_authoring = Default::default();
+pub(super) fn cancel_qualification_authoring(
+    editor: &mut crate::workbench::documents::model_editor::ModelEditorState,
+) {
+    editor.qualification_authoring_open = false;
+    editor.qualification_authoring = Default::default();
 }
 
 pub(super) fn qualification_normalize_authoring_domains(

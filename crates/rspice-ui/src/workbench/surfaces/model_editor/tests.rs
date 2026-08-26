@@ -1,10 +1,95 @@
 //! Tests for the model editor surface's authoring behaviour.
 //!
 //! The cases pin that normalizing a selection never resizes the form, that
-//! fallbacks are deterministic, and that cancelling authoring discards every
-//! partial field rather than leaving some behind.
+//! fallbacks are deterministic, that cancelling authoring discards every
+//! partial field rather than leaving some behind, and that every count the
+//! surface states is painted by the element that owns it.
 
 use super::*;
+
+/// A project-owned candidate with enough declared parameters that the counts
+/// the rail and the section headers state are not all zero.
+#[cfg(not(target_arch = "wasm32"))]
+fn app_with_open_candidate() -> RSpiceApp {
+    use crate::state::model_library::ProjectModelDefinition;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model_library_manager
+        .create_project_model(
+            "owned-models",
+            &ProjectModelDefinition {
+                name: "nch_owned".to_owned(),
+                spice_type: "NMOS".to_owned(),
+                description: "Project model".to_owned(),
+                numeric_parameters: BTreeMap::from([
+                    ("vto".to_owned(), 0.7),
+                    ("kp".to_owned(), 120e-6),
+                    ("gamma".to_owned(), 0.45),
+                ]),
+                string_parameters: BTreeMap::new(),
+            },
+        )
+        .expect("create project model");
+    let revision = app.state.workspace.project.revision();
+    app.state
+        .workbench
+        .model_editor
+        .open(
+            &app.state.model_library_manager,
+            "owned-models",
+            "nch_owned",
+            revision,
+        )
+        .expect("open model candidate");
+    app
+}
+
+/// Every string the surface paints, with the colour it was laid out in, at the
+/// workspace width the surface is designed against.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_surface(app: &mut RSpiceApp, section: ModelEditorSection) -> Vec<(String, Color32)> {
+    fn walk(shape: &egui::epaint::Shape, into: &mut Vec<(String, Color32)>) {
+        match shape {
+            egui::epaint::Shape::Text(painted) => into.push((
+                painted.galley.job.text.clone(),
+                painted
+                    .galley
+                    .job
+                    .sections
+                    .first()
+                    .map_or(painted.fallback_color, |section| section.format.color),
+            )),
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, into);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    app.state.workbench.model_editor.active_section = section;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let size = Vec2::new(1_180.0, 900.0);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| show(ui, app));
+        },
+    );
+    let mut painted = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut painted);
+    }
+    painted
+}
 
 #[test]
 fn section_contract_matches_the_six_mockup_tabs() {
@@ -270,7 +355,7 @@ fn cancelling_qualification_authoring_discards_every_partial_field() {
     fields.sample = QualificationAuthoringSample::SweepPoint;
     fields.error = Some("partial error".to_owned());
 
-    cancel_qualification_authoring(&mut app);
+    cancel_qualification_authoring(&mut app.state.workbench.model_editor);
 
     let editor = &app.state.workbench.model_editor;
     assert!(!editor.qualification_authoring_open);
@@ -290,4 +375,237 @@ fn cancelling_qualification_authoring_discards_every_partial_field() {
         QualificationAuthoringSample::OperatingPoint
     );
     assert!(editor.qualification_authoring.error.is_none());
+}
+
+/// Each rail entry states the count its own section owns, and only that: no
+/// entry projects a fact another section is responsible for.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_navigation_rail_projects_only_section_owned_counts() {
+    let app = app_with_open_candidate();
+    let records = persisted_records(&app);
+    let metadata = records.metadata.as_ref().expect("persisted schema");
+    let parameters = metadata.parameters.len();
+    let sections = metadata.sections.len();
+    let qualification = qualification_totals(&app, &records);
+
+    assert_eq!(
+        navigation_meta(&app, &records, ModelEditorSection::Parameters),
+        Some((parameters.to_string(), MetricTone::Neutral))
+    );
+    assert_eq!(
+        navigation_meta(&app, &records, ModelEditorSection::Sections),
+        Some((sections.to_string(), MetricTone::Neutral))
+    );
+    assert_eq!(
+        navigation_meta(&app, &records, ModelEditorSection::Tests),
+        Some((
+            format!("{}/{}", qualification.desktop_passed, qualification.total),
+            qualification.desktop_tone
+        ))
+    );
+    assert_eq!(qualification.desktop_tone, MetricTone::Warning);
+    for section in [
+        ModelEditorSection::Statistics,
+        ModelEditorSection::Temperature,
+        ModelEditorSection::Release,
+    ] {
+        assert_eq!(navigation_meta(&app, &records, section), None);
+    }
+}
+
+/// A rejected persisted schema tones both count entries and the parameter
+/// split, because a count read off a rejected definition is exactly the fact
+/// whose health is in doubt.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_rejected_schema_tones_every_count_read_off_it() {
+    let app = app_with_open_candidate();
+    let mut records = persisted_records(&app);
+    records.metadata_error = Some("parameters[0]: out of declared bounds".to_owned());
+    for section in [
+        ModelEditorSection::Parameters,
+        ModelEditorSection::Sections,
+    ] {
+        let (_, tone) = navigation_meta(&app, &records, section).expect("count");
+        assert_eq!(tone, MetricTone::Error);
+    }
+    let (_, tone) =
+        section_header_fact(&app, &records, ModelEditorSection::Parameters).expect("split");
+    assert_eq!(tone, MetricTone::Error);
+}
+
+/// The parameter source split and runtime parity are section aggregates: no
+/// single row can carry them, and no other section restates them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn section_headers_own_the_aggregates_no_row_can_carry() {
+    let app = app_with_open_candidate();
+    let records = persisted_records(&app);
+    let metadata = records.metadata.as_ref().expect("persisted schema");
+    let (declared, inherited, overridden) = parameter_source_split(metadata);
+    let qualification = qualification_totals(&app, &records);
+
+    assert_eq!(
+        section_header_fact(&app, &records, ModelEditorSection::Parameters),
+        Some((
+            format!("{declared} declared · {inherited} inherited · {overridden} override"),
+            MetricTone::Neutral
+        ))
+    );
+    assert_eq!(
+        section_header_fact(&app, &records, ModelEditorSection::Tests),
+        Some((
+            format!(
+                "{} / {} WebAssembly · {}",
+                qualification.wasm_passed, qualification.total, qualification.wasm_detail
+            ),
+            qualification.wasm_tone
+        ))
+    );
+    // Section names, statistical variables, temperature laws, and release
+    // facts are already stated row by row on their own pages.
+    for section in [
+        ModelEditorSection::Sections,
+        ModelEditorSection::Statistics,
+        ModelEditorSection::Temperature,
+        ModelEditorSection::Release,
+    ] {
+        assert_eq!(section_header_fact(&app, &records, section), None);
+    }
+}
+
+/// Every projected fact is painted, in its tone, by the element that owns it.
+/// Nothing above the workspace restates one: `Parity` names a fact the Tests
+/// section owns, so that label anywhere is a KPI band standing over the page.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_owned_fact_is_painted_by_its_owner() {
+    let mut app = app_with_open_candidate();
+    let records = persisted_records(&app);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let t = Tokens::get(&ctx);
+
+    let (parameters, _) =
+        navigation_meta(&app, &records, ModelEditorSection::Parameters).expect("count");
+    let (tests, tests_tone) =
+        navigation_meta(&app, &records, ModelEditorSection::Tests).expect("ratio");
+    let (split, _) =
+        section_header_fact(&app, &records, ModelEditorSection::Parameters).expect("split");
+    let (parity, parity_tone) =
+        section_header_fact(&app, &records, ModelEditorSection::Tests).expect("parity");
+
+    let parameters_page = painted_surface(&mut app, ModelEditorSection::Parameters);
+    assert!(
+        parameters_page.contains(&(parameters, t.color.text_dim)),
+        "{parameters_page:?}"
+    );
+    assert!(
+        parameters_page.contains(&(tests, meta_color(&t, tests_tone))),
+        "{parameters_page:?}"
+    );
+    assert!(
+        parameters_page.contains(&(split, t.color.text_dim)),
+        "{parameters_page:?}"
+    );
+
+    let tests_page = painted_surface(&mut app, ModelEditorSection::Tests);
+    assert!(
+        tests_page.contains(&(parity, meta_color(&t, parity_tone))),
+        "{tests_page:?}"
+    );
+    for page in [parameters_page, tests_page] {
+        assert!(
+            !page.iter().any(|(text, _)| text == "Parity"),
+            "a Parity cell restates a fact the Tests section owns: {page:?}"
+        );
+    }
+}
+
+/// The workspace owns every pixel below the specialist header: the navigation
+/// rail starts directly under it and reaches the bottom edge, so a band
+/// inserted between the two would leave an unpainted seam here.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_workspace_body_tiles_the_surface_under_the_specialist_header() {
+    fn walk(shape: &egui::epaint::Shape, fill: Color32, out: &mut Vec<Rect>) {
+        match shape {
+            egui::epaint::Shape::Rect(rect) if rect.fill == fill => out.push(rect.rect),
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, fill, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut app = app_with_open_candidate();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let size = Vec2::new(1_180.0, 900.0);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| show(ui, &mut app));
+        },
+    );
+    let fill = Tokens::get(&ctx).color.bg_panel;
+    let mut panels = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, fill, &mut panels);
+    }
+    let body_top = OUTER_IDENTITY_H + specialist_header_height(size.x);
+    let nav_w = NAV_W.min((size.x * 0.31).max(150.0));
+    assert!(
+        panels.iter().any(|rect| {
+            rect.left().abs() <= 1.0
+                && (rect.right() - nav_w).abs() <= 1.0
+                && (rect.top() - body_top).abs() <= 1.0
+                && (rect.bottom() - size.y).abs() <= 1.0
+        }),
+        "the navigation rail must tile from {body_top} to the bottom edge: {panels:?}"
+    );
+}
+
+/// Renders every model editor section to `RSPICE_RASTER_DIR` (or the system
+/// temp directory); read them for layout, not wording — the rasterizer's own
+/// header says why.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_every_section_for_review() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    for (index, section) in ModelEditorSection::ALL.into_iter().enumerate() {
+        let mut app = app_with_open_candidate();
+        app.state.workbench.model_editor.active_section = section;
+        let canvas = crate::ui::raster::render(Vec2::new(1_180.0, 900.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| show(ui, &mut app));
+        });
+        let slug = section
+            .label()
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>();
+        let path = directory.join(format!("model-editor-{index:02}-{slug}.png"));
+        let height = canvas.content_height().max(200);
+        std::fs::write(&path, canvas.png(height)).expect("write png");
+        writeln!(report, "wrote {}", path.display()).ok();
+    }
 }

@@ -49,7 +49,6 @@ use crate::workbench::documents::model_editor::{
 const SPECIALIST_HEADER_H: f32 = 82.0;
 const SPECIALIST_HEADER_MEDIUM_H: f32 = 124.0;
 const OUTER_IDENTITY_H: f32 = 60.0;
-const METRICS_H: f32 = 68.0;
 const NAV_W: f32 = 214.0;
 const NAV_ROW_H: f32 = 36.0;
 const SECTION_HEADER_H: f32 = 70.0;
@@ -128,14 +127,6 @@ struct PersistedModelRecords {
     qualification: Option<ModelQualificationState>,
     metadata_error: Option<String>,
     qualification_error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MetricProjection {
-    label: &'static str,
-    value: String,
-    detail: String,
-    tone: MetricTone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,8 +262,6 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             "Open an editable project model from Model & PDK catalog. Built-in and external model sources remain read-only.",
         );
     } else {
-        let metrics = project_metrics(app, &records);
-        metric_strip(&mut surface, &metrics);
         workspace_body(
             &mut surface,
             app,
@@ -626,92 +615,116 @@ fn candidate_status(app: &RSpiceApp, records: &PersistedModelRecords) -> (String
     ("validation required".to_owned(), MetricTone::Warning)
 }
 
-fn project_metrics(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<MetricProjection> {
-    let draft = app.state.workbench.model_editor.draft.as_ref();
-    let parameter_count = records.metadata.as_ref().map_or_else(
-        || draft.map_or(0, |draft| draft.parameters.len()),
-        |metadata| metadata.parameters.len(),
-    );
-    let (declared, inherited, model_overrides) =
-        records.metadata.as_ref().map_or((0, 0, 0), |metadata| {
-            metadata
-                .parameters
-                .iter()
-                .fold((0, 0, 0), |mut counts, parameter| {
-                    match parameter.source {
-                        ParameterSource::Declared { .. } => counts.0 += 1,
-                        ParameterSource::Inherited { .. } => counts.1 += 1,
-                        ParameterSource::Overridden { .. } => counts.2 += 1,
-                    }
-                    counts
-                })
-        });
-    let section_overrides = records.metadata.as_ref().map_or(0, |metadata| {
-        metadata
-            .sections
-            .iter()
-            .map(|section| section.overrides.len())
-            .sum::<usize>()
-    });
-    let overridden = model_overrides + section_overrides;
-    let section_count = records
-        .metadata
-        .as_ref()
-        .map_or(0, |value| value.sections.len());
-    let section_detail = records.metadata.as_ref().map_or_else(
-        || "no persisted section metadata".to_owned(),
-        |metadata| {
-            if metadata.sections.is_empty() {
-                "no named sections".to_owned()
-            } else {
-                metadata
-                    .sections
-                    .iter()
-                    .map(|section| section.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" · ")
+/// Section overrides count with the model-level overrides because both replace
+/// an inherited typed value; the split is over the persisted schema, not the
+/// draft, so an unsaved edit never moves a parameter between the three.
+fn parameter_source_split(metadata: &ModelDefinitionMetadata) -> (usize, usize, usize) {
+    let (declared, inherited, model_overrides) = metadata
+        .parameters
+        .iter()
+        .fold((0, 0, 0), |mut counts, parameter| {
+            match parameter.source {
+                ParameterSource::Declared { .. } => counts.0 += 1,
+                ParameterSource::Inherited { .. } => counts.1 += 1,
+                ParameterSource::Overridden { .. } => counts.2 += 1,
             }
-        },
-    );
-    let qualification = qualification_totals(app, records);
-    vec![
-        MetricProjection {
-            label: "Parameters",
-            value: parameter_count.to_string(),
-            detail: if records.metadata.is_some() {
-                format!("{declared} declared · {inherited} inherited · {overridden} override")
-            } else {
-                "source values · schema unavailable".to_owned()
-            },
-            tone: if records.metadata_error.is_some() {
-                MetricTone::Error
-            } else {
-                MetricTone::Neutral
-            },
-        },
-        MetricProjection {
-            label: "Sections",
-            value: section_count.to_string(),
-            detail: section_detail,
-            tone: if records.metadata_error.is_some() {
-                MetricTone::Error
-            } else {
-                MetricTone::Neutral
-            },
-        },
-        MetricProjection {
-            label: "Tests",
-            value: format!("{} / {}", qualification.desktop_passed, qualification.total),
-            detail: qualification.desktop_detail,
-            tone: qualification.desktop_tone,
-        },
-        MetricProjection {
-            label: "Parity",
-            value: format!("{} / {}", qualification.wasm_passed, qualification.total),
-            detail: qualification.wasm_detail,
-            tone: qualification.wasm_tone,
-        },
-    ]
+            counts
+        });
+    let section_overrides = metadata
+        .sections
+        .iter()
+        .map(|section| section.overrides.len())
+        .sum::<usize>();
+    (declared, inherited, model_overrides + section_overrides)
+}
+
+/// The one scalar a rail entry's own section owns. A section whose page states
+/// its counts per row carries none, so the rail never restates a table column.
+fn navigation_meta(
+    app: &RSpiceApp,
+    records: &PersistedModelRecords,
+    section: ModelEditorSection,
+) -> Option<(String, MetricTone)> {
+    let record_tone = if records.metadata_error.is_some() {
+        MetricTone::Error
+    } else {
+        MetricTone::Neutral
+    };
+    match section {
+        ModelEditorSection::Parameters => {
+            // Without persisted schema the open source's own values are the
+            // only parameters the section can list, so they are what it counts.
+            let count = records.metadata.as_ref().map_or_else(
+                || {
+                    app.state
+                        .workbench
+                        .model_editor
+                        .draft
+                        .as_ref()
+                        .map_or(0, |draft| draft.parameters.len())
+                },
+                |metadata| metadata.parameters.len(),
+            );
+            Some((count.to_string(), record_tone))
+        }
+        ModelEditorSection::Sections => Some((
+            records
+                .metadata
+                .as_ref()
+                .map_or(0, |metadata| metadata.sections.len())
+                .to_string(),
+            record_tone,
+        )),
+        ModelEditorSection::Tests => {
+            let qualification = qualification_totals(app, records);
+            Some((
+                format!("{}/{}", qualification.desktop_passed, qualification.total),
+                qualification.desktop_tone,
+            ))
+        }
+        ModelEditorSection::Statistics
+        | ModelEditorSection::Temperature
+        | ModelEditorSection::Release => None,
+    }
+}
+
+/// The aggregate a section owns but cannot state in any one of its rows. A fact
+/// the rows already carry is never repeated in the header.
+fn section_header_fact(
+    app: &RSpiceApp,
+    records: &PersistedModelRecords,
+    section: ModelEditorSection,
+) -> Option<(String, MetricTone)> {
+    match section {
+        ModelEditorSection::Parameters => {
+            let metadata = records.metadata.as_ref()?;
+            let (declared, inherited, overridden) = parameter_source_split(metadata);
+            Some((
+                format!("{declared} declared · {inherited} inherited · {overridden} override"),
+                if records.metadata_error.is_some() {
+                    MetricTone::Error
+                } else {
+                    MetricTone::Neutral
+                },
+            ))
+        }
+        ModelEditorSection::Tests => {
+            // Suite rows state desktop and WebAssembly runs one suite at a
+            // time; runtime parity is a property of the candidate as a whole.
+            let qualification = qualification_totals(app, records);
+            Some((
+                format!(
+                    "{} / {} WebAssembly · {}",
+                    qualification.wasm_passed, qualification.total, qualification.wasm_detail
+                ),
+                qualification.wasm_tone,
+            ))
+        }
+        ModelEditorSection::Sections
+        | ModelEditorSection::Statistics
+        | ModelEditorSection::Temperature
+        | ModelEditorSection::Release => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -719,7 +732,6 @@ struct QualificationTotals {
     total: usize,
     desktop_passed: usize,
     wasm_passed: usize,
-    desktop_detail: String,
     wasm_detail: String,
     desktop_tone: MetricTone,
     wasm_tone: MetricTone,
@@ -731,7 +743,6 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
             total: 0,
             desktop_passed: 0,
             wasm_passed: 0,
-            desktop_detail: "no bound qualification evidence".to_owned(),
             wasm_detail: "no bound qualification evidence".to_owned(),
             desktop_tone: MetricTone::Warning,
             wasm_tone: MetricTone::Warning,
@@ -746,7 +757,6 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
                 .sum(),
             desktop_passed: 0,
             wasm_passed: 0,
-            desktop_detail: "persisted qualification state is invalid".to_owned(),
             wasm_detail: "persisted qualification state is invalid".to_owned(),
             desktop_tone: MetricTone::Error,
             wasm_tone: MetricTone::Error,
@@ -777,13 +787,6 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
         total,
         desktop_passed,
         wasm_passed,
-        desktop_detail: if total == 0 {
-            "no qualification vectors".to_owned()
-        } else if desktop_passed == total {
-            "desktop source-bound evidence".to_owned()
-        } else {
-            format!("{} unresolved or failed", total - desktop_passed)
-        },
         wasm_detail: if total == 0 {
             "no qualification vectors".to_owned()
         } else if wasm_passed == total {
@@ -803,55 +806,6 @@ fn pass_tone(passed: usize, total: usize) -> MetricTone {
         MetricTone::Good
     } else {
         MetricTone::Warning
-    }
-}
-
-fn metric_strip(ui: &mut Ui, metrics: &[MetricProjection]) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width().max(1.0), METRICS_H),
-        Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-    bottom_rule(ui, rect, t.color.border);
-    let column_w = rect.width() / metrics.len().max(1) as f32;
-    for (index, metric) in metrics.iter().enumerate() {
-        let cell = Rect::from_min_max(
-            Pos2::new(rect.left() + index as f32 * column_w, rect.top()),
-            Pos2::new(rect.left() + (index + 1) as f32 * column_w, rect.bottom()),
-        );
-        if index > 0 {
-            ui.painter().vline(
-                cell.left(),
-                cell.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
-        }
-        let clip = cell.shrink2(Vec2::new(12.0, 0.0));
-        paint_elided(
-            ui,
-            clip,
-            metric.label,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-            8.0,
-        );
-        paint_elided(
-            ui,
-            clip,
-            &metric.value,
-            theme::mono(tokens::FS_3, FontWeight::SemiBold),
-            tone_color(&t, metric.tone),
-            25.0,
-        );
-        paint_elided(
-            ui,
-            clip,
-            &metric.detail,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-            47.0,
-        );
     }
 }
 
@@ -882,7 +836,7 @@ fn workspace_body(
             .layout(Layout::top_down(Align::Min)),
     );
     nav.spacing_mut().item_spacing = Vec2::ZERO;
-    render_navigation(&mut nav, current_section, action);
+    render_navigation(&mut nav, app, records, current_section, action);
 
     let mut content = ui.new_child(
         egui::UiBuilder::new()
@@ -893,7 +847,13 @@ fn workspace_body(
     render_section(&mut content, app, records, current_section, action);
 }
 
-fn render_navigation(ui: &mut Ui, current: ModelEditorSection, action: &mut Option<SurfaceAction>) {
+fn render_navigation(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    records: &PersistedModelRecords,
+    current: ModelEditorSection,
+    action: &mut Option<SurfaceAction>,
+) {
     let viewport_h = ui.available_height().max(1.0);
     ScrollArea::vertical()
         .id_salt("model-editor-section-navigation")
@@ -935,31 +895,65 @@ fn render_navigation(ui: &mut Ui, current: ModelEditorSection, action: &mut Opti
                         t.color.text_faint
                     },
                 );
+                // The entry's own count is laid out first: the label is elided
+                // against what the meta leaves, never painted under it.
+                let meta = navigation_meta(app, records, spec.section);
+                let accessible = meta.as_ref().map_or_else(
+                    || spec.section.label().to_owned(),
+                    |(value, _)| format!("{} · {value}", spec.section.label()),
+                );
+                let meta = meta.map(|(value, tone)| {
+                    ui.painter().layout_no_wrap(
+                        value,
+                        theme::mono(tokens::FS_0, FontWeight::Regular),
+                        meta_color(&t, tone),
+                    )
+                });
+                let label_font = theme::sans(
+                    tokens::FS_0,
+                    if active {
+                        FontWeight::SemiBold
+                    } else {
+                        FontWeight::Regular
+                    },
+                );
+                let meta_w = meta
+                    .as_ref()
+                    .map_or(0.0, |galley| galley.rect.width() + 10.0);
+                let label = design_system::elide_text(
+                    ui,
+                    spec.section.label(),
+                    &label_font,
+                    (rect.width() - 44.0 - 11.0 - meta_w).max(1.0),
+                );
                 ui.painter().text(
                     Pos2::new(rect.left() + 44.0, rect.center().y),
                     Align2::LEFT_CENTER,
-                    spec.section.label(),
-                    theme::sans(
-                        tokens::FS_0,
-                        if active {
-                            FontWeight::SemiBold
-                        } else {
-                            FontWeight::Regular
-                        },
-                    ),
+                    label,
+                    label_font,
                     if active {
                         t.color.text
                     } else {
                         t.color.text_dim
                     },
                 );
+                if let Some(galley) = meta {
+                    ui.painter().galley(
+                        Pos2::new(
+                            rect.right() - 11.0 - galley.rect.width(),
+                            rect.center().y - galley.rect.height() * 0.5,
+                        ),
+                        galley,
+                        t.color.text_dim,
+                    );
+                }
                 theme::paint_focus_ring(ui, &response, rect);
                 response.widget_info(|| {
                     egui::WidgetInfo::selected(
                         egui::WidgetType::Button,
                         true,
                         active,
-                        spec.section.label(),
+                        accessible.clone(),
                     )
                 });
                 if response.clicked() && !active {
@@ -1052,7 +1046,7 @@ fn section_header(
     action: &mut Option<SurfaceAction>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ui.available_width().max(1.0), SECTION_HEADER_H),
         Sense::hover(),
     );
@@ -1071,14 +1065,46 @@ fn section_header(
             rect.bottom(),
         ),
     );
+    // The section's aggregate shares the kicker line: it is elided first so the
+    // kicker gives up width to it rather than overprinting it.
+    let fact = section_header_fact(app, records, spec.section);
+    let fact_galley = fact.as_ref().map(|(text, tone)| {
+        let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+        let text = design_system::elide_text(ui, text, &font, (copy_rect.width() * 0.66).max(1.0));
+        ui.painter()
+            .layout_no_wrap(text, font, meta_color(&t, *tone))
+    });
+    let kicker_rect = Rect::from_min_max(
+        copy_rect.min,
+        Pos2::new(
+            copy_rect.right()
+                - fact_galley
+                    .as_ref()
+                    .map_or(0.0, |galley| galley.rect.width() + 12.0),
+            copy_rect.bottom(),
+        ),
+    );
     paint_elided(
         ui,
-        copy_rect,
+        kicker_rect,
         &format!("MODEL · {}", spec.section.label().to_uppercase()),
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_faint,
         9.0,
     );
+    if let Some(galley) = fact_galley {
+        ui.painter().with_clip_rect(copy_rect).galley(
+            Pos2::new(copy_rect.right() - galley.rect.width(), copy_rect.top() + 9.0),
+            galley,
+            t.color.text_dim,
+        );
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(match fact.as_ref() {
+            Some((fact, _)) => format!("{}. {}. {fact}", spec.section.label(), spec.title),
+            None => format!("{}. {}", spec.section.label(), spec.title),
+        });
+    });
     paint_elided(
         ui,
         copy_rect,
@@ -2399,6 +2425,15 @@ fn tone_color(t: &Tokens, tone: MetricTone) -> Color32 {
         MetricTone::Good => t.color.ok,
         MetricTone::Warning => t.color.warn,
         MetricTone::Error => t.color.err,
+    }
+}
+
+/// A rail or header meta value qualifies the label beside it, so an untoned one
+/// stays subordinate instead of reading at full text weight.
+fn meta_color(t: &Tokens, tone: MetricTone) -> Color32 {
+    match tone {
+        MetricTone::Neutral => t.color.text_dim,
+        tone => tone_color(t, tone),
     }
 }
 
