@@ -27,7 +27,7 @@ pub(super) mod closure {
         findings_for as source_drift_findings, needs_scan as source_drift_needs_scan,
         scan as scan_source_drift,
     };
-    pub(in crate::workbench::surfaces) use super::manager::specialist_pages::{
+    pub(in crate::workbench::surfaces) use super::manager::include::{
         DefinitionRow, definition_index,
     };
 }

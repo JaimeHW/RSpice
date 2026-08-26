@@ -6,8 +6,10 @@
 
 mod adoption;
 mod bindings;
+mod bins;
 mod browser;
 mod corner_ops;
+mod corners;
 mod corpus;
 mod detail;
 mod dialogs;
@@ -15,13 +17,14 @@ pub(super) mod drift;
 mod held_catalog;
 mod held_parts;
 mod hub;
+pub(super) mod include;
 mod paint;
 mod place;
 #[cfg(test)]
 mod raster;
 mod shelf;
-pub(super) mod specialist_pages;
 mod symbol_contracts;
+mod symbols;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -249,10 +252,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         };
         match page {
             ModelsPage::Models => catalog_page(ui, &mut render, &hub_catalog, installed),
-            ModelsPage::Symbols => specialist_pages::symbols_page(ui, &mut render),
-            ModelsPage::Corners => specialist_pages::corners_page(ui, &mut render),
-            ModelsPage::Bins => specialist_pages::bins_page(ui, &mut render),
-            ModelsPage::Include => specialist_pages::include_page(
+            ModelsPage::Symbols => symbols::symbols_page(ui, &mut render),
+            ModelsPage::Corners => corners::corners_page(ui, &mut render),
+            ModelsPage::Bins => bins::bins_page(ui, &mut render),
+            ModelsPage::Include => include::include_page(
                 ui,
                 &mut render,
                 include_diagnostics

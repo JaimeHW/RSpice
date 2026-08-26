@@ -32,10 +32,12 @@ fn every_authored_control_declares_its_effect() {
     const SOURCES: &[(&str, &str)] = &[
         ("manager.rs", include_str!("manager.rs")),
         ("manager/adoption.rs", include_str!("manager/adoption.rs")),
+        ("manager/bins.rs", include_str!("manager/bins.rs")),
         (
             "manager/corner_ops.rs",
             include_str!("manager/corner_ops.rs"),
         ),
+        ("manager/corners.rs", include_str!("manager/corners.rs")),
         ("manager/corpus.rs", include_str!("manager/corpus.rs")),
         ("manager/detail.rs", include_str!("manager/detail.rs")),
         ("manager/bindings.rs", include_str!("manager/bindings.rs")),
@@ -50,16 +52,14 @@ fn every_authored_control_declares_its_effect() {
             include_str!("manager/held_parts.rs"),
         ),
         ("manager/hub.rs", include_str!("manager/hub.rs")),
+        ("manager/include.rs", include_str!("manager/include.rs")),
         ("manager/place.rs", include_str!("manager/place.rs")),
         ("manager/shelf.rs", include_str!("manager/shelf.rs")),
-        (
-            "manager/specialist_pages.rs",
-            include_str!("manager/specialist_pages.rs"),
-        ),
         (
             "manager/symbol_contracts.rs",
             include_str!("manager/symbol_contracts.rs"),
         ),
+        ("manager/symbols.rs", include_str!("manager/symbols.rs")),
     ];
 
     let mut authored = std::collections::BTreeMap::<String, &str>::new();
