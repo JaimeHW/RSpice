@@ -556,11 +556,11 @@ fn run_set_verdict(
 ) -> (String, Compatibility) {
     match (base.point_count(), target.point_count()) {
         (Some(from), Some(to)) if from == to => (
-            format!("same {from} point{}", plan_plural_suffix(from)),
+            format!("same {from} point{}", plural_suffix(from)),
             compatibility(difference),
         ),
         (Some(from), Some(to)) => (
-            format!("{from} → {to} point{}", plan_plural_suffix(to)),
+            format!("{from} → {to} point{}", plural_suffix(to)),
             Compatibility::Differs,
         ),
         _ => (
@@ -841,7 +841,7 @@ mod tests {
         assert_ne!(from, to, "the fixture did not move the declared space");
         assert_eq!(
             run_set.verdict,
-            format!("{from} → {to} point{}", plan_plural_suffix(to)),
+            format!("{from} → {to} point{}", plural_suffix(to)),
             "the resolved point counts are the two plans' own"
         );
         assert_eq!(run_set.compatibility, Compatibility::Differs);
@@ -938,7 +938,7 @@ mod tests {
                 .expect("the fixture's run set validates");
             assert_eq!(
                 domain(&domains, "Run set and budgets").verdict,
-                format!("same {points} point{}", plan_plural_suffix(points))
+                format!("same {points} point{}", plural_suffix(points))
             );
         }
     }
@@ -989,7 +989,7 @@ mod tests {
             format!(
                 "{} → {to} point{}",
                 base.point_count().expect("validates"),
-                plan_plural_suffix(to)
+                plural_suffix(to)
             )
         );
     }

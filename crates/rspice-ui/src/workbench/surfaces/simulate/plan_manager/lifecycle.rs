@@ -274,7 +274,7 @@ fn result_reference_row(ui: &mut Ui, selected: &PlanCatalogRecord) {
             "Result references",
             &format!(
                 "{count} run receipt{} · matched by identity",
-                plan_plural_suffix(count)
+                plural_suffix(count)
             ),
             t.color.ok,
             StatusMark::Success,

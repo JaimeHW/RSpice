@@ -23,6 +23,7 @@ use super::*;
 use kit::{ColumnTrack, HeadStatus, LifecycleTone, SplitColumn, TableColumn, TableRow};
 use records::{PlanCatalogRecord, plan_catalog_records};
 
+use crate::ui::accessibility::plural_suffix;
 use crate::ui::widgets::workflow_preview_status;
 use crate::workbench::app::purpose_line;
 use crate::workbench::app_state::ReferencePvtPoint;
@@ -663,9 +664,9 @@ fn announced_plan_row(record: &PlanCatalogRecord) -> String {
         record.analyses,
         record.run_set_label(),
         record.model_bindings,
-        plan_plural_suffix(record.model_bindings),
+        plural_suffix(record.model_bindings),
         record.results,
-        plan_plural_suffix(record.results)
+        plural_suffix(record.results)
     )
 }
 
@@ -827,8 +828,8 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
                 "Declared run set",
                 format!(
                     "{points} PVT point{} · {tasks} task{}",
-                    plan_plural_suffix(points),
-                    plan_plural_suffix(tasks)
+                    plural_suffix(points),
+                    plural_suffix(tasks)
                 ),
             ),
             _ => PlanDetailRow {
@@ -852,7 +853,7 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
             format!(
                 "{} binding{}",
                 selected.model_bindings,
-                plan_plural_suffix(selected.model_bindings)
+                plural_suffix(selected.model_bindings)
             ),
         ),
         stated(
@@ -1137,10 +1138,6 @@ fn handle_plan_manager_action(
         Some(Err(error)) => draft.validation_error = Some(error),
     }
     app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(draft));
-}
-
-const fn plan_plural_suffix(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
 }
 
 #[cfg(test)]

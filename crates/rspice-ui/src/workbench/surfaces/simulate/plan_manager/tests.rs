@@ -1266,7 +1266,7 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
     let bindings = app.state.sim_setup.model_bindings.len();
     assert_eq!(
         aside_value(&rows, "Model closure"),
-        format!("{bindings} binding{}", plan_plural_suffix(bindings))
+        format!("{bindings} binding{}", plural_suffix(bindings))
     );
     assert_eq!(
         aside_value(&rows, "Source lineage"),

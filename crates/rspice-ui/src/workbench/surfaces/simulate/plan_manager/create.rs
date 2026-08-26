@@ -292,7 +292,7 @@ fn model_closure_label(model_bindings: Option<usize>) -> String {
         |count| {
             format!(
                 "Ordered model closure · {count} binding{}",
-                plan_plural_suffix(count)
+                plural_suffix(count)
             )
         },
     )

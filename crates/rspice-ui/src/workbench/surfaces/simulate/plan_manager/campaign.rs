@@ -262,11 +262,7 @@ fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str
     property_row(
         ui,
         "Members",
-        &format!(
-            "{} plan{}",
-            scope.members,
-            plan_plural_suffix(scope.members)
-        ),
+        &format!("{} plan{}", scope.members, plural_suffix(scope.members)),
     );
     // "After", not "before". This route used to call the same number
     // "approximately N tasks before dependency expansion", and it is neither
@@ -467,7 +463,7 @@ fn announced_member_row(
         (Some(tasks), Some(duration), Some(storage)) => format!(
             "run set {} · {tasks} task{} · {duration} · {storage}",
             record.run_set_label(),
-            plan_plural_suffix(tasks)
+            plural_suffix(tasks)
         ),
         _ => format!("declared run set {RUN_SET_DOES_NOT_VALIDATE}"),
     };

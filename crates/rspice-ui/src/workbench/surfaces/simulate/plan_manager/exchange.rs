@@ -271,7 +271,7 @@ fn export(
                     record.enabled,
                     record.analyses,
                     record.model_bindings,
-                    plan_plural_suffix(record.model_bindings)
+                    plural_suffix(record.model_bindings)
                 ),
             );
             property_row(
@@ -280,11 +280,11 @@ fn export(
                 &format!(
                     "{} variable{} · {} saved output{} · {} specification{}",
                     record.design_variables,
-                    plan_plural_suffix(record.design_variables),
+                    plural_suffix(record.design_variables),
                     record.saved_outputs,
-                    plan_plural_suffix(record.saved_outputs),
+                    plural_suffix(record.saved_outputs),
                     record.specifications,
-                    plan_plural_suffix(record.specifications)
+                    plural_suffix(record.specifications)
                 ),
             );
         }
@@ -395,9 +395,9 @@ fn import(
                     &format!(
                         "{} analysis instance{} · {} model binding{}",
                         package.plan.analysis_plan.instances().len(),
-                        plan_plural_suffix(package.plan.analysis_plan.instances().len()),
+                        plural_suffix(package.plan.analysis_plan.instances().len()),
                         package.plan.model_bindings.len(),
-                        plan_plural_suffix(package.plan.model_bindings.len())
+                        plural_suffix(package.plan.model_bindings.len())
                     ),
                 );
                 property_row(
@@ -406,11 +406,11 @@ fn import(
                     &format!(
                         "{} variable{} · {} saved output{} · {} specification{}",
                         package.payload.design_variables.len(),
-                        plan_plural_suffix(package.payload.design_variables.len()),
+                        plural_suffix(package.payload.design_variables.len()),
                         package.payload.saved_outputs.len(),
-                        plan_plural_suffix(package.payload.saved_outputs.len()),
+                        plural_suffix(package.payload.saved_outputs.len()),
                         specification_count(&package.payload),
-                        plan_plural_suffix(specification_count(&package.payload))
+                        plural_suffix(specification_count(&package.payload))
                     ),
                 );
             }
