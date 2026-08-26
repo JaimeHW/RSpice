@@ -1544,6 +1544,11 @@ fn simulate_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     // preflight checks. Choosing the plan therefore reads above the actions
     // taken on it, in the same group they belong to.
     command_item(ui, app, Command::ManageSimulationPlans);
+    // Filling the chosen plan reads directly under choosing it, and above the
+    // actions that dispatch what it holds. It is here because the navigator is
+    // the only other route to the catalogue, and the navigator is a panel a
+    // reader can collapse.
+    command_item(ui, app, Command::AddAnalysis);
     command_item(ui, app, Command::RunSimulation);
     command_item(ui, app, Command::StopSimulation);
     command_item(ui, app, Command::JobsManager);

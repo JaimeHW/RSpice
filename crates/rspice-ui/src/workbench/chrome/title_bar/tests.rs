@@ -766,6 +766,11 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
 /// from no menu at all. It leads the Simulate menu now: it decides which plan
 /// is active, and every row under it - run it, stop it, read its job history,
 /// check it - acts on whatever it selected.
+///
+/// Adding to that plan reads second, directly under choosing it. Before
+/// `Command::AddAnalysis` existed, the catalogue had exactly one route - the
+/// navigator's creating action - and a reader with the panel collapsed, or in
+/// focus mode, had no way to add an analysis at all.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
@@ -779,6 +784,7 @@ fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
         labels,
         [
             "Manage simulation plans\u{2026}",
+            "Add analysis or workflow\u{2026}",
             "Run active plan",
             "Stop active run",
             "Jobs, targets and run history\u{2026}",
@@ -789,13 +795,18 @@ fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
             "Edit specification matrix",
         ]
     );
-    // The row is the command's, not a look-alike: its label is the one the
-    // vocabulary publishes, so renaming the command renames the row.
+    // The rows are the commands', not look-alikes: their labels are the ones
+    // the vocabulary publishes, so renaming a command renames its row.
     assert_eq!(
         labels.first().copied(),
         Some(Command::ManageSimulationPlans.spec().label)
     );
     assert_eq!(Command::ManageSimulationPlans.spec().group, "Simulate");
+    assert_eq!(
+        labels.get(1).copied(),
+        Some(Command::AddAnalysis.spec().label)
+    );
+    assert_eq!(Command::AddAnalysis.spec().group, "Simulate");
 }
 
 /// The menu row has to be exactly as honest as the command behind it: a project

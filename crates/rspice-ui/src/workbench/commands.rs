@@ -748,11 +748,12 @@ impl Command {
                         && !state.simulation.trigger_simulation
                 }
             }
-            // The manager edits the plan catalog through the active plan's
-            // stable identity. A project whose plan never migrated to that
-            // identity has nothing for it to select, so the command reports
-            // unavailable rather than opening an empty dialog.
-            Self::ManageSimulationPlans => state.sim_setup.stable_analysis_plan().is_ok(),
+            // Both edit the plan catalog through the active plan's stable
+            // identity, so a project whose plan never migrated to it has
+            // nothing to select, nothing to add to, and no dialog worth opening.
+            Self::ManageSimulationPlans | Self::AddAnalysis => {
+                state.sim_setup.stable_analysis_plan().is_ok()
+            }
             // Each of these opens a window that only the netlist page draws.
             // Availability therefore has to name the page, not just the
             // workspace: from Verilog-A or Automation they would set a dialog
@@ -1796,6 +1797,7 @@ impl Command {
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
                 }
             }
+            Self::AddAnalysis => app.state.open_analysis_catalog(),
             Self::SimulationOptions => {
                 // The Solver & convergence page is the only editor of the
                 // plan's engine options: every field of `SimulationOptions`

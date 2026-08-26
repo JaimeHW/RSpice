@@ -788,7 +788,8 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     // the dock paid for the expansion twice a frame to print one number in two
     // places. The forecast's point count does not depend on how many analyses
     // are enabled; only its task count does, so one validation answers both.
-    let run_set_validation = crate::simulation::run_set::validate(&app.state.sim_setup.run_set, enabled);
+    let run_set_validation =
+        crate::simulation::run_set::validate(&app.state.sim_setup.run_set, enabled);
     let declared_points = run_set_validation
         .errors
         .is_empty()
@@ -894,10 +895,15 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
 /// Full-bleed and square rather than an inset pill: it reads as the last row
 /// of the tree rather than a control floating inside the panel, and it carries
 /// the filled accent so it is the obvious way into an empty plan.
+///
+/// The row is the command's, not a look-alike: the panel draws it on all nine
+/// setup routes, and it was writing the catalogue's four palette fields itself
+/// while only the Analyses route drew the catalogue. Routing through
+/// `Command::AddAnalysis` puts the arming and the drawing under one owner.
 fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.add_space(SIMULATION_CREATOR_GAP);
     let width = ui.available_width();
-    if Button::new("Add analysis or workflow…")
+    if Button::new(Command::AddAnalysis.spec().label)
         .accent()
         .min_width(width)
         .min_height(Tokens::get(ui.ctx()).metrics.row_h + SIMULATION_CREATOR_EXTRA_HEIGHT)
@@ -905,14 +911,7 @@ fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui)
         .clicked()
     {
-        // On tablet and phone this action is hosted by the navigator drawer.
-        // Close that transient layer before opening the catalog so the modal
-        // is never obscured by its invoker.
-        app.state.workbench.close_drawer();
-        app.state.sim_setup.palette_open = true;
-        app.state.sim_setup.palette_query.clear();
-        app.state.sim_setup.palette_active = 0;
-        app.state.sim_setup.palette_scroll_to_active = true;
+        Command::AddAnalysis.execute(app);
     }
 }
 

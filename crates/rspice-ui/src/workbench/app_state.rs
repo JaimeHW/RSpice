@@ -986,6 +986,25 @@ impl AppState {
             || browser_file_operation_open
     }
 
+    /// Arm the analysis catalogue, from wherever the reader asked for it.
+    ///
+    /// Beside [`Self::application_modal_open`] because `palette_open` is one of
+    /// its terms: setting it withdraws the application's keyboard, and the
+    /// three routes that do so — the navigator's creating action, the empty
+    /// analysis rail and `Command::AddAnalysis` — each used to write some of
+    /// these four fields themselves. A route that forgot the query left the
+    /// catalogue filtered by whatever the last search had been.
+    pub(crate) fn open_analysis_catalog(&mut self) {
+        // On tablet and phone the creating action is hosted by the navigator
+        // drawer. Close that transient layer first, so the modal is never
+        // obscured by its own invoker.
+        self.workbench.close_drawer();
+        self.sim_setup.palette_open = true;
+        self.sim_setup.palette_query.clear();
+        self.sim_setup.palette_active = 0;
+        self.sim_setup.palette_scroll_to_active = true;
+    }
+
     /// Whether static authored state permits a run. Interactive Run commands
     /// intentionally remain available while this is false so the complete
     /// preflight can explain every blocker and offer its remediation route.

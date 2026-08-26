@@ -204,6 +204,13 @@ pub enum Command {
     /// plan chip, the palette and the shortcut map all reach the manager
     /// through this one command rather than constructing its draft themselves.
     ManageSimulationPlans,
+    /// Open the analysis catalogue over whatever workspace the reader is on.
+    ///
+    /// The navigator's creating action, the empty analysis rail and the
+    /// Simulate menu all arm the catalogue through this one command. They used
+    /// to set the four palette fields themselves, which is how the navigator
+    /// came to arm a modal on eight routes that had nothing drawing it.
+    AddAnalysis,
     SimulationOptions,
     GenerateNetlist,
     FindCodeDocument,
@@ -668,6 +675,11 @@ impl Command {
             Self::ManageSimulationPlans => spec(
                 "manage-simulation-plans",
                 "Manage simulation plans\u{2026}",
+                "Simulate",
+            ),
+            Self::AddAnalysis => spec(
+                "add-analysis",
+                "Add analysis or workflow\u{2026}",
                 "Simulate",
             ),
             Self::SimulationOptions => spec("solver", "Global solver & convergence", "Simulate"),
@@ -1212,6 +1224,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::JobsManager,
     Command::PreflightChecks,
     Command::ManageSimulationPlans,
+    Command::AddAnalysis,
     Command::SimulationOptions,
     Command::GenerateNetlist,
     Command::FindCodeDocument,

@@ -491,6 +491,7 @@ impl Command {
                 | Self::SimulationPage(_)
                 | Self::PreflightChecks
                 | Self::ManageSimulationPlans
+                | Self::AddAnalysis
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
                 | Self::DatasetManifestBrowser
@@ -1084,6 +1085,9 @@ impl Command {
             Self::RunSimulation => "active plan is not runnable",
             Self::ManageSimulationPlans => {
                 "the active simulation plan has no stable analysis identity to manage"
+            }
+            Self::AddAnalysis => {
+                "the active simulation plan has no stable analysis identity to add to"
             }
             Self::OpenNetlist | Self::ImportNetlist
                 if app.state.simulation.has_active_execution() =>
