@@ -18,7 +18,9 @@
 
 use egui::Ui;
 
-use crate::simulation::placed_sources::{PlacedRfPort, PlacedSource, SourceConsumer};
+use crate::simulation::placed_sources::{
+    PlacedRfPort, PlacedSource, SourceConsumer, duplicate_port_numbers,
+};
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
@@ -93,6 +95,10 @@ pub(super) fn show(
             if sources.is_empty() && !ports.iter().any(PlacedRfPort::is_read) {
                 card_note(ui, &unread_port_note(ports.len()));
             }
+            let collisions = duplicate_port_numbers(ports);
+            if !collisions.is_empty() {
+                card_note(ui, &duplicate_port_note(&collisions));
+            }
         },
     );
 }
@@ -113,6 +119,12 @@ fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> (&'static str, T
     let unread = sources.iter().filter(|source| !source.is_read()).count();
     if sources.is_empty() && ports.is_empty() {
         ("no sources placed", Tone::Warn)
+    } else if ports.iter().any(PlacedRfPort::is_read) && !duplicate_port_numbers(ports).is_empty() {
+        // Only once something indexes them. Two ports sharing a number is a
+        // defect the moment a run addresses one by number, and until then it is
+        // a bench still being drawn — flagging it before there is an `.sp` to
+        // confuse would fire on every second port the moment it is placed.
+        ("ports share a number", Tone::Warn)
     } else if unread > 0 {
         ("sources with no reader", Tone::Warn)
     } else if !sources.is_empty() {
@@ -161,6 +173,28 @@ fn unread_port_note(ports: usize) -> String {
         "No enabled S-parameter analysis in this plan reads {subject} \u{2014} and no other \
          analysis addresses a port by number. {verb} still netlisted, and still terminating the \
          design into the reference impedance each one declares."
+    )
+}
+
+/// What the page says when two placed ports claim one port number.
+///
+/// The numbers are named rather than counted: the reader's next action is to
+/// open the ports carrying them, and a note saying "2 collisions" sends them
+/// through every port on the sheet to find which. Which port wins, and whether
+/// the run is refused, is the dispatching surface's answer to give — this only
+/// states that the design asked one question twice.
+fn duplicate_port_note(collisions: &[u32]) -> String {
+    let numbers: Vec<String> = collisions.iter().map(u32::to_string).collect();
+    let (subject, verb) = if collisions.len() == 1 {
+        ("Port number", "is claimed")
+    } else {
+        ("Port numbers", "are claimed")
+    };
+    format!(
+        "{subject} {} {verb} by more than one placed port. An S-parameter run \
+         addresses a port by its number, so the ports sharing one cannot both be \
+         the port that run measures.",
+        numbers.join(", ")
     )
 }
 
@@ -316,7 +350,7 @@ fn reveal(state: &mut AppState, component_id: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Tone, unread_port_note, unread_source_note, verdict};
+    use super::{Tone, duplicate_port_note, unread_port_note, unread_source_note, verdict};
     use crate::simulation::placed_sources::{placed_rf_ports, placed_sources};
     use crate::simulation::plan::{AnalysisKind, SimulationPlan};
     use crate::state::{Component, ComponentType, Point, SchematicState};
@@ -384,6 +418,34 @@ mod tests {
         assert_eq!(
             verdict(&[], &ports),
             ("S-parameter ports drive this design", Tone::Ok)
+        );
+    }
+
+    /// The note names the numbers, because they are what the reader opens next.
+    #[test]
+    fn the_duplicate_port_note_names_the_numbers_it_found() {
+        let one = duplicate_port_note(&[2]);
+        assert!(one.starts_with("Port number 2 is claimed"), "{one}");
+
+        let many = duplicate_port_note(&[1, 3]);
+        assert!(many.starts_with("Port numbers 1, 3 are claimed"), "{many}");
+    }
+
+    /// A collision is a finding once something indexes the ports, and a bench
+    /// still being drawn is not.
+    #[test]
+    fn colliding_port_numbers_are_a_finding_only_once_a_run_reads_them() {
+        let schematic =
+            schematic_with(vec![rf_port(1, "P1", "port=1"), rf_port(2, "P2", "port=1")]);
+
+        let read = placed_rf_ports(&schematic, Some(&plan_with(AnalysisKind::SParameter, true)));
+        assert_eq!(verdict(&[], &read), ("ports share a number", Tone::Warn));
+
+        let unread = placed_rf_ports(&schematic, None);
+        assert_eq!(
+            verdict(&[], &unread),
+            ("ports with no S-parameter run", Tone::Warn),
+            "with nothing indexing them the bench is unfinished, not miswired"
         );
     }
 

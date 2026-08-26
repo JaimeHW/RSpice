@@ -195,11 +195,6 @@ impl PlacedRfPort {
         self.consumers.iter().any(SourceConsumer::reads)
     }
 
-    /// The consumers the run actually contains.
-    pub fn reading_consumers(&self) -> impl Iterator<Item = &SourceConsumer> {
-        self.consumers.iter().filter(|consumer| consumer.reads())
-    }
-
     /// The quantity letter, for a column that has room for one character.
     ///
     /// The card's own letter, as a source row states `V` or `I`.
@@ -234,21 +229,6 @@ pub fn placed_source_count(schematic: &SchematicState) -> usize {
         .components
         .iter()
         .filter(|component| source_family(component.kind).is_some())
-        .count()
-}
-
-/// How many RF ports this sheet places.
-///
-/// The same predicate [`placed_rf_ports`] admits a component under, asked
-/// without resolving anything, for the same reason [`placed_source_count`]
-/// exists: a rail that states a number and nothing else must not walk the
-/// design's nets to learn it.
-#[must_use]
-pub fn placed_rf_port_count(schematic: &SchematicState) -> usize {
-    schematic
-        .components
-        .iter()
-        .filter(|component| component.kind == ComponentType::RfPort)
         .count()
 }
 
@@ -904,7 +884,6 @@ mod tests {
         assert_eq!(listed[0].mode, RfPortMode::Termination);
         assert_eq!(listed[0].summary(), "term \u{00b7} Z0 50");
         assert_eq!(listed[0].quantity(), "P");
-        assert_eq!(placed_rf_port_count(&schematic), 1);
     }
 
     /// A port with no `port` parameter is port 1, which is the registry's own
@@ -1063,11 +1042,9 @@ mod tests {
             "the disabled instance is still named"
         );
         assert!(!listed[0].is_read());
-        assert_eq!(listed[0].reading_consumers().count(), 0);
 
         let listed = placed_rf_ports(&schematic, Some(&sp_plan(true)));
         assert!(listed[0].is_read());
-        assert_eq!(listed[0].reading_consumers().count(), 1);
     }
 
     /// A transient loads a termination exactly as it loads a resistor, which is
