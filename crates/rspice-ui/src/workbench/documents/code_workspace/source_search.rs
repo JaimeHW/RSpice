@@ -11,6 +11,7 @@ use crate::state::{
     find_all_in_source_bounded, replace_source_ranges,
 };
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
+use crate::ui::accessibility::counted;
 use crate::workbench::RSpiceApp;
 
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
@@ -346,16 +347,19 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
     }
     app.state.ui.code_workspace.source_search = None;
     let message = format!(
-        "Replaced {replacement_count} match{} in {changed_files} project source file{}{}.",
-        plural(replacement_count),
-        plural(changed_files),
+        "Replaced {} in {}{}.",
+        counted(replacement_count, "match", "matches"),
+        counted(changed_files, "project source file", "project source files"),
         if results.read_only_matches == 0 {
             String::new()
         } else {
             format!(
-                "; left {} read-only match{} unchanged",
-                results.read_only_matches,
-                plural(results.read_only_matches)
+                "; left {} unchanged",
+                counted(
+                    results.read_only_matches,
+                    "read-only match",
+                    "read-only matches"
+                )
             )
         }
     );
@@ -780,10 +784,6 @@ fn source_line_preview(source: &str, one_based_line: usize) -> String {
         .chars()
         .take(240)
         .collect()
-}
-
-const fn plural(count: usize) -> &'static str {
-    if count == 1 { "" } else { "es" }
 }
 
 #[cfg(test)]
