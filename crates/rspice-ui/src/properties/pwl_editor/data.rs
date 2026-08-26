@@ -357,4 +357,18 @@ mod tests {
             );
         }
     }
+
+    /// PWL rows are times and values, and both are authored with units far
+    /// more often than without. `1ns` used to be a `TimeParseError` on a row
+    /// a deck reads without complaint.
+    #[test]
+    fn a_row_authored_with_its_units_parses() {
+        let data = PwlData::parse("0 0 1ns 5V 2ns 0").expect("units on a PWL row parse");
+
+        let points = data.points();
+        assert_eq!(points.len(), 3);
+        assert_eq!(points[1].time, 1e-9);
+        assert_eq!(points[1].value, 5.0);
+        assert_eq!(points[2].time, 2e-9);
+    }
 }

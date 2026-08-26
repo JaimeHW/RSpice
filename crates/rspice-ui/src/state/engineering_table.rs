@@ -1290,13 +1290,33 @@ mod tests {
         }
     }
 
+    /// What makes a cell a rejection is a digit after the letters, not the
+    /// letters themselves. The shared parser now reads the unit a value is
+    /// authored with — `1kohm` is a kilohm, as it is in a deck — so the guard
+    /// this test exists for is the narrower one it always needed to be: a part
+    /// number carries digits after its letter, and never becomes a quantity.
     #[test]
-    fn an_unrecognised_suffix_is_rejected_rather_than_scaled_by_one() {
-        for text in ["12x", "1N4148", "5 volts", "1kohm"] {
+    fn a_part_number_is_rejected_rather_than_scaled_by_its_first_letter() {
+        for text in ["12%", "1N4148", "2N3904", "1k5", "1u-2"] {
             assert_eq!(
                 parse_engineering_number(text),
                 None,
                 "{text} carries no engineering suffix and must not parse"
+            );
+        }
+    }
+
+    /// The other side of that boundary: a value authored with its unit is a
+    /// quantity, and a filter that refused it compared the row's text instead
+    /// of its number.
+    #[test]
+    fn a_value_authored_with_its_unit_is_still_a_quantity() {
+        for (text, expected) in [("1kohm", 1e3), ("5V", 5.0), ("2.2uF", 2.2e-6)] {
+            let parsed = parse_engineering_number(text)
+                .unwrap_or_else(|| panic!("{text} is an engineering number"));
+            assert!(
+                (parsed - expected).abs() <= expected.abs() * 1e-12,
+                "{text} parsed as {parsed}, expected {expected}"
             );
         }
     }

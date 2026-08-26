@@ -578,3 +578,41 @@ fn looks_like_placeholder(value: &str) -> bool {
             | "vhi"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::component_value_label;
+    use crate::state::{Component, ComponentType, Point};
+
+    /// A label leaves out the lines that only repeat a default, and it decides
+    /// that by parsing. An `ac=0V` — the AC default, written the way a reader
+    /// writes it — used to read as unparseable and therefore as a magnitude
+    /// worth a second line, so the symbol carried an AC row for a source with
+    /// no AC excitation at all.
+    #[test]
+    fn a_default_written_with_its_unit_no_longer_earns_a_line() {
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin())
+            .with_name_value("V1", "5");
+        component.params = "ac=0V".to_owned();
+
+        let label = component_value_label(&component);
+
+        assert!(
+            !label.contains("AC:"),
+            "an AC default written with its unit must not earn a line: {label}"
+        );
+    }
+
+    /// The other half of the same decision: an AC magnitude that is not the
+    /// default still earns its line, unit or no unit.
+    #[test]
+    fn an_ac_magnitude_that_is_not_the_default_still_earns_its_line() {
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::origin())
+            .with_name_value("V1", "5");
+        component.params = "ac=1V".to_owned();
+
+        let label = component_value_label(&component);
+
+        assert!(label.contains("AC:"), "{label}");
+    }
+}

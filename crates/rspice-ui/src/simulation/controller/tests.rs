@@ -2350,3 +2350,18 @@ fn a_failure_that_named_nothing_writes_the_row_it_always_did() {
     assert_eq!(entries.len(), 1, "no attribution, no second row");
     assert!(entries[0].anchor.is_none());
 }
+
+/// A hand-written deck's `.param` values are read with the engineering
+/// notation parser, and a parameter authored with its unit used to be dropped
+/// outright: the deck said `tr=1ns`, the parser refused the `s`, and the
+/// controller carried no value for `tr` at all.
+#[test]
+fn manual_deck_parameters_authored_with_units_are_read() {
+    let values = SimulationController::manual_deck_param_values(
+        "deck\n.param tr=1ns vsupply=5V rload=1k\n.end\n",
+    );
+
+    assert_eq!(values.get("tr").copied(), Some(1e-9));
+    assert_eq!(values.get("vsupply").copied(), Some(5.0));
+    assert_eq!(values.get("rload").copied(), Some(1e3));
+}

@@ -957,4 +957,21 @@ mod pwl_tests {
             Some(&PropertyValue::String("0 0 2n 1".to_owned()))
         );
     }
+
+    /// A number-typed field authored with its unit is a number, not an
+    /// expression. `1ms` used to reach the sheet as `Expression("1ms")` —
+    /// the notation parser refused the `s` — so a period typed in the form
+    /// every deck uses stopped being a quantity the moment it was written.
+    #[test]
+    fn a_number_field_authored_with_its_unit_stays_a_number() {
+        let registry = PropertyRegistry::new();
+        let parsed = property_value_from_schema(
+            ComponentType::VoltageSourcePulse,
+            "per",
+            "1ms".to_owned(),
+            &registry,
+        );
+
+        assert_eq!(parsed.as_number(), Some(1e-3));
+    }
 }

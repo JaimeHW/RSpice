@@ -1994,4 +1994,20 @@ mod tests {
 
         assert_eq!(samples, vec![2e-3; 16]);
     }
+
+    /// The preview re-reads a field the dialog holds as text. A period
+    /// authored `1ms` used to fail that read and fall through to the 2 µs
+    /// default, so the drawn pulse train disagreed with the field above it.
+    #[test]
+    fn the_preview_reads_a_period_authored_with_its_unit() {
+        let mut typed = TabbedPropertyDialogState::default();
+        typed.set_value("per", PropertyValue::String("1ms".to_owned()));
+        let mut numeric = TabbedPropertyDialogState::default();
+        numeric.set_value("per", PropertyValue::number(1e-3));
+
+        assert_eq!(
+            source_preview_samples(&typed, ComponentType::VoltageSourcePulse, 16),
+            source_preview_samples(&numeric, ComponentType::VoltageSourcePulse, 16)
+        );
+    }
 }
