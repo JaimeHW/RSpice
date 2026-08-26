@@ -316,7 +316,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     DesignNavigatorSection::Ports => port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
-                    DesignNavigatorSection::Excitations => excitation_section(ui, &mut app.state),
+                    DesignNavigatorSection::Excitations => excitation_section(ui, app),
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
                 }
             }
@@ -422,8 +422,9 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     ) {
         Ok(projection) => projection,
         Err(error) => {
-            navigator_section_header(ui, "Nets", "\u{2014}");
-            empty_navigator_row(ui, &error.to_string());
+            if navigator_section_header(ui, "Nets", "\u{2014}") {
+                empty_navigator_row(ui, &error.to_string());
+            }
             return;
         }
     };
@@ -437,7 +438,9 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
     .cloned()
     .collect::<Vec<_>>();
-    navigator_section_header(ui, "Nets", &nets.len().to_string());
+    if !navigator_section_header(ui, "Nets", &nets.len().to_string()) {
+        return;
+    }
     if nets.is_empty() {
         empty_navigator_row(
             ui,
@@ -468,7 +471,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         let response = nav_row_indented_mono_response(
             ui,
             if net.class == crate::simulation::netlist_gen::NetClass::Ground {
-                WorkbenchIcon::Project
+                WorkbenchIcon::Supply
             } else {
                 WorkbenchIcon::Design
             },
@@ -530,23 +533,135 @@ fn net_anchor(app: &RSpiceApp, net: &DesignNet) -> Option<crate::state::Point> {
         })
 }
 
-fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
-    let ports = app
-        .state
+/// One interface pin, as the ports rail lists it.
+struct PortRow {
+    component_id: u64,
+    position: crate::state::Point,
+    spec: crate::state::PortSpec,
+    contract: crate::state::PortContract,
+    /// Where the pin sits in the interface: the order the contract declares,
+    /// or the document position that stands in for one until the typed editor
+    /// rewrites it.
+    order: usize,
+    /// The document position, which breaks a tie between two pins declaring
+    /// the same order.
+    document_index: usize,
+    /// Another pin of this cell carries the same name, folded for case.
+    duplicated: bool,
+}
+
+impl PortRow {
+    /// The meta column: the interface position, the direction declared there,
+    /// and the conductors the pin carries when its name declares a vector.
+    fn meta(&self) -> String {
+        let mut meta = format!("#{} \u{00b7} {}", self.order, self.spec.direction.keyword());
+        let width = self.spec.width();
+        if width > 1 {
+            meta.push_str(&format!(" \u{00b7} [{width}]"));
+        }
+        meta
+    }
+
+    /// The whole contract this pin declares, which the meta column has room
+    /// for only the position and the direction of.
+    fn tooltip(&self) -> String {
+        let mut lines = vec![
+            format!("{} \u{00b7} #{}", self.spec.name, self.order),
+            format!(
+                "{} \u{00b7} {} \u{00b7} {}",
+                self.contract.direction.keyword(),
+                self.contract.signal_type.keyword(),
+                self.contract.discipline.keyword()
+            ),
+        ];
+        let width = self.spec.width();
+        if width > 1 {
+            lines.push(format!("{width} conductors"));
+        }
+        let documentation = self.contract.documentation.trim();
+        if !documentation.is_empty() {
+            lines.push(documentation.to_owned());
+        }
+        if self.duplicated {
+            lines.push(
+                "This name is declared more than once, so the interface takes the first \
+                 declaration and the rest add no pin"
+                    .to_owned(),
+            );
+        }
+        lines.join("\n")
+    }
+}
+
+/// The pins the rail lists, in the order the interface declares them.
+///
+/// The sort key is `(netlist_order, document order)` — the key
+/// [`crate::state::SchematicState::interface_ports`] sorts by — because that
+/// order is the `.SUBCKT` port list and the node order of every instance of
+/// this cell. A rail in document order would number the pins in an order no
+/// deck has.
+///
+/// Duplicate names are counted over the whole cell rather than over the rows
+/// that survive the scope and the filter: a repeated name is a fact about the
+/// interface, and narrowing what is on screen does not un-declare it.
+fn port_rows(
+    state: &crate::workbench::app_state::AppState,
+    scope: SheetScope,
+    query: &str,
+) -> Vec<PortRow> {
+    let mut declared: BTreeMap<String, usize> = BTreeMap::new();
+    for spec in state
         .schematic
         .components
         .iter()
-        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
-        .filter_map(|component| {
-            component
-                .port_spec()
-                .map(|port| (component.id, component.pos, port))
+        .filter_map(crate::state::Component::port_spec)
+    {
+        *declared.entry(spec.name.to_ascii_lowercase()).or_default() += 1;
+    }
+    let mut rows = state
+        .schematic
+        .components
+        .iter()
+        .enumerate()
+        .filter_map(|(document_index, component)| {
+            let spec = component.port_spec()?;
+            let contract = component.port_contract()?;
+            Some(PortRow {
+                order: contract.netlist_order.unwrap_or(document_index + 1),
+                duplicated: declared
+                    .get(&spec.name.to_ascii_lowercase())
+                    .is_some_and(|count| *count > 1),
+                component_id: component.id,
+                position: component.pos,
+                document_index,
+                spec,
+                contract,
+            })
         })
-        .filter(|(_, _, port)| matches_query(&query, &[&port.name, port.direction.keyword()]))
+        .filter(|row| sheet_visibility::object_is_in_scope(state, scope, row.component_id))
+        .filter(|row| {
+            matches_query(
+                query,
+                &[
+                    &row.spec.name,
+                    row.spec.direction.keyword(),
+                    &row.order.to_string(),
+                    row.contract.discipline.keyword(),
+                ],
+            )
+        })
         .collect::<Vec<_>>();
-    navigator_section_header(ui, "Ports", &ports.len().to_string());
+    rows.sort_by_key(|row| (row.order, row.document_index));
+    rows
+}
+
+fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
+    let query = normalized(app.state.workbench.navigator_filter());
+    let ports = port_rows(&app.state, scope, &query);
+    if !navigator_section_header(ui, "Ports", &ports.len().to_string()) {
+        return;
+    }
     if ports.is_empty() {
         empty_navigator_row(
             ui,
@@ -558,36 +673,49 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     }
-    for (component_id, position, port) in ports {
-        let icon = match port.direction {
+    for port in ports {
+        let icon = match port.spec.direction {
             PortDirection::In => WorkbenchIcon::ArrowRight,
             PortDirection::Out => WorkbenchIcon::ArrowLeft,
             PortDirection::Supply => WorkbenchIcon::Supply,
             PortDirection::InOut => WorkbenchIcon::Design,
         };
-        let response = nav_row_indented_mono_response(
+        let meta = port.meta();
+        let response = hierarchy_tree::tree_row(
             ui,
-            icon,
-            &port.name,
-            app.state.schematic.selection.has_component(component_id),
-            Some(port.direction.keyword()),
-            1,
-        );
+            hierarchy_tree::TreeRow {
+                id: ui.id().with(("navigator-port", port.component_id)),
+                level: 1,
+                disclosure: None,
+                icon,
+                label: port.spec.name.as_str(),
+                mono: true,
+                meta: Some(meta.as_str()),
+                alert: port.duplicated,
+                selected: app
+                    .state
+                    .schematic
+                    .selection
+                    .has_component(port.component_id),
+            },
+        )
+        .row
+        .on_hover_text(port.tooltip());
         if response.clicked() {
             app.state
                 .schematic
                 .selection
-                .select_only_component(component_id);
+                .select_only_component(port.component_id);
             app.state.schematic.net_highlight.clear();
-            app.state.schematic.center_request = Some(position);
+            app.state.schematic.center_request = Some(port.position);
         }
         navigator_object_context_menu(
             &response,
             app,
             NavigatorObject::Component {
-                id: component_id,
-                label: port.name,
-                position,
+                id: port.component_id,
+                label: port.spec.name,
+                position: port.position,
             },
         );
     }
@@ -601,18 +729,18 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// row itself is what makes that visible without opening anything, so the count
 /// is never elided.
 ///
-/// It takes the session rather than the application because everything a row
-/// does — select, clear the highlight, centre — is a schematic edit, and a rail
-/// that cannot reach past the session cannot grow a command that does.
-fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
+/// A source is an instance like any other row in these rails, so it carries the
+/// same object menu: the rail that could select a source but not open, rename
+/// or find it was the one rail whose rows answered to the pointer alone.
+fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(state.workbench.navigator_filter());
+    let query = normalized(app.state.workbench.navigator_filter());
     let sources = crate::simulation::placed_sources::placed_sources(
-        &state.schematic,
-        state.sim_setup.analysis_plan.as_ref(),
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
     )
     .into_iter()
-    .filter(|source| sheet_visibility::object_is_in_scope(state, scope, source.component_id))
+    .filter(|source| sheet_visibility::object_is_in_scope(&app.state, scope, source.component_id))
     .filter(|source| {
         matches_query(
             &query,
@@ -626,7 +754,9 @@ fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppS
     })
     .collect::<Vec<_>>();
 
-    navigator_section_header(ui, "Excitations", &sources.len().to_string());
+    if !navigator_section_header(ui, "Excitations", &sources.len().to_string()) {
+        return;
+    }
     if sources.is_empty() {
         empty_navigator_row(
             ui,
@@ -652,30 +782,60 @@ fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppS
             source.quantity(),
             source.summary()
         );
-        let position = state
-            .schematic
-            .components
-            .iter()
-            .find(|component| component.id == source.component_id)
-            .map(|component| component.pos);
+        let object = excitation_object(&app.state, &source);
         let response = nav_row_indented_mono_response(
             ui,
             WorkbenchIcon::ArrowRight,
             &source.reference,
-            state.schematic.selection.has_component(source.component_id),
+            app.state
+                .schematic
+                .selection
+                .has_component(source.component_id),
             Some(&meta),
             1,
         )
         .on_hover_text(excitation_tooltip(&source));
-        if response.clicked() {
-            state
-                .schematic
-                .selection
-                .select_only_component(source.component_id);
-            state.schematic.net_highlight.clear();
-            state.schematic.center_request = position;
+        match object {
+            Some(object) => {
+                if response.clicked() {
+                    select_navigator_object(app, &object);
+                }
+                navigator_object_context_menu(&response, app, object);
+            }
+            None => {
+                if response.clicked() {
+                    app.state
+                        .schematic
+                        .selection
+                        .select_only_component(source.component_id);
+                    app.state.schematic.net_highlight.clear();
+                    app.state.schematic.center_request = None;
+                }
+            }
         }
     }
+}
+
+/// The design object one excitation row stands for.
+///
+/// Every command the shared menu carries acts on a placed object, so a source
+/// the sheet holds no instance for stands for nothing: it is still listed,
+/// still selectable, and offered no menu rather than a menu of dead entries.
+fn excitation_object(
+    state: &crate::workbench::app_state::AppState,
+    source: &crate::simulation::placed_sources::PlacedSource,
+) -> Option<NavigatorObject> {
+    let position = state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == source.component_id)
+        .map(|component| component.pos)?;
+    Some(NavigatorObject::Component {
+        id: source.component_id,
+        label: source.reference.clone(),
+        position,
+    })
 }
 
 /// The full reading of one excitation: its terminals, and every analysis that
@@ -747,7 +907,9 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .unwrap_or_default();
 
-    navigator_section_header(ui, "Named signals", &probes.len().to_string());
+    if !navigator_section_header(ui, "Named signals", &probes.len().to_string()) {
+        return;
+    }
     if probes.is_empty() {
         empty_navigator_row(
             ui,
@@ -859,7 +1021,7 @@ fn reveal_probe_expression(app: &mut RSpiceApp, expression: &str) {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum NavigatorObject {
     Component {
         id: u64,
@@ -1550,12 +1712,40 @@ fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
+/// One rail's band: what the section is called, how many rows it stands over,
+/// and whether those rows are painted at all. Returns the disclosure position.
+///
+/// The caret is the control, so it states the position it is in rather than
+/// pointing down over a section that cannot fold. A section is open until a
+/// reader folds it, and the position is held per title so a rail folded in one
+/// frame is folded in the next.
+///
+/// The count is the section's own and is stated whether or not the section is
+/// open: a folded rail that hid how much it holds would be a worse answer than
+/// the rows it replaced.
+///
+/// `egui::CollapsingHeader` is refused here for the same reason
+/// [`catalog_group_row`] refuses it — its stock geometry is not this band.
+fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) -> bool {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let id = ui.make_persistent_id(("navigator-section", title));
+    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));
+    let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_SECTION_H),
-        egui::Sense::hover(),
+        egui::Sense::click(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title)
+    });
+    // Before the caret is drawn, so the band paints the position this frame
+    // returns rather than the one the press just left.
+    if response.clicked() {
+        open = !open;
+        ui.data_mut(|data| data.insert_persisted(id, open));
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_expanded(open);
+    });
     ui.painter().rect_filled(
         rect,
         0.0,
@@ -1566,7 +1756,15 @@ fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
             204,
         ),
     );
-    WorkbenchIcon::ChevronDown.paint(
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    let caret = if open {
+        WorkbenchIcon::ChevronDown
+    } else {
+        WorkbenchIcon::ChevronRight
+    };
+    caret.paint(
         ui.painter(),
         egui::Rect::from_center_size(
             egui::pos2(rect.left() + 15.0, rect.center().y),
@@ -1603,6 +1801,8 @@ fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
         count_galley,
         t.color.text_dim,
     );
+    theme::paint_focus_ring(ui, &response, rect);
+    open
 }
 
 fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {

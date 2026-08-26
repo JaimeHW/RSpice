@@ -25,23 +25,26 @@ const CHIP_HEIGHT: f32 = 22.0;
 /// Render the selected setup page. The analyses route is handled by the
 /// surface itself and never reaches here.
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
-    // The Excitations page and its own heading state the same list, so it is
-    // resolved once here and lent to both. Each resolved it separately, and
-    // resolving it walks the design's nets — so a frame showing that page paid
-    // for the walk twice to print one count above the table it counts.
-    let excitations = if page == SimulationPage::Excitations {
-        crate::simulation::placed_sources::placed_sources(
-            &app.state.schematic,
-            app.state.sim_setup.analysis_plan.as_ref(),
+    // The Excitations page and its own heading state the same two lists, so
+    // each is resolved once here and lent to both. Each resolved it separately,
+    // and resolving one walks the design's nets — so a frame showing that page
+    // paid for the walk twice to print one count above the table it counts.
+    let (excitations, rf_ports) = if page == SimulationPage::Excitations {
+        let plan = app.state.sim_setup.analysis_plan.as_ref();
+        (
+            crate::simulation::placed_sources::placed_sources(&app.state.schematic, plan),
+            crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, plan),
         )
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
-    workspace_title_row(ui, |ui| page_heading(ui, app, page, &excitations));
+    workspace_title_row(ui, |ui| {
+        page_heading(ui, app, page, &excitations, &rf_ports)
+    });
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
         SimulationPage::Excitations => {
-            super::page_excitations::show(ui, &mut app.state, &excitations);
+            super::page_excitations::show(ui, &mut app.state, &excitations, &rf_ports);
         }
         SimulationPage::Variables => super::page_variables::show(ui, app),
         SimulationPage::Outputs => super::page_outputs::show(ui, app),
@@ -114,8 +117,9 @@ fn page_heading(
     app: &mut RSpiceApp,
     page: SimulationPage,
     excitations: &[crate::simulation::placed_sources::PlacedSource],
+    rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
 ) {
-    let eyebrow = eyebrow(app, page, excitations);
+    let eyebrow = eyebrow(app, page, excitations, rf_ports);
     let chip = PreflightChip::resolve(app);
     ui.horizontal(|ui| {
         let available = ui.available_width();
@@ -342,31 +346,41 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
 /// saved-output preflight, the model qualification gate -- are page-body work
 /// and stay there.
 ///
-/// The exception is Excitations, whose eyebrow counts the placed-source list.
-/// Resolving that list walks the design's nets, so it is resolved once by
-/// [`show`] and lent to the heading and the page body together rather than
-/// resolved by each. The Design navigator's rail resolves it again on the same
-/// frame and is left that way deliberately: it is a different dock rendered
-/// from a different borrow, and the only thing that could join them is a cache
-/// keyed on the frame — which reports the count from before a structural edit
-/// for one frame after it, a wrong number in a heading whose whole job is to be
-/// a right one. `placed_sources` returns early on a design that places no
-/// source, so a sheet being drawn pays nothing at all.
+/// The exception is Excitations, whose eyebrow counts the placed-source and
+/// placed-port lists. Resolving either walks the design's nets, so each is
+/// resolved once by [`show`] and lent to the heading and the page body together
+/// rather than resolved by each. The Design navigator's rail resolves them
+/// again on the same frame and is left that way deliberately: it is a different
+/// dock rendered from a different borrow, and the only thing that could join
+/// them is a cache keyed on the frame — which reports the count from before a
+/// structural edit for one frame after it, a wrong number in a heading whose
+/// whole job is to be a right one. Both derivations return early on a design
+/// that places none of what they list, so a sheet being drawn pays nothing at
+/// all and a design with no RF port pays nothing for the second.
 fn eyebrow(
     app: &RSpiceApp,
     page: SimulationPage,
     excitations: &[crate::simulation::placed_sources::PlacedSource],
+    rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
 ) -> String {
     match page {
+        // `unread` counts sources, as it always has. A port's readership is not
+        // the same fact — a port no `.sp` run indexes is still terminating the
+        // design — and the card's own chip is where that is stated.
         SimulationPage::Excitations => {
             let unread = excitations
                 .iter()
                 .filter(|source| !source.is_read())
                 .count();
-            format!(
-                "DESIGN · {} · {unread} unread",
-                counted(excitations.len(), "source", "sources")
-            )
+            let sources = counted(excitations.len(), "source", "sources");
+            if rf_ports.is_empty() {
+                format!("DESIGN · {sources} · {unread} unread")
+            } else {
+                format!(
+                    "DESIGN · {sources} · {} · {unread} unread",
+                    counted(rf_ports.len(), "RF port", "RF ports")
+                )
+            }
         }
         SimulationPage::Analyses => {
             let plan = app

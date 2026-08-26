@@ -179,7 +179,7 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     let panel = if layout.navigator_resizable {
         panel
             .default_size(layout.navigator_width)
-            .size_range(220.0..=440.0)
+            .size_range(layout.navigator_min_width..=layout.navigator_max_width)
             .resizable(true)
     } else {
         panel.exact_size(layout.navigator_width).resizable(false)
@@ -187,31 +187,33 @@ pub fn show_navigator(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     let shown = panel.show(root, |ui| navigator::show(ui, app));
     if layout.navigator_resizable && splitter_is_dragged(ctx, NAVIGATOR_PANEL_ID) {
         let actual = shown.response.rect.width();
-        app.state.workbench.navigator_width = actual.clamp(220.0, 440.0);
+        app.state.workbench.navigator_width =
+            actual.clamp(layout.navigator_min_width, layout.navigator_max_width);
         app.state.workbench.navigator_width_custom = true;
     }
     if layout.navigator_resizable
         && let Some(response) = splitter_response(ctx, NAVIGATOR_PANEL_ID)
     {
+        // The splitter reports and moves the dock that is on screen, which is
+        // the persisted width clamped into the resolved class range.
         expose_splitter_accessibility(
             ctx,
             &response,
             "Resize workspace navigator",
-            app.state.workbench.navigator_width,
-            220.0,
-            440.0,
+            layout.navigator_width,
+            layout.navigator_min_width,
+            layout.navigator_max_width,
             12.0,
         );
         if let Some(action) =
             horizontal_splitter_action(ctx, &response, Key::ArrowRight, Key::ArrowLeft)
         {
-            if let Some(width) =
-                apply_splitter_step(app.state.workbench.navigator_width, action, 12.0)
-            {
-                app.state.workbench.navigator_width = width.clamp(220.0, 440.0);
+            if let Some(width) = apply_splitter_step(layout.navigator_width, action, 12.0) {
+                app.state.workbench.navigator_width =
+                    width.clamp(layout.navigator_min_width, layout.navigator_max_width);
                 app.state.workbench.navigator_width_custom = true;
             } else {
-                app.state.workbench.navigator_width = 256.0;
+                app.state.workbench.navigator_width = layout.navigator_reset_width;
                 app.state.workbench.navigator_width_custom = false;
             }
             ctx.request_repaint();
@@ -233,7 +235,7 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     let panel = if layout.inspector_resizable {
         panel
             .default_size(layout.inspector_width)
-            .size_range(278.0..=440.0)
+            .size_range(layout.inspector_min_width..=layout.inspector_max_width)
             .resizable(true)
     } else {
         // Responsive/touch projections own an exact dock width. Letting an
@@ -244,7 +246,8 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
     let shown = panel.show(root, |ui| inspector::show(ui, app));
     if layout.inspector_resizable && splitter_is_dragged(ctx, INSPECTOR_PANEL_ID) {
         let actual = shown.response.rect.width();
-        app.state.workbench.inspector_width = actual.clamp(278.0, 440.0);
+        app.state.workbench.inspector_width =
+            actual.clamp(layout.inspector_min_width, layout.inspector_max_width);
         app.state.workbench.inspector_width_custom = true;
     }
     if layout.inspector_resizable
@@ -254,9 +257,9 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
             ctx,
             &response,
             "Resize inspector",
-            app.state.workbench.inspector_width,
-            278.0,
-            440.0,
+            layout.inspector_width,
+            layout.inspector_min_width,
+            layout.inspector_max_width,
             12.0,
         );
         // The inspector is attached to the right edge, so moving its splitter
@@ -264,13 +267,12 @@ pub fn show_inspector(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSp
         if let Some(action) =
             horizontal_splitter_action(ctx, &response, Key::ArrowLeft, Key::ArrowRight)
         {
-            if let Some(width) =
-                apply_splitter_step(app.state.workbench.inspector_width, action, 12.0)
-            {
-                app.state.workbench.inspector_width = width.clamp(278.0, 440.0);
+            if let Some(width) = apply_splitter_step(layout.inspector_width, action, 12.0) {
+                app.state.workbench.inspector_width =
+                    width.clamp(layout.inspector_min_width, layout.inspector_max_width);
                 app.state.workbench.inspector_width_custom = true;
             } else {
-                app.state.workbench.inspector_width = 312.0;
+                app.state.workbench.inspector_width = layout.inspector_reset_width;
                 app.state.workbench.inspector_width_custom = false;
             }
             ctx.request_repaint();
@@ -346,7 +348,8 @@ pub fn show_drawers(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
 
 #[cfg(test)]
 mod tests {
-    use super::{SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale};
+    use super::{LayoutSpec, SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale};
+    use crate::workbench::state::WorkbenchState;
 
     #[test]
     fn responsive_and_reset_layouts_discard_egui_panel_memory() {
@@ -379,5 +382,22 @@ mod tests {
             apply_splitter_step(440.0, SplitterKeyboardAction::Reset, 12.0),
             None
         );
+    }
+
+    #[test]
+    fn splitter_keys_move_the_dock_the_width_class_actually_shows() {
+        let mut state = WorkbenchState::default();
+        state.navigator_width = 440.0;
+        state.navigator_width_custom = true;
+        let layout = LayoutSpec::resolve(1_000.0, 900.0, &state);
+        let step = |action| {
+            apply_splitter_step(layout.navigator_width, action, 12.0)
+                .map(|width| width.clamp(layout.navigator_min_width, layout.navigator_max_width))
+        };
+
+        assert_eq!(layout.navigator_width, 320.0);
+        assert_eq!(step(SplitterKeyboardAction::Decrease), Some(308.0));
+        assert_eq!(step(SplitterKeyboardAction::Increase), Some(320.0));
+        assert_eq!(layout.navigator_reset_width, 228.0);
     }
 }

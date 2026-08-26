@@ -34,7 +34,13 @@ pub struct LayoutSpec {
     pub status_bar_height: f32,
     pub phone_navigation_height: f32,
     pub navigator_width: f32,
+    pub navigator_min_width: f32,
+    pub navigator_max_width: f32,
+    pub navigator_reset_width: f32,
     pub inspector_width: f32,
+    pub inspector_min_width: f32,
+    pub inspector_max_width: f32,
+    pub inspector_reset_width: f32,
     pub console_min_height: f32,
     pub console_max_height: f32,
     pub console_height: f32,
@@ -152,6 +158,11 @@ impl LayoutSpec {
             )
         };
 
+        let (navigator_min_width, navigator_max_width, navigator_reset_width) =
+            navigator_width_bounds(width_class);
+        let (inspector_min_width, inspector_max_width, inspector_reset_width) =
+            inspector_width_bounds(width_class);
+
         let show_navigator_dock = project_open
             && context_docks_enabled
             && !navigator_uses_drawer
@@ -195,8 +206,10 @@ impl LayoutSpec {
             // The canonical run-configuration summary is present only when
             // both workstation docks fit (the mockup removes it at 1260 px).
             show_run_config_selector: matches!(width_class, WidthClass::Wide) && !short_landscape,
-            navigator_resizable: matches!(width_class, WidthClass::Wide),
-            inspector_resizable: matches!(width_class, WidthClass::Wide),
+            // Every docked projection of a context dock carries its splitter;
+            // only drawer and touch projections own an exact width.
+            navigator_resizable: matches!(width_class, WidthClass::Desktop | WidthClass::Wide),
+            inspector_resizable: matches!(width_class, WidthClass::Desktop | WidthClass::Wide),
             title_bar_height: metrics.title,
             toolbar_height: metrics.toolbar,
             toolbar_control_height: metrics.toolbar_control,
@@ -205,20 +218,33 @@ impl LayoutSpec {
             sheet_strip_height: metrics.sheet,
             status_bar_height: metrics.status,
             phone_navigation_height: 54.0,
-            // At 821-1260 px the mockup fixes the left column at 228 px and
-            // removes its splitter. Wide layouts restore the persisted dock.
-            navigator_width: if matches!(width_class, WidthClass::Desktop) {
-                228.0
-            } else if state.navigator_width_custom {
-                state.navigator_width.clamp(220.0, 440.0)
+            // A persisted dock width is clamped into the resolved class range
+            // at read time and never rewritten, so a width chosen on a wide
+            // window survives a spell in a narrower one. Without a resize of
+            // its own the Desktop class holds the left column at its reset
+            // width; wider windows scale the column with the viewport.
+            navigator_width: if state.navigator_width_custom {
+                state
+                    .navigator_width
+                    .clamp(navigator_min_width, navigator_max_width)
+            } else if matches!(width_class, WidthClass::Desktop) {
+                navigator_reset_width
             } else {
                 (viewport_width * 0.18).clamp(220.0, 256.0)
             },
+            navigator_min_width,
+            navigator_max_width,
+            navigator_reset_width,
             inspector_width: if state.inspector_width_custom {
-                state.inspector_width.clamp(278.0, 440.0)
+                state
+                    .inspector_width
+                    .clamp(inspector_min_width, inspector_max_width)
             } else {
                 (viewport_width * 0.22).clamp(278.0, 312.0)
             },
+            inspector_min_width,
+            inspector_max_width,
+            inspector_reset_width,
             console_min_height,
             console_max_height,
             console_height,
@@ -305,6 +331,33 @@ impl ChromeMetrics {
             metrics.document - 4.0
         };
         metrics
+    }
+}
+
+/// Resize contract for the left dock as `(minimum, maximum, reset)`.
+///
+/// Hierarchical instance paths and net names are long enough that a fixed
+/// column truncates them on an ordinary laptop window, so the Desktop class
+/// carries a splitter as well. Its 320 px ceiling keeps the canvas the
+/// majority of an 821-1260 px window, and its reset restores the 228 px the
+/// class holds without a resize. Wide windows carry the full range.
+const fn navigator_width_bounds(width_class: WidthClass) -> (f32, f32, f32) {
+    match width_class {
+        WidthClass::Wide => (220.0, 440.0, 256.0),
+        _ => (220.0, 320.0, 228.0),
+    }
+}
+
+/// Resize contract for the right dock as `(minimum, maximum, reset)`.
+///
+/// The 278 px property-column floor holds in every class. Narrower classes
+/// take the navigator's 320 px ceiling, since a docked pair plus the activity
+/// rail must still leave the canvas the larger share of the window, and reset
+/// to the 278 px those classes resolve without a resize.
+const fn inspector_width_bounds(width_class: WidthClass) -> (f32, f32, f32) {
+    match width_class {
+        WidthClass::Wide => (278.0, 440.0, 312.0),
+        _ => (278.0, 320.0, 278.0),
     }
 }
 
@@ -432,7 +485,56 @@ mod tests {
         assert!(!spec.show_inspector_dock);
         assert!(spec.inspector_uses_drawer);
         assert_eq!(spec.navigator_width, 228.0);
-        assert!(!spec.navigator_resizable);
+        assert!(spec.navigator_resizable);
+    }
+
+    #[test]
+    fn desktop_docks_resize_inside_the_narrower_class_clamp() {
+        let spec = LayoutSpec::resolve(1_000.0, 900.0, &WorkbenchState::default());
+
+        assert!(spec.navigator_resizable);
+        assert!(spec.inspector_resizable);
+        assert_eq!(spec.navigator_min_width, 220.0);
+        assert_eq!(spec.navigator_max_width, 320.0);
+        assert_eq!(spec.navigator_reset_width, 228.0);
+        assert_eq!(spec.navigator_width, 228.0);
+        assert_eq!(spec.inspector_min_width, 278.0);
+        assert_eq!(spec.inspector_max_width, 320.0);
+        assert_eq!(spec.inspector_reset_width, 278.0);
+        assert_eq!(spec.inspector_width, 278.0);
+
+        let mut resized = WorkbenchState::default();
+        resized.navigator_width = 300.0;
+        resized.navigator_width_custom = true;
+        resized.inspector_width = 300.0;
+        resized.inspector_width_custom = true;
+        let spec = LayoutSpec::resolve(1_000.0, 900.0, &resized);
+
+        assert_eq!(spec.navigator_width, 300.0);
+        assert_eq!(spec.inspector_width, 300.0);
+    }
+
+    #[test]
+    fn a_wide_dock_width_survives_a_spell_in_a_desktop_window() {
+        let mut state = WorkbenchState::default();
+        state.navigator_width = 440.0;
+        state.navigator_width_custom = true;
+        state.inspector_width = 440.0;
+        state.inspector_width_custom = true;
+
+        let wide = LayoutSpec::resolve(1_440.0, 900.0, &state);
+        assert_eq!(wide.navigator_width, 440.0);
+        assert_eq!(wide.inspector_width, 440.0);
+
+        let desktop = LayoutSpec::resolve(1_000.0, 900.0, &state);
+        assert_eq!(desktop.navigator_width, 320.0);
+        assert_eq!(desktop.inspector_width, 320.0);
+        assert_eq!(state.navigator_width, 440.0);
+        assert_eq!(state.inspector_width, 440.0);
+
+        let wide_again = LayoutSpec::resolve(1_440.0, 900.0, &state);
+        assert_eq!(wide_again.navigator_width, 440.0);
+        assert_eq!(wide_again.inspector_width, 440.0);
     }
 
     #[test]
@@ -448,6 +550,12 @@ mod tests {
         assert!(spec.show_run_config_selector);
         assert!((spec.navigator_width - 230.4).abs() < 0.001);
         assert!((spec.inspector_width - 281.6).abs() < 0.001);
+        assert_eq!(spec.navigator_min_width, 220.0);
+        assert_eq!(spec.navigator_max_width, 440.0);
+        assert_eq!(spec.navigator_reset_width, 256.0);
+        assert_eq!(spec.inspector_min_width, 278.0);
+        assert_eq!(spec.inspector_max_width, 440.0);
+        assert_eq!(spec.inspector_reset_width, 312.0);
     }
 
     #[test]

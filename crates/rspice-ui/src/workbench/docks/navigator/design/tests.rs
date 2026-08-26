@@ -154,14 +154,14 @@ fn the_sheet_scope_narrows_the_object_rails_to_the_active_sheet() {
     crate::ui::Theme::default().apply(&ctx);
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::AllSheets);
-    let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.state));
+    let every_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app));
     assert!(
         every_sheet.contains("VIN") && every_sheet.contains("VBIAS"),
         "the default scope lists the whole cell view: {every_sheet}"
     );
 
     sheet_visibility::set_sheet_scope(&ctx, SheetScope::ActiveSheet);
-    let this_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app.state));
+    let this_sheet = painted_panel(&ctx, |ui| excitation_section(ui, &mut app));
     assert!(
         this_sheet.contains("VIN"),
         "an object on the active sheet is kept: {this_sheet}"
@@ -691,19 +691,30 @@ fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
         .expect("the fixture configuration is well formed");
 }
 
-/// Everything a painted frame carries, as text.
+/// Every run of text a frame painted: what it says, where it landed, and the
+/// colour it was set in.
 ///
 /// The rail is read from its shapes rather than its accessibility tree: a
 /// section that resolves paints selectable rows and one that does not
-/// paints a plain row, and only the shapes carry both.
+/// paints a plain row, and only the shapes carry both. The colour is here
+/// because a meta column that states a hazard has to be told apart from one
+/// that states a count, and that difference is only ever a colour.
 #[cfg(not(target_arch = "wasm32"))]
-fn painted_text(output: &egui::FullOutput) -> String {
-    fn walk(shape: &egui::epaint::Shape, into: &mut String) {
+fn painted_runs(output: &egui::FullOutput) -> Vec<(String, egui::Rect, egui::Color32)> {
+    fn walk(shape: &egui::epaint::Shape, into: &mut Vec<(String, egui::Rect, egui::Color32)>) {
         match shape {
-            egui::epaint::Shape::Text(painted) => {
-                into.push_str(&painted.galley.job.text);
-                into.push('\n');
-            }
+            egui::epaint::Shape::Text(painted) => into.push((
+                painted.galley.job.text.clone(),
+                egui::Rect::from_min_size(painted.pos, painted.galley.size()),
+                painted.override_text_color.unwrap_or_else(|| {
+                    painted
+                        .galley
+                        .job
+                        .sections
+                        .first()
+                        .map_or(egui::Color32::PLACEHOLDER, |section| section.format.color)
+                }),
+            )),
             egui::epaint::Shape::Vec(shapes) => {
                 for shape in shapes {
                     walk(shape, into);
@@ -713,11 +724,23 @@ fn painted_text(output: &egui::FullOutput) -> String {
         }
     }
 
-    let mut text = String::new();
+    let mut runs = Vec::new();
     for clipped in &output.shapes {
-        walk(&clipped.shape, &mut text);
+        walk(&clipped.shape, &mut runs);
     }
-    text
+    runs
+}
+
+/// Everything a painted frame carries, as text.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_text(output: &egui::FullOutput) -> String {
+    painted_runs(output)
+        .into_iter()
+        .fold(String::new(), |mut text, (run, _, _)| {
+            text.push_str(&run);
+            text.push('\n');
+            text
+        })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -985,4 +1008,476 @@ fn an_unadopted_release_reviews_and_an_incompatible_one_refuses() {
         "{reason}"
     );
     assert_eq!(rows[1].meta, "opamp · needs harmonic-balance-2");
+}
+
+// ---------------------------------------------------------- rails that fold
+
+/// One interface pin, drawn as the typed port editor writes it.
+fn port(
+    id: u64,
+    name: &str,
+    netlist_order: Option<usize>,
+    direction: PortDirection,
+    documentation: &str,
+) -> crate::state::Component {
+    use crate::state::{PortContract, PortDiscipline, PortSignalType};
+
+    let mut component = crate::state::Component::new(
+        id,
+        ComponentType::Port,
+        crate::state::Point::new(20, 20 + id as i32),
+    );
+    component.value = name.to_owned();
+    component.params = PortContract {
+        direction,
+        signal_type: PortSignalType::Analog,
+        discipline: PortDiscipline::Electrical,
+        netlist_order,
+        documentation: documentation.to_owned(),
+    }
+    .encoded_params();
+    component
+}
+
+/// A cell whose interface is declared out of document order: the pin the
+/// contract puts second is the one drawn first.
+fn interface_design() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    for (id, name, order, direction) in [
+        (401, "BETA", 2, PortDirection::In),
+        (402, "ALPHA", 1, PortDirection::In),
+        (403, "GAMMA", 3, PortDirection::Out),
+    ] {
+        app.state.schematic.components.push(port(
+            id,
+            name,
+            Some(order),
+            direction,
+            "carries the proving signal",
+        ));
+    }
+    app.state.sync_active_schematic_to_workspace();
+    app
+}
+
+/// A press and a release at one point, which is what egui reads as a click.
+#[cfg(not(target_arch = "wasm32"))]
+fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
+    vec![
+        egui::Event::PointerMoved(at),
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        },
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::default(),
+        },
+    ]
+}
+
+/// The titles the navigator's bands carry, in the order it stacks them.
+#[cfg(not(target_arch = "wasm32"))]
+const SECTION_TITLES: [&str; 6] = [
+    "Masters",
+    "Occurrences",
+    "Ports",
+    "Nets",
+    "Excitations",
+    "Named signals",
+];
+
+/// The navigator held open across frames, so a press and the frame that reads
+/// it belong to one session.
+///
+/// A disclosure is only worth anything if it survives the frame it was set in,
+/// and a case that wrote the persisted flag itself would prove nothing about
+/// the band the reader actually presses.
+#[cfg(not(target_arch = "wasm32"))]
+struct NavigatorPanel {
+    ctx: egui::Context,
+    app: RSpiceApp,
+    /// Every control the frame announced: what it says, where it is, and the
+    /// disclosure position it publishes.
+    controls: Vec<(String, egui::Rect, Option<bool>)>,
+    /// Every run of text the frame painted.
+    runs: Vec<(String, egui::Rect, egui::Color32)>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NavigatorPanel {
+    fn open(app: RSpiceApp) -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut panel = Self {
+            ctx,
+            app,
+            controls: Vec::new(),
+            runs: Vec::new(),
+        };
+        // Twice: the first pass builds the font set and the second lays out
+        // against it, and a band measured before the fonts exist is not the
+        // band the header ends up in.
+        panel.pass(Vec::new());
+        panel.pass(Vec::new());
+        panel
+    }
+
+    /// One rendered pass, and what it published.
+    fn pass(&mut self, events: Vec<egui::Event>) {
+        let app = &mut self.app;
+        let output = self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 1600.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.set_width(260.0);
+                        navigator(ui, app);
+                    });
+            },
+        );
+        self.runs = painted_runs(&output);
+        self.controls = output
+            .platform_output
+            .accesskit_update
+            .map(|update| {
+                update
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| {
+                        let label = node.label()?.to_owned();
+                        let bounds = node.bounds()?;
+                        Some((
+                            label,
+                            egui::Rect::from_min_max(
+                                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                            ),
+                            node.is_expanded(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+
+    /// The one band announcing `title`.
+    fn band(&self, title: &str) -> (egui::Rect, Option<bool>) {
+        let hits = self
+            .controls
+            .iter()
+            .filter(|(label, _, _)| label == title)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hits.len(),
+            1,
+            "expected exactly one control announcing {title:?}, found {}; the rail announces: \
+             {:#?}",
+            hits.len(),
+            self.controls
+                .iter()
+                .map(|(label, _, _)| label.as_str())
+                .collect::<Vec<_>>()
+        );
+        (hits[0].1, hits[0].2)
+    }
+
+    /// The disclosure position the band publishes to a screen reader.
+    fn expanded(&self, title: &str) -> Option<bool> {
+        self.band(title).1
+    }
+
+    /// Press the band, then settle the frame the press produced.
+    fn click(&mut self, title: &str) {
+        let at = self.band(title).0.center();
+        self.pass(click_events(at));
+        self.pass(Vec::new());
+    }
+
+    /// The count the section states, read from the band its own title is
+    /// painted in rather than from the frame at large.
+    fn stated_count(&self, title: &str) -> Option<String> {
+        let heading = title.to_uppercase();
+        let band = self
+            .runs
+            .iter()
+            .find(|(run, _, _)| run.as_str() == heading)?
+            .1;
+        self.runs
+            .iter()
+            .find(|(run, rect, _)| {
+                run.as_str() != heading && (rect.center().y - band.center().y).abs() <= 2.0
+            })
+            .map(|(run, _, _)| run.clone())
+    }
+
+    /// Every run one section painted under its own band.
+    ///
+    /// Read from the band down to the next one rather than from the frame at
+    /// large, because the rails answer about one design and say the same words
+    /// about it: a port named `ALPHA` puts `ALPHA` in the ports rail and in the
+    /// nets rail both, and a search of the whole frame would call a folded
+    /// section open on the strength of its neighbour.
+    fn rows_under(&self, title: &str) -> Vec<String> {
+        let band = self.band(title).0;
+        let next = SECTION_TITLES
+            .iter()
+            .filter(|other| **other != title)
+            .map(|other| self.band(other).0.top())
+            .filter(|top| *top > band.top())
+            .fold(f32::INFINITY, f32::min);
+        self.runs
+            .iter()
+            .filter(|(_, rect, _)| rect.top() >= band.bottom() && rect.bottom() <= next)
+            .map(|(run, _, _)| run.clone())
+            .collect()
+    }
+}
+
+/// A section folds on a press, stays folded into the next frame, and goes on
+/// stating what it holds while folded.
+///
+/// The caret was decoration before this: every band pointed down and nothing
+/// answered a press, so a reader working in a long rail had no way to put one
+/// group aside. What makes it honest is the pair — the rows go, the count
+/// stays — because a header that hid its count would trade a rail you cannot
+/// shorten for one that will not say what it is hiding.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_navigator_section_folds_on_a_press_and_keeps_stating_what_it_holds() {
+    let mut panel = NavigatorPanel::open(interface_design());
+
+    assert_eq!(
+        panel.expanded("Ports"),
+        Some(true),
+        "sections are open until a reader folds one"
+    );
+    assert_eq!(panel.stated_count("Ports").as_deref(), Some("3"));
+    assert!(
+        panel.rows_under("Ports").contains(&"ALPHA".to_owned()),
+        "an open rail paints its rows: {:?}",
+        panel.rows_under("Ports")
+    );
+
+    panel.click("Ports");
+    assert_eq!(panel.expanded("Ports"), Some(false));
+    assert_eq!(
+        panel.rows_under("Ports"),
+        Vec::<String>::new(),
+        "a folded rail paints no rows"
+    );
+    assert_eq!(
+        panel.stated_count("Ports").as_deref(),
+        Some("3"),
+        "a folded rail still states what it holds"
+    );
+
+    // The frame after the press: a position that did not survive it would be a
+    // caret that flickers rather than a section that folds.
+    panel.pass(Vec::new());
+    assert_eq!(panel.expanded("Ports"), Some(false));
+    assert_eq!(panel.rows_under("Ports"), Vec::<String>::new());
+
+    panel.click("Ports");
+    assert_eq!(panel.expanded("Ports"), Some(true));
+    assert!(
+        panel.rows_under("Ports").contains(&"ALPHA".to_owned()),
+        "a second press unfolds it again"
+    );
+}
+
+/// Folding one section leaves every other one alone.
+///
+/// The position is held per title, so a rail that keyed them together would
+/// fold the whole navigator on one press.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn folding_one_navigator_section_leaves_the_others_open() {
+    let mut panel = NavigatorPanel::open(interface_design());
+
+    panel.click("Ports");
+
+    assert_eq!(panel.expanded("Ports"), Some(false));
+    for title in [
+        "Masters",
+        "Occurrences",
+        "Nets",
+        "Excitations",
+        "Named signals",
+    ] {
+        assert_eq!(
+            panel.expanded(title),
+            Some(true),
+            "{title} was not the section that was pressed"
+        );
+    }
+}
+
+/// The ports rail lists the interface in the order the deck has it, and numbers
+/// every pin with the position it occupies there.
+///
+/// Document order is the order the pins happened to be drawn in, which is no
+/// order at all: the `.SUBCKT` line and the node order of every instance of
+/// this cell come from `netlist_order`. A rail numbering rows by their place in
+/// the file would call a pin `#1` that the deck calls third.
+#[test]
+fn the_ports_rail_lists_the_interface_in_the_order_the_deck_has_it() {
+    let app = interface_design();
+
+    let rows = port_rows(&app.state, SheetScope::AllSheets, "");
+
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.spec.name.as_str(), row.meta()))
+            .collect::<Vec<_>>(),
+        [
+            ("ALPHA", "#1 \u{00b7} in".to_owned()),
+            ("BETA", "#2 \u{00b7} in".to_owned()),
+            ("GAMMA", "#3 \u{00b7} out".to_owned()),
+        ]
+    );
+}
+
+/// A pin whose name declares a vector states the conductors it carries.
+///
+/// The name is the declaration, so `DATA[7:0]` is one row standing for eight
+/// wires. A rail that listed it as one wire would under-count the interface by
+/// seven every time it was read.
+#[test]
+fn a_vector_pin_states_the_conductors_its_name_declares() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.schematic.components.push(port(
+        404,
+        "DATA[7:0]",
+        Some(1),
+        PortDirection::In,
+        "the sampled word",
+    ));
+    app.state.sync_active_schematic_to_workspace();
+
+    let rows = port_rows(&app.state, SheetScope::AllSheets, "");
+
+    assert_eq!(rows[0].meta(), "#1 \u{00b7} in \u{00b7} [8]");
+    let tooltip = rows[0].tooltip();
+    assert!(
+        tooltip.contains("8 conductors") && tooltip.contains("the sampled word"),
+        "the tooltip carries the whole contract: {tooltip}"
+    );
+}
+
+/// A name declared twice is marked on every row that declares it, in the tone a
+/// hazard is stated in rather than the tone a count is.
+///
+/// The interface takes the first declaration and the rest add no pin, so the
+/// rail is the only place the reader is told that the sheet shows two ports and
+/// the deck has one.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_port_name_declared_twice_is_marked_on_both_rows() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    // Folded for case, because the netlist folds it: `SENSE` and `sense` are
+    // one node, declared twice.
+    app.state
+        .schematic
+        .components
+        .push(port(405, "SENSE", Some(1), PortDirection::In, ""));
+    app.state
+        .schematic
+        .components
+        .push(port(406, "sense", Some(2), PortDirection::In, ""));
+    app.state
+        .schematic
+        .components
+        .push(port(407, "CLEAN", Some(3), PortDirection::Out, ""));
+    app.state.sync_active_schematic_to_workspace();
+
+    let rows = port_rows(&app.state, SheetScope::AllSheets, "");
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.spec.name.as_str(), row.duplicated))
+            .collect::<Vec<_>>(),
+        [("SENSE", true), ("sense", true), ("CLEAN", false)],
+        "the repetition is a fact about both declarations, not about the second"
+    );
+    assert!(
+        rows[0].tooltip().contains("declared more than once"),
+        "{}",
+        rows[0].tooltip()
+    );
+
+    // And the marking reaches the screen: a warning painted in the faint tone
+    // every other meta column uses is not a warning.
+    let panel = NavigatorPanel::open(app);
+    let warn = Tokens::get(&panel.ctx).color.warn;
+    let tone = |meta: &str| {
+        panel
+            .runs
+            .iter()
+            .find(|(run, _, _)| run.as_str() == meta)
+            .map(|(_, _, color)| *color)
+    };
+    assert_eq!(tone("#1 \u{00b7} in"), Some(warn));
+    assert_eq!(tone("#2 \u{00b7} in"), Some(warn));
+    assert_ne!(
+        tone("#3 \u{00b7} out"),
+        Some(warn),
+        "the pin declared once states no hazard"
+    );
+}
+
+/// An excitation row stands for the instance it names, which is what the shared
+/// object menu acts on.
+///
+/// This was the one rail whose rows answered to the pointer alone: they could
+/// be selected and nothing else, while every other rail carried open, rename
+/// and find on the same gesture.
+#[test]
+fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
+    let mut app = RSpiceApp::test_instance();
+    let mut source = crate::state::Component::new(
+        501,
+        ComponentType::VoltageSource,
+        crate::state::Point::new(60, 80),
+    );
+    source.name = "VIN".to_owned();
+    app.state.schematic.components.push(source);
+    app.state.sync_active_schematic_to_workspace();
+
+    let sources = crate::simulation::placed_sources::placed_sources(
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
+    );
+    let placed = sources
+        .iter()
+        .find(|source| source.reference == "VIN")
+        .expect("the fixture source is placed");
+
+    assert_eq!(
+        excitation_object(&app.state, placed),
+        Some(NavigatorObject::Component {
+            id: 501,
+            label: "VIN".to_owned(),
+            position: crate::state::Point::new(60, 80),
+        })
+    );
+
+    // A source the sheet holds no instance for is offered no menu rather than a
+    // menu of commands that would act on nothing.
+    app.state.schematic.components.clear();
+    assert_eq!(excitation_object(&app.state, placed), None);
 }
