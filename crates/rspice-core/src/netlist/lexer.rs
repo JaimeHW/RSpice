@@ -622,7 +622,28 @@ pub fn is_xyce_device_name_char(character: char) -> bool {
         )
 }
 
+/// Resolve the SPICE engineering suffix at the head of `text`.
+///
+/// Returns the multiplier the suffix names together with how many *characters*
+/// of `text` it consumed. Text this dialect does not know as a suffix consumes
+/// nothing and scales by one, so a caller that must refuse `1bogus` rather than
+/// silently read it as `1` compares the consumed count against the length of
+/// the text it handed in.
+///
+/// This is the single semantic owner for SPICE numeric suffixes. The lexer
+/// reads every deck through it, and so must any surface whose typed text is
+/// compiled into a deck — a simulation dialog's stop-time field, for instance.
+/// A second table beside this one is how `1A` comes to mean one ampere in a
+/// field and 1e-18 seconds in the run that field configures.
+pub fn spice_suffix_scale(text: &str) -> (Value, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    parse_spice_suffix(&chars)
+}
+
 /// Parse SPICE engineering suffix and return (multiplier, chars_consumed)
+///
+/// [`spice_suffix_scale`] is the `&str` door onto this table for callers
+/// outside the lexer; the table itself lives here and has exactly one copy.
 fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
     if chars.is_empty() {
         return (1.0, 0);
@@ -1144,6 +1165,63 @@ mod tests {
         assert_eq!(parse_spice_value("1X").expect("1X parses"), 1.0e6);
         assert_eq!(parse_spice_value("1x").expect("1x parses"), 1.0e6);
         assert_eq!(parse_spice_value("2.5X").expect("2.5X parses"), 2.5e6);
+    }
+
+    /// The exposed suffix reader and the lexer's own number path are one
+    /// table. A UI field whose text is compiled into a deck resolves its scale
+    /// through [`spice_suffix_scale`], so anything the two could disagree on
+    /// would be a value that means one thing where it is typed and another
+    /// where it is run.
+    ///
+    /// The consumed count is the other half of the contract: a suffix this
+    /// dialect does not know consumes nothing, which is what lets a caller
+    /// refuse `1wat` instead of silently reading it as `1`. And there is no
+    /// atto — `A` is amperes, and consumes one character at unit scale.
+    #[test]
+    fn the_exposed_suffix_reader_is_the_table_the_lexer_itself_reads() {
+        for (literal, suffix, expected) in [
+            ("1ns", "ns", 1.0e-9),
+            ("10kHz", "kHz", 1.0e4),
+            ("2.2uF", "uF", 2.2e-6),
+            ("5V", "V", 5.0),
+            ("1A", "A", 1.0),
+            ("1MHz", "MHz", 1.0e6),
+            ("1mil", "mil", 25.4e-6),
+            ("1meg", "meg", 1.0e6),
+            ("1m", "m", 1.0e-3),
+            ("1X", "X", 1.0e6),
+        ] {
+            let (multiplier, consumed) = spice_suffix_scale(suffix);
+            assert_eq!(
+                consumed,
+                suffix.chars().count(),
+                "{suffix} must be consumed whole"
+            );
+            let through_suffix = literal[..literal.len() - suffix.len()]
+                .parse::<Value>()
+                .expect("the mantissa is a plain decimal")
+                * multiplier;
+            let through_lexer = parse_spice_value_complete(literal)
+                .unwrap_or_else(|error| panic!("{literal} must parse completely: {error}"));
+            assert!(
+                (through_suffix - expected).abs() <= expected.abs() * 1.0e-15
+                    && (through_lexer - expected).abs() <= expected.abs() * 1.0e-15,
+                "{literal}: suffix reader gives {through_suffix:e}, lexer gives {through_lexer:e}"
+            );
+        }
+
+        for unknown in ["wat", "ohm", "%", ""] {
+            assert_eq!(
+                spice_suffix_scale(unknown),
+                (1.0, 0),
+                "{unknown:?} is not a suffix this dialect knows"
+            );
+        }
+
+        // `atto` reads as the unit letter `A` and stops; the three letters
+        // after it are nothing this dialect knows, which is what keeps
+        // `1atto` a rejection at a boundary that demands full consumption.
+        assert_eq!(spice_suffix_scale("atto"), (1.0, 1));
     }
 
     #[test]
