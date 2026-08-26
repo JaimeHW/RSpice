@@ -27,7 +27,18 @@ use super::page_kit::{
 const DATASET_COLUMNS: [f32; 4] = [0.26, 0.14, 0.20, 0.40];
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let payload = plan_payload(app);
+    // Before preflight is asked anything. Handing a defaulted payload to the
+    // controller gets a clean answer over an empty selection, and the page then
+    // states a save policy, a group ledger and a forecast for a plan it could
+    // not resolve — numbers that read as "this run keeps nothing" rather than
+    // "there is no run to price".
+    let payload = match plan_payload(app) {
+        Ok(payload) => payload,
+        Err(reason) => {
+            unresolved_plan(ui, &reason);
+            return;
+        }
+    };
     let selection = app.simulation_controller.effective_saved_outputs_preflight(
         &app.state,
         &payload.saved_outputs,
@@ -208,14 +219,46 @@ impl ExecutedDeckStorage {
     }
 }
 
-fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
+/// The outputs and groups this page prices, or why there is nothing to price.
+///
+/// A `Result` rather than a defaulted payload. Both failures — a plan that has
+/// not been migrated to stable analysis-instance identity, and a resolvable
+/// plan the workspace holds no payload record for — used to fall back to
+/// `SimulationPlanPayload::default()`. Every number on this page is a fold over
+/// that payload, so the fallback did not produce an error, it produced a
+/// forecast: a zero-byte ledger, an empty group table and a streaming policy,
+/// all stated with the same confidence as a real plan's. `retention_contract`
+/// already refused to do that for its own half of the page; this is the same
+/// refusal, taken before the controller is asked to price anything.
+fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     app.state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id).cloned())
-        .unwrap_or_default()
+        .workspace
+        .plan_data(plan_id)
+        .cloned()
+        .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
+}
+
+/// What the page says instead of a save policy when the plan will not resolve.
+fn unresolved_plan(ui: &mut Ui, reason: &str) {
+    card(
+        ui,
+        "Capture groups",
+        Some(("plan unavailable", Tone::Error)),
+        |ui| {
+            card_body(ui, |ui| {
+                rule_row(ui, "Plan", reason);
+            });
+            card_note(
+                ui,
+                "What a run keeps is a property of the analysis plan it executes, and this \
+                 workspace's plan cannot be resolved — so this is not a plan that retains \
+                 nothing, it is a plan with no retention to state. No group, forecast or \
+                 streaming contract shown here would describe a run. Add an analysis first; the \
+                 plan it creates is what a save policy belongs to.",
+            );
+        },
+    );
 }
 
 fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPlanPayload) {

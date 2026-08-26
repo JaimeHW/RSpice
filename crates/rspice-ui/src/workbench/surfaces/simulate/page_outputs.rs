@@ -44,7 +44,17 @@ struct OutputRegistryRow {
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let payload = plan_payload(app);
+    // Before anything is priced or drawn. A plan that cannot be resolved owns
+    // no outputs to forecast, and the registry that would list them has to say
+    // so in its own words rather than paint the empty table an authored plan
+    // with nothing saved in it paints.
+    let payload = match plan_payload(app) {
+        Ok(payload) => payload,
+        Err(reason) => {
+            unresolved_plan(ui, &reason);
+            return;
+        }
+    };
     // Priced once for the route. Pricing the capture workload expands the
     // declared space, and both halves of this page price against it: the
     // registry to give each row its size, the storage card to total them.
@@ -59,14 +69,44 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     super::pages::plan_configuration_receipts(ui, app);
 }
 
-fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
+/// The outputs this page lists, or why there is no list to draw.
+///
+/// A `Result` rather than a defaulted payload. Both failures — a plan that has
+/// not been migrated to stable analysis-instance identity, and a resolvable
+/// plan the workspace holds no payload record for — used to fall back to
+/// `SimulationPlanPayload::default()`, which paints exactly what a plan whose
+/// author has saved nothing paints. The two states have opposite fixes: one is
+/// "author an output", the other is "this plan is broken", and a registry that
+/// spells them the same way tells the reader a run would capture nothing when
+/// in truth nothing here is known about the run at all.
+fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     app.state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id).cloned())
-        .unwrap_or_default()
+        .workspace
+        .plan_data(plan_id)
+        .cloned()
+        .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
+}
+
+/// What the page says instead of a registry when the plan will not resolve.
+fn unresolved_plan(ui: &mut Ui, reason: &str) {
+    card(
+        ui,
+        "Saved outputs",
+        Some(("plan unavailable", Tone::Error)),
+        |ui| {
+            card_body(ui, |ui| {
+                rule_row(ui, "Plan", reason);
+            });
+            card_note(
+                ui,
+                "An output belongs to an analysis plan, and this workspace's plan cannot be \
+                 resolved — so this is not a plan that saves nothing, it is a plan nothing can be \
+                 saved to. Nothing here states what a run would capture or what it would cost. Add \
+                 an analysis first; the plan it creates is what a saved output belongs to.",
+            );
+        },
+    );
 }
 
 /// What each authored output will cost the run, by the output's own identity.

@@ -54,13 +54,45 @@ const REGISTRY_EVIDENCE_NOTE: &str = "A limit is evaluated against the active da
      specification editor, which owns the limits this page reads.";
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let payload = plan_payload(app);
+    // Before the registry. A plan that cannot be resolved holds no limits, and
+    // a table that says so by being empty is indistinguishable from the plan
+    // whose author has written no requirement yet — which is the one thing an
+    // acceptance page must never leave ambiguous.
+    let payload = match plan_payload(app) {
+        Ok(payload) => payload,
+        Err(reason) => {
+            unresolved_plan(ui, &reason);
+            return;
+        }
+    };
     registry(ui, app, &payload);
     card_row(
         ui,
         app,
         |ui, app| selected_record(ui, app, &payload),
         |ui, app| evaluation_policy(ui, app, &payload),
+    );
+}
+
+/// What the page says instead of a registry when the plan will not resolve.
+fn unresolved_plan(ui: &mut Ui, reason: &str) {
+    card(
+        ui,
+        "Specification registry",
+        Some(("plan unavailable", Tone::Error)),
+        |ui| {
+            card_body(ui, |ui| {
+                rule_row(ui, "Plan", reason);
+            });
+            card_note(
+                ui,
+                "A specification bounds a measurement one analysis plan produces, and this \
+                 workspace's plan cannot be resolved — so this is not a plan nothing judges, it \
+                 is a plan nothing can be authored against. No limit here is being evaluated, and \
+                 no verdict this page could show would speak for a run. Add an analysis first; \
+                 the plan it creates is what a specification belongs to.",
+            );
+        },
     );
 }
 
@@ -83,14 +115,23 @@ fn role_label(role: SpecificationRole) -> &'static str {
     }
 }
 
-fn plan_payload(app: &RSpiceApp) -> SimulationPlanPayload {
+/// The limits this page judges against, or why there are none to judge with.
+///
+/// A `Result` rather than a defaulted payload. Both failures — a plan that has
+/// not been migrated to stable analysis-instance identity, and a resolvable
+/// plan the workspace holds no payload record for — used to fall back to
+/// `SimulationPlanPayload::default()`, which paints exactly what a plan holding
+/// no requirement paints: "No specifications · nothing judges this plan's
+/// results". That row is a true statement about an authored plan and a false
+/// one here, because a broken plan's results are not unjudged, they are
+/// unknown.
+fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
+    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
     app.state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.plan_data(plan_id).cloned())
-        .unwrap_or_default()
+        .workspace
+        .plan_data(plan_id)
+        .cloned()
+        .ok_or_else(|| format!("simulation plan {plan_id} has no payload record in this workspace"))
 }
 
 /// The process corners the current run set actually reaches.
