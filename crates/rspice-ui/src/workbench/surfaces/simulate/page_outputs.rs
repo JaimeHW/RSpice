@@ -12,11 +12,12 @@ use crate::simulation::capture_ledger;
 use crate::simulation::output_contract::SavedOutputPreflightReport;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
-    CaptureGroupMembership, SavedOutput, SavedOutputCompatibility, SavedOutputPolicy,
+    CaptureGroup, CaptureGroupMembership, SavedOutput, SavedOutputCompatibility, SavedOutputPolicy,
     SavedOutputPrecision, SavedOutputStreaming, UNGROUPED_NAME,
 };
 use crate::ui::widgets::{Button, mono_input, select};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::commands::vocabulary::Command;
 
 use super::page_kit::{
@@ -349,12 +350,37 @@ fn registry(
             );
         },
     );
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .map(|plan| plan.id())
+        .ok();
+    // A removal the reader confirmed in the destructive review is applied here,
+    // by the page that staged it: this is the registry the row is in, so the
+    // one route that can commit it is the one route that can show the reader it
+    // happened. Taken before the button is read so a confirmed answer is never
+    // left standing behind a click in the same frame.
+    //
+    // The table above was already drawn from the payload this is about to
+    // change, so the frame is asked to run again: the confirming click landed
+    // in the modal, and nothing else is coming to repaint the row it removed.
+    let mut removal = plan_id
+        .and_then(|plan_id| {
+            app.state
+                .dialogs
+                .plan_removal_review
+                .take_confirmed_output(plan_id)
+        })
+        .inspect(|_| ui.ctx().request_repaint())
+        .and_then(|id| {
+            outputs
+                .iter()
+                .find(|output| output.id == id)
+                .map(|output| (id, output.name.clone()))
+        });
     if let Some((output_id, name)) = selected_output
-        && let Ok(plan_id) = app
-            .state
-            .sim_setup
-            .stable_analysis_plan()
-            .map(|plan| plan.id())
+        && let Some(plan_id) = plan_id
     {
         if duplicate {
             let copy = unique_copy_name(&name, |candidate| {
@@ -378,18 +404,37 @@ fn registry(
                 app.state.workbench.selected_saved_output = Some(committed);
             }
         } else if remove {
-            let detail = format!("Removed saved output {name}.");
-            // A refused removal leaves the record in the registry, so the
-            // selection has to survive with it — clearing regardless would
-            // close the editor on a row that is still there.
-            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-                workspace
-                    .remove_saved_output(plan_id, output_id)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            }) {
-                app.state.workbench.selected_saved_output = None;
+            // An output a group holds or a specification reads is not removed
+            // on one click: the group's forecast and the requirement's source
+            // both change with it, and neither is visible from this row.
+            match removal_consequences(payload, &membership, output_id) {
+                Some(consequences) => app.state.dialogs.plan_removal_review.open(
+                    PlanRemovalTarget::Output {
+                        plan: plan_id,
+                        id: output_id,
+                    },
+                    name,
+                    consequences,
+                ),
+                None => removal = Some((output_id, name)),
             }
+        }
+    }
+    if let Some((output_id, name)) = removal
+        && let Some(plan_id) = plan_id
+    {
+        let detail = format!("Removed saved output {name}.");
+        // A refused removal leaves the record in the registry, so the
+        // selection has to survive with it — clearing regardless would
+        // close the editor on a row that is still there.
+        if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+            workspace
+                .remove_saved_output(plan_id, output_id)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }) && app.state.workbench.selected_saved_output.as_deref() == Some(name.as_str())
+        {
+            app.state.workbench.selected_saved_output = None;
         }
     }
     if let Some(name) = pick {
@@ -401,6 +446,119 @@ fn registry(
         }
         app.state.workbench.selected_saved_output = Some(name);
     }
+}
+
+/// What removing this output orphans, or `None` when nothing reads it.
+///
+/// Two readers, both of them real and neither of them visible from the row's
+/// own cells. A capture group holds the output — by naming it or by a rule
+/// matching it — and removal changes what that group forecasts and stores; a
+/// specification measures it, and removal takes the source the requirement is
+/// judged from. An output no group holds and no requirement names is a record
+/// nothing else in the plan is built on, and removing it is not a decision
+/// worth a modal.
+///
+/// Membership is [`CaptureGroupMembership`], resolved over the authored
+/// registry — the same resolver the row's "Capture group" cell and the Save
+/// page's ledger state, so the review cannot claim a different owner than the
+/// registry it was opened from.
+fn removal_consequences(
+    payload: &SimulationPlanPayload,
+    membership: &CaptureGroupMembership,
+    id: crate::product::SavedOutputId,
+) -> Option<Vec<PlanRemovalConsequence>> {
+    let index = payload
+        .saved_outputs
+        .iter()
+        .position(|output| output.id == id)?;
+    let output = &payload.saved_outputs[index];
+    let owner = membership.owner(index);
+    let group = payload
+        .capture_groups
+        .iter()
+        .find(|group| group.id == owner && owner != CaptureGroup::ungrouped_id());
+    let specs = payload
+        .specs
+        .iter()
+        .filter(|spec| spec_reads_output(spec, output))
+        .map(|spec| spec.measurement.clone())
+        .collect::<Vec<_>>();
+    if group.is_none() && specs.is_empty() {
+        return None;
+    }
+    let mut consequences = Vec::new();
+    if let Some(group) = group {
+        // Named or matched is the difference between a group that loses a
+        // member and a group whose rule simply stops matching one output, and
+        // the reader repairs those two differently.
+        let held = if group.members.contains(&output.id) {
+            format!("{} · named", group.name)
+        } else {
+            format!("{} · matched by rule", group.name)
+        };
+        consequences.push(
+            PlanRemovalConsequence::stated("Capture group holding it", held).explained(
+                PlanRemovalTone::Warn,
+                "The capture group above holds this output. Removing it drops the output from \
+                 that group and lowers what the group forecasts, and no other output takes its \
+                 place under the group's overrides.",
+            ),
+        );
+    } else {
+        consequences.push(PlanRemovalConsequence::stated(
+            "Capture group holding it",
+            UNGROUPED_NAME,
+        ));
+    }
+    consequences.push(if specs.is_empty() {
+        PlanRemovalConsequence::stated("Specifications reading it", "none")
+    } else {
+        PlanRemovalConsequence::stated("Specifications reading it", specs.join(", ")).explained(
+            PlanRemovalTone::Warn,
+            "The specifications above are measured from this output. Removing it leaves each of \
+             them with no source to judge, and they will report no result rather than a failure \
+             the next time the plan is run.",
+        )
+    });
+    consequences.push(
+        PlanRemovalConsequence::stated("Kind", output.kind.label()).explained(
+            PlanRemovalTone::Aside,
+            "Datasets already captured under this output stay in the project and stay readable. \
+             What removal takes is the instruction to capture it again.",
+        ),
+    );
+    Some(consequences)
+}
+
+/// Whether one specification is measured from this output.
+///
+/// Three ways a `.MEAS` names an output and all of them are authored by hand:
+/// the measurement carries the output's own name, the statement body names it,
+/// or the statement body is written over the raw expression the output saves.
+/// Matching the body by identifier token rather than by substring is what keeps
+/// an output named `v` from being claimed by every expression containing the
+/// letter.
+fn spec_reads_output(spec: &crate::state::SpecEntry, output: &SavedOutput) -> bool {
+    let name = output.name.trim();
+    if name.is_empty() {
+        return false;
+    }
+    if spec.measurement.trim().eq_ignore_ascii_case(name) {
+        return true;
+    }
+    if spec
+        .expression
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .any(|token| token.eq_ignore_ascii_case(name))
+    {
+        return true;
+    }
+    let expression = output.source_expression.trim();
+    !expression.is_empty()
+        && spec
+            .expression
+            .to_ascii_lowercase()
+            .contains(&expression.to_ascii_lowercase())
 }
 
 /// Summarize the exact semantic states represented by the registry rows.
