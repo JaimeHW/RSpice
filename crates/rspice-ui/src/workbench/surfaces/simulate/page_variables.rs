@@ -15,6 +15,7 @@ use crate::state::{
 };
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 
 use crate::ui::widgets::{mono_input, select};
 
@@ -211,6 +212,27 @@ fn registry(
     if import {
         super::variable_import::import_from_file(ui.ctx(), &mut app.state);
     }
+    // A removal the reader confirmed in the destructive review is applied here,
+    // by the page that staged it: this is the registry the row is in, so the
+    // one route that can commit it is the one route that can show the reader it
+    // happened. Taken before the button is read so a confirmed answer is never
+    // left standing behind a click in the same frame.
+    //
+    // The table above was already drawn from the payload this is about to
+    // change, so the frame is asked to run again: the confirming click landed
+    // in the modal, and nothing else is coming to repaint the row it removed.
+    let mut removal = app
+        .state
+        .dialogs
+        .plan_removal_review
+        .take_confirmed_variable(plan_id)
+        .inspect(|_| ui.ctx().request_repaint())
+        .and_then(|id| {
+            variables
+                .iter()
+                .find(|variable| variable.id == id)
+                .map(|variable| (id, variable.name.clone()))
+        });
     if let Some(index) = selected_index {
         let name = variables[index].name.clone();
         let id = variables[index].id;
@@ -236,20 +258,75 @@ fn registry(
                 app.state.workbench.selected_design_variable = Some(committed);
             }
         } else if remove {
-            let detail = format!("Removed design variable {name}.");
-            // A refused removal leaves the variable in the registry, so the
-            // selection has to survive with it — clearing regardless would
-            // close the editor on a row that is still there.
-            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-                workspace
-                    .remove_design_variable(plan_id, id)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            }) {
-                app.state.workbench.selected_design_variable = None;
+            // Removing a variable the plan resolves into an analysis is a
+            // removal that costs something: the expressions that named it are
+            // left naming nothing. Removing one nothing reads costs nothing, so
+            // it is not worth a modal.
+            match removal_consequences(app, &variables[index]) {
+                Some(consequences) => app.state.dialogs.plan_removal_review.open(
+                    PlanRemovalTarget::Variable { plan: plan_id, id },
+                    name,
+                    consequences,
+                ),
+                None => removal = Some((id, name)),
             }
         }
     }
+    if let Some((id, name)) = removal {
+        let detail = format!("Removed design variable {name}.");
+        // A refused removal leaves the variable in the registry, so the
+        // selection has to survive with it — clearing regardless would
+        // close the editor on a row that is still there.
+        if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+            workspace
+                .remove_design_variable(plan_id, id)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }) && app.state.workbench.selected_design_variable.as_deref() == Some(name.as_str())
+        {
+            app.state.workbench.selected_design_variable = None;
+        }
+    }
+}
+
+/// What removing this variable orphans, or `None` when nothing reads it.
+///
+/// The readers come from [`design_variable_consumers_scoped`], which is the
+/// same derivation the registry's "Used by" column and the Create-variable
+/// dialog's preview both state — so what the review says is about to lose this
+/// variable is exactly what the row said was using it. The two sentences that
+/// derivation answers with when there is no reader are its own vocabulary, and
+/// matching them here is what keeps the gate and the column from disagreeing
+/// about the same plan.
+///
+/// [`design_variable_consumers_scoped`]: super::workflows::design_variable_consumers_scoped
+fn removal_consequences(
+    app: &RSpiceApp,
+    variable: &crate::state::DesignVariable,
+) -> Option<Vec<PlanRemovalConsequence>> {
+    let readers = super::workflows::design_variable_consumers_scoped(
+        app,
+        match &variable.scope {
+            DesignVariableScope::SelectedAnalysis { analysis_id } => Some(Some(*analysis_id)),
+            _ => None,
+        },
+    );
+    if readers == "no enabled analysis consumers" || readers == "plan unavailable" {
+        return None;
+    }
+    Some(vec![
+        PlanRemovalConsequence::stated("Analyses resolving it", readers).explained(
+            PlanRemovalTone::Warn,
+            "The analyses listed above resolve this variable. Removing it leaves every expression \
+             that names it unresolved, and they will refuse to build a deck until the name is \
+             gone from them or the variable is declared again.",
+        ),
+        PlanRemovalConsequence::stated("Scope it is declared at", variable.scope.label()).explained(
+            PlanRemovalTone::Aside,
+            "Retained results from runs that already resolved this variable stay in the project \
+             and stay readable. What removal takes is the declaration, not the evidence.",
+        ),
+    ])
 }
 
 fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
