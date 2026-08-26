@@ -27,7 +27,7 @@ use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{
     PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, schematic_section_header as shelf_section_header,
 };
-use super::super::super::state::DesignPanel;
+use super::super::super::state::{DesignPanel, Workspace};
 use super::{
     empty_navigator_row, panel_search, schematic_nav_row_indented_drag_response,
     schematic_nav_row_indented_response,
@@ -1093,10 +1093,29 @@ fn navigator_object_context_menu(
             ui.close();
         }
         if ui.button("Find references and consumers…").clicked() {
-            Command::FindInDesign.execute(app);
+            find_navigator_object_references(app, &object);
             ui.close();
         }
     });
+}
+
+/// Raise the navigator's search over the object the row names, already
+/// filtering by it. The workspace is activated first because the route
+/// transition restores that workspace's saved dock layout.
+fn find_navigator_object_references(app: &mut RSpiceApp, object: &NavigatorObject) {
+    let name = match object {
+        NavigatorObject::Component { label: name, .. }
+        | NavigatorObject::Net { name, .. }
+        | NavigatorObject::SavedOutput { name, .. } => name.clone(),
+    };
+    app.state.workbench.activate(Workspace::Design);
+    *app.state
+        .workbench
+        .navigator_trees
+        .filter_mut(Workspace::Design) = name;
+    app.state.workbench.navigator_visible = true;
+    app.state.workbench.design_panel = DesignPanel::Navigator;
+    app.state.workbench.focus_navigator_search = true;
 }
 
 fn open_measurements(app: &mut RSpiceApp) {
