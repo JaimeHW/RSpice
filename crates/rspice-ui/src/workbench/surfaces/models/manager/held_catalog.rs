@@ -30,7 +30,20 @@ pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub:
             "Who signed the catalog snapshot this client holds, the contract it is accepted \
              under, and the last hub operation this session attempted.",
         )
-        .size(DialogSize::Manager)
+        // `Manager` is a fixed 760 x 530 surface — `fill_height`, so it is 530
+        // tall whatever it holds — and this card holds an identity table, two
+        // paragraphs of acceptance contract and one attempt. The contract is
+        // the half a reader came for, and at 530 it began below the fold every
+        // time.
+        //
+        // `WideWorkflow` is the widest content-height surface the design system
+        // offers, and this dialog family already reads its two release-diff
+        // cards under it. Both dimensions earn their place here: the height is
+        // what puts the acceptance contract and the last attempt on the page
+        // together, and the width is what stops the identity table eliding its
+        // own origin column — "covered by the signature; a lower serial is
+        // refus…" was the sentence a reader came to this card to read.
+        .size(DialogSize::WideWorkflow)
         .primary_on_enter(false)
         .note_only_footer()
         .hint("Model hub · identity, acceptance and history")
@@ -150,7 +163,11 @@ fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
         property(
             ui,
             "Contents",
-            &format!("{} packs · {releases} releases", hub.packs.len()),
+            &format!(
+                "{} · {}",
+                crate::ui::accessibility::counted(hub.packs.len(), "pack", "packs"),
+                crate::ui::accessibility::counted(releases, "release", "releases"),
+            ),
             "as the held snapshot lists them",
         );
     });

@@ -40,6 +40,7 @@ use rspice_pack::SnapshotPack;
 use crate::services::model_hub::ModelHubService;
 use crate::state::model_hub::{ArchiveEvidence, ReleaseDiff, missing_capabilities, precedence};
 use crate::state::model_library::PackPartPin;
+use crate::ui::accessibility::counted;
 use crate::workbench::app::ModelHubRequest;
 use crate::workbench::state::{ModelHubFacet, PackReProof, PackReleaseConfirmation};
 
@@ -255,7 +256,12 @@ fn pack_attention(row: &HubLedgerRow, proof: Option<&PackReProof>) -> Option<Att
     };
     if let Some(recalled) = row.recalled.as_ref() {
         return error(
-            "revoked".to_owned(),
+            // A pack row carries several things that can be withdrawn — the
+            // signing key, the catalog, the release — and a bare "revoked"
+            // beside a pack identifier names none of them. The mockup's
+            // vocabulary says which, in a phrase shorter than three of the
+            // rungs below it, so the column that already fits those fits this.
+            "release revoked".to_owned(),
             // The reason is the publisher's own prose and may end in anything,
             // so it is quoted rather than run into the sentence after it.
             format!(
@@ -788,16 +794,23 @@ pub(super) fn byte_size(bytes: u64) -> String {
 }
 
 /// The packs scope: the pack ledger, then the shipped corpus if present.
+///
+/// Whichever detail region is last on the page is the one that fills to the
+/// panel's bottom edge, which is why the corpus is looked for before the
+/// ledger is drawn rather than after. On the ordinary installation — no
+/// shipped corpus tree — that is the inspector, and it used to be two
+/// content-height panes that stopped wherever their rows ran out, leaving a
+/// third of the page painted in the container's hairline colour.
 pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
     catalog_status(ui, app, hub);
     exception_banner(ui, app);
-    ledger(ui, app, hub);
     let packs = app
         .state
         .model_library_manager
         .spice_packs()
         .map(|index| index.packs().to_vec())
         .unwrap_or_default();
+    ledger(ui, app, hub, packs.is_empty());
     if !packs.is_empty() {
         super::corpus::pack_catalog(ui, app, &packs);
     }
@@ -906,8 +919,15 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                 );
                 let (parts, held) = hub.part_totals();
                 if parts > 0 {
-                    let contents =
-                        format!("{parts} parts · {} packs · {held} here", hub.packs.len());
+                    // Grammar through the crate's one count formatter rather
+                    // than an `s` glued on here: a catalog listing one pack is
+                    // an ordinary state and "1 packs" is the sort of line a
+                    // reader stops trusting the rest of.
+                    let contents = format!(
+                        "{} · {} · {held} here",
+                        counted(parts, "part", "parts"),
+                        counted(hub.packs.len(), "pack", "packs"),
+                    );
                     ui.label(
                         RichText::new(&contents)
                             .small()
@@ -1133,7 +1153,11 @@ fn project_cell(adoption: &PackAdoption) -> Option<(String, bool)> {
 }
 
 /// The pack ledger and the inspector under it.
-fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
+///
+/// `fills` says whether the inspector is the last block on the page, and so
+/// whether its two panes reach the panel's bottom edge or leave room for the
+/// shipped-corpus table below them.
+fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fills: bool) {
     if hub.unavailable.is_some() {
         page_empty_state(
             ui,
@@ -1225,7 +1249,7 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
             .count(),
         "packs",
     );
-    inspector(ui, app, hub);
+    inspector(ui, app, hub, fills);
 }
 
 /// The one colour each tone is painted in, named once.
@@ -1342,7 +1366,7 @@ fn ledger_line(
 /// every selection. That button lives up there rather than here so it is
 /// reachable in the state that most provokes the question: a page with no
 /// catalog at all, which has no selection to inspect.
-fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
+fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fills: bool) {
     let Some(row) = selected_row(hub, app.state).cloned() else {
         return;
     };
@@ -1364,14 +1388,39 @@ fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) 
         .clone()
         .filter(|diff| diff.key.pack_id == row.pack_id);
     inspector_identity(ui, app, &row, attention.as_ref());
+    // Measured after the identity line, which is part of the region: the
+    // panes fill what is left under it, not what was left above it.
+    let region_h = fills.then(|| ui.available_height().max(1.0));
     // `columns` rather than a hand-measured `horizontal`: an allocated child
     // advances the cursor by the width of what it *contained*, not by the
     // track it was handed, so a short pane leaves the next one starting under
     // it and a tall one decides the row's height for both.
     ui.columns(2, |columns| {
-        releases_pane(&mut columns[0], app, &row, diff.as_ref());
-        catalog_pane(&mut columns[1], &row, proof.as_ref());
+        releases_pane(&mut columns[0], app, &row, diff.as_ref(), region_h);
+        catalog_pane(&mut columns[1], &row, proof.as_ref(), region_h);
     });
+}
+
+/// One inspector pane, filling its track when the inspector owns the rest of
+/// the page and sizing to its rows when the corpus table is still to come.
+///
+/// The mockup's `.model-detail-body` is one grid row of equal-height panes
+/// reaching the panel's edge, and [`filled_detail_pane`] is that row's pane.
+/// It is not unconditional here because this page has a second table under it
+/// on an installation that carries the shipped corpus tree, and a pane that
+/// took the whole remaining height would push that table off the surface.
+fn inspector_pane(
+    ui: &mut Ui,
+    title: &str,
+    meta: Option<&str>,
+    height: Option<f32>,
+    scroll_salt: &str,
+    content: impl FnOnce(&mut Ui),
+) {
+    match height {
+        Some(height) => filled_detail_pane(ui, title, meta, height, scroll_salt, content),
+        None => detail_pane(ui, title, meta, content),
+    }
 }
 
 /// The inspector's identity line and the actions this pack offers.
@@ -1480,114 +1529,129 @@ fn releases_pane(
     app: &mut ManagerRenderContext<'_>,
     row: &HubLedgerRow,
     diff: Option<&ReleaseDiff>,
+    height: Option<f32>,
 ) {
     let t = Tokens::get(ui.ctx());
     let published = format!("{} published", row.releases.len());
-    detail_pane(ui, "RELEASES", Some(&published), |ui| {
-        ScrollArea::vertical()
-            .id_salt("models-hub-releases")
-            .max_height(150.0)
-            .show(ui, |ui| {
-                for release in &row.releases {
-                    let held = row
-                        .installed
-                        .as_ref()
-                        .is_some_and(|installed| installed.version == release.version);
-                    property(
-                        ui,
-                        &release.version,
-                        &byte_size(release.archive_length),
-                        if held {
-                            "on this machine"
-                        } else {
-                            release.state.pill()
-                        },
-                    );
-                }
-            });
-        ui.label(
-            RichText::new(if row.missing.is_empty() {
-                match row.releases.first() {
-                    Some(release) if release.capabilities.is_empty() => {
-                        "Needs nothing beyond the core engine.".to_owned()
+    inspector_pane(
+        ui,
+        "RELEASES",
+        Some(&published),
+        height,
+        "models-hub-releases-pane",
+        |ui| {
+            ScrollArea::vertical()
+                .id_salt("models-hub-releases")
+                .max_height(150.0)
+                .show(ui, |ui| {
+                    for release in &row.releases {
+                        let held = row
+                            .installed
+                            .as_ref()
+                            .is_some_and(|installed| installed.version == release.version);
+                        property(
+                            ui,
+                            &release.version,
+                            &byte_size(release.archive_length),
+                            if held {
+                                "on this machine"
+                            } else {
+                                release.state.pill()
+                            },
+                        );
                     }
-                    Some(release) => format!(
-                        "Needs {} — this build provides all of them.",
-                        release.capabilities.join(" · ")
-                    ),
-                    None => String::new(),
-                }
-            } else {
-                format!(
-                    "Needs {} — not in this build, so installing is refused.",
-                    plain_list(&row.missing)
-                )
-            })
-            .small()
-            .color(if row.missing.is_empty() {
-                t.color.text_faint
-            } else {
-                t.color.err
-            }),
-        );
-        if let Some(diff) = diff {
-            super::adoption::pane(ui, app, row, diff);
-        }
-    });
+                });
+            ui.label(
+                RichText::new(if row.missing.is_empty() {
+                    match row.releases.first() {
+                        Some(release) if release.capabilities.is_empty() => {
+                            "Needs nothing beyond the core engine.".to_owned()
+                        }
+                        Some(release) => format!(
+                            "Needs {} — this build provides all of them.",
+                            release.capabilities.join(" · ")
+                        ),
+                        None => String::new(),
+                    }
+                } else {
+                    format!(
+                        "Needs {} — not in this build, so installing is refused.",
+                        plain_list(&row.missing)
+                    )
+                })
+                .small()
+                .color(if row.missing.is_empty() {
+                    t.color.text_faint
+                } else {
+                    t.color.err
+                }),
+            );
+            if let Some(diff) = diff {
+                super::adoption::pane(ui, app, row, diff);
+            }
+        },
+    );
 }
 
 /// What this machine holds and what this project adopted, in one pane.
 ///
 /// They are the two halves of "can my results be attributed", and reading them
 /// together is the point of the ledger.
-fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>) {
+fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>, height: Option<f32>) {
     let t = Tokens::get(ui.ctx());
     let licence = row
         .releases
         .first()
         .map(|release| release.spdx.clone())
         .unwrap_or_default();
-    detail_pane(ui, "CATALOG", Some(&licence), |ui| {
-        let mut verdict = None;
-        match row.installed.as_ref() {
-            Some(installed) => {
-                property(ui, "Installed", &installed.version, "this machine");
-                verdict = Some(evidence(installed, proof));
+    inspector_pane(
+        ui,
+        "CATALOG",
+        Some(&licence),
+        height,
+        "models-hub-catalog-pane",
+        |ui| {
+            let mut verdict = None;
+            match row.installed.as_ref() {
+                Some(installed) => {
+                    property(ui, "Installed", &installed.version, "this machine");
+                    verdict = Some(evidence(installed, proof));
+                }
+                None => property(
+                    ui,
+                    "Installed",
+                    "nothing of this pack is here",
+                    "installing fetches and proves the release archive",
+                ),
             }
-            None => property(
-                ui,
-                "Installed",
-                "nothing of this pack is here",
-                "installing fetches and proves the release archive",
-            ),
-        }
-        match project_cell(&row.adoption) {
-            Some((label, _)) => property(ui, "In this project", &label, "recorded pin"),
-            None => property(ui, "In this project", "no parts adopted", "no pin recorded"),
-        }
-        if let Some(update) = row.update.as_deref()
-            && row.installed.is_some()
-        {
-            property(ui, "Offered", update, "updates are notified, never applied");
-        }
-        // The evidence is a sentence, so it gets a line rather than a cell. A
-        // property value is a third of the pane wide and the painter clips
-        // without an ellipsis, which turned "the retained archive no longer
-        // hashes to the published digest" into "the retained archive no lon" —
-        // a phrase that reads as reassurance.
-        if let Some((value, origin)) = verdict {
-            ui.label(
-                RichText::new(&value)
-                    .small()
-                    .color(if value.starts_with("verified") {
-                        t.color.text_dim
-                    } else {
-                        t.color.warn
-                    }),
-            );
-            ui.label(RichText::new(origin).small().color(t.color.text_faint));
-        }
-    });
+            match project_cell(&row.adoption) {
+                Some((label, _)) => property(ui, "In this project", &label, "recorded pin"),
+                None => property(ui, "In this project", "no parts adopted", "no pin recorded"),
+            }
+            if let Some(update) = row.update.as_deref()
+                && row.installed.is_some()
+            {
+                property(ui, "Offered", update, "updates are notified, never applied");
+            }
+            // The evidence is a sentence, so it gets a line rather than a cell. A
+            // property value is a third of the pane wide and the painter clips
+            // without an ellipsis, which turned "the retained archive no longer
+            // hashes to the published digest" into "the retained archive no lon" —
+            // a phrase that reads as reassurance.
+            if let Some((value, origin)) = verdict {
+                ui.label(
+                    RichText::new(&value)
+                        .small()
+                        .color(if value.starts_with("verified") {
+                            t.color.text_dim
+                        } else {
+                            t.color.warn
+                        }),
+                );
+                ui.label(RichText::new(origin).small().color(t.color.text_faint));
+            }
+        },
+    );
 }
 
 /// What is known about the bytes of one installed release, and who says so.

@@ -36,11 +36,28 @@ fn raster(
     hub: hub::HubCatalog,
     seed: impl FnOnce(&mut AppState),
 ) -> Canvas {
+    raster_at(PAGE_WIDTH, scope, hub, seed)
+}
+
+/// The same, at a stated panel width.
+///
+/// The detail regions on these pages reflow on the width of the workspace
+/// column rather than of the window — the mockup's container queries — and the
+/// composition below that threshold is one no render at the shell's own width
+/// can show. It is a parameter rather than a second harness so a narrow render
+/// and a wide one are the same page, differing in exactly the value the layout
+/// is a function of.
+fn raster_at(
+    width: f32,
+    scope: ModelsCatalogScope,
+    hub: hub::HubCatalog,
+    seed: impl FnOnce(&mut AppState),
+) -> Canvas {
     let mut state = AppState::default();
     state.workbench.models_view.catalog_scope = scope;
     seed(&mut state);
     let mut pending = Vec::new();
-    crate::ui::raster::render(egui::vec2(PAGE_WIDTH, PAGE_HEIGHT), |ui, background| {
+    crate::ui::raster::render(egui::vec2(width, PAGE_HEIGHT), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(ui, |ui| {
@@ -66,11 +83,17 @@ fn raster(
 /// page's text lying across it — an artifact of this harness rather than of the
 /// dialog, and one that makes the card impossible to read. A modal is a
 /// self-contained composition anyway, so it is rendered as one.
+///
+/// The viewport is wider than the widest surface these dialogs declare. A
+/// dialog rendered into a viewport its own width is clamped to that width less
+/// the gutter, so the render would be of a surface narrower than the one that
+/// ships — and the elision the extra width exists to prevent would appear in
+/// the render and nowhere else.
 fn raster_dialog(hub: hub::HubCatalog, dialog: ModelsWorkbenchDialog) -> Canvas {
     let mut state = AppState::default();
     state.workbench.models_view.dialog = Some(dialog);
     let mut pending = Vec::new();
-    crate::ui::raster::render(egui::vec2(760.0, 900.0), |ui, background| {
+    crate::ui::raster::render(egui::vec2(1060.0, 900.0), |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
             .show(ui, |ui| {
@@ -540,6 +563,22 @@ fn render_every_model_hub_state() {
             raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {
                 state.model_library_manager.add_library(retained_fixture());
             }),
+        ),
+        // The part detail below the mockup's container query, where the two
+        // panes stop being a row and become a stack. It is the one composition
+        // on this page that no render at the shell's own width can show, and
+        // the question it answers is whether a pane that is filling a track
+        // when it shares a row still reads as a pane when it does not.
+        (
+            "shelf-detail-narrow",
+            raster_at(
+                620.0,
+                ModelsCatalogScope::RSpiceLibrary,
+                catalog(false),
+                |state| {
+                    state.model_library_manager.add_library(retained_fixture());
+                },
+            ),
         ),
         // The browser projection, composed on a desktop build. The host is a
         // value the projection carries rather than something read from the

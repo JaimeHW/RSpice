@@ -564,7 +564,7 @@ fn the_attention_ladder_reports_the_most_decisive_exception_first() {
     );
     let attention = pack_attention(&recalled, Some(&PackReProof::Failed("x".to_owned())))
         .expect("a recalled release always has something to say");
-    assert_eq!(attention.phrase, "revoked");
+    assert_eq!(attention.phrase, "release revoked");
     assert_eq!(attention.tone, AttentionTone::Error);
     assert!(
         attention.detail.contains(REASON),
@@ -584,7 +584,10 @@ fn the_attention_ladder_reports_the_most_decisive_exception_first() {
         &[pin("0.9.0", &"a".repeat(64))],
         Some(("0.9.0", REASON)),
     );
-    assert_eq!(phrase(&pinned_only, None), Some("revoked".to_owned()));
+    assert_eq!(
+        phrase(&pinned_only, None),
+        Some("release revoked".to_owned())
+    );
     // And the "needs attention" facet collects it, so the chip counts it.
     assert!(ledger_matches(
         &recalled,
@@ -727,7 +730,8 @@ fn the_expired_page_and_the_revoked_row_are_both_announced() {
     );
 
     // A recalled release that is installed: the row's own node carries the
-    // publisher's reason, because the cell that paints "revoked" cannot.
+    // publisher's reason, because the cell that paints "release revoked"
+    // cannot.
     let mut state = AppState::default();
     let recalled = catalog(
         vec![recalled_pack(
@@ -1108,6 +1112,12 @@ fn a_discarded_catalog_cache_is_not_reported_as_never_having_asked() {
     assert!(button(&nodes, "Refresh catalog").is_some());
 }
 
+/// A size is spelled in the workspace's units, by the workspace's formatter.
+///
+/// The last two assertions are the point of routing this through the shared
+/// one: the page's own formatter divided by 1024 and then wrote `kB` and `MB`
+/// beside the quotient, which is a different quantity from the one it had
+/// computed. Only the em-dash is this page's own, and it is not a size.
 #[test]
 fn a_byte_count_reads_as_a_size_rather_than_a_number() {
     assert_eq!(byte_size(0), "—");
@@ -1115,4 +1125,9 @@ fn a_byte_count_reads_as_a_size_rather_than_a_number() {
     assert_eq!(byte_size(2048), "2.00 KiB");
     assert_eq!(byte_size(3 * 1024 * 1024), "3.00 MiB");
     assert_eq!(byte_size(150 * 1024 * 1024), "150.00 MiB");
+    assert_eq!(
+        byte_size(2 * 1024 * 1024),
+        crate::simulation::run_set::format_bytes(2 * 1024 * 1024),
+        "every non-zero size is the shared spelling, character for character"
+    );
 }

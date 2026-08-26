@@ -39,6 +39,31 @@
 //! be interleaved with a stream without materializing it. So the two are
 //! concatenated: held first, because those are the parts a reader can place
 //! this second, and they were the half the shelf could not see at all.
+//!
+//! # Why the columns do not sort
+//!
+//! Every other table in this workspace carries a sortable header, and this one
+//! deliberately does not. Sorting a table means ordering the rows it is
+//! *about*, and the rows this table is about are not in it: a page is at most
+//! `CATALOG_LIMIT` of them, drawn from an index that can hold two hundred
+//! thousand and that takes a query, a class filter, an offset and a limit —
+//! and no ordering. A header cell here could only reorder the rows already
+//! fetched, while looking exactly like a control that had ordered the catalog;
+//! a reader clicking `VDS` would read the top row as the highest-rated part on
+//! the shelf when it is the highest-rated part of one arbitrary page. That is
+//! a worse answer than no control at all, and it is not a question about where
+//! the sort state is kept — a durable field and a frame-scoped one would both
+//! be wrong in the same way.
+//!
+//! The mockup's shelf does sort, and the difference is exactly this: it holds
+//! every matching part in one array and orders all of them, having no index,
+//! no stream and no pages. Its spec ordering is not a header click either — a
+//! spec is a string carrying its own unit, so `"900 mV"` sorts above `"5.1 V"`
+//! under any lexical comparison, and the mockup orders on a parsed magnitude
+//! from a control in the bar over the table. Ordering this shelf honestly
+//! needs an order the pack index itself applies, over every match rather than
+//! over one page; that is a seam in the index, not a header cell, and it is
+//! not something this alignment pass can invent.
 
 use super::*;
 
@@ -304,7 +329,14 @@ pub(super) fn parts_catalog(
         .iter()
         .map(|column| (column.heading, column.width))
         .collect::<Vec<_>>();
-    let table_h = (ui.available_height() * 0.40).max(120.0);
+    // The mockup's `.model-browser` grid, which the shelf and the Models page
+    // are both laid out on: the table keeps a little under half of what is
+    // left once its own header and footer are paid for, and the part detail
+    // takes the rest. Written as the same expression the Models page uses,
+    // because two spellings of one grid is how the two pages came to split
+    // their panes differently in the first place.
+    let table_h =
+        ((ui.available_height() - HEADER_H - CATALOG_FOOT_H) * CATALOG_TRACK_FRACTION).max(120.0);
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
         table_header(ui, &headings);
@@ -512,7 +544,12 @@ fn parts_catalog_footer(
                     ui.set_min_width(ui.available_width());
                     ui.label(
                         RichText::new(format!(
-                            "Showing {start}–{end} of {total} addressable parts"
+                            "Showing {start}–{end} of {}",
+                            crate::ui::accessibility::counted(
+                                total,
+                                "addressable part",
+                                "addressable parts"
+                            )
                         ))
                         .small()
                         .color(t.color.text_faint),
@@ -644,45 +681,161 @@ fn selected_part_detail(
             open_card(app, &hit, source);
         }
     });
-    card(ui, |ui| {
-        card_title(ui, "DEFINITION", Some(&hit.kind));
-        property(ui, "Name", &hit.name, "catalog identity");
-        // Only where the publisher wrote one. A row with no description shows
-        // no line rather than an em-dash: the card is short enough that an
-        // absent fact is legible by absence, and a placeholder would say the
-        // publisher declined where in fact the format predates the field.
-        if let Some(description) = row.description.as_deref() {
-            property(ui, "Summary", description, "as the publisher signed it");
-        }
-        property(ui, "Device class", &hit.device, "canonical");
-        property(ui, "Pack", &hit.pack_name, &hit.pack);
-        // Every specification the manifest publishes, not only the ones this
-        // class declares a column for: the columns are what a table has room
-        // to compare, and the card is where a reader has come to read one part.
-        for (key, value) in &row.specs {
-            property(ui, key, value, "published specification");
-        }
-        property(
-            ui,
-            "Source",
-            hit.source
-                .as_deref()
-                .map(path_label)
-                .as_deref()
-                .unwrap_or("not on disk"),
-            &format!("line {}", hit.line),
-        );
-        property(
-            ui,
-            "Project eligibility",
-            if hit.redistributable && !hit.restricted {
-                "eligible"
+    // The mockup's `.model-detail-body.hub-shelf-detail`: identity and specs
+    // in one pane, what the part executes from in the other, both the same
+    // height and both reaching the panel's bottom edge. A single shrink-to-fit
+    // card left the page ending a quarter of a screen short of that edge, and
+    // dead space under a table reads as a block that failed to render rather
+    // than as room.
+    let region_h = ui.available_height().max(1.0);
+    if ui.available_width() > 650.0 {
+        ui.columns(2, |columns| {
+            identity_pane(&mut columns[0], &row, region_h);
+            source_pane(&mut columns[1], &row, region_h);
+        });
+    } else {
+        // Below the mockup's container query the two panes stack rather than
+        // squeezing two half-width columns into a width neither can be read
+        // at. They take half the region each, so the stack still reaches the
+        // bottom edge; the region scrolls only once half of it is shorter than
+        // a pane's floor.
+        let row_h = (region_h * 0.5).max(DETAIL_PANE_MIN_H);
+        ScrollArea::vertical()
+            .id_salt("models-shelf-detail")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                identity_pane(ui, &row, row_h);
+                source_pane(ui, &row, row_h);
+            });
+    }
+}
+
+/// What the selected part is, and every specification its publisher signed.
+fn identity_pane(ui: &mut Ui, row: &ShelfRow, height: f32) {
+    let hit = &row.hit;
+    filled_detail_pane(
+        ui,
+        "IDENTITY & SPECS",
+        // The statement the part is declared with, spelled the way the page's
+        // own footer spells it when a whole page shares one.
+        Some(&format!(".{}", hit.kind)),
+        height,
+        "models-shelf-identity",
+        |ui| {
+            property(ui, "Name", &hit.name, "catalog identity");
+            // Only where the publisher wrote one. A row with no description
+            // shows no line rather than an em-dash: the pane is short enough
+            // that an absent fact is legible by absence, and a placeholder
+            // would say the publisher declined where in fact the format
+            // predates the field.
+            if let Some(description) = row.description.as_deref() {
+                property(ui, "Summary", description, "as the publisher signed it");
+            }
+            property(ui, "Device class", &hit.device, "canonical");
+            property(ui, "Pack", &hit.pack_name, &hit.pack);
+            // Every specification the manifest publishes, not only the ones
+            // this class declares a column for: the columns are what a table
+            // has room to compare, and this pane is where a reader has come to
+            // read one part.
+            if row.specs.is_empty() {
+                empty_state(
+                    ui,
+                    "No specification is published for this part.",
+                    "The part is reachable by name, class and pack; no spec column or filter can \
+                     see it.",
+                );
             } else {
-                "blocked"
-            },
-            "license policy",
-        );
-    });
+                for (key, value) in &row.specs {
+                    property(ui, key, value, "published specification");
+                }
+            }
+        },
+    );
+}
+
+/// What holds the selected part's definition, and whether a file backs it.
+///
+/// A missing path is four different facts on this shelf and only one of them
+/// is a problem. A foundation card is written into the build and has no file
+/// by construction; an installed release keeps its parts inside the archive
+/// the pack store proved, which is not a path this workspace reads; a retained
+/// or corpus row names a file, and only there does the file being absent mean
+/// anything is wrong. One `is_file()` test would have told all four the same
+/// story, and the story would have been false for two of them.
+fn source_standing(row: &ShelfRow) -> (&'static str, Option<&'static str>) {
+    match row.origin {
+        PartOrigin::Foundation { .. } => (
+            "compiled in",
+            Some(
+                "This card is written into the build rather than into a file, so there is nothing \
+                 here to open, sync or re-read. Every machine running this version has the same \
+                 one.",
+            ),
+        ),
+        PartOrigin::InstalledPack { .. } => (
+            "in the release",
+            Some(
+                "The definition is inside the release archive this machine holds, in the pack \
+                 store rather than in a file this workspace reads. Placing the part retains those \
+                 bytes into the project first.",
+            ),
+        ),
+        _ if row.hit.source.as_ref().is_some_and(|path| path.is_file()) => {
+            ("on this machine", None)
+        }
+        _ => (
+            "not on disk",
+            Some(
+                "There is no readable card behind this row on this machine, so it cannot be \
+                 opened or added until the source is rescanned or the corpus synced.",
+            ),
+        ),
+    }
+}
+
+/// Where the selected part's definition executes from, and on what terms.
+fn source_pane(ui: &mut Ui, row: &ShelfRow, height: f32) {
+    let hit = &row.hit;
+    let (standing, note) = source_standing(row);
+    filled_detail_pane(
+        ui,
+        "MODEL SOURCE",
+        Some(standing),
+        height,
+        "models-shelf-source",
+        |ui| {
+            let path = hit.source.as_deref().map(path_label);
+            property(
+                ui,
+                "Source",
+                path.as_deref().unwrap_or(standing),
+                match (path.is_some(), hit.line) {
+                    // A parsed card does not always carry the line it was read
+                    // at, and "line 0" is a number nobody can look up.
+                    (true, 0) => "line not recorded".to_owned(),
+                    (true, line) => format!("line {line}"),
+                    (false, _) => "no file this workspace reads".to_owned(),
+                }
+                .as_str(),
+            );
+            property(
+                ui,
+                "Project eligibility",
+                if hit.redistributable && !hit.restricted {
+                    "eligible"
+                } else {
+                    "blocked"
+                },
+                "license policy",
+            );
+            // Prose rather than a property row: it is the reason the pane says
+            // so little, and a reason is a sentence.
+            if let Some(note) = note {
+                let t = Tokens::get(ui.ctx());
+                ui.label(RichText::new(note).small().color(t.color.text_dim));
+            }
+        },
+    );
 }
 
 /// The pack the packs scope could show this row under, when there is one.
@@ -936,6 +1089,120 @@ mod tests {
                 detail.y0 - footer.y1
             );
         }
+    }
+
+    /// The part detail is one row of equal panes reaching the panel's edge.
+    ///
+    /// The surface's own guard against ending in unpainted canvas renders the
+    /// Models page in its default scope, so it never saw this one: the shelf
+    /// ended a quarter of a screen short of the bottom edge for as long as it
+    /// has existed, with the shell's charcoal canvas showing under it, and
+    /// every assertion about the shelf passed the whole time because a pane's
+    /// *position* is the only thing that could tell anyone.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_part_detail_is_one_row_of_equal_panes_filling_the_page() {
+        fn walk(shape: &egui::epaint::Shape, fill: egui::Color32, out: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::epaint::Shape::Rect(rect) if rect.fill == fill => out.push(rect.rect),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, fill, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut state = AppState::default();
+        let mut pending = Vec::new();
+        let size = egui::vec2(1180.0, 900.0);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+                        let mut context = ManagerRenderContext {
+                            state: &mut state,
+                            pending_actions: &mut pending,
+                        };
+                        parts_catalog(ui, &mut context, &[]);
+                    });
+            },
+        );
+        let panel = Tokens::get(&ctx).color.bg_panel;
+        let mut painted = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, panel, &mut painted);
+        }
+        // The panes are the only blocks that reach the bottom band, and the
+        // fill is what a reader sees there: an unfilled band is the shell's
+        // canvas, which reads as a page that failed to render.
+        let mut panes = painted
+            .into_iter()
+            .filter(|rect| rect.bottom() >= size.y - 3.0 && rect.height() > 100.0)
+            .collect::<Vec<_>>();
+        panes.sort_by(|left, right| left.left().total_cmp(&right.left()));
+        assert!(
+            panes.len() >= 2,
+            "the detail row reaches the bottom edge as two panes; found {:?}",
+            panes
+        );
+        let (left, right) = (panes[0], panes[panes.len() - 1]);
+        assert!(
+            (left.height() - right.height()).abs() < 1.0,
+            "the two panes are one row of equal heights: {left:?} vs {right:?}"
+        );
+        assert!(
+            left.right() <= right.left() + 1.0,
+            "and they sit beside each other rather than overlapping: {left:?} vs {right:?}"
+        );
+    }
+
+    /// A part with no file behind it is four facts, and one of them is a fault.
+    ///
+    /// The detail pane used to decide this with a single `is_file()`, which
+    /// told a foundation card compiled into the binary and an installed
+    /// release proved in the pack store that their definitions had never been
+    /// read — a sentence that is true of neither and actionable for neither.
+    #[test]
+    fn a_row_with_no_file_says_which_of_the_four_reasons_it_has_none() {
+        let foundation = ShelfRow {
+            origin: PartOrigin::Foundation {
+                library: "rspice-foundation".to_owned(),
+            },
+            ..corpus_row("RSPICE_DIODE", "diode", "model")
+        };
+        let (standing, note) = source_standing(&foundation);
+        assert_eq!(standing, "compiled in");
+        assert!(
+            note.expect("a card with no file says why")
+                .contains("written into the build"),
+            "the build is where it is, not a file nobody synced"
+        );
+
+        let (standing, note) = source_standing(&pack_row("1N4148", "diode", &[]));
+        assert_eq!(standing, "in the release");
+        assert!(note.is_some_and(|note| note.contains("pack store")));
+
+        // The one fault of the four, and the only one that asks for anything.
+        let mut absent = corpus_row("RSPICE_ZENER", "diode", "model");
+        absent.hit.source = Some(std::path::PathBuf::from("/no/such/card.lib"));
+        let (standing, note) = source_standing(&absent);
+        assert_eq!(standing, "not on disk");
+        assert!(note.is_some_and(|note| note.contains("rescanned")));
+
+        // And a file that is actually there says nothing extra at all.
+        let mut present = corpus_row("RSPICE_ZENER", "diode", "model");
+        present.hit.source = Some(std::env::current_exe().expect("this test has a binary"));
+        assert_eq!(source_standing(&present), ("on this machine", None));
     }
 
     /// A column every row agrees on is stated once, not repeated down the page.

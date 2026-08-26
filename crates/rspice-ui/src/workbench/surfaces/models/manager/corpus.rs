@@ -289,63 +289,75 @@ fn pack_detail(
             });
         }
     });
-    card(ui, |ui| {
-        card_title(ui, "PACK CONTRACT", Some(&pack.category));
-        property(
-            ui,
-            "Contents",
-            &format!(
-                "{} addressable · {} total definitions · {} files",
-                pack.models_top + pack.subcircuits_top,
-                pack.models + pack.subcircuits,
-                pack.files
-            ),
-            "manifest",
-        );
-        property(ui, "License", &pack.spdx, pack.tier.display_name());
-        property(
-            ui,
-            "Redistributable",
-            if pack.redistributable { "yes" } else { "no" },
-            "enforced before project embedding",
-        );
-        property(
-            ui,
-            "Attachment",
-            &if built_in {
-                "built into RSpice".to_owned()
-            } else if attached.is_empty() {
-                "not attached".to_owned()
-            } else {
-                attached.join(", ")
-            },
-            if built_in {
-                "embedded foundation"
-            } else if !attached.is_empty() {
-                "authenticated project source"
-            } else {
-                "corpus only"
-            },
-        );
-        property(
-            ui,
-            "Executable source",
-            if catalog_source_available || !attached.is_empty() {
-                "available"
-            } else {
-                "import required"
-            },
-            "attach gate",
-        );
-        property(
-            ui,
-            "Entry",
-            pack.entry
-                .as_deref()
-                .map(path_label)
-                .as_deref()
-                .unwrap_or("not declared"),
-            "pack manifest",
-        );
-    });
+    // The last block on the packs page whenever an installation carries a
+    // shipped corpus tree, so it is the one that reaches the panel's bottom
+    // edge. A shrink-to-fit card here left the surface ending in the
+    // container's hairline colour, which reads as a pane that failed to render
+    // rather than as room.
+    let region_h = ui.available_height().max(1.0);
+    filled_detail_pane(
+        ui,
+        "PACK CONTRACT",
+        Some(&pack.category),
+        region_h,
+        "models-corpus-contract",
+        |ui| {
+            property(
+                ui,
+                "Contents",
+                &format!(
+                    "{} addressable · {} total definitions · {} files",
+                    pack.models_top + pack.subcircuits_top,
+                    pack.models + pack.subcircuits,
+                    pack.files
+                ),
+                "manifest",
+            );
+            property(ui, "License", &pack.spdx, pack.tier.display_name());
+            property(
+                ui,
+                "Redistributable",
+                if pack.redistributable { "yes" } else { "no" },
+                "enforced before project embedding",
+            );
+            property(
+                ui,
+                "Attachment",
+                &if built_in {
+                    "built into RSpice".to_owned()
+                } else if attached.is_empty() {
+                    "not attached".to_owned()
+                } else {
+                    attached.join(", ")
+                },
+                if built_in {
+                    "embedded foundation"
+                } else if !attached.is_empty() {
+                    "authenticated project source"
+                } else {
+                    "corpus only"
+                },
+            );
+            property(
+                ui,
+                "Executable source",
+                if catalog_source_available || !attached.is_empty() {
+                    "available"
+                } else {
+                    "import required"
+                },
+                "attach gate",
+            );
+            property(
+                ui,
+                "Entry",
+                pack.entry
+                    .as_deref()
+                    .map(path_label)
+                    .as_deref()
+                    .unwrap_or("not declared"),
+                "pack manifest",
+            );
+        },
+    );
 }
