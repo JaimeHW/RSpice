@@ -422,8 +422,9 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     ) {
         Ok(projection) => projection,
         Err(error) => {
-            navigator_section_header(ui, "Nets", "\u{2014}");
-            empty_navigator_row(ui, &error.to_string());
+            if navigator_section_header(ui, "Nets", "\u{2014}") {
+                empty_navigator_row(ui, &error.to_string());
+            }
             return;
         }
     };
@@ -437,7 +438,9 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
     .cloned()
     .collect::<Vec<_>>();
-    navigator_section_header(ui, "Nets", &nets.len().to_string());
+    if !navigator_section_header(ui, "Nets", &nets.len().to_string()) {
+        return;
+    }
     if nets.is_empty() {
         empty_navigator_row(
             ui,
@@ -626,7 +629,9 @@ fn excitation_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppS
     })
     .collect::<Vec<_>>();
 
-    navigator_section_header(ui, "Excitations", &sources.len().to_string());
+    if !navigator_section_header(ui, "Excitations", &sources.len().to_string()) {
+        return;
+    }
     if sources.is_empty() {
         empty_navigator_row(
             ui,
@@ -747,7 +752,9 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .unwrap_or_default();
 
-    navigator_section_header(ui, "Named signals", &probes.len().to_string());
+    if !navigator_section_header(ui, "Named signals", &probes.len().to_string()) {
+        return;
+    }
     if probes.is_empty() {
         empty_navigator_row(
             ui,
@@ -1550,12 +1557,40 @@ fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
+/// One rail's band: what the section is called, how many rows it stands over,
+/// and whether those rows are painted at all. Returns the disclosure position.
+///
+/// The caret is the control, so it states the position it is in rather than
+/// pointing down over a section that cannot fold. A section is open until a
+/// reader folds it, and the position is held per title so a rail folded in one
+/// frame is folded in the next.
+///
+/// The count is the section's own and is stated whether or not the section is
+/// open: a folded rail that hid how much it holds would be a worse answer than
+/// the rows it replaced.
+///
+/// `egui::CollapsingHeader` is refused here for the same reason
+/// [`catalog_group_row`] refuses it — its stock geometry is not this band.
+fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) -> bool {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
+    let id = ui.make_persistent_id(("navigator-section", title));
+    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));
+    let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), PANEL_SECTION_H),
-        egui::Sense::hover(),
+        egui::Sense::click(),
     );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title)
+    });
+    // Before the caret is drawn, so the band paints the position this frame
+    // returns rather than the one the press just left.
+    if response.clicked() {
+        open = !open;
+        ui.data_mut(|data| data.insert_persisted(id, open));
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_expanded(open);
+    });
     ui.painter().rect_filled(
         rect,
         0.0,
@@ -1566,7 +1601,15 @@ fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
             204,
         ),
     );
-    WorkbenchIcon::ChevronDown.paint(
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    }
+    let caret = if open {
+        WorkbenchIcon::ChevronDown
+    } else {
+        WorkbenchIcon::ChevronRight
+    };
+    caret.paint(
         ui.painter(),
         egui::Rect::from_center_size(
             egui::pos2(rect.left() + 15.0, rect.center().y),
@@ -1603,6 +1646,8 @@ fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) {
         count_galley,
         t.color.text_dim,
     );
+    theme::paint_focus_ring(ui, &response, rect);
+    open
 }
 
 fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {

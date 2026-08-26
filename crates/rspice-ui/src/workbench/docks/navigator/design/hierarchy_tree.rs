@@ -611,7 +611,9 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
         .flat_map(|cells| cells.values())
         .map(|views| views.len())
         .sum::<usize>();
-    navigator_section_header(ui, "Masters", &total.to_string());
+    if !navigator_section_header(ui, "Masters", &total.to_string()) {
+        return;
+    }
     if masters.is_empty() {
         empty_navigator_row(
             ui,
@@ -732,7 +734,10 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|row| matches!(row, DesignTreeRow::Occurrence(_)))
         .count();
 
-    navigator_section_header(ui, "Occurrences", &occurrences.to_string());
+    if !navigator_section_header(ui, "Occurrences", &occurrences.to_string()) {
+        *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
+        return;
+    }
     if rows.is_empty() {
         *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
         empty_navigator_row(
@@ -853,8 +858,9 @@ fn resolved_projection(
     ) {
         Ok(projection) => Some(projection),
         Err(error) => {
-            navigator_section_header(ui, section, "\u{2014}");
-            empty_navigator_row(ui, &error.to_string());
+            if navigator_section_header(ui, section, "\u{2014}") {
+                empty_navigator_row(ui, &error.to_string());
+            }
             None
         }
     }
