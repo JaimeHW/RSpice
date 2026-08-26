@@ -72,6 +72,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, app| selected_record(ui, app, &payload),
         |ui, app| evaluation_policy(ui, app, &payload),
     );
+    // Scoping a limit, retyping a definition and changing the evaluation policy
+    // all commit through `commit_plan_change`, so this route writes into the
+    // plan's receipt log like every other registry — and was the only one that
+    // never showed it, leaving a successful edit here with no surface at all.
+    super::pages::plan_configuration_receipts(ui, app);
 }
 
 /// What the page says instead of a registry when the plan will not resolve.
