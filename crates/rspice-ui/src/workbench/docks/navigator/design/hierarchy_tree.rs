@@ -433,25 +433,28 @@ fn declared_masters(
 // -----------------------------------------------------------------------------
 
 /// One tree row's paint request.
-struct TreeRow<'a> {
-    id: egui::Id,
-    level: usize,
+pub(super) struct TreeRow<'a> {
+    pub id: egui::Id,
+    pub level: usize,
     /// `Some(unfolded)` when the node has children to disclose.
-    disclosure: Option<bool>,
-    icon: WorkbenchIcon,
-    label: &'a str,
-    meta: Option<&'a str>,
+    pub disclosure: Option<bool>,
+    pub icon: WorkbenchIcon,
+    pub label: &'a str,
+    /// The label names a net or a deck identifier rather than a design object,
+    /// so it is set in the mono face the deck is read in.
+    pub mono: bool,
+    pub meta: Option<&'a str>,
     /// The meta states a condition rather than a name or a count, so it is
     /// painted as one.
-    alert: bool,
-    selected: bool,
+    pub alert: bool,
+    pub selected: bool,
 }
 
 /// What the reader did to one row.
-struct TreeRowResponse {
-    row: Response,
+pub(super) struct TreeRowResponse {
+    pub row: Response,
     /// Present exactly when the row disclosed children.
-    disclosure: Option<Response>,
+    pub disclosure: Option<Response>,
 }
 
 /// Paint one tree row, with its disclosure control as its own hit target.
@@ -459,7 +462,11 @@ struct TreeRowResponse {
 /// The two gestures mean different things — unfolding a node reads it,
 /// activating it navigates to it — and a tree that conflates them cannot show
 /// a subtree without leaving the sheet the reader is on.
-fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
+///
+/// The object rails share this painter wherever a row has to state a condition
+/// in its meta column, because the navigator's own indented row paints every
+/// meta faint and a warning that reads as a count is not a warning.
+pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), SCHEMATIC_NAV_ROW_HEIGHT),
@@ -575,7 +582,11 @@ fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
             egui::pos2(label_left, rect.center().y),
             egui::Align2::LEFT_CENTER,
             row.label,
-            theme::sans(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular),
+            if row.mono {
+                theme::mono(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular)
+            } else {
+                theme::sans(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular)
+            },
             if row.selected {
                 t.color.text
             } else {
@@ -641,6 +652,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                 disclosure: Some(unfolded),
                 icon: WorkbenchIcon::Models,
                 label: library.as_str(),
+                mono: false,
                 meta: Some(cell_count.as_str()),
                 alert: false,
                 selected: false,
@@ -665,6 +677,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                     disclosure: Some(unfolded),
                     icon: WorkbenchIcon::Design,
                     label: cell.as_str(),
+                    mono: false,
                     meta: Some(view_count.as_str()),
                     alert: false,
                     selected: false,
@@ -687,6 +700,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                         disclosure: None,
                         icon: WorkbenchIcon::Layers,
                         label: master.view.as_str(),
+                        mono: false,
                         meta: Some(occurrences.as_str()),
                         alert: false,
                         selected: state.workspace.active_view == reference,
@@ -778,6 +792,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                             WorkbenchIcon::Instance
                         },
                         label: row.label.as_str(),
+                        mono: false,
                         meta: Some(note.as_str()),
                         alert: row.state.note().is_some(),
                         selected: tree.selection() == Some(&row.path) || row.path == active,
@@ -808,6 +823,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                         disclosure: None,
                         icon: WorkbenchIcon::File,
                         label: name.as_str(),
+                        mono: false,
                         meta: Some("sheet"),
                         alert: false,
                         selected: false,

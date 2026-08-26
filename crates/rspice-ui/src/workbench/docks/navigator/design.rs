@@ -533,23 +533,135 @@ fn net_anchor(app: &RSpiceApp, net: &DesignNet) -> Option<crate::state::Point> {
         })
 }
 
-fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let scope = sheet_visibility::sheet_scope(ui.ctx());
-    let query = normalized(app.state.workbench.navigator_filter());
-    let ports = app
-        .state
+/// One interface pin, as the ports rail lists it.
+struct PortRow {
+    component_id: u64,
+    position: crate::state::Point,
+    spec: crate::state::PortSpec,
+    contract: crate::state::PortContract,
+    /// Where the pin sits in the interface: the order the contract declares,
+    /// or the document position that stands in for one until the typed editor
+    /// rewrites it.
+    order: usize,
+    /// The document position, which breaks a tie between two pins declaring
+    /// the same order.
+    document_index: usize,
+    /// Another pin of this cell carries the same name, folded for case.
+    duplicated: bool,
+}
+
+impl PortRow {
+    /// The meta column: the interface position, the direction declared there,
+    /// and the conductors the pin carries when its name declares a vector.
+    fn meta(&self) -> String {
+        let mut meta = format!("#{} \u{00b7} {}", self.order, self.spec.direction.keyword());
+        let width = self.spec.width();
+        if width > 1 {
+            meta.push_str(&format!(" \u{00b7} [{width}]"));
+        }
+        meta
+    }
+
+    /// The whole contract this pin declares, which the meta column has room
+    /// for only the position and the direction of.
+    fn tooltip(&self) -> String {
+        let mut lines = vec![
+            format!("{} \u{00b7} #{}", self.spec.name, self.order),
+            format!(
+                "{} \u{00b7} {} \u{00b7} {}",
+                self.contract.direction.keyword(),
+                self.contract.signal_type.keyword(),
+                self.contract.discipline.keyword()
+            ),
+        ];
+        let width = self.spec.width();
+        if width > 1 {
+            lines.push(format!("{width} conductors"));
+        }
+        let documentation = self.contract.documentation.trim();
+        if !documentation.is_empty() {
+            lines.push(documentation.to_owned());
+        }
+        if self.duplicated {
+            lines.push(
+                "This name is declared more than once, so the interface takes the first \
+                 declaration and the rest add no pin"
+                    .to_owned(),
+            );
+        }
+        lines.join("\n")
+    }
+}
+
+/// The pins the rail lists, in the order the interface declares them.
+///
+/// The sort key is `(netlist_order, document order)` — the key
+/// [`crate::state::SchematicState::interface_ports`] sorts by — because that
+/// order is the `.SUBCKT` port list and the node order of every instance of
+/// this cell. A rail in document order would number the pins in an order no
+/// deck has.
+///
+/// Duplicate names are counted over the whole cell rather than over the rows
+/// that survive the scope and the filter: a repeated name is a fact about the
+/// interface, and narrowing what is on screen does not un-declare it.
+fn port_rows(
+    state: &crate::workbench::app_state::AppState,
+    scope: SheetScope,
+    query: &str,
+) -> Vec<PortRow> {
+    let mut declared: BTreeMap<String, usize> = BTreeMap::new();
+    for spec in state
         .schematic
         .components
         .iter()
-        .filter(|component| sheet_visibility::object_is_in_scope(&app.state, scope, component.id))
-        .filter_map(|component| {
-            component
-                .port_spec()
-                .map(|port| (component.id, component.pos, port))
+        .filter_map(crate::state::Component::port_spec)
+    {
+        *declared.entry(spec.name.to_ascii_lowercase()).or_default() += 1;
+    }
+    let mut rows = state
+        .schematic
+        .components
+        .iter()
+        .enumerate()
+        .filter_map(|(document_index, component)| {
+            let spec = component.port_spec()?;
+            let contract = component.port_contract()?;
+            Some(PortRow {
+                order: contract.netlist_order.unwrap_or(document_index + 1),
+                duplicated: declared
+                    .get(&spec.name.to_ascii_lowercase())
+                    .is_some_and(|count| *count > 1),
+                component_id: component.id,
+                position: component.pos,
+                document_index,
+                spec,
+                contract,
+            })
         })
-        .filter(|(_, _, port)| matches_query(&query, &[&port.name, port.direction.keyword()]))
+        .filter(|row| sheet_visibility::object_is_in_scope(state, scope, row.component_id))
+        .filter(|row| {
+            matches_query(
+                query,
+                &[
+                    &row.spec.name,
+                    row.spec.direction.keyword(),
+                    &row.order.to_string(),
+                    row.contract.discipline.keyword(),
+                ],
+            )
+        })
         .collect::<Vec<_>>();
-    navigator_section_header(ui, "Ports", &ports.len().to_string());
+    rows.sort_by_key(|row| (row.order, row.document_index));
+    rows
+}
+
+fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
+    let query = normalized(app.state.workbench.navigator_filter());
+    let ports = port_rows(&app.state, scope, &query);
+    if !navigator_section_header(ui, "Ports", &ports.len().to_string()) {
+        return;
+    }
     if ports.is_empty() {
         empty_navigator_row(
             ui,
@@ -561,36 +673,49 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     }
-    for (component_id, position, port) in ports {
-        let icon = match port.direction {
+    for port in ports {
+        let icon = match port.spec.direction {
             PortDirection::In => WorkbenchIcon::ArrowRight,
             PortDirection::Out => WorkbenchIcon::ArrowLeft,
             PortDirection::Supply => WorkbenchIcon::Supply,
             PortDirection::InOut => WorkbenchIcon::Design,
         };
-        let response = nav_row_indented_mono_response(
+        let meta = port.meta();
+        let response = hierarchy_tree::tree_row(
             ui,
-            icon,
-            &port.name,
-            app.state.schematic.selection.has_component(component_id),
-            Some(port.direction.keyword()),
-            1,
-        );
+            hierarchy_tree::TreeRow {
+                id: ui.id().with(("navigator-port", port.component_id)),
+                level: 1,
+                disclosure: None,
+                icon,
+                label: port.spec.name.as_str(),
+                mono: true,
+                meta: Some(meta.as_str()),
+                alert: port.duplicated,
+                selected: app
+                    .state
+                    .schematic
+                    .selection
+                    .has_component(port.component_id),
+            },
+        )
+        .row
+        .on_hover_text(port.tooltip());
         if response.clicked() {
             app.state
                 .schematic
                 .selection
-                .select_only_component(component_id);
+                .select_only_component(port.component_id);
             app.state.schematic.net_highlight.clear();
-            app.state.schematic.center_request = Some(position);
+            app.state.schematic.center_request = Some(port.position);
         }
         navigator_object_context_menu(
             &response,
             app,
             NavigatorObject::Component {
-                id: component_id,
-                label: port.name,
-                position,
+                id: port.component_id,
+                label: port.spec.name,
+                position: port.position,
             },
         );
     }
