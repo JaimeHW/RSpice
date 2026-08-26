@@ -334,7 +334,7 @@ fn auto_binding(headers: &[String]) -> Result<Vec<Option<usize>>, VariableImport
 /// Reading a sheet changes nothing, so this takes the application immutably and
 /// hands back what the dialog should show. The caller decides that the dialog
 /// opens; this only decides what is in it.
-fn import_draft_for_sheet(
+pub(super) fn import_draft_for_sheet(
     app: &RSpiceApp,
     plan_id: SimulationPlanId,
     file_name: &str,

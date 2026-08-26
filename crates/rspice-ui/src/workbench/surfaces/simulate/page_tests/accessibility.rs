@@ -459,10 +459,17 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
 /// outside it — and two of the nameless text fields it exists to catch were
 /// living in exactly those two places. A gate that cannot reach a surface is
 /// not a gate over it.
+///
+/// "Every workflow dialog" was five of the eight. The clone, the capture group
+/// and the guided variable import were never listed here, so every sweep that
+/// reads this was silent about them for as long as they existed — the same
+/// defect one level up, which is why
+/// [`every_studio_workflow_draft_has_an_overlay_fixture`] counts the list
+/// against the enum rather than trusting the sentence.
 fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     use crate::workbench::state::{
-        DesignVariableDraft, RenameAnalysisDraft, SavedOutputDraft, SimulationPlanManagerDraft,
-        SimulationWorkflowDialog,
+        CaptureGroupDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
+        SavedOutputDraft, SimulationPlanManagerDraft, SimulationWorkflowDialog,
     };
 
     let mut overlays: Vec<(String, RSpiceApp)> = analysis_catalogue_fixtures();
@@ -515,7 +522,99 @@ fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     ));
     overlays.push(("saved output".to_owned(), app));
 
+    // Cloning the plan, from the header that offers it.
+    let mut app = studio_route(SimulationPage::Analyses, None);
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the fixture holds a stable plan")
+        .id();
+    let plan_name = app.state.sim_setup.active_plan_name().to_string();
+    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+        ClonePlanDraft::for_source(plan_id, &plan_name),
+    ));
+    overlays.push(("clone plan".to_owned(), app));
+
+    // A new capture group, on the page that holds them.
+    let mut app = studio_route(SimulationPage::Save, None);
+    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
+        CaptureGroupDraft::default(),
+    ));
+    overlays.push(("capture group".to_owned(), app));
+
+    // The guided variable import, opened through its own entry point on a
+    // sheet carrying a resolvable row and an unreadable one — both panes of
+    // the dialog have something in them that way.
+    let mut app = studio_route(SimulationPage::Variables, None);
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the fixture holds a stable plan")
+        .id();
+    let draft = super::super::variable_import::import_draft_for_sheet(
+        &app,
+        plan_id,
+        "spec.csv",
+        "name,quantity,expression,minimum,maximum,scope,description\n\
+         RFB,resistance,47k,10k,100k,testbench,feedback resistor\n\
+         CFB,capacitance,2.2p,,,testbench,feedback capacitor\n\
+         IBIAS,current,banana,,,testbench,not a current\n",
+    );
+    app.state.workbench.simulation_workflow =
+        Some(SimulationWorkflowDialog::DesignVariableImport(draft));
+    overlays.push(("design variable import".to_owned(), app));
+
     overlays
+}
+
+/// Every workflow draft the studio owns is opened by a fixture above.
+///
+/// The sweeps that read [`studio_overlays`] are only as wide as the list they
+/// are handed, and three of the eight drafts were never in it. A count against
+/// the enum is what stops a ninth from being added and quietly missed the same
+/// way: a new variant fails to compile here until it has a fixture.
+#[test]
+fn every_studio_workflow_draft_has_an_overlay_fixture() {
+    use crate::workbench::state::SimulationWorkflowDialog;
+
+    let opened: Vec<&'static str> = studio_overlays()
+        .into_iter()
+        .filter_map(|(_, app)| {
+            app.state
+                .workbench
+                .simulation_workflow
+                .as_ref()
+                .map(|workflow| match workflow {
+                    SimulationWorkflowDialog::PlanManager(_) => "PlanManager",
+                    SimulationWorkflowDialog::ClonePlan(_) => "ClonePlan",
+                    SimulationWorkflowDialog::DesignVariable(_) => "DesignVariable",
+                    SimulationWorkflowDialog::SavedOutput(_) => "SavedOutput",
+                    SimulationWorkflowDialog::RenameAnalysis(_) => "RenameAnalysis",
+                    SimulationWorkflowDialog::CaptureGroup(_) => "CaptureGroup",
+                    SimulationWorkflowDialog::AnalysisRunPoints(_) => "AnalysisRunPoints",
+                    SimulationWorkflowDialog::DesignVariableImport(_) => "DesignVariableImport",
+                })
+        })
+        .collect();
+    let missing: Vec<&str> = [
+        "PlanManager",
+        "ClonePlan",
+        "DesignVariable",
+        "SavedOutput",
+        "RenameAnalysis",
+        "CaptureGroup",
+        "AnalysisRunPoints",
+        "DesignVariableImport",
+    ]
+    .into_iter()
+    .filter(|variant| !opened.contains(variant))
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "these workflow dialogs are outside every overlay sweep: {missing:?}"
+    );
 }
 
 /// Every text field and switch in the studio announces the row that names it.
