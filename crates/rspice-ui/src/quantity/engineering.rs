@@ -1,6 +1,71 @@
 //! Engineering-notation parsing and formatting ("1k", "10u", "3.3Meg").
 
-/// Parse an engineering notation value (e.g., "1k", "10u", "3.3meg").
+/// Word forms for the scale factors, tried ahead of the SPICE letters.
+///
+/// These are a UI convenience rather than SPICE: no deck reader accepts
+/// `1micro`. They are matched first because every one of them begins with a
+/// scale letter, and unit letters after a scale are ignored — so `micro`
+/// would otherwise read as milli followed by the "unit" `icro`.
+const WORD_SCALE_FACTORS: &[(&str, f64)] = &[
+    ("tera", 1e12),
+    ("giga", 1e9),
+    ("mega", 1e6),
+    ("kilo", 1e3),
+    ("milli", 1e-3),
+    ("micro", 1e-6),
+    ("nano", 1e-9),
+    ("pico", 1e-12),
+    ("femto", 1e-15),
+];
+
+/// The SPICE scale factors, longest token first.
+///
+/// `mil` (one thousandth of an inch) and `meg` both have to precede the `m`
+/// that starts them. `mil` is here because the engine's own deck reader has
+/// it: `crates/rspice-core/src/netlist/lexer.rs` resolves `MIL` to 25.4e-6 in
+/// every element-value position, so a field that read `1mil` as one milli
+/// would disagree with the netlist the field is compiled into.
+///
+/// There is no `a` for atto. A scale factor followed by ignored unit letters
+/// means the `A` of a one-ampere source is a unit, not a decade, and ngspice
+/// has no atto either.
+const SPICE_SCALE_FACTORS: &[(&str, f64)] = &[
+    ("mil", 25.4e-6),
+    ("meg", 1e6),
+    ("t", 1e12),
+    ("g", 1e9),
+    ("k", 1e3),
+    ("m", 1e-3),
+    ("u", 1e-6),
+    ("n", 1e-9),
+    ("p", 1e-12),
+    ("f", 1e-15),
+];
+
+/// Parse an engineering notation value (e.g., "1k", "10u", "3.3meg", "1ns").
+///
+/// The rule, in order:
+///
+/// 1. A leading number — digits, one point, a sign, an `e`/`E` exponent.
+/// 2. The rest is the suffix: trimmed, lowercased, with U+00B5 MICRO SIGN and
+///    U+03BC GREEK SMALL LETTER MU folded to `u`.
+/// 3. A word form from [`WORD_SCALE_FACTORS`], then a SPICE scale factor from
+///    [`SPICE_SCALE_FACTORS`], longest token first.
+/// 4. Whatever follows the scale factor must be alphabetic, and is **ignored**
+///    — it is the unit. This is SPICE: `1ns` is one nanosecond, `10kHz` is ten
+///    kilohertz, `2.2uF` is 2.2 microfarad.
+/// 5. A suffix that is alphabetic but starts with no scale factor is a bare
+///    unit and multiplies by one: `5V`, `1A`, `3s`.
+/// 6. Anything else is an error: `1k5`, `1N4148`, `12%`, and the empty string.
+///
+/// Two consequences are SPICE's, and are deliberate rather than defects:
+///
+/// * `1mHz` is 1e-3, not one millihertz-as-megahertz — `m` is the milli scale
+///   and `Hz` is an ignored unit. SPICE has no case-sensitive `M`; mega must
+///   be spelled `meg`. (The engine's deck lexer reads the three-letter `MHZ`
+///   as megahertz instead; that spelling is the one place the two disagree.)
+/// * `1F` is 1e-15, because `f` is femto. A farad has to be written with a
+///   scale factor in front of it (`1pF`) to read as a capacitance.
 ///
 /// Returns the numeric value or an error message.
 pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
@@ -12,51 +77,64 @@ pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
 
     // Find where the number ends and the suffix begins
     let mut numeric_end = 0;
-    let chars: Vec<char> = trimmed.chars().collect();
-
-    for (i, c) in chars.iter().enumerate() {
-        if c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+' || *c == 'e' || *c == 'E' {
-            numeric_end = i + 1;
+    for (index, character) in trimmed.char_indices() {
+        if character.is_ascii_digit() || matches!(character, '.' | '-' | '+' | 'e' | 'E') {
+            numeric_end = index + character.len_utf8();
         } else {
             break;
         }
     }
 
     // Parse the numeric part
-    let numeric_str = &trimmed[..trimmed.chars().take(numeric_end).collect::<String>().len()];
+    let (numeric_str, suffix) = trimmed.split_at(numeric_end);
     let base_value: f64 = numeric_str
         .parse()
         .map_err(|_| format!("Cannot parse '{}' as number", numeric_str))?;
 
     // Parse the suffix - take the rest and compare lowercase/normalized
-    let suffix: String = trimmed.chars().skip(numeric_end).collect();
     let suffix = suffix.trim();
     let suffix_lower = suffix.to_lowercase();
 
     // Normalize micro sign: U+00B5 (µ MICRO SIGN) and U+03BC (μ GREEK SMALL LETTER MU) both map to 'u'
     let normalized_suffix = suffix_lower.replace(['\u{00B5}', '\u{03BC}'], "u");
 
-    let multiplier = match normalized_suffix.as_str() {
-        "" => 1.0,
-        "t" | "tera" => 1e12,
-        "g" | "giga" => 1e9,
-        "meg" | "mega" => 1e6,
-        "k" | "kilo" => 1e3,
-        "m" | "milli" => 1e-3,
-        "u" | "micro" => 1e-6,
-        "n" | "nano" => 1e-9,
-        "p" | "pico" => 1e-12,
-        "f" | "femto" => 1e-15,
-        "a" | "atto" => 1e-18,
-        _ => {
-            return Err(format!(
-                "Unknown suffix: '{}' (normalized: '{}')",
-                suffix, normalized_suffix
-            ));
-        }
-    };
+    let multiplier = scale_factor(&normalized_suffix).ok_or_else(|| {
+        format!(
+            "Unknown suffix: '{}' (normalized: '{}')",
+            suffix, normalized_suffix
+        )
+    })?;
 
     Ok(base_value * multiplier)
+}
+
+/// The decade a normalized suffix names, or `None` when the text is not a
+/// scale factor followed by a unit.
+///
+/// The tables are ordered so that the first token that prefixes the suffix is
+/// the longest one that can: a shorter token would leave a remainder that
+/// still contains this one's, so a failed unit check here can never hide a
+/// match further down.
+fn scale_factor(suffix: &str) -> Option<f64> {
+    if suffix.is_empty() {
+        return Some(1.0);
+    }
+    for (token, multiplier) in WORD_SCALE_FACTORS.iter().chain(SPICE_SCALE_FACTORS) {
+        if let Some(unit) = suffix.strip_prefix(token) {
+            return is_unit_text(unit).then_some(*multiplier);
+        }
+    }
+    // No scale factor: a bare unit sits on the same decade as the number.
+    is_unit_text(suffix).then_some(1.0)
+}
+
+/// Whether the text after a scale factor is a unit rather than more value.
+///
+/// Alphabetic in the Unicode sense, so `1kΩ` reads as a kilohm; a digit,
+/// a sign or a symbol makes the whole string a rejection instead, which is
+/// what keeps `1k5` and the part number `1N4148` out of the numeric surfaces.
+fn is_unit_text(text: &str) -> bool {
+    text.chars().all(char::is_alphabetic)
 }
 
 /// How much of a mantissa a surface shows.
@@ -264,7 +342,6 @@ mod tests {
             ("1n", 1e-9),
             ("1p", 1e-12),
             ("1f", 1e-15),
-            ("1a", 1e-18),
             ("1e3", 1e3),
             ("-4.7k", -4.7e3),
         ] {
@@ -277,17 +354,81 @@ mod tests {
         }
     }
 
-    /// A suffix the ladder does not name is a parse failure. Defaulting it to
-    /// a multiplier of one would read the leading digits of any text at all —
-    /// a part number, a unit-bearing label — as a quantity.
+    /// A suffix that is not a scale factor followed by a unit is a parse
+    /// failure. What makes a part number a rejection is the digits inside it:
+    /// `1N4148` is nano followed by `4148`, and `4148` is not a unit, so the
+    /// text is refused rather than read as 1e-9.
     #[test]
-    fn an_unnamed_suffix_is_an_error_rather_than_a_multiplier_of_one() {
-        for text in ["", "12x", "1N4148", "5 volts", "1kohm", "abc"] {
+    fn a_suffix_that_is_not_a_scale_and_a_unit_is_an_error() {
+        for text in [
+            "", "1N4148", "2N3904", "abc", "1k5", "1.5.2", "12%", "1u/s", "1k-2",
+        ] {
             assert!(
                 parse_engineering_value(text).is_err(),
                 "{text:?} must not parse as an engineering value"
             );
         }
+    }
+
+    /// SPICE reads the letters after a scale factor as the unit and ignores
+    /// them, and a UI field that refused them refused what a deck accepts: a
+    /// source authored `5V` reached the Excitations page as a family name with
+    /// no value at all.
+    ///
+    /// Two rows here look wrong and are not. `1mHz` is one milli-something —
+    /// `m` is milli in SPICE and `Hz` is the ignored unit — and `1F` is one
+    /// femto-something, because `f` is femto. Both are what a deck reader
+    /// does with the same text.
+    #[test]
+    fn a_unit_after_the_scale_factor_is_ignored_the_way_spice_ignores_it() {
+        for (text, expected) in [
+            ("5V", 5.0),
+            ("1ns", 1e-9),
+            ("10kHz", 1e4),
+            ("3.3meg", 3.3e6),
+            ("1mHz", 1e-3),
+            ("1A", 1.0),
+            ("2.2uF", 2.2e-6),
+            ("1F", 1e-15),
+            ("1\u{00B5}s", 1e-6),
+            ("100mV", 0.1),
+            ("47pF", 47e-12),
+            ("1megohm", 1e6),
+            ("1kohm", 1e3),
+            ("5 volts", 5.0),
+            ("2.5s", 2.5),
+            ("1millisecond", 1e-3),
+            // `mil` is one thousandth of an inch, as it is in the engine's own
+            // deck lexer, and the word `milli` still has to beat it.
+            ("1mil", 25.4e-6),
+            ("2milli", 2e-3),
+            // Atto is gone: `a` is an ordinary unit letter, so a one-ampere
+            // source reads as one ampere rather than as 1e-18.
+            ("1a", 1.0),
+            ("1atto", 1.0),
+            ("1e3", 1e3),
+            ("-4.7k", -4.7e3),
+        ] {
+            let parsed = parse_engineering_value(text)
+                .unwrap_or_else(|error| panic!("{text} should parse: {error}"));
+            assert!(
+                (parsed - expected).abs() <= expected.abs() * 1e-12,
+                "{text} parsed as {parsed}, expected {expected}"
+            );
+        }
+    }
+
+    /// The formatter still spells the decade below femto `a`, which this
+    /// parser now reads as a unit rather than as atto — so a sub-femto value
+    /// no longer survives a round trip, and the netlist hover that checks the
+    /// round trip falls back to the raw float instead of showing `1a`.
+    ///
+    /// Pinned rather than fixed: the `a` the formatter writes is shared with
+    /// two other suffix ladders, and changing it is not this module's call.
+    #[test]
+    fn the_sub_femto_suffix_the_formatter_writes_no_longer_reads_back_as_atto() {
+        assert_eq!(format_engineering_value(1e-18), "1a");
+        assert_eq!(parse_engineering_value("1a").unwrap(), 1.0);
     }
 
     #[test]
