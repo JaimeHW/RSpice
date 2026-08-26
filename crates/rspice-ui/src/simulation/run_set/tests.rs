@@ -590,6 +590,7 @@ fn storage_budgets_round_trip_through_the_form_they_are_shown_in() {
         4 * 1024,
         4 * 1024 * 1024,
         10 * 1024 * 1024 * 1024,
+        3 * 1024 * 1024 * 1024 * 1024,
     ] {
         let text = format_bytes(bytes);
         assert_eq!(parse_bytes(&text), Ok(bytes), "{text}");
@@ -597,6 +598,23 @@ fn storage_budgets_round_trip_through_the_form_they_are_shown_in() {
     assert_eq!(parse_bytes("2 GB"), Ok(2_000_000_000));
     assert_eq!(parse_bytes("1_048_576"), Ok(1_048_576));
     assert!(parse_bytes("plenty").is_err());
+}
+
+#[test]
+fn byte_formatter_selects_the_largest_exact_binary_unit() {
+    assert_eq!(format_bytes(0), "0 B");
+    assert_eq!(format_bytes(17), "17 B");
+    assert_eq!(format_bytes(1024), "1.00 KiB");
+    assert_eq!(format_bytes(256 * 1024 * 1024), "256.00 MiB");
+    assert_eq!(format_bytes(10 * 1024 * 1024 * 1024), "10.00 GiB");
+    assert_eq!(format_bytes(3 * 1024 * 1024 * 1024 * 1024), "3.00 TiB");
+}
+
+#[test]
+fn byte_formatter_preserves_fractional_engineering_scale() {
+    assert_eq!(format_bytes(1536), "1.50 KiB");
+    assert_eq!(format_bytes(3 * 1024 * 1024 / 2), "1.50 MiB");
+    assert_eq!(format_bytes(5 * 1024 * 1024 * 1024 / 2), "2.50 GiB");
 }
 
 /// The identity of the `index`-th point of the composed space.
