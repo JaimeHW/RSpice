@@ -511,33 +511,111 @@ fn no_models_page_ends_in_unpainted_canvas() {
         }
     }
 
+    // Every catalog scope, not only the default: the shelf shipped 250 px
+    // short with this guard green because the probe only ever saw the
+    // project scope's composition.
+    use crate::workbench::state::ModelsCatalogScope;
+    const SCOPES: [ModelsCatalogScope; 3] = [
+        ModelsCatalogScope::Project,
+        ModelsCatalogScope::InstalledPacks,
+        ModelsCatalogScope::RSpiceLibrary,
+    ];
     for page in ModelsPage::ALL {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
+        for scope in SCOPES {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut app = RSpiceApp::test_instance();
+            app.state.workbench.models_page = page;
+            app.state.workbench.models_view.catalog_scope = scope;
+            let size = egui::vec2(1_180.0, 900.0);
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ctx, |ui| show(ui, &mut app));
+                },
+            );
+            let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
+            let probe = egui::pos2(size.x * 0.5, size.y - 4.0);
+            assert!(
+                output
+                    .shapes
+                    .iter()
+                    .any(|clipped| covers(&clipped.shape, probe, panel)),
+                "{page:?} under {scope:?} left the document surface unpainted at {probe:?}"
+            );
+            if page != ModelsPage::Models {
+                // Only the Models page reads the scope; one pass is evidence
+                // enough for the rest.
+                break;
+            }
+        }
+    }
+}
+
+/// Write every page of the workspace to a PNG so its design can be reviewed.
+///
+/// The default state renders the compiled-in catalog; per-page populated and
+/// exception states live beside the pages that own them (`corners::tests`,
+/// `symbols::tests`, `bins::tests`, `qualification_page::tests`) and the hub's
+/// trust rungs in `manager/raster.rs`. This test is the whole-workspace sweep
+/// a reviewer starts from. Renders go to `RSPICE_RASTER_DIR` (default: the
+/// system temp directory); read them for layout, not wording — the
+/// rasterizer's own header says why.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_every_page_for_review() {
+    use crate::workbench::state::ModelsCatalogScope;
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    let mut render = |slug: &str, page: ModelsPage, scope: ModelsCatalogScope| {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.models_page = page;
-        let size = egui::vec2(1_180.0, 900.0);
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ui, &mut app));
-            },
-        );
-        let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
-        let probe = egui::pos2(size.x * 0.5, size.y - 4.0);
-        assert!(
-            output
-                .shapes
-                .iter()
-                .any(|clipped| covers(&clipped.shape, probe, panel)),
-            "{page:?} left the document surface unpainted at {probe:?}"
+        app.state.workbench.models_view.catalog_scope = scope;
+        let canvas = crate::ui::raster::render(egui::vec2(1_180.0, 900.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| show(ui, &mut app));
+        });
+        let path = directory.join(format!("models-{slug}.png"));
+        let height = canvas.content_height().max(200);
+        std::fs::write(&path, canvas.png(height)).expect("write png");
+        writeln!(report, "wrote {}", path.display()).ok();
+    };
+    for (index, page) in ModelsPage::ALL.into_iter().enumerate() {
+        let slug = page
+            .label()
+            .to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>();
+        render(
+            &format!("{index:02}-{slug}"),
+            page,
+            ModelsCatalogScope::Project,
         );
     }
+    render(
+        "00b-rspice-library",
+        ModelsPage::Models,
+        ModelsCatalogScope::RSpiceLibrary,
+    );
+    render(
+        "00b-installed-packs",
+        ModelsPage::Models,
+        ModelsCatalogScope::InstalledPacks,
+    );
 }
 
 /// The Models page's detail panes are one row of equal columns that reaches the

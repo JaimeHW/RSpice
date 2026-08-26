@@ -16,7 +16,8 @@ use std::path::PathBuf;
 use crate::product::{ContentDigest, ModelSourceId};
 use crate::state::model_library::{
     DeviceModel, ModelDefinitionMetadata, ModelLibrary, ModelSourceAuthority, ModelSourceContent,
-    ModelSourcePin, ModelType, ProjectModelDefinition, ProjectModelRevisionDefinition,
+    ModelSourcePin, ModelType, ProcessCorner, ProjectModelDefinition,
+    ProjectModelRevisionDefinition,
 };
 use crate::state::{Component, ComponentType, Point};
 use crate::workbench::RSpiceApp;
@@ -253,7 +254,11 @@ fn bound_pdk_library(index: usize) -> ModelLibrary {
     library.technology_node = "28nm".to_owned();
     let root = PathBuf::from(format!("/pdk/{index}/models.lib"));
     library.root_path = Some(root.clone());
-    let mut source = String::new();
+    // Sectioned like a real PDK source, with corners bound the way an import
+    // builds them: standard corners are no longer seeded into every library,
+    // which had left this fixture rendering only the Corners page's empty
+    // state — a gate that never exercises the populated path measures nothing.
+    let mut source = String::from(".lib tt\n");
     for model_index in 0..MODELS_PER_LIBRARY {
         let name = pdk_model_name(index, model_index);
         let bin = model_index / FAMILIES.len();
@@ -276,6 +281,14 @@ fn bound_pdk_library(index: usize) -> ModelLibrary {
         .collect();
         source.push_str(&format!(".model {name} NMOS ( LEVEL=54 VTH0=0.4 )\n"));
         library.add_model(model);
+    }
+    source.push_str(".endl tt\n.lib ss\n.param dvthn=0.03\n.endl ss\n");
+    for (section, is_default) in [("tt", true), ("ss", false)] {
+        let corner = ProcessCorner::from_composite_section(section, root.clone(), is_default);
+        if is_default {
+            library.selected_corner = Some(corner.name.clone());
+        }
+        library.corners.insert(corner.name.clone(), corner);
     }
     let bytes = source.into_bytes();
     let digest = {
