@@ -8,6 +8,8 @@
 
 use super::*;
 
+use crate::state::model_library::ModelSourceAuthority;
+
 /// A model's release verdict.
 ///
 /// Readable across the surfaces because it is a fact about the project, not
@@ -20,6 +22,15 @@ pub(in crate::workbench::surfaces) enum QualificationGate {
     Review,
     Unqualified,
     Blocked,
+    /// The model is one of the simulator's own compiled-in equation defaults,
+    /// and the source-owned gate is not its gate.
+    ///
+    /// Off the ramp above rather than a shade of [`Self::Blocked`]: a built-in
+    /// card has no project source to bind evidence to, so "not source-owned"
+    /// is its design and not a finding against it. Deriving it from a failed
+    /// source resolution is what once had a project nobody had touched yet
+    /// reporting every foundation family as a red release-gate failure.
+    EngineOwned,
 }
 
 impl QualificationGate {
@@ -29,7 +40,18 @@ impl QualificationGate {
             Self::Review => "review",
             Self::Unqualified => "unqualified",
             Self::Blocked => "blocked",
+            Self::EngineOwned => "engine-owned",
         }
+    }
+
+    /// Whether the source-owned release gate governs this model at all.
+    ///
+    /// The counts that read as verdicts — qualified of how many, parity of how
+    /// many — are ratios over the governed population, and totalling the
+    /// exempt models into their denominators is the same false alarm the
+    /// per-model badge used to carry.
+    pub(in crate::workbench::surfaces) const fn is_gate_subject(self) -> bool {
+        !matches!(self, Self::EngineOwned)
     }
 }
 
@@ -200,67 +222,82 @@ pub(super) fn qualification_model_summary(
             draft.library_name.eq_ignore_ascii_case(&library.name)
                 && draft.model_name.eq_ignore_ascii_case(&model.name)
         });
-    let resolved = closure.map_or_else(
-        |error| Err(error.clone()),
-        |closure| {
-            model_editor::resolve_project_model_in_closure(
-                library,
-                &library.name,
-                &model.name,
-                closure,
-            )
-        },
-    );
-    let (source_revision, source_error, state, source) = match resolved {
-        Ok(resolved) => {
-            let qualification = open_draft.map_or_else(
-                || resolved.qualification.clone(),
-                |draft| draft.qualification.clone(),
-            );
-            let source_id = open_draft.map_or_else(|| resolved.source_id, |draft| draft.source_id);
-            let source_digest =
-                open_draft.map_or(resolved.model_digest, |draft| draft.base_source_digest);
-            let source_revision =
-                open_draft.map_or(resolved.model_revision, |draft| draft.base_source_revision);
-            let source = ModelSourceEvidenceBinding::try_new_project_bound(
-                &model.name,
-                source_id,
-                source_digest,
-                source_revision,
-            );
-            match source {
-                Ok(source) => (
-                    if open_draft.is_some_and(|draft| draft.qualification_is_dirty()) {
-                        format!(
-                            "{}@{} · working qualification",
-                            model.name,
-                            source_revision.get()
-                        )
-                    } else {
-                        format!("{}@{}", model.name, source_revision.get())
-                    },
-                    None,
-                    qualification,
-                    Some(source),
-                ),
-                Err(error) => (
-                    "invalid source identity".to_owned(),
-                    Some(error.to_string()),
-                    qualification,
-                    None,
-                ),
-            }
-        }
-        Err(error) => (
-            "not source-owned".to_owned(),
-            Some(error),
-            library
-                .model_qualification
-                .get(&model.name)
-                .cloned()
-                .unwrap_or_default(),
+    // Asked before the source is resolved, not after it fails to be. An
+    // engine-owned library has no project source, so resolving one can only
+    // manufacture a "not source-owned" error — and that manufactured error was
+    // the whole of the evidence behind sixteen red gates on a fresh project.
+    let engine_owned = library.source_authority == ModelSourceAuthority::BuiltIn;
+    let (source_revision, source_error, state, source) = if engine_owned {
+        (
+            "engine-owned".to_owned(),
             None,
-        ),
+            ModelQualificationState::default(),
+            None,
+        )
+    } else {
+        let resolved = closure.map_or_else(
+            |error| Err(error.clone()),
+            |closure| {
+                model_editor::resolve_project_model_in_closure(
+                    library,
+                    &library.name,
+                    &model.name,
+                    closure,
+                )
+            },
+        );
+        match resolved {
+            Ok(resolved) => {
+                let qualification = open_draft.map_or_else(
+                    || resolved.qualification.clone(),
+                    |draft| draft.qualification.clone(),
+                );
+                let source_id =
+                    open_draft.map_or_else(|| resolved.source_id, |draft| draft.source_id);
+                let source_digest =
+                    open_draft.map_or(resolved.model_digest, |draft| draft.base_source_digest);
+                let source_revision =
+                    open_draft.map_or(resolved.model_revision, |draft| draft.base_source_revision);
+                let source = ModelSourceEvidenceBinding::try_new_project_bound(
+                    &model.name,
+                    source_id,
+                    source_digest,
+                    source_revision,
+                );
+                match source {
+                    Ok(source) => (
+                        if open_draft.is_some_and(|draft| draft.qualification_is_dirty()) {
+                            format!(
+                                "{}@{} · working qualification",
+                                model.name,
+                                source_revision.get()
+                            )
+                        } else {
+                            format!("{}@{}", model.name, source_revision.get())
+                        },
+                        None,
+                        qualification,
+                        Some(source),
+                    ),
+                    Err(error) => (
+                        "invalid source identity".to_owned(),
+                        Some(error.to_string()),
+                        qualification,
+                        None,
+                    ),
+                }
+            }
+            Err(error) => (
+                "not source-owned".to_owned(),
+                Some(error),
+                library
+                    .model_qualification
+                    .get(&model.name)
+                    .cloned()
+                    .unwrap_or_default(),
+                None,
+            ),
+        }
     };
 
     let mut summary = summarize_qualification_state(
@@ -269,6 +306,7 @@ pub(super) fn qualification_model_summary(
         model,
         source_revision,
         source_error,
+        engine_owned,
         &state,
         source.as_ref(),
     );
@@ -286,10 +324,15 @@ pub(super) fn summarize_qualification_state(
     model: &DeviceModel,
     source_revision: String,
     mut source_error: Option<String>,
+    engine_owned: bool,
     state: &ModelQualificationState,
     source: Option<&ModelSourceEvidenceBinding>,
 ) -> QualificationModelSummary {
-    if source_error.is_none()
+    // The retained-state check reports a defect in *project* state. An
+    // engine-owned model holds none, so running it here could only put a
+    // finding on a model the gate does not govern.
+    if !engine_owned
+        && source_error.is_none()
         && let Err(error) = state.validate_for_model(&model.name)
     {
         source_error = Some(format!("Retained qualification state is invalid: {error}"));
@@ -411,7 +454,13 @@ pub(super) fn summarize_qualification_state(
             .filter(|disposition| disposition.is_open() && disposition.vector.source == *source)
             .count()
     });
-    let gate = if source_error.is_some() {
+    let gate = if engine_owned {
+        // Decided before the ramp below, and never by it: with no source to
+        // bind evidence to there are no suites, so every branch under this one
+        // would read the absence of project evidence as the model's failure to
+        // produce it.
+        QualificationGate::EngineOwned
+    } else if source_error.is_some() {
         QualificationGate::Blocked
     } else if exact_suites.is_empty() {
         QualificationGate::Unqualified
@@ -456,6 +505,12 @@ pub(super) fn apply_correlation_qualification_contract(
     correlation: Option<&ModelCorrelationState>,
     source: Option<&ModelSourceEvidenceBinding>,
 ) {
+    // Every refusal below reads a missing source identity as a defect, which
+    // for an engine-owned model is its design. The gate is not this model's
+    // gate, so nothing configured against it may move that verdict.
+    if summary.gate == QualificationGate::EngineOwned {
+        return;
+    }
     let Some(correlation) = correlation.filter(|state| !state.suites.is_empty()) else {
         return;
     };
@@ -635,6 +690,40 @@ pub(super) fn qualification_evidence_contract_digest(
     ))
 }
 
+/// The band the engine-owned families are listed under.
+pub(super) const ENGINE_OWNED_BAND: &str =
+    "Engine-owned · exempt from the source-owned release gate";
+
+/// One row of the qualification rail: a model, or the band above a group.
+pub(super) enum QualificationRailRow<'a> {
+    Band(&'static str),
+    Model(&'a QualificationModelSummary),
+}
+
+/// The rail's order: the gate's own subjects first, then what it exempts.
+///
+/// Interleaving the two — which is what sorting by library name alone does —
+/// leaves a reader scanning one flat list to tell "exempt" from "not yet
+/// qualified" by badge colour, on a page whose entire subject is which models
+/// a release may be signed against. The band says it once, in words, and the
+/// group under it inherits the statement.
+pub(super) fn qualification_rail_rows(
+    summaries: &[QualificationModelSummary],
+) -> Vec<QualificationRailRow<'_>> {
+    let (exempt, subject): (Vec<_>, Vec<_>) = summaries
+        .iter()
+        .partition(|summary| !summary.gate.is_gate_subject());
+    let mut rows = subject
+        .into_iter()
+        .map(QualificationRailRow::Model)
+        .collect::<Vec<_>>();
+    if !exempt.is_empty() {
+        rows.push(QualificationRailRow::Band(ENGINE_OWNED_BAND));
+        rows.extend(exempt.into_iter().map(QualificationRailRow::Model));
+    }
+    rows
+}
+
 pub(super) fn selected_qualification_summary<'a>(
     app: &RSpiceApp,
     summaries: &'a [QualificationModelSummary],
@@ -660,6 +749,17 @@ pub(super) fn qualification_action_block_reason(
     };
     if !app.state.project_lifecycle.project_open {
         return Some("Open a project before using model qualification".to_owned());
+    }
+    // Asked before the source-owned refusal below, which would otherwise
+    // report an engine-owned card as a project-owned revision the user failed
+    // to select. There is nothing here for them to fix; the way to bring one
+    // of these under the gate is to author a project copy of it.
+    if !selected.gate.is_gate_subject() {
+        return Some(
+            "Engine-owned models are exempt from the source-owned release gate — author a \
+             project copy to qualify one"
+                .to_owned(),
+        );
     }
     if selected.source_error.is_some() {
         return Some("Select an exact project-owned model revision".to_owned());

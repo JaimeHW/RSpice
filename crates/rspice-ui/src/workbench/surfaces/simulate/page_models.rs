@@ -567,6 +567,15 @@ impl ModelGate<'_> {
     /// One row per model. Which vector failed, and why, is the qualification
     /// page's subject; the plan only needs to know the model is not clear.
     fn finding(&self) -> Option<GateFinding> {
+        // Asked before every test below, all of which read an absence of
+        // project evidence as this model's failure to produce it. An
+        // engine-owned card is the simulator's own equation default and is not
+        // a subject of the source-owned gate, so the plan has nothing to
+        // report about it — an exemption stated as a finding is still a row in
+        // a table of things that are wrong.
+        if self.gate == QualificationGate::EngineOwned {
+            return None;
+        }
         let (rank, finding, tone) = if self.unreadable {
             (0, "gate could not be read".to_owned(), Tone::Error)
         } else if self.evidenced_vectors > self.passing_vectors {
@@ -646,6 +655,12 @@ struct GateReading {
     open_dispositions: usize,
     /// Models whose gate could not be read.
     unreadable: usize,
+    /// Models the source-owned gate does not govern at all.
+    ///
+    /// Counted rather than skipped: a closure of nothing but engine-owned
+    /// cards has no findings, and "no findings" said about no subjects is how
+    /// the card would come to sign off a release on an empty gate.
+    engine_owned: usize,
     findings: Vec<GateFinding>,
 }
 
@@ -662,6 +677,9 @@ fn gate_reading<'a>(models: impl IntoIterator<Item = ModelGate<'a>>) -> GateRead
         reading.models += 1;
         reading.vectors += model.vectors;
         reading.open_dispositions += model.open_dispositions;
+        if model.gate == QualificationGate::EngineOwned {
+            reading.engine_owned += 1;
+        }
         if model.unreadable {
             reading.unreadable += 1;
         } else {
@@ -684,6 +702,17 @@ fn gate_reading<'a>(models: impl IntoIterator<Item = ModelGate<'a>>) -> GateRead
 fn gate_status(reading: &GateReading) -> (String, Tone) {
     if reading.models == 0 {
         return ("no models to gate".to_owned(), Tone::Neutral);
+    }
+    // Every model here is one the gate does not govern, so there is no verdict
+    // to report — neither a clean one nor a failing one.
+    if reading.engine_owned == reading.models {
+        return (
+            format!(
+                "{} · nothing under the release gate",
+                counted(reading.engine_owned, "engine-owned model", "engine-owned models")
+            ),
+            Tone::Neutral,
+        );
     }
     let open = counted(reading.open_dispositions, "disposition", "dispositions");
     if reading.unreadable > 0 {
@@ -759,6 +788,14 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
             if reading.findings.is_empty() {
                 let (subject, finding, tone) = if reading.models == 0 {
                     ("No models loaded", "nothing to gate", Tone::Warn)
+                } else if reading.engine_owned == reading.models {
+                    // No finding is not the same fact as a qualified gate when
+                    // no model in the closure has one.
+                    (
+                        "No source-owned models",
+                        "every model in the closure is engine-owned",
+                        Tone::Neutral,
+                    )
                 } else {
                     (
                         "No findings",
@@ -1151,6 +1188,41 @@ mod tests {
         assert_eq!(
             gate_status(&gate_reading([])),
             ("no models to gate".to_owned(), Tone::Neutral)
+        );
+    }
+
+    /// An engine-owned card is not a gate subject, so it is neither a finding
+    /// nor a pass. Both mistakes are available here: reporting the exemption as
+    /// "held for review" puts the simulator's own library in a table of defects,
+    /// and reading a closure of nothing but exempt models as qualified signs off
+    /// a release against a gate with no subjects in it.
+    #[test]
+    fn an_engine_owned_closure_is_neither_a_finding_nor_a_clean_gate() {
+        let reading = gate_reading([
+            model_gate("res", 0, 0, 0, 0, false, QualificationGate::EngineOwned),
+            model_gate("cap", 0, 0, 0, 0, false, QualificationGate::EngineOwned),
+        ]);
+
+        assert!(reading.findings.is_empty());
+        assert_eq!(reading.engine_owned, 2);
+        assert_eq!(
+            gate_status(&reading),
+            (
+                "2 engine-owned models · nothing under the release gate".to_owned(),
+                Tone::Neutral
+            )
+        );
+
+        // One source-owned model in the closure and the gate has a subject
+        // again, so the card goes back to reporting its verdict.
+        let mixed = gate_reading([
+            model_gate("res", 0, 0, 0, 0, false, QualificationGate::EngineOwned),
+            model_gate("nch", 8, 8, 8, 0, false, QualificationGate::Qualified),
+        ]);
+        assert!(mixed.findings.is_empty());
+        assert_eq!(
+            gate_status(&mixed),
+            ("no open dispositions".to_owned(), Tone::Ok)
         );
     }
 

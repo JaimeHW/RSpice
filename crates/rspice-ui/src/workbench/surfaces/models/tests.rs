@@ -284,7 +284,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
 }
 
 #[test]
-fn non_project_model_never_receives_synthetic_qualification_evidence() {
+fn engine_owned_model_is_exempt_and_never_receives_synthetic_qualification_evidence() {
     let app = RSpiceApp::test_instance();
     let library = ModelLibrary::new("built-in");
     let model = DeviceModel::new(
@@ -295,11 +295,107 @@ fn non_project_model_never_receives_synthetic_qualification_evidence() {
     let closure = model_editor::verify_project_library_closure(&library, &library.name);
     let summary = qualification_model_summary(&app, &library, &model, closure.as_ref());
 
-    assert!(summary.source_error.is_some());
-    assert_eq!(summary.gate, QualificationGate::Blocked);
+    // No evidence is invented for it — and no failure is either: the source
+    // resolution that cannot succeed for a compiled-in card is never run, so
+    // its error never becomes this model's verdict.
+    assert!(summary.source_error.is_none());
+    assert_eq!(summary.gate, QualificationGate::EngineOwned);
+    assert_eq!(summary.source_revision, "engine-owned");
     assert_eq!(summary.vectors, 0);
     assert_eq!(summary.passing_vectors, 0);
     assert!(summary.evidence_digest.is_none());
+}
+
+/// The exemption is for engine-owned cards alone. A library that claims a
+/// source and cannot produce one is still a blocked gate: that is a project
+/// defect, and softening it would be the release gate failing open.
+#[test]
+fn a_library_that_should_be_source_owned_and_is_not_stays_blocked() {
+    let app = RSpiceApp::test_instance();
+    let mut library = ModelLibrary::new("vendor-pdk");
+    library.source_authority = crate::state::model_library::ModelSourceAuthority::External;
+    let model = DeviceModel::new("nch", crate::state::model_library::ModelType::Nmos);
+
+    let closure = model_editor::verify_project_library_closure(&library, &library.name);
+    let summary = qualification_model_summary(&app, &library, &model, closure.as_ref());
+
+    assert!(summary.source_error.is_some());
+    assert_eq!(summary.gate, QualificationGate::Blocked);
+    assert_eq!(summary.source_revision, "not source-owned");
+}
+
+/// A project nobody has touched must not open on a red release gate.
+///
+/// Every family in the compiled-in foundation library is engine-owned, and the
+/// page derived their verdict from a source resolution that cannot succeed for
+/// a card with no source — so a fresh project reported all of them as blocked
+/// release-gate failures, which is RSpice shipping red against its own library.
+#[test]
+fn a_fresh_project_reports_no_blocked_release_gates() {
+    let app = RSpiceApp::test_instance();
+    let summaries = qualification_summaries(&app);
+    assert!(
+        !summaries.is_empty(),
+        "a fresh project loads the compiled-in foundation library"
+    );
+
+    let blocked = summaries
+        .iter()
+        .filter(|summary| summary.gate == QualificationGate::Blocked)
+        .map(|summary| format!("{}/{}", summary.library, summary.model))
+        .collect::<Vec<_>>();
+    assert!(
+        blocked.is_empty(),
+        "a fresh project reported release-gate failures: {}",
+        blocked.join(", ")
+    );
+    for summary in &summaries {
+        assert_eq!(
+            summary.gate,
+            QualificationGate::EngineOwned,
+            "{}/{} is compiled in and is not a gate subject",
+            summary.library,
+            summary.model
+        );
+        assert!(summary.source_error.is_none());
+    }
+
+    // A reading surface sees the same rung, and never "the gate could not be
+    // read" — which is the fact that would make the Simulation Studio refuse a
+    // release on evidence nobody can open.
+    let facts = model_gate_facts(&app);
+    assert_eq!(facts.len(), summaries.len());
+    assert!(
+        facts
+            .iter()
+            .all(|fact| !fact.unreadable && fact.gate == QualificationGate::EngineOwned)
+    );
+
+    // The rail groups them under their own band rather than mixing them into
+    // the gate's own subjects.
+    let rows = qualification_rail_rows(&summaries);
+    assert_eq!(rows.len(), summaries.len() + 1);
+    assert!(matches!(
+        rows.first(),
+        Some(QualificationRailRow::Band(label)) if *label == ENGINE_OWNED_BAND
+    ));
+
+    // And the workflows state the exemption instead of asking for a project
+    // revision the user has no way to select.
+    let selected = summaries.first().expect("a foundation family");
+    for action in [
+        QualificationPageAction::RunSuite,
+        QualificationPageAction::ReviewVectors,
+        QualificationPageAction::ReviewReleaseBinding,
+        QualificationPageAction::CompareRelease,
+    ] {
+        let reason = qualification_action_block_reason(&app, Some(selected), action)
+            .expect("an engine-owned selection blocks every qualification workflow");
+        assert!(
+            reason.contains("exempt from the source-owned release gate"),
+            "{action:?} blocked for the wrong reason: {reason}"
+        );
+    }
 }
 
 #[test]

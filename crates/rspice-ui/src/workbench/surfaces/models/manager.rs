@@ -541,46 +541,55 @@ fn qualification_metric_strip(ui: &mut Ui, summaries: &[super::QualificationMode
         .iter()
         .filter(|summary| summary.suites > 0 && summary.parity_suites == summary.suites)
         .count();
+    // The model tiles are ratios over the population the gate governs. Totalling
+    // the exempt models into the denominator is what made a fresh project read
+    // "0 / 16 qualified" — a failure claim assembled entirely out of models the
+    // gate has nothing to say about.
+    let gate_subjects = summaries
+        .iter()
+        .filter(|summary| summary.gate.is_gate_subject())
+        .count();
+    let exempt = summaries.len() - gate_subjects;
+    // A ratio over an empty population carries no verdict, so it is painted in
+    // neither verdict's colour: "0 / 0" in the warning tone is a warning about
+    // nothing, and on the fresh project above it was four of them.
+    let verdict = |whole: usize, part: usize| {
+        if whole == 0 {
+            t.color.text_dim
+        } else if part == whole {
+            t.color.ok
+        } else {
+            t.color.warn
+        }
+    };
     let metrics = [
         (
             "VECTORS PASSING",
             format!("{passing_vectors} / {total_vectors}"),
             format!("{open_dispositions} open dispositions"),
-            if total_vectors > 0 && passing_vectors == total_vectors {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
+            verdict(total_vectors, passing_vectors),
         ),
         (
             "REFERENCE COVERAGE",
             format!("{evidenced_vectors} / {total_vectors}"),
             "exact retained evidence".to_owned(),
-            if total_vectors > 0 && evidenced_vectors == total_vectors {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
+            verdict(total_vectors, evidenced_vectors),
         ),
         (
             "QUALIFIED MODELS",
-            format!("{qualified} / {}", summaries.len()),
-            "source-owned release gates".to_owned(),
-            if !summaries.is_empty() && qualified == summaries.len() {
-                t.color.ok
+            format!("{qualified} / {gate_subjects}"),
+            if exempt == 0 {
+                "source-owned release gates".to_owned()
             } else {
-                t.color.warn
+                format!("{exempt} engine-owned exempt")
             },
+            verdict(gate_subjects, qualified),
         ),
         (
             "RUNTIME PARITY",
-            format!("{parity} / {}", summaries.len()),
+            format!("{parity} / {gate_subjects}"),
             "desktop · WebAssembly".to_owned(),
-            if !summaries.is_empty() && parity == summaries.len() {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
+            verdict(gate_subjects, parity),
         ),
     ];
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 62.0), Sense::hover());
@@ -638,15 +647,18 @@ fn qualification_gate_banner(ui: &mut Ui, selected: Option<&super::Qualification
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
+    // What the banner says is a statement about the *selected* model, so for
+    // one the gate does not govern it states the exemption rather than reciting
+    // a closure contract that will never be applied to it.
+    let contract = if selected.is_some_and(|summary| !summary.gate.is_gate_subject()) {
+        "Engine-owned: this card is compiled into the simulator and is exempt from the source-owned release gate."
+    } else {
+        "Release closure consumes exact source revisions, retained references, runtime parity, and governed dispositions."
+    };
     ui.painter().text(
         egui::pos2(rect.left() + 12.0, rect.bottom() - 13.0),
         egui::Align2::LEFT_CENTER,
-        elide(
-            ui,
-            "Release closure consumes exact source revisions, retained references, runtime parity, and governed dispositions.",
-            (rect.width() - 150.0).max(1.0),
-            false,
-        ),
+        elide(ui, contract, (rect.width() - 150.0).max(1.0), false),
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
@@ -664,6 +676,41 @@ fn qualification_gate_banner(ui: &mut Ui, selected: Option<&super::Qualification
     );
 }
 
+/// The rail lists every model in every loaded library, which on a foundry
+/// corpus is thousands of fixed-height rows. The band between the groups is a
+/// row of the same height for the same reason: the list is virtualised, and a
+/// row that measured differently would put every row after it in the wrong
+/// place.
+const RAIL_ROW_H: f32 = 38.0;
+
+/// The label over a group of rail rows.
+///
+/// Painted like [`table_header`] — this workspace's one spelling of "this is a
+/// label over the rows below it" — and it publishes its own accessibility node,
+/// because a band that only exists as painted glyphs would leave the exemption
+/// legible to sighted readers alone.
+fn qualification_rail_band(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), RAIL_ROW_H), Sense::hover());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    let band = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), rect.bottom() - 22.0),
+        rect.right_bottom(),
+    );
+    ui.painter().rect_filled(band, 0.0, t.color.bg_inset);
+    ui.painter()
+        .hline(band.x_range(), band.top(), Stroke::new(1.0, t.color.border));
+    ui.painter().text(
+        egui::pos2(band.left() + 8.0, band.center().y),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, label, (band.width() - 16.0).max(1.0), false),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_faint,
+    );
+}
+
 fn qualification_suite_rail(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -672,110 +719,139 @@ fn qualification_suite_rail(
     requested_action: &mut Option<super::QualificationPageAction>,
 ) {
     let selected_key = selected.map(|summary| summary.key.as_str());
-    detail_pane(
-        ui,
-        "MODEL SUITES",
-        Some(&format!("{} source revisions", summaries.len())),
-        |ui| {
-            let list_height = (ui.available_height() - 154.0).max(130.0);
-            // The rail lists every model in every loaded library, which on a
-            // foundry corpus is thousands of fixed-height rows.
-            const RAIL_ROW_H: f32 = 38.0;
-            ScrollArea::vertical()
-                .id_salt("models-qualification-suite-rail")
-                .max_height(list_height)
-                .show_rows(ui, RAIL_ROW_H, summaries.len(), |ui, range| {
-                    for summary in &summaries[range] {
-                        let t = Tokens::get(ui.ctx());
-                        let selected = selected_key == Some(summary.key.as_str());
-                        let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), RAIL_ROW_H),
-                            Sense::click(),
-                        );
-                        if selected {
-                            ui.painter().rect_filled(
-                                rect,
-                                0.0,
-                                t.color.accent.linear_multiply(0.14),
-                            );
-                            ui.painter().vline(
-                                rect.left(),
-                                rect.y_range(),
-                                Stroke::new(2.0, t.color.accent),
-                            );
-                        } else if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+    let rows = super::qualification_rail_rows(summaries);
+    let exempt = summaries
+        .iter()
+        .filter(|summary| !summary.gate.is_gate_subject())
+        .count();
+    // "16 source revisions" over sixteen compiled-in cards names something none
+    // of them has, so the meta counts the two populations apart.
+    let meta = if exempt == 0 {
+        format!("{} source revisions", summaries.len())
+    } else {
+        format!(
+            "{} source · {exempt} engine-owned",
+            summaries.len() - exempt
+        )
+    };
+    detail_pane(ui, "MODEL SUITES", Some(&meta), |ui| {
+        let list_height = (ui.available_height() - 154.0).max(130.0);
+        ScrollArea::vertical()
+            .id_salt("models-qualification-suite-rail")
+            .max_height(list_height)
+            .show_rows(ui, RAIL_ROW_H, rows.len(), |ui, range| {
+                for row in &rows[range] {
+                    let summary = match row {
+                        super::QualificationRailRow::Band(label) => {
+                            qualification_rail_band(ui, label);
+                            continue;
                         }
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 8.0, rect.top() + 12.0),
-                            egui::Align2::LEFT_CENTER,
-                            elide(ui, &summary.model, rect.width() - 92.0, true),
-                            theme::mono(tokens::FS_0, FontWeight::SemiBold),
-                            t.color.text,
+                        super::QualificationRailRow::Model(summary) => *summary,
+                    };
+                    let t = Tokens::get(ui.ctx());
+                    let selected = selected_key == Some(summary.key.as_str());
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), RAIL_ROW_H),
+                        Sense::click(),
+                    );
+                    if selected {
+                        ui.painter()
+                            .rect_filled(rect, 0.0, t.color.accent.linear_multiply(0.14));
+                        ui.painter().vline(
+                            rect.left(),
+                            rect.y_range(),
+                            Stroke::new(2.0, t.color.accent),
                         );
-                        ui.painter().text(
-                            egui::pos2(rect.left() + 8.0, rect.bottom() - 9.0),
-                            egui::Align2::LEFT_CENTER,
-                            elide(
-                                ui,
-                                &format!("{} · {} vectors", summary.library, summary.vectors),
-                                rect.width() - 92.0,
-                                false,
-                            ),
-                            theme::sans(tokens::FS_0, FontWeight::Regular),
-                            t.color.text_faint,
-                        );
-                        ui.painter().text(
-                            egui::pos2(rect.right() - 8.0, rect.center().y),
-                            egui::Align2::RIGHT_CENTER,
-                            summary.gate.label(),
-                            theme::mono(tokens::FS_0, FontWeight::SemiBold),
-                            qualification_gate_color(summary.gate, &t),
-                        );
-                        let row_label = format!(
-                            "{} in {}, {} vectors, {}",
-                            summary.model,
-                            summary.library,
-                            summary.vectors,
-                            summary.gate.label()
-                        );
-                        response.widget_info(|| {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::SelectableLabel,
-                                ui.is_enabled(),
-                                selected,
-                                row_label.clone(),
-                            )
-                        });
-                        theme::paint_focus_ring(ui, &response, rect);
-                        if response.clicked() {
-                            app.state.select_model_library(&summary.library);
-                            app.state.workbench.selected_model = Some(summary.model.clone());
-                        }
+                    } else if response.hovered() {
+                        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
                     }
-                });
-            ui.separator();
-            if let Some(selected) = selected {
-                property(ui, "Selected", &selected.model, &selected.library);
-                property(
-                    ui,
-                    "Source",
-                    &selected.source_revision,
-                    if selected.source_error.is_none() {
-                        "retained"
-                    } else {
-                        "review"
-                    },
-                );
-                if ui.button("Review qualification").clicked() {
-                    *requested_action = Some(super::QualificationPageAction::ReviewVectors);
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 8.0, rect.top() + 12.0),
+                        egui::Align2::LEFT_CENTER,
+                        elide(ui, &summary.model, rect.width() - 92.0, true),
+                        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                        t.color.text,
+                    );
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 8.0, rect.bottom() - 9.0),
+                        egui::Align2::LEFT_CENTER,
+                        elide(
+                            ui,
+                            &format!("{} · {} vectors", summary.library, summary.vectors),
+                            rect.width() - 92.0,
+                            false,
+                        ),
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        t.color.text_faint,
+                    );
+                    ui.painter().text(
+                        egui::pos2(rect.right() - 8.0, rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        summary.gate.label(),
+                        theme::mono(tokens::FS_0, FontWeight::SemiBold),
+                        qualification_gate_color(summary.gate, &t),
+                    );
+                    let row_label = format!(
+                        "{} in {}, {} vectors, {}",
+                        summary.model,
+                        summary.library,
+                        summary.vectors,
+                        summary.gate.label()
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            ui.is_enabled(),
+                            selected,
+                            row_label.clone(),
+                        )
+                    });
+                    theme::paint_focus_ring(ui, &response, rect);
+                    if response.clicked() {
+                        app.state.select_model_library(&summary.library);
+                        app.state.workbench.selected_model = Some(summary.model.clone());
+                    }
                 }
-                if ui.button("Measurement correlation").clicked() {
-                    *requested_action = Some(super::QualificationPageAction::OpenCorrelation);
-                }
+            });
+        ui.separator();
+        if let Some(selected) = selected {
+            property(ui, "Selected", &selected.model, &selected.library);
+            property(
+                ui,
+                "Source",
+                &selected.source_revision,
+                // Three states, not two: an engine-owned card has no source to
+                // retain, and nothing about it is awaiting review either.
+                if !selected.gate.is_gate_subject() {
+                    "exempt"
+                } else if selected.source_error.is_none() {
+                    "retained"
+                } else {
+                    "review"
+                },
+            );
+            // Enabled from the same reason the rest of the page reads, so an
+            // exempt selection says why the workflow is closed instead of
+            // opening an editor on a model that cannot be qualified.
+            let review_blocker = super::qualification_action_block_reason(
+                app,
+                Some(selected),
+                super::QualificationPageAction::ReviewVectors,
+            );
+            let review = ui.add_enabled(
+                review_blocker.is_none(),
+                egui::Button::new("Review qualification"),
+            );
+            if let Some(reason) = review_blocker.as_deref() {
+                review.on_disabled_hover_text(reason);
+            } else if review.clicked() {
+                *requested_action = Some(super::QualificationPageAction::ReviewVectors);
             }
-        },
-    );
+            if ui.button("Measurement correlation").clicked() {
+                *requested_action = Some(super::QualificationPageAction::OpenCorrelation);
+            }
+        }
+    });
 }
 
 fn qualification_selected_contract(
@@ -796,12 +872,19 @@ fn qualification_selected_contract(
         .id_salt("models-qualification-selected-contract")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // "not configured" and "fail closed" are findings against a model
+            // that was supposed to declare something. An engine-owned card was
+            // never supposed to, so each pane states the exemption rather than
+            // reporting the absence it was designed to have.
+            let exempt = !selected.gate.is_gate_subject();
             detail_pane(
                 ui,
                 "OPEN DISPOSITIONS",
                 Some(&format!("{} pending", selected.open_dispositions)),
                 |ui| {
-                    if selected.domains.is_empty() {
+                    if exempt {
+                        property(ui, "Domains", "not applicable", "engine-owned");
+                    } else if selected.domains.is_empty() {
                         property(ui, "Domains", "not configured", "suite contract");
                     } else {
                         for domain in &selected.domains {
@@ -834,7 +917,9 @@ fn qualification_selected_contract(
                 "TOLERANCE POLICY",
                 Some("domain-owned contracts"),
                 |ui| {
-                    if selected.domains.is_empty() {
+                    if exempt {
+                        property(ui, "Policy", "not applicable", "engine-owned");
+                    } else if selected.domains.is_empty() {
                         property(ui, "Policy", "not declared", "fail closed");
                     } else {
                         for domain in &selected.domains {
@@ -853,6 +938,25 @@ fn qualification_selected_contract(
                 "QUALIFICATION CONTRACT",
                 Some(selected.gate.label()),
                 |ui| {
+                    if exempt {
+                        // Every row below reads a retained artefact that an
+                        // engine-owned card has none of. Four "not retained"
+                        // lines are four findings; the exemption is one fact.
+                        property(
+                            ui,
+                            "Model revision",
+                            "engine-owned",
+                            "compiled into the simulator",
+                        );
+                        property(ui, "Release gate", "exempt", "not source-owned by design");
+                        property(
+                            ui,
+                            "Qualification",
+                            "engine equation defaults",
+                            "author a project copy to gate one",
+                        );
+                        return;
+                    }
                     property(
                         ui,
                         "Model revision",
@@ -905,6 +1009,10 @@ fn qualification_gate_color(gate: super::QualificationGate, t: &Tokens) -> Color
         super::QualificationGate::Qualified => t.color.ok,
         super::QualificationGate::Review | super::QualificationGate::Unqualified => t.color.warn,
         super::QualificationGate::Blocked => t.color.err,
+        // Neither a pass nor a finding: an engine-owned card is outside the
+        // gate, so it takes the page's plain text tone rather than borrowing
+        // either verdict's colour.
+        super::QualificationGate::EngineOwned => t.color.text_dim,
     }
 }
 
