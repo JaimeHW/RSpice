@@ -573,6 +573,44 @@ mod tests {
         assert_eq!(listed[0].quantity(), "V");
     }
 
+    /// A DC source is authored with its unit far more often than without it,
+    /// and the row used to drop the whole figure when it was: the parser
+    /// refused `5V`, `key_figure` swallowed the error with `.ok()?`, and the
+    /// page whose one job is to say what drives the circuit showed the bare
+    /// word `DC`.
+    #[test]
+    fn a_dc_row_states_a_value_authored_with_its_unit() {
+        let component = Component::new(1, ComponentType::VoltageSource, Point::origin())
+            .with_name_value("V1", "5V");
+        let listed = placed_sources(&schematic_with(vec![component]), None);
+        assert_eq!(listed[0].summary(), "DC · 5V");
+    }
+
+    /// The ampere that made atto unaffordable: `1A` is one ampere on every
+    /// surface that reads it, not 1e-18.
+    #[test]
+    fn a_current_source_authored_in_amperes_reads_as_amperes() {
+        let component = Component::new(1, ComponentType::CurrentSource, Point::origin())
+            .with_name_value("I1", "1A");
+        let listed = placed_sources(&schematic_with(vec![component]), None);
+        assert_eq!(listed[0].summary(), "DC · 1A");
+        assert_eq!(listed[0].quantity(), "I");
+    }
+
+    /// Parameter figures carry units too: a pulse period authored `1ms` and a
+    /// sinusoid frequency authored `10kHz` both used to leave the row's figure
+    /// empty.
+    #[test]
+    fn a_parameter_figure_authored_with_its_unit_reaches_the_row() {
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::CurrentSourcePulse, "I1", "per=1ms"),
+            source(2, ComponentType::VoltageSourceSin, "V1", "freq=10kHz"),
+        ]);
+        let listed = placed_sources(&schematic, None);
+        let summaries: Vec<String> = listed.iter().map(PlacedSource::summary).collect();
+        assert_eq!(summaries, vec!["PULSE · PER 1ms", "SIN · 10kHz"]);
+    }
+
     #[test]
     fn a_pulse_row_is_identified_by_its_period() {
         let schematic = schematic_with(vec![source(
