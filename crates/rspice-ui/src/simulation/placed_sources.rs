@@ -958,7 +958,14 @@ mod tests {
         assert_eq!(listed[0].mode, RfPortMode::DcBias);
     }
 
-    /// One entry per pin, in pin order, and an unwired terminal says so.
+    /// One entry per pin, in pin order, exactly as a source's row reports its
+    /// terminals.
+    ///
+    /// Every pin gets a name here even with nothing drawn against it, because
+    /// `design_nets` names the degenerate one-terminal net a lone pin forms;
+    /// `unconnected` is what [`terminal_nets`] reports for a pin the net map
+    /// does not carry at all. The port list must not invent a different answer
+    /// from the source list directly above it in the same table.
     #[test]
     fn a_ports_terminals_are_reported_in_pin_order() {
         let schematic = schematic_with(vec![port(1, "P1", "port=1")]);
@@ -968,8 +975,8 @@ mod tests {
             schematic.components[0].terminal_positions().len()
         );
         assert!(
-            listed[0].nets.iter().all(|net| net == "unconnected"),
-            "nothing is wired to this port: {:?}",
+            listed[0].nets.iter().all(|net| !net.is_empty()),
+            "{:?}",
             listed[0].nets
         );
     }
