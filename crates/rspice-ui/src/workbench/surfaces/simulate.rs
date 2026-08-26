@@ -74,7 +74,8 @@ const ANALYSIS_ROW_LEFT_PADDING: f32 = 9.0;
 const ANALYSIS_INDEX_LABEL_GAP: f32 = 8.0;
 const ANALYSIS_ROW_TRAILING_PADDING: f32 = 9.0;
 const ANALYSIS_LABEL_MIN_WIDTH: f32 = 64.0;
-pub(super) const ANALYSIS_SWITCH_WIDTH: f32 = 30.0;
+pub(super) use crate::ui::widgets::SWITCH_WIDTH as ANALYSIS_SWITCH_WIDTH;
+pub(super) use crate::ui::widgets::paint_switch;
 const ANALYSIS_SWITCH_MAX_HIT_WIDTH: f32 = 44.0;
 const ANALYSIS_SWITCH_LABEL_GAP: f32 = 7.0;
 const ANALYSIS_STACK_TABLET_MIN_WIDTH: f32 = 175.0;
@@ -922,55 +923,6 @@ fn analysis_stack_row(
     } else {
         None
     }
-}
-
-pub(super) fn paint_switch(
-    ui: &Ui,
-    center: egui::Pos2,
-    enabled: bool,
-    hovered: bool,
-    row_rect: Rect,
-) {
-    let t = Tokens::get(ui.ctx());
-    let rect = Rect::from_center_size(center, vec2(ANALYSIS_SWITCH_WIDTH, 17.0));
-    let fill = if enabled {
-        t.color.accent
-    } else if hovered {
-        t.color.bg_hover
-    } else {
-        t.color.bg_inset
-    };
-    let painter = ui
-        .painter()
-        .with_clip_rect(row_rect.intersect(ui.clip_rect()));
-    painter.rect(
-        rect,
-        8.5,
-        fill,
-        Stroke::new(
-            1.0,
-            if enabled {
-                t.color.accent
-            } else {
-                t.color.border_strong
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let knob_x = if enabled {
-        rect.right() - 7.5
-    } else {
-        rect.left() + 7.5
-    };
-    painter.circle_filled(
-        egui::pos2(knob_x, rect.center().y),
-        5.5,
-        if enabled {
-            t.color.accent_ink
-        } else {
-            t.color.text_dim
-        },
-    );
 }
 
 /// Paint one line into `rect`, elided rather than cut.

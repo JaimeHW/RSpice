@@ -30,6 +30,7 @@ mod section;
 mod segmented;
 mod select;
 mod selection_command;
+mod switch;
 mod table;
 mod toast;
 mod tree;
@@ -39,7 +40,7 @@ pub use chip::chip;
 pub use dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone};
 pub use docbar::docbar_at_height;
 pub(crate) use form::name_control;
-pub use form::{check_row, choice_row, input_row, kv_row, mono_input};
+pub use form::{choice_row, input_row, kv_row, mono_input, switch_row};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
     pane_section_label, two_pane,
@@ -53,6 +54,7 @@ pub(crate) use selection_command::{
     NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
     selection_command_workflow, workflow_preview_status,
 };
+pub(crate) use switch::{SWITCH_WIDTH, paint_switch};
 pub use table::measurement_table;
 pub use toast::{
     MirroredEntry, NotificationAction, NotificationCategory, NotificationRecord, ToastKind, Toasts,

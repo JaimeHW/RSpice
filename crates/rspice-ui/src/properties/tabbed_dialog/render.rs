@@ -416,7 +416,7 @@ fn parameters_contents(
                 .any(|definition| definition.display_mode == DisplayMode::Advanced);
             if has_advanced {
                 ui.add_space(8.0);
-                crate::ui::widgets::check_row(
+                crate::ui::widgets::switch_row(
                     ui,
                     "Show advanced properties",
                     &mut state.show_advanced,

@@ -824,16 +824,19 @@ pub(super) fn switch_cell(ui: &mut Ui, name: &str, value: &mut bool) -> Response
 /// them now, so another cannot be written in the other style without somebody
 /// noticing.
 ///
-/// Every boolean the studio paints is one of these, or the bare
-/// [`switch_cell`] where the row beside it already carries the label. That is
-/// the mockup's rule for the simulation stage and its advanced options —
-/// `label.switch` throughout, with `.check-row` appearing only in the project
-/// launcher and the results and platform workflows — and the studio now holds
-/// it in full. [`tests::the_studio_paints_no_tick_box`] is what keeps it:
-/// the doc here once claimed a tick box on four rows and a switch on every
-/// other, which was true of the four and false of the rest, and a claim about
-/// how many of something ships drifts back to being wrong the moment nothing
-/// checks it.
+/// Every boolean the studio paints is one of these, the bare [`switch_cell`]
+/// where the row beside it already carries the label, or — where an editor
+/// column is too narrow to hold two — the design system's own
+/// [`crate::ui::widgets::switch_row`], which paints the same switch on a tree
+/// row. That is the mockup's rule for the simulation stage and its advanced
+/// options — `label.switch` throughout, with `.check-row` appearing only in
+/// the project launcher and the results and platform workflows — and the
+/// studio now holds it in full. [`tests::the_studio_paints_no_tick_box`] is
+/// what keeps it: the doc here once claimed a tick box on four rows and a
+/// switch on every other, which was true of the four and false of the rest,
+/// and it went on being false at narrow widths for as long as the ban named
+/// only egui's spellings. A claim about how many of something ships drifts
+/// back to being wrong the moment nothing checks it.
 ///
 /// Returns whether the reader changed the value. The label elides rather than
 /// wrapping, because these rows sit inside cards whose width is the page's.
@@ -1321,28 +1324,42 @@ mod tests {
     /// a claim about how many of something ships drifts back to being wrong
     /// the next time one is added.
     ///
-    /// The five are gone, so the census is a ban: the analysis form's own
-    /// `check_row`, the point table's include column, the workflow dialogs'
-    /// `workflow_switch`, and the importer's scope control and per-row
-    /// accept column are all [`super::switch_row`] or [`super::switch_cell`]
-    /// now. Every boolean in the mockup's simulation stage and its advanced
-    /// options is a `label.switch`, and there is no longer a number here for a
-    /// sixth to hide behind.
+    /// The five are gone, so the census is a ban: the point table's include
+    /// column, the workflow dialogs' `workflow_switch`, and the importer's
+    /// scope control and per-row accept column are all [`super::switch_row`]
+    /// or [`super::switch_cell`] now. Every boolean in the mockup's simulation
+    /// stage and its advanced options is a `label.switch`, and there is no
+    /// longer a number here for a sixth to hide behind.
+    ///
+    /// The ban had a hole under it for as long as it named only egui's own
+    /// spellings. Below 420 points the analysis form's boolean row falls back
+    /// to the design system's row, which painted a tick box on a tree row —
+    /// a call in a file this scan does read, spelt in a way it could not see,
+    /// so every narrow editor column showed a control the rest of the studio
+    /// had stopped using. That row paints the switch now and is named
+    /// `switch_row` for it, so `check_row(` and `.checkbox(` name nothing
+    /// anywhere in the crate and are banned here to keep it that way.
     #[test]
     fn the_studio_paints_no_tick_box() {
         let sites: Vec<String> = studio_sources()
             .iter()
             .flat_map(|(path, source)| {
-                ["ui.checkbox(", "egui::Checkbox::", "widgets::tick_box("]
-                    .into_iter()
-                    .flat_map(move |call| {
-                        calls(source, call).into_iter().map(move |(line, _)| {
-                            format!(
-                                "{}:{line}: {call}",
-                                path.file_name().unwrap_or_default().to_string_lossy()
-                            )
-                        })
+                [
+                    "ui.checkbox(",
+                    "egui::Checkbox::",
+                    "widgets::tick_box(",
+                    "check_row(",
+                    ".checkbox(",
+                ]
+                .into_iter()
+                .flat_map(move |call| {
+                    calls(source, call).into_iter().map(move |(line, _)| {
+                        format!(
+                            "{}:{line}: {call}",
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        )
                     })
+                })
             })
             .collect();
         assert!(

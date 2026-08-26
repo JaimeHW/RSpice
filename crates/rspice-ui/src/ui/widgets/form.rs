@@ -99,13 +99,19 @@ pub fn kv_row(ui: &mut Ui, key: &str, value: &str) {
     );
 }
 
-/// A labeled checkbox row. Returns `true` if the value changed.
-pub fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
+/// A labelled on/off row. Returns `true` if the value changed.
+///
+/// The control is this design system's switch, carried on a tree row so the
+/// label column lines up with the input rows beside it. It painted a tick box
+/// until the row it delegates to stopped: every boolean in the product reads as
+/// the same control now, including the ones a narrow editor column falls back
+/// to here for.
+pub fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let row = super::tree::TreeRow::new(label)
-        .checkbox(value)
+        .switch(value)
         .height(t.metrics.row_h);
-    row.show(ui).checkbox_changed
+    row.show(ui).switch_changed
 }
 
 /// A labeled chip-choice row for small enums (sweep type, distribution).

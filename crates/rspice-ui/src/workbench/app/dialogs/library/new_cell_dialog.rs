@@ -6,7 +6,7 @@ use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, check_row, input_row};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, switch_row};
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_new_cell_dialog(&mut self, ctx: &Context) {
@@ -96,9 +96,9 @@ impl RSpiceApp {
                     },
                 );
                 ui.label(kicker);
-                check_row(ui, "Schematic", &mut dialogs.new_cell_create_schematic);
-                check_row(ui, "Symbol", &mut dialogs.new_cell_create_symbol);
-                check_row(ui, "Testbench", &mut dialogs.new_cell_create_testbench);
+                switch_row(ui, "Schematic", &mut dialogs.new_cell_create_schematic);
+                switch_row(ui, "Symbol", &mut dialogs.new_cell_create_symbol);
+                switch_row(ui, "Testbench", &mut dialogs.new_cell_create_testbench);
 
                 if let Some(error) = dialogs.new_cell_error.clone() {
                     ui.add_space(6.0);

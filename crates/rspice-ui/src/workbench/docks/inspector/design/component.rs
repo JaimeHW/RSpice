@@ -863,7 +863,7 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
 
         TreeRowResult {
             response,
-            checkbox_changed: false,
+            switch_changed: false,
         }
     })
     .inner

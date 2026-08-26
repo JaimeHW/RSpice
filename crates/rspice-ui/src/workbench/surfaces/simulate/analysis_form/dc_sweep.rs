@@ -12,7 +12,7 @@ use egui::Ui;
 
 use crate::workbench::app_state::DcSetup;
 
-use super::{check_row, clear_pending_cell, input_row, input_row_enabled};
+use super::{clear_pending_cell, input_row, input_row_enabled, switch_row};
 
 /// Render the DC sweep fields; returns the note describing the configured run.
 pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
@@ -23,10 +23,10 @@ pub(super) fn fields(ui: &mut Ui, setup: &mut DcSetup) -> &'static str {
     // Disabled rather than merely refused: a control that can be set and then
     // rejected at preflight teaches the reader nothing a greyed one does not.
     ui.add_enabled_ui(!setup.nested, |ui| {
-        check_row(ui, "Bidirectional", &mut setup.hysteresis);
+        switch_row(ui, "Bidirectional", &mut setup.hysteresis);
     });
     ui.add_enabled_ui(!setup.hysteresis, |ui| {
-        check_row(ui, "Nested sweep", &mut setup.nested);
+        switch_row(ui, "Nested sweep", &mut setup.nested);
     });
     // Nested-sweep enablement is a complete field group. Do not pair the first
     // secondary-sweep value with the checkbox: doing so shifts every following

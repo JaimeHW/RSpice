@@ -29,9 +29,8 @@ use crate::state::format_engineering;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, check_row as inspector_check_row, choice_row as inspector_choice_row,
-    input_row as inspector_input_row, mono_input, select, select_mono_with_response,
-    select_with_disabled,
+    Button, choice_row as inspector_choice_row, input_row as inspector_input_row, mono_input,
+    select, select_mono_with_response, select_with_disabled, switch_row as inspector_switch_row,
 };
 use crate::workbench::design_system::property_row as inspector_property_row;
 
@@ -1074,9 +1073,9 @@ fn envelope_modulation_source_row(ui: &mut Ui, value: &mut String, circuit_sourc
     );
 }
 
-fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
+fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
     if !uses_two_column_fields(ui) {
-        return inspector_check_row(ui, label, value);
+        return inspector_switch_row(ui, label, value);
     }
     field_cell(ui, label, Some("domain constrained"), |ui| {
         let row_size = vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
@@ -1206,8 +1205,8 @@ fn periodic_network_fields(
 ) {
     frequency_sweep_fields(ui, &mut setup.sweep, policy, locale);
     input_row(ui, "Max sideband", &mut setup.max_sideband);
-    check_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
-    check_row(ui, "Noise parameters", &mut setup.noise_parameters);
+    switch_row(ui, "Mixed-mode matrix", &mut setup.mixed_mode);
+    switch_row(ui, "Noise parameters", &mut setup.noise_parameters);
     let port_count = setup.ports.len();
     let mut remove = None;
     for (index, port) in setup.ports.iter_mut().enumerate() {
@@ -1436,7 +1435,7 @@ pub(super) fn form(
             } else {
                 input_row(ui, "Max step", &mut setup.max_step);
             }
-            check_row(ui, "Use initial conditions", &mut setup.uic);
+            switch_row(ui, "Use initial conditions", &mut setup.uic);
             "Local truncation error controls step size between limits."
         }
         AnalysisDraft::Ac(setup) => {
@@ -1661,7 +1660,7 @@ pub(super) fn form(
                 &mut setup.num_points,
             );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
-            check_row(ui, "Nyquist contour", &mut setup.compute_nyquist);
+            switch_row(ui, "Nyquist contour", &mut setup.compute_nyquist);
             "Loop gain via the probe source. Gain margin, phase margin and \
              crossover are always extracted and reported as measurements."
         }
@@ -1686,7 +1685,7 @@ pub(super) fn form(
             input_row(ui, "Oversample", &mut setup.oversample);
             input_row(ui, "Max iters", &mut setup.maxiter);
             choice_row(ui, "Solver", &["newton", "krylov"], &mut setup.solver_idx);
-            check_row(ui, "Source stepping", &mut setup.source_stepping);
+            switch_row(ui, "Source stepping", &mut setup.source_stepping);
             let mut remove: Option<usize> = None;
             for (idx, tone) in setup.additional_tones.iter_mut().enumerate() {
                 sub_header(ui, &format!("Tone {}", idx + 2));
@@ -1737,8 +1736,8 @@ pub(super) fn form(
             );
             choice_row(ui, "Sweep", SWEEP_KINDS, &mut setup.sweep_type_idx);
             input_row(ui, "Z0", &mut setup.z0);
-            check_row(ui, "Noise parameters", &mut setup.do_noise);
-            check_row(ui, "Touchstone export", &mut setup.touchstone_export);
+            switch_row(ui, "Noise parameters", &mut setup.do_noise);
+            switch_row(ui, "Touchstone export", &mut setup.touchstone_export);
             sp_port_fields(ui, setup, placed_rf_ports)
         }
         AnalysisDraft::Pac(setup) => {
@@ -1769,7 +1768,7 @@ pub(super) fn form(
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Magnitude", &mut setup.pac_magnitude);
             input_row(ui, "Max sideband", &mut setup.max_sideband);
-            check_row(ui, "Include DC", &mut setup.include_dc);
+            switch_row(ui, "Include DC", &mut setup.include_dc);
             "Small-signal AC around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pnoise(setup) => {
@@ -1805,8 +1804,8 @@ pub(super) fn form(
                 &["output", "input", "phase"],
                 &mut setup.noise_ref_idx,
             );
-            check_row(ui, "Integrated noise", &mut setup.integrated_noise);
-            check_row(ui, "Noise summary", &mut setup.noise_summary);
+            switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
+            switch_row(ui, "Noise summary", &mut setup.noise_summary);
             "Cyclostationary noise around the periodic steady state (needs PSS)."
         }
         AnalysisDraft::Pxf(setup) => {
@@ -1854,7 +1853,7 @@ pub(super) fn form(
             input_row(ui, "Multipliers", &mut setup.num_multipliers);
             engineering_input_row(ui, "Unstable above", &mut setup.stability_threshold);
             engineering_input_row(ui, "Eigen tol", &mut setup.eigenvalue_tolerance);
-            check_row(ui, "Detect subharmonics", &mut setup.detect_subharmonics);
+            switch_row(ui, "Detect subharmonics", &mut setup.detect_subharmonics);
             "Loop stability around the periodic steady state (needs PSS). \
              Margins are always extracted from the Floquet multipliers."
         }
@@ -1952,16 +1951,16 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            check_row(ui, "Compute THD", &mut setup.compute_thd);
-            check_row(ui, "Normalize", &mut setup.normalize);
+            switch_row(ui, "Compute THD", &mut setup.compute_thd);
+            switch_row(ui, "Normalize", &mut setup.normalize);
             "Fourier components of a transient waveform window."
         }
         AnalysisDraft::Reliability(setup) => {
             input_row(ui, "Years", &mut setup.years_csv);
             input_row(ui, "Min stress V", &mut setup.min_stress_voltage);
-            check_row(ui, "Hot carrier (HCI)", &mut setup.enable_hci);
-            check_row(ui, "Bias instability (NBTI)", &mut setup.enable_nbti);
-            check_row(ui, "Electromigration", &mut setup.enable_em);
+            switch_row(ui, "Hot carrier (HCI)", &mut setup.enable_hci);
+            switch_row(ui, "Bias instability (NBTI)", &mut setup.enable_nbti);
+            switch_row(ui, "Electromigration", &mut setup.enable_em);
             "Projects device aging across the lifetime points."
         }
         AnalysisDraft::Optimization(setup) => {
@@ -1997,13 +1996,13 @@ pub(super) fn form(
                 policy,
                 locale,
             );
-            check_row(ui, "Check Vgs", &mut setup.check_vgs_max);
+            switch_row(ui, "Check Vgs", &mut setup.check_vgs_max);
             input_row_enabled(ui, "Max Vgs", &mut setup.max_vgs, setup.check_vgs_max);
-            check_row(ui, "Check Vds", &mut setup.check_vds_max);
+            switch_row(ui, "Check Vds", &mut setup.check_vds_max);
             input_row_enabled(ui, "Max Vds", &mut setup.max_vds, setup.check_vds_max);
-            check_row(ui, "Check Vbe", &mut setup.check_vbe_max);
+            switch_row(ui, "Check Vbe", &mut setup.check_vbe_max);
             input_row_enabled(ui, "Max Vbe", &mut setup.max_vbe, setup.check_vbe_max);
-            check_row(ui, "Check Vce", &mut setup.check_vce_max);
+            switch_row(ui, "Check Vce", &mut setup.check_vce_max);
             input_row_enabled(ui, "Max Vce", &mut setup.max_vce, setup.check_vce_max);
             "Flags excursions outside the safe operating area during transient."
         }
@@ -2038,7 +2037,7 @@ pub(super) fn form(
             input_row(ui, "Harmonic orders", &mut setup.harmonics);
             input_row(ui, "Max iterations", &mut setup.max_iterations);
             input_row(ui, "Relative tolerance", &mut setup.relative_tolerance);
-            check_row(ui, "Autonomous oscillator", &mut setup.autonomous);
+            switch_row(ui, "Autonomous oscillator", &mut setup.autonomous);
             input_row_enabled(
                 ui,
                 "Oscillator node",
@@ -2057,9 +2056,9 @@ pub(super) fn form(
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Input source", &mut setup.input_source);
             input_row(ui, "Max sideband", &mut setup.max_sideband);
-            check_row(ui, "Integrated noise", &mut setup.integrated_noise);
-            check_row(ui, "Noise figure", &mut setup.noise_figure);
-            check_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
+            switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
+            switch_row(ui, "Noise figure", &mut setup.noise_figure);
+            switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
             "Noise folding and correlation around harmonic balance (needs HB)."
         }
         AnalysisDraft::Psp(setup) => {
@@ -2081,8 +2080,8 @@ pub(super) fn form(
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Input source", &mut setup.input_source);
             input_row(ui, "Lattice ranges", &mut setup.lattice_products);
-            check_row(ui, "Integrated noise", &mut setup.integrated_noise);
-            check_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
+            switch_row(ui, "Integrated noise", &mut setup.integrated_noise);
+            switch_row(ui, "Contributor ranking", &mut setup.contributor_ranking);
             "Noise folding across a multi-tone spectral lattice (needs QPSS)."
         }
         AnalysisDraft::Qpxf(setup) => {
@@ -2092,7 +2091,7 @@ pub(super) fn form(
             input_row(ui, "Output ref", &mut setup.output_ref);
             input_row(ui, "Input lattice", &mut setup.input_lattice);
             input_row(ui, "Output lattice", &mut setup.output_lattice);
-            check_row(ui, "Group delay", &mut setup.group_delay);
+            switch_row(ui, "Group delay", &mut setup.group_delay);
             "Translated transfer paths indexed by lattice products (needs QPSS)."
         }
         AnalysisDraft::TransientNoise(setup) => {
@@ -2138,7 +2137,7 @@ pub(super) fn form(
                 locale,
             );
             input_row(ui, "Noise scale", &mut setup.scale);
-            check_row(
+            switch_row(
                 ui,
                 "Use initial conditions",
                 &mut setup.use_initial_conditions,
@@ -2149,9 +2148,9 @@ pub(super) fn form(
             input_row(ui, "Output expression", &mut setup.output_expression);
             input_row(ui, "Sigma multiplier", &mut setup.sigma_multiplier);
             input_row(ui, "Contributor limit", &mut setup.contributor_limit);
-            check_row(ui, "Process variation", &mut setup.include_process);
-            check_row(ui, "Local mismatch", &mut setup.include_mismatch);
-            check_row(
+            switch_row(ui, "Process variation", &mut setup.include_process);
+            switch_row(ui, "Local mismatch", &mut setup.include_mismatch);
+            switch_row(
                 ui,
                 "Normalize contributions",
                 &mut setup.normalized_contributions,

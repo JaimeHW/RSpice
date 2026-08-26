@@ -10,19 +10,19 @@ use crate::ui::tokens::{self, Tokens};
 pub struct TreeRowResult {
     /// The row's interaction response (click, double-click, context menu).
     pub response: Response,
-    /// `true` if an embedded checkbox changed value this frame.
-    pub checkbox_changed: bool,
+    /// `true` if an embedded switch changed value this frame.
+    pub switch_changed: bool,
 }
 
 /// A full-width interactive row with optional twist (expand) arrow, leading
-/// color dot or checkbox, and right-aligned mono metadata.
+/// color dot or switch, and right-aligned mono metadata.
 pub struct TreeRow<'a> {
     label: &'a str,
     meta: Option<&'a str>,
     /// `Some(expanded)` shows a twist arrow.
     twist: Option<bool>,
     chip_dot: Option<egui::Color32>,
-    checkbox: Option<&'a mut bool>,
+    switch: Option<&'a mut bool>,
     indent: u8,
     selected: bool,
     mono_label: bool,
@@ -37,7 +37,7 @@ impl<'a> TreeRow<'a> {
             meta: None,
             twist: None,
             chip_dot: None,
-            checkbox: None,
+            switch: None,
             indent: 0,
             selected: false,
             mono_label: false,
@@ -64,9 +64,15 @@ impl<'a> TreeRow<'a> {
         self
     }
 
-    /// Embed a checkbox; clicking the row toggles it.
-    pub fn checkbox(mut self, value: &'a mut bool) -> Self {
-        self.checkbox = Some(value);
+    /// Embed an on/off switch; clicking the row toggles it.
+    ///
+    /// This painted egui's tick box until the whole product's booleans were
+    /// one control. The switch it paints now is the design system's own, from
+    /// [`crate::ui::widgets::paint_switch`] — so the form row that falls back
+    /// to this shape in a narrow column no longer shows a reader an idiom
+    /// nothing else in the application uses.
+    pub fn switch(mut self, value: &'a mut bool) -> Self {
+        self.switch = Some(value);
         self
     }
 
@@ -103,45 +109,41 @@ impl<'a> TreeRow<'a> {
         let width = ui.available_width();
         let (rect, mut response) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
 
-        let mut checkbox_changed = false;
-        let has_checkbox = self.checkbox.is_some();
-        let mut checkbox_value_after = self.checkbox.as_ref().map(|v| **v);
-        if let Some(value) = self.checkbox {
-            if response.clicked() {
+        // A self-painted control gets none of egui's disabled handling: this
+        // row allocates its own rect and reads its own response, so the
+        // enabled bit is read once here and carried into the toggle, the paint
+        // and the announcement alike.
+        let enabled = ui.is_enabled();
+        let mut switch_changed = false;
+        let has_switch = self.switch.is_some();
+        let mut switch_value_after = self.switch.as_ref().map(|v| **v);
+        if let Some(value) = self.switch {
+            if enabled && response.clicked() {
                 *value = !*value;
-                checkbox_changed = true;
+                switch_changed = true;
                 response.mark_changed();
             }
-            checkbox_value_after = Some(*value);
+            switch_value_after = Some(*value);
         }
         let accessible_label = self.meta.map_or_else(
             || self.label.to_owned(),
             |meta| format!("{}, {}", self.label, meta),
         );
         response.widget_info(|| {
-            if let Some(value) = checkbox_value_after.filter(|_| has_checkbox) {
-                WidgetInfo::selected(
-                    WidgetType::Checkbox,
-                    ui.is_enabled(),
-                    value,
-                    &accessible_label,
-                )
+            if let Some(value) = switch_value_after.filter(|_| has_switch) {
+                // `Checkbox` is the role a two-state control publishes, and it
+                // is what the switches elsewhere in the product announce: the
+                // paint changed, what a reader's assistive technology is
+                // offered did not.
+                WidgetInfo::selected(WidgetType::Checkbox, enabled, value, &accessible_label)
             } else if self.twist.is_some() {
-                WidgetInfo::labeled(
-                    WidgetType::CollapsingHeader,
-                    ui.is_enabled(),
-                    &accessible_label,
-                )
+                WidgetInfo::labeled(WidgetType::CollapsingHeader, enabled, &accessible_label)
             } else {
-                WidgetInfo::labeled(
-                    WidgetType::SelectableLabel,
-                    ui.is_enabled(),
-                    &accessible_label,
-                )
+                WidgetInfo::labeled(WidgetType::SelectableLabel, enabled, &accessible_label)
             }
         });
         ui.ctx().accesskit_node_builder(response.id, |node| {
-            if !has_checkbox {
+            if !has_switch {
                 node.set_role(egui::accesskit::Role::TreeItem);
                 node.set_selected(self.selected);
                 node.set_level(usize::from(self.indent) + 1);
@@ -154,7 +156,7 @@ impl<'a> TreeRow<'a> {
         if !ui.is_rect_visible(rect) {
             return TreeRowResult {
                 response,
-                checkbox_changed,
+                switch_changed,
             };
         }
 
@@ -210,30 +212,15 @@ impl<'a> TreeRow<'a> {
             x += 12.0;
         }
 
-        if let Some(value) = checkbox_value_after {
-            let box_rect = Rect::from_center_size(egui::pos2(x + 6.5, cy), vec2(13.0, 13.0));
-            if value {
-                painter.rect_filled(box_rect, t.radius.min(2.0), c.accent);
-                // Check mark.
-                let s = box_rect.width();
-                painter.add(egui::Shape::line(
-                    vec![
-                        box_rect.left_top() + vec2(0.25 * s, 0.55 * s),
-                        box_rect.left_top() + vec2(0.42 * s, 0.72 * s),
-                        box_rect.left_top() + vec2(0.78 * s, 0.30 * s),
-                    ],
-                    Stroke::new(1.6, c.accent_ink),
-                ));
-            } else {
-                painter.rect(
-                    box_rect,
-                    t.radius.min(2.0),
-                    c.bg_inset,
-                    Stroke::new(1.0, c.border_strong),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            x += 13.0 + 6.0;
+        if let Some(value) = switch_value_after {
+            super::paint_switch(
+                ui,
+                egui::pos2(x + super::SWITCH_WIDTH * 0.5, cy),
+                value,
+                enabled && response.hovered(),
+                rect,
+            );
+            x += super::SWITCH_WIDTH + 6.0;
         }
 
         if let Some(dot) = self.chip_dot {
@@ -301,7 +288,7 @@ impl<'a> TreeRow<'a> {
         }
         TreeRowResult {
             response,
-            checkbox_changed,
+            switch_changed,
         }
     }
 }
@@ -346,11 +333,87 @@ mod tests {
         }));
     }
 
+    /// A row inside a disabled `Ui` does not move when it is clicked.
+    ///
+    /// A self-painted control gets none of egui's disabled handling: the row
+    /// allocates its own rect and reads its own response, so the enabled bit
+    /// is honoured here or nowhere. The DC sweep draws its two mutually
+    /// exclusive settings exactly this way — each inside
+    /// `add_enabled_ui(!the_other, ..)` — so a row that toggled anyway would
+    /// let a reader configure the pair the form exists to keep apart.
     #[test]
-    fn checkbox_tree_row_publishes_checkbox_state() {
+    fn a_disabled_switch_row_does_not_toggle_when_it_is_clicked() {
+        fn press(enabled: bool) -> bool {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut value = false;
+            let mut at = egui::Pos2::ZERO;
+            // Two passes to measure the row against the fonts, then one that
+            // presses its centre.
+            for pass in 0..3 {
+                let events = if pass == 2 {
+                    vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::default(),
+                        },
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: egui::Modifiers::default(),
+                        },
+                    ]
+                } else {
+                    Vec::new()
+                };
+                let mut measured = Rect::NOTHING;
+                // The frame's output is not the subject here: what the pass is
+                // for is the value the row wrote and the rect it landed in.
+                let _ = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(240.0, 200.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            ui.add_enabled_ui(enabled, |ui| {
+                                measured = TreeRow::new("Nested sweep")
+                                    .switch(&mut value)
+                                    .show(ui)
+                                    .response
+                                    .rect;
+                            });
+                        });
+                    },
+                );
+                at = measured.center();
+            }
+            value
+        }
+
+        assert!(
+            press(true),
+            "an enabled switch row must toggle on the click that asked"
+        );
+        assert!(
+            !press(false),
+            "a disabled one must not, self-painted or otherwise"
+        );
+    }
+
+    #[test]
+    fn switch_tree_row_publishes_toggle_state() {
         let mut checked = true;
         let nodes = accesskit_nodes(|ui| {
-            TreeRow::new("V(out)").checkbox(&mut checked).show(ui);
+            TreeRow::new("V(out)").switch(&mut checked).show(ui);
         });
 
         assert!(nodes.iter().any(|(_, node)| {
