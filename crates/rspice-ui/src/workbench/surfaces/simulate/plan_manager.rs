@@ -83,10 +83,21 @@ const PLAN_DIALOG_DESCRIPTION: &str = "Create, select, compare, import, export, 
 /// the split can stay two-column, and the one-column arrangement it falls back
 /// to cannot fit a 640-point viewport at all. Widening a column here can push
 /// the surface into an arrangement that does not fit.
+///
+/// The elastic floor is the one width in the set that is not measured to
+/// anything: the identity cell holds a plan's name over its stable identity,
+/// neither of which has a longest form, so both are elided to the cell at every
+/// width the dialog is ever laid out at. That is why the four points the body's
+/// scrollbar gutter costs the split come off this column and not off the six
+/// beside it — each of those is already at its heading's or its longest value's
+/// width, and a point off any of them clips a value that fits today. It also
+/// costs nothing anywhere but at the breakpoint itself: this column absorbs the
+/// whole of the track's surplus, so at every width above the floor it is exactly
+/// as wide as it was.
 const PLAN_COLUMNS: [TableColumn; 7] = [
     TableColumn {
         heading: "Plan / identity",
-        track: ColumnTrack::Elastic(120.0),
+        track: ColumnTrack::Elastic(116.0),
     },
     TableColumn {
         heading: "Lifecycle",
