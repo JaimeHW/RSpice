@@ -1148,6 +1148,53 @@ mod manifest_tests {
         ));
     }
 
+    /// The field this alignment is about, read end to end: what a reader types
+    /// into the Simulate form's transient stop time is what the run is
+    /// configured with.
+    ///
+    /// `1ns` used to be refused outright by the parser behind this field — a
+    /// unit letter after a scale factor was an unsupported suffix — while `1A`
+    /// was accepted as 1e-18 seconds, because that table still had atto. Both
+    /// now read the way the engine reads them out of a deck: one nanosecond,
+    /// and one second with `A` as a neutral unit designator.
+    #[test]
+    fn a_transient_stop_time_is_the_number_a_deck_would_read_from_the_same_text() {
+        let controller = SimulationController::new();
+        for (typed, expected) in [
+            ("1ns", 1e-9),
+            ("1A", 1.0),
+            ("1", 1.0),
+            ("2.5s", 2.5),
+            ("1m", 1e-3),
+            ("1mil", 25.4e-6),
+        ] {
+            let mut state = AppState::default();
+            state.sim_setup.tran.stop = typed.to_owned();
+
+            let spec = controller
+                .build_analysis_spec_for_index(&state, 1)
+                .unwrap_or_else(|error| panic!("a stop time of {typed} must be accepted: {error}"));
+            let AnalysisSpec::Transient { stop_time, .. } = spec else {
+                panic!("index 1 is the transient analysis");
+            };
+            assert!(
+                (stop_time - expected).abs() <= expected * 1e-12,
+                "a stop time typed {typed} reached the draft as {stop_time:e}, not {expected:e}"
+            );
+        }
+
+        // The spellings no deck reader has stay refused, rather than reaching a
+        // run at a decade the engine would not have agreed with.
+        for typed in ["1micro", "1wat", "1k5"] {
+            let mut state = AppState::default();
+            state.sim_setup.tran.stop = typed.to_owned();
+            assert!(
+                controller.build_analysis_spec_for_index(&state, 1).is_err(),
+                "a stop time of {typed} must not reach a run"
+            );
+        }
+    }
+
     #[test]
     fn every_new_manifest_draft_builds_its_exact_typed_spec() {
         let controller = SimulationController::new();
