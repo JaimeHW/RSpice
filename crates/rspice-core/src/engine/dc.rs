@@ -378,6 +378,24 @@ impl Engine {
             result.push_dc_observable(format!("I({})", diode.name), current);
         }
 
+        // Independent current sources are nodal devices and therefore do not
+        // allocate an MNA branch unknown.  Xyce still exposes their accepted
+        // lead current (and power) as device data, including when the source
+        // itself is the active `.DC` sweep coordinate.  Publish the value
+        // installed in this circuit point so `.PRINT DC I(I1)` is complete at
+        // every row instead of disappearing merely because no branch unknown
+        // exists in the solution vector.
+        for index in 0..circuit.current_sources.names.len() {
+            let name = &circuit.current_sources.names[index];
+            let voltage = node_voltage(circuit.current_sources.node_pos[index])
+                - node_voltage(circuit.current_sources.node_neg[index]);
+            let current = circuit.current_sources.dc_values[index];
+            let power = voltage * current;
+            result.push_dc_observable(format!("I({name})"), current);
+            result.push_dc_observable(format!("P({name})"), power);
+            result.push_dc_observable(format!("W({name})"), power);
+        }
+
         // A solution-dependent resistor is stamped as a behavioral current
         // expression so its complete Jacobian participates in Newton solves.
         // Preserve the resistor lead-observable contract at the accepted
@@ -2121,6 +2139,18 @@ R1 in 0 1k
                 (actual_voltage - expected_voltage).abs() < 1.0e-9,
                 "unexpected V(in) at I1={actual_sweep}: {actual_voltage}, expected {expected_voltage}"
             );
+            let current = result
+                .try_dc_observable_named("I(I1)")
+                .expect("independent current-source lead current is observable");
+            let power = result
+                .try_dc_observable_named("P(i1)")
+                .expect("independent current-source power is observable");
+            let alias_power = result
+                .try_dc_observable_named("W(I1)")
+                .expect("independent current-source W() power alias is observable");
+            assert!((current - actual_sweep).abs() < 1.0e-15);
+            assert!((power - actual_voltage * actual_sweep).abs() < 1.0e-12);
+            assert!((alias_power - power).abs() < 1.0e-15);
         }
     }
 
