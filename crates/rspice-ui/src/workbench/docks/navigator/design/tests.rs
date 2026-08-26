@@ -548,7 +548,7 @@ fn navigator_path_names_the_occurrence_and_the_master_bound_there() {
 fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {
     let entries = PRIMITIVE_GROUPS
         .iter()
-        .flat_map(|(_, sections)| primitive_entries(sections))
+        .flat_map(|(_, _, sections)| primitive_entries(sections))
         .collect::<Vec<_>>();
     let unique = entries
         .iter()
@@ -1480,4 +1480,158 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
     // menu of commands that would act on nothing.
     app.state.schematic.components.clear();
     assert_eq!(excitation_object(&app.state, placed), None);
+}
+
+// ------------------------------------------------------------ shelf identity
+
+/// Every glyph the Component shelf can paint, deduplicated: each placeable
+/// palette entry's, each primitive group band's, and the marks the XSPICE,
+/// Verilog-A and library sections use.
+#[cfg(not(target_arch = "wasm32"))]
+fn every_shelf_glyph() -> Vec<ShelfGlyph> {
+    let mut glyphs = vec![
+        // Built-in XSPICE rows and their band.
+        ShelfGlyph::Event,
+        // Generated Verilog-A rows and their band.
+        ShelfGlyph::Text("VA"),
+        // Library parts and project-library bands.
+        ShelfGlyph::Icon(WorkbenchIcon::Models),
+    ];
+    glyphs.extend(PRIMITIVE_GROUPS.iter().map(|(_, glyph, _)| *glyph));
+    for section in component_palette() {
+        for entry in section.entries {
+            glyphs.push(primitive_shelf_glyph(entry.kind));
+        }
+    }
+    let mut distinct = Vec::new();
+    for glyph in glyphs {
+        if !distinct.contains(&glyph) {
+            distinct.push(glyph);
+        }
+    }
+    distinct
+}
+
+/// One glyph rasterized alone in the 15 px slot the shelf paints it in.
+#[cfg(not(target_arch = "wasm32"))]
+fn glyph_canvas(glyph: ShelfGlyph) -> crate::ui::raster::Canvas {
+    crate::ui::raster::render(egui::vec2(24.0, 24.0), move |ui, background| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(background))
+            .show(ui, |ui| {
+                glyph.paint(
+                    ui.painter(),
+                    egui::Rect::from_center_size(egui::pos2(12.0, 12.0), egui::vec2(15.0, 15.0)),
+                    egui::Color32::WHITE,
+                );
+            });
+    })
+}
+
+/// Every glyph in the shelf table puts real ink in the glyph slot, and no
+/// text glyph is the replacement box the text layouter substitutes for a
+/// character the bundled faces lack.
+///
+/// The tofu reference is rendered through the same paint path from two
+/// characters no bundled face holds; that the pair renders identically is
+/// what proves a missing glyph has one shape, which every table glyph must
+/// then differ from. This is the gate that catches a future table entry
+/// reaching for ◯, ▷, ⊞, Σ, Ω or anything else outside the Latin-subset
+/// Plex cuts: it would compile, paint a plausible box of ink, and fail here.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box() {
+    let pattern = |glyph: ShelfGlyph| -> Vec<egui::Color32> {
+        let canvas = glyph_canvas(glyph);
+        canvas
+            .pixels_in(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(24.0, 24.0),
+            ))
+            .collect()
+    };
+    let background = glyph_canvas(ShelfGlyph::Text(" ")).background();
+    let tofu = pattern(ShelfGlyph::Text("\u{2603}"));
+    assert_eq!(
+        tofu,
+        pattern(ShelfGlyph::Text("\u{E001}")),
+        "two characters the faces lack must share one replacement shape for \
+         the tofu comparison to mean anything"
+    );
+
+    let glyphs = every_shelf_glyph();
+    assert!(
+        glyphs.len() >= 20,
+        "the table lost its vocabulary: {glyphs:?}"
+    );
+    for glyph in glyphs {
+        let painted = pattern(glyph);
+        assert!(
+            painted.iter().any(|pixel| *pixel != background),
+            "{glyph:?} paints no ink in the glyph slot"
+        );
+        if let ShelfGlyph::Text(text) = glyph {
+            assert_ne!(
+                painted, tofu,
+                "'{text}' is not in the bundled faces and would reach the \
+                 shelf as a tofu box"
+            );
+        }
+    }
+}
+
+/// Rows of different families paint different identity glyphs.
+///
+/// The label and meta are pinned to one string so the glyph slot is the only
+/// thing that can differ — which is exactly what one shared icon, or two
+/// missing characters both rendering as the replacement box, would fail.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn shelf_rows_of_different_families_paint_distinct_glyph_slots() {
+    let row = |kind: ComponentType| {
+        crate::ui::raster::render(egui::vec2(160.0, 24.0), move |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    shelf_part_row(ui, primitive_shelf_glyph(kind), "PART", false, Some("m"), 0);
+                });
+        })
+    };
+    // The identity slot: the 15 px glyph rect at the schematic row's icon
+    // column, with a pixel of air on each side.
+    let slot = egui::Rect::from_center_size(egui::pos2(33.5, 12.0), egui::vec2(17.0, 17.0));
+    let slot_pixels = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
+        canvas.pixels_in(slot).collect()
+    };
+
+    let resistor = row(ComponentType::Resistor);
+    let capacitor = row(ComponentType::Capacitor);
+    let xspice = row(ComponentType::XspiceGain);
+    for (name, canvas) in [
+        ("resistor", &resistor),
+        ("capacitor", &capacitor),
+        ("XSPICE", &xspice),
+    ] {
+        assert!(
+            slot_pixels(canvas)
+                .iter()
+                .any(|pixel| *pixel != canvas.background()),
+            "the {name} row's glyph slot is empty"
+        );
+    }
+    assert_ne!(
+        slot_pixels(&resistor),
+        slot_pixels(&capacitor),
+        "a resistor row and a capacitor row paint one glyph"
+    );
+    assert_ne!(
+        slot_pixels(&resistor),
+        slot_pixels(&xspice),
+        "a resistor row and an XSPICE row paint one glyph"
+    );
+    assert_ne!(
+        slot_pixels(&capacitor),
+        slot_pixels(&xspice),
+        "a capacitor row and an XSPICE row paint one glyph"
+    );
 }

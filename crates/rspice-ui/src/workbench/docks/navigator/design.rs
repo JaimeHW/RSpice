@@ -29,6 +29,7 @@ use super::super::super::design_system::{
 };
 use super::super::super::state::{DesignPanel, Workspace};
 use super::{
+    SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
     empty_navigator_row, panel_search, schematic_nav_row_indented_drag_response,
     schematic_nav_row_indented_response,
 };
@@ -38,15 +39,134 @@ mod hierarchy_tree;
 #[cfg(test)]
 mod tests;
 
-const PRIMITIVE_GROUPS: [(&str, &[&str]); 4] = [
-    ("Passives", &["Passives"]),
-    ("Sources", &["Sources"]),
+/// The shelf's primitive groups: the band's name, the family glyph its group
+/// row carries, and the palette sections it gathers. The family glyphs follow
+/// the mockup's `PART_CATALOG` group column — Passives —, Sources ◯,
+/// Analog ▷, Mixed signal ⊞ — with the non-Latin marks painted as vector
+/// geometry because the bundled faces do not hold them (see [`ShelfGlyph`]).
+const PRIMITIVE_GROUPS: [(&str, ShelfGlyph, &[&str]); 4] = [
+    ("Passives", ShelfGlyph::Text("\u{2014}"), &["Passives"]),
+    ("Sources", ShelfGlyph::Source, &["Sources"]),
     (
         "Analog",
+        ShelfGlyph::Amp,
         &["Hierarchy", "Semiconductors", "Controlled sources"],
     ),
-    ("Mixed signal / XSPICE", &["Behavioral (XSPICE)"]),
+    (
+        "Mixed signal / XSPICE",
+        ShelfGlyph::Event,
+        &["Behavioral (XSPICE)"],
+    ),
 ];
+
+/// The identity mark a Component-shelf row paints in its glyph column.
+///
+/// The rule: a placeable part's glyph is its SPICE card letter — the letter
+/// its emitted element card starts with, straight from
+/// [`ComponentType::spice_prefix`] — set in the mono face at the schematic
+/// symbol tint, exactly the mockup's `PART_CATALOG` glyph column. Identities a
+/// card letter cannot state take a mark instead: the op-amp triangle (its `E`
+/// card would file it as a plain VCVS), ground and the interface pin
+/// (structural objects with no card of their own), the event-driven ⊞ for
+/// every A-card XSPICE row, and `VA` for generated Verilog-A models.
+///
+/// The bundled IBM Plex faces are Latin subsets: every non-Latin candidate in
+/// the mockup vocabulary — ◯ ▷ △ ⊞ ⊳ ⏚, and even Σ and Ω — rasterizes as a
+/// tofu box, which is why the family marks are vector geometry rather than
+/// text. `every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box`
+/// walks the table and fails on any glyph the faces lack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShelfGlyph {
+    /// A mono-face string: a SPICE card letter (`R`, `Q`, `M`), a family
+    /// abbreviation (`MR`, `VA`), or the Passives em dash.
+    Text(&'static str),
+    /// A design-system icon: ground's supply bars, the interface pin, the
+    /// Models mark on library rows.
+    Icon(WorkbenchIcon),
+    /// The source circle — the mockup's ◯.
+    Source,
+    /// The amplifier triangle — the mockup's ▷ / △.
+    Amp,
+    /// The event-driven / mixed-signal squared plus — the mockup's ⊞.
+    Event,
+}
+
+impl ShelfGlyph {
+    /// Paints the glyph centred in `rect`.
+    ///
+    /// Vector marks share the design-system icon idiom: a 24-unit design
+    /// space scaled to the slot, strokes floored at one pixel.
+    fn paint(self, painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+        let side = rect.width().min(rect.height());
+        let scale = side / 24.0;
+        let stroke = egui::Stroke::new((1.6 * scale).max(1.0), color);
+        match self {
+            Self::Text(text) => {
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    text,
+                    theme::mono(tokens::FS_1, FontWeight::Medium),
+                    color,
+                );
+            }
+            Self::Icon(icon) => icon.paint(painter, rect, color),
+            Self::Source => {
+                painter.circle_stroke(rect.center(), 7.5 * scale, stroke);
+            }
+            Self::Amp => {
+                painter.add(egui::Shape::closed_line(
+                    vec![
+                        rect.center() + egui::vec2(-6.0 * scale, -7.0 * scale),
+                        rect.center() + egui::vec2(7.0 * scale, 0.0),
+                        rect.center() + egui::vec2(-6.0 * scale, 7.0 * scale),
+                    ],
+                    stroke,
+                ));
+            }
+            Self::Event => {
+                let half = 7.0 * scale;
+                let cross = 3.5 * scale;
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(2.0 * half)),
+                    0.0,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+                painter.line_segment(
+                    [
+                        rect.center() - egui::vec2(cross, 0.0),
+                        rect.center() + egui::vec2(cross, 0.0),
+                    ],
+                    stroke,
+                );
+                painter.line_segment(
+                    [
+                        rect.center() - egui::vec2(0.0, cross),
+                        rect.center() + egui::vec2(0.0, cross),
+                    ],
+                    stroke,
+                );
+            }
+        }
+    }
+}
+
+/// The glyph for one placeable primitive.
+///
+/// Card letters come from [`ComponentType::spice_prefix`], so this column can
+/// never drift from the designator the meta column states and the netlist
+/// emits. The exceptions are the identities a card letter cannot carry — see
+/// [`ShelfGlyph`] for the rule.
+fn primitive_shelf_glyph(kind: ComponentType) -> ShelfGlyph {
+    match kind {
+        ComponentType::Ground => ShelfGlyph::Icon(WorkbenchIcon::Supply),
+        ComponentType::Port => ShelfGlyph::Icon(WorkbenchIcon::Pin),
+        ComponentType::OpAmp => ShelfGlyph::Amp,
+        kind if kind.spice_prefix() == "A" => ShelfGlyph::Event,
+        kind => ShelfGlyph::Text(kind.spice_prefix()),
+    }
+}
 const PANEL_TABS_PADDING_X: f32 = 8.0;
 /// Clearance between the location line and the sheet scope beneath it, so the
 /// two read as one header block rather than two stacked rows.
@@ -1549,7 +1669,7 @@ fn library_parts_section(
         catalog_group_row(
             ui,
             "component-shelf-library-parts",
-            WorkbenchIcon::Models,
+            ShelfGlyph::Icon(WorkbenchIcon::Models),
             "Library parts",
             rows.len(),
         )
@@ -1657,7 +1777,7 @@ fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, v
 fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
     let primitive_matches = PRIMITIVE_GROUPS
         .iter()
-        .map(|(_, section_names)| {
+        .map(|(_, _, section_names)| {
             primitive_entries(section_names)
                 .into_iter()
                 .filter(|entry| matches_query(query, &[entry.label, entry.kind.display_name()]))
@@ -1943,7 +2063,7 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     let mut armed = None;
     let visible_count = PRIMITIVE_GROUPS
         .iter()
-        .map(|(_, section_names)| {
+        .map(|(_, _, section_names)| {
             primitive_entries(section_names)
                 .into_iter()
                 .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
@@ -1954,7 +2074,7 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
         return None;
     }
     shelf_section_header(ui, "Primitives", Some(&visible_count.to_string()));
-    for (group, section_names) in PRIMITIVE_GROUPS {
+    for (group, glyph, section_names) in PRIMITIVE_GROUPS {
         let entries = primitive_entries(section_names)
             .into_iter()
             .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
@@ -1963,13 +2083,7 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
             continue;
         }
         if query.is_empty() {
-            if catalog_group_row(
-                ui,
-                ("component-shelf", group),
-                WorkbenchIcon::Design,
-                group,
-                entries.len(),
-            ) {
+            if catalog_group_row(ui, ("component-shelf", group), glyph, group, entries.len()) {
                 armed = primitive_rows(ui, app, &entries, 2).or(armed);
             }
         } else {
@@ -1980,6 +2094,110 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     armed
 }
 
+/// One placeable shelf row: the mockup's `.shelf-part` — an identity glyph
+/// at the symbol tint, the sans label, the mono meta column — on the same
+/// 24 px schematic tree-row contract every navigator row keeps.
+///
+/// [`schematic_nav_row_indented_drag_response`] paints this geometry for
+/// [`WorkbenchIcon`] rows; the shelf's identity column is a [`ShelfGlyph`],
+/// so the shelf owns this variant rather than widening every navigator row
+/// call in the crate with a parameter only this panel would pass.
+fn shelf_part_row(
+    ui: &mut Ui,
+    glyph: ShelfGlyph,
+    label: &str,
+    selected: bool,
+    meta: Option<&str>,
+    level: usize,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), SCHEMATIC_NAV_ROW_HEIGHT),
+        egui::Sense::click_and_drag(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+    if selected || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            if selected {
+                t.color.accent_dim
+            } else {
+                t.color.bg_hover
+            },
+        );
+    }
+    if selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            t.color.accent,
+        );
+    }
+    let indent = 14.0 * level as f32;
+    glyph.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 33.5 + indent, rect.center().y),
+            egui::vec2(15.0, 15.0),
+        ),
+        t.color.symbol,
+    );
+    let meta_width = meta.map_or(0.0, |meta| {
+        ui.painter()
+            .layout_no_wrap(
+                meta.to_owned(),
+                theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular),
+                t.color.text_faint,
+            )
+            .size()
+            .x
+    });
+    let label_left = rect.left() + 47.0 + indent;
+    let label_right = if meta.is_some() {
+        rect.right() - 14.0 - meta_width
+    } else {
+        rect.right() - 8.0
+    };
+    ui.painter()
+        .with_clip_rect(egui::Rect::from_x_y_ranges(
+            label_left..=label_right.max(label_left),
+            rect.y_range(),
+        ))
+        .text(
+            egui::pos2(label_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme::sans(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular),
+            if selected {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+    if let Some(meta) = meta {
+        ui.painter().text(
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular),
+            t.color.text_faint,
+        );
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response
+}
+
 fn primitive_rows(
     ui: &mut Ui,
     app: &RSpiceApp,
@@ -1988,16 +2206,13 @@ fn primitive_rows(
 ) -> Option<ComponentType> {
     let mut armed = None;
     for entry in entries {
-        let response = schematic_nav_row_indented_drag_response(
+        let response = shelf_part_row(
             ui,
-            WorkbenchIcon::Design,
+            primitive_shelf_glyph(entry.kind),
             entry.label,
             app.state.schematic.tool == Tool::Place(entry.kind),
             Some(entry.kind.spice_prefix()),
             level,
-            false,
-            false,
-            false,
         );
         if let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
             response.dnd_set_drag_payload(payload);
@@ -2032,7 +2247,7 @@ fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCel
         catalog_group_row(
             ui,
             "component-shelf-builtin-xspice",
-            WorkbenchIcon::Design,
+            ShelfGlyph::Event,
             "Built-in XSPICE",
             descriptors.len(),
         )
@@ -2054,16 +2269,13 @@ fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCel
             .and_then(|binding| binding.builtin_xspice.as_ref())
             .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
             && app.state.schematic.tool == Tool::Place(ComponentType::CellInstance);
-        let response = schematic_nav_row_indented_drag_response(
+        let response = shelf_part_row(
             ui,
-            WorkbenchIcon::Design,
+            ShelfGlyph::Event,
             descriptor.display_name,
             selected,
             Some(descriptor.model_type),
             if query.is_empty() { 2 } else { 0 },
-            false,
-            false,
-            false,
         );
         match builtin_xspice_library_binding(descriptor) {
             Ok(binding) => {
@@ -2128,7 +2340,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCel
         catalog_group_row(
             ui,
             "component-shelf-generated-veriloga",
-            WorkbenchIcon::Design,
+            ShelfGlyph::Text("VA"),
             "Generated Verilog-A",
             descriptors.len(),
         )
@@ -2154,9 +2366,9 @@ fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCel
             .and_then(|binding| binding.generated_veriloga.as_ref())
             .is_some_and(|binding| binding.model_name == descriptor.model_name)
             && app.state.schematic.tool == Tool::Place(ComponentType::CellInstance);
-        let response = schematic_nav_row_indented_drag_response(
+        let response = shelf_part_row(
             ui,
-            WorkbenchIcon::Design,
+            ShelfGlyph::Text("VA"),
             descriptor.model_name,
             selected,
             Some(&format!(
@@ -2165,9 +2377,6 @@ fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCel
                 descriptor.module_name
             )),
             if query.is_empty() { 2 } else { 0 },
-            false,
-            false,
-            false,
         );
         match generated_veriloga_library_binding(descriptor) {
             Ok(binding) => {
@@ -2210,7 +2419,7 @@ fn project_library(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> 
             if catalog_group_row(
                 ui,
                 ("component-shelf-library", library.as_str()),
-                WorkbenchIcon::Models,
+                ShelfGlyph::Icon(WorkbenchIcon::Models),
                 &library,
                 cells.len(),
             ) {
@@ -2282,7 +2491,7 @@ fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<Libra
 fn catalog_group_row(
     ui: &mut Ui,
     key: impl std::hash::Hash + std::fmt::Debug,
-    icon: WorkbenchIcon,
+    glyph: ShelfGlyph,
     label: &str,
     count: usize,
 ) -> bool {
@@ -2315,7 +2524,7 @@ fn catalog_group_row(
     };
     ui.painter()
         .add(egui::Shape::line(caret_points.to_vec(), caret_stroke));
-    icon.paint(
+    glyph.paint(
         ui.painter(),
         egui::Rect::from_center_size(
             egui::pos2(rect.left() + 46.5, rect.center().y),
