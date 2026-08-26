@@ -32,7 +32,7 @@ pub(super) fn analysis_catalog_window(
     let mut active = setup.palette_active;
     let mut chosen = None;
     let mut request_close = false;
-    let scroll_to_active = setup.palette_scroll_to_active;
+    let mut scroll_to_active = setup.palette_scroll_to_active;
     let choice = Dialog::new("Simulation Studio", "Add analysis or workflow", "Close")
         .description(
             "Search and add an explicitly classified solver, run-set controller, measurement, check, or optimization workflow.",
@@ -170,7 +170,16 @@ pub(super) fn analysis_catalog_window(
                         continue;
                     }
                     if ui.input(|input| input.key_pressed(key)) {
-                        active = catalog_grid_step(&filtered, catalog_columns, active, step);
+                        let stepped = catalog_grid_step(&filtered, catalog_columns, active, step);
+                        if stepped != active {
+                            active = stepped;
+                            // Travel the reader cannot see is not travel: the
+                            // rows below reveal the selection when this is
+                            // set, and the write at the end of the frame
+                            // clears it again, so it stays the one-shot it
+                            // already was.
+                            scroll_to_active = true;
+                        }
                     }
                 }
                 if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
@@ -1090,6 +1099,42 @@ mod tests {
         fn leave_the_search_field(&mut self) {
             self.ctx.memory_mut(egui::Memory::stop_text_input);
         }
+
+        /// The analysis codes the reader can actually see.
+        ///
+        /// A row scrolled out of the viewport is still laid out and still
+        /// paints — into a clip rectangle that holds none of it. Asking
+        /// whether the code's origin is inside the rectangle it was painted
+        /// into is what separates a row that is on screen from one that is
+        /// merely drawn.
+        fn visible_codes(&mut self) -> Vec<String> {
+            fn collect(shape: &egui::epaint::Shape, clip: Rect, out: &mut Vec<(String, f32)>) {
+                match shape {
+                    egui::epaint::Shape::Text(text) if clip.contains(text.pos) => {
+                        out.push((text.galley.job.text.clone(), text.pos.y));
+                    }
+                    egui::epaint::Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            collect(shape, clip, out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            self.frame(Vec::new());
+            let mut painted = Vec::new();
+            for clipped in &self.shapes {
+                collect(&clipped.shape, clipped.clip_rect, &mut painted);
+            }
+            painted.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let codes = AnalysisKind::MANIFEST_ORDER.map(AnalysisKind::code);
+            painted
+                .into_iter()
+                .map(|(text, _)| text)
+                .filter(|text| codes.contains(&text.as_str()))
+                .collect()
+        }
     }
 
     /// Left and Right belong to the caret while the reader is typing.
@@ -1131,5 +1176,46 @@ mod tests {
         assert_eq!(catalogue.setup.palette_active, 2);
         catalogue.press(egui::Key::ArrowUp);
         assert_eq!(catalogue.setup.palette_active, 0);
+    }
+
+    /// A step that moves the selection brings it into view; one that cannot
+    /// move leaves the list alone.
+    ///
+    /// Keyboard travel that scrolls nothing is travel a reader loses on the
+    /// second keystroke: the selection walks off the bottom of the viewport
+    /// and the list stays where it was. Fourteen rows is past the fold of a
+    /// 900-point screen, so the code of the row that ends up active is only
+    /// visible if the list followed it there.
+    #[test]
+    fn catalogue_travel_keeps_the_selection_in_view() {
+        let mut catalogue = Catalogue::open(1_100.0);
+        let opened = catalogue.visible_codes();
+        assert!(
+            opened.len() > 4,
+            "the catalogue is showing rows to begin with: {opened:?}"
+        );
+
+        catalogue.press(egui::Key::ArrowUp);
+        assert_eq!(catalogue.setup.palette_active, 0);
+        assert_eq!(
+            catalogue.visible_codes(),
+            opened,
+            "a step that cannot move the selection does not move the list"
+        );
+
+        for _ in 0..14 {
+            catalogue.press(egui::Key::ArrowDown);
+        }
+        assert_eq!(catalogue.setup.palette_active, 14);
+        let active_code = filtered_catalog_kinds("")[14].code();
+        let travelled = catalogue.visible_codes();
+        assert!(
+            travelled.iter().any(|code| code == active_code),
+            "the row the arrows landed on is on screen: {active_code} in {travelled:?}"
+        );
+        assert_ne!(
+            travelled, opened,
+            "the list moved to keep the selection in view"
+        );
     }
 }
