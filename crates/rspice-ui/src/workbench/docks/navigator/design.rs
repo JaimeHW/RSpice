@@ -52,7 +52,12 @@ mod tests;
 /// panel. Every position is still the reader's own once moved: only the
 /// default behind the persisted flag differs per group.
 const PRIMITIVE_GROUPS: [(&str, ShelfGlyph, bool, &[&str]); 4] = [
-    ("Passives", ShelfGlyph::Text("\u{2014}"), true, &["Passives"]),
+    (
+        "Passives",
+        ShelfGlyph::Text("\u{2014}"),
+        true,
+        &["Passives"],
+    ),
     ("Sources", ShelfGlyph::Source, false, &["Sources"]),
     (
         "Analog",
