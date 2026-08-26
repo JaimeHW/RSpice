@@ -140,8 +140,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     });
 
-    metric_strip(ui, &summaries);
-    gate_banner(ui, selected.as_ref());
+    closure_ledger(ui, &summaries, selected.as_ref());
     if summaries.is_empty() {
         page_empty_state(
             ui,
@@ -195,8 +194,33 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn metric_strip(ui: &mut Ui, summaries: &[QualificationModelSummary]) {
-    let t = Tokens::get(ui.ctx());
+/// The height of the closure band, and of nothing else on the page.
+const CLOSURE_LEDGER_H: f32 = 54.0;
+
+/// The band's own padding, and the gaps that hold the chain apart: between a
+/// segment's label and its value, between segments, and between the last
+/// segment and the verdict that terminates the chain.
+const LEDGER_PAD: f32 = 12.0;
+const SEGMENT_LABEL_GAP: f32 = 6.0;
+const SEGMENT_GAP: f32 = 18.0;
+const VERDICT_GAP: f32 = 28.0;
+
+/// One input release closure consumes, as the band states it.
+///
+/// Held as data rather than painted where it is derived because the band is
+/// laid out right to left: the whole cluster has to be measured before its
+/// first segment can be placed.
+struct ClosureInput {
+    label: &'static str,
+    value: String,
+    /// The fact the band has room for only on hover, and the one a reader who
+    /// cannot see the band is read along with the ratio.
+    detail: String,
+    color: Color32,
+}
+
+/// The four closure inputs over the whole loaded corpus.
+fn closure_inputs(t: &Tokens, summaries: &[QualificationModelSummary]) -> [ClosureInput; 4] {
     let total_vectors = summaries
         .iter()
         .map(|summary| summary.vectors)
@@ -229,17 +253,17 @@ fn metric_strip(ui: &mut Ui, summaries: &[QualificationModelSummary]) {
         .iter()
         .filter(|summary| summary.suites > 0 && summary.parity_suites == summary.suites)
         .count();
-    // The model tiles are ratios over the population the gate governs. Totalling
-    // the exempt models into the denominator is what made a fresh project read
-    // "0 / 16 qualified" — a failure claim assembled entirely out of models the
-    // gate has nothing to say about.
+    // The last two segments are ratios over the population the gate governs.
+    // Totalling the exempt models into the denominator is what made a fresh
+    // project read "0 / 16 qualified" — a failure claim assembled entirely out
+    // of models the gate has nothing to say about.
     let gate_subjects = summaries
         .iter()
         .filter(|summary| summary.gate.is_gate_subject())
         .count();
     let exempt = summaries.len() - gate_subjects;
     // A ratio over an empty population carries no verdict, so it is painted in
-    // neither verdict's colour: "0 / 0" in the warning tone is a warning about
+    // neither verdict's colour: "0/0" in the warning tone is a warning about
     // nothing, and on the fresh project above it was four of them.
     let verdict = |whole: usize, part: usize| {
         if whole == 0 {
@@ -250,85 +274,64 @@ fn metric_strip(ui: &mut Ui, summaries: &[QualificationModelSummary]) {
             t.color.warn
         }
     };
-    let metrics = [
-        (
-            "VECTORS PASSING",
-            format!("{passing_vectors} / {total_vectors}"),
+    [
+        ClosureInput {
+            label: "vectors",
+            value: format!("{passing_vectors}/{total_vectors}"),
             // The split the retained record actually carries. A disposition
             // holds a cause and a required action and nothing else — no
             // severity, no age, no measured miss — so "worst open" is not a
             // fact this page could state, and the two causes are.
-            if open_dispositions == 0 {
+            detail: if open_dispositions == 0 {
                 "no open dispositions".to_owned()
             } else {
                 format!("{open_failed} failed · {open_stale} stale open")
             },
-            verdict(total_vectors, passing_vectors),
-        ),
-        (
-            "REFERENCE COVERAGE",
-            format!("{evidenced_vectors} / {total_vectors}"),
-            "exact retained evidence".to_owned(),
-            verdict(total_vectors, evidenced_vectors),
-        ),
-        (
-            "QUALIFIED MODELS",
-            format!("{qualified} / {gate_subjects}"),
-            if exempt == 0 {
+            color: verdict(total_vectors, passing_vectors),
+        },
+        ClosureInput {
+            label: "references",
+            value: format!("{evidenced_vectors}/{total_vectors}"),
+            detail: "exact retained evidence".to_owned(),
+            color: verdict(total_vectors, evidenced_vectors),
+        },
+        ClosureInput {
+            label: "qualified",
+            value: format!("{qualified}/{gate_subjects}"),
+            detail: if exempt == 0 {
                 "source-owned release gates".to_owned()
             } else {
                 format!("{exempt} engine-owned exempt")
             },
-            verdict(gate_subjects, qualified),
-        ),
-        (
-            "RUNTIME PARITY",
-            format!("{parity} / {gate_subjects}"),
-            "desktop · WebAssembly".to_owned(),
-            verdict(gate_subjects, parity),
-        ),
-    ];
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 62.0), Sense::hover());
-    let width = rect.width() / metrics.len() as f32;
-    for (index, (label, value, detail, color)) in metrics.iter().enumerate() {
-        let cell = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + width * index as f32, rect.top()),
-            egui::pos2(rect.left() + width * (index + 1) as f32, rect.bottom()),
-        );
-        ui.painter().rect(
-            cell,
-            0.0,
-            t.color.bg_panel,
-            Stroke::new(1.0, t.color.border),
-            egui::StrokeKind::Inside,
-        );
-        ui.painter().text(
-            egui::pos2(cell.left() + 9.0, cell.top() + 12.0),
-            egui::Align2::LEFT_CENTER,
-            label,
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text_faint,
-        );
-        ui.painter().text(
-            egui::pos2(cell.left() + 9.0, cell.top() + 33.0),
-            egui::Align2::LEFT_CENTER,
-            value,
-            theme::mono(tokens::FS_1, FontWeight::SemiBold),
-            *color,
-        );
-        ui.painter().text(
-            egui::pos2(cell.left() + 9.0, cell.bottom() - 9.0),
-            egui::Align2::LEFT_CENTER,
-            elide(ui, detail, (cell.width() - 18.0).max(1.0), false),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-        );
-    }
+            color: verdict(gate_subjects, qualified),
+        },
+        ClosureInput {
+            label: "parity",
+            value: format!("{parity}/{gate_subjects}"),
+            detail: "desktop · WebAssembly".to_owned(),
+            color: verdict(gate_subjects, parity),
+        },
+    ]
 }
 
-fn gate_banner(ui: &mut Ui, selected: Option<&QualificationModelSummary>) {
+/// The page's one aggregate: what the gate is, the inputs it consumes, and the
+/// verdict over the selection — one band, read left to right.
+///
+/// The inputs are inline segments rather than bordered cells because four
+/// boxed ratios over a page whose subject is already a coverage matrix say
+/// nothing the matrix does not, and say it in the register of a dashboard.
+/// What the band adds is the chain: these numbers are what closure reads, and
+/// that verdict is what it returns.
+fn closure_ledger(
+    ui: &mut Ui,
+    summaries: &[QualificationModelSummary],
+    selected: Option<&QualificationModelSummary>,
+) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 54.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CLOSURE_LEDGER_H),
+        Sense::hover(),
+    );
     ui.painter().rect(
         rect,
         0.0,
@@ -336,37 +339,144 @@ fn gate_banner(ui: &mut Ui, selected: Option<&QualificationModelSummary>) {
         Stroke::new(1.0, t.color.border_strong),
         egui::StrokeKind::Inside,
     );
+
+    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
+    let title_w = ui
+        .painter()
+        .layout_no_wrap("Release closure".to_owned(), title_font.clone(), t.color.text)
+        .size()
+        .x;
     ui.painter().text(
-        egui::pos2(rect.left() + 12.0, rect.top() + 16.0),
+        egui::pos2(rect.left() + LEDGER_PAD, rect.top() + 16.0),
         egui::Align2::LEFT_CENTER,
-        "Gate ownership",
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        "Release closure",
+        title_font,
         t.color.text,
     );
-    // What the banner says is a statement about the *selected* model, so for
-    // one the gate does not govern it states the exemption rather than reciting
-    // a closure contract that will never be applied to it.
+
+    // The verdict owns the right edge and is placed first, because everything
+    // to its left is laid out against where it ends.
+    let gate = selected.map(|summary| summary.gate);
+    let verdict_color = gate.map_or(t.color.text_faint, |gate| gate_color(gate, &t));
+    let verdict_label = gate
+        .map_or("NO SELECTION", QualificationGate::label)
+        .to_uppercase();
+    let verdict_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
+    let verdict_w = ui
+        .painter()
+        .layout_no_wrap(verdict_label.clone(), verdict_font.clone(), verdict_color)
+        .size()
+        .x;
+    ui.painter().text(
+        egui::pos2(rect.right() - LEDGER_PAD, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        verdict_label,
+        verdict_font,
+        verdict_color,
+    );
+
+    let inputs = closure_inputs(&t, summaries);
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
+    let measured: [(f32, f32); 4] = std::array::from_fn(|index| {
+        let input = &inputs[index];
+        (
+            ui.painter()
+                .layout_no_wrap(
+                    input.label.to_owned(),
+                    label_font.clone(),
+                    t.color.text_faint,
+                )
+                .size()
+                .x,
+            ui.painter()
+                .layout_no_wrap(input.value.clone(), value_font.clone(), input.color)
+                .size()
+                .x,
+        )
+    });
+    let cluster_w = measured
+        .iter()
+        .map(|(label, value)| label + SEGMENT_LABEL_GAP + value)
+        .sum::<f32>()
+        + SEGMENT_GAP * (measured.len() - 1) as f32;
+    let cluster_right = rect.right() - LEDGER_PAD - verdict_w - VERDICT_GAP;
+    let cluster_left = cluster_right - cluster_w;
+    // The cluster is anchored off the verdict so the chain always terminates in
+    // the same place, and floored at the title so a band too narrow to hold
+    // both clips its leftmost segment rather than painting one over the band's
+    // own heading.
+    let floor = rect.left() + LEDGER_PAD + title_w + 16.0;
+    let clip_left = cluster_left.max(floor);
+    let clip = egui::Rect::from_min_max(
+        egui::pos2(clip_left, rect.top()),
+        egui::pos2(cluster_right.max(clip_left), rect.bottom()),
+    )
+    .intersect(ui.clip_rect());
+    let painter = ui.painter().with_clip_rect(clip);
+
+    let mut x = cluster_left;
+    for (index, (input, (label_w, value_w))) in inputs.iter().zip(measured).enumerate() {
+        let segment = egui::Rect::from_min_max(
+            egui::pos2(x, rect.top() + 1.0),
+            egui::pos2(x + label_w + SEGMENT_LABEL_GAP + value_w, rect.bottom() - 1.0),
+        );
+        x = segment.right() + SEGMENT_GAP;
+        painter.text(
+            egui::pos2(segment.left(), rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            input.label,
+            label_font.clone(),
+            t.color.text_faint,
+        );
+        painter.text(
+            egui::pos2(segment.left() + label_w + SEGMENT_LABEL_GAP, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            &input.value,
+            value_font.clone(),
+            input.color,
+        );
+        // Painted glyphs publish no accessibility node, so each segment states
+        // its own whole line — the count, the ratio, and the fact the band has
+        // room for only on hover.
+        let hover = ui.interact(
+            segment.intersect(clip),
+            ui.id().with(("qualification-closure-input", index)),
+            Sense::hover(),
+        );
+        let announced = format!("{} {}, {}", input.label, input.value, input.detail);
+        hover.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
+        });
+        hover.on_hover_text(&input.detail);
+    }
+
+    // The verdict is the chain's terminal rather than a fifth input, and a
+    // hairline says so where a wider gap alone would not.
+    ui.painter().vline(
+        cluster_right + VERDICT_GAP / 2.0,
+        egui::Rangef::new(rect.center().y - 9.0, rect.center().y + 9.0),
+        Stroke::new(1.0, t.color.border),
+    );
+
+    // What the band says is a statement about the *selected* model, so for one
+    // the gate does not govern it states the exemption rather than reciting a
+    // closure contract that will never be applied to it.
     let contract = if selected.is_some_and(|summary| !summary.gate.is_gate_subject()) {
         "Engine-owned: this card is compiled into the simulator and is exempt from the source-owned release gate."
     } else {
         "Release closure consumes exact source revisions, retained references, runtime parity, and governed dispositions."
     };
+    // The sentence is the band's first casualty: it is clipped to stop before
+    // the cluster begins, so a long contract can never reach the ledger.
+    let sentence_x = rect.left() + LEDGER_PAD;
+    let sentence_w = (clip_left - LEDGER_PAD - sentence_x).max(1.0);
     ui.painter().text(
-        egui::pos2(rect.left() + 12.0, rect.bottom() - 13.0),
+        egui::pos2(sentence_x, rect.bottom() - 13.0),
         egui::Align2::LEFT_CENTER,
-        elide(ui, contract, (rect.width() - 150.0).max(1.0), false),
+        elide(ui, contract, sentence_w, false),
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
-    );
-    let gate = selected.map(|summary| summary.gate);
-    let color = gate.map_or(t.color.text_faint, |gate| gate_color(gate, &t));
-    let label = gate.map_or("NO SELECTION", QualificationGate::label);
-    ui.painter().text(
-        egui::pos2(rect.right() - 12.0, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        label.to_uppercase(),
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        color,
     );
 }
 

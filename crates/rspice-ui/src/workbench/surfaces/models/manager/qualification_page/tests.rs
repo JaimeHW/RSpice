@@ -143,6 +143,301 @@ fn themed_context() -> egui::Context {
     ctx
 }
 
+/// One string the page painted: what it said, the tone it said it in, and the
+/// rectangle a reader can actually see it in.
+///
+/// The visible rectangle is the shape's own box clipped to the region it was
+/// painted into, which is the only rectangle worth asserting on: the closure
+/// band lays its segments out against the verdict and clips them at its
+/// heading, so an unclipped box says nothing about what overlaps what.
+#[cfg(not(target_arch = "wasm32"))]
+struct PaintedText {
+    text: String,
+    color: Option<Color32>,
+    visible: egui::Rect,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_text(output: &egui::FullOutput) -> Vec<PaintedText> {
+    fn walk(shape: &egui::epaint::Shape, clip: egui::Rect, out: &mut Vec<PaintedText>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => out.push(PaintedText {
+                text: text.galley.text().to_owned(),
+                color: text.override_text_color.or_else(|| {
+                    text.galley
+                        .job
+                        .sections
+                        .first()
+                        .map(|section| section.format.color)
+                }),
+                visible: egui::Rect::from_min_size(text.pos, text.galley.size()).intersect(clip),
+            }),
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, clip, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut painted = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, clipped.clip_rect, &mut painted);
+    }
+    painted
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_page(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
+    let size = egui::vec2(width, PAGE_SIZE[1]);
+    app.state.workbench.models_page = ModelsPage::Qualification;
+    let ctx = themed_context();
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| super::super::show(ui, app));
+        },
+    )
+}
+
+/// The closure ledger counts only the population the gate governs, and states
+/// no verdict at all over an empty one.
+///
+/// Both halves encode a defect the four bordered tiles shipped: a fresh
+/// project holding nothing but compiled-in cards read "0 / 16 qualified" in
+/// the warning tone — a failure claim assembled entirely out of models the
+/// gate has nothing to say about — and the three ratios beside it read "0 / 0"
+/// in that same tone, which is a warning about nothing.
+#[test]
+fn the_closure_inputs_count_gate_subjects_and_stay_neutral_over_an_empty_population() {
+    let ctx = themed_context();
+    let t = Tokens::get(&ctx);
+
+    let app = RSpiceApp::test_instance();
+    let summaries = qualification_summaries(&app);
+    let exempt = summaries
+        .iter()
+        .filter(|summary| !summary.gate.is_gate_subject())
+        .count();
+    assert!(
+        exempt > 0 && exempt == summaries.len(),
+        "a fresh project holds the engine-owned families and nothing else"
+    );
+    for input in &closure_inputs(&t, &summaries) {
+        assert_eq!(
+            input.value, "0/0",
+            "`{}` totalled the exempt population into its denominator",
+            input.label
+        );
+        assert_eq!(
+            input.color, t.color.text_dim,
+            "`{}` claims a verdict over an empty population",
+            input.label
+        );
+    }
+    assert_eq!(
+        closure_inputs(&t, &summaries)[2].detail,
+        format!("{exempt} engine-owned exempt"),
+        "the exempt population is what the qualified segment has to account for"
+    );
+
+    let app = source_owned_app();
+    let summaries = qualification_summaries(&app);
+    let inputs = closure_inputs(&t, &summaries);
+    assert_eq!(
+        inputs
+            .iter()
+            .map(|input| (input.label, input.value.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("vectors", "0/3"),
+            ("references", "0/3"),
+            ("qualified", "0/1"),
+            ("parity", "0/1"),
+        ],
+        "the ledger read the whole corpus rather than the one family the gate governs"
+    );
+    for input in &inputs {
+        assert_eq!(
+            input.color, t.color.warn,
+            "`{}` stands open and is not toned as one",
+            input.label
+        );
+    }
+    assert_eq!(inputs[0].detail, "no open dispositions");
+    assert_eq!(inputs[1].detail, "exact retained evidence");
+    assert_eq!(inputs[3].detail, "desktop · WebAssembly");
+}
+
+/// The band is one chain — what the gate is, what it consumes, what it
+/// returns — and the four bordered tiles it replaced are not painted again.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_closure_ledger_paints_one_chain_and_never_the_tiles_again() {
+    let mut app = source_owned_app();
+    let verdict_label = owned_summary(&app).gate.label().to_uppercase();
+    let output = run_page(&mut app, PAGE_SIZE[0]);
+    let ctx = themed_context();
+    let t = Tokens::get(&ctx);
+    let painted = painted_text(&output);
+
+    for banned in [
+        "VECTORS PASSING",
+        "REFERENCE COVERAGE",
+        "QUALIFIED MODELS",
+        "RUNTIME PARITY",
+        "Gate ownership",
+    ] {
+        assert!(
+            !painted.iter().any(|text| text.text == banned),
+            "the tile strip is still painted: {banned}"
+        );
+    }
+
+    for (label, value) in [
+        ("vectors", "0/3"),
+        ("references", "0/3"),
+        ("qualified", "0/1"),
+        ("parity", "0/1"),
+    ] {
+        assert!(
+            painted
+                .iter()
+                .any(|text| text.text == label && text.color == Some(t.color.text_faint)),
+            "the `{label}` segment is missing its label or does not recede behind its value"
+        );
+        assert!(
+            painted
+                .iter()
+                .any(|text| text.text == value && text.color == Some(t.color.warn)),
+            "the `{label}` segment does not paint {value} in the tone of a ratio that stands open"
+        );
+    }
+
+    // The heading, not the section bar's button of the same name: the band is
+    // painted under the bar, so it is the lower of the two.
+    let title = painted
+        .iter()
+        .filter(|text| text.text == "Release closure")
+        .max_by(|left, right| left.visible.top().total_cmp(&right.visible.top()))
+        .expect("the band states what the gate is");
+    let verdict = painted
+        .iter()
+        .find(|text| text.text == verdict_label)
+        .expect("the chain terminates in the selection's verdict");
+    for segment in painted
+        .iter()
+        .filter(|text| text.text == "0/3" || text.text == "0/1")
+    {
+        assert!(
+            segment.visible.width() > 0.0,
+            "a segment is clipped away at the width the page is designed for: {segment:?}",
+            segment = segment.visible
+        );
+        assert!(
+            segment.visible.left() >= title.visible.right()
+                && segment.visible.right() <= verdict.visible.left(),
+            "the input cluster overlaps the heading or the verdict: {:?} against {:?} and {:?}",
+            segment.visible,
+            title.visible,
+            verdict.visible
+        );
+    }
+}
+
+/// The band degrades by clipping, never by overlapping.
+///
+/// The sentence is the first casualty — it already elided — and the cluster is
+/// floored at the heading, so a document too narrow to hold both cuts a
+/// segment rather than painting one over the words that say what the gate is.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_narrow_document_clips_the_closure_ledger_rather_than_overlapping_it() {
+    let mut app = source_owned_app();
+    let verdict_label = owned_summary(&app).gate.label().to_uppercase();
+    let output = run_page(&mut app, 620.0);
+    let painted = painted_text(&output);
+    let title = painted
+        .iter()
+        .filter(|text| text.text == "Release closure")
+        .max_by(|left, right| left.visible.top().total_cmp(&right.visible.top()))
+        .expect("the band states what the gate is");
+    let verdict = painted
+        .iter()
+        .find(|text| text.text == verdict_label)
+        .expect("the chain terminates in the selection's verdict");
+    for segment in painted
+        .iter()
+        .filter(|text| text.text == "0/3" || text.text == "0/1")
+    {
+        assert!(
+            segment.visible.left() >= title.visible.right()
+                && segment.visible.right() <= verdict.visible.left(),
+            "a 620 px document paints the cluster over the heading or the verdict: {:?}",
+            segment.visible
+        );
+    }
+}
+
+/// The segments are painted glyphs, so the node each hover region publishes is
+/// the only thing a screen reader has — and it has to carry the fact the band
+/// itself has room for only on hover.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn every_closure_segment_announces_its_ratio_and_the_fact_behind_it() {
+    let ctx = themed_context();
+    ctx.enable_accesskit();
+    let mut app = source_owned_app();
+    let size = egui::vec2(PAGE_SIZE[0], PAGE_SIZE[1]);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| super::super::show(ui, &mut app));
+        },
+    );
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .expect("qualification accessibility tree")
+        .nodes;
+    // egui gives `WidgetType::Label` AccessKit's Label role, whose text is the
+    // node's *value*; `label()` is empty on every painted-glyph segment.
+    let announcements = nodes
+        .iter()
+        .filter_map(|(_, node)| node.value())
+        .collect::<Vec<_>>();
+    for announced in [
+        "vectors 0/3, no open dispositions",
+        "references 0/3, exact retained evidence",
+        "parity 0/1, desktop · WebAssembly",
+    ] {
+        assert!(
+            announcements.iter().any(|value| *value == announced),
+            "no closure segment announced {announced:?}"
+        );
+    }
+    // This corpus holds no engine-owned cards, so the qualified segment
+    // announces the population it does govern; the exempt phrasing is pinned
+    // by `the_closure_inputs_count_gate_subjects_...` on the fresh project.
+    assert!(
+        announcements
+            .iter()
+            .any(|value| *value == "qualified 0/1, source-owned release gates"),
+        "the qualified segment does not state the population the gate governs"
+    );
+}
+
 /// The header cannot describe a column the rows do not fill, and the columns
 /// cannot describe an analysis a vector cannot name.
 #[test]
