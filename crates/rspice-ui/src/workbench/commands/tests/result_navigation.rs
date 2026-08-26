@@ -355,9 +355,7 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     assert_eq!(
         Command::OpenTaskDeck.availability(&app),
-        CommandAvailability::Disabled(
-            crate::state::absent_deck_reason()
-        ),
+        CommandAvailability::Disabled(crate::state::absent_deck_reason()),
         "a run whose deck was released has something to open and cannot"
     );
 
