@@ -548,7 +548,7 @@ fn navigator_path_names_the_occurrence_and_the_master_bound_there() {
 fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {
     let entries = PRIMITIVE_GROUPS
         .iter()
-        .flat_map(|(_, _, sections)| primitive_entries(sections))
+        .flat_map(|(_, _, _, sections)| primitive_entries(sections))
         .collect::<Vec<_>>();
     let unique = entries
         .iter()
@@ -1497,7 +1497,7 @@ fn every_shelf_glyph() -> Vec<ShelfGlyph> {
         // Library parts and project-library bands.
         ShelfGlyph::Icon(WorkbenchIcon::Models),
     ];
-    glyphs.extend(PRIMITIVE_GROUPS.iter().map(|(_, glyph, _)| *glyph));
+    glyphs.extend(PRIMITIVE_GROUPS.iter().map(|(_, glyph, _, _)| *glyph));
     for section in component_palette() {
         for entry in section.entries {
             glyphs.push(primitive_shelf_glyph(entry.kind));
@@ -1578,6 +1578,120 @@ fn every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box() {
             );
         }
     }
+}
+
+/// One painted frame of the primitive catalog: every text run it painted and
+/// every control it announced, with the disclosure position each publishes.
+#[cfg(not(target_arch = "wasm32"))]
+fn shelf_frame(
+    ctx: &egui::Context,
+    app: &RSpiceApp,
+    events: Vec<egui::Event>,
+) -> (String, Vec<(String, egui::Rect, Option<bool>)>) {
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(260.0, 1600.0),
+            )),
+            events,
+            ..egui::RawInput::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.set_width(260.0);
+                    primitive_catalog(ui, app);
+                });
+        },
+    );
+    let controls = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .map(|update| {
+            update
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| {
+                    let label = node.label()?.to_owned();
+                    let bounds = node.bounds()?;
+                    Some((
+                        label,
+                        egui::Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        ),
+                        node.is_expanded(),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    (painted_text(&output), controls)
+}
+
+/// A fresh install's shelf leads with the Passives rows: that one band opens
+/// by default, every other band folds — and states its count — until the
+/// reader unfolds it. The reader's own position then outlives the shipped
+/// default, because the default sits only behind the persisted flag.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_fresh_shelf_opens_passives_and_folds_the_rest_until_the_reader_moves_one() {
+    let app = RSpiceApp::test_instance();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+
+    // Two settling frames: the first builds the font set, the second lays
+    // out against it, and only then are the band rects worth clicking.
+    let _ = shelf_frame(&ctx, &app, Vec::new());
+    let (text, controls) = shelf_frame(&ctx, &app, Vec::new());
+
+    for passive in ["Resistor", "Capacitor", "Transmission Line"] {
+        assert!(
+            text.contains(passive),
+            "a fresh shelf shows the Passives rows, missing {passive}: {text}"
+        );
+    }
+    for folded in ["Voltage Source", "NMOS", "AND Gate", "Op-Amp"] {
+        assert!(
+            !text.contains(folded),
+            "{folded} belongs to a band a fresh install keeps folded: {text}"
+        );
+    }
+    let expanded = |controls: &[(String, egui::Rect, Option<bool>)], band: &str| {
+        let hits = controls
+            .iter()
+            .filter(|(label, _, _)| label == band)
+            .collect::<Vec<_>>();
+        assert_eq!(hits.len(), 1, "exactly one control announces {band:?}");
+        (hits[0].1, hits[0].2)
+    };
+    assert_eq!(expanded(&controls, "Passives").1, Some(true));
+    for band in ["Sources", "Analog", "Mixed signal / XSPICE"] {
+        assert_eq!(
+            expanded(&controls, band).1,
+            Some(false),
+            "{band} starts folded"
+        );
+    }
+
+    // The reader folds Passives; the press must beat the shipped default in
+    // the frame it lands in and in every frame after it.
+    let at = expanded(&controls, "Passives").0.center();
+    let _ = shelf_frame(&ctx, &app, click_events(at));
+    let (text, controls) = shelf_frame(&ctx, &app, Vec::new());
+    assert_eq!(
+        expanded(&controls, "Passives").1,
+        Some(false),
+        "the reader's fold outlives the default-open position"
+    );
+    assert!(
+        !text.contains("Resistor"),
+        "a folded Passives band paints no rows: {text}"
+    );
 }
 
 /// The shelf's meta column states the designator prefix and the default the

@@ -40,21 +40,30 @@ mod hierarchy_tree;
 mod tests;
 
 /// The shelf's primitive groups: the band's name, the family glyph its group
-/// row carries, and the palette sections it gathers. The family glyphs follow
-/// the mockup's `PART_CATALOG` group column — Passives —, Sources ◯,
-/// Analog ▷, Mixed signal ⊞ — with the non-Latin marks painted as vector
-/// geometry because the bundled faces do not hold them (see [`ShelfGlyph`]).
-const PRIMITIVE_GROUPS: [(&str, ShelfGlyph, &[&str]); 4] = [
-    ("Passives", ShelfGlyph::Text("\u{2014}"), &["Passives"]),
-    ("Sources", ShelfGlyph::Source, &["Sources"]),
+/// row carries, whether a fresh install shows the band open, and the palette
+/// sections it gathers. The family glyphs follow the mockup's `PART_CATALOG`
+/// group column — Passives —, Sources ◯, Analog ▷, Mixed signal ⊞ — with the
+/// non-Latin marks painted as vector geometry because the bundled faces do
+/// not hold them (see [`ShelfGlyph`]).
+///
+/// Passives is the one band open on first run — the mockup's
+/// `shelfOpenGroups: { Passives: true }` — so a new install's shelf leads
+/// with placeable rows instead of four folded bands over an empty-looking
+/// panel. Every position is still the reader's own once moved: only the
+/// default behind the persisted flag differs per group.
+const PRIMITIVE_GROUPS: [(&str, ShelfGlyph, bool, &[&str]); 4] = [
+    ("Passives", ShelfGlyph::Text("\u{2014}"), true, &["Passives"]),
+    ("Sources", ShelfGlyph::Source, false, &["Sources"]),
     (
         "Analog",
         ShelfGlyph::Amp,
+        false,
         &["Hierarchy", "Semiconductors", "Controlled sources"],
     ),
     (
         "Mixed signal / XSPICE",
         ShelfGlyph::Event,
+        false,
         &["Behavioral (XSPICE)"],
     ),
 ];
@@ -1702,6 +1711,7 @@ fn library_parts_section(
             ShelfGlyph::Icon(WorkbenchIcon::Models),
             "Library parts",
             rows.len(),
+            false,
         )
     } else {
         shelf_section_header(ui, "Library parts", Some(&rows.len().to_string()));
@@ -1807,7 +1817,7 @@ fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, v
 fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
     let primitive_matches = PRIMITIVE_GROUPS
         .iter()
-        .map(|(_, _, section_names)| {
+        .map(|(_, _, _, section_names)| {
             primitive_entries(section_names)
                 .into_iter()
                 .filter(|entry| matches_query(query, &[entry.label, entry.kind.display_name()]))
@@ -2093,7 +2103,7 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
     let mut armed = None;
     let visible_count = PRIMITIVE_GROUPS
         .iter()
-        .map(|(_, _, section_names)| {
+        .map(|(_, _, _, section_names)| {
             primitive_entries(section_names)
                 .into_iter()
                 .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
@@ -2104,7 +2114,7 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
         return None;
     }
     shelf_section_header(ui, "Primitives", Some(&visible_count.to_string()));
-    for (group, glyph, section_names) in PRIMITIVE_GROUPS {
+    for (group, glyph, open_default, section_names) in PRIMITIVE_GROUPS {
         let entries = primitive_entries(section_names)
             .into_iter()
             .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
@@ -2113,7 +2123,14 @@ fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
             continue;
         }
         if query.is_empty() {
-            if catalog_group_row(ui, ("component-shelf", group), glyph, group, entries.len()) {
+            if catalog_group_row(
+                ui,
+                ("component-shelf", group),
+                glyph,
+                group,
+                entries.len(),
+                open_default,
+            ) {
                 armed = primitive_rows(ui, app, &entries, 2).or(armed);
             }
         } else {
@@ -2280,6 +2297,7 @@ fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCel
             ShelfGlyph::Event,
             "Built-in XSPICE",
             descriptors.len(),
+            false,
         )
     } else {
         shelf_section_header(ui, "Built-in XSPICE", Some(&descriptors.len().to_string()));
@@ -2373,6 +2391,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCel
             ShelfGlyph::Text("VA"),
             "Generated Verilog-A",
             descriptors.len(),
+            false,
         )
     } else {
         shelf_section_header(
@@ -2452,6 +2471,7 @@ fn project_library(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> 
                 ShelfGlyph::Icon(WorkbenchIcon::Models),
                 &library,
                 cells.len(),
+                false,
             ) {
                 armed = cell_rows(ui, &cells, 2).or_else(|| armed.take());
             }
@@ -2524,10 +2544,11 @@ fn catalog_group_row(
     glyph: ShelfGlyph,
     label: &str,
     count: usize,
+    open_default: bool,
 ) -> bool {
     let t = Tokens::get(ui.ctx());
     let id = ui.make_persistent_id(key);
-    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(false));
+    let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(open_default));
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::click());
     response.widget_info(|| {
