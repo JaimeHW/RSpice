@@ -8,6 +8,7 @@
 
 use super::*;
 
+use crate::simulation::plan::AnalysisPlanError;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 
 pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
@@ -557,11 +558,15 @@ fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize 
         .count()
 }
 
-/// Names of the analyses bound to this one as a prerequisite.
+/// The analyses bound to this one as a prerequisite, in plan order.
 ///
-/// By name, because a removal review listing "Transient, Transient" tells the
-/// reader nothing about what they are about to break.
-fn analyses_depending_on(app: &RSpiceApp, id: AnalysisInstanceId) -> Vec<String> {
+/// Both halves are carried. The name is what a reader knows the analysis by —
+/// a notice listing "Transient, Transient" tells them nothing about what is in
+/// the way — and the id is what a hop to it needs.
+fn analyses_depending_on(
+    app: &RSpiceApp,
+    id: AnalysisInstanceId,
+) -> Vec<(AnalysisInstanceId, String)> {
     app.state
         .sim_setup
         .stable_analysis_plan()
@@ -576,28 +581,15 @@ fn analyses_depending_on(app: &RSpiceApp, id: AnalysisInstanceId) -> Vec<String>
                         .iter()
                         .any(|dependency| dependency.target() == id)
                 })
-                .map(|instance| instance.display_name().to_owned())
+                .map(|instance| (instance.id(), instance.display_name().to_owned()))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
 }
 
-/// Remove one analysis, stopping first if removal costs something.
-///
-/// The check is deliberately narrow: retained results attributed to this
-/// analysis, or other analyses bound to it. Anything else is removed at once,
-/// because a confirmation with nothing behind it only teaches the reader to
-/// click through the ones that matter.
-pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
-    let retained_runs = retained_runs_for_analysis(app, id);
-    let dependent_analyses = analyses_depending_on(app, id);
-    if retained_runs == 0 && dependent_analyses.is_empty() {
-        commit_analysis_removal(app, id);
-        return;
-    }
-
-    let label = app
-        .state
+/// What this analysis shows under, or a phrase that stands in for it.
+fn analysis_display_name(app: &RSpiceApp, id: AnalysisInstanceId) -> String {
+    app.state
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -607,39 +599,59 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
                 .find(|instance| instance.id() == id)
                 .map(|instance| instance.display_name().to_owned())
         })
-        .unwrap_or_else(|| "this analysis".to_owned());
+        .unwrap_or_else(|| "this analysis".to_owned())
+}
+
+/// Remove one analysis: refuse it, review it, or do it.
+///
+/// Three outcomes, decided before anything opens.
+///
+/// An analysis another one is bound to is *refused*. The plan's removal
+/// transaction refuses that case on exactly this predicate, so the destructive
+/// review this used to stage was a confirmation with only one possible ending:
+/// the reader authorised the removal, nothing was removed, and the notice they
+/// got afterwards named the blocking analyses by instance id. A refusal is not
+/// a question, so it is not asked as one.
+///
+/// An analysis with retained results and nothing bound to it is *reviewed*.
+/// That decision is genuinely the reader's: the removal will succeed, and what
+/// it costs is the attribution of results that stay in the project either way.
+///
+/// Anything else is removed at once, because a confirmation with nothing behind
+/// it only teaches the reader to click through the ones that matter.
+pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstanceId) {
+    let dependents = analyses_depending_on(app, id);
+    if !dependents.is_empty() {
+        let label = analysis_display_name(app, id);
+        app.state
+            .dialogs
+            .plan_removal_refusal
+            .open(id, label, dependents);
+        return;
+    }
+
+    let retained_runs = retained_runs_for_analysis(app, id);
+    if retained_runs == 0 {
+        commit_analysis_removal(app, id);
+        return;
+    }
+
+    let label = analysis_display_name(app, id);
     // Rows in the order the review states them; each paragraph is carried by
     // the row it explains, and the dialog puts the warnings before the asides.
     let retained = PlanRemovalConsequence::stated(
         "Retained runs holding its results",
         retained_runs.to_string(),
+    )
+    .explained(
+        PlanRemovalTone::Aside,
+        "Retained results stay in the project and stay readable. What they lose is the \
+         configuration they can be traced back to.",
     );
-    let retained = if retained_runs > 0 {
-        retained.explained(
-            PlanRemovalTone::Aside,
-            "Retained results stay in the project and stay readable. What they lose is the \
-             configuration they can be traced back to.",
-        )
-    } else {
-        retained
-    };
-    let dependents = PlanRemovalConsequence::stated(
-        "Analyses bound to it",
-        if dependent_analyses.is_empty() {
-            "none".to_owned()
-        } else {
-            dependent_analyses.join(", ")
-        },
-    );
-    let dependents = if dependent_analyses.is_empty() {
-        dependents
-    } else {
-        dependents.explained(
-            PlanRemovalTone::Warn,
-            "The analyses listed above depend on this one. Removing it leaves them unbound, and \
-             they will refuse to run until they are rebound.",
-        )
-    };
+    // Always "none" — a dependent sends the request to the refusal above and
+    // never reaches this review. It is still stated, because a reader deciding
+    // what retained results cost needs to know that nothing else is at stake.
+    let dependents = PlanRemovalConsequence::stated("Analyses bound to it", "none");
     app.state.dialogs.plan_removal_review.open(
         PlanRemovalTarget::Analysis(id),
         label,
@@ -659,6 +671,21 @@ pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
         .take_confirmed_analysis()
     {
         commit_analysis_removal(app, id);
+    }
+}
+
+/// Show the analysis a refused removal named as the one in the way.
+///
+/// The same handshake the confirmed removal uses, for the same reason: the
+/// notice records what the reader asked for and the surface that owns the plan
+/// is what acts on it, so no modal navigates another surface itself.
+///
+/// Takes the state rather than the application. Answering a notice moves what
+/// is on screen and touches nothing else, and a handler holding the whole
+/// application could mutate every subsystem to do it.
+pub(super) fn apply_requested_blocker_reveal(state: &mut AppState) {
+    if let Some(blocker) = state.dialogs.plan_removal_refusal.take_reveal_target() {
+        super::advanced_options::reveal_in_analyses(&mut state.workbench, blocker);
     }
 }
 
@@ -683,11 +710,15 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
                 .position(|instance| instance.id() == id)
         })
         .unwrap_or(0);
+    // The typed refusal is carried out of the borrow rather than stringified
+    // inside it: the plan speaks in instance ids and is right to, and the names
+    // that make a refusal readable are only resolvable out here, against the
+    // plan a refused transaction left standing.
     let result = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .remove(id, prior_run_ids)
-            .map_err(|error| error.to_string()),
-        Err(error) => Err(error),
+            .map_err(RemovalFailure::Refused),
+        Err(error) => Err(RemovalFailure::Unavailable(error)),
     };
     match result {
         Ok(receipt) => {
@@ -706,8 +737,49 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
             app.state.workbench.active_analysis_instance = next;
             record_receipt(&mut app.state, &receipt);
         }
-        Err(error) => record_failure(&mut app.state, "Remove", &error),
+        Err(RemovalFailure::Unavailable(error)) => {
+            record_failure(&mut app.state, "Remove", &error);
+        }
+        Err(RemovalFailure::Refused(error)) => {
+            let message = removal_refusal_naming_instances(app, &error);
+            record_failure(&mut app.state, "Remove", &message);
+        }
     }
+}
+
+/// Why a removal did not commit.
+///
+/// Two different things, and the difference is what the reader is told. A
+/// refusal is the plan holding its own rule and can be restated in the names
+/// the reader knows; an unreachable plan is already a sentence and has no
+/// instances to name.
+enum RemovalFailure {
+    Refused(AnalysisPlanError),
+    Unavailable(String),
+}
+
+/// Restate a refusal in the names the analyses show under.
+///
+/// The backstop refusal is reached when the plan changed underneath a staged
+/// review, or when a caller went straight to the transaction — rare, and
+/// exactly when a reader has the least context to spend on decoding
+/// `Analysis 4f2a1b3c-… is still required by 9d10e2f4-…`. Only the identities
+/// are rewritten: the sentence, and the fail-closed guarantee it reports, stay
+/// the plan's own.
+fn removal_refusal_naming_instances(app: &RSpiceApp, error: &AnalysisPlanError) -> String {
+    let AnalysisPlanError::ReferencedBy { target, dependents } = error else {
+        return error.to_string();
+    };
+    let named = |id: AnalysisInstanceId| format!("{} ({id})", analysis_display_name(app, id));
+    format!(
+        "Analysis {} is still required by {}.",
+        named(*target),
+        dependents
+            .iter()
+            .map(|dependent| named(*dependent))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {

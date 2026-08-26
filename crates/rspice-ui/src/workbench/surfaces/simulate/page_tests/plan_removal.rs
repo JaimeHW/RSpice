@@ -7,6 +7,12 @@
 //! modal at all. These press the actual Remove control rather than calling the
 //! handler, because "which route commits a plan mutation" is exactly what was
 //! wrong: three of the four committed on the first click.
+//!
+//! The analysis registry answers a fourth question the other three do not. Its
+//! dependents are the one case the plan's own transaction *refuses*, so a
+//! review staged on them could only ever be confirmed into a refusal notice —
+//! that arm states the refusal instead, and only the retained-results arm is
+//! still a question.
 
 use egui::vec2;
 
@@ -556,15 +562,178 @@ fn removing_an_empty_capture_group_needs_no_review() {
 
 // ------------------------------------------------------- analysis regression
 
-/// The analysis route this review was generalized from is unchanged.
+/// A plan with one analysis bound to another, both named distinctly.
 ///
-/// Its staging rule, its wording and its two-frame handshake are the contract
-/// the other three registries were made to match, so a refactor that quietly
-/// changed the arm it was copied from would have moved the target.
-#[test]
-fn the_analysis_route_still_stages_and_applies_as_it_did() {
-    use super::super::lifecycle::{apply_confirmed_analysis_removal, remove_analysis_instance};
+/// Returns the application it built, then `(dependent, prerequisite)`. The
+/// names are authored rather than left as the kind labels so an assertion about
+/// a name cannot pass on a coincidence: "AC" is a word two default labels and a
+/// receipt already carry.
+fn bound_pair() -> (
+    RSpiceApp,
+    crate::product::AnalysisInstanceId,
+    crate::product::AnalysisInstanceId,
+) {
     use crate::simulation::plan::AnalysisKind;
+
+    let mut app = RSpiceApp::test_instance();
+    let dependent = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("stable plan")
+        .insert(AnalysisKind::Ac)
+        .expect("AC inserts")
+        .0;
+    super::super::lifecycle::apply_analysis_action(
+        &mut app,
+        dependent,
+        super::super::AnalysisAction::RepairDependencies,
+    );
+    let prerequisite = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("stable plan")
+        .instance(dependent)
+        .expect("AC is in the plan")
+        .dependencies()[0]
+        .target();
+    let plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("stable plan");
+    plan.set_instance_name(dependent, "Gain sweep")
+        .expect("the dependent takes a name");
+    plan.set_instance_name(prerequisite, "Bias point")
+        .expect("the prerequisite takes a name");
+    (app, dependent, prerequisite)
+}
+
+/// An analysis something is bound to is refused, not reviewed.
+///
+/// This route used to stage the destructive review for exactly the case the
+/// plan's removal transaction refuses — same predicate, evaluated twice — so
+/// the reader was asked to authorise a removal whose only possible ending was
+/// a refusal notice on the next frame. Confirming did nothing, and what they
+/// were told afterwards named the blocking analysis by instance id.
+#[test]
+fn an_analysis_something_is_bound_to_refuses_removal_instead_of_reviewing_it() {
+    use super::super::lifecycle::remove_analysis_instance;
+
+    let (mut app, dependent, prerequisite) = bound_pair();
+
+    remove_analysis_instance(&mut app, prerequisite);
+
+    assert!(
+        app.state.dialogs.plan_removal_review.target.is_none(),
+        "a removal the plan refuses must not be staged as a destructive review"
+    );
+    assert_eq!(
+        app.state.dialogs.plan_removal_refusal.analysis,
+        Some(prerequisite),
+        "the refusal must be raised on the analysis whose removal was asked for"
+    );
+    assert!(
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .instance(prerequisite)
+            .is_some(),
+        "stating a refusal must not remove the analysis"
+    );
+    assert_eq!(
+        app.state.dialogs.plan_removal_refusal.label, "Bias point",
+        "the refusal must name the analysis by what it shows under"
+    );
+    assert_eq!(
+        app.state.dialogs.plan_removal_refusal.blockers,
+        vec![(dependent, "Gain sweep".to_owned())],
+        "the blocker must be carried by display name, and by id for the hop"
+    );
+    assert!(
+        !app.state
+            .dialogs
+            .plan_removal_refusal
+            .blockers
+            .iter()
+            .any(|(id, name)| name == &id.to_string()),
+        "an opaque instance id is not a name a reader can act on"
+    );
+}
+
+/// The refusal hands the reader the analysis that is in the way.
+///
+/// A notice that states a blocker and offers no way to reach it leaves the
+/// reader to find it themselves in a stack that names it nowhere else. The hop
+/// is recorded by the dialog and taken by the surface that owns the plan, the
+/// same handshake a confirmed removal uses.
+#[test]
+fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
+    use super::super::lifecycle::{apply_requested_blocker_reveal, remove_analysis_instance};
+
+    let (mut app, dependent, prerequisite) = bound_pair();
+    app.state.workbench.simulation_page = SimulationPage::Solver;
+    app.state.workbench.active_analysis_instance = Some(prerequisite);
+
+    remove_analysis_instance(&mut app, prerequisite);
+    // Nothing moves until the reader asks for it.
+    apply_requested_blocker_reveal(&mut app.state);
+    assert_eq!(
+        app.state.workbench.simulation_page,
+        SimulationPage::Solver,
+        "an unanswered refusal must not navigate anywhere"
+    );
+
+    app.state.dialogs.plan_removal_refusal.reveal = true;
+    apply_requested_blocker_reveal(&mut app.state);
+    assert_eq!(
+        app.state.workbench.simulation_page,
+        SimulationPage::Analyses,
+        "the hop must land on the page that edits an analysis"
+    );
+    assert_eq!(
+        app.state.workbench.active_analysis_instance,
+        Some(dependent),
+        "the hop must select the analysis that is blocking the removal"
+    );
+    assert!(
+        app.state.dialogs.plan_removal_refusal.analysis.is_none(),
+        "the refusal must close behind the hop it sent the reader on"
+    );
+
+    app.state.workbench.simulation_page = SimulationPage::Solver;
+    apply_requested_blocker_reveal(&mut app.state);
+    assert_eq!(
+        app.state.workbench.simulation_page,
+        SimulationPage::Solver,
+        "an answered refusal must not navigate a second time"
+    );
+}
+
+/// The hop is called what the other hop to the same place is called.
+#[test]
+fn the_refusal_and_the_options_panel_name_the_same_hop_the_same_way() {
+    assert_eq!(
+        crate::workbench::app::REVEAL_BLOCKER,
+        super::super::advanced_options::REVEAL_ACTION,
+        "two surfaces sending the reader to the Analyses page must say so in one wording"
+    );
+}
+
+/// Retained results, and nothing bound to it: still reviewed, still committed.
+///
+/// This is the arm where the confirmation is a real question. The removal will
+/// succeed, and what it costs is the attribution of datasets that stay in the
+/// project either way — so the reader decides, and the answer is applied on the
+/// surface's next frame rather than by the modal.
+#[test]
+fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
+    use super::super::lifecycle::{apply_confirmed_analysis_removal, remove_analysis_instance};
+    use crate::product::{ContentDigest, ObjectRevision};
+    use crate::simulation::plan::AnalysisKind;
+    use crate::state::{AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun};
 
     let mut app = RSpiceApp::test_instance();
     let ac = app
@@ -575,56 +744,73 @@ fn the_analysis_route_still_stages_and_applies_as_it_did() {
         .insert(AnalysisKind::Ac)
         .expect("AC inserts")
         .0;
-    super::super::lifecycle::apply_analysis_action(
-        &mut app,
-        ac,
-        super::super::AnalysisAction::RepairDependencies,
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_provenance(
+            AnalysisResultProvenance::new(
+                ac,
+                ObjectRevision::INITIAL,
+                ContentDigest::from_bytes([0x5a; 32]),
+                Vec::new(),
+            )
+            .expect("test provenance is valid"),
+        ),
     );
-    let prerequisite = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .expect("stable plan")
-        .instance(ac)
-        .expect("AC is in the plan")
-        .dependencies()[0]
-        .target();
+    app.state.simulation.runs = vec![run];
 
-    // The prerequisite AC is bound to: reviewed, because removing it unbinds
-    // an analysis that then refuses to run.
-    remove_analysis_instance(&mut app, prerequisite);
+    remove_analysis_instance(&mut app, ac);
+    assert_eq!(
+        app.state.dialogs.plan_removal_review.target,
+        Some(crate::workbench::app::PlanRemovalTarget::Analysis(ac)),
+        "a removal that orphans retained results must still be reviewed"
+    );
     assert!(
-        app.state.dialogs.plan_removal_review.target.is_some(),
-        "an analysis another one is bound to must be reviewed before it is removed"
+        app.state.dialogs.plan_removal_refusal.analysis.is_none(),
+        "a removal the plan will perform is a question, not a refusal"
+    );
+    let stated: Vec<(String, String)> = app
+        .state
+        .dialogs
+        .plan_removal_review
+        .consequences
+        .iter()
+        .map(|consequence| (consequence.fact.clone(), consequence.value.clone()))
+        .collect();
+    assert_eq!(
+        stated,
+        vec![
+            (
+                "Retained runs holding its results".to_owned(),
+                "1".to_owned()
+            ),
+            ("Analyses bound to it".to_owned(), "none".to_owned()),
+        ],
+        "the review states what removal costs and what it does not"
     );
     assert!(
         app.state
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
-            .instance(prerequisite)
+            .instance(ac)
             .is_some(),
         "staging a review must not remove the analysis"
     );
-    assert!(
-        app.state
-            .dialogs
-            .plan_removal_review
-            .consequences
-            .iter()
-            .any(|consequence| consequence.fact == "Analyses bound to it"),
-        "the review must still state what removal unbinds"
-    );
 
-    // The confirmed answer is taken exactly once, on the surface's next frame,
-    // and it drives the plan's own removal transaction — which stays
-    // fail-closed: an analysis another one is still bound to is refused by the
-    // plan, and the review's job is to say so before the reader finds out.
     app.state.dialogs.plan_removal_review.confirmed = true;
     apply_confirmed_analysis_removal(&mut app);
     assert!(
         app.state.dialogs.plan_removal_review.target.is_none(),
         "the review must close once its answer has been applied"
+    );
+    assert!(
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .instance(ac)
+            .is_none(),
+        "the confirmed removal must reach the plan's own transaction"
     );
     let status = app
         .state
@@ -633,8 +819,8 @@ fn the_analysis_route_still_stages_and_applies_as_it_did() {
         .message()
         .to_owned();
     assert!(
-        status.contains("Remove"),
-        "the confirmed removal must reach the plan's own transaction, got: {status}"
+        status.contains("Remove committed"),
+        "the commit must leave the receipt the immediate route writes, got: {status}"
     );
     apply_confirmed_analysis_removal(&mut app);
     assert_eq!(
@@ -646,12 +832,28 @@ fn the_analysis_route_still_stages_and_applies_as_it_did() {
         status,
         "an answered review must not be applied a second time"
     );
+}
 
-    // AC itself: nothing is bound to it and it has produced nothing, so it
-    // goes without a modal.
+/// A removal with nothing behind it still goes on the click that asked.
+#[test]
+fn an_analysis_with_no_dependents_and_no_results_is_removed_at_once() {
+    use super::super::lifecycle::remove_analysis_instance;
+    use crate::simulation::plan::AnalysisKind;
+
+    let mut app = RSpiceApp::test_instance();
+    let ac = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("stable plan")
+        .insert(AnalysisKind::Ac)
+        .expect("AC inserts")
+        .0;
+
     remove_analysis_instance(&mut app, ac);
     assert!(
-        app.state.dialogs.plan_removal_review.target.is_none(),
+        app.state.dialogs.plan_removal_review.target.is_none()
+            && app.state.dialogs.plan_removal_refusal.analysis.is_none(),
         "an analysis nothing depends on must not raise a modal"
     );
     assert!(
@@ -662,6 +864,59 @@ fn the_analysis_route_still_stages_and_applies_as_it_did() {
             .instance(ac)
             .is_none(),
         "it must be removed by the action that asked for it"
+    );
+}
+
+/// The transaction stays fail-closed, and says so in names.
+///
+/// The surface refuses a blocked removal before it opens anything, so the
+/// plan's own refusal is now only reached when the plan changed underneath a
+/// staged review. That is exactly when a reader has the least context to spend
+/// decoding two UUIDs, so the identities in the sentence are resolved to the
+/// names the analyses show under before it reaches the status strip.
+#[test]
+fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
+    use super::super::lifecycle::apply_confirmed_analysis_removal;
+
+    let (mut app, dependent, prerequisite) = bound_pair();
+
+    // A review staged against a plan that has since bound something to this
+    // analysis: the modal's answer reaches the transaction, and the
+    // transaction is what refuses it.
+    app.state.dialogs.plan_removal_review.open(
+        crate::workbench::app::PlanRemovalTarget::Analysis(prerequisite),
+        "Bias point".to_owned(),
+        Vec::new(),
+    );
+    app.state.dialogs.plan_removal_review.confirmed = true;
+    apply_confirmed_analysis_removal(&mut app);
+
+    assert!(
+        app.state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("stable plan")
+            .instance(prerequisite)
+            .is_some(),
+        "the refused removal must leave the plan unchanged"
+    );
+    let status = app
+        .state
+        .workbench
+        .analysis_lifecycle_status
+        .message()
+        .to_owned();
+    assert!(
+        status.contains("Remove rejected fail-closed"),
+        "the transaction must still refuse fail-closed, got: {status}"
+    );
+    assert!(
+        status.contains("Bias point") && status.contains("Gain sweep"),
+        "the refusal must name both analyses by what they show under, got: {status}"
+    );
+    assert!(
+        status.contains(&prerequisite.to_string()) && status.contains(&dependent.to_string()),
+        "and must keep the identities the plan actually refused on, got: {status}"
     );
 }
 

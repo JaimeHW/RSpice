@@ -282,8 +282,10 @@ enum StackAction {
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // A removal confirmed in the destructive review is applied here, by the
-    // surface that owns the plan, rather than by the modal that asked.
+    // surface that owns the plan, rather than by the modal that asked. The hop
+    // a refused removal offers is taken here for the same reason.
     apply_confirmed_analysis_removal(app);
+    lifecycle::apply_requested_blocker_reveal(&mut app.state);
     if let Err(error) = resolve_active_analysis_instance(&mut app.state) {
         record_failure(&mut app.state, "Analysis selection", &error);
     }

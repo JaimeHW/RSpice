@@ -15,7 +15,8 @@ mod reviews;
 
 pub(crate) use reviews::{
     DeletionInstanceResolution, LibraryDeletionReviewState, LibraryDeletionTarget,
-    PlanRemovalConsequence, PlanRemovalReview, PlanRemovalTarget, PlanRemovalTone,
+    PlanRemovalConsequence, PlanRemovalRefusal, PlanRemovalReview, PlanRemovalTarget,
+    PlanRemovalTone,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -2204,6 +2205,9 @@ pub struct DialogState {
     /// an analysis, a design variable, a saved output or a capture group —
     /// raised only where removal orphans something.
     pub(crate) plan_removal_review: PlanRemovalReview,
+    /// Why a removal the plan will not perform was refused before it was
+    /// staged. The review above asks; this one only states.
+    pub(crate) plan_removal_refusal: PlanRemovalRefusal,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
@@ -2430,6 +2434,7 @@ impl DialogState {
             || self.delete_library_dialog
             || self.library_deletion_review.target.is_some()
             || self.plan_removal_review.target.is_some()
+            || self.plan_removal_refusal.analysis.is_some()
             || self.preferences_open
             || self.hardcopy.open
             || self.drawing_sheet_setup.open

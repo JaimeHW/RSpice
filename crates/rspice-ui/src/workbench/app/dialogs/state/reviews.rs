@@ -253,3 +253,62 @@ impl PlanRemovalReview {
         *self = Self::default();
     }
 }
+
+/// Why one analysis cannot be removed at all, and what has to move first.
+///
+/// This is not a review. A review asks a question the reader's answer decides;
+/// this states a decision the plan has already made. The plan's removal
+/// transaction refuses an instance any other instance is still bound to, and it
+/// refuses it on exactly the predicate the surface can evaluate before opening
+/// anything — so staging a destructive confirmation for that case asked the
+/// reader to authorise something that could only ever end in a refusal notice.
+///
+/// The blockers are carried as `(id, name)` because both are needed and neither
+/// substitutes for the other: the name is what the reader knows the analysis
+/// by, and the id is what the hop to it needs.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PlanRemovalRefusal {
+    pub(crate) analysis: Option<crate::product::AnalysisInstanceId>,
+    /// The analysis the reader asked to remove, by the name it shows under.
+    pub(crate) label: String,
+    /// Every analysis bound to it, in plan order.
+    pub(crate) blockers: Vec<(crate::product::AnalysisInstanceId, String)>,
+    /// Set by the dialog when the reader asks to be shown the first blocker.
+    /// The surface that owns the plan performs the hop on its next frame, so
+    /// the modal never navigates another surface itself.
+    pub(crate) reveal: bool,
+}
+
+impl PlanRemovalRefusal {
+    pub(crate) fn open(
+        &mut self,
+        analysis: crate::product::AnalysisInstanceId,
+        label: String,
+        blockers: Vec<(crate::product::AnalysisInstanceId, String)>,
+    ) {
+        *self = Self {
+            analysis: Some(analysis),
+            label,
+            blockers,
+            reveal: false,
+        };
+    }
+
+    /// The blocker the reader asked to be shown, taken exactly once.
+    ///
+    /// Taking it closes the refusal: the hop leaves this analysis behind, so
+    /// leaving the notice standing over the page it lands on would state a
+    /// refusal about something the reader is no longer looking at.
+    pub(crate) fn take_reveal_target(&mut self) -> Option<crate::product::AnalysisInstanceId> {
+        if !self.reveal {
+            return None;
+        }
+        let target = self.blockers.first().map(|(id, _)| *id);
+        self.close();
+        target
+    }
+
+    pub(crate) fn close(&mut self) {
+        *self = Self::default();
+    }
+}

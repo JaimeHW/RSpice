@@ -192,6 +192,11 @@ pub(crate) use dialogs::state::{
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
+/// Test-only: the studio pins this against its own hop label, and the dialog
+/// module it lives in is private to the shell.
+#[cfg(test)]
+pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
+
 pub(crate) use schematic::edit_authority::SchematicEditAuthority;
 
 pub(crate) use dialogs::selection::workflow::{
@@ -861,6 +866,7 @@ impl RSpiceApp {
         self.process_rename_cell_dialog(ctx);
         self.process_library_deletion_review_dialog(ctx);
         self.process_plan_removal_review_dialog(ctx);
+        self.process_plan_removal_refusal_dialog(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();
