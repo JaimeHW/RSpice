@@ -665,6 +665,14 @@ pub(super) struct PopupChoice {
 /// fills the list with `ui.button`, so a card head that used it carried two
 /// controls this workbench does not otherwise draw. The list geometry here is
 /// the select's option list, which is the only drop-down these pages have.
+///
+/// A row is reachable from the keyboard, and taking one there does what taking
+/// one with the pointer does. Only the available rows sense clicks, which is
+/// also what makes them focusable, so tabbing walks the choices that can be
+/// taken and skips the ones that state why they cannot. The explicit close is
+/// the half egui does not do: a `CloseOnClick` popup is dismissed by a *pointer*
+/// click and by nothing else, so Space or Enter on the focused row used to add
+/// the dimension and leave the list standing over the page it had just changed.
 pub(super) fn command_popup(
     ui: &mut Ui,
     id_salt: &str,
@@ -753,6 +761,9 @@ pub(super) fn command_popup(
                 }
             }
         });
+    if picked.is_some() {
+        egui::Popup::close_id(ui.ctx(), popup_id);
+    }
     picked
 }
 
@@ -842,6 +853,240 @@ pub(super) fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+
+    /// What the trigger of the harness popup announces.
+    const TRIGGER: &str = "Add something";
+    /// The choice that can be taken.
+    const AVAILABLE: &str = "Available choice";
+    /// The choice that states why it cannot.
+    const BLOCKED: &str = "Blocked choice";
+
+    /// One [`super::command_popup`] driven by keyboard and pointer.
+    ///
+    /// Rendered on its own rather than through a page, because what is under
+    /// test is the popup's own interaction contract and a route around it
+    /// would put a page's layout between the assertion and the row.
+    ///
+    /// Each pass keeps the accessibility tree it published, so a row is found
+    /// by the string a screen reader is given and the focused widget is named
+    /// by looking its id up in that same tree — an AccessKit node id is the
+    /// egui id's value, which is what makes the two tables joinable.
+    struct PopupHarness {
+        ctx: egui::Context,
+        choices: Vec<super::PopupChoice>,
+        picked: Option<usize>,
+        nodes: Vec<(u64, String, egui::Rect)>,
+    }
+
+    impl PopupHarness {
+        /// A harness with one takeable choice and one refused one, settled.
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            ctx.enable_accesskit();
+            let mut popup = Self {
+                ctx,
+                choices: vec![
+                    super::PopupChoice {
+                        label: AVAILABLE.to_owned(),
+                        unavailable: None,
+                    },
+                    super::PopupChoice {
+                        label: BLOCKED.to_owned(),
+                        unavailable: Some("already declared"),
+                    },
+                ],
+                picked: None,
+                nodes: Vec::new(),
+            };
+            // Twice: the first pass builds the font set and the second lays
+            // out against it, so a rectangle measured here is the one the
+            // control ends up in.
+            popup.pass(Vec::new());
+            popup.pass(Vec::new());
+            popup
+        }
+
+        fn pass(&mut self, events: Vec<egui::Event>) {
+            let choices = &self.choices;
+            let mut picked = None;
+            let output = self.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(420.0, 320.0),
+                    )),
+                    events,
+                    ..egui::RawInput::default()
+                },
+                |ui| {
+                    picked = super::command_popup(
+                        ui,
+                        "page-kit.popup-keyboard",
+                        crate::ui::widgets::Button::new(TRIGGER),
+                        "nothing can be added",
+                        choices,
+                    );
+                },
+            );
+            self.picked = picked;
+            self.nodes = output
+                .platform_output
+                .accesskit_update
+                .map(|update| {
+                    update
+                        .nodes
+                        .iter()
+                        .filter_map(|(id, node)| {
+                            let label = node.label()?.to_owned();
+                            let bounds = node.bounds()?;
+                            Some((
+                                id.0,
+                                label,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                                ),
+                            ))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+
+        /// Press and release the pointer over the control announcing `label`.
+        fn click(&mut self, label: &str) {
+            let at = self
+                .nodes
+                .iter()
+                .find(|(_, announced, _)| announced.as_str() == label)
+                .unwrap_or_else(|| panic!("no control announces {label:?}: {:?}", self.announced()))
+                .2
+                .center();
+            self.pass(vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ]);
+            self.pass(Vec::new());
+        }
+
+        fn key(&mut self, key: egui::Key) {
+            self.pass(vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::default(),
+            }]);
+        }
+
+        /// What the widget holding keyboard focus announces, if anything.
+        fn focused(&self) -> Option<String> {
+            let id = self.ctx.memory(egui::Memory::focused)?;
+            self.nodes
+                .iter()
+                .find(|(node, _, _)| *node == id.value())
+                .map(|(_, label, _)| label.clone())
+        }
+
+        fn announced(&self) -> Vec<&str> {
+            self.nodes
+                .iter()
+                .map(|(_, label, _)| label.as_str())
+                .collect()
+        }
+    }
+
+    /// A popup row is taken from the keyboard, and taking it dismisses the list.
+    ///
+    /// The rows were click-sensed and announced correctly from the start, so
+    /// egui already turned Space and Enter on the focused row into a click.
+    /// What it does not do is close the list: a `CloseOnClick` popup is
+    /// dismissed by a *pointer* click and by nothing else, so the keyboard
+    /// path added the dimension and left the choices standing over the page.
+    #[test]
+    fn a_command_popup_row_is_taken_from_the_keyboard() {
+        let mut popup = PopupHarness::new();
+        popup.click(TRIGGER);
+        assert!(
+            popup.announced().contains(&AVAILABLE),
+            "the trigger opens the list; it announced {:?}",
+            popup.announced()
+        );
+
+        // Whether the click left focus on the trigger is egui's business, so
+        // the walk is bounded rather than counted.
+        for _ in 0..4 {
+            if popup.focused().as_deref() == Some(AVAILABLE) {
+                break;
+            }
+            popup.key(egui::Key::Tab);
+        }
+        assert_eq!(
+            popup.focused().as_deref(),
+            Some(AVAILABLE),
+            "tabbing reaches the takeable row; focus sat on {:?}",
+            popup.focused()
+        );
+
+        popup.key(egui::Key::Enter);
+        assert_eq!(
+            popup.picked,
+            Some(0),
+            "Enter on the focused row takes that choice"
+        );
+        popup.pass(Vec::new());
+        assert!(
+            !popup.announced().contains(&AVAILABLE),
+            "and the list closes behind it; it still announced {:?}",
+            popup.announced()
+        );
+    }
+
+    /// A refused row is listed, and keyboard focus never lands on it.
+    ///
+    /// The list keeps every choice the domain has, including the ones that
+    /// cannot be taken — a list that silently shortens teaches nothing. But a
+    /// refused row is not a control: it senses hover only, which is also what
+    /// keeps it out of the tab order, so the keyboard walks exactly the rows
+    /// that can be acted on.
+    #[test]
+    fn an_unavailable_command_popup_row_is_listed_but_never_focused() {
+        let mut popup = PopupHarness::new();
+        popup.click(TRIGGER);
+        assert!(
+            popup.announced().contains(&BLOCKED),
+            "a refused choice stays listed; it announced {:?}",
+            popup.announced()
+        );
+
+        let mut visited = Vec::new();
+        for _ in 0..6 {
+            popup.key(egui::Key::Tab);
+            if let Some(label) = popup.focused() {
+                visited.push(label);
+            }
+        }
+        assert!(
+            visited.iter().any(|label| label.as_str() == AVAILABLE),
+            "the walk reached the takeable row; it visited {visited:?}"
+        );
+        assert!(
+            !visited.iter().any(|label| label.as_str() == BLOCKED),
+            "and never the refused one; it visited {visited:?}"
+        );
+    }
 
     /// Every `.rs` file the Simulation Studio ships, read at test time.
     ///
