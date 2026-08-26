@@ -8,6 +8,7 @@
 mod accessibility;
 mod capture_groups;
 mod field_editing;
+mod registry_honesty;
 mod settings_switch;
 
 use egui::{Rect, vec2};
