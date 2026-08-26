@@ -393,20 +393,22 @@ impl ModelLibrary {
         }
     }
 
-    /// Create a new library
+    /// Create a new library.
+    ///
+    /// A new library declares no corners. A corner is a binding to a `.lib`
+    /// section, so one can only exist where a source declares a section to
+    /// bind: every path that loads, imports, or authors a sectioned source
+    /// builds the corner catalog from that source's own section names, and
+    /// the Corners page authors the rest. Seeding tt/ff/ss/fs/sf here instead
+    /// gave every library five corners bound to nothing — including the
+    /// compiled-in foundation catalog, which has no source file and so can
+    /// never resolve one — and the Corners page correctly reported all five
+    /// as unresolved on a project that had done nothing wrong.
     pub fn new(name: impl Into<String>) -> Self {
-        let mut lib = Self {
+        Self {
             name: name.into(),
             ..Default::default()
-        };
-        // Add standard corners by default
-        for corner in ProcessCorner::standard_corners() {
-            if corner.is_default {
-                lib.selected_corner = Some(corner.name.clone());
-            }
-            lib.corners.insert(corner.name.clone(), corner);
         }
-        lib
     }
 
     /// Set technology

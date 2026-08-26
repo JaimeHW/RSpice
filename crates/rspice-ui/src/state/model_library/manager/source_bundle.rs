@@ -533,12 +533,11 @@ pub(super) fn build(
         })
         .collect();
     library.source_edges.sort();
+    // The bundle's own sections are the whole corner catalog. Catalog and
+    // selection are cleared together: a library pointing at a corner it does
+    // not define fails projection later with "selected corner does not
+    // exist". A section below re-selects when the source declares one.
     library.corners.clear();
-    // `ModelLibrary::new` seeds the standard corners and selects "tt".
-    // Clearing the catalogue without clearing the selection leaves a
-    // library pointing at a corner it no longer defines, which fails
-    // projection later with "selected corner does not exist". A section
-    // below re-selects when the source actually declares one.
     library.selected_corner = None;
     for section_name in result.section_names() {
         let mut corner = ProcessCorner::from_composite_section(section_name, root.clone(), false);

@@ -943,6 +943,17 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
         .get_library_mut(&name)
         .expect("the fixture library is retained")
         .selected_corner = Some("zz".to_owned());
+    // A second declarer, authored rather than assumed: a library declares TT
+    // only by carrying a TT section, so the ambiguity this case is about has to
+    // be built from a source that has one.
+    state
+        .model_library_manager
+        .load_library_bytes(
+            "second-declarer.lib",
+            b".lib TT\n.model pch PMOS (LEVEL=1 KP=1e-3)\n.endl TT\n".to_vec(),
+            None,
+        )
+        .expect("the second fixture source parses");
     let report = collect_report(&state);
     let binding = report
         .blockers

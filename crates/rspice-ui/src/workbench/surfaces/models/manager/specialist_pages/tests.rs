@@ -146,6 +146,29 @@ fn a_corner_bound_to_nothing_at_all_reports_no_executable_bindings() {
     assert_eq!(corner_blocker(&bare, &ProcessCorner::new("floating")), None);
 }
 
+/// A project that has attached nothing has no corner bindings to report.
+///
+/// `ModelLibrary::new` used to seed tt/ff/ss/fs/sf into every library it made,
+/// so the compiled-in foundation catalog — which has no source file, and so
+/// can bind no section — opened a brand-new project on five red rows, a
+/// blocked default corner, and no control that could ever resolve them: Bind
+/// section can only fail against a library that declares none. The page's own
+/// empty state is the truthful reading of a project that has attached nothing.
+#[test]
+fn a_fresh_project_reports_no_corner_bindings_at_all() {
+    let mut state = AppState::default();
+    let mut pending = Vec::new();
+    let app = ManagerRenderContext {
+        state: &mut state,
+        pending_actions: &mut pending,
+    };
+
+    assert!(
+        corner_rows(&app).is_empty(),
+        "the compiled-in catalog declares no section, so it declares no corner"
+    );
+}
+
 /// The run's answer for one library and its execution-active corner.
 ///
 /// It goes through the persisted shape a run actually reads, and through the
