@@ -320,6 +320,7 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
     };
 
     let close = Cell::new(false);
+    let reveal = Cell::new(false);
     let picked = Cell::new(None::<NumericOverrideOption>);
     let clear = Cell::new(None::<NumericOverrideOption>);
     let apply = Cell::new(false);
@@ -339,7 +340,10 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
                 &format!("Advanced options · {name}"),
                 Some((status.as_str(), Tone::Neutral)),
                 |ui| {
+                    // Right to left, so Close stays furthest right and the
+                    // hop back sits beside it.
                     close.set(Button::new("Close").show(ui).clicked());
+                    reveal.set(Button::new(REVEAL_ACTION).show(ui).clicked());
                 },
             );
         },
@@ -405,6 +409,10 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
 
+    if reveal.get() {
+        reveal_in_analyses(&mut app.state.workbench, instance);
+        return;
+    }
     if close.get() {
         app.state.workbench.advanced_options = None;
         return;
@@ -541,6 +549,29 @@ fn editor_row(
     {
         clear.set(Some(row.option));
     }
+}
+
+/// What the head's hop back to the analysis is called.
+pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
+
+/// Show the analysis this panel is open on, on the page that edits it.
+///
+/// The route in is one-way otherwise. `Options…` on the analysis header sends
+/// the reader to the Solver page and opens this panel there, and the only
+/// control the panel carried was `Close` — which leaves them on Solver, three
+/// routes away from the form they came from, with nothing on screen naming the
+/// way back. The two facts the Analyses page needs are the page and the
+/// instance, and both are already in hand here.
+///
+/// The panel is deliberately left open. This is a hop, not a dismissal: the
+/// reader who returns to Solver finds the same analysis's options where they
+/// left them, and `Close` remains the way to say they are done with it.
+pub(super) fn reveal_in_analyses(
+    workbench: &mut crate::workbench::state::WorkbenchState,
+    instance: AnalysisInstanceId,
+) {
+    workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    workbench.active_analysis_instance = Some(instance);
 }
 
 /// Open the panel on one analysis.

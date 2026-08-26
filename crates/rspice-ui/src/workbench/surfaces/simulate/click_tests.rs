@@ -666,3 +666,64 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
         "and nothing is left claiming exclusive keyboard intent"
     );
 }
+
+// ------------------------------------------------ advanced options hand-back
+
+/// The advanced-options panel hands the reader back to its analysis.
+///
+/// `Options…` on the analysis header is a hop: it selects the Solver route and
+/// opens the sectioned panel there, on the instance it was pressed for. Until
+/// this control the only way out was `Close`, which leaves the reader on
+/// Solver with the analysis they asked about three routes away and nothing on
+/// screen naming it.
+///
+/// The selection starts on a *different* instance, so the assertion is that
+/// the hop carried the panel's own subject rather than that it left whatever
+/// was already selected in place.
+#[test]
+fn open_in_analyses_returns_the_advanced_options_panel_to_its_analysis() {
+    use crate::simulation::plan::AnalysisKind;
+
+    let mut app = RSpiceApp::test_instance();
+    let (first, reported) = {
+        let plan = app
+            .state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("the test instance has a stable plan");
+        while plan.instances().len() < 2 {
+            plan.insert(AnalysisKind::Transient)
+                .expect("a transient inserts");
+        }
+        let ids = plan
+            .instances()
+            .iter()
+            .map(|instance| instance.id())
+            .collect::<Vec<_>>();
+        (ids[0], ids[ids.len() - 1])
+    };
+    assert_ne!(first, reported, "the fixture needs two distinct analyses");
+    // The same entry point the analysis header's Options… uses, so what this
+    // presses is the panel the product opens rather than one arranged here.
+    super::page_solver::open_for_analysis(&mut app, reported)
+        .expect("a transient carries authorable options");
+    app.state.workbench.active_analysis_instance = Some(first);
+
+    // Tall enough that the panel, which is the last card on a long Solver
+    // page, is inside the surface's own scroll viewport: a control below the
+    // fold still publishes its rectangle, and a press aimed at that rectangle
+    // lands outside the clip and reaches nothing.
+    let mut studio = Studio::open(app, SimulationPage::Solver, (1280.0, 4000.0));
+    studio.click(|label| label == super::advanced_options::REVEAL_ACTION);
+
+    assert_eq!(
+        studio.app.state.workbench.simulation_page,
+        SimulationPage::Analyses,
+        "the hop lands on the one route that edits an analysis"
+    );
+    assert_eq!(
+        studio.app.state.workbench.active_analysis_instance,
+        Some(reported),
+        "and it opens on the analysis the panel was reporting"
+    );
+}
