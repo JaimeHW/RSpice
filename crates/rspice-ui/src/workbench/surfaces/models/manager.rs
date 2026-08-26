@@ -8,6 +8,7 @@ mod adoption;
 mod bindings;
 mod bins;
 mod browser;
+mod catalog_scan;
 mod corner_ops;
 mod corners;
 mod corpus;
@@ -61,6 +62,9 @@ use crate::workbench::state::{
 use crate::workbench::{AppState, RSpiceApp};
 
 use bindings::{ConsumerIndex, effective_model_consumers};
+use catalog_scan::project_catalog_scan;
+#[cfg(test)]
+use catalog_scan::sort_catalog_rows;
 // The shared painters, re-exported at this module's own path so every page
 // under it keeps naming them through its `use super::*` — the split moved
 // where they are written, not what any caller says.
@@ -1374,13 +1378,22 @@ struct ProjectModelRow {
     /// Whether this row's library holds a source whose bytes no longer hash to
     /// its pin. It qualifies the source cell, so it is painted over it.
     drifted: bool,
-    /// The first consumer, which is all the row column shows.
+    /// The first consumer's instance designator, which is what the column has
+    /// room to name.
     usage: Option<String>,
+    /// How many instances name this model, so the cell can say how many it is
+    /// not naming. Counted in the scan that took the first one: asking the
+    /// consumer index again while painting would be a second read per row.
+    usage_count: usize,
     vectors: usize,
 }
 
 /// Where the source column ends, as a fraction of the catalog row.
 const SOURCE_COLUMN_END: f32 = 0.20 + 0.17 + 0.22;
+
+/// Where the status column begins, as a fraction of the catalog row: the sum
+/// of the five fractions the header above declares before it.
+const STATUS_COLUMN_START: f32 = 0.20 + 0.17 + 0.22 + 0.16 + 0.10;
 
 /// One frame's worth of catalog derivation, kept together so every part of the
 /// page reads the same pass over the design.
@@ -1401,86 +1414,45 @@ struct ProjectCatalogScan {
     consumer_diagnostics: Vec<bindings::BindingDiagnostic>,
 }
 
-fn project_catalog_scan(
-    app: &ManagerRenderContext<'_>,
-    consumers: &ConsumerIndex,
-) -> ProjectCatalogScan {
-    let query = app
-        .state
-        .workbench
-        .models_view
-        .catalog_query
-        .trim()
-        .to_ascii_lowercase();
-    let facet = app.state.workbench.models_view.project_facet;
-    let mut rows = Vec::new();
-    let mut facets = [0usize; ProjectModelFacet::ALL.len()];
-    let mut review_shown = 0usize;
-    for library in app.state.model_library_manager.libraries_sorted() {
-        let pinned = model_is_pinned(library);
-        let built_in = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
-        let drifted = !drift::findings_for(app.state, &library.name).is_empty();
-        let library_source = library.root_path.as_deref().map(path_label);
-        for model in library.models.values() {
-            let usages = consumers.of(library, &model.name);
-            let review = model_needs_review(library, model);
-            let matches = |facet: ProjectModelFacet| match facet {
-                ProjectModelFacet::All => true,
-                ProjectModelFacet::Bound => !usages.is_empty(),
-                ProjectModelFacet::Pinned => pinned,
-                ProjectModelFacet::Review => review,
-                ProjectModelFacet::BuiltIn => built_in,
-            };
-            for (index, candidate) in ProjectModelFacet::ALL.into_iter().enumerate() {
-                facets[index] += usize::from(matches(candidate));
-            }
-            if !matches(facet) {
-                continue;
-            }
-            if !query.is_empty() && !model_matches_query(library, model, &query) {
-                continue;
-            }
-            if review {
-                review_shown += 1;
-            }
-            rows.push(ProjectModelRow {
-                library: library.name.clone(),
-                model: model.name.clone(),
-                family: model.model_type.display_name(),
-                source: model
-                    .file_path
-                    .as_deref()
-                    .map(path_label)
-                    .or_else(|| library_source.clone())
-                    .unwrap_or_else(|| match library.source_authority {
-                        ModelSourceAuthority::BuiltIn => "RSpice built-in".to_owned(),
-                        ModelSourceAuthority::External => "external source".to_owned(),
-                        ModelSourceAuthority::RetainedImport { .. } => "retained import".to_owned(),
-                        ModelSourceAuthority::ProjectOwned { .. } => "project source".to_owned(),
-                    }),
-                pinned,
-                review,
-                drifted,
-                usage: usages.first().cloned(),
-                vectors: library
-                    .model_qualification
-                    .get(&model.name)
-                    .map_or(0, |qualification| {
-                        qualification
-                            .suites
-                            .iter()
-                            .map(|suite| suite.vectors.len())
-                            .sum()
-                    }),
-            });
+/// What the catalog's STATUS column says about a row, and in what tone.
+///
+/// The word and the tone are one value rather than a cell that says one thing
+/// and a colour chosen beside it, which is how a table comes to paint "review"
+/// in the tone of a settled state.
+/// A built-in card's compiled-in authority is deliberately *not* one of these.
+/// The SOURCE cell beside it already reads "RSpice built-in" on every one of
+/// those rows, and a status column that restates its neighbour down the whole
+/// table is wallpaper: it costs a column's width and carries nothing. The
+/// detail band says it once, where the source is named once.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CatalogStatus {
+    /// Something on this card an engineer has to look at.
+    Review,
+    /// The bytes behind it are retained, so a run can reproduce it.
+    Pinned,
+    /// Nothing to say about this row that its other cells do not already say.
+    Unstated,
+}
+
+impl CatalogStatus {
+    /// The word the cell paints, which is also what the column orders by.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::Pinned => "pinned",
+            Self::Unstated => "",
         }
     }
-    sort_catalog_rows(&mut rows, app.state.workbench.models_view.catalog_sort);
-    ProjectCatalogScan {
-        rows,
-        facets,
-        review: review_shown,
-        consumer_diagnostics: consumers.diagnostics.clone(),
+
+    /// A pin is a settled state and reads as one; only the finding is toned
+    /// like a finding. A table that painted both in the warning colour would
+    /// be a table where the colour means nothing.
+    fn tone(self, t: &Tokens) -> Color32 {
+        match self {
+            Self::Review => t.color.warn,
+            Self::Pinned => t.color.text_dim,
+            Self::Unstated => t.color.text_faint,
+        }
     }
 }
 
@@ -1489,81 +1461,14 @@ fn project_catalog_scan(
 /// One owner, because the cell and the column's ordering are the same fact:
 /// when the row painted its own status inline, ordering by status would have
 /// been ordering by a second reading of it.
-fn catalog_status(row: &ProjectModelRow) -> &'static str {
+fn catalog_status(row: &ProjectModelRow) -> CatalogStatus {
     if row.review {
-        "review"
+        CatalogStatus::Review
     } else if row.pinned {
-        "pinned"
+        CatalogStatus::Pinned
     } else {
-        ""
+        CatalogStatus::Unstated
     }
-}
-
-/// Put the derived rows in the order the reader asked for.
-///
-/// This reorders a vector the page has already built — the rows that survived
-/// the facet and the query — so a header click costs a sort of what is on the
-/// page and never another pass over the corpus. The model identity is always
-/// the final tie-break, which is what keeps the order total: two rows equal on
-/// the chosen column still land in the same place on every frame.
-fn sort_catalog_rows(rows: &mut [ProjectModelRow], sort: ModelsTableSort) {
-    rows.sort_by(|left, right| {
-        let primary = match sort.key {
-            // The identity tie-break below *is* the model order.
-            ModelsCatalogSortKey::Model => std::cmp::Ordering::Equal,
-            ModelsCatalogSortKey::Family => case_folded_cmp(left.family, right.family),
-            ModelsCatalogSortKey::Source => case_folded_cmp(&left.source, &right.source),
-            ModelsCatalogSortKey::UsedBy => case_folded_cmp(
-                left.usage.as_deref().unwrap_or(""),
-                right.usage.as_deref().unwrap_or(""),
-            ),
-            ModelsCatalogSortKey::Vectors => left.vectors.cmp(&right.vectors),
-            ModelsCatalogSortKey::Status => catalog_status(left).cmp(catalog_status(right)),
-        };
-        let identity = case_folded_cmp(&left.model, &right.model)
-            .then_with(|| left.library.cmp(&right.library));
-        let ordering = primary.then(identity);
-        if sort.descending {
-            ordering.reverse()
-        } else {
-            ordering
-        }
-    });
-}
-
-/// Order two names exactly as comparing their `to_ascii_lowercase` would,
-/// without allocating either one.
-///
-/// The catalog lower-cased both sides inside the comparator, which allocates
-/// two strings per comparison — well over a hundred thousand allocations to
-/// order one frame of a corpus-sized catalog. Folding ASCII per byte, rather
-/// than reaching for `char::to_lowercase`, keeps the ordering identical to the
-/// one this replaces; full Unicode folding would be both slower and a
-/// different order.
-fn case_folded_cmp(left: &str, right: &str) -> std::cmp::Ordering {
-    left.bytes()
-        .map(|byte| byte.to_ascii_lowercase())
-        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
-}
-
-/// Whether a search term appears anywhere a catalog row reports.
-///
-/// Matched field by field rather than by joining the card into one haystack:
-/// the join allocated a string per model per frame, including the whole
-/// parameter map, and was thrown away immediately.
-fn model_matches_query(library: &ModelLibrary, model: &DeviceModel, query: &str) -> bool {
-    let contains = |field: &str| {
-        field.len() >= query.len()
-            && field
-                .as_bytes()
-                .windows(query.len())
-                .any(|window| window.eq_ignore_ascii_case(query.as_bytes()))
-    };
-    contains(&model.name)
-        || contains(&model.description)
-        || contains(model.model_type.display_name())
-        || contains(&library.name)
-        || model.parameters.keys().any(|parameter| contains(parameter))
 }
 
 fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &ProjectCatalogPass) {
@@ -1678,7 +1583,15 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    let row_label = format!("{} in {}", row.model, row.library);
+    // Every cell in this row is painted, so nothing in it reaches a screen
+    // reader except what this node says. The status is toned rather than
+    // spelled out for a sighted reader, which makes it exactly the cell that
+    // would otherwise be legible only to one.
+    let status = catalog_status(row);
+    let row_label = match status {
+        CatalogStatus::Unstated => format!("{} in {}", row.model, row.library),
+        status => format!("{} in {} · {}", row.model, row.library, status.label()),
+    };
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -1692,7 +1605,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         app.state.select_model_library(&row.library);
         app.state.workbench.selected_model = Some(row.model.clone());
     }
-    let status = catalog_status(row);
+    let used_by = used_by_cell(row);
     paint_columns(
         ui,
         rect,
@@ -1700,14 +1613,58 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
             (&row.model, 0.20, true),
             (row.family, 0.17, false),
             (&row.source, 0.22, false),
-            (row.usage.as_deref().unwrap_or(""), 0.16, false),
+            (&used_by, 0.16, true),
             (&row.vectors.to_string(), 0.10, true),
-            (status, 0.15, true),
+            // The status cell is painted below, in its own tone.
+            ("", 0.15, true),
         ],
     );
+    paint_status_cell(ui, rect, status);
     if row.drifted {
         drift::paint_source_chip(ui, rect, SOURCE_COLUMN_END);
     }
+}
+
+/// The USED BY cell: one instance, and how many more there are.
+///
+/// A model bound eleven times used to show the same single designator as one
+/// bound once, so the column could not be read for what it is actually for —
+/// finding the models the design leans on. The full list is the detail pane's
+/// where-used card; this says which one and how many.
+fn used_by_cell(row: &ProjectModelRow) -> String {
+    match (row.usage.as_deref(), row.usage_count) {
+        (None, _) => String::new(),
+        (Some(first), count) if count <= 1 => first.to_owned(),
+        (Some(first), count) => format!("{first} · +{}", count - 1),
+    }
+}
+
+/// The row's status, in its state's tone.
+///
+/// Flat toned mono text rather than a bordered pill: the same treatment the
+/// plan manager's lifecycle word carries and the same one the approved mockup
+/// renders. A box repeated down every row of a corpus-sized table is
+/// decoration, and it is the tone that carries the state.
+fn paint_status_cell(ui: &Ui, rect: egui::Rect, status: CatalogStatus) {
+    if status == CatalogStatus::Unstated {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let left = rect.left() + rect.width() * STATUS_COLUMN_START + 5.0;
+    let font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let label = crate::workbench::design_system::elide_text(
+        ui,
+        status.label(),
+        &font,
+        (rect.right() - left - 5.0).max(1.0),
+    );
+    ui.painter().text(
+        egui::pos2(left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        font,
+        status.tone(&t),
+    );
 }
 
 fn catalog_footer(ui: &mut Ui, shown: usize, total: usize, review: usize, noun: &str) {

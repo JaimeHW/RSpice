@@ -35,6 +35,18 @@ struct SelectedModelDetail<'a> {
     pinned: bool,
     project_owned: bool,
     source_available: bool,
+    /// Whether this card carries a finding an engineer has to look at, and
+    /// whether its library's retained bytes still hash to their pin. Both are
+    /// stated in the header band rather than only in the catalog row above it:
+    /// a reader who arrived at this pane from anywhere else could not see the
+    /// row's cell.
+    review: bool,
+    drifted: bool,
+    /// Whether the definition is one of the simulator's own compiled-in cards.
+    engine_owned: bool,
+    /// Where the card is written — `OPA189.lib:41` — when the parse retained
+    /// both the file and the line.
+    source_reference: Option<String>,
     /// The parameter rows the column paints, already ordered and truncated.
     parameters: Vec<(String, String, &'static str)>,
     parameter_total: usize,
@@ -48,6 +60,10 @@ struct SelectedModelDetail<'a> {
     usages: &'a [String],
     selected_component: Option<u64>,
     binding_block_reason: Option<String>,
+    /// The reference designator the bind action would land on, resolved only
+    /// when it would actually land: a primary that names an instance it is
+    /// refusing to bind to is worse than one that says "selection".
+    bind_target: Option<String>,
 }
 
 /// What the card itself declares about the device's operating envelope.
@@ -144,6 +160,20 @@ fn project_selection<'a>(
             .err()
         },
     );
+    // One walk of the *sheet* for one designator, and only while the action is
+    // live. The catalog is the corpus-sized side of this pane; the schematic
+    // is the side the consumer index already walks once a frame.
+    let bind_target = selected_component
+        .filter(|_| binding_block_reason.is_none())
+        .and_then(|component_id| {
+            app.state
+                .schematic
+                .components
+                .iter()
+                .find(|component| component.id == component_id)
+                .map(|component| component.name.clone())
+        })
+        .filter(|reference| !reference.is_empty());
 
     Ok(SelectedModelDetail {
         library: library.name.clone(),
@@ -154,6 +184,18 @@ fn project_selection<'a>(
         pinned: library.has_retained_closure(),
         project_owned: library.source_authority.is_project_owned(),
         source_available: !library.source_contents.is_empty() || model.file_path.is_some(),
+        review: model_needs_review(library, model),
+        drifted: !drift::findings_for(app.state, &library.name).is_empty(),
+        engine_owned: matches!(library.source_authority, ModelSourceAuthority::BuiltIn),
+        source_reference: model.file_path.as_deref().map(|path| {
+            // The line is the one the card *starts* on: the parse retains a
+            // card's position, not a position per parameter, and claiming a
+            // line per row would be inventing provenance the source never had.
+            model.source_line.map_or_else(
+                || path_label(path),
+                |line| format!("{}:{line}", path_label(path)),
+            )
+        }),
         parameters,
         parameter_total,
         typed_schema_fields: library
@@ -187,6 +229,7 @@ fn project_selection<'a>(
         usages: consumers.of(library, &model.name),
         selected_component,
         binding_block_reason,
+        bind_target,
     })
 }
 
@@ -211,6 +254,10 @@ pub(super) fn selected_model_detail(
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
+                // One line of identity. A long model name wrapping the band
+                // open pushes the cards below it off the page, which is the
+                // same failure the action row's allocation guards against.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.label(
                     RichText::new(&detail.model)
                         .monospace()
@@ -225,6 +272,28 @@ pub(super) fn selected_model_detail(
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(t.color.text_dim),
                 );
+                // The band's own state, beside the identity it qualifies. Each
+                // word is a fact this pane already holds; nothing here is a
+                // verdict the release gate has not published — that page owns
+                // "qualified", and repeating it from weaker evidence is how two
+                // surfaces come to disagree about one model.
+                for (word, tone) in [
+                    ("review", detail.review.then_some(t.color.warn)),
+                    ("drift", detail.drifted.then_some(t.color.warn)),
+                    ("pinned", detail.pinned.then_some(t.color.ok)),
+                    (
+                        "engine-owned",
+                        detail.engine_owned.then_some(t.color.text_faint),
+                    ),
+                ] {
+                    if let Some(tone) = tone {
+                        ui.label(
+                            RichText::new(word)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                .color(tone),
+                        );
+                    }
+                }
             });
             // Right to left, so the Models page's one accent primary — the
             // binding this pane exists to make — sits hard against the right
@@ -241,7 +310,15 @@ pub(super) fn selected_model_detail(
                 |ui| {
                     ui.set_min_width(track);
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    let bind = Button::new("Bind to selection…")
+                    // The primary names the instance it would bind, once there
+                    // is exactly one and it would take the binding. "Bind to
+                    // selection…" is the same control with nothing to name;
+                    // the base spelling is what the control ratchet reads.
+                    let bind_label = detail.bind_target.as_deref().map_or_else(
+                        || "Bind to selection…".to_owned(),
+                        |reference| format!("Bind to {reference}…"),
+                    );
+                    let bind = Button::new(&bind_label)
                         .accent()
                         .enabled(
                             detail.selected_component.is_some()
@@ -326,7 +403,7 @@ pub(super) fn selected_model_detail(
         ui.columns(4, |columns| {
             parameter_card(&mut columns[0], &detail, region_h);
             characteristic_card(&mut columns[1], &detail, region_h);
-            qualification_card(&mut columns[2], &detail, region_h);
+            qualification_card(&mut columns[2], &detail, app, region_h);
             usage_card(&mut columns[3], &detail, app, region_h);
         });
     } else if detail_width > 650.0 {
@@ -340,7 +417,7 @@ pub(super) fn selected_model_detail(
                     characteristic_card(&mut columns[1], &detail, row_h);
                 });
                 ui.columns(2, |columns| {
-                    qualification_card(&mut columns[0], &detail, row_h);
+                    qualification_card(&mut columns[0], &detail, app, row_h);
                     usage_card(&mut columns[1], &detail, app, row_h);
                 });
             });
@@ -351,7 +428,7 @@ pub(super) fn selected_model_detail(
             .show(ui, |ui| {
                 parameter_card(ui, &detail, DETAIL_PANE_MIN_H);
                 characteristic_card(ui, &detail, DETAIL_PANE_MIN_H);
-                qualification_card(ui, &detail, DETAIL_PANE_MIN_H);
+                qualification_card(ui, &detail, app, DETAIL_PANE_MIN_H);
                 usage_card(ui, &detail, app, DETAIL_PANE_MIN_H);
             });
     }
@@ -417,6 +494,155 @@ fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, mod
     }
 }
 
+/// A parameter row two lines tall: what the value came from, over where that
+/// is written.
+///
+/// [`paint::property`] states an origin as one trailing word, which is the
+/// right shape for a card with no source document behind it. A resolved
+/// parameter has one, and "source card" with nothing beside it is a claim a
+/// reader has no way to check — the point of the column is that a value
+/// inherited from a technology file carries different weight from one an
+/// instance line overrode, and neither can be told apart without the file.
+///
+/// Private to this pane rather than promoted to the shared painters: it is the
+/// only two-line row in the workspace, and the shared module should gain it
+/// when a second page needs one, not in anticipation of that.
+fn origin_property(ui: &mut Ui, name: &str, value: &str, origin: &str, reference: &str) {
+    /// Two lines of caption text plus the badge's own box.
+    const ORIGIN_ROW_H: f32 = 32.0;
+    /// The mockup's `.model-param-table` column widths, less the origin
+    /// column, which takes what is left.
+    const NAME_FRACTION: f32 = 0.26;
+    const VALUE_FRACTION: f32 = 0.30;
+    const INSET: f32 = 3.0;
+
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), ORIGIN_ROW_H),
+        Sense::hover(),
+    );
+    let name_width = rect.width() * NAME_FRACTION;
+    let value_width = rect.width() * VALUE_FRACTION;
+    let origin_left = rect.left() + name_width + value_width + INSET;
+    let origin_width = (rect.right() - origin_left - INSET).max(1.0);
+    // Both cells of the origin column sit on their own line, so the name and
+    // the value align to the first one rather than to the row's centre.
+    let first_line = rect.top() + 9.0;
+    let second_line = rect.top() + 23.0;
+
+    ui.painter().text(
+        egui::pos2(rect.left() + INSET, first_line),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, name, (name_width - INSET * 2.0).max(1.0), false),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + name_width + INSET, first_line),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, value, (value_width - INSET * 2.0).max(1.0), true),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+
+    let badge_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
+    let badge_text = crate::workbench::design_system::elide_text(
+        ui,
+        origin,
+        &badge_font,
+        (origin_width - 10.0).max(1.0),
+    );
+    let badge_width = ui
+        .painter()
+        .layout_no_wrap(badge_text.clone(), badge_font.clone(), t.color.text_dim)
+        .size()
+        .x;
+    let badge = egui::Rect::from_min_size(
+        egui::pos2(origin_left, first_line - 7.0),
+        egui::vec2((badge_width + 10.0).min(origin_width), 14.0),
+    );
+    ui.painter().rect(
+        badge,
+        3.0,
+        Color32::TRANSPARENT,
+        Stroke::new(1.0, t.color.border),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        badge.left_center() + egui::vec2(5.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        badge_text,
+        badge_font,
+        t.color.text_dim,
+    );
+    ui.painter().text(
+        egui::pos2(origin_left, second_line),
+        egui::Align2::LEFT_CENTER,
+        crate::workbench::design_system::elide_text(
+            ui,
+            reference,
+            &theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+            origin_width,
+        ),
+        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+        t.color.text_faint,
+    );
+}
+
+/// A counted row that opens the page the count is kept on.
+///
+/// The qualification column states five numbers a reader cannot act on where
+/// they are shown; the page that owns them is one route away and the card had
+/// no way in. Each row is that one route rather than five new controls — the
+/// action bar's "Qualification" button is the same destination, and this is
+/// the count itself being the way there.
+///
+/// Painted rather than built from links: this is a data row, and a column of
+/// five link widgets in a four-pane detail region reads as a form. The node it
+/// publishes carries the count, because nothing else painted here reaches a
+/// reader who cannot see it.
+fn routed_count(ui: &mut Ui, name: &str, value: &str, note: &str) -> egui::Response {
+    const INSET: f32 = 3.0;
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), Sense::click());
+    let announcement = format!("{name}: {value} · open Qualification");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &announcement)
+    });
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    let name_width = rect.width() * 0.30;
+    let value_width = rect.width() * 0.34;
+    let note_width = (rect.width() - name_width - value_width).max(1.0);
+    ui.painter().text(
+        egui::pos2(rect.left() + INSET, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, name, (name_width - INSET * 2.0).max(1.0), false),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    // The number is the control, so it is the number that carries the accent.
+    ui.painter().text(
+        egui::pos2(rect.left() + name_width + INSET, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        elide(ui, value, (value_width - INSET * 2.0).max(1.0), true),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.accent,
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - INSET, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        elide(ui, note, (note_width - INSET * 2.0).max(1.0), false),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    response
+}
+
 fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
     filled_detail_pane(
         ui,
@@ -436,7 +662,13 @@ fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
                 // a column in a four-pane row. What is not listed is counted;
                 // a list that stops silently reads as the whole card.
                 for (name, value, origin) in &detail.parameters {
-                    property(ui, name, value, origin);
+                    match detail.source_reference.as_deref() {
+                        Some(reference) => origin_property(ui, name, value, origin, reference),
+                        // A built-in card is written in the simulator, not in
+                        // a file, so the second line would have nothing true
+                        // to put on it.
+                        None => property(ui, name, value, origin),
+                    }
                 }
                 let hidden = detail.parameter_total - detail.parameters.len();
                 if hidden > 0 {
@@ -528,17 +760,33 @@ fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f3
                 );
             }
             if envelope.is_empty() {
-                empty_state(
-                    ui,
-                    "This card declares no operating envelope.",
-                    "Bin ranges, threshold and supply are read from the card; nothing is inferred.",
-                );
+                // A built-in card declares nothing because the engine holds
+                // its defaults, which is its design and not a gap in it. The
+                // general copy read as the latter on every foundation family.
+                if detail.engine_owned {
+                    empty_state(
+                        ui,
+                        "The engine owns this family's defaults.",
+                        "A built-in card declares no envelope of its own; bin ranges, threshold and supply arrive with a source card.",
+                    );
+                } else {
+                    empty_state(
+                        ui,
+                        "This card declares no operating envelope.",
+                        "Bin ranges, threshold and supply are read from the card; nothing is inferred.",
+                    );
+                }
             }
         },
     );
 }
 
-fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
+fn qualification_card(
+    ui: &mut Ui,
+    detail: &SelectedModelDetail<'_>,
+    app: &mut ManagerRenderContext<'_>,
+    height: f32,
+) {
     filled_detail_pane(
         ui,
         "QUALIFICATION",
@@ -547,20 +795,30 @@ fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32
         "models-detail-qualification",
         |ui| {
             if let Some(counts) = &detail.qualification {
-                property(ui, "Suites", &counts.suites.to_string(), "retained");
-                property(ui, "Vectors", &counts.vectors.to_string(), "declared");
-                property(ui, "Evidence", &counts.evidence.to_string(), "immutable");
-                property(ui, "Releases", &counts.releases.to_string(), "promoted");
-                property(
-                    ui,
-                    "Open dispositions",
-                    &counts.open_dispositions.to_string(),
-                    if counts.open_dispositions == 0 {
-                        "clean"
-                    } else {
-                        "review required"
-                    },
-                );
+                // Every count is a way into the page that holds it — the same
+                // route the action bar's "Qualification" button takes, reached
+                // from the number a reader is already looking at.
+                let mut routed = false;
+                for (name, value, note) in [
+                    ("Suites", counts.suites, "retained"),
+                    ("Vectors", counts.vectors, "declared"),
+                    ("Evidence", counts.evidence, "immutable"),
+                    ("Releases", counts.releases, "promoted"),
+                    (
+                        "Open dispositions",
+                        counts.open_dispositions,
+                        if counts.open_dispositions == 0 {
+                            "clean"
+                        } else {
+                            "review required"
+                        },
+                    ),
+                ] {
+                    routed |= routed_count(ui, name, &value.to_string(), note).clicked();
+                }
+                if routed {
+                    app.state.workbench.models_page = ModelsPage::Qualification;
+                }
             } else {
                 empty_state(
                     ui,
@@ -593,14 +851,33 @@ fn usage_card(
                     "Place an instance or select one and use Bind to selection.",
                 );
             } else {
+                let t = Tokens::get(ui.ctx());
                 for usage in usages.iter().take(USAGE_ROWS) {
-                    if ui.link(usage).clicked() {
-                        app.state.workbench.models_view.dialog =
-                            Some(ModelsWorkbenchDialog::BindingTrace {
-                                model: detail.model.clone(),
-                                consumers: usages.to_vec(),
-                            });
-                    }
+                    // The designator is what a reader scans this column for,
+                    // so it is the designator that carries the row and the
+                    // rest of the label — what the instance is, where it sits
+                    // — reads as the location it is.
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let opened = ui
+                            .link(
+                                RichText::new(bindings::consumer_designator(usage))
+                                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold)),
+                            )
+                            .clicked();
+                        ui.label(
+                            RichText::new(bindings::consumer_location(usage))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        );
+                        if opened {
+                            app.state.workbench.models_view.dialog =
+                                Some(ModelsWorkbenchDialog::BindingTrace {
+                                    model: detail.model.clone(),
+                                    consumers: usages.to_vec(),
+                                });
+                        }
+                    });
                 }
                 if usages.len() > USAGE_ROWS {
                     // The trace dialog lists all of them; only this column stops.

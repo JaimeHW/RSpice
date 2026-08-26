@@ -79,8 +79,10 @@ impl ConsumerIndex {
                 reference: model.clone(),
                 reason,
             };
+            // Spelled through the separator its readers split on, so the label
+            // and the two halves that read it back cannot drift apart.
             let label = format!(
-                "{} · {} · ({}, {})",
+                "{}{CONSUMER_FIELD}{}{CONSUMER_FIELD}({}, {})",
                 component.name,
                 component.kind.display_name(),
                 component.pos.x,
@@ -143,6 +145,30 @@ impl ConsumerIndex {
             ))
             .map_or(&[], Vec::as_slice)
     }
+}
+
+/// The separator between a consumer label's fields.
+const CONSUMER_FIELD: &str = " · ";
+
+/// The instance designator at the head of a consumer label.
+///
+/// [`ConsumerIndex::build`] writes each label as `designator · kind ·
+/// (x, y)`, so the designator is its first field. A column with room for one
+/// instance wants that field and not the rest — the kind and the coordinates
+/// are what the where-used list is for — and reading it beside the code that
+/// writes it is what keeps the two halves of the spelling together.
+pub(super) fn consumer_designator(label: &str) -> &str {
+    label
+        .split_once(CONSUMER_FIELD)
+        .map_or(label, |(designator, _)| designator)
+}
+
+/// Everything a consumer label carries after its designator: what the instance
+/// is, and where on the sheet it sits.
+pub(super) fn consumer_location(label: &str) -> &str {
+    label
+        .split_once(CONSUMER_FIELD)
+        .map_or("", |(_, location)| location)
 }
 
 /// Rows the card lists before the scroll area takes over the arithmetic.
