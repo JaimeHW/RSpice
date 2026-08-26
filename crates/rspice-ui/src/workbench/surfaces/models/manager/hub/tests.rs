@@ -251,7 +251,7 @@ fn the_release_confirmation_states_its_cost_and_exposes_both_actions() {
     // the projection rather than the painted glyphs is deliberate: this
     // workspace's property rows are painter text and expose no
     // accessibility node, so a tree assertion here would prove nothing.
-    assert_eq!(byte_size(confirmation.archive_length), "2.0 MB");
+    assert_eq!(byte_size(confirmation.archive_length), "2.00 MiB");
     assert_eq!(confirmation.spdx, "LicenseRef-RSpice-Models");
     assert_eq!(confirmation.parts, 12);
     assert_eq!(
@@ -1062,7 +1062,7 @@ fn a_discarded_catalog_cache_is_not_reported_as_never_having_asked() {
 fn a_byte_count_reads_as_a_size_rather_than_a_number() {
     assert_eq!(byte_size(0), "—");
     assert_eq!(byte_size(512), "512 B");
-    assert_eq!(byte_size(2048), "2.0 kB");
-    assert_eq!(byte_size(3 * 1024 * 1024), "3.0 MB");
-    assert_eq!(byte_size(150 * 1024 * 1024), "150 MB");
+    assert_eq!(byte_size(2048), "2.00 KiB");
+    assert_eq!(byte_size(3 * 1024 * 1024), "3.00 MiB");
+    assert_eq!(byte_size(150 * 1024 * 1024), "150.00 MiB");
 }

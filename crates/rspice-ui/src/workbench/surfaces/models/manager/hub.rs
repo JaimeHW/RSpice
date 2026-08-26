@@ -776,22 +776,15 @@ fn newest_release_first(left: &HubPackRow, right: &HubPackRow) -> Ordering {
 }
 
 /// A byte count a person reads rather than counts.
+///
+/// Delegates to the one public spelling, so the shelf and a hub receipt
+/// describe the same archive with the same number; a release with no bytes
+/// still reads as an em dash rather than claiming a zero-byte archive.
 pub(super) fn byte_size(bytes: u64) -> String {
-    const UNITS: [(&str, u64); 3] = [("MB", 1024 * 1024), ("kB", 1024), ("B", 1)];
     if bytes == 0 {
         return "—".to_owned();
     }
-    for (unit, scale) in UNITS {
-        if bytes >= scale {
-            let value = bytes as f64 / scale as f64;
-            return if value >= 100.0 || scale == 1 {
-                format!("{value:.0} {unit}")
-            } else {
-                format!("{value:.1} {unit}")
-            };
-        }
-    }
-    "—".to_owned()
+    crate::simulation::run_set::format_bytes(bytes)
 }
 
 /// The packs scope: the pack ledger, then the shipped corpus if present.
