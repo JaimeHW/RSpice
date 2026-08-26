@@ -1580,6 +1580,39 @@ fn every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box() {
     }
 }
 
+/// The shelf's meta column states the designator prefix and the default the
+/// placed instance will carry, spelled through the crate's engineering
+/// formatter — and only what a part actually has: a modelled device keeps its
+/// prefix alone, a structural row says nothing.
+#[test]
+fn shelf_meta_states_the_prefix_and_the_placed_default() {
+    for (kind, meta) in [
+        (ComponentType::Resistor, Some("R \u{00b7} 1k")),
+        (ComponentType::Capacitor, Some("C \u{00b7} 1u")),
+        (ComponentType::Inductor, Some("L \u{00b7} 1m")),
+        (ComponentType::VoltageSource, Some("V \u{00b7} 5")),
+        (ComponentType::OpAmp, Some("E \u{00b7} 100k")),
+        // The one default not authored in the formatter's spelling: the
+        // formatter's decade wins, as it does in the property editor.
+        (ComponentType::CoupledInductor, Some("K \u{00b7} 990m")),
+        // A default no engineering parser reads is stated as authored.
+        (ComponentType::BehavioralSource, Some("B \u{00b7} V=0")),
+        // Modelled devices have no meaningful default value.
+        (ComponentType::Diode, Some("D")),
+        (ComponentType::Nmos, Some("M")),
+        (ComponentType::Memristor, Some("MR")),
+        // Structural objects own neither a designator nor a value.
+        (ComponentType::Ground, None),
+        (ComponentType::Port, None),
+    ] {
+        assert_eq!(
+            primitive_shelf_meta(kind).as_deref(),
+            meta,
+            "meta column of {kind:?}"
+        );
+    }
+}
+
 /// Rows of different families paint different identity glyphs.
 ///
 /// The label and meta are pinned to one string so the glyph slot is the only

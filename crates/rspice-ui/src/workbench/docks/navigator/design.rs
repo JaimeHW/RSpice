@@ -152,6 +152,36 @@ impl ShelfGlyph {
     }
 }
 
+/// The shelf's meta column for one placeable primitive: `prefix · default`,
+/// e.g. `R · 1k` — what the designator will start with and the value the
+/// placed instance opens carrying.
+///
+/// Both halves come from the type's own metadata — [`ComponentType::
+/// spice_prefix`] and [`ComponentType::default_value`], the same single
+/// source [`crate::state`]'s placement writes into a fresh component — and
+/// the value is re-presented through the crate's engineering formatter the
+/// way the property editor re-presents an untouched draft, so the shelf and
+/// the editor spell one decade the same way. A default the formatter cannot
+/// read (`V=0`) is stated as authored; a part with no meaningful default
+/// keeps the prefix alone, and a structural row with neither says nothing.
+fn primitive_shelf_meta(kind: ComponentType) -> Option<String> {
+    let prefix = kind.spice_prefix();
+    let default = kind.default_value();
+    let value = if default.is_empty() {
+        String::new()
+    } else {
+        crate::quantity::parse_engineering_value(default)
+            .map(crate::quantity::format_engineering_value)
+            .unwrap_or_else(|_| default.to_owned())
+    };
+    match (prefix.is_empty(), value.is_empty()) {
+        (true, true) => None,
+        (true, false) => Some(value),
+        (false, true) => Some(prefix.to_owned()),
+        (false, false) => Some(format!("{prefix} \u{00b7} {value}")),
+    }
+}
+
 /// The glyph for one placeable primitive.
 ///
 /// Card letters come from [`ComponentType::spice_prefix`], so this column can
@@ -2211,7 +2241,7 @@ fn primitive_rows(
             primitive_shelf_glyph(entry.kind),
             entry.label,
             app.state.schematic.tool == Tool::Place(entry.kind),
-            Some(entry.kind.spice_prefix()),
+            primitive_shelf_meta(entry.kind).as_deref(),
             level,
         );
         if let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
