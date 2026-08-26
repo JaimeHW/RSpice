@@ -230,6 +230,61 @@ fn studio_route_nodes(
     nodes
 }
 
+/// Every consecutive pass of one studio route, as the controls each published.
+///
+/// Same fixture and same host as [`studio_route_nodes`], kept apart from it
+/// because that helper answers what a settled surface says and this one answers
+/// whether it settles at all.
+fn studio_route_passes(
+    mut app: RSpiceApp,
+    width: f32,
+    passes: usize,
+) -> Vec<Vec<(egui::accesskit::NodeId, egui::accesskit::Rect)>> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut recorded = Vec::with_capacity(passes);
+    for _ in 0..passes {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(width, RENDER_VIEWPORT_HEIGHT),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::super::show(ui, &mut app));
+                super::super::show_workflow_dialogs(ctx, &mut app);
+            },
+        );
+        let mut controls: Vec<(egui::accesskit::NodeId, egui::accesskit::Rect)> = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, node)| {
+                matches!(
+                    node.role(),
+                    egui::accesskit::Role::Button
+                        | egui::accesskit::Role::CheckBox
+                        | egui::accesskit::Role::ComboBox
+                        | egui::accesskit::Role::Link
+                        | egui::accesskit::Role::TextInput
+                        | egui::accesskit::Role::MultilineTextInput
+                )
+            })
+            .filter_map(|(id, node)| node.bounds().map(|bounds| (id, bounds)))
+            .collect();
+        controls.sort_by_key(|(id, _)| *id);
+        recorded.push(controls);
+    }
+    recorded
+}
+
 /// Only the frame's overlay host, with the studio surface not drawn.
 ///
 /// This is what a reader anywhere but Simulate actually gets:
@@ -632,5 +687,120 @@ fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
          catalogue offers has a form, and a plan that refuses more than a handful of inserts is \
          a fixture that has stopped reaching them",
         GATE_WIDTHS.len()
+    );
+}
+
+/// Every workflow dialog the studio opens comes to rest, and stays where it
+/// came to rest.
+///
+/// A dialog measured from its content used to creep upward two points a pass
+/// for as long as its body overflowed: the overflow took a scrollbar, the bar
+/// narrowed the body, the narrower body wrapped taller, and the surface
+/// measured from it asked for more room again. Nothing on such a dialog ever
+/// stopped moving for a third of a second after it opened, and a reader
+/// reaching for a control was reaching for a moving target.
+///
+/// Two passes of settling are allowed and no more. One is the overlay's own: a
+/// content-height surface is laid out against the height its previous pass
+/// resolved, so the pass that opens it is the measuring one. The other belongs
+/// to the route drawn behind it, which resolves its own content against the
+/// scroll track it reserves a pass later still. The dialog shell's own contract
+/// — one re-measure, and never a third — is pinned where it can be measured
+/// alone, in `ui::widgets::dialog`'s tests.
+#[test]
+fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
+    const PASSES: usize = 8;
+    // Sub-pixel: rounding in the layout is not drift.
+    const TOLERANCE: f64 = 0.5;
+    /// The pass by which everything an overlay draws has settled, and the one
+    /// every later pass is judged against.
+    const SETTLED: usize = 2;
+
+    let mut drifting = Vec::new();
+    let mut swept = 0usize;
+    let mut measured = 0usize;
+    // The workflow dialogs: every overlay whose body the dialog shell lays
+    // out. Two of the studio's overlays are not that, and both are still
+    // moving on their tenth pass for a reason of their own:
+    //
+    // - the analysis catalogue keeps its own scrolling, and the bar its result
+    //   list takes fades in over ten passes, narrowing every row under it as
+    //   it goes;
+    // - the advanced-options panel is drawn into the Solver route rather than
+    //   over it, and the content it adds tips that route's own scroll area
+    //   into taking a bar, whose reveal walks every control on the page.
+    //
+    // Both are the shell's defect one level down, in a surface that reserves
+    // no gutter, and both belong to the surface that draws them.
+    let dialogs = studio_overlays().into_iter().filter(|(surface, _)| {
+        !surface.starts_with("analysis catalogue") && surface != "advanced options"
+    });
+    for (surface, app) in dialogs {
+        swept += 1;
+        let passes = studio_route_passes(app, 1280.0, PASSES);
+        let settled = &passes[SETTLED];
+        measured += settled.len();
+        for (index, pass) in passes.iter().enumerate().skip(SETTLED + 1) {
+            let pass_number = index + 1;
+            if pass.len() != settled.len() {
+                drifting.push(format!(
+                    "{surface}: pass {pass_number} publishes {} controls where the \
+                     settled pass published {}",
+                    pass.len(),
+                    settled.len()
+                ));
+                continue;
+            }
+            for ((id, bounds), (settled_id, settled_bounds)) in pass.iter().zip(settled) {
+                if id != settled_id {
+                    drifting.push(format!(
+                        "{surface}: pass {pass_number} publishes a different set of controls"
+                    ));
+                    continue;
+                }
+                let moved = [
+                    (bounds.x0, settled_bounds.x0),
+                    (bounds.y0, settled_bounds.y0),
+                    (bounds.x1, settled_bounds.x1),
+                    (bounds.y1, settled_bounds.y1),
+                ]
+                .into_iter()
+                .any(|(now, settled)| (now - settled).abs() > TOLERANCE);
+                if moved {
+                    drifting.push(format!(
+                        "{surface}: a control settled at \
+                         {:.1}..{:.1} x {:.1}..{:.1} and pass {pass_number} drew it at \
+                         {:.1}..{:.1} x {:.1}..{:.1}",
+                        settled_bounds.x0,
+                        settled_bounds.x1,
+                        settled_bounds.y0,
+                        settled_bounds.y1,
+                        bounds.x0,
+                        bounds.x1,
+                        bounds.y0,
+                        bounds.y1
+                    ));
+                }
+            }
+        }
+    }
+    drifting.sort();
+    drifting.dedup();
+    assert!(
+        drifting.is_empty(),
+        "overlays still moving after they had come to rest:\n{}",
+        drifting.join("\n")
+    );
+    // A sweep that opened nothing, or measured nothing on what it opened,
+    // would pass forever.
+    assert_eq!(
+        swept,
+        studio_overlays().len() - analysis_catalogue_fixtures().len() - 1,
+        "every workflow dialog the studio opens is one pass of this sweep"
+    );
+    assert!(
+        measured > 100,
+        "the sweep watched only {measured} controls; it is not reaching the \
+         overlays it claims to check"
     );
 }
