@@ -137,6 +137,12 @@ pub(super) fn analysis_catalog_window(
                 Stroke::new(1.0, t.color.border),
             );
 
+            // Where the keyboard is decides what half of the arrows mean, so
+            // it is read from the field that was just drawn rather than
+            // assumed.
+            let search_focused =
+                search_id.is_some_and(|id| ui.memory(|memory| memory.has_focus(id)));
+
             let filtered = filtered_catalog_kinds(&query);
             if filtered.is_empty() {
                 active = 0;
@@ -153,6 +159,16 @@ pub(super) fn analysis_catalog_window(
                     (egui::Key::ArrowLeft, GridStep::Left),
                     (egui::Key::ArrowRight, GridStep::Right),
                 ] {
+                    // Left and Right are the caret's while the search field
+                    // has the keyboard, which is where it starts and mostly
+                    // stays. A palette that took them would move the
+                    // selection into the next column every time a reader went
+                    // back to fix a typo in the query. Up and Down stay the
+                    // list's throughout: that is the palette idiom, and a
+                    // single-line field has nothing to do with them.
+                    if search_focused && matches!(step, GridStep::Left | GridStep::Right) {
+                        continue;
+                    }
                     if ui.input(|input| input.key_pressed(key)) {
                         active = catalog_grid_step(&filtered, catalog_columns, active, step);
                     }
@@ -1002,5 +1018,118 @@ mod tests {
         assert_eq!(analysis_catalog_column_count(bound - 1.0), 1);
         assert_eq!(analysis_catalog_column_count(bound), 1);
         assert_eq!(analysis_catalog_column_count(bound + 1.0), 2);
+    }
+
+    /// The catalogue window itself, driven one frame per keystroke.
+    ///
+    /// The travel helper is pure and proved on its own; what this reaches is
+    /// everything around it — which arrows the window listens to, where the
+    /// keyboard has to be for it to listen, and whether the row it moves to
+    /// ends up somewhere the reader can see.
+    struct Catalogue {
+        ctx: egui::Context,
+        setup: SimSetupState,
+        viewport: f32,
+        shapes: Vec<egui::epaint::ClippedShape>,
+    }
+
+    impl Catalogue {
+        /// Open the window on a `viewport`-wide screen, settled.
+        ///
+        /// Twice, because a content-height surface lays out against its
+        /// previous measurement, and because the field the dialog focuses
+        /// takes that focus at the end of the opening pass.
+        fn open(viewport: f32) -> Self {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut catalogue = Self {
+                ctx,
+                setup: SimSetupState::default(),
+                viewport,
+                shapes: Vec::new(),
+            };
+            catalogue.frame(Vec::new());
+            catalogue.frame(Vec::new());
+            catalogue
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            let Self {
+                ctx,
+                setup,
+                viewport,
+                shapes,
+            } = self;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        vec2(*viewport, 900.0),
+                    )),
+                    events,
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    let _ = analysis_catalog_window(ctx, setup, &[]);
+                },
+            );
+            *shapes = output.shapes;
+        }
+
+        fn press(&mut self, key: egui::Key) {
+            self.frame(vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+
+        /// Take the keyboard off the search field, as a Tab out of it would.
+        fn leave_the_search_field(&mut self) {
+            self.ctx.memory_mut(egui::Memory::stop_text_input);
+        }
+    }
+
+    /// Left and Right belong to the caret while the reader is typing.
+    ///
+    /// The search field is what the catalogue focuses when it opens, and a
+    /// query is edited far more often than a column is crossed: a reader who
+    /// goes back a character to fix a typo must not find the selection has
+    /// moved with them. Off the field, the same key is grid travel, which is
+    /// the whole reason the binding exists.
+    #[test]
+    fn the_catalogue_leaves_left_and_right_to_the_search_caret() {
+        let mut catalogue = Catalogue::open(1_400.0);
+        assert_eq!(catalogue.setup.palette_active, 0);
+
+        catalogue.press(egui::Key::ArrowRight);
+        assert_eq!(
+            catalogue.setup.palette_active, 0,
+            "the field has the keyboard, so Right moved a caret and nothing else"
+        );
+
+        catalogue.leave_the_search_field();
+        catalogue.press(egui::Key::ArrowRight);
+        assert_eq!(
+            catalogue.setup.palette_active, 1,
+            "off the field, Right crosses to the second column"
+        );
+    }
+
+    /// Up and Down stay the list's, field or no field.
+    ///
+    /// That is the shipped behaviour and the palette idiom both — searching
+    /// and choosing are one gesture — and a single-line field has no use for
+    /// them. At two columns Down is a row, so from the first cell it lands on
+    /// the third analysis rather than the second.
+    #[test]
+    fn the_catalogue_steps_rows_while_the_reader_is_still_typing() {
+        let mut catalogue = Catalogue::open(1_400.0);
+        catalogue.press(egui::Key::ArrowDown);
+        assert_eq!(catalogue.setup.palette_active, 2);
+        catalogue.press(egui::Key::ArrowUp);
+        assert_eq!(catalogue.setup.palette_active, 0);
     }
 }
