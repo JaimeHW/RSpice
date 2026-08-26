@@ -719,22 +719,21 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
     let mut drifting = Vec::new();
     let mut swept = 0usize;
     let mut measured = 0usize;
-    // The workflow dialogs: every overlay whose body the dialog shell lays
-    // out. Two of the studio's overlays are not that, and both are still
-    // moving on their tenth pass for a reason of their own:
+    // One of the studio's overlays is left out. The analysis catalogue keeps
+    // its own scrolling, and the bar its result list takes fades in over ten
+    // passes, narrowing every row under it as it goes — the shell's defect one
+    // level down, in a surface that reserves no gutter. It is a known follow-up
+    // on `surfaces::simulate::catalog`, which draws it, and it is deliberately
+    // still excluded here rather than quietly tolerated by a wider tolerance.
     //
-    // - the analysis catalogue keeps its own scrolling, and the bar its result
-    //   list takes fades in over ten passes, narrowing every row under it as
-    //   it goes;
-    // - the advanced-options panel is drawn into the Solver route rather than
-    //   over it, and the content it adds tips that route's own scroll area
-    //   into taking a bar, whose reveal walks every control on the page.
-    //
-    // Both are the shell's defect one level down, in a surface that reserves
-    // no gutter, and both belong to the surface that draws them.
-    let dialogs = studio_overlays().into_iter().filter(|(surface, _)| {
-        !surface.starts_with("analysis catalogue") && surface != "advanced options"
-    });
+    // The advanced-options panel used to be excluded beside it, for the same
+    // reason one level down again: it is drawn *into* the Solver route rather
+    // than over it, and the content it adds tipped that route's own scroll area
+    // into taking a bar. The studio surface now reserves that gutter whether or
+    // not a bar is showing, so the panel is in the sweep.
+    let dialogs = studio_overlays()
+        .into_iter()
+        .filter(|(surface, _)| !surface.starts_with("analysis catalogue"));
     for (surface, app) in dialogs {
         swept += 1;
         let passes = studio_route_passes(app, 1280.0, PASSES);
@@ -795,8 +794,9 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
     // would pass forever.
     assert_eq!(
         swept,
-        studio_overlays().len() - analysis_catalogue_fixtures().len() - 1,
-        "every workflow dialog the studio opens is one pass of this sweep"
+        studio_overlays().len() - analysis_catalogue_fixtures().len(),
+        "every studio overlay but the analysis catalogue is one pass of this \
+         sweep"
     );
     assert!(
         measured > 100,

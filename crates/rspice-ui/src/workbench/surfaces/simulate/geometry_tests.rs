@@ -82,9 +82,17 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
 /// the end of it.
 ///
 /// So the line is elided, and both halves of that are pinned at the width the
-/// gate measures. At 1000 the full line fits and stops short of the chip; at
+/// gate measures. At 1016 the full line fits and stops short of the chip; at
 /// 950 it does not fit, ends in the ellipsis, and still stops short. The
 /// mockup's own rule for this row is `overflow:hidden; text-overflow:ellipsis`.
+///
+/// These are viewport widths, and the studio surface no longer gets all of one:
+/// it withholds its scrollbar's thirteen-point track whether or not a bar is
+/// showing, so a route is laid out in thirteen points less than the window. The
+/// wide probe was 1000 and measured a surface of exactly that; it names 1016
+/// now for the same reason, and for the same surface with a little room to
+/// spare. The narrow probe is unmoved: it was well past the line already, and
+/// taking width away only takes it further past.
 #[test]
 fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip() {
     /// The header band: the chip and the identity line are the only two things
@@ -117,10 +125,10 @@ fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip
         (identity, chip)
     };
 
-    let (identity, chip) = header_geometry(1000.0);
+    let (identity, chip) = header_geometry(1016.0);
     assert!(
         identity.text.ends_with("· lifecycle draft"),
-        "at 1000 the identity line fits whole: {:?}",
+        "at 1016 the identity line fits whole: {:?}",
         identity.text
     );
     assert!(
