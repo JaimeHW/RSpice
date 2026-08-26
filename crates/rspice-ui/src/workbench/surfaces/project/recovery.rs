@@ -6,6 +6,7 @@
 //! recover from it later.
 
 use super::*;
+use crate::simulation::run_set::format_bytes;
 use crate::workbench::app_state::AppState;
 
 #[cfg(target_arch = "wasm32")]
@@ -227,7 +228,7 @@ fn recovery_checkpoint_timeline(ui: &mut Ui, state: &mut AppState) {
             format!(
                 "revision {} \u{00b7} {} \u{00b7} verified",
                 checkpoint.project_revision(),
-                format_byte_count(checkpoint.snapshot_byte_len())
+                format_bytes(checkpoint.snapshot_byte_len())
             ),
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.ok,
@@ -307,7 +308,7 @@ fn recovery_policy_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     property_row(ui, "Restore destination", "independent project copy");
     property_row(ui, "Current work", "never overwritten");
-    property_row(ui, "Storage", &format_byte_count(checkpoint_bytes));
+    property_row(ui, "Storage", &format_bytes(checkpoint_bytes));
     property_row(
         ui,
         "Quarantined payloads",
@@ -542,16 +543,6 @@ fn poll_browser_manual_checkpoint(ctx: &Context, state: &mut AppState) {
                     .error_with_title(ctx, "Checkpoint failed", error);
             }
         }
-    }
-}
-
-pub(super) fn format_byte_count(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 {
-        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
-    } else if bytes >= 1024 {
-        format!("{:.1} KiB", bytes as f64 / 1024.0)
-    } else {
-        format!("{bytes} B")
     }
 }
 
