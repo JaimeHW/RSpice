@@ -134,11 +134,20 @@ pub(super) fn analysis_catalog_window(
                 active = 0;
             } else {
                 active = active.min(filtered.len() - 1);
-                if ui.input(|input| input.key_pressed(egui::Key::ArrowDown)) {
-                    active = (active + 1).min(filtered.len() - 1);
-                }
-                if ui.input(|input| input.key_pressed(egui::Key::ArrowUp)) {
-                    active = active.saturating_sub(1);
+                // Travel is over the grid the rows are drawn in, not over the
+                // flat list behind it. At two columns a step of one is a step
+                // sideways, so Down used to leave the reader one cell along
+                // the same row and Up used to undo it; nothing moved the
+                // selection across a column at all.
+                for (key, step) in [
+                    (egui::Key::ArrowUp, GridStep::Up),
+                    (egui::Key::ArrowDown, GridStep::Down),
+                    (egui::Key::ArrowLeft, GridStep::Left),
+                    (egui::Key::ArrowRight, GridStep::Right),
+                ] {
+                    if ui.input(|input| input.key_pressed(key)) {
+                        active = catalog_grid_step(&filtered, catalog_columns, active, step);
+                    }
                 }
                 if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                     chosen = filtered
@@ -232,6 +241,86 @@ pub(super) fn analysis_catalog_search_field(query: &mut String) -> egui::TextEdi
 
 pub(super) const fn analysis_catalog_column_count(viewport_width: f32) -> usize {
     if viewport_width >= 1_200.0 { 2 } else { 1 }
+}
+
+/// Which way a keystroke moves the catalogue's selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GridStep {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// The cells the catalogue draws, row by row, as indices into `filtered`.
+///
+/// [`analysis_catalog_group_rows`] chunks each category's members into rows of
+/// `columns`, so a category with an odd count leaves a short row at its end
+/// and the next category starts a fresh one. Keyboard travel has to be shaped
+/// against the same chunking, or a keystroke lands somewhere the reader is not
+/// looking.
+fn analysis_catalog_grid(filtered: &[AnalysisKind], columns: usize) -> Vec<Vec<usize>> {
+    let columns = columns.max(1);
+    let mut grid = Vec::new();
+    for group in ANALYSIS_CATEGORY_ORDER {
+        let members = filtered
+            .iter()
+            .enumerate()
+            .filter(|(_, kind)| analysis_catalog_group(**kind) == group)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        for chunk in members.chunks(columns) {
+            grid.push(chunk.to_vec());
+        }
+    }
+    grid
+}
+
+/// Where `direction` takes the selection from `active`.
+///
+/// Up and Down hold the column and change the row, crossing group boundaries
+/// into whichever cell of the next row is nearest: a short row — the tail of a
+/// category with an odd count — is entered at its last cell rather than
+/// skipped. Left and Right move within the row and do not wrap, so the ends of
+/// a row are ends rather than a way into the neighbouring category. At one
+/// column every row holds a single cell, which makes Left and Right no-ops and
+/// Down the flat step it has always been.
+pub(super) fn catalog_grid_step(
+    filtered: &[AnalysisKind],
+    columns: usize,
+    active: usize,
+    direction: GridStep,
+) -> usize {
+    if filtered.is_empty() {
+        return 0;
+    }
+    let active = active.min(filtered.len() - 1);
+    let grid = analysis_catalog_grid(filtered, columns);
+    let Some((row, column)) = grid.iter().enumerate().find_map(|(row, cells)| {
+        cells
+            .iter()
+            .position(|cell| *cell == active)
+            .map(|column| (row, column))
+    }) else {
+        return active;
+    };
+    let vertical = |target: Option<usize>| {
+        target
+            .and_then(|target| grid.get(target))
+            .and_then(|cells| cells.get(column).or_else(|| cells.last()))
+            .copied()
+            .unwrap_or(active)
+    };
+    match direction {
+        GridStep::Up => vertical(row.checked_sub(1)),
+        GridStep::Down => vertical(Some(row + 1)),
+        GridStep::Left => column
+            .checked_sub(1)
+            .and_then(|column| grid[row].get(column))
+            .copied()
+            .unwrap_or(active),
+        GridStep::Right => grid[row].get(column + 1).copied().unwrap_or(active),
+    }
 }
 
 pub(super) fn analysis_catalog_group_rows(
@@ -724,4 +813,127 @@ pub(super) fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
                 .contains(&query)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A five-member category ahead of a three-member one.
+    ///
+    /// At two columns that is every shape the catalogue's chunking can make:
+    /// two full rows, a short row at the end of a group, the group boundary
+    /// after it, and a short row at the end of the list.
+    const TWO_GROUPS: [AnalysisKind; 8] = [
+        AnalysisKind::OperatingPoint,
+        AnalysisKind::Transient,
+        AnalysisKind::Ac,
+        AnalysisKind::DcSweep,
+        AnalysisKind::Noise,
+        AnalysisKind::Qpac,
+        AnalysisKind::Qpnoise,
+        AnalysisKind::Qpxf,
+    ];
+
+    /// The fixture is only worth its assertions if it still has that shape.
+    ///
+    /// Both halves are whole categories, so a kind moved between categories
+    /// upstream would quietly turn the five-and-three into something else and
+    /// the travel table below would be measuring a grid nobody draws.
+    #[test]
+    fn the_catalogue_travel_fixture_is_a_group_of_five_before_a_group_of_three() {
+        let groups = TWO_GROUPS.map(analysis_catalog_group);
+        assert_eq!(groups[..5], ["Core analyses"; 5]);
+        assert_eq!(groups[5..], ["Quasi-periodic small-signal"; 3]);
+        assert_eq!(
+            analysis_catalog_grid(&TWO_GROUPS, 2),
+            vec![vec![0, 1], vec![2, 3], vec![4], vec![5, 6], vec![7]],
+            "the grid is chunked per category, not across the flat list"
+        );
+    }
+
+    /// An arrow key moves the selection by a row, not by a cell.
+    ///
+    /// Stepping the flat index by one is a step sideways in a two-column
+    /// layout: Down left the reader on the same row and Up put them back, and
+    /// nothing crossed a column at all. Every cell of the fixture is stepped
+    /// in every direction here, because the interesting cases are the ones at
+    /// the edges — the short row `[4]` that a step from either column of the
+    /// row above has to land in, the group boundary under it, and the two ends
+    /// of a row, which are ends rather than a way into the next category.
+    #[test]
+    fn catalogue_arrow_travel_moves_by_a_row_and_clamps_into_short_rows() {
+        /// `(cell, [up, down, left, right])`.
+        const TRAVEL: [(usize, [usize; 4]); 8] = [
+            (0, [0, 2, 0, 1]),
+            (1, [1, 3, 0, 1]),
+            (2, [0, 4, 2, 3]),
+            (3, [1, 4, 2, 3]),
+            (4, [2, 5, 4, 4]),
+            (5, [4, 7, 5, 6]),
+            (6, [4, 7, 5, 6]),
+            (7, [5, 7, 7, 7]),
+        ];
+
+        for (cell, expected) in TRAVEL {
+            for (direction, expected) in [
+                (GridStep::Up, expected[0]),
+                (GridStep::Down, expected[1]),
+                (GridStep::Left, expected[2]),
+                (GridStep::Right, expected[3]),
+            ] {
+                assert_eq!(
+                    catalog_grid_step(&TWO_GROUPS, 2, cell, direction),
+                    expected,
+                    "{direction:?} from cell {cell}"
+                );
+            }
+        }
+    }
+
+    /// At one column the grid is the list, and travel is the flat step.
+    ///
+    /// Which is a claim about the manifest as much as about the helper: the
+    /// rows are drawn category by category, so a Down that is `+1` everywhere
+    /// — across group boundaries included — is only true while
+    /// `MANIFEST_ORDER` runs contiguously in `ANALYSIS_CATEGORY_ORDER`. Left
+    /// and Right have nowhere to go in a single-cell row and say so.
+    #[test]
+    fn single_column_catalogue_travel_is_the_flat_order() {
+        let all = filtered_catalog_kinds("");
+        assert_eq!(all.len(), AnalysisKind::MANIFEST_ORDER.len());
+        let last = all.len() - 1;
+        for cell in 0..all.len() {
+            assert_eq!(
+                catalog_grid_step(&all, 1, cell, GridStep::Down),
+                (cell + 1).min(last),
+                "down from {cell}"
+            );
+            assert_eq!(
+                catalog_grid_step(&all, 1, cell, GridStep::Up),
+                cell.saturating_sub(1),
+                "up from {cell}"
+            );
+            for direction in [GridStep::Left, GridStep::Right] {
+                assert_eq!(
+                    catalog_grid_step(&all, 1, cell, direction),
+                    cell,
+                    "{direction:?} from {cell}"
+                );
+            }
+        }
+    }
+
+    /// Nothing to step through, and nothing to step to.
+    #[test]
+    fn catalogue_travel_over_an_empty_search_result_stays_at_the_top() {
+        for direction in [
+            GridStep::Up,
+            GridStep::Down,
+            GridStep::Left,
+            GridStep::Right,
+        ] {
+            assert_eq!(catalog_grid_step(&[], 2, 7, direction), 0);
+        }
+    }
 }
