@@ -22,6 +22,7 @@ use crate::state::{
 };
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, select};
+use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 use crate::workbench::state::{CaptureGroupDraft, SimulationWorkflowDialog};
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -246,7 +247,115 @@ pub(super) fn capture_groups(
     if policy != state.sim_setup.save_policy {
         commit_save_policy(state, policy, "Save policy · output selection and storage");
     }
-    head_command.or(command)
+    // A group that holds outputs is not removed on one click. What falls back
+    // to the fallback group, and which overrides stop applying to it, is the
+    // entire cost of removing a capture policy — and none of it is legible from
+    // the strip that removes it.
+    let plan = plan_id(state);
+    let requested = match head_command.or(command) {
+        Some(GroupCommand::Remove(id)) => {
+            stage_group_removal(state, plan, &groups, id, outputs, membership)
+        }
+        other => other,
+    };
+    // A removal the reader confirmed in the destructive review comes back as
+    // the command the strip would have raised, so it is committed by the same
+    // transaction, with the same receipt, as a group that cost nothing to
+    // remove. It outranks a click in the same frame: it is an answered
+    // question, and the click is not.
+    //
+    // The ledger above was already drawn from the groups this is about to
+    // change, so the frame is asked to run again: the confirming click landed
+    // in the modal, and nothing else is coming to repaint the row it removed.
+    plan.and_then(|plan| {
+        state
+            .dialogs
+            .plan_removal_review
+            .take_confirmed_capture_group(plan)
+    })
+    .inspect(|_| ui.ctx().request_repaint())
+    .map(GroupCommand::Remove)
+    .or(requested)
+}
+
+/// The plan a capture-group edit belongs to.
+fn plan_id(state: &AppState) -> Option<crate::product::SimulationPlanId> {
+    state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())
+}
+
+/// Stage the review for a group that holds outputs, or pass the removal
+/// straight through for one that holds none.
+///
+/// Holdings come from the membership the page already resolved, so the count
+/// the review states is the count the group's own row states. An empty group is
+/// a policy with nothing under it: removing it orphans nothing, and stopping to
+/// ask would only teach the reader to click through the reviews that matter.
+fn stage_group_removal(
+    state: &mut AppState,
+    plan: Option<crate::product::SimulationPlanId>,
+    groups: &[CaptureGroup],
+    id: CaptureGroupId,
+    outputs: &[SavedOutput],
+    membership: &CaptureGroupMembership,
+) -> Option<GroupCommand> {
+    let (Some(plan), Some(group)) = (plan, groups.iter().find(|group| group.id == id)) else {
+        return Some(GroupCommand::Remove(id));
+    };
+    let held = outputs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| membership.owner(*index) == id)
+        .map(|(_, output)| output.name.as_str())
+        .collect::<Vec<_>>();
+    if held.is_empty() {
+        return Some(GroupCommand::Remove(id));
+    }
+    let overrides = [
+        group.points.map(|points| points.label()),
+        group.streaming.map(|streaming| streaming.label()),
+        group.precision.map(|precision| precision.label()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    let consequences = vec![
+        PlanRemovalConsequence::stated(
+            "Outputs it holds",
+            format!("{} · {}", held.len(), held.join(", ")),
+        )
+        .explained(
+            PlanRemovalTone::Warn,
+            format!(
+                "The outputs above fall back to {UNGROUPED_NAME}, which overrides nothing: each \
+                 one reverts to the save policy, precision and streaming its own record declares, \
+                 and the plan's forecast changes with them."
+            ),
+        ),
+        PlanRemovalConsequence::stated(
+            "Overrides it applies",
+            if overrides.is_empty() {
+                "none".to_owned()
+            } else {
+                overrides.join(" · ")
+            },
+        ),
+        PlanRemovalConsequence::stated("Rules it resolves by", group.rules.len().to_string())
+            .explained(
+                PlanRemovalTone::Aside,
+                "Removing a group removes a capture policy, never an output. Every output it held \
+                 stays in the registry and is still captured by the run.",
+            ),
+    ];
+    state.dialogs.plan_removal_review.open(
+        PlanRemovalTarget::CaptureGroup { plan, id },
+        group.name.clone(),
+        consequences,
+    );
+    None
 }
 
 /// One plan-level allowance, drawn in the group table but deliberately not a

@@ -483,10 +483,34 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     studio.app.state.workbench.simulation_workflow = None;
 
     studio.click(|label| label == "Remove");
+    // A group holding outputs is a reviewed removal: the strip stages it, and
+    // the card commits it on the frame after the reader answers. What each of
+    // its outputs is stored and sampled by changes the moment the group goes,
+    // and none of that is legible from the strip that removes it.
+    assert!(
+        studio
+            .app
+            .state
+            .dialogs
+            .plan_removal_review
+            .target
+            .is_some(),
+        "Remove stages the destructive review for a group that holds outputs"
+    );
+    assert_eq!(
+        order(&studio.app),
+        vec!["Core rails", "Edge rails"],
+        "and stages it without taking anything out of the plan"
+    );
+    // Two passes, as a click settles in two: the first applies the answer, and
+    // the ledger it had already drawn is redrawn by the second.
+    studio.app.state.dialogs.plan_removal_review.confirmed = true;
+    studio.pass(Vec::new());
+    studio.pass(Vec::new());
     assert_eq!(
         order(&studio.app),
         vec!["Edge rails"],
-        "Remove takes the selected group out of the plan"
+        "Remove takes the selected group out of the plan once it is confirmed"
     );
     assert_eq!(
         studio.app.state.workbench.selected_capture_group, None,
