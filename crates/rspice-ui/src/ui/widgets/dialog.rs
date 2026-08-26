@@ -1145,17 +1145,34 @@ impl<'a> Dialog<'a> {
             ))
             .show(ui, |ui| {
                 let header_width = ui.available_width();
+                let row_min_height = if title_first {
+                    0.0
+                } else {
+                    WORKFLOW_HEADER_MIN_HEIGHT
+                };
                 ui.allocate_ui_with_layout(
-                    vec2(
-                        header_width,
-                        if title_first {
-                            0.0
-                        } else {
-                            WORKFLOW_HEADER_MIN_HEIGHT
-                        },
-                    ),
+                    vec2(header_width, row_min_height),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
+                        // State the row's floor as a floor.
+                        //
+                        // The height requested above is only a request: egui
+                        // advances the parent by the row's own `min_rect`, and
+                        // the row reaches the requested height solely because a
+                        // centre cross-alignment fills the track it was offered.
+                        // An `Area` lays its first frame out as a sizing pass —
+                        // invisible, and with every centre cross-alignment
+                        // rewritten to `Align::Min` so widgets report the least
+                        // they can live in — and under those rules this row
+                        // collapses onto its two lines of text, 22 points short.
+                        // The surface measured from it is short by the same
+                        // amount, and it is that measurement the first *visible*
+                        // frame is laid out against, so every dialog opened with
+                        // a header jumped once more after the reader could
+                        // already see it. A floor stated as a floor holds in both
+                        // passes, and the sizing pass measures what the visible
+                        // pass will draw.
+                        ui.set_min_height(row_min_height);
                         ui.spacing_mut().item_spacing.x = 10.0;
                         let close_size = if large_targets {
                             vec2(TOUCH_TARGET_SIDE, TOUCH_TARGET_SIDE)

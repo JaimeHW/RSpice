@@ -1107,3 +1107,52 @@ fn a_content_height_dialog_settles_in_one_pass_and_stops_moving() {
         );
     }
 }
+
+/// The pass that measures a dialog for the first time measures the dialog the
+/// reader is about to be shown.
+///
+/// An `egui::Area` lays its opening frame out as a *sizing pass*: painted
+/// invisibly, and with every centre cross-alignment rewritten to `Align::Min`
+/// so each widget reports the least room it can live in. That is the pass a
+/// dialog is first measured on, and anything on the surface that reaches its
+/// authored height by filling a track — the header row does — reports something
+/// smaller. The surface measured from it is short by the same amount, and it is
+/// that measurement the first *visible* frame is laid out against, so the whole
+/// dialog stepped once more after the reader could already see it.
+///
+/// The two passes are compared as heights rather than by asserting the header's
+/// own rectangle: what has to agree is the number the next pass is laid out
+/// against, and the header is only the part of the surface that disagreed.
+#[test]
+fn the_opening_sizing_pass_measures_the_surface_the_first_visible_pass_draws() {
+    fn pass(ctx: &Context) -> f32 {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .size(DialogSize::WideWorkflow)
+                .show(ctx, |ui| {
+                    for row in 0..3 {
+                        ui.label(format!("row {row}"));
+                    }
+                });
+        });
+        ctx.data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))))
+            .expect("a content-height dialog measures the surface it resolved")
+    }
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let sizing = pass(&ctx);
+    let first_visible = pass(&ctx);
+    let settled = pass(&ctx);
+    assert_eq!(
+        first_visible, settled,
+        "the first visible pass did not settle the surface"
+    );
+    assert_eq!(
+        sizing, settled,
+        "the opening sizing pass measured a {sizing}-point surface for a dialog \
+         that draws {settled}, so the first frame the reader sees is laid out \
+         against a height it then has to correct"
+    );
+}
