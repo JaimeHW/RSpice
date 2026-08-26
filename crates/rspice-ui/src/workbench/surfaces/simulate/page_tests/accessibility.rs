@@ -719,22 +719,15 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
     let mut drifting = Vec::new();
     let mut swept = 0usize;
     let mut measured = 0usize;
-    // One of the studio's overlays is left out. The analysis catalogue keeps
-    // its own scrolling, and the bar its result list takes fades in over ten
-    // passes, narrowing every row under it as it goes — the shell's defect one
-    // level down, in a surface that reserves no gutter. It is a known follow-up
-    // on `surfaces::simulate::catalog`, which draws it, and it is deliberately
-    // still excluded here rather than quietly tolerated by a wider tolerance.
-    //
-    // The advanced-options panel used to be excluded beside it, for the same
-    // reason one level down again: it is drawn *into* the Solver route rather
-    // than over it, and the content it adds tipped that route's own scroll area
-    // into taking a bar. The studio surface now reserves that gutter whether or
-    // not a bar is showing, so the panel is in the sweep.
-    let dialogs = studio_overlays()
-        .into_iter()
-        .filter(|(surface, _)| !surface.starts_with("analysis catalogue"));
-    for (surface, app) in dialogs {
+    // Two of the studio's overlays used to be left out, each for the shell's
+    // defect one level down — a scroll area whose rows were laid out against a
+    // width the bar's animated reveal was still taking away. The analysis
+    // catalogue's result list now reads its row track through
+    // `analysis_catalog_row_space` with the gutter withheld whether or not a
+    // bar is showing, and the studio surface reserves the same gutter for the
+    // routes drawn into it (which is what brought the advanced-options panel
+    // to rest), so the sweep covers everything.
+    for (surface, app) in studio_overlays() {
         swept += 1;
         let passes = studio_route_passes(app, 1280.0, PASSES);
         let settled = &passes[SETTLED];
@@ -794,9 +787,8 @@ fn every_studio_workflow_dialog_comes_to_rest_and_stays_there() {
     // would pass forever.
     assert_eq!(
         swept,
-        studio_overlays().len() - analysis_catalogue_fixtures().len(),
-        "every studio overlay but the analysis catalogue is one pass of this \
-         sweep"
+        studio_overlays().len(),
+        "every studio overlay is one pass of this sweep"
     );
     assert!(
         measured > 100,

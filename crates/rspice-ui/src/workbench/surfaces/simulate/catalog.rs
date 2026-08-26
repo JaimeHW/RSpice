@@ -191,6 +191,14 @@ pub(super) fn analysis_catalog_window(
             }
 
             let results_height = ui.available_height().max(1.0);
+            // The rows' track, with the scrollbar's gutter withheld from it
+            // whether or not a bar is showing — the same width
+            // [`analysis_catalog_row_space`] hands the column count, read out
+            // here for the same reason: inside the scroll area the available
+            // width answers to the bar's animated reveal, and rows laid out
+            // against it narrow half a point a pass for ten passes every time
+            // the result list outgrows the window.
+            let row_space = analysis_catalog_row_space(ui).max(1.0);
             egui::Frame::NONE.fill(t.color.bg_app).show(ui, |ui| {
                 ui.set_min_height(results_height);
                 ScrollArea::vertical()
@@ -199,7 +207,7 @@ pub(super) fn analysis_catalog_window(
                     .max_height(results_height)
                     .min_scrolled_height(results_height)
                     .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
+                        ui.set_width(row_space);
                         if filtered.is_empty() {
                             ui.add_space(12.0);
                             super::page_kit::note_line(
