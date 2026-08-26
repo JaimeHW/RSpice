@@ -1030,7 +1030,7 @@ impl InstanceRunState {
 /// one row down is worse than no chip: it attributes a failure to an analysis
 /// that never ran.
 fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunState)> {
-    let Some((index, _)) = prior_plan_run(app) else {
+    let Some(PriorPlanRun { index, .. }) = prior_plan_run(app) else {
         return Vec::new();
     };
     let Some(run) = app.state.simulation.runs.get(index) else {
@@ -1115,34 +1115,91 @@ fn analysis_stack_rows(
         .collect())
 }
 
-/// The newest retained run this plan produced, and its history position.
+/// The newest run this plan produced that holds a dataset: where it sits in
+/// history, which run it is, and whether an execution is still writing it.
+#[derive(Debug, Clone, Copy)]
+struct PriorPlanRun {
+    index: usize,
+    sequence: u64,
+    executing: bool,
+}
+
+impl PriorPlanRun {
+    /// How the plan heading names it, mid-sentence among the plan's standing
+    /// facts.
+    fn heading_claim(self) -> String {
+        if self.executing {
+            format!("Run {} in progress", self.sequence)
+        } else {
+            format!("prior Run {} immutable", self.sequence)
+        }
+    }
+
+    /// How the analysis contract card names it, as a value on its own row.
+    fn contract_summary(self) -> String {
+        if self.executing {
+            format!("Run {} in progress", self.sequence)
+        } else {
+            format!("Run {} retained · immutable", self.sequence)
+        }
+    }
+}
+
+/// The newest retained run this plan produced.
 ///
-/// One derivation for both the heading's claim about a prior dataset and the
-/// control that opens it, so the sentence and the hop can never name
-/// different runs.
-fn prior_plan_run(app: &RSpiceApp) -> Option<(usize, u64)> {
+/// One derivation for the heading's claim about a prior dataset, the control
+/// that opens it, and the contract card that summarizes it, so the three
+/// cannot name different runs. Two of them used to re-derive it inline and
+/// without the `analyses` guard, which is a different question — a run exists
+/// from the moment it is started, and `start_run_with_receipt` puts it at the
+/// front of history with its receipt attached and nothing in it. The heading
+/// therefore announced "prior Run 7 immutable" for the run that was at that
+/// moment executing, while the hop beside it stayed disabled saying no dataset
+/// existed. Both sentences were about the same row.
+///
+/// `executing` is what keeps the surviving derivation honest once results do
+/// land in that run: "immutable" is a claim about a sealed dataset, and the
+/// run an execution still owns is not one. The hop stays live — Results shows
+/// the partials as they arrive — and only the wording changes.
+fn prior_plan_run(app: &RSpiceApp) -> Option<PriorPlanRun> {
     let plan_id = app
         .state
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())?;
-    app.state
-        .simulation
-        .runs
-        .iter()
-        .position(|run| {
-            !run.analyses.is_empty()
-                && run
-                    .prepared_receipt()
-                    .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
-                    == Some(plan_id)
-        })
-        .map(|index| (index, app.state.simulation.runs[index].id))
+    let simulation = &app.state.simulation;
+    let index = simulation.runs.iter().position(|run| {
+        !run.analyses.is_empty()
+            && run
+                .prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                == Some(plan_id)
+    })?;
+    let run = &simulation.runs[index];
+    // Identity first, selection only as the fallback `has_active_execution`
+    // itself falls back on: `is_running` without a sealed identity is the
+    // runner's instantaneous activity, and the run being written is then the
+    // one history has selected.
+    let executing = simulation.has_active_execution()
+        && match simulation.active_execution {
+            Some(identity) => run.execution_identity() == Some(identity),
+            None => simulation.active_run_idx == Some(index),
+        };
+    Some(PriorPlanRun {
+        index,
+        sequence: run.id,
+        executing,
+    })
 }
 
 fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let plan_name = app.state.sim_setup.active_plan_name().as_str().to_owned();
+    // The heading states whether a prior dataset exists; the two controls
+    // below make that statement reachable. All three read the one derivation,
+    // so the sentence, the hop's label and the hop's own availability are
+    // three views of a single answer rather than three answers.
+    let prior = prior_plan_run(app);
     let (eyebrow, description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
         Ok(plan) => {
             let enabled = plan
@@ -1150,20 +1207,10 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .iter()
                 .filter(|instance| instance.enabled())
                 .count();
-            let prior = app
-                .state
-                .simulation
-                .runs
-                .iter()
-                .find(|run| {
-                    run.prepared_receipt()
-                        .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
-                        == Some(plan.id())
-                })
-                .map_or_else(
-                    || "no prior dataset".to_owned(),
-                    |run| format!("prior Run {} immutable", run.id),
-                );
+            let prior = prior.map_or_else(
+                || "no prior dataset".to_owned(),
+                PriorPlanRun::heading_claim,
+            );
             (
                 format!("Simulation plan · revision {}", plan.revision().get()),
                 format!(
@@ -1186,14 +1233,12 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         ),
     };
 
-    // The heading already states that a prior dataset exists; these two make
-    // that statement reachable. The split toggle sits beside the hop because
-    // both answer "and now show me what the last run produced" — one by
-    // leaving this page, one by keeping it.
-    let prior = prior_plan_run(app);
+    // The split toggle sits beside the hop because both answer "and now show
+    // me what the last run produced" — one by leaving this page, one by
+    // keeping it.
     let open_prior_label = prior.map_or_else(
         || "Open prior run".to_owned(),
-        |(_, sequence)| format!("Open Run {sequence}"),
+        |prior| format!("Open Run {}", prior.sequence),
     );
     let split_availability = Command::ToggleResultsSplit.availability(app);
     let split_enabled = split_availability.is_available();
@@ -1303,7 +1348,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     if validate || rerun_preflight {
         Command::PreflightChecks.execute(app);
     }
-    if open_prior && let Some((index, _)) = prior {
+    if open_prior && let Some(PriorPlanRun { index, .. }) = prior {
         // Selecting first is what carries the object: the command owns the
         // workspace half of the destination and nothing else.
         if app.state.simulation.select_run(index) {
@@ -1547,27 +1592,15 @@ fn analysis_editor(
         }
     };
 
-    let active_plan_id = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .map(|plan| plan.id());
-    let prior_datasets = app
-        .state
-        .simulation
-        .runs
-        .iter()
-        .find(|run| {
-            run.prepared_receipt()
-                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
-                == active_plan_id
-        })
-        .map_or_else(
-            || "No prior datasets".to_owned(),
-            |run| format!("Run {} retained · immutable", run.id),
-        );
+    // The card's summary and the hop under it are the same run, read once.
+    // The summary used to find its own, over a predicate that accepted a run
+    // holding nothing — so a started run made the card claim a retained
+    // immutable dataset while the hop beside it stayed disabled.
     let prior_run = prior_plan_run(app);
+    let prior_datasets = prior_run.map_or_else(
+        || "No prior datasets".to_owned(),
+        PriorPlanRun::contract_summary,
+    );
     let mut draft = selected.draft.clone();
     let serialized_before = serde_json::to_vec(&draft);
     let mut action = None;
@@ -1598,7 +1631,7 @@ fn analysis_editor(
             &plan_statement,
             ContractDatasets {
                 summary: &prior_datasets,
-                sequence: prior_run.map(|(_, sequence)| sequence),
+                sequence: prior_run.map(|prior| prior.sequence),
                 open: &mut open_prior_dataset,
             },
             resolved_participation,
@@ -1658,7 +1691,7 @@ fn analysis_editor(
     // takes focus off whatever field was being typed into, does not also
     // commit an unintended edit on the way out of the page.
     if open_prior_dataset
-        && let Some((index, _)) = prior_run
+        && let Some(PriorPlanRun { index, .. }) = prior_run
         && app.state.simulation.select_run(index)
     {
         Command::OpenRunInResults.execute(app);

@@ -90,6 +90,17 @@ fn saved_output() -> SavedOutput {
 /// Seal one retained run against the app's own active plan, produced by its
 /// first instance, holding `analysis`.
 fn retain_run_for_active_plan(state: &mut AppState, analysis: AnalysisResult) {
+    start_prepared_run_for_active_plan(state, Some(analysis));
+}
+
+/// Start one prepared run against the active plan, holding `analysis` if it has
+/// produced one yet.
+///
+/// `None` is not a degenerate fixture: `SimulationState::start_run_with_receipt`
+/// puts the run at the front of history with its receipt already attached and
+/// nothing in it, so this is the exact shape every plan-scoped run has between
+/// dispatch and the first result landing.
+fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<AnalysisResult>) {
     state.project_lifecycle.project_open = true;
     let plan = state
         .sim_setup
@@ -121,22 +132,25 @@ fn retain_run_for_active_plan(state: &mut AppState, analysis: AnalysisResult) {
         ],
     )
     .expect("valid prepared run receipt");
-    let analysis = analysis.with_provenance(
-        AnalysisResultProvenance::new_with_source_domain(
-            AnalysisResultSourceDomain::SimulationPlan,
-            analysis_id,
-            project_revision,
-            ContentDigest::from_bytes([0x44; 32]),
-            Vec::new(),
+    let analysis = analysis.map(|analysis| {
+        analysis.with_provenance(
+            AnalysisResultProvenance::new_with_source_domain(
+                AnalysisResultSourceDomain::SimulationPlan,
+                analysis_id,
+                project_revision,
+                ContentDigest::from_bytes([0x44; 32]),
+                Vec::new(),
+            )
+            .expect("valid prepared analysis provenance"),
         )
-        .expect("valid prepared analysis provenance"),
-    );
-    state
-        .simulation
-        .start_prepared_run(receipt)
-        .add_analysis(analysis);
+    });
+    let holds_analysis = analysis.is_some();
+    let run = state.simulation.start_prepared_run(receipt);
+    if let Some(analysis) = analysis {
+        run.add_analysis(analysis);
+    }
     state.simulation.active_run_idx = Some(0);
-    state.simulation.active_analysis_idx = Some(0);
+    state.simulation.active_analysis_idx = holds_analysis.then_some(0);
 }
 
 /// The plan heading says whether a prior dataset exists; both controls beside
@@ -419,5 +433,104 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
             .map(crate::workbench::documents::result_document::SelectedResultTrace::source_name),
         Some("V(out)"),
         "and the trace itself is selected, not merely the workspace opened"
+    );
+}
+
+/// The heading, the hop and the contract card name one run or none.
+///
+/// A run exists from the moment it is dispatched: history carries it at the
+/// front with its prepared receipt attached and nothing in it. Two of these
+/// three sites used to find their own prior run over a predicate that accepted
+/// exactly that — so the instant a run started, the heading announced "prior
+/// Run 1 immutable" and the card announced "Run 1 retained · immutable" for the
+/// run that was at that moment executing, while the hop between them stayed
+/// disabled saying no dataset existed. Three statements about one row, two of
+/// them false.
+///
+/// The hop's availability is read from its label, which is the derivation's
+/// own: it reads "Open prior run" only where there is none to open, and that
+/// is the state it is drawn disabled in.
+#[test]
+fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
+    let dispatched = render_with(SimulationPage::Analyses, 1400.0, |state| {
+        start_prepared_run_for_active_plan(state, None);
+        // The fixture is the exact shape that fooled the two inline
+        // derivations, pinned here so it cannot quietly stop being one: a run
+        // in history, sealed to this plan, holding nothing.
+        let run = state
+            .simulation
+            .runs
+            .first()
+            .expect("the run is at the front of history");
+        assert!(run.analyses.is_empty(), "and it has produced nothing yet");
+        assert!(
+            run.prepared_receipt()
+                .and_then(crate::state::PreparedRunReceipt::simulation_plan_id)
+                .is_some(),
+            "while already carrying the receipt that names the plan"
+        );
+    });
+    assert!(
+        dispatched.contains("no prior dataset"),
+        "a run holding nothing is not a dataset the heading may claim:\n{dispatched}"
+    );
+    assert!(
+        dispatched.contains("Open prior run"),
+        "so the hop names no run either, and stays disabled:\n{dispatched}"
+    );
+    assert!(
+        dispatched.contains("No prior datasets"),
+        "and the contract card says the same thing in its own register:\n{dispatched}"
+    );
+
+    let landed = render_with(SimulationPage::Analyses, 1400.0, |state| {
+        retain_run_for_active_plan(
+            state,
+            AnalysisResult::new(1, AnalysisType::Transient, "retained TRAN"),
+        );
+    });
+    assert!(
+        landed.contains("prior Run 1 immutable"),
+        "once a result lands the heading names the run:\n{landed}"
+    );
+    assert!(
+        landed.contains("Open Run 1"),
+        "the hop names the same one:\n{landed}"
+    );
+    assert!(
+        landed.contains("Run 1 retained · immutable"),
+        "and so does the card:\n{landed}"
+    );
+}
+
+/// "Immutable" is a claim about a sealed dataset, so a live run is not one.
+///
+/// The run an execution still owns is the one Results is filling in as its
+/// partials arrive. Both sites say so; the hop stays live, because a partial
+/// dataset is exactly what a reader wants to open at that moment.
+#[test]
+fn a_run_still_executing_is_named_as_in_progress_rather_than_immutable() {
+    let executing = render_with(SimulationPage::Analyses, 1400.0, |state| {
+        retain_run_for_active_plan(
+            state,
+            AnalysisResult::new(1, AnalysisType::Transient, "live TRAN"),
+        );
+        state.simulation.is_running = true;
+        assert!(
+            state.simulation.has_active_execution(),
+            "the fixture is a run an execution still owns"
+        );
+    });
+    assert!(
+        executing.contains("Run 1 in progress"),
+        "the heading and the card both stop calling the live run immutable:\n{executing}"
+    );
+    assert!(
+        !executing.contains("immutable"),
+        "neither of them may still be claiming it:\n{executing}"
+    );
+    assert!(
+        executing.contains("Open Run 1"),
+        "and the hop stays live on it, because Results shows the partials:\n{executing}"
     );
 }
