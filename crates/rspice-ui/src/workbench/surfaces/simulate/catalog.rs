@@ -7,21 +7,32 @@
 
 use super::*;
 
+/// Draw the catalogue and report the kind it chose, if any.
+///
+/// The choice comes back as a value rather than as a stack action written
+/// through an out-parameter: adding an instance is the only thing this window
+/// can ask for, and the rail that used to collect its action is no longer the
+/// caller. The frame is, on whichever workspace the reader is standing on.
+///
+/// Whether it is open at all is the host's question, not this function's — the
+/// host has to resolve the plan before it can lend the rows, and paying for
+/// that on every frame of every workspace to then draw nothing is exactly the
+/// cost the guard exists to avoid.
+///
+/// It takes the setup state rather than the application because the four
+/// palette fields are the whole of what it owns. What is done with the kind it
+/// returns is the host's business, and the host is the only thing here that
+/// needs to reach the plan.
 pub(super) fn analysis_catalog_window(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    setup: &mut SimSetupState,
     rows: &[AnalysisStackRow],
-    action: &mut Option<StackAction>,
-) {
-    if !app.state.sim_setup.palette_open {
-        return;
-    }
-
-    let mut query = app.state.sim_setup.palette_query.clone();
-    let mut active = app.state.sim_setup.palette_active;
+) -> Option<AnalysisKind> {
+    let mut query = setup.palette_query.clone();
+    let mut active = setup.palette_active;
     let mut chosen = None;
     let mut request_close = false;
-    let scroll_to_active = app.state.sim_setup.palette_scroll_to_active;
+    let scroll_to_active = setup.palette_scroll_to_active;
     let catalog_columns = analysis_catalog_column_count(ctx.content_rect().width());
     let choice = Dialog::new("Simulation Studio", "Add analysis or workflow", "Close")
         .description(
@@ -190,20 +201,16 @@ pub(super) fn analysis_catalog_window(
             search_id
         });
 
-    if choice == DialogChoice::Cancelled {
-        request_close = true;
-    }
-
-    if let Some(kind) = chosen {
-        *action = Some(StackAction::Insert(kind));
+    if choice == DialogChoice::Cancelled || chosen.is_some() {
         request_close = true;
     }
     if request_close {
-        app.state.sim_setup.palette_open = false;
+        setup.palette_open = false;
     }
-    app.state.sim_setup.palette_query = query;
-    app.state.sim_setup.palette_active = active;
-    app.state.sim_setup.palette_scroll_to_active = false;
+    setup.palette_query = query;
+    setup.palette_active = active;
+    setup.palette_scroll_to_active = false;
+    chosen
 }
 
 /// What the catalogue's search field is called.

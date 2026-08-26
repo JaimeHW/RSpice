@@ -101,3 +101,61 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
         "a name the analysis does not have must be committable"
     );
 }
+
+/// The catalogue opens over a plan that does not resolve.
+///
+/// It has to. The control that arms it is drawn on all nine setup routes and
+/// sits in the Simulate menu, and `palette_open` withdraws the application's
+/// keyboard the moment it is set — so a host that gave up when the plan could
+/// not be read would leave the reader inside a modal with no window, no search
+/// field and no Escape. What the rows say instead is the honest thing: nothing
+/// is configured for the insert to sit beside, and the insert itself refuses in
+/// its own words if the plan still cannot take it.
+#[test]
+fn the_analysis_catalogue_opens_over_a_plan_that_does_not_resolve() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    app.state.sim_setup.analysis_plan = None;
+    assert!(
+        app.state.sim_setup.stable_analysis_plan().is_err(),
+        "the fixture is a project whose plan has no stable analysis identity"
+    );
+    app.state.sim_setup.palette_open = true;
+
+    let mut run = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_200.0, 900.0))),
+                ..egui::RawInput::default()
+            },
+            |ctx| super::show_workflow_dialogs(ctx, &mut app),
+        )
+    };
+    // A content-height surface lays out against its previous measurement.
+    let _ = run();
+    let nodes = run()
+        .platform_output
+        .accesskit_update
+        .map(|update| update.nodes)
+        .unwrap_or_default();
+
+    assert!(
+        nodes.iter().any(|(_, node)| node
+            .label()
+            .is_some_and(|label| label == ANALYSIS_CATALOG_SEARCH_LABEL)),
+        "the catalogue is drawn, and the field it focuses announces itself"
+    );
+    let offers = nodes
+        .iter()
+        .filter(|(_, node)| {
+            node.label()
+                .is_some_and(|label| label.ends_with("analysis instance"))
+        })
+        .count();
+    assert!(
+        offers > 8,
+        "the catalogue still lists what the plan could take; it offered {offers} rows"
+    );
+}

@@ -255,14 +255,28 @@ pub(super) type InsertAnalysisResult = Result<
     String,
 >;
 
-pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) {
+/// Add one instance of `kind` to the stable plan, and name it if it committed.
+///
+/// The identity comes back because the caller decides what happens next, and
+/// the two callers want different things: the run-set page adds the Monte
+/// Carlo controller its declaration needs and stays where it is, while the
+/// catalogue carries the reader to the route that edits what was just added.
+/// Both selections are the same one this function already wrote — the return
+/// is what lets the second one act on it without re-reading the plan.
+///
+/// `None` is every refusal, each of which has already stated itself: a blocked
+/// kind, a plan that does not resolve, an insert the plan rejected.
+pub(super) fn insert_analysis_instance(
+    app: &mut RSpiceApp,
+    kind: AnalysisKind,
+) -> Option<AnalysisInstanceId> {
     app.state.sim_setup.palette_open = false;
     app.state.sim_setup.palette_query.clear();
     app.state.sim_setup.palette_active = 0;
     app.state.sim_setup.palette_scroll_to_active = false;
     if let Some(reason) = kind.execution_blocker() {
         record_failure(&mut app.state, "Insert", reason);
-        return;
+        return None;
     }
     let repair_context = build_envelope_source_catalog(&app.state).dependency_repair_context();
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
@@ -319,8 +333,12 @@ pub(super) fn insert_analysis_instance(app: &mut RSpiceApp, kind: AnalysisKind) 
                     ));
                 }
             }
+            Some(id)
         }
-        Err(error) => record_failure(&mut app.state, "Add analysis", &error),
+        Err(error) => {
+            record_failure(&mut app.state, "Add analysis", &error);
+            None
+        }
     }
 }
 

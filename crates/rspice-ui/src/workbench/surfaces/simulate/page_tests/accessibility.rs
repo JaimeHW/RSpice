@@ -230,6 +230,42 @@ fn studio_route_nodes(
     nodes
 }
 
+/// Only the frame's overlay host, with the studio surface not drawn.
+///
+/// This is what a reader anywhere but Simulate actually gets:
+/// [`show_workflow_dialogs`](super::super::show_workflow_dialogs) runs every
+/// frame on every workspace, and `simulate::show` does not run at all. A sweep
+/// that drew the surface as well would let an overlay the *surface* happens to
+/// draw pass as one the frame hosts, which is exactly the confusion that left
+/// the analysis catalogue reachable from one route out of nine.
+fn workflow_host_nodes(
+    mut app: RSpiceApp,
+    width: f32,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(width, RENDER_VIEWPORT_HEIGHT),
+                )),
+                ..Default::default()
+            },
+            |ctx| super::super::show_workflow_dialogs(ctx, &mut app),
+        );
+        nodes = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default();
+    }
+    nodes
+}
+
 /// The fixture on one route, with the instance of one kind selected.
 fn studio_route(
     page: SimulationPage,
@@ -295,6 +331,71 @@ fn first_enabled_instance(app: &RSpiceApp) -> crate::product::AnalysisInstanceId
         .expect("the fixture holds an enabled analysis")
 }
 
+/// The analysis catalogue armed from every place its control is drawn.
+///
+/// Ten fixtures for one window, because the control that opens it is on all of
+/// them: the navigator's creating action is drawn on all nine setup routes,
+/// and `Command::AddAnalysis` reaches it from the Simulate menu and the palette
+/// on any workspace at all. The window itself used to be drawn by the Analyses
+/// rail, so nine of these ten armed a modal that no pass rendered — and
+/// `palette_open` is one of the terms of `AppState::application_modal_open`, so
+/// each of them silently disabled every keyboard shortcut in the application
+/// with no painted dialog to press Escape on.
+fn analysis_catalogue_fixtures() -> Vec<(String, RSpiceApp)> {
+    use crate::workbench::state::Workspace;
+
+    let mut fixtures = SimulationPage::NAVIGATION
+        .into_iter()
+        .map(|page| {
+            let mut app = studio_route(page, None);
+            app.state.sim_setup.palette_open = true;
+            (format!("analysis catalogue · {page:?}"), app)
+        })
+        .collect::<Vec<_>>();
+    // And from a workspace that is not Simulate at all. The frame hosts this
+    // window, so standing on Results is no different from standing on a setup
+    // route — which is the whole claim, and the one the command makes true.
+    let mut app = studio_route(SimulationPage::Solver, None);
+    app.state.workbench.activate(Workspace::Results);
+    app.state.sim_setup.palette_open = true;
+    fixtures.push(("analysis catalogue · Results workspace".to_owned(), app));
+    fixtures
+}
+
+/// The catalogue opens wherever the reader pressed the control that arms it.
+///
+/// Rendered through the frame's overlay host alone, with the studio surface
+/// not drawn, because that is the only pass a reader on Results or Verify
+/// gets. Judged on the search field's name rather than on the window's frame:
+/// the field is the control the dialog puts focus on, so a tree that publishes
+/// it is a dialog a reader has actually landed inside.
+#[test]
+fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
+    let mut missing = Vec::new();
+    let fixtures = analysis_catalogue_fixtures();
+    assert_eq!(
+        fixtures.len(),
+        SimulationPage::NAVIGATION.len() + 1,
+        "one fixture per setup route, plus one off the Simulate workspace"
+    );
+    for (surface, app) in fixtures {
+        let named = workflow_host_nodes(app, 1280.0)
+            .into_iter()
+            .any(|(_, node)| {
+                node.label()
+                    .is_some_and(|label| label == super::super::ANALYSIS_CATALOG_SEARCH_LABEL)
+            });
+        if !named {
+            missing.push(surface);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "the catalogue was armed and nothing drew it on:\n{}",
+        missing.join("\n")
+    );
+}
+
 /// Every overlay and dialog the studio draws over its routes, each on the route
 /// it opens from.
 ///
@@ -309,12 +410,7 @@ fn studio_overlays() -> Vec<(String, RSpiceApp)> {
         SimulationWorkflowDialog,
     };
 
-    let mut overlays: Vec<(String, RSpiceApp)> = Vec::new();
-
-    // The analysis catalogue, which a keystroke opens over the Analyses route.
-    let mut app = studio_route(SimulationPage::Analyses, None);
-    app.state.sim_setup.palette_open = true;
-    overlays.push(("analysis catalogue".to_owned(), app));
+    let mut overlays: Vec<(String, RSpiceApp)> = analysis_catalogue_fixtures();
 
     // The advanced-options panel, opened on one analysis from the Solver page.
     let mut app = studio_route(SimulationPage::Solver, None);
@@ -436,7 +532,7 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
          reaching the surfaces it claims to check"
     );
     assert!(
-        swept >= studio_routes().len() + 7,
+        swept >= studio_routes().len() + 6 + analysis_catalogue_fixtures().len(),
         "the sweep ran {swept} surfaces; every route and every overlay is one"
     );
 }

@@ -932,8 +932,9 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     if add_monte_carlo {
         // The same insertion the catalog performs, so the instance arrives
         // with its prerequisites bound and its receipt recorded rather than as
-        // a second way of adding an analysis that behaves almost the same.
-        super::lifecycle::insert_analysis_instance(app, AnalysisKind::MonteCarlo);
+        // a second way of adding an analysis that behaves almost the same. It
+        // names what it added; this page has no use for that, having asked.
+        let _ = super::lifecycle::insert_analysis_instance(app, AnalysisKind::MonteCarlo);
     }
 }
 

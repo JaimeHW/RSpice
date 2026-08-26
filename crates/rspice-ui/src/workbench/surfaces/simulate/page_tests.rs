@@ -1693,7 +1693,8 @@ fn the_operating_points_newton_budget_is_reported_as_its_accuracy_tiers() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.sim_setup.options.itl1 = 50;
-    super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::OperatingPoint);
+    super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::OperatingPoint)
+        .expect("an operating point inserts into the test instance plan");
 
     let budget_label = NumericOverrideOption::Itl1.label();
     let rows = super::page_solver::analysis_overrides(&app);
@@ -1750,7 +1751,8 @@ fn the_transfer_functions_newton_budget_is_never_claimed_for_the_plan() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.sim_setup.options.itl1 = 50;
-    super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::TransferFunction);
+    super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::TransferFunction)
+        .expect("a transfer function inserts into the test instance plan");
 
     let budget_label = NumericOverrideOption::Itl1.label();
     let rows = super::page_solver::analysis_overrides(&app);

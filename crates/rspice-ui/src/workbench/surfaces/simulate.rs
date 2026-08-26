@@ -46,10 +46,11 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, mono_input, select,
 };
+use crate::workbench::app_state::SimSetupState;
 use crate::workbench::state::{
     AnalysisRunPointsDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
-    SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
-    SimulationWorkflowDialog,
+    SavedOutputDraft, SimulationPage, SimulationPlanManagerDraft, SimulationPlanManagerMode,
+    SimulationWorkflowDialog, Workspace,
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -277,7 +278,6 @@ enum AnalysisAction {
 enum StackAction {
     Select(AnalysisInstanceId),
     SetEnabled(AnalysisInstanceId, bool),
-    Insert(AnalysisKind),
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -303,7 +303,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
                 let page = app.state.workbench.simulation_page;
-                if page == crate::workbench::state::SimulationPage::Analyses {
+                if page == SimulationPage::Analyses {
                     workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
                     analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
                 } else {
@@ -322,19 +322,68 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.ctx().request_repaint();
         }
     });
-    drain_lifecycle_refusal(ui.ctx(), &mut app.state);
 }
 
-/// Paint whichever plan-editing workflow is open, over whatever workspace the
-/// reader is on.
+/// Paint whichever plan-editing overlay is open, over whatever workspace the
+/// reader is on, and carry any refusal it raised to a toast.
 ///
-/// The frame calls this, not [`show`]. Every route onto these drafts — the
-/// toolbar's run configuration chip, the Simulate menu, the command palette —
-/// is chrome a reader reaches from any workspace, so a host that only runs
-/// while Simulate is the active surface would arm a dialog that no pass
-/// renders and leave the control dead everywhere else.
+/// The frame calls this, not [`show`]. Only one of the nine overlays is
+/// genuinely chrome: the plan manager, which the toolbar's run configuration
+/// chip and `Command::ManageSimulationPlans` open from the menu bar, the
+/// palette and the shortcut map, on any workspace. The other seven drafts are
+/// each opened by a control on one setup page — cloning the plan and renaming
+/// an analysis from the Analyses route, a design variable from Variables, a
+/// saved output from Outputs, and so on.
+///
+/// The catalogue is the reason they are hosted together anyway. Its invoker is
+/// the navigator's creating action, which the panel draws on all nine setup
+/// routes, and `Command::AddAnalysis`, which reaches it from the Simulate menu
+/// and the palette on any workspace — but the catalogue itself was drawn from
+/// the Analyses rail, so pressing that action anywhere else set
+/// `palette_open` with nothing to render it. That flag is one of the terms of
+/// [`AppState::application_modal_open`], so the press took every keyboard
+/// shortcut in the application with it and left no painted modal to press
+/// Escape on. A host that runs once a frame wherever the reader is standing
+/// cannot arm an overlay that no pass draws.
+///
+/// The refusal drain is here for the same reason and not a weaker one: the
+/// plan manager commits from any workspace, and the strip that would have
+/// stated its refusal is drawn on one route.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
     simulation_workflow_dialog(ctx, app);
+    analysis_catalog(ctx, app);
+    drain_lifecycle_refusal(ctx, &mut app.state);
+}
+
+/// Host the analysis catalogue, and act on the kind it chose.
+///
+/// The rows are resolved here rather than lent from the rail that used to draw
+/// it. On eight of the nine setup routes, and on every other workspace,
+/// nothing has resolved the plan by the time this runs, and a plan that does
+/// not resolve at all yields none — so the window opens on an empty slice and
+/// every row reads "Add instance", which is the honest disposition when
+/// nothing can be said about what is already configured. Refusing to open
+/// would be the worse answer: the reader pressed a control, and an insert
+/// against a broken plan refuses in its own words rather than in silence.
+fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
+    if !app.state.sim_setup.palette_open {
+        return;
+    }
+    let participation = participation::PlanParticipation::resolve(&app.state);
+    let rows = analysis_stack_rows(app, &participation).unwrap_or_default();
+    let Some(kind) = analysis_catalog_window(ctx, &mut app.state.sim_setup, &rows) else {
+        return;
+    };
+    let Some(id) = insert_analysis_instance(app, kind) else {
+        return;
+    };
+    // Whoever adds an analysis means to configure it, and the catalogue can be
+    // opened from anywhere. Carrying the reader to the one route that edits the
+    // new instance is the same move `page_excitations::reveal` makes towards
+    // Design: the insert alone would leave a receipt on a page nobody is on.
+    app.state.workbench.active_analysis_instance = Some(id);
+    app.state.workbench.simulation_page = SimulationPage::Analyses;
+    app.state.workbench.activate(Workspace::Simulate);
 }
 
 /// Carry a refused plan command to a reader who is not on the Analyses page.
@@ -504,18 +553,29 @@ fn ordered_instance_stack(
     };
     let active = app.state.workbench.active_analysis_instance;
     let mut action = None;
+    let mut add_analysis = false;
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.set_width(ui.available_width());
         if rows.is_empty() {
+            // The notice used to name the navigator and stop there, which made
+            // it a dead end on the two states where the navigator is not on
+            // screen — the panel collapsed, and focus mode. The empty rail is
+            // where a plan is started, so it carries the action itself.
             flat_notice(ui, |ui| {
                 status_dot(ui, t.color.warn, "No analysis instances");
                 page_kit::note_line(
                     ui,
-                    "Add an analysis from the Simulation Studio navigator.",
+                    "This plan runs nothing until it holds one.",
                     page_kit::Tone::Dim,
                 );
+                ui.add_space(4.0);
+                add_analysis = Button::new(Command::AddAnalysis.spec().label)
+                    .accent()
+                    .min_width(ui.available_width())
+                    .show(ui)
+                    .clicked();
             });
         } else {
             let mut displayed_position = 0usize;
@@ -540,7 +600,9 @@ fn ordered_instance_stack(
         }
     });
 
-    analysis_catalog_window(ui.ctx(), app, &rows, &mut action);
+    if add_analysis {
+        Command::AddAnalysis.execute(app);
+    }
 
     match action {
         Some(StackAction::Select(id)) => {
@@ -549,7 +611,6 @@ fn ordered_instance_stack(
         Some(StackAction::SetEnabled(id, enabled)) => {
             apply_analysis_action(app, id, AnalysisAction::SetEnabled(enabled));
         }
-        Some(StackAction::Insert(kind)) => insert_analysis_instance(app, kind),
         None => {}
     }
 }

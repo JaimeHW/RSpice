@@ -56,7 +56,8 @@ fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
     let before = page_runset::exact_plan_task_count(&app)
         .unwrap()
         .expect("baseline workload");
-    insert_analysis_instance(&mut app, AnalysisKind::Temperature);
+    insert_analysis_instance(&mut app, AnalysisKind::Temperature)
+        .expect("a temperature controller inserts");
 
     let tasks = page_runset::exact_plan_task_count(&app)
         .expect("workload is valid")
@@ -73,7 +74,7 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
     let before = page_runset::exact_plan_task_count(&app)
         .unwrap()
         .expect("baseline workload");
-    insert_analysis_instance(&mut app, AnalysisKind::Pss);
+    insert_analysis_instance(&mut app, AnalysisKind::Pss).expect("a PSS instance inserts");
     name_every_pss_tone(
         app.state
             .sim_setup
@@ -1039,7 +1040,11 @@ fn unavailable_analysis_cannot_be_inserted_through_the_surface_action() {
         .instances()
         .len();
 
-    insert_analysis_instance(&mut app, AnalysisKind::Qpss);
+    assert_eq!(
+        insert_analysis_instance(&mut app, AnalysisKind::Qpss),
+        None,
+        "a blocked kind names no instance, because it committed none"
+    );
 
     let after = app
         .state
@@ -1828,24 +1833,67 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
 
 // ------------------------------------------------- refused-command reporting
 
-/// Run one Simulation Studio frame on the given setup route.
+/// Run one frame: the studio on `page`, or the overlay host alone when there
+/// is no page because the reader is not on this workspace at all.
 ///
-/// The drain lives in the surface entry point rather than in any page, so a
-/// test of it has to go through `show` and not through `pages::show`.
-fn simulate_frame(app: &mut RSpiceApp, page: crate::workbench::state::SimulationPage) {
+/// Both halves, because the drain is no longer in the surface. It moved to
+/// `show_workflow_dialogs` when the plan manager gained routes off this
+/// workspace altogether — refused from the toolbar's plan chip, which is
+/// chrome everywhere, it would otherwise sit queued until the reader next
+/// opened Simulate and then arrive as one toast for however many accumulated.
+/// `None` is that case: the whole of what a reader on Results is given.
+fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::SimulationPage>) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    app.state.workbench.simulation_page = page;
+    if let Some(page) = page {
+        app.state.workbench.simulation_page = page;
+    }
     let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 900.0))),
             ..egui::RawInput::default()
         },
         |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show(ui, app));
+            if page.is_some() {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::show(ui, app));
+            }
+            super::show_workflow_dialogs(ctx, app);
         },
+    );
+}
+
+/// A refusal raised off the Simulate workspace is reported where it happened.
+///
+/// The plan manager opens from the toolbar's run configuration chip and from
+/// `Command::ManageSimulationPlans`, both of which are reachable from every
+/// workspace, so a plan edit can be refused while Simulate is not on screen at
+/// all. The drain that carries it is in the frame's overlay host for exactly
+/// that reason.
+#[test]
+fn a_refusal_raised_off_the_simulate_workspace_is_reported_without_visiting_it() {
+    use crate::ui::widgets::ToastKind;
+    use crate::workbench::state::Workspace;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Results);
+    app.state
+        .workbench
+        .analysis_lifecycle_status
+        .record_refusal("Rename rejected fail-closed: that name is already in the plan.");
+    simulate_frame(&mut app, None);
+    let reported = app.state.ui.toasts.activity();
+    assert_eq!(
+        reported.len(),
+        1,
+        "the reader is told where they are, not the next time they open Simulate"
+    );
+    assert_eq!(reported[0].kind(), ToastKind::Error);
+    assert!(
+        reported[0].message().contains("already in the plan"),
+        "{}",
+        reported[0].message()
     );
 }
 
@@ -1863,7 +1911,7 @@ fn a_refusal_away_from_the_analyses_page_is_reported_and_a_receipt_is_not() {
         .workbench
         .analysis_lifecycle_status
         .record_receipt("Receipt #3 · Edit committed for instance 1.");
-    simulate_frame(&mut app, SimulationPage::Variables);
+    simulate_frame(&mut app, Some(SimulationPage::Variables));
     assert!(
         app.state.ui.toasts.activity().is_empty(),
         "a committed receipt is not an error the reader has to be chased with"
@@ -1873,7 +1921,7 @@ fn a_refusal_away_from_the_analyses_page_is_reported_and_a_receipt_is_not() {
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Remove rejected fail-closed: another analysis is bound to it.");
-    simulate_frame(&mut app, SimulationPage::Variables);
+    simulate_frame(&mut app, Some(SimulationPage::Variables));
     let reported = app.state.ui.toasts.activity();
     assert_eq!(
         reported.len(),
@@ -1901,11 +1949,11 @@ fn a_standing_refusal_is_reported_once_and_not_again_on_the_next_frame() {
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Reorder rejected fail-closed: the position is out of range.");
-    simulate_frame(&mut app, SimulationPage::Outputs);
+    simulate_frame(&mut app, Some(SimulationPage::Outputs));
     assert_eq!(app.state.ui.toasts.activity().len(), 1);
 
-    simulate_frame(&mut app, SimulationPage::Outputs);
-    simulate_frame(&mut app, SimulationPage::Outputs);
+    simulate_frame(&mut app, Some(SimulationPage::Outputs));
+    simulate_frame(&mut app, Some(SimulationPage::Outputs));
     assert_eq!(
         app.state.ui.toasts.activity().len(),
         1,
@@ -1917,7 +1965,7 @@ fn a_standing_refusal_is_reported_once_and_not_again_on_the_next_frame() {
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Reorder rejected fail-closed: the position is out of range.");
-    simulate_frame(&mut app, SimulationPage::Outputs);
+    simulate_frame(&mut app, Some(SimulationPage::Outputs));
     assert_eq!(app.state.ui.toasts.activity().len(), 1);
 }
 
@@ -1932,12 +1980,12 @@ fn two_different_refusals_in_a_row_are_both_reported() {
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Design-variable import refused · line 3 · out of range");
-    simulate_frame(&mut app, SimulationPage::RunSet);
+    simulate_frame(&mut app, Some(SimulationPage::RunSet));
     app.state
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Run set · blocked · the declared space exceeds the task budget");
-    simulate_frame(&mut app, SimulationPage::RunSet);
+    simulate_frame(&mut app, Some(SimulationPage::RunSet));
 
     let reported = app.state.ui.toasts.activity();
     assert_eq!(reported.len(), 2);
@@ -1957,17 +2005,17 @@ fn a_receipt_advances_the_guard_without_reporting_anything() {
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Clone rejected fail-closed: the instance no longer exists.");
-    simulate_frame(&mut app, SimulationPage::Specifications);
+    simulate_frame(&mut app, Some(SimulationPage::Specifications));
     app.state
         .workbench
         .analysis_lifecycle_status
         .record_receipt("Receipt #4 · Edit committed for instance 2.");
-    simulate_frame(&mut app, SimulationPage::Specifications);
+    simulate_frame(&mut app, Some(SimulationPage::Specifications));
     app.state
         .workbench
         .analysis_lifecycle_status
         .record_refusal("Clone rejected fail-closed: the instance no longer exists.");
-    simulate_frame(&mut app, SimulationPage::Specifications);
+    simulate_frame(&mut app, Some(SimulationPage::Specifications));
 
     assert_eq!(
         app.state.ui.toasts.activity().len(),
@@ -2082,7 +2130,7 @@ fn a_render_path_refusal_restated_every_frame_does_not_spin_the_sequence() {
     let mut app = RSpiceApp::test_instance();
     app.state.sim_setup.analysis_plan = None;
     for _ in 0..4 {
-        simulate_frame(&mut app, SimulationPage::Analyses);
+        simulate_frame(&mut app, Some(SimulationPage::Analyses));
     }
 
     let outcome = &app.state.workbench.analysis_lifecycle_status;

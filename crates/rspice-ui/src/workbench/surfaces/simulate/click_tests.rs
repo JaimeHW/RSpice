@@ -58,20 +58,47 @@ struct Studio {
     app: RSpiceApp,
     controls: Vec<Control>,
     size: (f32, f32),
+    shell: bool,
 }
 
 impl Studio {
     /// Open `page` and settle its layout.
-    fn open(mut app: RSpiceApp, page: SimulationPage, size: (f32, f32)) -> Self {
+    fn open(app: RSpiceApp, page: SimulationPage, size: (f32, f32)) -> Self {
+        Self::opened(app, page, size, false)
+    }
+
+    /// Open `page` inside the shell the frame puts around it: the navigator
+    /// dock on one side, and the overlay host that draws the plan dialogs.
+    ///
+    /// Opt-in, and not because the dock is expensive. Drawing an overlay in the
+    /// same pass as the synthetic click that opened it lets the modal read that
+    /// click as a dismissal — its press and its release arrive in one frame
+    /// here, which is not how a pointer behaves — so a case that only wants to
+    /// press something on the surface is better off without it. The cases that
+    /// need it are the ones about a control on one surface opening a window
+    /// hosted by another, which is precisely what cannot be checked otherwise.
+    fn open_with_shell(app: RSpiceApp, page: SimulationPage, size: (f32, f32)) -> Self {
+        Self::opened(app, page, size, true)
+    }
+
+    fn opened(mut app: RSpiceApp, page: SimulationPage, size: (f32, f32), shell: bool) -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
+        if shell {
+            // The navigator draws the tree of whichever workspace is active, so
+            // a studio shown beside it has to actually be the active one.
+            app.state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Simulate);
+        }
         app.state.workbench.simulation_page = page;
         let mut studio = Self {
             ctx,
             app,
             controls: Vec::new(),
             size,
+            shell,
         };
         // Twice: the first pass builds the font set and the second lays out
         // against it, and a rectangle measured before the fonts exist is not
@@ -83,12 +110,16 @@ impl Studio {
 
     /// One rendered pass, and the controls it published.
     fn pass(&mut self, events: Vec<egui::Event>) {
+        use crate::workbench::layout::LayoutSpec;
+
         let app = &mut self.app;
+        let shell = self.shell;
+        let size = self.size;
         let output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    vec2(self.size.0, self.size.1),
+                    vec2(size.0, size.1),
                 )),
                 events,
                 ..egui::RawInput::default()
@@ -96,7 +127,23 @@ impl Studio {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| super::show(ui, app));
+                    .show(ctx, |root| {
+                        if shell {
+                            // The shell's own dock, resolved the way the shell
+                            // resolves it, so the panel this presses is the
+                            // panel the product draws.
+                            let layout = LayoutSpec::resolve(size.0, size.1, &app.state.workbench);
+                            crate::workbench::docks::show_navigator(root, app, layout);
+                        }
+                        super::show(root, app);
+                    });
+                if shell {
+                    // Where the plan dialogs and the analysis catalogue are
+                    // actually drawn. A harness that ran only the surface could
+                    // press the control that opens one and see nothing appear,
+                    // which is the defect these cases exist to hold shut.
+                    super::show_workflow_dialogs(ctx, app);
+                }
             },
         );
         self.controls = output
@@ -157,6 +204,10 @@ impl Studio {
 
 /// The desktop size these routes are laid out at.
 const DESKTOP: (f32, f32) = (1280.0, 1400.0);
+
+/// Wide enough that the navigator dock and the surface beside it both lay out
+/// at their desktop widths rather than at their stacked breakpoints.
+const DESKTOP_WITH_SHELL: (f32, f32) = (1600.0, 1400.0);
 
 // ----------------------------------------------------------------- stack rows
 
@@ -532,5 +583,86 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
         names(&studio.app),
         before,
         "Remove takes the instance the editor was open on, and only it"
+    );
+}
+
+// ------------------------------------------------------- the analysis catalogue
+
+/// Adding an analysis from a route that is not the one it lands on.
+///
+/// The navigator's creating action is drawn on all nine setup routes, and the
+/// catalogue it arms was drawn by the Analyses rail — so on the other eight the
+/// press set `palette_open` with nothing to render it. That flag is a term of
+/// `AppState::application_modal_open`, which gates the whole shortcut
+/// dispatcher, so a reader who pressed it from Solver lost every keyboard
+/// shortcut in the application and had no painted modal to press Escape on.
+///
+/// Both halves are asserted here, because either alone would pass over the
+/// defect: that the press paints the catalogue, and that choosing from it
+/// leaves the plan holding the instance, the reader on the route that edits
+/// it, and no modal claim standing behind them.
+#[test]
+fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_new_instance() {
+    use crate::workbench::commands::vocabulary::Command;
+
+    let app = RSpiceApp::test_instance();
+    let before = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the test instance has a stable plan")
+        .instances()
+        .len();
+
+    let mut studio = Studio::open_with_shell(app, SimulationPage::Solver, DESKTOP_WITH_SHELL);
+    assert!(
+        !studio.announces(|label| label == super::ANALYSIS_CATALOG_SEARCH_LABEL),
+        "nothing is open before the press"
+    );
+
+    studio.click(|label| label == Command::AddAnalysis.spec().label);
+    assert!(
+        studio.app.state.sim_setup.palette_open,
+        "the press arms the catalogue"
+    );
+    assert!(
+        studio.announces(|label| label == super::ANALYSIS_CATALOG_SEARCH_LABEL),
+        "and the frame draws it, from the Solver route it was pressed on"
+    );
+
+    studio.click(|label| label == "Add Transient analysis instance");
+    let plan = studio
+        .app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan still resolves");
+    assert_eq!(
+        plan.instances().len(),
+        before + 1,
+        "the row commits the insert"
+    );
+    let added = studio
+        .app
+        .state
+        .workbench
+        .active_analysis_instance
+        .expect("the insert selects what it added");
+    assert!(
+        plan.instance(added).is_some(),
+        "and the selection names an instance the plan holds"
+    );
+    assert_eq!(
+        studio.app.state.workbench.simulation_page,
+        SimulationPage::Analyses,
+        "the reader lands on the one route that can configure it"
+    );
+    assert!(
+        !studio.app.state.sim_setup.palette_open,
+        "the catalogue closes behind the choice"
+    );
+    assert!(
+        !studio.app.state.application_modal_open(),
+        "and nothing is left claiming exclusive keyboard intent"
     );
 }
