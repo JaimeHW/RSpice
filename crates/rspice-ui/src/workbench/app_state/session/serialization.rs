@@ -69,7 +69,7 @@ impl serde::Serialize for AppState {
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field(
             "ui_session",
-            &crate::workbench::UiSessionStateSer::from(&self.ui),
+            &crate::workbench::UiSessionStateSer::from(&*self.ui),
         )?;
         state.serialize_field("workbench", &self.workbench)?;
         state.serialize_field("recent_files", &self.recent_files)?;
@@ -212,8 +212,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             schematic,
             workspace: project_workspace,
             library_manager,
-            ui: (*de.ui).into(),
-            workbench: *de.workbench,
+            ui: Box::new((*de.ui).into()),
+            workbench: de.workbench,
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,

@@ -670,7 +670,7 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
         clear_browser_handles();
     }
     let next_epoch = state.project_lifecycle.epoch.wrapping_add(1).max(1);
-    state.project_lifecycle = ProjectLifecycleState {
+    *state.project_lifecycle = ProjectLifecycleState {
         epoch: next_epoch,
         ..ProjectLifecycleState::default()
     };
@@ -688,7 +688,7 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
         clear_browser_handles();
     }
     let next_epoch = state.project_lifecycle.epoch.wrapping_add(1).max(1);
-    state.project_lifecycle = ProjectLifecycleState {
+    *state.project_lifecycle = ProjectLifecycleState {
         epoch: next_epoch,
         project_open: false,
         ..ProjectLifecycleState::default()

@@ -21,6 +21,8 @@ pub(in crate::workbench) mod run_identity;
 pub(crate) mod run_preflight;
 pub(in crate::workbench) mod session;
 pub(in crate::workbench) mod sim_setup;
+#[cfg(test)]
+mod stack_budget;
 pub(crate) mod technology_demand;
 pub(in crate::workbench) mod viewer_capabilities;
 
@@ -192,8 +194,9 @@ pub struct AppState {
     pub(crate) project_design_history: design_history::ProjectDesignHistory,
     /// Per-cell-view interactive check receipts, bound to exact live inputs.
     pub(crate) design_checks: DesignCheckRuntime,
-    /// Dialog visibility
-    pub(crate) dialogs: DialogState,
+    /// Dialog visibility. Boxed: this is the largest sub-state, and an inline
+    /// copy would ride along in every stack frame that moves an [`AppState`].
+    pub(crate) dialogs: Box<DialogState>,
     /// Typed analysis configuration behind the Simulate view.
     pub(crate) sim_setup: SimSetupState,
     /// Structured log history buffer (ring-buffer, filterable).
@@ -212,7 +215,7 @@ pub struct AppState {
     /// canonical persistence identity. Runtime-only; session recovery keeps
     /// the working set separately and reconstructs this boundary at startup.
     pub(crate) project_lifecycle:
-        crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState,
+        Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -258,9 +261,9 @@ pub struct AppState {
     pub(crate) analysis: AnalysisWorkspaceState,
     /// Document-engine and interaction session state (theme, canvas, result
     /// viewers, symbol editor, and netlist editor).
-    pub(crate) ui: crate::workbench::UiSessionState,
+    pub(crate) ui: Box<crate::workbench::UiSessionState>,
     /// Canonical workbench navigation and responsive layout state.
-    pub(crate) workbench: crate::workbench::WorkbenchState,
+    pub(crate) workbench: Box<crate::workbench::WorkbenchState>,
     /// Runtime-only chord/prefix authority. Partial sequences are never
     /// serialized or restored across application sessions.
     pub(crate) shortcut_resolver: session::shortcuts::ShortcutResolverState,
