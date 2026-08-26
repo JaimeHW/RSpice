@@ -790,7 +790,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     } else if released.get() {
         let renamed = name.trim() != output.name;
         let rewritten = expression.trim() != output.source_expression;
-        if renamed || rewritten {
+        // Name and expression are one transaction here, so they share one
+        // outcome. Text nobody changed is settled by definition; text that was
+        // changed is settled only once the plan has adopted it.
+        let settled = if renamed || rewritten {
             let detail = if renamed {
                 format!("Renamed saved output {} to {}.", output.name, name.trim())
             } else {
@@ -809,9 +812,22 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             if committed && renamed {
                 app.state.workbench.selected_saved_output = Some(name.trim().to_owned());
             }
+            committed
+        } else {
+            true
+        };
+        if settled {
+            app.state.workbench.saved_output_name_draft = None;
+            app.state.workbench.saved_output_expression_draft = None;
+        } else {
+            // A refused edit keeps both fields exactly as they were typed. The
+            // refusal is reported on the lifecycle channel; clearing the drafts
+            // as well snapped the card back to the stored record, so the reader
+            // was told an expression was rejected and simultaneously shown the
+            // one it replaced, with no way back to what they had written.
+            app.state.workbench.saved_output_name_draft = Some(name);
+            app.state.workbench.saved_output_expression_draft = Some(expression);
         }
-        app.state.workbench.saved_output_name_draft = None;
-        app.state.workbench.saved_output_expression_draft = None;
     } else {
         if name != output.name {
             app.state.workbench.saved_output_name_draft = Some(name);

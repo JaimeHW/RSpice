@@ -451,14 +451,27 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         return;
     }
     if released.get() {
-        if draft.trim() != variable.expression.trim() {
-            commit_expression(app, variable_id, &draft, &variable.name);
+        // A refused commit keeps its draft. The workspace re-validates the
+        // whole configuration, so an expression that breaks a bound or a
+        // dimensional rule leaves the plan exactly as it was — and clearing the
+        // draft regardless snapped the field back to the stored value, taking
+        // the engineer's typed text with it and leaving a toast as the only
+        // trace of what they had written. The field keeps the refused text so
+        // the correction is one character rather than one retype.
+        let expression_settled = draft.trim() == variable.expression.trim()
+            || commit_expression(app, variable_id, &draft, &variable.name);
+        let bounds_settled =
+            bounds == stored_bounds || commit_bounds(app, variable_id, &bounds, &variable.name);
+        if expression_settled {
+            app.state.workbench.design_variable_expression_draft = None;
+        } else {
+            app.state.workbench.design_variable_expression_draft = Some(draft);
         }
-        if bounds != stored_bounds {
-            commit_bounds(app, variable_id, &bounds, &variable.name);
+        if bounds_settled {
+            app.state.workbench.design_variable_bounds_draft = None;
+        } else {
+            app.state.workbench.design_variable_bounds_draft = Some(bounds);
         }
-        app.state.workbench.design_variable_expression_draft = None;
-        app.state.workbench.design_variable_bounds_draft = None;
         return;
     }
     if draft != variable.expression {
@@ -568,19 +581,22 @@ fn scope_label(scope: &DesignVariableScope, options: &[(String, DesignVariableSc
 }
 
 /// Replace one variable's typed contract as a single validated transaction.
+///
+/// Reports whether the transaction was adopted, so an in-place editor can tell
+/// a refusal from a change and keep the refused text on the field.
 fn replace_variable(
     app: &mut RSpiceApp,
     variable_id: DesignVariableId,
     detail: &str,
     apply: impl FnOnce(&mut crate::state::DesignVariable),
-) {
+) -> bool {
     let Ok(plan_id) = app
         .state
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
     else {
-        return;
+        return false;
     };
     let Some(mut replacement) = app.state.workspace.plan_data(plan_id).and_then(|payload| {
         payload
@@ -589,20 +605,22 @@ fn replace_variable(
             .find(|variable| variable.id == variable_id)
             .cloned()
     }) else {
-        return;
+        return false;
     };
     apply(&mut replacement);
-    commit_replacement(app, plan_id, variable_id, replacement, detail);
+    commit_replacement(app, plan_id, variable_id, replacement, detail)
 }
 
 /// Replace one variable's inclusive bounds. Clearing both fields removes the
 /// range outright, which is what makes the variable unbounded again.
+///
+/// Reports whether the bounds were adopted.
 fn commit_bounds(
     app: &mut RSpiceApp,
     variable_id: DesignVariableId,
     bounds: &(String, String),
     name: &str,
-) {
+) -> bool {
     let range = (!bounds.0.trim().is_empty() || !bounds.1.trim().is_empty()).then(|| {
         crate::state::DesignVariableRange {
             minimum: bounds.0.trim().to_owned(),
@@ -620,42 +638,44 @@ fn commit_bounds(
     );
     replace_variable(app, variable_id, &detail, |target| {
         target.allowed_range = range;
-    });
+    })
 }
 
+/// Reports whether the replacement was adopted.
 fn commit_replacement(
     app: &mut RSpiceApp,
     plan_id: SimulationPlanId,
     variable_id: DesignVariableId,
     replacement: crate::state::DesignVariable,
     detail: &str,
-) {
+) -> bool {
     commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
         workspace
             .replace_design_variable(plan_id, variable_id, replacement)
             .map(|_| ())
             .map_err(|error| error.to_string())
-    });
+    })
 }
 
 /// Replace one variable's expression as a single validated transaction.
 ///
 /// The workspace mutator advances the variable's revision and re-validates the
 /// whole configuration, so an expression that breaks a bound or a dimensional
-/// rule leaves the plan exactly as it was and reports why.
+/// rule leaves the plan exactly as it was and reports why. Reports whether the
+/// expression was adopted, which is what lets the field keep a refused edit.
 fn commit_expression(
     app: &mut RSpiceApp,
     variable_id: DesignVariableId,
     expression: &str,
     name: &str,
-) {
+) -> bool {
     let Ok(plan_id) = app
         .state
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
     else {
-        return;
+        return false;
     };
     let detail = format!("Updated design variable {name} to {expression}.");
     let expression = expression.to_owned();
@@ -664,7 +684,7 @@ fn commit_expression(
             .update_design_variable_expression(plan_id, variable_id, expression)
             .map(|_| ())
             .map_err(|error| error.to_string())
-    });
+    })
 }
 
 /// What the Change impact card says about who resolves these values.
