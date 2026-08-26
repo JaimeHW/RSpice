@@ -393,34 +393,18 @@ fn activation_error(ui: &mut Ui) {
 }
 
 fn no_active_configuration(ui: &mut Ui, count: usize) -> bool {
-    let t = Tokens::get(ui.ctx());
     let mut manage = false;
-    section_header(
+    // The page's only content is the absence itself, so it states it with the
+    // workbench's centred empty-state idiom rather than a stranded paragraph.
+    crate::workbench::design_system::empty_state_with_actions(
         ui,
-        "Configuration authority",
-        &format!("{count} configuration set{}", plural(count)),
-        t.color.warn,
-    );
-    egui::Frame::new()
-        .inner_margin(Margin::same(12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(
-                egui::RichText::new("No project-owned configuration is active.")
-                    .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(
-                        "Create or activate a configuration before relying on an exact hierarchy, view-binding, and model-source execution contract.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-            ui.add_space(8.0);
+        WorkbenchIcon::Layers,
+        "No active configuration",
+        &format!(
+            "The project catalog holds {count} configuration set{}. Activate one to pin the hierarchy, view-binding, and model-source contract every run executes.",
+            plural(count)
+        ),
+        |ui| {
             if Button::new("Manage configurations\u{2026}")
                 .accent()
                 .show(ui)
@@ -428,7 +412,8 @@ fn no_active_configuration(ui: &mut Ui, count: usize) -> bool {
             {
                 manage = true;
             }
-        });
+        },
+    );
     manage
 }
 
