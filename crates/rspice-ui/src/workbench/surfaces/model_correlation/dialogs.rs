@@ -745,9 +745,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn empty_projection_never_claims_correlation_evidence() {
-        let projection = CorrelationProjection {
+    fn empty_projection() -> CorrelationProjection {
+        CorrelationProjection {
             model: Some("dut".to_owned()),
             source_error: None,
             suite_name: "dut · no retained correlation suite".to_owned(),
@@ -758,20 +757,100 @@ mod tests {
             current_evidence: Vec::new(),
             source_current: false,
             suite_count: 0,
-            dataset_count: 0,
             metric_count: 0,
             passed_metrics: 0,
             coverage_percent: None,
             worst_normalized_error: None,
             open_dispositions: 0,
-        };
+        }
+    }
+
+    #[test]
+    fn empty_projection_never_claims_correlation_evidence() {
+        let projection = empty_projection();
         assert_eq!(
             projection.state_label(),
             ("correlation suite not configured", Tone::Warning)
         );
-        assert!(projection.metrics().iter().all(|metric| {
-            metric.value == "0" || metric.value == "0 / 0" || metric.value == "No evidence"
-        }));
+        assert!(
+            projection
+                .measures()
+                .iter()
+                .all(|measure| { measure.value == "0 / 0" || measure.value == "No evidence" })
+        );
+    }
+
+    /// Absence is stated as absence, in the tone that says so.
+    ///
+    /// The ledger's middle segments are the only place a reader learns whether
+    /// a measure exists at all, so an unevaluated suite may not borrow the
+    /// neutral tone of a measured one, and may not print a number.
+    #[test]
+    fn ledger_measures_without_evidence_stay_in_the_warning_tone() {
+        let measures = empty_projection().measures();
+        assert_eq!(measures[1].value, "No evidence");
+        assert_eq!(measures[1].tone, Tone::Warning);
+        assert_eq!(measures[2].value, "No evidence");
+        assert_eq!(measures[2].tone, Tone::Warning);
+        assert_eq!(measures[0].value, "0 / 0");
+        assert_eq!(measures[0].tone, Tone::Warning);
+        assert_eq!(measures[0].detail, "0 open dispositions");
+    }
+
+    /// Every ledger tone is a claim about evidence, not about layout.
+    ///
+    /// A gate set is only good when every review metric passed *and* nothing
+    /// is left undisposed, and a worst normalized error is only good at or
+    /// inside its declared limit.
+    #[test]
+    fn ledger_measure_tones_follow_the_evidence() {
+        let passing = CorrelationProjection {
+            metric_count: 4,
+            passed_metrics: 4,
+            coverage_percent: Some(92.14),
+            worst_normalized_error: Some(0.812),
+            ..empty_projection()
+        };
+        let measures = passing.measures();
+        assert_eq!(
+            (measures[0].short, measures[0].value.as_str()),
+            ("gates", "4 / 4")
+        );
+        assert_eq!(measures[0].tone, Tone::Good);
+        assert_eq!(
+            (measures[1].short, measures[1].value.as_str()),
+            ("coverage", "92.1%")
+        );
+        assert_eq!(measures[1].tone, Tone::Neutral);
+        assert_eq!(
+            (measures[2].short, measures[2].value.as_str()),
+            ("worst", "0.812×")
+        );
+        assert_eq!(measures[2].tone, Tone::Good);
+
+        let disputed = CorrelationProjection {
+            open_dispositions: 3,
+            worst_normalized_error: Some(1.001),
+            ..passing
+        };
+        let measures = disputed.measures();
+        assert_eq!(measures[0].tone, Tone::Warning);
+        assert_eq!(measures[0].detail, "3 open dispositions");
+        assert_eq!(measures[2].value, "1.001×");
+        assert_eq!(measures[2].tone, Tone::Warning);
+    }
+
+    /// The abbreviation the band paints is never what a screen reader hears.
+    #[test]
+    fn ledger_segments_name_themselves_in_full_for_assistive_technology() {
+        assert_eq!(
+            empty_projection().measures().map(|measure| measure.label),
+            [
+                "Metric gates",
+                "Envelope coverage",
+                "Worst normalized error"
+            ]
+        );
     }
 
     #[test]
@@ -820,6 +899,346 @@ mod tests {
         assert_eq!(
             bounded_string_list(&sources, 4),
             "run-0, run-1, run-2, run-3, … +4 more"
+        );
+    }
+
+    /// A correlation suite that actually evaluates, bound to a project-owned
+    /// model that the surface can resolve, so the ledger is exercised against
+    /// numbers rather than against the empty state.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn correlated_app() -> RSpiceApp {
+        use crate::product::ContentDigest;
+        use crate::state::model_library::{
+            CorrelationDatasetRevision, CorrelationMetricDefinition,
+            CorrelationSimulationProvenance, ModelLibraryManager, ProjectModelDefinition,
+        };
+
+        const REFERENCE: &[u8] = b"id,quantity,value,unit,uncertainty,weight,condition:frequency[Hz],condition:temperature[degC]\n\
+r1,gain,0,dB,0.05,1,10,27\n\
+r2,gain,-1,dB,0.05,1,100,27\n\
+r3,gain,-2,dB,0.05,1,1000,27\n";
+        const SIMULATED: &[u8] = b"id,quantity,value,unit,uncertainty,weight,condition:frequency[Hz],condition:temperature[degC]\n\
+s1,gain,0.05,dB,0.04,1,10,27\n\
+s2,gain,-0.95,dB,0.04,1,100,27\n\
+s3,gain,-1.9,dB,0.04,1,1000,27\n";
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.model_library_manager = ModelLibraryManager::new();
+        let definition = ProjectModelDefinition {
+            name: "nch_corr".to_owned(),
+            spice_type: "NMOS".to_owned(),
+            description: "Correlation ledger fixture".to_owned(),
+            numeric_parameters: BTreeMap::from([("level".to_owned(), 1.0)]),
+            string_parameters: BTreeMap::new(),
+        };
+        app.state
+            .model_library_manager
+            .create_project_model("owned-models", &definition)
+            .expect("project model");
+        let resolved = resolve_project_model_for_editor(
+            &app.state.model_library_manager,
+            "owned-models",
+            "nch_corr",
+        )
+        .expect("resolved project model");
+        let source = ModelSourceEvidenceBinding::try_new_project_bound(
+            "nch_corr",
+            resolved.source_id,
+            resolved.model_digest,
+            resolved.model_revision,
+        )
+        .expect("source binding");
+
+        let reference = CorrelationDatasetRevision::try_from_csv(
+            "reference",
+            ObjectRevision::INITIAL,
+            "Bench sweep",
+            CorrelationDatasetClass::BenchMeasurement,
+            "qualified test authority",
+            "lot-1",
+            "fixture-1",
+            "calibration-1",
+            "bench.csv",
+            REFERENCE.to_vec(),
+            None,
+        )
+        .expect("reference dataset");
+        // The retained export digest is the digest of the exported bytes, and
+        // the constructor is the only thing that computes it.
+        let export_digest = CorrelationDatasetRevision::try_from_csv(
+            "simulation",
+            ObjectRevision::INITIAL,
+            "Model simulation",
+            CorrelationDatasetClass::BenchMeasurement,
+            "qualified test authority",
+            "lot-1",
+            "fixture-1",
+            "calibration-1",
+            "simulation.csv",
+            SIMULATED.to_vec(),
+            None,
+        )
+        .expect("simulation digest probe")
+        .raw_digest;
+        let simulation = CorrelationDatasetRevision::try_from_csv_with_provenance(
+            "simulation",
+            ObjectRevision::INITIAL,
+            "Model simulation",
+            CorrelationDatasetClass::ModelSimulation,
+            "qualified test authority",
+            "lot-1",
+            "fixture-1",
+            "calibration-1",
+            "simulation.csv",
+            SIMULATED.to_vec(),
+            Some(source.clone()),
+            Some(CorrelationSimulationProvenance {
+                run_id: "correlation-run".to_owned(),
+                run_dataset_id: "correlation-run-dataset".to_owned(),
+                analysis_id: 1,
+                analysis_result_digest: ContentDigest::from_bytes([0x43; 32]),
+                plan_id: "correlation-plan".to_owned(),
+                project_revision: ObjectRevision::INITIAL,
+                prepared_snapshot_digest: ContentDigest::from_bytes([0x44; 32]),
+                source_content_digest: ContentDigest::from_bytes([0x45; 32]),
+                task_config_digest: ContentDigest::from_bytes([0x55; 32]),
+                execution_target: "test-platform".to_owned(),
+                export_digest,
+                model_source: source.clone(),
+                executed_at_unix_ms: 1,
+            }),
+        )
+        .expect("simulation dataset");
+        let metric = CorrelationMetricDefinition::try_new(
+            "gain-error",
+            "Gain error",
+            "reference",
+            "simulation",
+            "gain",
+            CorrelationCalculation::AbsoluteDecibels,
+            None,
+            0.25,
+            1.0,
+            0.5,
+            CorrelationAggregation::WorstCondition,
+            CorrelationAlignmentPolicy::ExactOnly,
+            CorrelationReleaseRole::Review,
+        )
+        .expect("metric definition");
+        let suite = CorrelationSuite::try_new(
+            "gain-correlation",
+            ObjectRevision::INITIAL,
+            "Gain correlation",
+            "model-owner",
+            source,
+            vec![reference, simulation],
+            vec![metric],
+            Vec::new(),
+        )
+        .expect("correlation suite");
+        let correlation =
+            ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("correlation state");
+        app.state
+            .model_library_manager
+            .replace_project_model_correlation(
+                "owned-models",
+                resolved.source_id,
+                resolved.library_revision,
+                resolved.model_revision,
+                resolved.model_digest,
+                "nch_corr",
+                &correlation,
+            )
+            .expect("retained correlation");
+        app.state.model_library_manager.selected_library = Some("owned-models".to_owned());
+        app.state.workbench.selected_model = Some("nch_corr".to_owned());
+        app
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn correlation_nodes(
+        app: &mut RSpiceApp,
+        size: Vec2,
+    ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| show(ui, app));
+            },
+        );
+        output
+            .platform_output
+            .accesskit_update
+            .expect("correlation accessibility tree")
+            .nodes
+    }
+
+    /// Each ledger segment is one readable region, not three loose glyphs.
+    ///
+    /// The band paints an abbreviation beside a number; the caption that made
+    /// the number mean something used to sit under it in the strip and now
+    /// lives on the segment's own hover and accessible name, so nothing that
+    /// was stated is silently dropped.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_ledger_publishes_every_measure_with_its_value_and_caption() {
+        let mut app = correlated_app();
+        let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
+        let projection = CorrelationProjection::build(&app);
+        for measure in projection.measures() {
+            let expected = format!("{}: {}. {}", measure.label, measure.value, measure.detail);
+            // egui gives `WidgetType::Label` AccessKit's Label role, whose
+            // text is the node's *value*, not its `label()`.
+            assert!(
+                nodes
+                    .iter()
+                    .any(|(_, node)| node.value() == Some(expected.as_str())),
+                "the ledger never published '{expected}'"
+            );
+        }
+        assert_eq!(projection.measures()[1].value, "100.0%");
+        assert_eq!(projection.measures()[0].value, "1 / 1");
+    }
+
+    /// One fact, one owner.
+    ///
+    /// The state verdict was painted in the identity band and repeated as the
+    /// summary region's description; it now terminates the evidence ledger and
+    /// is stated exactly once on the page.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_state_verdict_is_stated_once_and_on_the_ledger() {
+        let mut app = correlated_app();
+        let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
+        let projection = CorrelationProjection::build(&app);
+        let (state, _) = projection.state_label();
+        let owners = nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.label().is_some_and(|label| label.contains(state))
+                    || node
+                        .description()
+                        .is_some_and(|description| description.contains(state))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            owners.len(),
+            1,
+            "the verdict '{state}' has {} owners on the page",
+            owners.len()
+        );
+        assert_eq!(owners[0].1.label(), Some(LEDGER_TITLE));
+    }
+
+    /// The datasets panel lists the retained revisions, so it states how many
+    /// it holds; the ledger band does not.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_datasets_panel_owns_the_retained_dataset_count() {
+        let mut app = correlated_app();
+        app.state.workbench.model_correlation.section = ModelCorrelationSection::Datasets;
+        let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, node)| node.value() == Some("2 datasets")),
+            "the datasets panel head never stated its count"
+        );
+        assert!(
+            CorrelationProjection::build(&app)
+                .measures()
+                .iter()
+                .all(|measure| measure.label != "Datasets"),
+            "the ledger took the dataset count back"
+        );
+    }
+
+    /// The band's height is the body's, and the body takes all of it.
+    ///
+    /// The strip this replaces was 62 px per row and could be two rows; the
+    /// ledger is one 54 px band at every width, so the workspace below starts
+    /// exactly that far down and nothing is left unpainted where the second
+    /// row used to be.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_workspace_body_starts_directly_under_the_ledger_band() {
+        let mut app = correlated_app();
+        for width in [1_180.0, 900.0] {
+            let nodes = correlation_nodes(&mut app, Vec2::new(width, 900.0));
+            let bounds = nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Tab && node.label() == Some("Datasets")
+                })
+                .and_then(|(_, node)| node.bounds())
+                .expect("first correlation section tab");
+            let expected = f64::from(OUTER_HEADER_H + SUMMARY_H + LEDGER_H);
+            assert!(
+                (bounds.y0 - expected).abs() < 0.5,
+                "the workspace body starts at {} instead of {expected} at {width}",
+                bounds.y0
+            );
+        }
+    }
+
+    /// Write the evidence ledger to PNGs so its design can be reviewed.
+    ///
+    /// Both states the band has to carry: an unconfigured page, where every
+    /// measure is an absence, and an evaluated suite whose measures pass while
+    /// the verdict still withholds. The compact width is the one that proves
+    /// the sentence elides before the segments reach the title. Renders go to
+    /// `RSPICE_RASTER_DIR` (default: the system temp directory); read them for
+    /// layout, not wording — the rasterizer's own header says why.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_evidence_ledger_for_review() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report = stderr.lock();
+
+        let mut render = |slug: &str, app: &mut RSpiceApp, size: Vec2| {
+            let canvas = crate::ui::raster::render(size, |ui, background| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(background))
+                    .show(ui, |ui| show(ui, app));
+            });
+            let path = directory.join(format!("model-correlation-{slug}.png"));
+            let height = canvas.content_height().max(200);
+            std::fs::write(&path, canvas.png(height)).expect("write png");
+            writeln!(report, "wrote {}", path.display()).ok();
+        };
+
+        let mut unconfigured = RSpiceApp::test_instance();
+        render(
+            "ledger-unconfigured",
+            &mut unconfigured,
+            Vec2::new(1_180.0, 720.0),
+        );
+        let mut correlated = correlated_app();
+        render(
+            "ledger-evaluated",
+            &mut correlated,
+            Vec2::new(1_180.0, 720.0),
+        );
+        render("ledger-compact", &mut correlated, Vec2::new(760.0, 720.0));
+        correlated.state.workbench.model_correlation.section = ModelCorrelationSection::Datasets;
+        render(
+            "datasets-count-owner",
+            &mut correlated,
+            Vec2::new(1_180.0, 720.0),
         );
     }
 }

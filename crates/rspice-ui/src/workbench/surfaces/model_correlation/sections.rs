@@ -86,7 +86,14 @@ pub(super) fn datasets_section(
         );
         return;
     }
-    section_panel(ui, "Retained dataset revisions", |ui| {
+    // This panel lists the retained reference evidence, so it is where the
+    // count of it is stated.
+    let retained = if datasets.len() == 1 {
+        "1 dataset".to_owned()
+    } else {
+        format!("{} datasets", datasets.len())
+    };
+    section_panel_with_meta(ui, "Retained dataset revisions", Some(&retained), |ui| {
         ScrollArea::horizontal()
             .id_salt("correlation-datasets-table")
             .auto_shrink([false, true])
@@ -179,11 +186,7 @@ pub(super) fn datasets_section(
     });
 }
 
-pub(super) fn conditions_section(
-    ui: &mut Ui,
-    _app: &mut RSpiceApp,
-    projection: &CorrelationProjection,
-) {
+pub(super) fn conditions_section(ui: &mut Ui, projection: &CorrelationProjection) {
     let Some(suite) = projection.suite.as_ref() else {
         empty_state(
             ui,
@@ -950,11 +953,7 @@ pub(super) fn outliers_section(
     });
 }
 
-pub(super) fn evidence_section(
-    ui: &mut Ui,
-    _app: &mut RSpiceApp,
-    projection: &CorrelationProjection,
-) {
+pub(super) fn evidence_section(ui: &mut Ui, projection: &CorrelationProjection) {
     let Some(suite) = projection.suite.as_ref() else {
         empty_state(
             ui,
@@ -1235,9 +1234,12 @@ pub(super) fn correlation_notice(ui: &mut Ui, app: &mut RSpiceApp) {
     describe_region(ui, &response, "Correlation notification", &notice);
 }
 
-pub(super) fn select_section(app: &mut RSpiceApp, section: ModelCorrelationSection) {
-    app.state.workbench.model_correlation.section = section;
-    app.state.workbench.model_correlation.scroll_offset = 0.0;
+pub(super) fn select_section(
+    workspace: &mut crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
+    section: ModelCorrelationSection,
+) {
+    workspace.section = section;
+    workspace.scroll_offset = 0.0;
 }
 
 pub(super) fn correlation_action_blocker(

@@ -47,7 +47,7 @@ use crate::workbench::documents::model_editor::{
 
 const OUTER_HEADER_H: f32 = 58.0;
 const SUMMARY_H: f32 = 92.0;
-const KPI_H: f32 = 62.0;
+const LEDGER_H: f32 = 54.0;
 const NAV_W: f32 = 196.0;
 const NAV_ROW_H: f32 = 36.0;
 const COMPACT_BREAKPOINT: f32 = 820.0;
@@ -62,6 +62,11 @@ const SIMULATION_SOURCE_DISPLAY_LIMIT: usize = 4;
 
 const SUMMARY: &str = "Align measured, vendor, oracle, and simulated evidence over the declared operating envelope; define metrics, inspect systematic error, govern outliers, and hand a versioned correlation conclusion to model qualification.";
 const EVIDENCE_CONTRACT: &str = "Dataset checksums, fixtures, calibration, axis alignment, model revision, conditions, metric definitions, aggregation, uncertainty, exclusions, residuals, outlier dispositions, and reviewer conclusions are retained.";
+const LEDGER_TITLE: &str = "Correlation evidence";
+/// Exactly the chain `CorrelationProjection::state_label` walks, in its order.
+/// The band states what the verdict is made of, so the sentence may not claim
+/// an input the verdict does not actually consume.
+const LEDGER_CHAIN: &str = "Needs a suite bound to this model revision, evaluated metrics without open dispositions, and a retained review approval.";
 
 fn correlation_dialog_error_id() -> egui::Id {
     egui::Id::new("model-correlation-submit-error")
@@ -202,9 +207,15 @@ struct BoundedPage {
     total: usize,
 }
 
+/// One measure the correlation verdict is made of.
+///
+/// `label` is what a screen reader hears and `short` is what the ledger band
+/// paints: the band has room for an abbreviation beside its value, and an
+/// abbreviation is not a name.
 #[derive(Debug, Clone)]
-struct Metric {
+struct Measure {
     label: &'static str,
+    short: &'static str,
     value: String,
     detail: String,
     tone: Tone,
@@ -222,7 +233,6 @@ struct CorrelationProjection {
     current_evidence: Vec<CorrelationEvidence>,
     source_current: bool,
     suite_count: usize,
-    dataset_count: usize,
     metric_count: usize,
     passed_metrics: usize,
     coverage_percent: Option<f64>,
@@ -359,10 +369,6 @@ impl CorrelationProjection {
             evidence.sort_by_key(|record| (record.reviewed_at_unix_ms, record.id.clone()));
             evidence
         });
-        let dataset_count = suite
-            .as_ref()
-            .and_then(|suite| suite.latest_datasets().ok())
-            .map_or(0, |datasets| datasets.len());
         let metric_count = suite.as_ref().map_or(0, |suite| {
             suite
                 .metrics
@@ -449,7 +455,6 @@ impl CorrelationProjection {
             current_evidence,
             source_current,
             suite_count,
-            dataset_count,
             metric_count,
             passed_metrics,
             coverage_percent,
@@ -486,24 +491,17 @@ impl CorrelationProjection {
         }
     }
 
-    fn metrics(&self) -> [Metric; 4] {
+    /// The measures the verdict is made of.
+    ///
+    /// The retained dataset count is not among them: the datasets section's
+    /// own panel lists those revisions and states how many it holds, and a
+    /// count with two owners on one page is a count that can disagree with
+    /// itself.
+    fn measures(&self) -> [Measure; 3] {
         [
-            Metric {
-                label: "Datasets",
-                value: self.dataset_count.to_string(),
-                detail: if self.dataset_count == 0 {
-                    "no retained reference evidence".to_owned()
-                } else {
-                    "bench · silicon · vendor · oracle · simulation".to_owned()
-                },
-                tone: if self.dataset_count == 0 {
-                    Tone::Warning
-                } else {
-                    Tone::Neutral
-                },
-            },
-            Metric {
+            Measure {
                 label: "Metric gates",
+                short: "gates",
                 value: format!("{} / {}", self.passed_metrics, self.metric_count),
                 detail: format!("{} open dispositions", self.open_dispositions),
                 tone: if self.metric_count > 0
@@ -515,8 +513,9 @@ impl CorrelationProjection {
                     Tone::Warning
                 },
             },
-            Metric {
+            Measure {
                 label: "Envelope coverage",
+                short: "coverage",
                 value: self
                     .coverage_percent
                     .map(|value| format!("{value:.1}%"))
@@ -528,8 +527,9 @@ impl CorrelationProjection {
                     Tone::Warning
                 },
             },
-            Metric {
+            Measure {
                 label: "Worst normalized error",
+                short: "worst",
                 value: self
                     .worst_normalized_error
                     .map(|value| format!("{value:.3}×"))
@@ -586,7 +586,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     outer_header(&mut surface, app, &projection);
     summary_header(&mut surface, &projection);
-    metric_strip(&mut surface, &projection.metrics());
+    evidence_ledger(&mut surface, &projection);
     correlation_notice(&mut surface, app);
     workspace_body(&mut surface, app, &projection);
     show_correlation_dialog(ui.ctx(), app);
@@ -684,7 +684,10 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         .max_width(96.0)
         .show(&mut actions);
     if viewer.clicked() {
-        select_section(app, ModelCorrelationSection::Comparison);
+        select_section(
+            &mut app.state.workbench.model_correlation,
+            ModelCorrelationSection::Comparison,
+        );
     } else if !viewer_enabled {
         viewer.on_disabled_hover_text(
             projection
@@ -740,7 +743,11 @@ fn summary_header(ui: &mut Ui, projection: &CorrelationProjection) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let compact = width <= COMPACT_BREAKPOINT;
-    let height = if compact { 132.0 } else { SUMMARY_H };
+    // 110, not 132: the verdict occupied the bottom 22 px of the compact band
+    // and now terminates the evidence ledger, so the band gives that height
+    // back rather than holding it empty. The charter's galley is unchanged at
+    // both widths — it still ends 6 px above the rule.
+    let height = if compact { 110.0 } else { SUMMARY_H };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     bottom_rule(ui, rect, t.color.border);
@@ -765,17 +772,9 @@ fn summary_header(ui: &mut Ui, projection: &CorrelationProjection) {
     );
 
     let left = mark.right() + 12.0;
-    let status_w = 202.0_f32.min(width * 0.30);
-    let status_left = if compact {
-        left
-    } else {
-        rect.right() - status_w - 12.0
-    };
-    let text_right = if compact {
-        rect.right() - 12.0
-    } else {
-        (status_left - 12.0).max(left + 80.0)
-    };
+    // The verdict lives on the evidence ledger below, so the identity band
+    // keeps its full width for the identity and the charter.
+    let text_right = (rect.right() - 12.0).max(left + 80.0);
     let copy = Rect::from_min_max(
         Pos2::new(left, rect.top()),
         Pos2::new(text_right, rect.bottom()),
@@ -798,14 +797,7 @@ fn summary_header(ui: &mut Ui, projection: &CorrelationProjection) {
     );
     let summary_rect = Rect::from_min_max(
         Pos2::new(left, rect.top() + 49.0),
-        Pos2::new(
-            text_right,
-            if compact {
-                rect.bottom() - 28.0
-            } else {
-                rect.bottom() - 6.0
-            },
-        ),
+        Pos2::new(text_right, rect.bottom() - 6.0),
     );
     let galley = ui.painter().layout(
         SUMMARY.to_owned(),
@@ -817,98 +809,157 @@ fn summary_header(ui: &mut Ui, projection: &CorrelationProjection) {
         .with_clip_rect(summary_rect)
         .galley(summary_rect.min, galley, t.color.text_dim);
 
-    let (state, tone) = projection.state_label();
-    let color = tone_color(&t, tone);
-    let y = if compact {
-        rect.bottom() - 14.0
-    } else {
-        rect.top() + 17.0
-    };
-    ui.painter()
-        .circle_filled(Pos2::new(status_left + 4.0, y), 2.5, color);
-    paint_elided(
-        ui,
-        Rect::from_min_max(
-            Pos2::new(status_left + 13.0, rect.top()),
-            Pos2::new(rect.right() - 12.0, rect.bottom()),
-        ),
-        state,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        color,
-        if compact { rect.height() - 22.0 } else { 10.0 },
-    );
     describe_region(
         ui,
         &response,
         &format!("{} correlation evidence", projection.model_label()),
-        &format!("{}. {}", projection.suite_name, state),
+        &projection.suite_name,
     );
 }
 
-fn metric_strip(ui: &mut Ui, metrics: &[Metric; 4]) {
+fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+        .size()
+        .x
+}
+
+/// The evidence ledger: one band that reads left to right as the chain it
+/// describes — what the evidence is for, the measures it is made of, and the
+/// verdict those measures produce.
+///
+/// The measures are inline segments rather than cells because none of them is
+/// a headline: each is only meaningful beside the verdict that terminates the
+/// row, and boxing them would state four independent facts instead of one
+/// argument. Widths are measured rather than assumed, so a narrow band elides
+/// the sentence first and the segments never reach the title or the verdict.
+fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
+    const LABEL_GAP: f32 = 6.0;
+    const SEGMENT_GAP: f32 = 18.0;
+    const VERDICT_GAP: f32 = 22.0;
+    const MARK_LEAD: f32 = 13.0;
+
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let columns = if width <= COMPACT_BREAKPOINT { 2 } else { 4 };
-    let rows = 4_usize.div_ceil(columns);
-    let total_h = KPI_H * rows as f32;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, total_h), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-    bottom_rule(ui, rect, t.color.border);
-    let cell_w = width / columns as f32;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, LEDGER_H), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
+    bottom_rule(ui, rect, t.color.border_strong);
+    let content = rect.shrink2(Vec2::new(14.0, 0.0));
+    let center = rect.center().y;
 
-    for (index, metric) in metrics.iter().enumerate() {
-        let row = index / columns;
-        let column = index % columns;
-        let cell = Rect::from_min_size(
-            Pos2::new(
-                rect.left() + cell_w * column as f32,
-                rect.top() + KPI_H * row as f32,
-            ),
-            Vec2::new(cell_w, KPI_H),
-        );
-        if column > 0 {
-            ui.painter().vline(
-                cell.left(),
-                cell.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
-        }
-        if row > 0 {
-            ui.painter()
-                .hline(cell.x_range(), cell.top(), Stroke::new(1.0, t.color.border));
-        }
-        let copy = cell.shrink2(Vec2::new(12.0, 0.0));
-        paint_elided(
-            ui,
-            copy,
-            metric.label,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-            8.0,
-        );
-        paint_elided(
-            ui,
-            copy,
-            &metric.value,
-            theme::mono(tokens::FS_3, FontWeight::SemiBold),
-            tone_color(&t, metric.tone),
-            26.0,
-        );
-        paint_elided(
-            ui,
-            copy,
-            &metric.detail,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-            46.0,
-        );
-    }
-    let description = metrics
+    let (state, state_tone) = projection.state_label();
+    let state_color = tone_color(&t, state_tone);
+    let verdict_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    // The verdict is the terminal of the chain and never yields its place; the
+    // measures are laid out against what is left of the band.
+    let verdict =
+        design_system::elide_text(ui, state, &verdict_font, (content.width() * 0.34).max(1.0));
+    let verdict_left = content.right() - MARK_LEAD - text_width(ui, &verdict, &verdict_font);
+    ui.painter()
+        .circle_filled(Pos2::new(verdict_left + 4.0, center), 2.5, state_color);
+    ui.painter().with_clip_rect(content).text(
+        Pos2::new(verdict_left + MARK_LEAD, center),
+        Align2::LEFT_CENTER,
+        &verdict,
+        verdict_font,
+        state_color,
+    );
+
+    let measures = projection.measures();
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let spans = measures
         .iter()
-        .map(|metric| format!("{}: {}; {}", metric.label, metric.value, metric.detail))
+        .map(|measure| {
+            (
+                text_width(ui, measure.short, &label_font),
+                text_width(ui, &measure.value, &value_font),
+            )
+        })
+        .collect::<Vec<_>>();
+    let segments_w = spans
+        .iter()
+        .map(|(label, value)| label + LABEL_GAP + value)
+        .sum::<f32>()
+        + SEGMENT_GAP * (measures.len() - 1) as f32;
+    let segments_left = verdict_left - VERDICT_GAP - segments_w;
+    // Clipped rather than reflowed: a band narrow enough to squeeze the
+    // segments drops the leading ones and keeps the measures nearest the
+    // verdict, which are the ones the verdict turns on.
+    let segments_clip = Rect::from_min_max(
+        Pos2::new(content.left(), rect.top()),
+        Pos2::new((verdict_left - 8.0).max(content.left()), rect.bottom()),
+    );
+    let painter = ui.painter().with_clip_rect(segments_clip);
+    let mut x = segments_left;
+    for (measure, (label_w, value_w)) in measures.iter().zip(&spans) {
+        painter.text(
+            Pos2::new(x, center),
+            Align2::LEFT_CENTER,
+            measure.short,
+            label_font.clone(),
+            t.color.text_faint,
+        );
+        painter.text(
+            Pos2::new(x + label_w + LABEL_GAP, center),
+            Align2::LEFT_CENTER,
+            &measure.value,
+            value_font.clone(),
+            tone_color(&t, measure.tone),
+        );
+        let segment = Rect::from_min_max(
+            Pos2::new(x, rect.top()),
+            Pos2::new(x + label_w + LABEL_GAP + value_w, rect.bottom()),
+        )
+        .intersect(segments_clip);
+        let hover = ui.interact(
+            segment,
+            ui.id().with(("correlation-measure", measure.label)),
+            Sense::hover(),
+        );
+        hover.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Label,
+                ui.is_enabled(),
+                format!("{}: {}. {}", measure.label, measure.value, measure.detail),
+            )
+        });
+        hover.on_hover_text(measure.detail.as_str());
+        x += label_w + LABEL_GAP + value_w + SEGMENT_GAP;
+    }
+
+    let copy = Rect::from_min_max(
+        Pos2::new(content.left(), rect.top()),
+        Pos2::new((segments_left - 16.0).max(content.left()), rect.bottom()),
+    );
+    paint_elided(
+        ui,
+        copy,
+        LEDGER_TITLE,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
+        11.0,
+    );
+    paint_elided(
+        ui,
+        copy,
+        LEDGER_CHAIN,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        29.0,
+    );
+
+    let description = measures
+        .iter()
+        .map(|measure| format!("{}: {}; {}", measure.label, measure.value, measure.detail))
         .collect::<Vec<_>>()
         .join(". ");
-    describe_region(ui, &response, "Correlation summary metrics", &description);
+    describe_region(
+        ui,
+        &response,
+        LEDGER_TITLE,
+        &format!("{LEDGER_CHAIN} {description}. Verdict: {state}"),
+    );
 }
 
 fn workspace_body(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjection) {
@@ -983,7 +1034,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
                             true,
                         );
                         if response.clicked() {
-                            select_section(app, section);
+                            select_section(&mut app.state.workbench.model_correlation, section);
                         }
                     }
                 });
@@ -1012,7 +1063,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
             false,
         );
         if response.clicked() {
-            select_section(app, section);
+            select_section(&mut app.state.workbench.model_correlation, section);
         }
     }
     let note_top = (rect.top() + NAV_ROW_H * 7.0).min(rect.bottom());
@@ -1242,11 +1293,11 @@ fn section_body(
             suite_selector(ui, app, projection);
             match section {
                 ModelCorrelationSection::Datasets => datasets_section(ui, app, projection),
-                ModelCorrelationSection::Conditions => conditions_section(ui, app, projection),
+                ModelCorrelationSection::Conditions => conditions_section(ui, projection),
                 ModelCorrelationSection::Metrics => metrics_section(ui, app, projection),
                 ModelCorrelationSection::Comparison => comparison_section(ui, app, projection),
                 ModelCorrelationSection::Outliers => outliers_section(ui, app, projection),
-                ModelCorrelationSection::Evidence => evidence_section(ui, app, projection),
+                ModelCorrelationSection::Evidence => evidence_section(ui, projection),
                 ModelCorrelationSection::Gate => gate_section(ui, app, projection),
             }
         });
@@ -1353,6 +1404,17 @@ fn metric_draft_from_definition(
 }
 
 fn section_panel(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
+    section_panel_with_meta(ui, title, None, add_contents);
+}
+
+/// A panel whose head carries a right-aligned dim mono count of what the panel
+/// itself lists, so that count has exactly one owner on the page.
+fn section_panel_with_meta(
+    ui: &mut Ui,
+    title: &str,
+    meta: Option<&str>,
+    add_contents: impl FnOnce(&mut Ui),
+) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_panel)
@@ -1366,11 +1428,22 @@ fn section_panel(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width().max(1.0));
-                    ui.label(
-                        egui::RichText::new(title)
-                            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                            .color(t.color.text),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(title)
+                                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                                .color(t.color.text),
+                        );
+                        if let Some(meta) = meta {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(
+                                    egui::RichText::new(meta)
+                                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                        .color(t.color.text_faint),
+                                );
+                            });
+                        }
+                    });
                 });
             let (rule, _) = ui.allocate_exact_size(
                 Vec2::new(ui.available_width().max(1.0), 1.0),
