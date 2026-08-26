@@ -934,13 +934,26 @@ mod tests {
 
     /// Nothing the studio paints falls back to egui's default text style.
     ///
-    /// `ui.label` with a bare string, or with a `RichText` that never names a
+    /// `Ui::label` with a bare string, or with a `RichText` that never names a
     /// font, paints at 13 px in a family the theme assigns no weight to. That
     /// is a register the token scale does not have: the line sits a step and a
     /// half above the captions beside it, and nothing chose it. Ten shipped
     /// that way — a search's empty state, a predicate hint, two field labels,
     /// four plan-unavailable notices — and each was a place someone reached
     /// for egui instead of [`super::note_line`].
+    ///
+    /// The receiver is not always spelled `ui`. A control placed in a reserved
+    /// ledger cell is drawn on a child `Ui` named for the cell, and a two-up
+    /// row is drawn on `columns[0]`, so a scan anchored on `ui.label(` had a
+    /// hole exactly where the studio does its most bespoke layout — the
+    /// advanced-options editor row painted both of its text cells at egui's
+    /// default through a child called `hint` and one called `name`. Any
+    /// receiver counts here.
+    ///
+    /// An empty argument list is skipped: `kind.label()` and its two dozen
+    /// siblings are enum getters that hand back the word a row states, not
+    /// calls that paint one. `set_label(` never matches — the dot belongs to
+    /// `set`, not to `label`.
     ///
     /// The check is on the source rather than the render because a font is a
     /// literal at its call site, and a rendered galley cannot say whether the
@@ -957,7 +970,10 @@ mod tests {
         let mut scanned = 0usize;
         let mut untyped = Vec::new();
         for (path, source) in &sources {
-            for (line, argument) in calls(source, "ui.label(") {
+            for (line, argument) in calls(source, ".label(") {
+                if argument.trim().is_empty() {
+                    continue;
+                }
                 scanned += 1;
                 if !argument.contains(".font(") {
                     untyped.push(format!("{}:{line}", path.display()));
@@ -965,7 +981,7 @@ mod tests {
             }
         }
         assert!(
-            scanned >= 25,
+            scanned >= 30,
             "the scan matched only {scanned} label calls; the pattern has stopped matching"
         );
         assert!(

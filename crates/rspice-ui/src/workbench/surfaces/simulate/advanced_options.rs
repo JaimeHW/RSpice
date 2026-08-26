@@ -42,6 +42,8 @@ use crate::simulation::plan::{
     AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
     OverrideValueKind, SolverOwnership,
 };
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, mono_input};
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::AdvancedOptionsEditor;
@@ -477,9 +479,18 @@ fn editor_row(
     apply: &Cell<bool>,
     clear: &Cell<Option<NumericOverrideOption>>,
 ) {
+    let color = Tokens::get(ui.ctx()).color;
+    // The two text cells of an editing row sit in the same columns a read-only
+    // row paints, so they take that row's type: `ledger_row` writes every cell
+    // in mono at the token base size, and a bare `label` here painted egui's
+    // 13 px default beside its own mono neighbours.
     let (_, cells) = super::page_kit::ledger_row_cells(ui, &COLUMNS);
     let mut name = super::page_kit::cell_ui(ui, cells[0]);
-    name.label(row.option.label());
+    name.label(
+        egui::RichText::new(row.option.label())
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .color(color.text_dim),
+    );
 
     let mut input = super::page_kit::cell_ui(ui, cells[1]);
     // A boolean is not free text. Typing `on` into a well that also accepts
@@ -509,9 +520,15 @@ fn editor_row(
 
     // The hint sits where the origin does on a read-only row: an editing row
     // has no origin yet, and the shape a value must take is what a reader
-    // needs in that instant instead.
+    // needs in that instant instead. Faint rather than dim, because the origin
+    // it stands in for is a fact about the row and this is guidance about the
+    // well beside it.
     let mut hint = super::page_kit::cell_ui(ui, cells[2]);
-    hint.label(row.option.value_hint());
+    hint.label(
+        egui::RichText::new(row.option.value_hint())
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .color(color.text_faint),
+    );
 
     let mut actions = super::page_kit::cell_ui(ui, cells[3]);
     if Button::new("Apply").show(&mut actions).clicked() {
