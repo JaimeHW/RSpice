@@ -8,7 +8,7 @@
 
 use super::*;
 
-use crate::state::model_library::ModelSourceAuthority;
+use crate::state::model_library::{ModelSourceAuthority, QualificationVectorDispositionCause};
 
 /// A model's release verdict.
 ///
@@ -64,12 +64,40 @@ pub(super) enum QualificationDomain {
 }
 
 impl QualificationDomain {
+    /// Every domain a vector can be written against, in the order the matrix
+    /// columns read.
+    ///
+    /// Exhaustive over [`QualificationAnalysis`] on purpose. A column set
+    /// derived from whatever the corpus happens to hold would drop the empty
+    /// domains silently, and "this family declares nothing here" is the one
+    /// answer a reader checking coverage came for.
+    ///
+    /// There is no temperature column because there is no temperature domain:
+    /// the analyses a vector may name are DC, AC/charge, transient and noise,
+    /// and a temperature is a *condition* one of them is run at rather than an
+    /// analysis of its own.
+    pub(super) const ALL: [Self; 4] = [Self::Dc, Self::Ac, Self::Transient, Self::Noise];
+
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Dc => "DC operating curves",
             Self::Ac => "AC / charge",
             Self::Transient => "Transient",
             Self::Noise => "Noise",
+        }
+    }
+
+    /// The domain's name as a matrix column heading.
+    ///
+    /// Shorter than [`Self::label`] because a column heading has a column's
+    /// width, and not an abbreviation because the heading is what says which
+    /// analyses the cells under it were counted from.
+    pub(super) const fn column_label(self) -> &'static str {
+        match self {
+            Self::Dc => "DC",
+            Self::Ac => "AC · CHARGE",
+            Self::Transient => "TRANSIENT",
+            Self::Noise => "NOISE",
         }
     }
 
@@ -100,6 +128,13 @@ pub(super) struct QualificationDomainAccumulator {
 pub(super) struct QualificationDomainSummary {
     pub(super) domain: QualificationDomain,
     pub(super) vectors: usize,
+    /// Vectors in this domain that a retained evidence record actually
+    /// describes. Carried as a count beside [`Self::passing_vectors`] rather
+    /// than folded into the prose below it, because a matrix cell has to tell
+    /// "ran and failed" from "never ran" and the two colour differently.
+    pub(super) evidenced_vectors: usize,
+    pub(super) passing_vectors: usize,
+    pub(super) open_dispositions: usize,
     pub(super) reference_coverage: String,
     pub(super) tolerance: String,
     pub(super) disposition: String,
@@ -128,12 +163,37 @@ pub(crate) struct QualificationModelSummary {
     pub(super) parity_suites: usize,
     pub(super) evidence_digest: Option<String>,
     pub(crate) open_dispositions: usize,
+    /// The two causes an open disposition can have, counted apart.
+    ///
+    /// The retained record carries a cause and a required action and nothing
+    /// else — no severity, no age, no measured miss. So "worst open" is not a
+    /// fact this state holds, and the honest split of a pending count is the
+    /// one the state does hold: a vector that ran and failed, against a vector
+    /// whose evidence no longer describes the current source.
+    pub(super) open_failed: usize,
+    pub(super) open_stale: usize,
     pub(super) releases: usize,
     pub(super) comparison_available: bool,
     pub(super) correlation_status: String,
     pub(super) correlation_evidence_digest: Option<String>,
     pub(crate) gate: QualificationGate,
     pub(super) domains: Vec<QualificationDomainSummary>,
+}
+
+impl QualificationModelSummary {
+    /// What this family retains in one domain, or nothing if it declares no
+    /// vector there.
+    ///
+    /// `None` and a summary of zero vectors are different facts and only the
+    /// first can happen: [`qualification_domain_summaries`] builds a row per
+    /// domain a vector was actually counted into, so an absent domain is one
+    /// the family never wrote a vector against.
+    pub(super) fn domain(
+        &self,
+        domain: QualificationDomain,
+    ) -> Option<&QualificationDomainSummary> {
+        self.domains.iter().find(|summary| summary.domain == domain)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,13 +507,19 @@ pub(super) fn summarize_qualification_state(
         );
     }
 
-    let open_dispositions = source.map_or(0, |source| {
+    let open = source.map_or_else(Vec::new, |source| {
         state
             .vector_dispositions
             .iter()
             .filter(|disposition| disposition.is_open() && disposition.vector.source == *source)
-            .count()
+            .collect()
     });
+    let open_dispositions = open.len();
+    let open_failed = open
+        .iter()
+        .filter(|disposition| disposition.cause == QualificationVectorDispositionCause::Failed)
+        .count();
+    let open_stale = open_dispositions - open_failed;
     let gate = if engine_owned {
         // Decided before the ramp below, and never by it: with no source to
         // bind evidence to there are no suites, so every branch under this one
@@ -491,6 +557,8 @@ pub(super) fn summarize_qualification_state(
         parity_suites,
         evidence_digest,
         open_dispositions,
+        open_failed,
+        open_stale,
         releases: state.releases.len(),
         comparison_available: !state.candidates.is_empty() && !state.releases.is_empty(),
         correlation_status: "not configured".to_owned(),
@@ -625,6 +693,9 @@ pub(super) fn qualification_domain_summaries(
             QualificationDomainSummary {
                 domain,
                 vectors: accumulated.vectors,
+                evidenced_vectors: accumulated.evidenced_vectors,
+                passing_vectors: accumulated.passing_vectors,
+                open_dispositions: accumulated.open_dispositions,
                 reference_coverage,
                 tolerance,
                 disposition,

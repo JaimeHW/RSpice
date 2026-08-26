@@ -54,6 +54,10 @@ fn every_authored_control_declares_its_effect() {
         ("manager/hub.rs", include_str!("manager/hub.rs")),
         ("manager/include.rs", include_str!("manager/include.rs")),
         ("manager/place.rs", include_str!("manager/place.rs")),
+        (
+            "manager/qualification_page.rs",
+            include_str!("manager/qualification_page.rs"),
+        ),
         ("manager/shelf.rs", include_str!("manager/shelf.rs")),
         (
             "manager/symbol_contracts.rs",
