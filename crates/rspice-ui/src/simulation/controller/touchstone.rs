@@ -259,3 +259,80 @@ impl SimulationController {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::results::WaveformData;
+
+    /// An N-port S-parameter result, as the runner assembles one.
+    fn matrix_result(num_ports: usize) -> crate::simulation::SimulationResult {
+        let frequencies = vec![1.0e9, 2.0e9];
+        let mut waveforms = std::collections::HashMap::new();
+        for row in 1..=num_ports {
+            for col in 1..=num_ports {
+                let name = SimulationController::sparameter_name(row, col, num_ports);
+                waveforms.insert(
+                    name.clone(),
+                    WaveformData {
+                        name,
+                        x_values: frequencies.clone(),
+                        y_values: vec![0.5, 0.4],
+                        y_unit: String::new(),
+                        is_complex: true,
+                        y_imag: Some(vec![0.0, 0.0]),
+                    },
+                );
+            }
+        }
+        crate::simulation::SimulationResult::Ac {
+            frequencies,
+            waveforms,
+            measurements: Vec::new(),
+        }
+    }
+
+    /// The export takes its per-port reference impedances from the analysis
+    /// spec's port table, and the matrix from the solved result. When a design
+    /// declares its own `P` ports the solver measures those and the spec's
+    /// table is whatever the S-parameter form happens to hold, so the two
+    /// counts can differ — and this is what that costs: the whole export is
+    /// refused after a run that succeeded.
+    ///
+    /// Pinned rather than fixed here. The repair is upstream, where the spec's
+    /// port table is derived from the ports the design places instead of being
+    /// authored beside them.
+    #[test]
+    fn a_port_table_shorter_than_the_solved_matrix_refuses_the_export() {
+        let error = SimulationController::build_touchstone_dataset(
+            &matrix_result(3),
+            50.0,
+            // Two entries, which is what the S-parameter form holds by
+            // default, against a three-port design.
+            &[50.0, 50.0],
+            2,
+        )
+        .expect_err("a two-entry table cannot describe a three-port matrix");
+
+        assert_eq!(error, "expected 3 per-port reference values, got 2");
+    }
+
+    /// And when the counts agree by coincidence, the table's numbers are
+    /// exported as the network's reference impedances whatever the deck's own
+    /// ports were normalized to.
+    #[test]
+    fn a_port_table_that_fits_supplies_the_exported_reference_impedances() {
+        let dataset = SimulationController::build_touchstone_dataset(
+            &matrix_result(2),
+            50.0,
+            &[50.0, 75.0],
+            2,
+        )
+        .expect("a two-entry table describes a two-port matrix");
+
+        assert_eq!(
+            dataset.metadata.get("z0_ports").map(String::as_str),
+            Some("50,75")
+        );
+    }
+}
