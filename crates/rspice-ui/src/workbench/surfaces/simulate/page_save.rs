@@ -11,6 +11,7 @@ use egui::Ui;
 
 use crate::product::RunId;
 use crate::simulation::capture_ledger::{CaptureLedger, CaptureWorkload};
+pub(super) use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroupMembership, RunRetention, SavedOutputPrecision, SavedOutputStreaming,
@@ -678,10 +679,6 @@ fn commit_save_policy(
     }
 }
 
-pub(super) fn format_bytes(bytes: u64) -> String {
-    super::workflows::format_storage_bytes(bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -868,23 +865,6 @@ mod tests {
             vec![format_bytes(4_096), format_bytes(1_000)],
             "and a run whose decks are held prints their exact size"
         );
-    }
-
-    #[test]
-    fn storage_formatter_selects_the_largest_exact_binary_unit() {
-        assert_eq!(format_bytes(0), "0 B");
-        assert_eq!(format_bytes(17), "17 B");
-        assert_eq!(format_bytes(1024), "1.00 KiB");
-        assert_eq!(format_bytes(256 * 1024 * 1024), "256.00 MiB");
-        assert_eq!(format_bytes(10 * 1024 * 1024 * 1024), "10.00 GiB");
-        assert_eq!(format_bytes(3 * 1024 * 1024 * 1024 * 1024), "3.00 TiB");
-    }
-
-    #[test]
-    fn storage_formatter_preserves_fractional_engineering_scale() {
-        assert_eq!(format_bytes(1536), "1.50 KiB");
-        assert_eq!(format_bytes(3 * 1024 * 1024 / 2), "1.50 MiB");
-        assert_eq!(format_bytes(5 * 1024 * 1024 * 1024 / 2), "2.50 GiB");
     }
 
     #[test]

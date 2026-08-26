@@ -10,6 +10,7 @@ use egui::Ui;
 use crate::simulation::SavedOutputSemanticStatus;
 use crate::simulation::capture_ledger;
 use crate::simulation::output_contract::SavedOutputPreflightReport;
+use crate::simulation::run_set::format_bytes;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     CaptureGroup, CaptureGroupMembership, SavedOutput, SavedOutputCompatibility, SavedOutputPolicy,
@@ -181,7 +182,7 @@ fn registry(
     };
     let size_cell = |output: &SavedOutput| -> (String, Tone) {
         match projected.get(&output.id) {
-            Some(Some(bytes)) => (super::page_save::format_bytes(*bytes), Tone::Neutral),
+            Some(Some(bytes)) => (format_bytes(*bytes), Tone::Neutral),
             // Named rather than dashed: an output whose size cannot be proven
             // before the solve is the one the budget cannot be checked against.
             Some(None) => ("indeterminate".to_owned(), Tone::Warn),
@@ -1411,10 +1412,6 @@ fn storage_read(
             );
         },
     );
-}
-
-fn format_bytes(bytes: u64) -> String {
-    super::workflows::format_storage_bytes(bytes)
 }
 
 #[cfg(test)]

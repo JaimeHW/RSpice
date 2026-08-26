@@ -927,9 +927,6 @@ fn analysis_catalog_search_text_is_centered_in_its_48_point_row() {
 
 #[test]
 fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
-    assert_eq!(format_storage_bytes(960), "960 B");
-    assert_eq!(format_storage_bytes(1_536), "1.50 KiB");
-    assert_eq!(format_storage_bytes(2 * 1024 * 1024), "2.00 MiB");
     assert_eq!(
         saved_output_storage_summary(&SavedOutputStorageEstimate::ExactBytes(960), 1, 0),
         "960 B · 1 compatible analysis"

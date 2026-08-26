@@ -1649,7 +1649,7 @@ pub(super) fn saved_output_storage_summary(
     match estimate {
         SavedOutputStorageEstimate::ExactBytes(bytes) => format!(
             "{} · {compatible_analyses} compatible {}",
-            format_storage_bytes(*bytes),
+            crate::simulation::run_set::format_bytes(*bytes),
             if compatible_analyses == 1 {
                 "analysis"
             } else {
@@ -1659,25 +1659,6 @@ pub(super) fn saved_output_storage_summary(
         SavedOutputStorageEstimate::Indeterminate { reason } => {
             format!("indeterminate · {reason}")
         }
-    }
-}
-
-pub(super) fn format_storage_bytes(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = KIB * 1024.0;
-    const GIB: f64 = MIB * 1024.0;
-    const TIB: f64 = GIB * 1024.0;
-    let bytes_f64 = bytes as f64;
-    if bytes_f64 >= TIB {
-        format!("{:.2} TiB", bytes_f64 / TIB)
-    } else if bytes_f64 >= GIB {
-        format!("{:.2} GiB", bytes_f64 / GIB)
-    } else if bytes_f64 >= MIB {
-        format!("{:.2} MiB", bytes_f64 / MIB)
-    } else if bytes_f64 >= KIB {
-        format!("{:.2} KiB", bytes_f64 / KIB)
-    } else {
-        format!("{bytes} B")
     }
 }
 
