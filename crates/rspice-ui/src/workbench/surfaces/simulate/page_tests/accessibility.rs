@@ -322,7 +322,7 @@ fn workflow_host_nodes(
 }
 
 /// The fixture on one route, with the instance of one kind selected.
-fn studio_route(
+pub(super) fn studio_route(
     page: SimulationPage,
     kind: Option<crate::simulation::plan::AnalysisKind>,
 ) -> RSpiceApp {
@@ -351,7 +351,7 @@ fn studio_route(
 }
 
 /// Every route of the studio, and on the Analyses route every form it holds.
-fn studio_routes() -> Vec<(
+pub(super) fn studio_routes() -> Vec<(
     SimulationPage,
     Option<crate::simulation::plan::AnalysisKind>,
 )> {
@@ -466,7 +466,7 @@ fn the_analysis_catalogue_is_hosted_by_the_frame_on_every_route() {
 /// defect one level up, which is why
 /// [`every_studio_workflow_draft_has_an_overlay_fixture`] counts the list
 /// against the enum rather than trusting the sentence.
-fn studio_overlays() -> Vec<(String, RSpiceApp)> {
+pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     use crate::workbench::state::{
         CaptureGroupDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
         SavedOutputDraft, SimulationPlanManagerDraft, SimulationWorkflowDialog,
