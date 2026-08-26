@@ -1478,19 +1478,24 @@ fn parser_preserves_complex_param_storage() {
 }
 
 #[test]
-fn number_suffixes_match_ngspice_numparam() {
-    // numparam swallows letters after a number, applies the scale factor
-    // even after a scientific exponent, and has no `mil` unit (`1mil` is
-    // milli). All values pinned against ngspice-46.
+fn number_suffixes_read_the_deck_suffix_table() {
+    // The shapes are numparam's, pinned against ngspice-46: letters after a
+    // number are swallowed and the scale factor applies even after a
+    // scientific exponent. The scale table is the deck lexer's, so a number
+    // means the same thing in an expression as in a value position — which
+    // deviates from numparam where the tables disagree: `1a` is a unit
+    // ampere (numparam reads atto), `1mil` is 25.4e-6 (numparam reads
+    // milli), and `1MHz` is 1e6 (numparam reads milli).
     let ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "10kohm"), 10_000.0);
     assert_eq!(eval_with(&ctx, "1MegHz"), 1e6);
-    assert_eq!(eval_with(&ctx, "1mil"), 1e-3);
+    assert_eq!(eval_with(&ctx, "1mil"), 25.4e-6);
+    assert_eq!(eval_with(&ctx, "1MHz"), 1e6);
     assert_eq!(eval_with(&ctx, "1e3k"), 1e6);
     // ngspice computes `mantissa * scale`, so pin the same product (one
     // ulp off the decimal literal 2.5e-6).
     assert_eq!(eval_with(&ctx, "2.5u"), 2.5 * 1e-6);
-    assert_eq!(eval_with(&ctx, "1a"), 1e-18);
+    assert_eq!(eval_with(&ctx, "1a"), 1.0);
     assert_eq!(eval_with(&ctx, "5xyz"), 5.0);
     assert_eq!(eval_with(&ctx, "10k + 1"), 10_001.0);
     assert_eq!(eval_with(&ctx, "3meg"), 3e6);

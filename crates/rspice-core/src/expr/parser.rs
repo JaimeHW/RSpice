@@ -170,10 +170,12 @@ impl<'a> Lexer<'a> {
             Err(_) => return Token::InvalidNumber(s),
         };
 
-        // ngspice B-source numbers go through INPevaluate: an engineering
-        // suffix may follow the digits (even after an exponent, `1e3k` =
-        // 1e6) and any remaining letters are swallowed (`10kOhm`). Unlike
-        // parameter expressions, `mil` = 25.4e-6 exists here.
+        // Like ngspice's INPevaluate, an engineering suffix may follow the
+        // digits (even after an exponent, `1e3k` = 1e6) and any remaining
+        // letters are swallowed (`10kOhm`). The scale itself comes from the
+        // deck lexer's one suffix table, so a number means the same thing
+        // here as in a value position: `1a` is a unit ampere rather than
+        // INPevaluate's atto, and `1MHz` is 1e6 rather than milli.
         let mut multiplier = 1.0;
         let mut tail = String::new();
         if matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
@@ -187,25 +189,7 @@ impl<'a> Lexer<'a> {
             if self.aborted {
                 return Token::Eof;
             }
-            let upper = tail.to_ascii_uppercase();
-            multiplier = if upper.starts_with("MEG") {
-                1e6
-            } else if upper.starts_with("MIL") {
-                25.4e-6
-            } else {
-                match upper.as_bytes()[0] {
-                    b'T' => 1e12,
-                    b'G' => 1e9,
-                    b'K' => 1e3,
-                    b'M' => 1e-3,
-                    b'U' => 1e-6,
-                    b'N' => 1e-9,
-                    b'P' => 1e-12,
-                    b'F' => 1e-15,
-                    b'A' => 1e-18,
-                    _ => 1.0,
-                }
-            };
+            multiplier = crate::netlist::lexer::spice_suffix_scale(&tail).0;
         }
 
         let lexeme = if tail.is_empty() {
@@ -1359,17 +1343,21 @@ mod tests {
     }
 
     #[test]
-    fn numbers_accept_inpevaluate_suffixes() {
-        // B-source numbers go through INPevaluate in ngspice: engineering
-        // suffixes work (`2k`), `mil` is 25.4e-6 (unlike numparam), the
-        // scale applies after an exponent, and unit letters are swallowed.
+    fn numbers_read_the_deck_suffix_table() {
+        // B-source numbers keep INPevaluate's shapes — engineering suffixes
+        // work (`2k`), the scale applies after an exponent, and unit letters
+        // are swallowed — but the scale table is the deck lexer's, so `1a`
+        // is a unit ampere (ngspice reads atto) and `1MHz` is 1e6 (ngspice
+        // reads milli).
         assert_eq!(eval_const("2k"), 2000.0);
         assert_eq!(eval_const("1mil*1e6"), 25.4e-6 * 1e6);
         assert_eq!(eval_const("10kohm"), 10_000.0);
         assert_eq!(eval_const("1e3k/1e6"), 1.0);
         assert_eq!(eval_const("3meg"), 3e6);
         assert_eq!(eval_const("100n"), 100.0 * 1e-9);
-        assert_eq!(eval_const("1a"), 1e-18);
+        assert_eq!(eval_const("1a"), 1.0);
+        assert_eq!(eval_const("1MHz"), 1e6);
+        assert_eq!(eval_const("3x"), 3e6);
         assert_eq!(eval_const("5xyz"), 5.0);
     }
 

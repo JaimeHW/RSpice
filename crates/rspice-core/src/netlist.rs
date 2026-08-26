@@ -9945,6 +9945,48 @@ mod tests {
     }
 
     #[test]
+    fn plain_values_and_brace_expressions_share_one_suffix_dialect() {
+        // One suffix table serves value positions and expressions alike.
+        // Before it did, this deck put V1 and V2 eighteen decades apart: the
+        // lexer read `1a` as one ampere-style unit letter while the
+        // expression parsers kept ngspice's atto — and V3/V4 forty-fold
+        // apart on `mil`, which numparam reads as milli.
+        let netlist = Netlist::parse(
+            "one suffix dialect\n\
+             V1 1 0 1a\n\
+             V2 2 0 {1a}\n\
+             V3 3 0 1mil\n\
+             V4 4 0 {1mil}\n\
+             R1 1 0 1\n\
+             R2 2 0 1\n\
+             R3 3 0 1\n\
+             R4 4 0 1\n\
+             .end\n",
+        )
+        .expect("suffixed plain values and brace expressions parse");
+
+        let source_value = |name: &str| -> f64 {
+            netlist
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::VoltageSource(SourceSpec::Dc(value))
+                        if element.name.eq_ignore_ascii_case(name) =>
+                    {
+                        Some(*value)
+                    }
+                    _ => None,
+                })
+                .expect("voltage source exists")
+        };
+
+        assert_eq!(source_value("V1"), 1.0);
+        assert_eq!(source_value("V2"), source_value("V1"));
+        assert_eq!(source_value("V3"), 25.4e-6);
+        assert_eq!(source_value("V4"), source_value("V3"));
+    }
+
+    #[test]
     fn bare_source_dc_levels_accept_bound_parameter_identifiers() {
         let netlist = Netlist::parse(
             "source bound parameter identifiers\n\

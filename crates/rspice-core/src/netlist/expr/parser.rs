@@ -526,11 +526,11 @@ impl<'a> ExprParser<'a> {
 
     /// Parse a number with optional SPICE suffix
     ///
-    /// Mirrors ngspice numparam (xpressn.c `fetchnumber`): a scale suffix
-    /// may follow even after a scientific exponent (`1e3k` = 1e6) and any
-    /// remaining letters are swallowed (`10kOhm`, `1MegHz`). Expressions
-    /// have no `mil` scale, unlike netlist value positions: `1mil` is
-    /// milli with `il` swallowed.
+    /// Shapes follow ngspice numparam (xpressn.c `fetchnumber`): a scale
+    /// suffix may follow even after a scientific exponent (`1e3k` = 1e6) and
+    /// any remaining letters are swallowed (`10kOhm`, `1MegHz`). The scale
+    /// table is [`crate::netlist::lexer::spice_suffix_scale`], the same one
+    /// every netlist value position reads.
     fn parse_number(&mut self) -> Result<Expr, ExprError> {
         let start = self.pos;
         while self.peek().is_some_and(|ch| ch.is_ascii_digit()) {
@@ -569,50 +569,30 @@ impl<'a> ExprParser<'a> {
 
         let numeric_end = self.pos;
 
-        // ngspice numparam scale factors (xpressn.c `parseunit`), plus
-        // Xyce's engineering-expression imaginary suffix (`2.0J`).
+        // Like ngspice numparam (xpressn.c `parseunit`), the unit and any
+        // trailing letters are swallowed (`10kOhm`). The scale itself comes
+        // from the deck lexer's one suffix table, so a number means the same
+        // thing here as in a value position: `1a` is a unit ampere rather
+        // than numparam's atto, and `1mil` is 25.4e-6 rather than milli.
+        // Xyce's engineering-expression imaginary suffix (`2.0J`) is the one
+        // suffix a value position has no use for.
         let mut multiplier = 1.0;
         let mut imaginary_literal = false;
         if self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
-            let remaining = &self.input[self.pos..];
-            let first = remaining
-                .chars()
-                .next()
-                .expect("alphabetic suffix was just observed");
-            let is_meg = remaining
-                .get(..3)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("meg"));
-            imaginary_literal = first.eq_ignore_ascii_case(&'j');
-            let x_scale_suffix = first.eq_ignore_ascii_case(&'x')
-                && remaining
-                    .chars()
-                    .nth(1)
-                    .is_none_or(|next| !next.is_ascii_alphabetic());
-            multiplier = if imaginary_literal {
-                1.0
-            } else if is_meg {
-                1e6
-            } else if x_scale_suffix {
-                1e6
-            } else {
-                match first.to_ascii_uppercase() {
-                    'T' => 1e12,
-                    'G' => 1e9,
-                    'K' => 1e3,
-                    'M' => 1e-3,
-                    'U' => 1e-6,
-                    'N' => 1e-9,
-                    'P' => 1e-12,
-                    'F' => 1e-15,
-                    'A' => 1e-18,
-                    _ => 1.0,
-                }
-            };
-            // Swallow the unit and any trailing letters (`10kOhm`).
+            let suffix_start = self.pos;
             while self.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
                 if self.advance().is_none() {
                     break;
                 }
+            }
+            let suffix = &self.input[suffix_start..self.pos];
+            let first = suffix
+                .chars()
+                .next()
+                .expect("alphabetic suffix was just observed");
+            imaginary_literal = first.eq_ignore_ascii_case(&'j');
+            if !imaginary_literal {
+                multiplier = crate::netlist::lexer::spice_suffix_scale(suffix).0;
             }
         }
 
