@@ -625,23 +625,9 @@ fn worker_transfer_outcome_from_result(
 fn worker_payload_limit_error(payload_bytes: usize, limit_bytes: usize) -> WorkerSimulationError {
     WorkerSimulationError::InvalidConfig(format!(
         "browser worker result numeric payload is {} and exceeds the current {} transport limit; reduce saved signals/points or use the native desktop runner for dense waveforms",
-        format_payload_bytes(payload_bytes),
-        format_payload_bytes(limit_bytes)
+        crate::simulation::run_set::format_bytes(payload_bytes as u64),
+        crate::simulation::run_set::format_bytes(limit_bytes as u64)
     ))
-}
-
-#[cfg(test)]
-fn format_payload_bytes(bytes: usize) -> String {
-    const KIB: usize = 1024;
-    const MIB: usize = KIB * 1024;
-
-    if bytes >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB as f64)
-    } else if bytes >= KIB {
-        format!("{:.1} KiB", bytes as f64 / KIB as f64)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
