@@ -908,18 +908,12 @@ fn visibility_label(public: bool) -> &'static str {
     }
 }
 
-/// Binary-scaled size with one decimal, matching the contract's MiB budget.
+/// The one public byte spelling, over the contract's `usize` counts.
+///
+/// Delegates so the payload gauge and every storage figure elsewhere in the
+/// product describe the same byte count with the same number.
 fn format_bytes(bytes: usize) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = 1024.0 * 1024.0;
-    let bytes = bytes as f64;
-    if bytes >= MIB {
-        format!("{:.1} MiB", bytes / MIB)
-    } else if bytes >= KIB {
-        format!("{:.1} KiB", bytes / KIB)
-    } else {
-        format!("{bytes:.0} B")
-    }
+    crate::simulation::run_set::format_bytes(bytes as u64)
 }
 
 #[cfg(test)]
@@ -929,8 +923,8 @@ mod tests {
     #[test]
     fn byte_formatting_is_binary_scaled() {
         assert_eq!(format_bytes(512), "512 B");
-        assert_eq!(format_bytes(14 * 1024 + 205), "14.2 KiB");
-        assert_eq!(format_bytes(64 * 1024 * 1024), "64.0 MiB");
+        assert_eq!(format_bytes(14 * 1024 + 205), "14.20 KiB");
+        assert_eq!(format_bytes(64 * 1024 * 1024), "64.00 MiB");
     }
 
     #[test]
