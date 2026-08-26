@@ -534,3 +534,45 @@ fn a_run_still_executing_is_named_as_in_progress_rather_than_immutable() {
         "and the hop stays live on it, because Results shows the partials:\n{executing}"
     );
 }
+
+/// An empty plan offers the action that fills it, on the rail itself.
+///
+/// The notice named the navigator and stopped there, which made it a dead end
+/// on the two states where the navigator is not on screen — the panel
+/// collapsed, and focus mode. The rail is where a plan is started, so it
+/// carries the command rather than pointing at a panel that may not be drawn.
+#[test]
+fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
+    use crate::workbench::commands::vocabulary::Command;
+
+    let empty = render_with(SimulationPage::Analyses, 1400.0, |state| {
+        let ids = state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("the test instance owns a stable plan")
+            .instances()
+            .iter()
+            .map(crate::simulation::plan::AnalysisInstance::id)
+            .collect::<Vec<_>>();
+        let plan = state
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .expect("the plan is still there to empty");
+        for id in ids {
+            plan.remove(id, Vec::new())
+                .expect("the plan gives the instance up");
+        }
+        assert!(
+            plan.instances().is_empty(),
+            "the fixture is a plan holding nothing"
+        );
+    });
+    assert!(
+        empty.contains("No analysis instances"),
+        "the rail states what it is holding:\n{empty}"
+    );
+    assert!(
+        empty.contains(Command::AddAnalysis.spec().label),
+        "and offers the command that fills it, rather than naming a panel:\n{empty}"
+    );
+}
