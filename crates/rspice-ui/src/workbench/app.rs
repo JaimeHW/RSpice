@@ -1366,6 +1366,23 @@ mod tests {
         UnresolvedBindingPolicy,
     };
 
+    /// The application root moves by value through the same debug fixture
+    /// chains as the state it embeds, on the same 2 MiB Windows test-thread
+    /// stacks, so its own inline members (controllers, runtimes) carry the
+    /// same discipline: growth lands behind a `Box`. The state's side of the
+    /// budget, with its per-field weight table, lives beside the `AppState`
+    /// declaration.
+    #[test]
+    fn application_root_stays_inside_its_inline_stack_budget() {
+        const APP_INLINE_BUDGET: usize = 40 * 1024;
+        let app = std::mem::size_of::<RSpiceApp>();
+        assert!(
+            app <= APP_INLINE_BUDGET,
+            "RSpiceApp is {app} bytes inline (budget {APP_INLINE_BUDGET}); test fixtures move \
+             it by value through helper chains, so box the member that grew"
+        );
+    }
+
     fn runnable_state() -> AppState {
         let mut state = AppState::default();
         // These readiness tests isolate schematic/DRC policy. Project-owned

@@ -24,10 +24,10 @@ use std::mem::size_of;
 /// growth, not for the next inline dialog aggregate.
 const APP_STATE_INLINE_BUDGET: usize = 32 * 1024;
 
-/// The application root adds its own inline members (controllers, runtimes)
-/// on top of the state and moves through the same fixture chains.
-const APP_INLINE_BUDGET: usize = 40 * 1024;
-
+/// The inline fields only. The boxed sub-states (`dialogs`, `ui`,
+/// `workbench`, `project_lifecycle`) contribute pointer size by construction
+/// and can never explain inline growth, so listing them would only add the
+/// upward module references this layer is retiring.
 fn field_sizes() -> Vec<(&'static str, usize)> {
     use crate::workbench::app_state as a;
     vec![
@@ -38,10 +38,6 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
             size_of::<a::design_history::ProjectDesignHistory>(),
         ),
         ("design_checks", size_of::<a::DesignCheckRuntime>()),
-        (
-            "dialogs",
-            size_of::<Box<crate::workbench::app::DialogState>>(),
-        ),
         ("sim_setup", size_of::<a::SimSetupState>()),
         ("log_buffer", size_of::<crate::diagnostics::LogBuffer>()),
         (
@@ -54,10 +50,6 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
             size_of::<crate::state::ProjectLibraryLockAuthority>(),
         ),
         ("workspace", size_of::<crate::state::ProjectWorkspace>()),
-        (
-            "project_lifecycle",
-            size_of::<Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>>(),
-        ),
         (
             "tabbed_property_dialog",
             size_of::<crate::properties::TabbedPropertyDialogState>(),
@@ -87,11 +79,6 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
             size_of::<crate::properties::model_browser::ModelBrowserState>(),
         ),
         ("analysis", size_of::<a::AnalysisWorkspaceState>()),
-        ("ui", size_of::<Box<crate::workbench::UiSessionState>>()),
-        (
-            "workbench",
-            size_of::<Box<crate::workbench::WorkbenchState>>(),
-        ),
         (
             "shortcut_resolver",
             size_of::<a::session::shortcuts::ShortcutResolverState>(),
@@ -113,6 +100,9 @@ fn weight_table() -> String {
 }
 
 /// The state must stay cheap to move by value on a default thread stack.
+///
+/// The application root that embeds this state carries its own budget in its
+/// own module's tests, beside the members it measures.
 #[test]
 fn app_state_stays_inside_its_inline_stack_budget() {
     let state = size_of::<crate::workbench::app_state::AppState>();
@@ -121,13 +111,6 @@ fn app_state_stays_inside_its_inline_stack_budget() {
         "AppState is {state} bytes inline (budget {APP_STATE_INLINE_BUDGET}); every by-value \
          move carries this on the stack, and debug fixture chains hold ten of them on a 2 MiB \
          Windows test thread. Box the field that grew:\n{}",
-        weight_table()
-    );
-    let app = size_of::<crate::workbench::app::RSpiceApp>();
-    assert!(
-        app <= APP_INLINE_BUDGET,
-        "RSpiceApp is {app} bytes inline (budget {APP_INLINE_BUDGET}); test fixtures move it by \
-         value through helper chains. Box the member that grew:\n{}",
         weight_table()
     );
 }
