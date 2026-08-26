@@ -767,32 +767,73 @@ pub(super) fn command_popup(
     picked
 }
 
+/// A bare on/off control for a cell whose row already names it.
+///
+/// The two tables that carry a boolean per row — the resolved point table's
+/// include column and the variable importer's accept column — state the
+/// subject in the cells beside the control, so a switch with a label of its
+/// own would repeat what the row has already said. The same holds for a form
+/// field, where the caption is painted above the cell the control fills.
+///
+/// It still has to *announce* one. A self-painted control publishes only what
+/// it is given, and a column of controls that publish nothing is a column a
+/// reader cannot tell apart — which is what twenty-seven nameless tick boxes
+/// in the point table were. `name` is that announcement and there is no
+/// spelling of this that omits it.
+///
+/// Returns the response so a caller can hang the row's own tooltip on it;
+/// [`egui::Response::changed`] is set exactly when the reader moved the value.
+pub(super) fn switch_cell(ui: &mut Ui, name: &str, value: &mut bool) -> Response {
+    use super::ANALYSIS_SWITCH_WIDTH as SWITCH_W;
+
+    let t = Tokens::get(ui.ctx());
+    let (rect, mut response) =
+        ui.allocate_exact_size(vec2(SWITCH_W, t.metrics.ctl_h), Sense::click());
+    // The enabled bit is read once and carried into the paint, the toggle and
+    // the announcement alike: a self-painted control gets none of egui's
+    // disabled styling, and its response still reports clicks inside a
+    // disabled `Ui`.
+    let enabled = ui.is_enabled();
+    if enabled && response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+    super::paint_switch(
+        ui,
+        rect.center(),
+        *value,
+        enabled && response.hovered(),
+        rect,
+    );
+    let announced = *value;
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, announced, name)
+    });
+    theme::paint_focus_ring(ui, &response, rect);
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
+}
+
 /// A labelled on/off control, painted with this design system's own switch.
 ///
 /// Four settings rows on these pages were still `ui.checkbox`, which is egui's
-/// tick box and not a control this studio ships. One row shape serves all four
-/// now, so a fifth cannot be written in the other style without somebody
+/// tick box and not a control this studio ships. One row shape serves all of
+/// them now, so another cannot be written in the other style without somebody
 /// noticing.
 ///
-/// It does not serve every boolean the studio paints, and the doc used to say
-/// it did — "a tick box on four rows and a switch on every other" was true of
-/// the four rows and false of the rest. Five tick-box call sites remain in the
-/// studio, every one of them through [`crate::ui::widgets::tick_box`] so that
-/// it announces a name: the analysis form's own `check_row`, the resolved
-/// point table's include tick, the workflow dialogs' `workflow_checkbox`, and
-/// the variable importer's scope control and per-row accept ticks — plus
-/// [`crate::ui::widgets::check_row`], which the analysis form falls back to in
-/// its one-column layout and which several surfaces outside the studio share.
-/// [`tests::the_studio_s_remaining_tick_boxes_are_the_ones_this_doc_names`]
-/// counts them, so that sentence cannot rot and a fifth cannot arrive quietly.
-///
-/// They are a conversion, not a second idiom the design admits: every boolean
-/// in the mockup's simulation stage and its advanced options is a
-/// `label.switch` — five of five, with `.check-row` appearing only in the
-/// project launcher and the results and platform workflows. Converting them is
-/// held back rather than done here because `check_row` is being given its
-/// AccessKit identity in a lane of its own, and a tick box announced as a
-/// switch mid-rename is worse than either.
+/// Every boolean the studio paints is one of these, or the bare
+/// [`switch_cell`] where the row beside it already carries the label. That is
+/// the mockup's rule for the simulation stage and its advanced options —
+/// `label.switch` throughout, with `.check-row` appearing only in the project
+/// launcher and the results and platform workflows — and the studio now holds
+/// it in full. [`tests::the_studio_paints_no_tick_box`] is what keeps it:
+/// the doc here once claimed a tick box on four rows and a switch on every
+/// other, which was true of the four and false of the rest, and a claim about
+/// how many of something ships drifts back to being wrong the moment nothing
+/// checks it.
 ///
 /// Returns whether the reader changed the value. The label elides rather than
 /// wrapping, because these rows sit inside cards whose width is the page's.
@@ -1271,21 +1312,25 @@ mod tests {
         );
     }
 
-    /// The tick boxes left in the studio are the five [`super::switch_row`]'s
-    /// doc names, and no others.
+    /// The studio paints no tick box at all.
     ///
-    /// That doc used to claim the studio painted a tick box on four rows and a
-    /// switch on every other, which was true of the four rows it had just
-    /// converted and false of everything else. A sentence about how many of
-    /// something ships is a claim, and a claim nothing checks drifts back to
-    /// being wrong the next time one is added — so this counts them.
+    /// This used to be a census. It named the five call sites left and asserted
+    /// exactly those, because the doc on [`super::switch_row`] had claimed the
+    /// studio painted a tick box on four rows and a switch on every other —
+    /// true of the four it had just converted, false of everything else — and
+    /// a claim about how many of something ships drifts back to being wrong
+    /// the next time one is added.
     ///
-    /// Each is a conversion the design already decided: every boolean in the
-    /// mockup's simulation stage and its advanced options is a `label.switch`.
-    /// Lowering the count here is what landing one of those looks like.
+    /// The five are gone, so the census is a ban: the analysis form's own
+    /// `check_row`, the point table's include column, the workflow dialogs'
+    /// `workflow_switch`, and the importer's scope control and per-row
+    /// accept column are all [`super::switch_row`] or [`super::switch_cell`]
+    /// now. Every boolean in the mockup's simulation stage and its advanced
+    /// options is a `label.switch`, and there is no longer a number here for a
+    /// sixth to hide behind.
     #[test]
-    fn the_studio_s_remaining_tick_boxes_are_the_ones_this_doc_names() {
-        let mut sites: Vec<String> = studio_sources()
+    fn the_studio_paints_no_tick_box() {
+        let sites: Vec<String> = studio_sources()
             .iter()
             .flat_map(|(path, source)| {
                 ["ui.checkbox(", "egui::Checkbox::", "widgets::tick_box("]
@@ -1293,30 +1338,17 @@ mod tests {
                     .flat_map(move |call| {
                         calls(source, call).into_iter().map(move |(line, _)| {
                             format!(
-                                "{}:{line}",
+                                "{}:{line}: {call}",
                                 path.file_name().unwrap_or_default().to_string_lossy()
                             )
                         })
                     })
             })
             .collect();
-        sites.sort();
-
-        let files: Vec<&str> = sites
-            .iter()
-            .filter_map(|site| site.split(':').next())
-            .collect();
-        assert_eq!(
-            files,
-            [
-                "analysis_form.rs",
-                "page_runset.rs",
-                "variable_import.rs",
-                "variable_import.rs",
-                "workflows.rs",
-            ],
-            "the studio's tick boxes are the five the switch row's doc names; \
-             found {sites:?}"
+        assert!(
+            sites.is_empty(),
+            "the studio's booleans are switches; these are tick boxes:\n  {}",
+            sites.join("\n  ")
         );
     }
 }

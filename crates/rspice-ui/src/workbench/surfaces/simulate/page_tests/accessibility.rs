@@ -463,20 +463,21 @@ fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     overlays
 }
 
-/// Every text field and tick box in the studio announces the row that names it.
+/// Every text field and switch in the studio announces the row that names it.
 ///
-/// A `TextEdit` publishes no accessible name of its own and `egui::Checkbox`
-/// publishes whichever word it is currently painting — so a form of engineering
-/// fields announced four controls whose name was the empty string, the analysis
-/// forms' tick boxes announced themselves as "Enabled", and the point table
-/// published twenty-seven nameless boxes. None of those can be reached, or told
-/// apart, by name.
+/// A `TextEdit` publishes no accessible name of its own, and a self-painted
+/// control publishes only what it is handed — so a form of engineering fields
+/// announced four controls whose name was the empty string, the analysis
+/// forms' booleans announced themselves as "Enabled", and the point table
+/// published twenty-seven nameless boxes. None of those can be reached, or
+/// told apart, by name.
 ///
-/// The names come from the widget constructors — `ui::widgets::mono_input` and
-/// `ui::widgets::tick_box` both take the row's label — so a new call site cannot
-/// omit one. This sweeps the routes to prove no path bypasses them.
+/// The names come from the constructors — `ui::widgets::mono_input` and
+/// `page_kit::switch_row` and `page_kit::switch_cell` each take the row's own
+/// label — so a new call site cannot omit one. This sweeps the routes to prove
+/// no path bypasses them.
 #[test]
-fn every_studio_text_field_and_tick_box_announces_a_name() {
+fn every_studio_text_field_and_switch_announces_a_name() {
     let mut unnamed = Vec::new();
     let mut inputs = 0usize;
     let mut boxes = 0usize;
@@ -528,7 +529,7 @@ fn every_studio_text_field_and_tick_box_announces_a_name() {
     // stopped opening the overlays would pass just as well.
     assert!(
         inputs >= 12 && boxes >= 4,
-        "the sweep reached {inputs} text fields and {boxes} tick boxes; it is not \
+        "the sweep reached {inputs} text fields and {boxes} switches; it is not \
          reaching the surfaces it claims to check"
     );
     assert!(

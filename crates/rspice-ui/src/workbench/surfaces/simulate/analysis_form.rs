@@ -1081,20 +1081,16 @@ fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
     field_cell(ui, label, Some("domain constrained"), |ui| {
         let row_size = vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
         ui.allocate_ui_with_layout(row_size, Layout::left_to_right(Align::Center), |ui| {
-            // The cell owns the full grid column, but the checkbox keeps its
+            // The cell owns the full grid column, but the switch keeps its
             // natural compact width at the leading edge. `add_sized` would
             // center its contents across an oversized half-column.
             //
-            // The word beside the box is the state, not the name: named by the
-            // box itself this control announced "Enabled" and a reader had no
-            // way to tell which of a form's tick boxes they had reached.
-            crate::ui::widgets::tick_box(
-                ui,
-                label,
-                if *value { "Enabled" } else { "Disabled" },
-                value,
-            )
-            .changed()
+            // Bare, because `field_cell` has already painted the caption over
+            // it. What it announces is that caption and never its own state:
+            // the tick box this replaced was named by the word it was showing,
+            // so it said "Enabled" and a reader had no way to tell which of a
+            // form's booleans they had reached.
+            super::page_kit::switch_cell(ui, label, value).changed()
         })
         .inner
     })

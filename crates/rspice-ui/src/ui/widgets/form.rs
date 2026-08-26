@@ -19,9 +19,8 @@ const LABEL_COL: f32 = 92.0;
 /// name of the control rather than as its state.
 ///
 /// Naming the node is the only route that survives that, and it belongs to the
-/// constructors below so a call site cannot forget it: `mono_input` and
-/// `tick_box` take the row's own label and there is no spelling of either that
-/// omits one.
+/// constructors that use it so a call site cannot forget it: `mono_input` takes
+/// the row's own label and there is no spelling of it that omits one.
 pub(crate) fn name_control(ui: &Ui, response: &Response, name: &str) {
     debug_assert!(
         !name.trim().is_empty(),
@@ -45,20 +44,6 @@ pub fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> R
             .margin(egui::Margin::symmetric(8, 4)),
     );
     name_control(ui, &response, label);
-    response
-}
-
-/// A tick box whose accessible name is `name` and whose painted text is `text`.
-///
-/// The two are separate on purpose. A tick box that shows its own state —
-/// "Enabled" / "Disabled" — publishes that word as its name through
-/// [`egui::Checkbox`], so the control is announced as whichever value it
-/// currently holds and its identity is never stated. One that shows nothing at
-/// all, because its row already names it in a column beside it, publishes an
-/// empty name and cannot be reached by name in the first place.
-pub fn tick_box(ui: &mut Ui, name: &str, text: &str, value: &mut bool) -> Response {
-    let response = ui.add(egui::Checkbox::new(value, text));
-    name_control(ui, &response, name);
     response
 }
 

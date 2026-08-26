@@ -252,22 +252,22 @@ pub(super) fn clone_plan_dialog(
             "Dependencies remain linked by stable identifiers.",
             |ui| {
                 ui.vertical(|ui| {
-                    workflow_checkbox(
+                    workflow_switch(
                         ui,
                         "Analyses and advanced options",
                         &mut draft.copy_analyses_options,
                     );
-                    workflow_checkbox(
+                    workflow_switch(
                         ui,
                         "Variables, outputs and specifications",
                         &mut draft.copy_variables_outputs_specs,
                     );
-                    workflow_checkbox(
+                    workflow_switch(
                         ui,
                         "PVT and model bindings",
                         &mut draft.copy_pvt_model_bindings,
                     );
-                    workflow_checkbox(
+                    workflow_switch(
                         ui,
                         "Regression baseline ownership",
                         &mut draft.copy_regression_baseline,
@@ -1986,17 +1986,22 @@ pub(super) fn workflow_section_heading(ui: &mut Ui, label: &str) {
 /// edge.
 ///
 /// The row spans the whole track so a column of these keeps one vertical
-/// rhythm, but the checkbox itself keeps its natural compact width at the left.
+/// rhythm, but the switch itself keeps its natural compact width at the left.
 /// `add_sized` centres a widget in the space it is given, which put labels of
 /// different lengths at different left edges and read as a broken list rather
 /// than as several choices about the same thing.
-pub(super) fn workflow_checkbox(ui: &mut Ui, label: &str, value: &mut bool) {
+///
+/// Named for what it paints. It was `workflow_checkbox`, and it painted egui's
+/// tick box; the dialogs are part of the simulation stage, where the mockup's
+/// every boolean is a `label.switch`, so it paints the studio's own switch and
+/// says so.
+pub(super) fn workflow_switch(ui: &mut Ui, label: &str, value: &mut bool) {
     let height = Tokens::get(ui.ctx()).metrics.row_h;
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), height),
         Layout::left_to_right(Align::Center),
         |ui| {
-            crate::ui::widgets::tick_box(ui, label, label, value);
+            super::page_kit::switch_row(ui, label, value);
         },
     );
 }

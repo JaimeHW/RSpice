@@ -723,13 +723,7 @@ fn scope_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
             let mut override_scope = draft.override_scope || !sheet_declares;
             if ui
                 .add_enabled_ui(sheet_declares, |ui| {
-                    crate::ui::widgets::tick_box(
-                        ui,
-                        "Override the sheet",
-                        "Override the sheet",
-                        &mut override_scope,
-                    )
-                    .changed()
+                    super::page_kit::switch_row(ui, "Override the sheet", &mut override_scope)
                 })
                 .inner
             {
@@ -813,12 +807,12 @@ fn row_table(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
                     ui.horizontal(|ui| {
                         let adoptable = row.is_adoptable();
                         let mut accepted = row.accepted;
-                        // Named for the sheet line it adopts: a column of boxes
-                        // that publish nothing cannot be told apart by name.
+                        // Named for the sheet line it adopts: a column of
+                        // switches that publish nothing cannot be told apart.
                         let name = format!("Adopt line {} \u{b7} {}", row.line, row.name);
                         if ui
                             .add_enabled_ui(adoptable, |ui| {
-                                crate::ui::widgets::tick_box(ui, &name, "", &mut accepted)
+                                super::page_kit::switch_cell(ui, &name, &mut accepted)
                             })
                             .inner
                             .changed()

@@ -2073,10 +2073,10 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     {
         let mut child = super::page_kit::cell_ui(ui, cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)));
         let mut included = !row.excluded;
-        // Named for the point it keeps: twenty-seven boxes that publish an
+        // Named for the point it keeps: twenty-seven switches that publish an
         // empty name are twenty-seven controls a reader cannot tell apart.
         let name = format!("Run point {:03}", row.index + 1);
-        if crate::ui::widgets::tick_box(&mut child, &name, "", &mut included)
+        if super::page_kit::switch_cell(&mut child, &name, &mut included)
             .on_hover_text(if row.excluded {
                 "Restore this point to the run"
             } else {

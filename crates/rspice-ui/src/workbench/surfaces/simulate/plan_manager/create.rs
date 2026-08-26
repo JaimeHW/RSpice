@@ -267,13 +267,13 @@ fn inheritance_controls(
     model_bindings: Option<usize>,
 ) {
     ui.vertical(|ui| {
-        workflow_checkbox(
+        workflow_switch(
             ui,
             &model_closure_label(model_bindings),
             &mut new_plan.inherit_model_closure,
         );
-        workflow_checkbox(ui, "Solver options", &mut new_plan.inherit_solver_options);
-        workflow_checkbox(
+        workflow_switch(ui, "Solver options", &mut new_plan.inherit_solver_options);
+        workflow_switch(
             ui,
             "Result retention policy",
             &mut new_plan.inherit_save_policy,
