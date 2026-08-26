@@ -444,6 +444,12 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
         "Bind section",
         "bind_corner_section publishes an authenticated revision",
     ),
+    // The bound-section excerpt pane's one action, and the painted per-row
+    // unbind the details pane carries beside each bound section. The scanner
+    // cannot harvest a painted hit-region's label, so the unbind entry is a
+    // declaration the stale-check still verifies against the source literal.
+    ("Open the file", "models_view.dialog = SourcePreview"),
+    ("Unbind", "unbind_corner_section publishes a revision"),
     (
         "Validate bindings",
         "seals and validates the exact model execution plan",

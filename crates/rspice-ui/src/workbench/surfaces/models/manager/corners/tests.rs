@@ -571,3 +571,540 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
         "a corner that covers the run set says nothing"
     );
 }
+
+/// Retained bytes with two sections in one file, which is the shape a PDK
+/// corner file actually has: sections addressed by name, never a file each.
+const RETAINED_CORNER_FILE: &str = "\
+* demo180 corner sections
+.param vdd_nom=1.8
+.lib tt
+.param dvthn=0 dvthp=0
+*
+* technology constants — shared by every section
+.param toxe=4.1n
+.model nch_tt nmos level=54 version=4.8
+.model pch_tt pmos level=54 version=4.8
+.endl tt
+*
+.lib mc_g
+.param mc_process=1
+.model nch_mc_g nmos level=54
+.endl
+";
+
+#[test]
+fn the_bound_section_slice_is_the_pair_the_corner_names() {
+    let excerpt = slice_section(RETAINED_CORNER_FILE.as_bytes(), "tt")
+        .expect("the retained file defines `.lib tt`");
+    assert_eq!(
+        excerpt.first_line, 3,
+        "the gutter states where in the file the section is, not where the slice starts"
+    );
+    assert_eq!(excerpt.total_lines, 8);
+    assert_eq!(excerpt.lines.first().map(String::as_str), Some(".lib tt"));
+    assert_eq!(excerpt.lines.last().map(String::as_str), Some(".endl tt"));
+    assert!(
+        !excerpt.lines.iter().any(|line| line.contains("mc_process")),
+        "the slice stopped at its own .endl: {:?}",
+        excerpt.lines
+    );
+
+    // The second section is reachable by name in the same file, and its
+    // `.endl` carries no name at all.
+    let mc = slice_section(RETAINED_CORNER_FILE.as_bytes(), "mc_g").expect("the second section");
+    assert_eq!(mc.total_lines, 4);
+    assert_eq!(mc.lines.last().map(String::as_str), Some(".endl"));
+
+    // Case and tabs are the file's business, not the reader's.
+    let odd = slice_section(b".LIB\tTT\n.model m nmos\n.ENDL\n", "tt").expect("case and tabs");
+    assert_eq!(odd.total_lines, 3);
+
+    // A three-token `.lib <file> <section>` includes a section defined
+    // elsewhere. Reading it as a definition would show an empty pane under a
+    // header claiming this file defines the corner.
+    assert!(
+        slice_section(b".lib ../shared/models.lib tt\n", "tt").is_none(),
+        "an include is not a definition"
+    );
+    assert!(slice_section(RETAINED_CORNER_FILE.as_bytes(), "ff").is_none());
+}
+
+#[test]
+fn a_long_section_is_capped_and_says_how_much_it_left() {
+    let mut source = String::from(".lib tt\n");
+    for index in 0..200 {
+        source.push_str(&format!(".param p{index}=0\n"));
+    }
+    source.push_str(".endl\n");
+    let excerpt = slice_section(source.as_bytes(), "tt").expect("the section");
+    assert_eq!(
+        excerpt.lines.len(),
+        SECTION_EXCERPT_LINES,
+        "the pane holds a fixed slice however large the file is"
+    );
+    assert_eq!(
+        excerpt.total_lines, 202,
+        "and still counts what it did not keep, so the footer can state it"
+    );
+}
+
+/// A library whose retained file carries both sections, one corner bound to
+/// `tt`, and one draft corner with a required domain left unbound.
+fn corner_page_state() -> AppState {
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    let mut library = library_with_sections(&["tt", "mc_g"], RETAINED_CORNER_FILE);
+    library.corners.clear();
+    let mut typical = corner_bound_to("tt", "tt");
+    typical.section_bindings.push(CornerSectionBinding::new(
+        CornerSectionDomain::StatisticalGlobal,
+        "mc_g",
+    ));
+    library.corners.insert("tt".to_owned(), typical);
+
+    let mut draft = ProcessCorner::new("hot_5v5");
+    draft.file_path = Some(PathBuf::from("pdk.lib"));
+    draft.required_domains = vec![CornerSectionDomain::Mos, CornerSectionDomain::Passives];
+    draft.section_bindings = vec![CornerSectionBinding::new(CornerSectionDomain::Mos, "tt")];
+    library.corners.insert("hot_5v5".to_owned(), draft);
+    library.selected_corner = Some("tt".to_owned());
+
+    state.model_library_manager.add_library(library);
+    state
+        .model_library_manager
+        .select_library("pdk")
+        .expect("the fixture library is loaded");
+    state
+}
+
+/// Render the page and report every accessibility node it published.
+fn rendered_corner_page(state: &mut AppState) -> Vec<(egui::accesskit::Role, String)> {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut pending = Vec::new();
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 900.0),
+            )),
+            ..egui::RawInput::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut app = ManagerRenderContext {
+                    state,
+                    pending_actions: &mut pending,
+                };
+                corners_page(ui, &mut app);
+            });
+        },
+    );
+    output
+        .platform_output
+        .accesskit_update
+        .expect("an access tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| Some((node.role(), node.label()?.to_owned())))
+        .collect()
+}
+
+#[test]
+fn the_bound_section_source_is_shown_where_the_binding_is_stated() {
+    let mut state = corner_page_state();
+    let nodes = rendered_corner_page(&mut state);
+    let labels = nodes
+        .iter()
+        .map(|(_, label)| label.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("pdk.lib(tt)") || label.contains("pdk.lib(TT)")),
+        "the pane's header names the file and the section it sliced: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("bound by TT")),
+        "and which corner binds it: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("read-only")),
+        "and that nothing here is editable: {labels:?}"
+    );
+    assert!(
+        nodes.iter().any(|(role, label)| *role
+            == egui::accesskit::Role::Button
+            && label == "Open the file"),
+        "the whole file stays one control away: {labels:?}"
+    );
+    // The slice itself reaches a reader who cannot see the painted glyphs.
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains(".lib tt") && label.contains("level=54")),
+        "the excerpt publishes one node carrying its own lines: {labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("nothing here is copied into the deck")),
+        "and the pane states what a section binding actually does: {labels:?}"
+    );
+}
+
+#[test]
+fn a_section_the_retained_file_does_not_carry_is_stated_rather_than_left_blank() {
+    // A corner naming a section the file never defines is exactly the state
+    // this pane exists for. Rendering nothing at all would read as a pane that
+    // failed rather than as a binding that cannot resolve.
+    let mut state = corner_page_state();
+    let library = state
+        .model_library_manager
+        .get_library_mut("pdk")
+        .expect("the fixture library");
+    library.corners.remove("hot_5v5");
+    library
+        .corners
+        .insert("ff".to_owned(), corner_bound_to("ff", "ff"));
+    library.selected_corner = Some("ff".to_owned());
+    state.workbench.models_view.selected_corner = Some("pdk\u{1f}ff".to_owned());
+
+    let labels = rendered_corner_page(&mut state)
+        .into_iter()
+        .map(|(_, label)| label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("No `.lib ff` … `.endl` pair appears")),
+        "{labels:?}"
+    );
+}
+
+#[test]
+fn the_source_excerpt_is_sliced_once_and_read_back_after_that() {
+    // The page carries no scroll of its own and repaints at the frame rate, so
+    // a slice re-derived per frame would walk every retained byte sixty times a
+    // second for a pane that changed nothing.
+    let mut state = corner_page_state();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut pending = Vec::new();
+    let mut excerpts = Vec::new();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let app = ManagerRenderContext {
+                state: &mut state,
+                pending_actions: &mut pending,
+            };
+            let rows = corner_rows(&app);
+            let row = rows
+                .iter()
+                .find(|row| row.corner.name == "tt")
+                .expect("the typical corner");
+            for _ in 0..3 {
+                excerpts.push(bound_section_excerpt(ui, &app, row, "tt"));
+            }
+        });
+    });
+    assert!(
+        Arc::ptr_eq(&excerpts[0], &excerpts[1]) && Arc::ptr_eq(&excerpts[1], &excerpts[2]),
+        "every read after the first is the cached slice, not a fresh walk"
+    );
+    assert!(excerpts[0].is_ok());
+
+    // A different section is a different slice; the key has to notice.
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut sections = Vec::new();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let app = ManagerRenderContext {
+                state: &mut state,
+                pending_actions: &mut pending,
+            };
+            let rows = corner_rows(&app);
+            let row = rows
+                .iter()
+                .find(|row| row.corner.name == "tt")
+                .expect("the typical corner");
+            sections.push(bound_section_excerpt(ui, &app, row, "tt"));
+            sections.push(bound_section_excerpt(ui, &app, row, "mc_g"));
+        });
+    });
+    assert!(!Arc::ptr_eq(&sections[0], &sections[1]));
+    assert_eq!(
+        sections[1]
+            .as_ref()
+            .as_ref()
+            .expect("the second section slices")
+            .first_line,
+        12
+    );
+}
+
+#[test]
+fn an_unresolved_corner_carries_the_bind_control_on_its_own_row() {
+    // The action row below acts on whichever corner is selected, so resolving
+    // a draft used to mean selecting it first and then finding the control
+    // somewhere else. The mockup puts it on the row, and a painted row can
+    // still publish a real button.
+    let mut state = corner_page_state();
+    let nodes = rendered_corner_page(&mut state);
+    assert!(
+        nodes
+            .iter()
+            .any(|(role, label)| *role == egui::accesskit::Role::Button
+                && label == "Bind section for corner hot_5v5"),
+        "the draft corner's own row offers the bind: {nodes:?}"
+    );
+    assert!(
+        !nodes
+            .iter()
+            .any(|(_, label)| label == "Bind section for corner tt"),
+        "and a corner that already resolves is offered nothing to fix"
+    );
+}
+
+#[test]
+fn a_corner_the_bind_dialog_cannot_help_is_offered_no_row_control() {
+    // Two blockers the dialog cannot lift: a corner bound to no retained
+    // source at all, and one whose own contract is malformed. Offering a
+    // control that cannot change the verdict is worse than offering none.
+    let mut state = AppState::default();
+    state.model_library_manager.clear();
+    let mut library = library_with_sections(&["tt"], RETAINED_CORNER_FILE);
+    library.corners.clear();
+    library.root_path = None;
+    library.source_contents.clear();
+    let mut sourceless = ProcessCorner::new("nowhere");
+    sourceless.file_path = None;
+    library.corners.insert("nowhere".to_owned(), sourceless);
+
+    let mut malformed = corner_bound_to("bad", "tt");
+    malformed.vdd_factor = 0.0;
+    library.corners.insert("bad".to_owned(), malformed);
+    state.model_library_manager.add_library(library);
+    state
+        .model_library_manager
+        .select_library("pdk")
+        .expect("the fixture library is loaded");
+
+    let mut pending = Vec::new();
+    let app = ManagerRenderContext {
+        state: &mut state,
+        pending_actions: &mut pending,
+    };
+    for row in corner_rows(&app) {
+        assert!(
+            !row.binding_blocked,
+            "'{}' cannot be fixed by naming a section: {:?}",
+            row.corner.name, row.blocker
+        );
+    }
+}
+
+#[test]
+fn each_unbind_sits_on_the_section_it_removes() {
+    // The action row used to grow one "Unbind <domain>" per binding, so a PDK
+    // binding several domains pushed the corner's own lifecycle actions along
+    // a row of destructive controls. Each now names the section it acts on,
+    // which the domain label alone never did.
+    let mut state = corner_page_state();
+    let nodes = rendered_corner_page(&mut state);
+    let mut unbinds = nodes
+        .iter()
+        .filter(|(role, label)| {
+            *role == egui::accesskit::Role::Button && label.starts_with("Unbind")
+        })
+        .map(|(_, label)| label.as_str())
+        .collect::<Vec<_>>();
+    unbinds.sort_unstable();
+    assert_eq!(
+        unbinds,
+        vec![
+            "Unbind Composite section tt",
+            "Unbind Statistical (global) section mc_g",
+        ],
+        "one per binding, each naming its section: {nodes:?}"
+    );
+
+    // And the action row is the fixed set of corner actions, with no control
+    // whose presence depends on how many domains the PDK splits into.
+    let actions = nodes
+        .iter()
+        .filter(|(role, _)| *role == egui::accesskit::Role::Button)
+        .map(|(_, label)| label.as_str())
+        .collect::<Vec<_>>();
+    for action in [
+        "Use for execution",
+        "Edit corner…",
+        "Duplicate…",
+        "Set default",
+        "Delete corner…",
+        "Bind section…",
+        "Open source",
+        "View include graph",
+        "Model editor…",
+    ] {
+        assert!(actions.contains(&action), "missing {action}: {actions:?}");
+    }
+}
+
+#[test]
+fn the_fail_closed_contract_is_stated_under_the_matrix() {
+    let mut state = corner_page_state();
+    let labels = rendered_corner_page(&mut state)
+        .into_iter()
+        .map(|(_, label)| label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels.iter().any(|label| label
+            .contains("no implicit typical fallback and no silent alias resolution")
+            && label.contains("held out of every run")),
+        "the contract, and that this project is currently held by it: {labels:?}"
+    );
+}
+
+#[test]
+fn the_statistical_card_counts_only_what_the_bound_section_declares() {
+    use crate::state::model_library::{
+        FiniteF64, ModelDefinitionMetadata, StatisticalDefinition, StatisticalDistribution,
+        StatisticalHierarchyScope, StatisticalVariableDefinition,
+    };
+
+    let mut library = library_with_sections(&["mc_g", "mc_l"], RETAINED_CORNER_FILE);
+    let variable = |name: &str| StatisticalVariableDefinition {
+        name: name.to_owned(),
+        parameter: "vth0".to_owned(),
+        distribution: StatisticalDistribution::Normal {
+            sigma: FiniteF64::new(1e-3).expect("finite"),
+        },
+        correlation_group: None,
+        hierarchy: StatisticalHierarchyScope::Global,
+        description: String::new(),
+    };
+    library.model_definition_metadata.insert(
+        "nch_mc_g".to_owned(),
+        ModelDefinitionMetadata {
+            statistics: StatisticalDefinition {
+                variables: vec![variable("dvth_g"), variable("du0_g")],
+                correlation_matrices: Vec::new(),
+            },
+            ..ModelDefinitionMetadata::default()
+        },
+    );
+
+    assert_eq!(
+        declared_statistics(&library, "mc_g").0,
+        "2 declared variables"
+    );
+    assert_eq!(
+        declared_statistics(&library, "mc_l").0,
+        "no declared statistical variable",
+        "a section whose models declare none must not borrow the other section's count"
+    );
+    assert_eq!(
+        declared_statistics(&library, "aging_10y").0,
+        "no retained model carries this section",
+        "and a section no retained model belongs to says exactly that"
+    );
+}
+
+#[test]
+fn a_corner_binding_no_statistics_says_so_instead_of_inventing_a_sampling_plan() {
+    let mut state = corner_page_state();
+    let library = state
+        .model_library_manager
+        .get_library_mut("pdk")
+        .expect("the fixture library");
+    let typical = library.corners.get_mut("tt").expect("the typical corner");
+    typical
+        .section_bindings
+        .retain(|binding| binding.domain == CornerSectionDomain::Composite);
+
+    let labels = rendered_corner_page(&mut state)
+        .into_iter()
+        .map(|(_, label)| label)
+        .collect::<Vec<_>>();
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("TT binds no statistical or aging section")),
+        "{labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .all(|label| !label.contains("seed") && !label.contains("sample")),
+        "sampling and seeds belong to the run set, not to a corner: {labels:?}"
+    );
+}
+
+/// Renders of the populated page, so its density can be looked at rather than
+/// only asserted about.
+///
+/// Run with `--ignored`; the PNGs go to `RSPICE_RASTER_DIR`.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_corner_page_states() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    let raster = |state: &mut AppState| {
+        let mut pending = Vec::new();
+        crate::ui::raster::render(egui::vec2(1180.0, 900.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    let mut app = ManagerRenderContext {
+                        state,
+                        pending_actions: &mut pending,
+                    };
+                    corners_page(ui, &mut app);
+                });
+        })
+    };
+
+    let mut bound = corner_page_state();
+    let mut draft = corner_page_state();
+    draft.workbench.models_view.selected_corner = Some("pdk\u{1f}hot_5v5".to_owned());
+    let mut narrow = corner_page_state();
+    {
+        let library = narrow
+            .model_library_manager
+            .get_library_mut("pdk")
+            .expect("the fixture library");
+        let typical = library.corners.get_mut("tt").expect("the typical corner");
+        typical.minimum_temperature_c = Some(-40.0);
+        typical.maximum_temperature_c = Some(125.0);
+    }
+    narrow.sim_setup.reference_pvt.temperature_celsius = 150.0;
+
+    for (name, state) in [
+        ("corners-bound", &mut bound),
+        ("corners-draft-selected", &mut draft),
+        ("corners-temperature-finding", &mut narrow),
+    ] {
+        let canvas = raster(state);
+        let height = canvas.content_height().max(200);
+        let path = directory.join(format!("{name}.png"));
+        std::fs::write(&path, canvas.png(height)).expect("write png");
+        writeln!(
+            report,
+            "wrote {} ({}x{height})",
+            path.display(),
+            canvas.width()
+        )
+        .ok();
+    }
+}
