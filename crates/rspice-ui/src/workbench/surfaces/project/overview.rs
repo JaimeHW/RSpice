@@ -7,7 +7,9 @@
 
 use std::collections::BTreeSet;
 
-use egui::{Align, Align2, Color32, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{
+    Align, Align2, Color32, CornerRadius, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2,
+};
 
 use crate::services::drc::DrcSeverity;
 use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
@@ -20,20 +22,27 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design_system::{centered_content_rect, property_row, property_row_toned};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage, ProjectPage, Workspace};
 
 use super::visible_workspace_width;
 
-const IDENTITY_PANEL_HEIGHT: f32 = 176.0;
-const IDENTITY_PANEL_COMPACT_HEIGHT: f32 = 210.0;
-const FIRST_ROW_MIN_HEIGHT: f32 = 176.0;
-const SECOND_ROW_MIN_HEIGHT: f32 = 214.0;
-const SECTION_HEADER_HEIGHT: f32 = 24.0;
+/// Shared page measure of the workbench landing surfaces, so the overview,
+/// the no-project landing, and the netlist-first landing read as one product.
+const CONTENT_MAX_WIDTH: f32 = 1240.0;
+const DESKTOP_GUTTER: f32 = 30.0;
+const HEADER_TOP: f32 = 15.0;
+const HEADER_BOTTOM: f32 = 14.0;
+const BODY_TOP: f32 = 14.0;
+const BODY_BOTTOM: f32 = 26.0;
+const STACK_BREAKPOINT: f32 = 900.0;
+const COLUMN_GAP: f32 = 14.0;
+const CARD_GAP: f32 = 10.0;
+const CARD_HEADER_HEIGHT: f32 = 26.0;
 const STATUS_ROW_HEIGHT: f32 = 27.0;
 const REGISTER_ROW_HEIGHT: f32 = 17.0;
 const ACTIVITY_ROW_HEIGHT: f32 = 30.0;
-const TWO_COLUMN_BREAKPOINT: f32 = 561.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tone {
@@ -743,95 +752,57 @@ struct DrcCounts {
 }
 
 /// Render the project overview from a single per-frame authoritative snapshot.
+///
+/// The page shares the landing surfaces' geometry — a header band and a
+/// centred content column on the application ground — and projects the
+/// dashboard as bordered cards that size to their content, so a sparse
+/// project shows page ground below the cards rather than stretched panels.
 pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
     let snapshot = OverviewSnapshot::capture(app);
     let mut intent = None;
+    let tokens = Tokens::get(ui.ctx());
     let workspace_width = visible_workspace_width(ui);
-    let paired_identity_width = overview_column_widths(workspace_width).0;
-    let first_row_height =
-        if workspace_width >= TWO_COLUMN_BREAKPOINT && paired_identity_width <= 500.0 {
-            IDENTITY_PANEL_COMPACT_HEIGHT
-        } else {
-            FIRST_ROW_MIN_HEIGHT
-        };
-    let second_row_height = (ui.available_height() - first_row_height - 1.0).max(1.0);
-    ui.scope(|ui| {
-        // The reference surface is a two-by-two dashboard whose panels meet
-        // on one-pixel rules. Narrow touch layouts retain the same reading
-        // order as a single scrolling column.
-        ui.spacing_mut().item_spacing.y = 0.0;
-        if workspace_width < TWO_COLUMN_BREAKPOINT {
-            egui::ScrollArea::vertical()
-                .id_salt("workbench.project.overview.stacked")
-                .auto_shrink([false, false])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                .show(ui, |ui| {
-                    retain_first_intent(
-                        &mut intent,
-                        overview_single_panel(ui, FIRST_ROW_MIN_HEIGHT, |ui| {
-                            overview_header(ui, app, &snapshot)
-                        }),
-                    );
-                    stacked_divider(ui);
-                    retain_first_intent(
-                        &mut intent,
-                        overview_single_panel(ui, FIRST_ROW_MIN_HEIGHT, |ui| {
-                            engineering_status_register(ui, &snapshot.statuses, &snapshot.problem)
-                        }),
-                    );
-                    stacked_divider(ui);
-                    retain_first_intent(
-                        &mut intent,
-                        overview_single_panel(ui, SECOND_ROW_MIN_HEIGHT, |ui| {
-                            project_register(ui, app, &snapshot)
-                        }),
-                    );
-                    stacked_divider(ui);
-                    retain_first_intent(
-                        &mut intent,
-                        overview_single_panel(ui, SECOND_ROW_MIN_HEIGHT, |ui| {
-                            run_register(ui, &snapshot)
-                        }),
-                    );
-                });
-        } else {
-            retain_first_intent(
-                &mut intent,
-                overview_panel_pair(
+    let viewport_height = ui.available_height().max(1.0);
+    egui::Frame::new().fill(tokens.color.bg_app).show(ui, |ui| {
+        ui.set_min_height(viewport_height);
+        ui.set_width(workspace_width);
+        egui::ScrollArea::vertical()
+            .id_salt("workbench.project.overview.page")
+            .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.set_min_width(workspace_width);
+                let content = centered_content_rect(
+                    Rect::from_min_size(pos2(0.0, 0.0), vec2(workspace_width, 1.0)),
+                    DESKTOP_GUTTER,
+                    CONTENT_MAX_WIDTH,
+                );
+                retain_first_intent(
+                    &mut intent,
+                    overview_header(ui, app, &snapshot, content.left(), content.width()),
+                );
+                overview_body(
                     ui,
-                    "identity-status",
-                    first_row_height,
-                    |ui| overview_header(ui, app, &snapshot),
-                    |ui| engineering_status_register(ui, &snapshot.statuses, &snapshot.problem),
-                ),
-            );
-            let (divider_rect, _) =
-                ui.allocate_exact_size(vec2(workspace_width, 1.0), Sense::hover());
-            ui.painter()
-                .rect_filled(divider_rect, 0.0, Tokens::get(ui.ctx()).color.border);
-            retain_first_intent(
-                &mut intent,
-                overview_panel_pair(
-                    ui,
-                    "design-operations",
-                    second_row_height,
-                    |ui| project_register(ui, app, &snapshot),
-                    |ui| run_register(ui, &snapshot),
-                ),
-            );
-        }
+                    app,
+                    &snapshot,
+                    &mut intent,
+                    content.left(),
+                    content.width(),
+                );
+                ui.add_space(BODY_BOTTOM);
+            });
     });
     if let Some(intent) = intent {
         intent.execute(app);
     }
 }
 
-fn overview_column_widths(width: f32) -> (f32, f32) {
-    let usable = (width - 1.0).max(2.0);
-    let min_left = 300.0_f32.min(usable - 1.0);
-    let max_left = (usable - 260.0).max(1.0);
-    let left = (usable * 0.565).clamp(min_left.min(max_left), max_left.max(min_left));
-    (left, (usable - left).max(1.0))
+/// The reference dashboard columns: `minmax(300px, 1.3fr) minmax(260px, 1fr)`.
+fn overview_column_widths(content_width: f32) -> (f32, f32) {
+    let usable = (content_width - COLUMN_GAP).max(2.0);
+    let right = (usable * 0.435).clamp(260.0_f32.min(usable * 0.5), 500.0);
+    ((usable - right).max(1.0), right)
 }
 
 fn retain_first_intent(slot: &mut Option<OverviewIntent>, candidate: Option<OverviewIntent>) {
@@ -840,99 +811,154 @@ fn retain_first_intent(slot: &mut Option<OverviewIntent>, candidate: Option<Over
     }
 }
 
-fn overview_single_panel(
+fn overview_body(
     ui: &mut Ui,
-    min_height: f32,
-    content: impl FnOnce(&mut Ui) -> Option<OverviewIntent>,
+    app: &RSpiceApp,
+    snapshot: &OverviewSnapshot,
+    intent: &mut Option<OverviewIntent>,
+    inset: f32,
+    content_width: f32,
+) {
+    ui.add_space(BODY_TOP);
+    if content_width >= STACK_BREAKPOINT {
+        let (left_width, right_width) = overview_column_widths(content_width);
+        let origin = ui.cursor().min;
+        // Both columns lay out at their natural content height; the page —
+        // not the cards — owns the leftover vertical space.
+        let unbounded = 40_000.0;
+        let mut left = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_size(
+                    pos2(origin.x + inset, origin.y),
+                    vec2(left_width, unbounded),
+                ))
+                .layout(Layout::top_down(Align::Min)),
+        );
+        retain_first_intent(
+            intent,
+            status_card(&mut left, &snapshot.statuses, &snapshot.problem),
+        );
+        left.add_space(CARD_GAP);
+        retain_first_intent(intent, design_card(&mut left, app, snapshot));
+        let mut right = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_size(
+                    pos2(origin.x + inset + left_width + COLUMN_GAP, origin.y),
+                    vec2(right_width, unbounded),
+                ))
+                .layout(Layout::top_down(Align::Min)),
+        );
+        retain_first_intent(intent, context_card(&mut right, snapshot));
+        right.add_space(CARD_GAP);
+        retain_first_intent(intent, operations_card(&mut right, snapshot));
+        let used = left.min_rect().height().max(right.min_rect().height());
+        ui.allocate_rect(
+            Rect::from_min_size(origin, vec2(ui.available_width().max(1.0), used)),
+            Sense::hover(),
+        );
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(inset);
+            ui.allocate_ui_with_layout(
+                vec2(content_width, 1.0),
+                Layout::top_down(Align::Min),
+                |ui| {
+                    ui.set_width(content_width);
+                    retain_first_intent(
+                        intent,
+                        status_card(ui, &snapshot.statuses, &snapshot.problem),
+                    );
+                    ui.add_space(CARD_GAP);
+                    retain_first_intent(intent, context_card(ui, snapshot));
+                    ui.add_space(CARD_GAP);
+                    retain_first_intent(intent, design_card(ui, app, snapshot));
+                    ui.add_space(CARD_GAP);
+                    retain_first_intent(intent, operations_card(ui, snapshot));
+                },
+            );
+        });
+    }
+}
+
+/// A bordered dashboard card: title bar, toned meta, content-sized body.
+fn overview_card(
+    ui: &mut Ui,
+    title: &str,
+    meta: &str,
+    meta_color: Color32,
+    body: impl FnOnce(&mut Ui) -> Option<OverviewIntent>,
 ) -> Option<OverviewIntent> {
     let tokens = Tokens::get(ui.ctx());
-    egui::Frame::new()
+    let width = ui.available_width().max(1.0);
+    let mut intent = None;
+    let shown = egui::Frame::new()
         .fill(tokens.color.bg_panel)
+        .stroke(Stroke::new(1.0, tokens.color.border))
+        .corner_radius(tokens.radius)
         .show(ui, |ui| {
-            ui.set_width(visible_workspace_width(ui));
-            ui.set_min_height(min_height);
-            content(ui)
-        })
-        .inner
-}
-
-fn stacked_divider(ui: &mut Ui) {
-    let width = visible_workspace_width(ui);
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 0.0, Tokens::get(ui.ctx()).color.border);
-}
-
-fn overview_panel_pair(
-    ui: &mut Ui,
-    id_salt: &'static str,
-    min_height: f32,
-    left: impl FnOnce(&mut Ui) -> Option<OverviewIntent>,
-    right: impl FnOnce(&mut Ui) -> Option<OverviewIntent>,
-) -> Option<OverviewIntent> {
-    let tokens = Tokens::get(ui.ctx());
-    let width = visible_workspace_width(ui);
-    let divider = 1.0;
-    let (left_width, right_width) = overview_column_widths(width);
-    let mut left_intent = None;
-    let mut right_intent = None;
-    let shown = ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = divider;
-        ui.allocate_ui_with_layout(
-            vec2(left_width, min_height),
-            Layout::top_down(Align::Min),
-            |ui| {
-                ui.set_width(left_width);
-                ui.set_min_height(min_height);
-                egui::Frame::new()
-                    .fill(tokens.color.bg_panel)
-                    .show(ui, |ui| {
-                        ui.set_width(left_width);
-                        egui::ScrollArea::vertical()
-                            .id_salt(("workbench.project.overview", id_salt, "left"))
-                            .max_height(min_height)
-                            .auto_shrink([false, false])
-                            .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
-                            )
-                            .show(ui, |ui| {
-                                ui.set_min_width(left_width);
-                                left_intent = left(ui);
-                            });
-                    });
-            },
-        );
-        ui.allocate_ui_with_layout(
-            vec2(right_width, min_height),
-            Layout::top_down(Align::Min),
-            |ui| {
-                ui.set_width(right_width);
-                ui.set_min_height(min_height);
-                egui::Frame::new()
-                    .fill(tokens.color.bg_panel)
-                    .show(ui, |ui| {
-                        ui.set_width(right_width);
-                        egui::ScrollArea::vertical()
-                            .id_salt(("workbench.project.overview", id_salt, "right"))
-                            .max_height(min_height)
-                            .auto_shrink([false, false])
-                            .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
-                            )
-                            .show(ui, |ui| {
-                                ui.set_min_width(right_width);
-                                right_intent = right(ui);
-                            });
-                    });
-            },
-        );
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(width);
+            card_title_row(ui, title, meta, meta_color);
+            intent = body(ui);
+            ui.add_space(9.0);
+        });
+    ui.ctx().accesskit_node_builder(shown.response.id, |node| {
+        node.set_role(egui::accesskit::Role::Group);
+        node.set_label(title);
     });
-    ui.painter().vline(
-        shown.response.rect.left() + left_width,
-        shown.response.rect.y_range(),
+    intent
+}
+
+fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
+    let tokens = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, CARD_HEADER_HEIGHT), Sense::hover());
+    let radius = tokens.radius as u8;
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius {
+            nw: radius,
+            ne: radius,
+            sw: 0,
+            se: 0,
+        },
+        tokens.color.bg_panel_2,
+    );
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
         Stroke::new(1.0, tokens.color.border),
     );
-    left_intent.or(right_intent)
+    let meta_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let meta = elide_text(ui, &meta.to_uppercase(), &meta_font, (width * 0.5).max(1.0));
+    let meta_width = ui
+        .painter()
+        .layout_no_wrap(meta.clone(), meta_font.clone(), Color32::WHITE)
+        .size()
+        .x;
+    ui.painter().text(
+        pos2(rect.right() - 10.0, rect.center().y),
+        Align2::RIGHT_CENTER,
+        &meta,
+        meta_font,
+        meta_color,
+    );
+    paint_elided(
+        ui,
+        pos2(rect.left() + 10.0, rect.center().y - tokens::FS_0 * 0.5),
+        &title.to_uppercase(),
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        tokens.color.text_dim,
+        (width - meta_width - 28.0).max(1.0),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            ui.is_enabled(),
+            format!("{title}: {meta}"),
+        )
+    });
 }
 
 /// Summarise the status register beside the project name.
@@ -957,293 +983,213 @@ fn project_status_summary(statuses: &[StatusSnapshot], tone: Tone) -> String {
     }
 }
 
+/// The identity band: project name, status summary, working-state facts, and
+/// the quick actions. It sits on the page ground above a full-width rule, the
+/// same header rhythm as the workbench landing surfaces.
 fn overview_header(
     ui: &mut Ui,
     app: &RSpiceApp,
     snapshot: &OverviewSnapshot,
+    inset: f32,
+    content_width: f32,
 ) -> Option<OverviewIntent> {
     let tokens = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let compact = width <= 500.0;
-    let narrow_actions = width <= 440.0;
-    let panel_height = if compact {
-        IDENTITY_PANEL_COMPACT_HEIGHT
-    } else {
-        IDENTITY_PANEL_HEIGHT
-    };
-    let (rect, response) = ui.allocate_exact_size(vec2(width, panel_height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel);
-
-    let content = rect.shrink2(vec2(14.0, 0.0));
-    let text_rect = Rect::from_min_max(content.min, pos2(content.right(), rect.top() + 54.0));
-    let action_rect = Rect::from_min_max(
-        pos2(content.left(), rect.top() + 58.0),
-        pos2(
-            content.right(),
-            rect.top() + if compact { 140.0 } else { 102.0 },
-        ),
-    );
-
-    let project_tone = if snapshot
-        .statuses
-        .iter()
-        .any(|status| status.tone == Tone::Error)
-    {
-        Tone::Error
-    } else if snapshot
-        .statuses
-        .iter()
-        .any(|status| status.tone == Tone::Warn)
-    {
-        Tone::Warn
-    } else {
-        Tone::Ok
-    };
-    let project_status = project_status_summary(&snapshot.statuses, project_tone);
-    let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let status_width = ui
-        .painter()
-        .layout_no_wrap(project_status.clone(), status_font.clone(), Color32::WHITE)
-        .size()
-        .x
-        .min(content.width() * 0.42);
-    let title_font = theme::sans(tokens::FS_5, FontWeight::SemiBold);
-    let title = elide_text(
-        ui,
-        &snapshot.project_name,
-        &title_font,
-        (text_rect.width() - status_width - 10.0).max(1.0),
-    );
-    let title_width = ui
-        .painter()
-        .layout_no_wrap(title.clone(), title_font.clone(), Color32::WHITE)
-        .size()
-        .x;
-    ui.painter().text(
-        pos2(text_rect.left(), rect.top() + 18.0),
-        Align2::LEFT_CENTER,
-        title,
-        title_font,
-        tokens.color.text,
-    );
-    ui.painter().text(
-        pos2(
-            (text_rect.left() + title_width + 10.0)
-                .min((text_rect.right() - status_width).max(text_rect.left())),
-            rect.top() + 18.0,
-        ),
-        Align2::LEFT_CENTER,
-        &project_status,
-        status_font,
-        project_tone.color(&tokens),
-    );
-    let state_label = if !snapshot.persistence_bound {
-        "no saved baseline".to_owned()
-    } else if snapshot.dirty_documents == 0 {
-        "working tree clean".to_owned()
-    } else {
-        format!(
-            "{} working {}",
-            snapshot.dirty_documents,
-            singular_or_plural(snapshot.dirty_documents, "change", "changes")
-        )
-    };
-    paint_elided(
-        ui,
-        pos2(text_rect.left(), rect.top() + 36.0),
-        &format!(
-            "main @ r{} · {} · {}",
-            snapshot.project_revision, state_label, snapshot.path
-        ),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        tokens.color.text_faint,
-        text_rect.width(),
-    );
-
     let mut intent = None;
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(action_rect)
-            .layout(Layout::top_down(Align::Min)),
-        |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let primary = if snapshot.netlist_first {
-                    Button::new("Open SPICE deck").icon(Icon::File)
-                } else {
-                    Button::new("Open top schematic").icon(Icon::Schematic)
-                };
-                if primary.accent().show(ui).clicked() {
-                    intent = Some(if snapshot.netlist_first {
-                        OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist))
-                    } else {
-                        OverviewIntent::OpenProjectRoot
-                    });
-                }
-                if !snapshot.netlist_first {
-                    let run_label = if narrow_actions {
-                        "Run plan\u{2026}".to_owned()
-                    } else {
-                        format!("Run {}…", snapshot.run_plan_name)
-                    };
-                    let command = Command::OpenWorkspace(Workspace::Simulate);
-                    let (enabled, disabled_reason) = command_gate(app, command);
-                    let run_plan = ui
-                        .add_enabled_ui(enabled, |ui| Button::new(&run_label).show(ui))
-                        .inner;
-                    let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
-                        run_plan.on_disabled_hover_text(reason)
-                    });
-                    if run_plan.clicked() {
-                        intent = Some(run_plan_intent());
-                    }
-                }
-                let (new_cell_command_enabled, new_cell_command_reason) =
-                    command_gate(app, Command::NewCell);
-                let has_writable_library = app
-                    .state
-                    .library_manager
-                    .libraries_sorted()
+    ui.add_space(HEADER_TOP);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(inset);
+        ui.allocate_ui_with_layout(
+            vec2(content_width, 1.0),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.set_width(content_width);
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let project_tone = if snapshot
+                    .statuses
                     .iter()
-                    .any(|library| !library.read_only);
-                let new_cell_allowed = new_cell_command_enabled
-                    && !app.state.workbench.safe_mode.project_read_only()
-                    && has_writable_library;
-                let new_cell = ui
-                    .add_enabled_ui(new_cell_allowed, |ui| Button::new("New cell…").show(ui))
-                    .inner
-                    .on_disabled_hover_text(if let Some(reason) = new_cell_command_reason {
-                        reason
-                    } else if app.state.workbench.safe_mode.project_read_only() {
-                        "Safe mode opened this project read-only."
-                    } else if !has_writable_library {
-                        "Attach or create a writable design library first."
+                    .any(|status| status.tone == Tone::Error)
+                {
+                    Tone::Error
+                } else if snapshot
+                    .statuses
+                    .iter()
+                    .any(|status| status.tone == Tone::Warn)
+                {
+                    Tone::Warn
+                } else {
+                    Tone::Ok
+                };
+                let project_status = project_status_summary(&snapshot.statuses, project_tone);
+                let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+                let status_width = ui
+                    .painter()
+                    .layout_no_wrap(project_status.clone(), status_font.clone(), Color32::WHITE)
+                    .size()
+                    .x
+                    .min(content_width * 0.42);
+                let title_font = theme::sans(20.0, FontWeight::SemiBold);
+                let (name_rect, name_response) =
+                    ui.allocate_exact_size(vec2(content_width, 27.0), Sense::hover());
+                let title = elide_text(
+                    ui,
+                    &snapshot.project_name,
+                    &title_font,
+                    (content_width - status_width - 12.0).max(1.0),
+                );
+                let title_width = ui
+                    .painter()
+                    .layout_no_wrap(title.clone(), title_font.clone(), Color32::WHITE)
+                    .size()
+                    .x;
+                ui.painter().text(
+                    pos2(name_rect.left(), name_rect.center().y),
+                    Align2::LEFT_CENTER,
+                    &title,
+                    title_font,
+                    tokens.color.text,
+                );
+                ui.painter().text(
+                    pos2(
+                        (name_rect.left() + title_width + 12.0)
+                            .min((name_rect.right() - status_width).max(name_rect.left())),
+                        name_rect.center().y + 2.0,
+                    ),
+                    Align2::LEFT_CENTER,
+                    &project_status,
+                    status_font,
+                    project_tone.color(&tokens),
+                );
+                name_response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        format!("Project {} · {project_status}", snapshot.project_name),
+                    )
+                });
+                name_response.on_hover_text(format!(
+                    "Project {} · logical revision {} · schema {}",
+                    snapshot.project_id, snapshot.project_revision, snapshot.schema_version
+                ));
+
+                let state_label = if !snapshot.persistence_bound {
+                    "no saved baseline".to_owned()
+                } else if snapshot.dirty_documents == 0 {
+                    "working tree clean".to_owned()
+                } else {
+                    format!(
+                        "{} working {}",
+                        snapshot.dirty_documents,
+                        singular_or_plural(snapshot.dirty_documents, "change", "changes")
+                    )
+                };
+                let (facts_rect, _) =
+                    ui.allocate_exact_size(vec2(content_width, 19.0), Sense::hover());
+                paint_elided(
+                    ui,
+                    pos2(facts_rect.left(), facts_rect.top() + 4.0),
+                    &format!(
+                        "main @ r{} · {} · {}",
+                        snapshot.project_revision, state_label, snapshot.path
+                    ),
+                    theme::mono(tokens::FS_0, FontWeight::Regular),
+                    tokens.color.text_faint,
+                    content_width,
+                );
+
+                ui.add_space(10.0);
+                // Every action is the Button widget's own disabled state, not
+                // an `add_enabled_ui` scope: a scope is placed before its size
+                // is known, so it can never wrap onto the next action row.
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                    let primary = if snapshot.netlist_first {
+                        Button::new("Open SPICE deck").icon(Icon::File)
                     } else {
-                        "New cell creation is unavailable."
+                        Button::new("Open top schematic").icon(Icon::Schematic)
+                    };
+                    if primary.accent().show(ui).clicked() {
+                        intent = Some(if snapshot.netlist_first {
+                            OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist))
+                        } else {
+                            OverviewIntent::OpenProjectRoot
+                        });
+                    }
+                    if !snapshot.netlist_first {
+                        let run_label = if content_width <= 440.0 {
+                            "Run plan\u{2026}".to_owned()
+                        } else {
+                            format!("Run {}…", snapshot.run_plan_name)
+                        };
+                        let command = Command::OpenWorkspace(Workspace::Simulate);
+                        let (enabled, disabled_reason) = command_gate(app, command);
+                        let run_plan = Button::new(&run_label).enabled(enabled).show(ui);
+                        let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
+                            run_plan.on_disabled_hover_text(reason)
+                        });
+                        if run_plan.clicked() {
+                            intent = Some(run_plan_intent());
+                        }
+                    }
+                    let (new_cell_command_enabled, new_cell_command_reason) =
+                        command_gate(app, Command::NewCell);
+                    let has_writable_library = app
+                        .state
+                        .library_manager
+                        .libraries_sorted()
+                        .iter()
+                        .any(|library| !library.read_only);
+                    let new_cell_allowed = new_cell_command_enabled
+                        && !app.state.workbench.safe_mode.project_read_only()
+                        && has_writable_library;
+                    let new_cell = Button::new("New cell…")
+                        .enabled(new_cell_allowed)
+                        .show(ui)
+                        .on_disabled_hover_text(if let Some(reason) = new_cell_command_reason {
+                            reason
+                        } else if app.state.workbench.safe_mode.project_read_only() {
+                            "Safe mode opened this project read-only."
+                        } else if !has_writable_library {
+                            "Attach or create a writable design library first."
+                        } else {
+                            "New cell creation is unavailable."
+                        });
+                    if new_cell.clicked() {
+                        intent = Some(OverviewIntent::Command(Command::NewCell));
+                    }
+                    let (open_deck_enabled, open_deck_disabled_reason) =
+                        command_gate(app, Command::OpenNetlist);
+                    let import_deck = Button::new("Import deck…")
+                        .enabled(open_deck_enabled)
+                        .show(ui);
+                    let import_deck = open_deck_disabled_reason
+                        .map_or(import_deck.clone(), |reason| {
+                            import_deck.on_disabled_hover_text(reason)
+                        });
+                    if import_deck.clicked() {
+                        intent = Some(import_deck_intent());
+                    }
+                    let (history_enabled, history_disabled_reason) =
+                        command_gate(app, Command::RevisionHistory);
+                    let history = Button::new("History…").enabled(history_enabled).show(ui);
+                    let history = history_disabled_reason.map_or(history.clone(), |reason| {
+                        history.on_disabled_hover_text(reason)
                     });
-                if new_cell.clicked() {
-                    intent = Some(OverviewIntent::Command(Command::NewCell));
-                }
-                let open_deck_command = Command::OpenNetlist;
-                let (open_deck_enabled, open_deck_disabled_reason) =
-                    command_gate(app, open_deck_command);
-                let import_deck = ui
-                    .add_enabled_ui(open_deck_enabled, |ui| Button::new("Import deck…").show(ui))
-                    .inner;
-                let import_deck = open_deck_disabled_reason.map_or(import_deck.clone(), |reason| {
-                    import_deck.on_disabled_hover_text(reason)
+                    if history.clicked() {
+                        intent = Some(OverviewIntent::Command(Command::RevisionHistory));
+                    }
                 });
-                if import_deck.clicked() {
-                    intent = Some(import_deck_intent());
-                }
-                let history_command = Command::RevisionHistory;
-                let (history_enabled, history_disabled_reason) = command_gate(app, history_command);
-                let history = ui
-                    .add_enabled_ui(history_enabled, |ui| Button::new("History…").show(ui))
-                    .inner;
-                let history = history_disabled_reason.map_or(history.clone(), |reason| {
-                    history.on_disabled_hover_text(reason)
-                });
-                if history.clicked() {
-                    intent = Some(OverviewIntent::Command(Command::RevisionHistory));
-                }
-            });
-        },
-    );
-    let context_top = rect.top() + if compact { 149.0 } else { 114.0 };
-    let context_row_height = 25.0;
-    let column_gap = 18.0;
-    let column_width = ((content.width() - column_gap) * 0.5).max(1.0);
-    let left = Rect::from_min_size(
-        pos2(content.left(), context_top),
-        vec2(column_width, context_row_height * 2.0),
-    );
-    let right = Rect::from_min_size(
-        pos2(content.left() + column_width + column_gap, context_top),
-        vec2(column_width, context_row_height * 2.0),
-    );
+            },
+        );
+    });
+    ui.add_space(HEADER_BOTTOM);
+    let rule_width = ui.available_width().max(1.0);
+    let (rule_rect, _) = ui.allocate_exact_size(vec2(rule_width, 1.0), Sense::hover());
     ui.painter().hline(
-        content.x_range(),
-        context_top,
+        rule_rect.x_range(),
+        rule_rect.top(),
         Stroke::new(1.0, tokens.color.border),
     );
-    let (left_top_label, left_top_value, left_bottom_label, left_bottom_value) =
-        if snapshot.netlist_first {
-            let deck = snapshot.source_deck.as_ref();
-            (
-                "Source deck",
-                deck.map_or("Unavailable", |deck| deck.name.as_str())
-                    .to_owned(),
-                "Validation",
-                deck.map_or("Unavailable", |deck| deck.validation_state.as_str())
-                    .to_owned(),
-            )
-        } else {
-            let configuration_status = match snapshot.configuration.tone {
-                Tone::Error => "blocked",
-                Tone::Warn => "review required",
-                _ => "resolved",
-            };
-            (
-                "Top / DUT",
-                format!(
-                    "{} \u{00b7} {}",
-                    snapshot.descriptor_root, snapshot.configuration.dut
-                ),
-                "Configuration",
-                format!("{} · {configuration_status}", snapshot.configuration.state),
-            )
-        };
-    let (right_top_label, right_top_value) = if snapshot.netlist_first {
-        (
-            "Ownership",
-            snapshot
-                .source_deck
-                .as_ref()
-                .map_or("Unavailable", |deck| deck.ownership)
-                .to_owned(),
-        )
-    } else {
-        ("Testbench", snapshot.configuration.root.clone())
-    };
-    identity_context_row(
-        ui,
-        Rect::from_min_size(left.min, vec2(left.width(), context_row_height)),
-        left_top_label,
-        &left_top_value,
-        true,
-    );
-    identity_context_row(
-        ui,
-        Rect::from_min_size(
-            pos2(left.left(), left.top() + context_row_height),
-            vec2(left.width(), context_row_height),
-        ),
-        left_bottom_label,
-        &left_bottom_value,
-        false,
-    );
-    identity_context_row(
-        ui,
-        Rect::from_min_size(right.min, vec2(right.width(), context_row_height)),
-        right_top_label,
-        &right_top_value,
-        !snapshot.netlist_first,
-    );
-    identity_context_row(
-        ui,
-        Rect::from_min_size(
-            pos2(right.left(), right.top() + context_row_height),
-            vec2(right.width(), context_row_height),
-        ),
-        "Execution",
-        &snapshot.execution_target,
-        false,
-    );
-    response.on_hover_text(format!(
-        "Project {} · logical revision {} · schema {}",
-        snapshot.project_id, snapshot.project_revision, snapshot.schema_version
-    ));
     intent
 }
 
@@ -1255,39 +1201,56 @@ fn import_deck_intent() -> OverviewIntent {
     OverviewIntent::Command(Command::OpenNetlist)
 }
 
-fn identity_context_row(ui: &Ui, rect: Rect, label: &str, value: &str, mono: bool) {
+/// The bindings the next run executes against, stated as a property ledger.
+fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
     let tokens = Tokens::get(ui.ctx());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, tokens.color.border),
-    );
-    const LABEL_WIDTH: f32 = 82.0;
-    const LABEL_VALUE_GAP: f32 = 8.0;
-    let label_width = LABEL_WIDTH.min(rect.width() * 0.38);
-    ui.painter().text(
-        rect.left_center(),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        tokens.color.text_faint,
-    );
-    let value_font = if mono {
-        theme::mono(tokens::FS_0, FontWeight::Regular)
-    } else {
-        theme::sans(tokens::FS_0, FontWeight::Regular)
-    };
-    paint_elided(
-        ui,
-        pos2(
-            rect.left() + label_width + LABEL_VALUE_GAP,
-            rect.center().y - tokens::FS_0 * 0.5,
-        ),
-        value,
-        value_font,
-        tokens.color.text,
-        (rect.width() - label_width - LABEL_VALUE_GAP).max(0.0),
-    );
+    overview_card(ui, "Execution context", "", tokens.color.text_faint, |ui| {
+        if snapshot.netlist_first {
+            let deck = snapshot.source_deck.as_ref();
+            property_row(
+                ui,
+                "Source deck",
+                deck.map_or("Unavailable", |deck| deck.name.as_str()),
+            );
+            match deck {
+                Some(deck) => property_row_toned(
+                    ui,
+                    "Validation",
+                    &deck.validation_state,
+                    deck.validation_tone.color(&tokens),
+                ),
+                None => property_row_toned(ui, "Validation", "Unavailable", tokens.color.err),
+            };
+            property_row(
+                ui,
+                "Ownership",
+                deck.map_or("Unavailable", |deck| deck.ownership),
+            );
+        } else {
+            property_row(
+                ui,
+                "Top / DUT",
+                &format!(
+                    "{} \u{00b7} {}",
+                    snapshot.descriptor_root, snapshot.configuration.dut
+                ),
+            );
+            property_row(ui, "Testbench", &snapshot.configuration.root);
+            let configuration_status = match snapshot.configuration.tone {
+                Tone::Error => "blocked",
+                Tone::Warn => "review required",
+                _ => "resolved",
+            };
+            property_row_toned(
+                ui,
+                "Configuration",
+                &format!("{} · {configuration_status}", snapshot.configuration.state),
+                snapshot.configuration.tone.color(&tokens),
+            );
+        }
+        property_row(ui, "Execution", &snapshot.execution_target);
+        None
+    })
 }
 
 fn open_project_root(app: &mut RSpiceApp) {
@@ -1341,7 +1304,7 @@ fn project_persistence_location(app: &RSpiceApp) -> String {
     }
 }
 
-fn engineering_status_register(
+fn status_card(
     ui: &mut Ui,
     statuses: &[StatusSnapshot],
     problem: &ProblemSnapshot,
@@ -1354,17 +1317,26 @@ fn engineering_status_register(
     } else {
         Tone::Ok
     };
-    section_header(
+    overview_card(
         ui,
         "Project status",
-        if status_tone == Tone::Ok {
-            "current"
-        } else {
-            "review required"
+        match status_tone {
+            Tone::Error => "blocked",
+            Tone::Warn => "review required",
+            _ => "current",
         },
-        status_tone,
-    );
-    ui.add_space(4.0);
+        status_tone.color(&tokens),
+        |ui| status_rows(ui, statuses, problem),
+    )
+}
+
+fn status_rows(
+    ui: &mut Ui,
+    statuses: &[StatusSnapshot],
+    problem: &ProblemSnapshot,
+) -> Option<OverviewIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    ui.add_space(5.0);
     let width = ui.available_width().max(1.0);
     let mut requested = None;
     for (index, status) in statuses.iter().enumerate() {
@@ -1500,51 +1472,85 @@ fn engineering_status_register(
     requested
 }
 
-fn project_register(
+fn design_card(
     ui: &mut Ui,
     app: &RSpiceApp,
     snapshot: &OverviewSnapshot,
 ) -> Option<OverviewIntent> {
+    let tokens = Tokens::get(ui.ctx());
     let objects = design_objects(snapshot);
-    section_header(
-        ui,
-        "Design",
-        &if snapshot.netlist_first {
-            format!(
-                "{} key {} · netlist-first",
-                objects.len(),
-                singular_or_plural(objects.len(), "source", "sources")
-            )
-        } else {
-            format!(
-                "{} key {} · {} {}",
-                objects.len(),
-                singular_or_plural(objects.len(), "object", "objects"),
-                snapshot.cell_count,
-                singular_or_plural(snapshot.cell_count, "cell", "cells")
-            )
-        },
-        Tone::Neutral,
-    );
-    ui.add_space(6.0);
+    let meta = if snapshot.netlist_first {
+        format!(
+            "{} key {} · netlist-first",
+            objects.len(),
+            singular_or_plural(objects.len(), "source", "sources")
+        )
+    } else {
+        format!(
+            "{} key {} · {} {}",
+            objects.len(),
+            singular_or_plural(objects.len(), "object", "objects"),
+            snapshot.cell_count,
+            singular_or_plural(snapshot.cell_count, "cell", "cells")
+        )
+    };
+    overview_card(ui, "Design", &meta, tokens.color.text_faint, |ui| {
+        design_register(ui, app, &objects)
+    })
+}
+
+fn design_register(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    objects: &[DesignObjectSnapshot],
+) -> Option<OverviewIntent> {
+    ui.add_space(7.0);
     let mut requested = None;
+    // The reference register sizes its name and kind columns to their widest
+    // content — `minmax(110px, auto) auto minmax(0, 1fr)` — so a row's detail
+    // starts just past its neighbours' names rather than at a fixed fraction
+    // of the card that leaves gulfs between related columns.
+    let width = ui.available_width().max(1.0);
+    let name_column = objects
+        .iter()
+        .map(|object| {
+            let font = theme::mono(
+                tokens::FS_0,
+                if object.top {
+                    FontWeight::SemiBold
+                } else {
+                    FontWeight::Regular
+                },
+            );
+            let indent = if object.top { 0.0 } else { 16.0 };
+            ui.painter()
+                .layout_no_wrap(object.name.clone(), font, Color32::WHITE)
+                .size()
+                .x
+                + indent
+        })
+        .fold(110.0_f32, f32::max)
+        .min(width * 0.40);
+    let kind_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
+    let kind_column = objects
+        .iter()
+        .map(|object| {
+            ui.painter()
+                .layout_no_wrap(object.kind.clone(), kind_font.clone(), Color32::WHITE)
+                .size()
+                .x
+                + 10.0
+        })
+        .fold(40.0_f32, f32::max)
+        .min(width * 0.32);
     for (index, object) in objects.iter().enumerate() {
-        design_summary_row(
-            ui,
-            &object.name,
-            &object.kind,
-            &object.detail,
-            object.tone,
-            if object.top { 0.0 } else { 16.0 },
-        );
+        design_summary_row(ui, object, name_column, kind_column);
         if index + 1 < objects.len() {
             ui.add_space(5.0);
         }
     }
     ui.add_space(5.0);
-    let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(t.color.bg_panel)
         .inner_margin(egui::Margin {
             left: 14,
             right: 14,
@@ -1552,14 +1558,13 @@ fn project_register(
             bottom: 0,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 let library_command = Command::ProjectPage(ProjectPage::Library);
                 let (library_enabled, library_disabled_reason) = command_gate(app, library_command);
-                let library = ui
-                    .add_enabled_ui(library_enabled, |ui| {
-                        Button::new("Browse library…").show(ui)
-                    })
-                    .inner;
+                let library = Button::new("Browse library…")
+                    .enabled(library_enabled)
+                    .show(ui);
                 let library = library_disabled_reason.map_or(library.clone(), |reason| {
                     library.on_disabled_hover_text(reason)
                 });
@@ -1569,11 +1574,9 @@ fn project_register(
                 let configuration_command = Command::ConfigurationSets;
                 let (configuration_enabled, configuration_disabled_reason) =
                     command_gate(app, configuration_command);
-                let configuration = ui
-                    .add_enabled_ui(configuration_enabled, |ui| {
-                        Button::new("Configuration sets…").show(ui)
-                    })
-                    .inner;
+                let configuration = Button::new("Configuration sets…")
+                    .enabled(configuration_enabled)
+                    .show(ui);
                 let configuration = configuration_disabled_reason
                     .map_or(configuration.clone(), |reason| {
                         configuration.on_disabled_hover_text(reason)
@@ -1756,6 +1759,17 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
         if rows.len() >= 5 {
             break;
         }
+        // A netlist-first project deliberately leaves its bootstrap schematic
+        // and symbol views pristine; naming them here would present documents
+        // the project's own contract says do not carry design content.
+        if snapshot.netlist_first
+            && matches!(
+                document.view_type,
+                ViewType::Schematic | ViewType::Symbol | ViewType::Testbench
+            )
+        {
+            continue;
+        }
         push_unique(
             &mut rows,
             &mut keys,
@@ -1784,34 +1798,38 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
 /// The reference surface reads this register rather than navigating from it —
 /// the destinations it names are reached from the actions below it — so the row
 /// is an annotation, not a control.
-fn design_summary_row(ui: &mut Ui, name: &str, kind: &str, detail: &str, tone: Tone, indent: f32) {
+fn design_summary_row(
+    ui: &mut Ui,
+    object: &DesignObjectSnapshot,
+    name_column: f32,
+    kind_column: f32,
+) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (rect, response) = ui.allocate_exact_size(vec2(width, REGISTER_ROW_HEIGHT), Sense::hover());
-    let name_width = (width * 0.30).max(110.0);
-    let kind_width = (width * 0.28).max(96.0);
+    let indent = if object.top { 0.0 } else { 16.0 };
     paint_elided(
         ui,
         pos2(
             rect.left() + 14.0 + indent,
             rect.center().y - tokens::FS_0 * 0.5,
         ),
-        name,
+        &object.name,
         theme::mono(
             tokens::FS_0,
-            if indent == 0.0 {
+            if object.top {
                 FontWeight::SemiBold
             } else {
                 FontWeight::Regular
             },
         ),
         t.color.text,
-        (name_width - 18.0 - indent).max(1.0),
+        (name_column - indent).max(1.0),
     );
     // The reference kind chip is an outline only — micro type, 3px radius,
     // no fill — so it reads as an annotation, not a control.
     let kind_font = theme::sans(tokens::FS_MICRO, FontWeight::Regular);
-    let kind_text = elide_text(ui, kind, &kind_font, (kind_width - 18.0).max(1.0));
+    let kind_text = elide_text(ui, &object.kind, &kind_font, (kind_column - 10.0).max(1.0));
     let kind_text_width = ui
         .painter()
         .layout_no_wrap(kind_text.clone(), kind_font.clone(), Color32::WHITE)
@@ -1819,13 +1837,10 @@ fn design_summary_row(ui: &mut Ui, name: &str, kind: &str, detail: &str, tone: T
         .x;
     let kind_rect = Rect::from_min_size(
         pos2(
-            rect.left() + name_width,
+            rect.left() + 14.0 + name_column + 9.0,
             rect.center().y - (tokens::FS_MICRO + 5.0) * 0.5,
         ),
-        vec2(
-            (kind_text_width + 10.0).min(kind_width - 4.0),
-            tokens::FS_MICRO + 5.0,
-        ),
+        vec2(kind_text_width + 10.0, tokens::FS_MICRO + 5.0),
     );
     ui.painter().rect_stroke(
         kind_rect,
@@ -1842,28 +1857,29 @@ fn design_summary_row(ui: &mut Ui, name: &str, kind: &str, detail: &str, tone: T
     );
     // Detail is faint annotation text in the reference; only a genuine
     // warning or error keeps its tone so real problems stay visible.
-    let detail_color = match tone {
-        Tone::Warn | Tone::Error => tone.color(&t),
+    let detail_color = match object.tone {
+        Tone::Warn | Tone::Error => object.tone.color(&t),
         _ => t.color.text_faint,
     };
+    let detail_left = rect.left() + 14.0 + name_column + 9.0 + kind_column + 9.0;
     paint_elided(
         ui,
-        pos2(
-            rect.left() + name_width + kind_width,
-            rect.center().y - tokens::FS_MICRO * 0.5,
-        ),
-        detail,
+        pos2(detail_left, rect.center().y - tokens::FS_MICRO * 0.5),
+        &object.detail,
         theme::sans(tokens::FS_MICRO, FontWeight::Regular),
         detail_color,
-        (width - name_width - kind_width - 10.0).max(1.0),
+        (rect.right() - 14.0 - detail_left).max(1.0),
     );
     // The row paints its three columns straight to the painter, so the label
     // has to be assembled here or a screen reader announces nothing.
-    let row_label = format!("{name}, {kind}, {detail}");
+    let row_label = format!("{}, {}, {}", object.name, object.kind, object.detail);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), row_label.clone())
     });
-    response.on_hover_text(format!("{name}\n{kind}\n{detail}"));
+    response.on_hover_text(format!(
+        "{}\n{}\n{}",
+        object.name, object.kind, object.detail
+    ));
 }
 
 /// Describe the operations register without letting its own limit pass for the
@@ -1876,14 +1892,19 @@ fn operations_meta(shown: usize, total: usize) -> String {
     }
 }
 
-fn run_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
-    section_header(
+fn operations_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
+    let tokens = Tokens::get(ui.ctx());
+    overview_card(
         ui,
         "Recent operations",
         &operations_meta(snapshot.operations.len(), snapshot.operation_total),
-        Tone::Neutral,
-    );
-    ui.add_space(6.0);
+        tokens.color.text_faint,
+        |ui| operations_register(ui, snapshot),
+    )
+}
+
+fn operations_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
+    ui.add_space(7.0);
     let mut selected = None;
     if snapshot.operations.is_empty() {
         activity_row(
@@ -2002,40 +2023,6 @@ fn activity_row(
         )
     });
     response.on_hover_text(format!("{event}\n{detail}"))
-}
-
-fn section_header(ui: &mut Ui, title: &str, meta: &str, tone: Tone) {
-    let tokens = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(width, SECTION_HEADER_HEIGHT), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, tokens.color.bg_panel_2);
-    let content = rect.shrink2(vec2(10.0, 0.0));
-    let meta_width = (content.width() * 0.46).max(0.0);
-    paint_elided(
-        ui,
-        content.left_center() - vec2(0.0, tokens::FS_0 * 0.5),
-        &title.to_uppercase(),
-        theme::sans(tokens::FS_2, FontWeight::SemiBold),
-        tokens.color.text_dim,
-        (content.width() - meta_width - 8.0).max(0.0),
-    );
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let meta = elide_text(ui, &meta.to_uppercase(), &meta_font, meta_width);
-    ui.painter().text(
-        content.right_center(),
-        Align2::RIGHT_CENTER,
-        &meta,
-        meta_font,
-        tone.color(&tokens),
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("{title}: {meta}"),
-        )
-    });
 }
 
 fn checks_snapshot(app: &RSpiceApp) -> HealthCopy {

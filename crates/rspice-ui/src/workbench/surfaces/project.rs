@@ -921,4 +921,224 @@ mod tests {
             }
         }
     }
+
+    fn populated_project_app() -> RSpiceApp {
+        use crate::state::{
+            AnalysisResult, AnalysisType, SimulationRunLifecycle, SimulationRunProvenance,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.project_open = true;
+        let _ = app.state.workspace.project.rename("lna-frontend-28g");
+        let now = crate::time_compat::unix_epoch().as_secs_f64();
+        {
+            let run = app.state.simulation.start_run();
+            run.lifecycle = SimulationRunLifecycle::Completed;
+            run.success = true;
+            run.timestamp = now - 3.0 * 3600.0;
+            run.elapsed_time = 42.6;
+            run.analyses.push(
+                AnalysisResult::new(1, AnalysisType::DcOp, "op")
+                    .with_measurements(vec![rspice_core::MeasureResult::success("idd", 1.86e-3)]),
+            );
+            run.analyses
+                .push(AnalysisResult::new(2, AnalysisType::Ac, "ac"));
+            run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+                .expect("seal run");
+        }
+        {
+            let run = app.state.simulation.start_run();
+            run.lifecycle = SimulationRunLifecycle::Failed;
+            run.success = false;
+            run.timestamp = now - 40.0 * 60.0;
+            run.elapsed_time = 8.3;
+            run.analyses
+                .push(AnalysisResult::new(3, AnalysisType::Transient, "tran"));
+            run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+                .expect("seal run");
+        }
+        {
+            let run = app.state.simulation.start_run();
+            run.lifecycle = SimulationRunLifecycle::Completed;
+            run.success = true;
+            run.timestamp = now - 6.0 * 60.0;
+            run.elapsed_time = 96.1;
+            run.analyses.push(
+                AnalysisResult::new(4, AnalysisType::Transient, "tran").with_measurements(vec![
+                    rspice_core::MeasureResult::success("gain_db", 18.4),
+                    rspice_core::MeasureResult::success("nf_db", 2.1),
+                ]),
+            );
+            run.analyses
+                .push(AnalysisResult::new(5, AnalysisType::Ac, "ac"));
+            run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
+                .expect("seal run");
+        }
+        let candidate = app
+            .prepare_project_library_publication(
+                "analog-core-1.2.0",
+                "james@example.test",
+                "org-release-authority",
+                "Qualified library handoff",
+            )
+            .expect("publication prepares");
+        app.commit_project_library_publication(candidate)
+            .expect("publication commits");
+        {
+            use crate::services::drc::{
+                DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+            };
+            app.state.workspace.active_view = crate::state::CellViewRef::new(
+                &app.state.workspace.project.root_library,
+                &app.state.workspace.project.top_cell,
+                crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+            );
+            let mut result = DrcResult::new();
+            result.add_violation(
+                DrcViolation::new(
+                    7,
+                    DrcViolationType::MissingGround,
+                    "Net vbias1 has no DC path to ground",
+                    DrcLocation::Global,
+                )
+                .with_severity(DrcSeverity::Warning),
+            );
+            result.completed = true;
+            app.state
+                .publish_active_design_check_result(result)
+                .expect("publish design-check receipt");
+        }
+        app
+    }
+
+    fn netlist_first_project_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        assert!(
+            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
+                &mut app.state,
+                "Front-end bias ladder\nV1 in 0 1.8\nR1 in out 4.7k\nR2 out 0 12k\n.op\n.end\n"
+                    .to_owned(),
+                None,
+                "front_end.sp",
+            )
+        );
+        app.state.workbench.project_page = ProjectPage::Overview;
+        app
+    }
+
+    fn painted_project_page(size: egui::Vec2, mut pass: impl FnMut(&mut Ui)) -> String {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| pass(ui));
+            },
+        );
+        painted_text(&output)
+    }
+
+    /// The overview names the live project, its cards, and its retained
+    /// operations — never placeholder copy — at every supported width.
+    #[test]
+    fn the_overview_states_the_project_from_live_state() {
+        for size in [
+            egui::vec2(1440.0, 900.0),
+            egui::vec2(820.0, 1180.0),
+            egui::vec2(390.0, 844.0),
+        ] {
+            let mut app = populated_project_app();
+            app.state.workbench.project_page = ProjectPage::Overview;
+            let text = painted_project_page(size, |ui| show(ui, &mut app));
+            for expected in [
+                "lna-frontend-28g",
+                "PROJECT STATUS",
+                "EXECUTION CONTEXT",
+                "DESIGN",
+                "RECENT OPERATIONS",
+                "Library published · analog-core-1.2.0",
+                "Open top schematic",
+                "CHK-007",
+                "4 RETAINED",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{expected:?} missing at {}x{}:\n{text}",
+                    size.x,
+                    size.y
+                );
+            }
+        }
+    }
+
+    /// A netlist-first project's overview speaks about the deck it continues
+    /// from, never about the pristine bootstrap schematic.
+    #[test]
+    fn the_netlist_first_overview_names_the_deck() {
+        let mut app = netlist_first_project_app();
+        let text = painted_project_page(egui::vec2(1440.0, 900.0), |ui| show(ui, &mut app));
+        for expected in [
+            "Open SPICE deck",
+            "Source deck",
+            "Ownership",
+            "front_end.sp",
+        ] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+        assert!(
+            !text.contains("Open top schematic"),
+            "the schematic action leaked into a deck-driven project:\n{text}"
+        );
+    }
+
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_project_workspace_for_review() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report_output = stderr.lock();
+
+        for page in ProjectPage::ALL {
+            let mut app = populated_project_app();
+            app.state.workbench.project_page = page;
+            let size = egui::vec2(1440.0, 900.0);
+            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+            let height = canvas.content_height().max(1).max(size.y as usize);
+            let path = directory.join(format!(
+                "project-{}-1440x900.png",
+                page.label().to_lowercase().replace(' ', "-")
+            ));
+            std::fs::write(&path, canvas.png(height)).expect("write the render");
+            writeln!(report_output, "{}", path.display()).ok();
+        }
+        for size in [egui::vec2(820.0, 1180.0), egui::vec2(390.0, 844.0)] {
+            let mut app = populated_project_app();
+            app.state.workbench.project_page = ProjectPage::Overview;
+            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+            let height = canvas.content_height().max(1).max(size.y as usize);
+            let path = directory.join(format!(
+                "project-overview-{}x{}.png",
+                size.x as usize, size.y as usize
+            ));
+            std::fs::write(&path, canvas.png(height)).expect("write the render");
+            writeln!(report_output, "{}", path.display()).ok();
+        }
+        let mut app = netlist_first_project_app();
+        let size = egui::vec2(1440.0, 900.0);
+        let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+        let path = directory.join("project-overview-netlist-first-1440x900.png");
+        std::fs::write(
+            &path,
+            canvas.png(canvas.content_height().max(1).max(size.y as usize)),
+        )
+        .expect("write the render");
+        writeln!(report_output, "{}", path.display()).ok();
+    }
 }

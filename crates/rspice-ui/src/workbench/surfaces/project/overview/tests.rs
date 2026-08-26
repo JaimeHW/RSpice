@@ -285,10 +285,13 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     assert!(objects.first().is_some_and(|object| {
         object.top && object.name == "front_end.sp" && object.kind.starts_with("SPICE deck")
     }));
+    // The pristine bootstrap views must not leak in under any spelling —
+    // neither the root identity itself nor its schematic/symbol view paths.
     assert!(
         objects
             .iter()
-            .all(|object| object.name != snapshot.descriptor_root)
+            .all(|object| !object.name.starts_with(&snapshot.descriptor_root)),
+        "{objects:?}"
     );
 }
 
