@@ -959,8 +959,11 @@ fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
     assert_eq!(ANALYSIS_CATALOG_GROUP_HEIGHT, 29.0);
     assert_eq!(ANALYSIS_CATALOG_ROW_HEIGHT, 57.0);
     assert_eq!(ANALYSIS_CATALOG_READINESS_WIDTH, 142.0);
-    assert_eq!(analysis_catalog_column_count(1_199.99), 1);
-    assert_eq!(analysis_catalog_column_count(1_200.0), 2);
+    // Measured on the space the rows are given, not on the viewport: the
+    // mockup's 1180-point surface carries two columns, a narrow one carries a
+    // single row.
+    assert_eq!(analysis_catalog_column_count(1_180.0), 2);
+    assert_eq!(analysis_catalog_column_count(560.0), 1);
     assert_eq!(analysis_catalog_readiness(AnalysisKind::Pac), None);
     assert_eq!(analysis_catalog_readiness(AnalysisKind::Transient), None);
     assert_eq!(

@@ -33,7 +33,6 @@ pub(super) fn analysis_catalog_window(
     let mut chosen = None;
     let mut request_close = false;
     let scroll_to_active = setup.palette_scroll_to_active;
-    let catalog_columns = analysis_catalog_column_count(ctx.content_rect().width());
     let choice = Dialog::new("Simulation Studio", "Add analysis or workflow", "Close")
         .description(
             "Search and add an explicitly classified solver, run-set controller, measurement, check, or optimization workflow.",
@@ -49,6 +48,15 @@ pub(super) fn analysis_catalog_window(
         .note_only_footer()
         .show_with_initial_body_focus(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
+            // How many columns there are is the body's question, not the
+            // window's. The catalogue's surface is inset from the viewport and
+            // its rows give up more to the scrollbar, so a count taken from
+            // the viewport is taken from a width nothing is drawn in: at 1199
+            // it read one column and left the room for a second one standing
+            // empty. It is asked once, here, because the travel below and the
+            // rows it moves through have to agree about the shape of the grid
+            // within the same frame.
+            let catalog_columns = analysis_catalog_column_count(analysis_catalog_row_space(ui));
             let mut search_id = None;
             egui::Frame::NONE
                 .fill(t.color.bg_inset)
@@ -239,8 +247,53 @@ pub(super) fn analysis_catalog_search_field(query: &mut String) -> egui::TextEdi
         .frame(egui::Frame::NONE)
 }
 
-pub(super) const fn analysis_catalog_column_count(viewport_width: f32) -> usize {
-    if viewport_width >= 1_200.0 { 2 } else { 1 }
+/// The width the catalogue's rows are laid out in, inside the body `ui`.
+///
+/// The rows sit in a vertical scroll area, and this theme's scrollbar is a
+/// solid one: it takes its width out of the space the rows get rather than
+/// floating over them. Subtracting it on every frame — including the ones
+/// where the bar has not appeared yet, or is animating in — is what keeps the
+/// count still. Measured against a width the bar is halfway through taking
+/// away, the layout would flip columns mid-animation.
+fn analysis_catalog_row_space(ui: &Ui) -> f32 {
+    (ui.available_width() - ui.spacing().scroll.allocated_width()).max(0.0)
+}
+
+/// The narrowest one catalogue column may be.
+///
+/// Two floors bear on it, and the wider one decides.
+///
+/// The row's own blocks are the first. A wide row is laid out as `code gutter
+/// (70) | 12 | copy | 12 | readiness ([`ANALYSIS_CATALOG_READINESS_WIDTH`],
+/// 142) | 12`, and [`analysis_catalog_row`] refuses to push the readiness
+/// block left of `copy_left + 96`, which leaves the copy 84 points of text.
+/// Those terms are 70 + 12 + 84 + 12 + 142 + 12 = 332 points of row.
+///
+/// The width at which the row abandons that layout is the second, and it is
+/// the wider: at or below [`TITLE_ACTION_STACK_BREAKPOINT`] both
+/// [`analysis_catalog_row_height`] and [`analysis_catalog_row`] stack the
+/// readiness block under the copy instead. Two columns that each draw a
+/// stacked row spend the width the split was meant to buy and hand back a
+/// taller list, so the second column is worth taking only when both columns
+/// clear that breakpoint.
+pub(super) const ANALYSIS_CATALOG_COLUMN_MIN_WIDTH: f32 = TITLE_ACTION_STACK_BREAKPOINT;
+
+/// How many columns of rows fit in `row_space` points.
+///
+/// The argument is the width the rows themselves are given — see
+/// [`analysis_catalog_row_space`] — and not the viewport's, which is wider
+/// than that by the dialog's inset, its border and the scrollbar: 39 points
+/// of a window whose catalogue turns over at 1160 of them.
+///
+/// Strictly wider than twice the minimum, because the row's own stacking test
+/// is `row_width <= TITLE_ACTION_STACK_BREAKPOINT`: a column drawn at exactly
+/// the minimum is already the stacked layout.
+pub(super) const fn analysis_catalog_column_count(row_space: f32) -> usize {
+    if row_space > 2.0 * ANALYSIS_CATALOG_COLUMN_MIN_WIDTH {
+        2
+    } else {
+        1
+    }
 }
 
 /// Which way a keystroke moves the catalogue's selection.
@@ -935,5 +988,19 @@ mod tests {
         ] {
             assert_eq!(catalog_grid_step(&[], 2, 7, direction), 0);
         }
+    }
+
+    /// The second column is taken on the width the rows are given.
+    ///
+    /// Either side of `2 × ANALYSIS_CATALOG_COLUMN_MIN_WIDTH`, and at the
+    /// bound itself, where a column drawn at exactly the minimum is already
+    /// the stacked row the split was meant to avoid.
+    #[test]
+    fn the_catalogue_takes_a_second_column_only_when_both_columns_clear_the_row_minimum() {
+        let bound = 2.0 * ANALYSIS_CATALOG_COLUMN_MIN_WIDTH;
+        assert_eq!(ANALYSIS_CATALOG_COLUMN_MIN_WIDTH, 560.0);
+        assert_eq!(analysis_catalog_column_count(bound - 1.0), 1);
+        assert_eq!(analysis_catalog_column_count(bound), 1);
+        assert_eq!(analysis_catalog_column_count(bound + 1.0), 2);
     }
 }

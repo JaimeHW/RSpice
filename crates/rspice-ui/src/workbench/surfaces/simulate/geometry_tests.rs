@@ -7,6 +7,7 @@
 
 use egui::{Rect, vec2};
 
+use crate::simulation::plan::AnalysisKind;
 use crate::workbench::RSpiceApp;
 
 /// One painted line of the Analyses route: its text and where it landed.
@@ -18,14 +19,8 @@ struct PaintedLine {
     top: f32,
 }
 
-/// Render the Analyses route at `width` and report every line it painted.
-///
-/// Positions, not just wording. The header's identity line and the
-/// availability chip beside it are laid out by two separate measurements —
-/// the chip is measured from the trailing inset, the line gets whatever is
-/// left — and whether they agree is a question about coordinates that no
-/// assertion over text alone can ask.
-fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
+/// Every line of text a rendered frame painted, and where each landed.
+fn painted_lines(shapes: &[egui::epaint::ClippedShape]) -> Vec<PaintedLine> {
     fn collect(shape: &egui::epaint::Shape, out: &mut Vec<PaintedLine>) {
         match shape {
             egui::epaint::Shape::Text(text) => out.push(PaintedLine {
@@ -43,6 +38,21 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
         }
     }
 
+    let mut lines = Vec::new();
+    for clipped in shapes {
+        collect(&clipped.shape, &mut lines);
+    }
+    lines
+}
+
+/// Render the Analyses route at `width` and report every line it painted.
+///
+/// Positions, not just wording. The header's identity line and the
+/// availability chip beside it are laid out by two separate measurements —
+/// the chip is measured from the trailing inset, the line gets whatever is
+/// left — and whether they agree is a question about coordinates that no
+/// assertion over text alone can ask.
+fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
@@ -58,11 +68,7 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
                 .show(ctx, |ui| super::show(ui, &mut app));
         },
     );
-    let mut lines = Vec::new();
-    for clipped in &output.shapes {
-        collect(&clipped.shape, &mut lines);
-    }
-    lines
+    painted_lines(&output.shapes)
 }
 
 /// The analysis header's identity line never reaches its availability chip.
@@ -135,5 +141,98 @@ fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip
         "the elided identity line runs to {} and the chip starts at {}",
         identity.right,
         chip.left
+    );
+}
+
+/// What the analysis catalogue drew, gathered into the rows it drew them in.
+///
+/// Every analysis code the frame painted, grouped by the top it landed on:
+/// two cells of one grid row share a row rect, so they share a top, and two
+/// cells of one column never do. That is the whole of what "two columns"
+/// means here, and it is a question only the coordinates answer — the same
+/// rows, the same wording and the same reading order come out of a
+/// one-column layout.
+fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    app.state.sim_setup.palette_open = true;
+    let mut run = || {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(viewport_width, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| super::show_workflow_dialogs(ctx, &mut app),
+        )
+    };
+    // A content-height surface lays out against its previous measurement.
+    let _ = run();
+    let output = run();
+    let codes = AnalysisKind::MANIFEST_ORDER.map(AnalysisKind::code);
+    let mut codes_painted = painted_lines(&output.shapes)
+        .into_iter()
+        .filter(|line| codes.contains(&line.text.as_str()))
+        .collect::<Vec<_>>();
+    codes_painted.sort_by(|a, b| a.top.total_cmp(&b.top).then(a.left.total_cmp(&b.left)));
+    let mut rows: Vec<Vec<PaintedLine>> = Vec::new();
+    for line in codes_painted {
+        match rows.last_mut() {
+            Some(row) if (row[0].top - line.top).abs() < 0.5 => row.push(line),
+            _ => rows.push(vec![line]),
+        }
+    }
+    rows
+}
+
+/// The catalogue's second column is decided by the body it is drawn in.
+///
+/// `DialogSize::AnalysisCatalog` is a 1180-point surface inset from the
+/// viewport, so the body is 26 points narrower than the window and the rows
+/// give another 13 to a solid scrollbar. A rule written against the viewport
+/// is wrong by that much, and at 1199 it was: a single column of 57-point
+/// rows drawn down a body 1173 wide, with room for a second column standing
+/// empty beside them.
+///
+/// Both directions are pinned, because "wider windows get two columns" is not
+/// the claim. The claim is that the body's own width decides. With the
+/// current chrome the layout turns over at a 1160-point window; 1199 is above
+/// it and carries two columns that each clear
+/// [`ANALYSIS_CATALOG_COLUMN_MIN_WIDTH`], and 1100 is below it and carries
+/// one.
+#[test]
+fn the_analysis_catalogue_takes_its_columns_from_its_body_not_the_viewport() {
+    let wide = analysis_catalogue_code_rows(1_199.0);
+    assert!(
+        wide.len() > 8,
+        "the catalogue drew its rows at 1199: {} row(s)",
+        wide.len()
+    );
+    assert!(
+        wide.iter().all(|row| row.len() <= 2),
+        "no row holds more cells than the layout has columns: {wide:?}"
+    );
+    let pair = wide
+        .iter()
+        .find(|row| row.len() == 2)
+        .unwrap_or_else(|| panic!("an 1199-point viewport pairs its rows: {wide:?}"));
+    let column_width = pair[1].left - pair[0].left;
+    assert!(
+        column_width > super::ANALYSIS_CATALOG_COLUMN_MIN_WIDTH,
+        "each of the two columns clears the row's own minimum: {column_width}"
+    );
+
+    let narrow = analysis_catalogue_code_rows(1_100.0);
+    assert!(
+        narrow.len() > 8,
+        "the catalogue drew its rows at 1100: {} row(s)",
+        narrow.len()
+    );
+    assert!(
+        narrow.iter().all(|row| row.len() == 1),
+        "a body that cannot carry two columns of that minimum draws one: {narrow:?}"
     );
 }
