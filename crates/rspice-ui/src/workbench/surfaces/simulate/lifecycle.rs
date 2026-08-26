@@ -8,6 +8,8 @@
 
 use super::*;
 
+use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
+
 pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
     let current = app.workbench.active_analysis_instance;
     let legacy_index = app.workbench.active_analysis;
@@ -606,10 +608,43 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
                 .map(|instance| instance.display_name().to_owned())
         })
         .unwrap_or_else(|| "this analysis".to_owned());
-    app.state
-        .dialogs
-        .analysis_removal_review
-        .open(id, label, retained_runs, dependent_analyses);
+    // Rows in the order the review states them; each paragraph is carried by
+    // the row it explains, and the dialog puts the warnings before the asides.
+    let retained = PlanRemovalConsequence::stated(
+        "Retained runs holding its results",
+        retained_runs.to_string(),
+    );
+    let retained = if retained_runs > 0 {
+        retained.explained(
+            PlanRemovalTone::Aside,
+            "Retained results stay in the project and stay readable. What they lose is the \
+             configuration they can be traced back to.",
+        )
+    } else {
+        retained
+    };
+    let dependents = PlanRemovalConsequence::stated(
+        "Analyses bound to it",
+        if dependent_analyses.is_empty() {
+            "none".to_owned()
+        } else {
+            dependent_analyses.join(", ")
+        },
+    );
+    let dependents = if dependent_analyses.is_empty() {
+        dependents
+    } else {
+        dependents.explained(
+            PlanRemovalTone::Warn,
+            "The analyses listed above depend on this one. Removing it leaves them unbound, and \
+             they will refuse to run until they are rebound.",
+        )
+    };
+    app.state.dialogs.plan_removal_review.open(
+        PlanRemovalTarget::Analysis(id),
+        label,
+        vec![retained, dependents],
+    );
 }
 
 /// Apply a removal the reader confirmed in the destructive review.
@@ -617,7 +652,12 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
 /// Called once per frame from the surface, so the modal records an answer
 /// rather than reaching into the plan itself.
 pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
-    if let Some(id) = app.state.dialogs.analysis_removal_review.take_confirmed() {
+    if let Some(id) = app
+        .state
+        .dialogs
+        .plan_removal_review
+        .take_confirmed_analysis()
+    {
         commit_analysis_removal(app, id);
     }
 }

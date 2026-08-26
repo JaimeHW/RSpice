@@ -14,8 +14,8 @@ use crate::workbench::app::{
 mod reviews;
 
 pub(crate) use reviews::{
-    AnalysisRemovalReviewState, DeletionInstanceResolution, LibraryDeletionReviewState,
-    LibraryDeletionTarget,
+    DeletionInstanceResolution, LibraryDeletionReviewState, LibraryDeletionTarget,
+    PlanRemovalConsequence, PlanRemovalReview, PlanRemovalTarget, PlanRemovalTone,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -2200,9 +2200,10 @@ pub struct DialogState {
     pub(crate) delete_library_library_revision: u64,
     /// Exact, revision-bound destructive review for deleting one cell or view.
     pub(crate) library_deletion_review: LibraryDeletionReviewState,
-    /// Destructive review for removing one configured analysis that has
-    /// retained results or dependents.
-    pub(crate) analysis_removal_review: AnalysisRemovalReviewState,
+    /// Destructive review for removing one record from the analysis plan —
+    /// an analysis, a design variable, a saved output or a capture group —
+    /// raised only where removal orphans something.
+    pub(crate) plan_removal_review: PlanRemovalReview,
     /// A saved-file open found a bound, eligible autosave checkpoint; the
     /// restore dialog resolves it before either exact byte snapshot is loaded.
     #[cfg(not(target_arch = "wasm32"))]
@@ -2428,7 +2429,7 @@ impl DialogState {
             || self.rename_library_dialog
             || self.delete_library_dialog
             || self.library_deletion_review.target.is_some()
-            || self.analysis_removal_review.target.is_some()
+            || self.plan_removal_review.target.is_some()
             || self.preferences_open
             || self.hardcopy.open
             || self.drawing_sheet_setup.open

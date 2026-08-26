@@ -5,7 +5,6 @@
 //! read answers whether any modal owns input this frame; the dialogs
 //! themselves never inspect each other.
 
-pub(in crate::workbench) mod analysis_removal;
 pub(in crate::workbench) mod check_and_save;
 pub(in crate::workbench) mod check_and_save_validation;
 pub(in crate::workbench) mod configuration_sets;
@@ -35,6 +34,7 @@ pub(in crate::workbench) mod operation_primitives;
 pub(in crate::workbench) mod pdk_settings;
 pub(in crate::workbench) mod pdk_workflow;
 pub(in crate::workbench) mod placement;
+pub(in crate::workbench) mod plan_removal;
 pub(in crate::workbench) mod preferences;
 pub(in crate::workbench) mod project;
 pub(in crate::workbench) mod project_revision_history;

@@ -185,9 +185,10 @@ pub(crate) use dialogs::state::{
     GridSnapRoutingDraft, GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage,
     HierarchyDescendEditMode, HierarchyParentContext, MoveSelectionDialogState,
     NamedNetObjectPropertiesDraft, NetLabelObjectPropertiesDraft, NetLabelPlacementDialogState,
-    NewWindowInitialContent, ObjectPropertiesDraft, PinPortDialogState, RenameSelectionTarget,
-    ReplaceInstanceOpen, StretchSelectionDialogState, TechnologyAttachmentDialogState,
-    ViewOperation, ViewOperationDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    NewWindowInitialContent, ObjectPropertiesDraft, PinPortDialogState, PlanRemovalConsequence,
+    PlanRemovalTarget, PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen,
+    StretchSelectionDialogState, TechnologyAttachmentDialogState, ViewOperation,
+    ViewOperationDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 
@@ -859,7 +860,7 @@ impl RSpiceApp {
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
         self.process_library_deletion_review_dialog(ctx);
-        self.process_analysis_removal_review_dialog(ctx);
+        self.process_plan_removal_review_dialog(ctx);
         #[cfg(not(target_arch = "wasm32"))]
         self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();
