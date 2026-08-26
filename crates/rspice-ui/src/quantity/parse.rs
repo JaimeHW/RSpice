@@ -171,6 +171,20 @@ fn parse_time_or_frequency(
     Ok(value * parse_prefix(prefix, policy.engineering_suffixes, true)?)
 }
 
+/// The decade a field's engineering prefix names, under the field's policy.
+///
+/// Neither policy has atto. `a` is a unit letter — the `A` of a one-ampere
+/// source — in every reader a typed value travels through, the engine's own
+/// deck lexer included, and a prefix table that still read it as 1e-18 would
+/// be the one place a value silently changed decade.
+///
+/// These tables stay separate from
+/// [`rspice_core::netlist::lexer::spice_suffix_scale`] on purpose, and are not
+/// routed through it: the strict policy is case-sensitive, so that `M` and `m`
+/// can be told apart in a field where a human is looking at the letter, while
+/// the engine's dialect folds case and reads both as milli. A field bound for
+/// a deck must use the engine's table instead — see
+/// `crate::simulation::spice_value`.
 fn parse_prefix(
     prefix: &str,
     policy: EngineeringSuffixPolicy,
@@ -191,7 +205,6 @@ fn parse_prefix(
             "n" => 1e-9,
             "p" => 1e-12,
             "f" => 1e-15,
-            "a" => 1e-18,
             "mil" => 25.4e-6,
             _ => {
                 return Err(QuantityInputError::UnknownEngineeringPrefix(
@@ -212,7 +225,6 @@ fn parse_prefix(
                 "n" => 1e-9,
                 "p" => 1e-12,
                 "f" => 1e-15,
-                "a" => 1e-18,
                 "mil" => 25.4e-6,
                 _ if prefix == "µ" => 1e-6,
                 _ => {
@@ -405,6 +417,35 @@ mod tests {
             .unwrap(),
             1e6
         );
+    }
+
+    /// Atto left every reader in the toolchain, this one included. `a` is a
+    /// unit letter, not a decade, so a prefix position holding it is an
+    /// unknown prefix under both policies rather than 1e-18.
+    #[test]
+    fn no_policy_reads_a_as_atto_any_more() {
+        for suffixes in [
+            EngineeringSuffixPolicy::StrictRspice,
+            EngineeringSuffixPolicy::ClassicSpiceCompatibility,
+        ] {
+            let policy = QuantityPresentationPolicy {
+                engineering_suffixes: suffixes,
+                ..QuantityPresentationPolicy::default()
+            };
+            for (text, kind) in [
+                ("1a", QuantityInputKind::EngineeringScalar),
+                ("1as", QuantityInputKind::Time),
+                ("1aHz", QuantityInputKind::Frequency),
+            ] {
+                assert!(
+                    matches!(
+                        parse_ui_quantity(text, kind, policy, UiNumberLocale::default()),
+                        Err(QuantityInputError::UnknownEngineeringPrefix(prefix)) if prefix == "a"
+                    ),
+                    "{text} under {suffixes:?} must not resolve an atto decade"
+                );
+            }
+        }
     }
 
     #[test]
