@@ -10,6 +10,7 @@
 use egui::Ui;
 
 use crate::state::model_library::{ModelSourceAuthority, short_digest};
+use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
@@ -428,10 +429,6 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-const fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
-}
-
 enum ModelBindingAction {
     SetCorner {
         index: usize,
@@ -577,9 +574,10 @@ impl ModelGate<'_> {
                 1,
                 format!(
                     "{} failing",
-                    plural(
+                    counted(
                         self.evidenced_vectors - self.passing_vectors,
-                        "evidenced vector"
+                        "evidenced vector",
+                        "evidenced vectors"
                     )
                 ),
                 Tone::Error,
@@ -587,7 +585,10 @@ impl ModelGate<'_> {
         } else if self.open_dispositions > 0 {
             (
                 2,
-                format!("{} open", plural(self.open_dispositions, "disposition")),
+                format!(
+                    "{} open",
+                    counted(self.open_dispositions, "disposition", "dispositions")
+                ),
                 Tone::Warn,
             )
         } else if self.vectors > self.evidenced_vectors {
@@ -595,7 +596,7 @@ impl ModelGate<'_> {
                 3,
                 format!(
                     "{} without evidence",
-                    plural(self.vectors - self.evidenced_vectors, "vector")
+                    counted(self.vectors - self.evidenced_vectors, "vector", "vectors")
                 ),
                 Tone::Warn,
             )
@@ -684,12 +685,12 @@ fn gate_status(reading: &GateReading) -> (String, Tone) {
     if reading.models == 0 {
         return ("no models to gate".to_owned(), Tone::Neutral);
     }
-    let open = plural(reading.open_dispositions, "disposition");
+    let open = counted(reading.open_dispositions, "disposition", "dispositions");
     if reading.unreadable > 0 {
         return (
             format!(
                 "{open} open · {} unreadable",
-                plural(reading.unreadable, "gate")
+                counted(reading.unreadable, "gate", "gates")
             ),
             Tone::Error,
         );
@@ -698,10 +699,6 @@ fn gate_status(reading: &GateReading) -> (String, Tone) {
         return (format!("{open} open"), Tone::Warn);
     }
     ("no open dispositions".to_owned(), Tone::Ok)
-}
-
-fn plural(count: usize, singular: &str) -> String {
-    format!("{count} {singular}{}", if count == 1 { "" } else { "s" })
 }
 
 /// The plan's read of the model qualification gate.
