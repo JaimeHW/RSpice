@@ -101,6 +101,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         selected.as_ref(),
         QualificationPageAction::RunSuite,
     );
+    let review_blocker = qualification_action_block_reason(
+        app,
+        selected.as_ref(),
+        QualificationPageAction::ReviewVectors,
+    );
 
     // Authored outermost-right first: the band lays its action cluster out
     // right to left, so the page's one accent primary is written first and
@@ -165,9 +170,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.set_min_size(egui::vec2(matrix_w, body));
                     family_matrix(
                         ui,
-                        app,
+                        &mut app.state,
                         &summaries,
                         selected.as_ref(),
+                        review_blocker.as_deref(),
                         &mut requested_action,
                         body,
                     );
@@ -367,9 +373,10 @@ fn gate_banner(ui: &mut Ui, selected: Option<&QualificationModelSummary>) {
 /// The family × domain matrix, filling the track it was handed.
 fn family_matrix(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    state: &mut crate::workbench::AppState,
     summaries: &[QualificationModelSummary],
     selected: Option<&QualificationModelSummary>,
+    review_blocker: Option<&str>,
     requested_action: &mut Option<QualificationPageAction>,
     height: f32,
 ) {
@@ -434,13 +441,13 @@ fn family_matrix(
                         if matrix_row(ui, summary, selected_key == Some(summary.key.as_str()))
                             .clicked()
                         {
-                            app.state.select_model_library(&summary.library);
-                            app.state.workbench.selected_model = Some(summary.model.clone());
+                            state.select_model_library(&summary.library);
+                            state.workbench.selected_model = Some(summary.model.clone());
                         }
                     }
                 });
             if let Some(selected) = selected {
-                selection_footer(ui, app, selected, requested_action);
+                selection_footer(ui, review_blocker, selected, requested_action);
             }
         });
 }
@@ -682,7 +689,7 @@ fn row_announcement(summary: &QualificationModelSummary) -> String {
 /// qualified" are different facts to an engineer looking for why.
 fn selection_footer(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    review_blocker: Option<&str>,
     selected: &QualificationModelSummary,
     requested_action: &mut Option<QualificationPageAction>,
 ) {
@@ -693,15 +700,10 @@ fn selection_footer(
             property(ui, "Selected", &selected.model, &selected.library);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let review_blocker = qualification_action_block_reason(
-                    app,
-                    Some(selected),
-                    QualificationPageAction::ReviewVectors,
-                );
                 let review = Button::new("Review qualification")
                     .enabled(review_blocker.is_none())
                     .show(ui);
-                if let Some(reason) = review_blocker.as_deref() {
+                if let Some(reason) = review_blocker {
                     review.on_disabled_hover_text(reason);
                 } else if review.clicked() {
                     *requested_action = Some(QualificationPageAction::ReviewVectors);
