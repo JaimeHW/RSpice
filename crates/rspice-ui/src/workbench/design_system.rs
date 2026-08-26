@@ -1780,6 +1780,101 @@ pub fn workspace_title_row(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
     );
 }
 
+/// The landing surfaces' centered content column: at most `max_width` wide,
+/// inset from `rect` by `minimum_gutter` on either side (16 on phone widths),
+/// and centered.
+pub fn centered_content_rect(rect: Rect, minimum_gutter: f32, max_width: f32) -> Rect {
+    let gutter = if rect.width() <= 560.0 {
+        16.0
+    } else {
+        minimum_gutter
+    };
+    let width = (rect.width() - gutter * 2.0).clamp(1.0, max_width);
+    Rect::from_center_size(rect.center(), Vec2::new(width, rect.height()))
+}
+
+/// Height of a landing action row before the touch target raises it.
+const ACTION_ROW_HEIGHT: f32 = 51.0;
+
+/// One landing-style action row: an icon, a title, and a one-line detail.
+///
+/// This is the shared action idiom of the workbench landing surfaces — the
+/// no-project landing and the netlist-first design surface dispatch their
+/// primary routes through the same row, so the two pages read as one product.
+/// `primary` marks the row a reader should take first.
+pub fn action_row(
+    ui: &mut Ui,
+    title: &str,
+    detail: &str,
+    icon: WorkbenchIcon,
+    primary: bool,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let height = ACTION_ROW_HEIGHT.max(if t.metrics.ctl_h >= 44.0 { 56.0 } else { 0.0 });
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    let border = if primary {
+        t.color.accent.gamma_multiply(0.58)
+    } else if response.hovered() {
+        t.color.accent
+    } else {
+        t.color.border
+    };
+    let fill = if primary {
+        t.color.accent_dim
+    } else if response.hovered() {
+        t.color.bg_hover
+    } else {
+        t.color.bg_panel
+    };
+    ui.painter().rect(
+        rect,
+        t.radius,
+        fill,
+        Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    let icon_rect = Rect::from_center_size(
+        Pos2::new(rect.left() + 18.0, rect.center().y),
+        Vec2::splat(16.0),
+    );
+    icon.paint(ui.painter(), icon_rect, t.color.text_dim);
+    let text_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + 38.0, rect.top() + 7.0),
+        Pos2::new(rect.right() - 10.0, rect.bottom() - 6.0),
+    );
+    let mut copy = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(text_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    copy.spacing_mut().item_spacing.y = 1.0;
+    copy.add(
+        egui::Label::new(
+            egui::RichText::new(title)
+                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                .color(t.color.text),
+        )
+        .truncate(),
+    );
+    copy.add(
+        egui::Label::new(
+            egui::RichText::new(detail)
+                .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                .color(t.color.text_faint),
+        )
+        .truncate(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), title.to_owned())
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_description(detail);
+    });
+    theme::paint_focus_ring(ui, &response, rect);
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 pub fn empty_state(ui: &mut Ui, icon: WorkbenchIcon, title: &str, description: &str) {
     let t = Tokens::get(ui.ctx());
     ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {

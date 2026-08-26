@@ -15,7 +15,7 @@ use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{RecentFile, RecentKind};
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
 use crate::workbench::state::{ProjectLauncherFilter, ProjectLauncherPage};
 
@@ -33,7 +33,6 @@ const TABLE_HEADER_HEIGHT: f32 = 27.0;
 const TABLE_ROW_HEIGHT: f32 = 32.0;
 const TABLE_TOOLBAR_HEIGHT: f32 = 34.0;
 const SECTION_HEADER_HEIGHT: f32 = 24.0;
-const ACTION_ROW_HEIGHT: f32 = 51.0;
 
 #[derive(Debug, Clone)]
 struct RecentProjectRow {
@@ -85,7 +84,7 @@ fn landing_header(ui: &mut Ui) {
         Stroke::new(1.0, t.color.border),
     );
 
-    let content = centered_content_rect(rect, DESKTOP_GUTTER);
+    let content = centered_content_rect(rect, DESKTOP_GUTTER, CONTENT_MAX_WIDTH);
     let mut header = ui.new_child(
         UiBuilder::new()
             .max_rect(content)
@@ -124,7 +123,7 @@ fn landing_header(ui: &mut Ui) {
 fn landing_body(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
     let available = ui.available_rect_before_wrap();
     ui.allocate_rect(available, Sense::hover());
-    let mut content = centered_content_rect(available, DESKTOP_GUTTER);
+    let mut content = centered_content_rect(available, DESKTOP_GUTTER, CONTENT_MAX_WIDTH);
     content.min.y = (content.top() + BODY_TOP).min(content.bottom());
     content.max.y = (content.bottom() - BODY_BOTTOM).max(content.top());
 
@@ -172,16 +171,6 @@ fn landing_body(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAct
                 start_rail(ui, action);
             });
     }
-}
-
-fn centered_content_rect(rect: Rect, minimum_gutter: f32) -> Rect {
-    let gutter = if rect.width() <= 560.0 {
-        16.0
-    } else {
-        minimum_gutter
-    };
-    let max_width = (rect.width() - gutter * 2.0).clamp(1.0, CONTENT_MAX_WIDTH);
-    Rect::from_center_size(rect.center(), vec2(max_width, rect.height()))
 }
 
 fn continue_column(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
@@ -921,81 +910,11 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
             LandingAction::OpenSchematic,
         ),
     ] {
-        if landing_action_row(ui, title, detail, icon, primary).clicked() {
+        if action_row(ui, title, detail, icon, primary).clicked() {
             *action = Some(next);
         }
         ui.add_space(5.0);
     }
-}
-
-fn landing_action_row(
-    ui: &mut Ui,
-    title: &str,
-    detail: &str,
-    icon: WorkbenchIcon,
-    primary: bool,
-) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let height = ACTION_ROW_HEIGHT.max(if t.metrics.ctl_h >= 44.0 { 56.0 } else { 0.0 });
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-    let border = if primary {
-        t.color.accent.gamma_multiply(0.58)
-    } else if response.hovered() {
-        t.color.accent
-    } else {
-        t.color.border
-    };
-    let fill = if primary {
-        t.color.accent_dim
-    } else if response.hovered() {
-        t.color.bg_hover
-    } else {
-        t.color.bg_panel
-    };
-    ui.painter().rect(
-        rect,
-        t.radius,
-        fill,
-        Stroke::new(1.0, border),
-        egui::StrokeKind::Inside,
-    );
-    let icon_rect =
-        Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
-    icon.paint(ui.painter(), icon_rect, t.color.text_dim);
-    let text_rect = Rect::from_min_max(
-        pos2(rect.left() + 38.0, rect.top() + 7.0),
-        pos2(rect.right() - 10.0, rect.bottom() - 6.0),
-    );
-    let mut copy = ui.new_child(
-        UiBuilder::new()
-            .max_rect(text_rect)
-            .layout(Layout::top_down(Align::Min)),
-    );
-    copy.spacing_mut().item_spacing.y = 1.0;
-    copy.add(
-        egui::Label::new(
-            egui::RichText::new(title)
-                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                .color(t.color.text),
-        )
-        .truncate(),
-    );
-    copy.add(
-        egui::Label::new(
-            egui::RichText::new(detail)
-                .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                .color(t.color.text_faint),
-        )
-        .truncate(),
-    );
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title.to_owned()));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(detail);
-    });
-    theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {

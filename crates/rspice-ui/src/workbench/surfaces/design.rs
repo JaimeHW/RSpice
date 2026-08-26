@@ -1,22 +1,21 @@
 //! Hierarchical design document surface.
 
 mod layout_editor;
+mod netlist_first;
 
-use egui::{Align2, Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
+use egui::{Context, Id, Key, Modifiers, Order, Rect, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::state::ViewType;
 use crate::state::workspace::DocumentOccurrence;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::super::design_system::{WorkbenchIcon, empty_state};
+use super::super::design_system::empty_state;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.is_netlist_first_without_schematic() {
-        netlist_first_empty_state(ui, app);
+        netlist_first::show(ui, app);
         return;
     }
     if app.state.active_view_read_only() {
@@ -146,167 +145,6 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
             node.set_role(egui::accesskit::Role::Status);
             node.set_label(format!("Live collaboration: {}", accessible.join("; ")));
         });
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NetlistFirstAction {
-    OpenNetlistWorkspace,
-    CreateSchematic,
-}
-
-fn execute_netlist_first_action(app: &mut RSpiceApp, action: NetlistFirstAction) {
-    match action {
-        NetlistFirstAction::OpenNetlistWorkspace => {
-            Command::OpenWorkspace(Workspace::Netlist).execute(app);
-        }
-        NetlistFirstAction::CreateSchematic => Command::NewCell.execute(app),
-    }
-}
-
-fn netlist_first_empty_state(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let available_width = ui.available_width().max(1.0);
-    let project_name = app.state.workspace.project.name().to_owned();
-
-    let (header_rect, _) =
-        ui.allocate_exact_size(Vec2::new(available_width, 118.0), Sense::hover());
-    ui.painter().rect_filled(header_rect, 0.0, t.color.bg_app);
-    ui.painter().line_segment(
-        [header_rect.left_bottom(), header_rect.right_bottom()],
-        Stroke::new(1.0, t.color.border),
-    );
-    let header_content = Rect::from_min_max(
-        header_rect.min + egui::vec2(30.0, 25.0),
-        egui::pos2(
-            (header_rect.left() + 750.0).min(header_rect.right() - 30.0),
-            header_rect.bottom() - 18.0,
-        ),
-    );
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(header_content)
-            .layout(egui::Layout::top_down(egui::Align::LEFT)),
-        |ui| {
-            ui.spacing_mut().item_spacing.y = 3.0;
-            ui.label(
-                egui::RichText::new("NETLIST-FIRST PROJECT \u{00b7} NO SCHEMATIC")
-                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_dim),
-            );
-            ui.label(
-                egui::RichText::new(project_name)
-                    .font(theme::sans(tokens::FS_4, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "This project is driven by its SPICE deck. The Netlist workspace owns editing; simulation, probing, and results work exactly as in schematic projects. Create a schematic to promote this into a schematic-driven design.",
-                )
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
-        },
-    );
-
-    let columns = if available_width <= 460.0 {
-        1
-    } else if available_width <= 760.0 {
-        2
-    } else {
-        4
-    };
-    let rows = 2_usize.div_ceil(columns);
-    let row_height = 72.0 * rows as f32;
-    let (actions_rect, _) =
-        ui.allocate_exact_size(Vec2::new(available_width, row_height), Sense::hover());
-    ui.painter()
-        .rect_filled(actions_rect, 0.0, t.color.bg_inset);
-    ui.painter().line_segment(
-        [actions_rect.left_bottom(), actions_rect.right_bottom()],
-        Stroke::new(1.0, t.color.border),
-    );
-
-    let column_width = actions_rect.width() / columns as f32;
-    let actions = [
-        (
-            NetlistFirstAction::OpenNetlistWorkspace,
-            WorkbenchIcon::Code,
-            // The card dispatches this exact command, so it reads the command's
-            // own label rather than keeping a second copy of the workspace name.
-            Command::OpenWorkspace(Workspace::Netlist).spec().label,
-            "Deck source \u{00b7} outline \u{00b7} diagnostics \u{00b7} overlay",
-            true,
-        ),
-        (
-            NetlistFirstAction::CreateSchematic,
-            WorkbenchIcon::Design,
-            "Create schematic\u{2026}",
-            "Promote to a schematic-driven project",
-            false,
-        ),
-    ];
-    let mut invoked = None;
-    for (index, (action, icon, title, detail, primary)) in actions.into_iter().enumerate() {
-        let row = index / columns;
-        let column = index % columns;
-        let rect = Rect::from_min_size(
-            actions_rect.min + egui::vec2(column as f32 * column_width, row as f32 * 72.0),
-            Vec2::new(column_width, 72.0),
-        );
-        let response = ui.interact(
-            rect,
-            ui.id().with(("netlist-first-action", index)),
-            Sense::click(),
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
-        if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-        }
-        ui.painter().line_segment(
-            [rect.right_top(), rect.right_bottom()],
-            Stroke::new(1.0, t.color.border),
-        );
-        if primary {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(rect.left(), rect.bottom() - 1.0),
-                    egui::pos2(rect.right(), rect.bottom() - 1.0),
-                ],
-                Stroke::new(2.0, t.color.accent),
-            );
-        }
-        icon.paint(
-            ui.painter(),
-            Rect::from_min_size(rect.min + egui::vec2(15.0, 21.0), Vec2::splat(30.0)),
-            if primary {
-                t.color.accent
-            } else {
-                t.color.text_dim
-            },
-        );
-        ui.painter().text(
-            rect.min + egui::vec2(53.0, 17.0),
-            Align2::LEFT_TOP,
-            title,
-            theme::sans(tokens::FS_2, FontWeight::SemiBold),
-            t.color.text,
-        );
-        ui.painter().text(
-            rect.min + egui::vec2(53.0, 39.0),
-            Align2::LEFT_TOP,
-            detail,
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-        theme::paint_focus_ring_outset(ui, &response, rect);
-        if response.clicked() {
-            invoked = Some(action);
-        }
-    }
-
-    if let Some(action) = invoked {
-        execute_netlist_first_action(app, action);
     }
 }
 
@@ -934,39 +772,5 @@ mod tests {
             render(&app).content_height() > 0,
             "a master placed twice must say so before the edit"
         );
-    }
-
-    #[test]
-    fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
-        let mut app = RSpiceApp::test_instance();
-        assert!(
-            crate::workbench::workflows::netlist_workflow::apply_imported_netlist(
-                &mut app.state,
-                "V1 out 0 1\n.op\n.end\n".to_owned(),
-                None,
-                "front_end.sp",
-            )
-        );
-
-        assert!(app.state.is_netlist_first_without_schematic());
-
-        app.state.schematic.add_component(
-            crate::state::ComponentType::Resistor,
-            crate::state::Point::new(0, 0),
-        );
-        assert!(!app.state.is_netlist_first_without_schematic());
-    }
-
-    #[test]
-    fn netlist_first_empty_state_actions_use_the_canonical_commands() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.project_open = true;
-
-        execute_netlist_first_action(&mut app, NetlistFirstAction::OpenNetlistWorkspace);
-        assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
-
-        execute_netlist_first_action(&mut app, NetlistFirstAction::CreateSchematic);
-        assert!(app.state.dialogs.new_cell_dialog);
-        assert!(app.state.dialogs.new_cell_create_schematic);
     }
 }
