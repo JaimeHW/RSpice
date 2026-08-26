@@ -427,6 +427,61 @@ fn navigator_tree_expansion_survives_a_re_render_and_is_per_workspace() {
     );
 }
 
+/// The object menu's find row answers about the object it was raised over:
+/// the rail comes back filtering by that object's own name, not by nothing.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn finding_references_seeds_the_navigator_filter_with_the_object_name() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.design_panel = DesignPanel::ComponentShelf;
+
+    find_navigator_object_references(
+        &mut app,
+        &NavigatorObject::Net {
+            name: "VOUT".to_owned(),
+            wire_ids: Vec::new(),
+            component_ids: Vec::new(),
+            position: None,
+        },
+    );
+
+    assert_eq!(
+        app.state
+            .workbench
+            .navigator_trees
+            .filter(Workspace::Design),
+        "VOUT"
+    );
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+    assert_eq!(app.state.workbench.design_panel, DesignPanel::Navigator);
+    assert!(app.state.workbench.navigator_visible);
+    assert!(app.state.workbench.focus_navigator_search);
+}
+
+/// The keyboard find is a different promise: it raises an empty box to type
+/// into, so whatever the rail was already filtering by survives it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_plain_find_command_leaves_the_navigator_filter_alone() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    *app.state
+        .workbench
+        .navigator_trees
+        .filter_mut(Workspace::Design) = "VOUT".to_owned();
+
+    Command::FindInDesign.execute(&mut app);
+
+    assert_eq!(
+        app.state
+            .workbench
+            .navigator_trees
+            .filter(Workspace::Design),
+        "VOUT"
+    );
+    assert!(app.state.workbench.focus_navigator_search);
+}
+
 #[test]
 fn design_tabs_keep_the_mockup_horizontal_inset() {
     let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));

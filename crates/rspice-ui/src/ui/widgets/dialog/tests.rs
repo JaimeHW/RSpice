@@ -982,12 +982,177 @@ fn a_flush_body_is_given_exactly_the_room_its_surface_leaves_it() {
         );
     }
 
-    // A body short enough to need no scrollbar spans the content box exactly:
-    // one measure decides the room the whole structural stack shares.
-    let (viewport, content, _) = settled_flush_body_geometry(DialogSize::WideWorkflow, 3);
+    // Across the content box less the scrollbar's gutter, which the body
+    // spends whether or not a bar is showing. A body short enough to need no
+    // bar is laid out in exactly the width one long enough to need one gets,
+    // so no body ever re-wraps because a bar arrived.
+    let (short, content, _) = settled_flush_body_geometry(DialogSize::WideWorkflow, 3);
+    let (overflowing, _, _) = settled_flush_body_geometry(DialogSize::WideWorkflow, 40);
     assert_eq!(
-        viewport.x_range(),
-        content.x_range(),
-        "the body spans the surface's content box"
+        short.x_range(),
+        overflowing.x_range(),
+        "the body's width must not answer to whether its content overflows"
+    );
+    assert_eq!(
+        short.left(),
+        content.left(),
+        "the body starts on the surface's content box"
+    );
+    assert_eq!(
+        short.right(),
+        content.right() - body_scrollbar_gutter(),
+        "the body ends a scrollbar gutter short of the surface's content box"
+    );
+}
+
+/// The width the body withholds for the scrollbar's track, under the theme
+/// every dialog is rendered with.
+fn body_scrollbar_gutter() -> f32 {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let gutter = ctx.global_style().spacing.scroll.allocated_width();
+    assert!(
+        gutter > 0.0,
+        "the solid scrollbar style this theme selects allocates a track"
+    );
+    gutter
+}
+
+/// A content-height dialog reaches its content in one re-measure, and then
+/// nothing on it moves again.
+///
+/// The body's height is a function of its width, and its width was a function
+/// of whether the scroll area was showing a bar — which it does when the body
+/// is too tall for the surface. The two were solving each other a point at a
+/// time. A body that outgrew the surface its dialog had already settled on took
+/// a bar, the bar narrowed the body, the narrower body wrapped taller still,
+/// and the surface measured from it crept upward for a dozen frames while the
+/// bar's own reveal animated the width out from under it.
+///
+/// Withholding the bar's gutter from the body whether or not a bar shows takes
+/// the width out of that loop, so the height the surface solves for is the
+/// height its next pass lays out.
+#[test]
+fn a_content_height_dialog_settles_in_one_pass_and_stops_moving() {
+    /// Render one pass and report where the body was laid out and what height
+    /// the surface resolved for the pass after it.
+    fn pass(ctx: &Context, rows: usize) -> (Rect, f32) {
+        let mut body = Rect::ZERO;
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .size(DialogSize::WideWorkflow)
+                .show(ctx, |ui| {
+                    body = ui.max_rect();
+                    for row in 0..rows {
+                        ui.label(format!("row {row}"));
+                    }
+                });
+        });
+        let height = ctx
+            .data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))))
+            .expect("a content-height dialog measures the surface it resolved");
+        (body, height)
+    }
+
+    const SETTLED_ROWS: usize = 3;
+    // Enough rows to overflow a surface settled on three, and few enough that
+    // the surface they ask for still clears its ceiling — a surface pinned
+    // against the clamp cannot show whether the arithmetic stopped it.
+    const GROWN_ROWS: usize = 18;
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    // The crawl needs a surface that has already come down onto its content,
+    // and content that then outgrows it.
+    for _ in 0..3 {
+        let _ = pass(&ctx, SETTLED_ROWS);
+    }
+    let (settled_body, settled_height) = pass(&ctx, SETTLED_ROWS);
+
+    let grown: Vec<(Rect, f32)> = (0..10).map(|_| pass(&ctx, GROWN_ROWS)).collect();
+    let ceiling = DialogSize::WideWorkflow.spec().max_height;
+    assert!(
+        settled_height < grown[0].1 && grown[0].1 < ceiling,
+        "the grown body must ask for more room than the settled surface had \
+         ({settled_height}) and less than the {ceiling}-point ceiling, not {}",
+        grown[0].1
+    );
+
+    // The first pass is laid out against the height the short body settled on,
+    // so its body rect is the stale one. Every pass from the second on is laid
+    // out against the height this one resolved, and is identical to it.
+    let (expected_body, expected_height) = grown[1];
+    for (index, (body, height)) in grown.iter().enumerate().skip(1) {
+        assert_eq!(
+            (*body, *height),
+            (expected_body, expected_height),
+            "pass {} moved the dialog after it had settled",
+            index + 1
+        );
+    }
+
+    // And the body's width never answered to any of it — not to the short
+    // content, not to the grown content, and not to the bar's reveal.
+    for (index, body) in std::iter::once(settled_body)
+        .chain(grown.iter().map(|(body, _)| *body))
+        .enumerate()
+    {
+        assert_eq!(
+            body.x_range(),
+            settled_body.x_range(),
+            "pass {index} laid the body out at a width that answered to its \
+             content's height"
+        );
+    }
+}
+
+/// The pass that measures a dialog for the first time measures the dialog the
+/// reader is about to be shown.
+///
+/// An `egui::Area` lays its opening frame out as a *sizing pass*: painted
+/// invisibly, and with every centre cross-alignment rewritten to `Align::Min`
+/// so each widget reports the least room it can live in. That is the pass a
+/// dialog is first measured on, and anything on the surface that reaches its
+/// authored height by filling a track — the header row does — reports something
+/// smaller. The surface measured from it is short by the same amount, and it is
+/// that measurement the first *visible* frame is laid out against, so the whole
+/// dialog stepped once more after the reader could already see it.
+///
+/// The two passes are compared as heights rather than by asserting the header's
+/// own rectangle: what has to agree is the number the next pass is laid out
+/// against, and the header is only the part of the surface that disagreed.
+#[test]
+fn the_opening_sizing_pass_measures_the_surface_the_first_visible_pass_draws() {
+    fn pass(ctx: &Context) -> f32 {
+        let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .size(DialogSize::WideWorkflow)
+                .show(ctx, |ui| {
+                    for row in 0..3 {
+                        ui.label(format!("row {row}"));
+                    }
+                });
+        });
+        ctx.data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))))
+            .expect("a content-height dialog measures the surface it resolved")
+    }
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let sizing = pass(&ctx);
+    let first_visible = pass(&ctx);
+    let settled = pass(&ctx);
+    assert_eq!(
+        first_visible, settled,
+        "the first visible pass did not settle the surface"
+    );
+    assert_eq!(
+        sizing, settled,
+        "the opening sizing pass measured a {sizing}-point surface for a dialog \
+         that draws {settled}, so the first frame the reader sees is laid out \
+         against a height it then has to correct"
     );
 }

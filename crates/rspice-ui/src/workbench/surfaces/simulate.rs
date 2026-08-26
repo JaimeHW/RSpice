@@ -290,16 +290,28 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let t = Tokens::get(ui.ctx());
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
+        // The track this surface is laid out in, with the scrollbar's gutter
+        // withheld from it whether or not a bar is showing.
+        //
+        // Reading `available_width()` inside the scroll area answers to whether
+        // a bar is up *this pass*, and that is not a fixed question: a route's
+        // height is a function of its width, a bar appears when the route is
+        // taller than the viewport, and the bar's reveal is animated over some
+        // ten passes. So a route that grew just past the viewport — opening the
+        // advanced-options panel on Solver does exactly that — narrowed a
+        // fraction of a point per pass for a third of a second, and every
+        // control on the page walked left with it while the reader reached for
+        // one. Spending the gutter unconditionally makes the width a function
+        // of the frame's width alone, and the loop cannot form.
+        let track = ui.available_width();
+        let gutter = ui.spacing().scroll.allocated_width();
+        let surface_width = (track - gutter).max(1.0);
         let output = ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
             .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let scroll_content_origin_y = ui.min_rect().top();
-                // Resolve the content width after the scroll area has reserved
-                // its solid scrollbar track. Reusing the outer width clips the
-                // right edge beneath that track.
-                let surface_width = ui.available_width();
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
                 let page = app.state.workbench.simulation_page;

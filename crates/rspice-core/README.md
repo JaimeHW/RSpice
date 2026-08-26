@@ -151,10 +151,9 @@ coupled multi-conductor lines (`coupled_transmission_line.rs`,
 `LEVEL=4` (`memristor_pem.rs`), both solving an internal state variable
 alongside the terminal equations.
 
-**Other** — switches (`switch.rs`), ideal op-amp (`opamp.rs`), GaN HEMT
-(`gan_hemt.rs`, in-tree physics-style model; ASM-HEMT/MVSG CMC
-qualification is feature-gated work through generated Rust from Verilog-A), thermal network elements (`thermal.rs`), tristate
-(`tristate.rs`).
+**Other** — switches (`switch.rs`) and thermal network elements
+(`thermal.rs`). GaN HEMT qualification is feature-gated work through
+generated Rust from Verilog-A (ASM-HEMT/MVSG CMC).
 
 **Extension points** — external Verilog-A devices via the `rspice-veriloga` compiler
 (`veriloga.rs`, behind the `veriloga` feature, with blake3-keyed on-disk

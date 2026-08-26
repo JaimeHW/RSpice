@@ -17,17 +17,14 @@ pub mod behavioral;
 pub mod controlled;
 mod coupled_transmission_line;
 mod cpl_native;
-pub mod gan_hemt;
 pub mod memristor_pem;
 pub mod memristor_team;
-pub mod opamp;
 pub mod pwl_file;
 mod sources;
 mod switch;
 pub mod thermal;
 mod traits;
 mod transmission_line;
-pub mod tristate;
 
 // Verilog-A support (feature-gated)
 #[cfg(feature = "veriloga")]

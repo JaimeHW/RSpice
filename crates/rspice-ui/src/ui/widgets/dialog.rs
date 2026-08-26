@@ -13,6 +13,11 @@
 //!   on top; footer is `[ghost] [secondary] [primary]` with the primary
 //!   always rightmost, always exactly one, accent-filled (or `err` when
 //!   destructive), plus an optional mono hint on the left.
+//! - **Body** — the scrolling middle region, laid out inside a stable
+//!   scrollbar gutter: the bar's track is withheld from the body whether or
+//!   not a bar is showing, so the body's width answers to the surface's width
+//!   and never to its own height. A content-height surface therefore reaches
+//!   its content in one re-measure instead of creeping toward it.
 //!
 //! Keys: `Esc` cancels, `Enter` activates the primary when it is enabled.
 //! Dialogs edit a draft and commit on the primary — the primary and
@@ -856,6 +861,10 @@ impl<'a> Dialog<'a> {
             // footer, painted after the body, covers the body's last points.
             let surface_margin = surface_frame.total_margin().sum();
             let content = (vec2(width, max_height) - surface_margin).max(vec2(1.0, 1.0));
+            // How much of the body the scroll area could not show this pass. A
+            // content-height surface owes its next pass exactly this much more
+            // room; a surface that fills its height ignores it and scrolls.
+            let mut unshown_body_height = 0.0_f32;
             let surface_output = surface_frame.show(&mut surface, |ui| {
                 ui.set_width(content.x);
                 if fill_surface_height {
@@ -892,6 +901,29 @@ impl<'a> Dialog<'a> {
                     (content.y - header_height - footer_height - transaction_height).max(1.0);
                 let requested_scroll_offset = self.body_scroll_offset.as_deref().copied();
                 let flush_body = self.flush_body;
+                // The body's own track, with the scrollbar's gutter withheld
+                // from it whether or not a bar is showing this pass.
+                //
+                // `allocated_width` is exactly what a shown bar takes out of a
+                // scroll area's inner width, so withholding it makes the body's
+                // width a function of the surface's width alone. That is the
+                // whole of the fix: the body's height is a function of its
+                // width, so while its width could still answer to whether a bar
+                // was showing, and a bar shows when the body is too tall, the
+                // two were solving each other. A body one point too tall took a
+                // bar, the bar narrowed it, the narrower body wrapped taller
+                // still, and the surface measured from it crept a point at a
+                // time for a dozen frames before anything settled. With the
+                // gutter always spent, no body ever re-wraps because a bar
+                // arrived, and the surface reaches its content in one
+                // re-measure. A floating scrollbar style allocates nothing and
+                // is left with nothing withheld, which is equally stable.
+                //
+                // The manual-scroll path is handed the full content box: it
+                // hosts no bar of its own, so its width never answered to its
+                // height in the first place, and the region inside it that does
+                // scroll is its owner's to lay out.
+                let body_width = (content.x - ui.spacing().scroll.allocated_width()).max(1.0);
                 if self.manual_body_scroll {
                     let body_output = ui.allocate_ui_with_layout(
                         vec2(ui.available_width(), body_max_height),
@@ -938,6 +970,7 @@ impl<'a> Dialog<'a> {
                         body_scroll
                     };
                     let body_output = body_scroll.show(ui, |ui| {
+                        ui.set_width(body_width);
                         Frame::NONE
                             .fill(if layout.app_background {
                                 c.bg_app
@@ -957,6 +990,8 @@ impl<'a> Dialog<'a> {
                             .inner
                     });
                     rendered_focus.body = body_output.inner;
+                    unshown_body_height =
+                        (body_output.content_size.y - body_output.inner_rect.height()).max(0.0);
                     if let Some(offset) = self.body_scroll_offset.as_deref_mut() {
                         *offset = body_output.state.offset.y;
                     }
@@ -984,15 +1019,29 @@ impl<'a> Dialog<'a> {
                     chosen => choice = chosen,
                 }
             });
-            // A content-height frame reports the structural stack's used
-            // height. Its stroke is an inset handed back as `total_margin`,
-            // not height consumed by a child, so retain that outer allowance
-            // in the next pass's resolved surface. Omitting it creates a
-            // fixed point two points too short: shortening the body merely
-            // shortens the next surface by the same amount and its last text
-            // row remains clipped forever.
+            // The surface is as tall as the stack it holds, plus whatever of
+            // that stack the body could not show.
+            //
+            // The frame reports its outer rect with the stroke already counted
+            // in, so the border allowance must not be added a second time. It
+            // was, and a body that overflows spends every point the surface
+            // offers, so every pass measured a border more than the last and
+            // handed it to the next: the dialog grew two points a frame until
+            // it reached its ceiling and nothing on it ever stopped moving.
+            //
+            // Counting the border once alone would freeze an overflowing
+            // surface at whatever height it happened to be, which is a
+            // different defect: content that arrived after the surface settled
+            // would be reachable only by scrolling, and a surface one point
+            // short of its content would stay one point short forever. Adding
+            // the unshown remainder back instead resolves the surface to the
+            // height its content actually asked for, and reaches it in a single
+            // re-measure — the body's height no longer moves when the scrollbar
+            // does, so the height solved for is the height the next pass lays
+            // out. Content past the size's ceiling is clamped below and scrolls,
+            // as it must.
             rendered_surface_height =
-                Some(surface_output.response.rect.height() + surface_margin.y);
+                Some(surface_output.response.rect.height() + unshown_body_height);
         });
 
         if self.fixed_height.is_none()
@@ -1096,17 +1145,34 @@ impl<'a> Dialog<'a> {
             ))
             .show(ui, |ui| {
                 let header_width = ui.available_width();
+                let row_min_height = if title_first {
+                    0.0
+                } else {
+                    WORKFLOW_HEADER_MIN_HEIGHT
+                };
                 ui.allocate_ui_with_layout(
-                    vec2(
-                        header_width,
-                        if title_first {
-                            0.0
-                        } else {
-                            WORKFLOW_HEADER_MIN_HEIGHT
-                        },
-                    ),
+                    vec2(header_width, row_min_height),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
+                        // State the row's floor as a floor.
+                        //
+                        // The height requested above is only a request: egui
+                        // advances the parent by the row's own `min_rect`, and
+                        // the row reaches the requested height solely because a
+                        // centre cross-alignment fills the track it was offered.
+                        // An `Area` lays its first frame out as a sizing pass —
+                        // invisible, and with every centre cross-alignment
+                        // rewritten to `Align::Min` so widgets report the least
+                        // they can live in — and under those rules this row
+                        // collapses onto its two lines of text, 22 points short.
+                        // The surface measured from it is short by the same
+                        // amount, and it is that measurement the first *visible*
+                        // frame is laid out against, so every dialog opened with
+                        // a header jumped once more after the reader could
+                        // already see it. A floor stated as a floor holds in both
+                        // passes, and the sizing pass measures what the visible
+                        // pass will draw.
+                        ui.set_min_height(row_min_height);
                         ui.spacing_mut().item_spacing.x = 10.0;
                         let close_size = if large_targets {
                             vec2(TOUCH_TARGET_SIDE, TOUCH_TARGET_SIDE)

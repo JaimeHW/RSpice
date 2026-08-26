@@ -903,18 +903,31 @@ mod tests {
             }
         }
         let transition = transition.expect("a wide enough dialog resolves two columns");
-        // 820 is `WideWorkflow`'s `narrow_max_width`: at or below it the dialog
-        // stops being a fixed-width panel and becomes the whole viewport. It is
-        // not a floor on the dialog's width — a narrower window makes a narrower
-        // dialog — so this asserts the column set stays two-column across every
-        // landscape width from 820 up. Portrait widths below it stack, which is
-        // correct there and is gated separately against a portrait viewport.
+        // The split is handed the dialog's *body* width, not the viewport's.
+        // 820 is `WideWorkflow`'s `narrow_max_width` — at or below it the dialog
+        // stops being a fixed-width panel and becomes the whole viewport — and
+        // of those 820 points the surface's two hairlines take one each and the
+        // body's reserved scrollbar gutter takes thirteen, so what reaches the
+        // split is 805. Asserting against 820 read as twelve points of headroom
+        // that were never there. It is not a floor on the dialog's width — a
+        // narrower window makes a narrower dialog — so this asserts the column
+        // set stays two-column across every landscape width from that shape up.
+        // Portrait widths below it stack, which is correct there and is gated
+        // separately against a portrait viewport.
+        //
+        // Stated in points rather than measured because this file is the one
+        // that decides it: the number a widened column has to answer to belongs
+        // beside the widths themselves. The gate that renders the real dialog
+        // and reads its real body is
+        // `the_manager_fits_the_real_viewport_at_every_supported_width`.
+        const FULL_VIEWPORT_LANDSCAPE_BODY: f32 = 805.0;
         assert!(
-            transition <= 820.0,
-            "the split cannot stay two-column until {transition}, so a \
-             full-viewport landscape window at 820 would stack — and stacking \
-             costs more height than a 640-point viewport has. Trim the column \
-             set rather than let the surface fall back to it."
+            transition <= FULL_VIEWPORT_LANDSCAPE_BODY,
+            "the split cannot stay two-column until {transition}, so the \
+             {FULL_VIEWPORT_LANDSCAPE_BODY}-point body a full-viewport \
+             landscape window at 820 hands it would stack — and stacking costs \
+             more height than a 640-point viewport has. Trim the column set \
+             rather than let the surface fall back to it."
         );
     }
 
