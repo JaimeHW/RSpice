@@ -7,14 +7,25 @@ pub(super) fn include_page(
     app: &mut ManagerRenderContext<'_>,
     diagnostics: &ClosureFacts,
 ) {
+    // One walk of the corpus, before the page bar, because the bar's own
+    // subtitle states what it found. Everything below reads this vector; the
+    // unresolved-instance card in particular answers its question by lookup
+    // into it rather than by a second scan.
+    let definitions = definition_index(app.state);
+    let contested = definitions.iter().filter(|row| row.contested()).count();
     section_title(
         ui,
         "Model include graph",
         &format!(
-            "{} files · {} edges · {} diagnostics",
+            "{} files · {} edges · {} definitions · {contested} contested · {}",
             diagnostics.files,
             diagnostics.edges,
-            diagnostics.diagnostics()
+            definitions.len(),
+            if diagnostics.cyclic_nodes == 0 {
+                "acyclic".to_owned()
+            } else {
+                format!("{} cyclic", diagnostics.cyclic_nodes)
+            },
         ),
         // Outermost-right first: the band lays its actions out right to left.
         |ui| {
@@ -70,9 +81,17 @@ pub(super) fn include_page(
         return;
     }
     let nodes = closure_nodes(app);
-    let definitions = definition_index(app.state);
+    let unbound = unbound_instances(app.state, &definitions);
     include_closure_graph(ui, app, &nodes, diagnostics);
     include_definition_table(ui, app, &definitions);
+    // The rules beside the instances they govern: the table above answers
+    // "which file wins for this name", and neither of these does — one states
+    // what happens when nothing wins, the other names every instance that has
+    // nothing.
+    ui.columns(2, |columns| {
+        resolution_rules_card(&mut columns[0]);
+        instance_binding_card(&mut columns[1], app, &unbound);
+    });
 }
 
 /// Nodes the closure graph draws before it stops.
@@ -298,11 +317,7 @@ fn include_closure_graph(
                     if let (Some(owner), Some(target)) =
                         (node_rects.get(edge_owner), node_rects.get(edge_target))
                     {
-                        ui.painter().arrow(
-                            owner.center_bottom(),
-                            target.center_top() - owner.center_bottom(),
-                            Stroke::new(1.0, t.color.text_faint),
-                        );
+                        dependency_edge(ui, *owner, *target, Stroke::new(1.0, t.color.text_faint));
                     }
                 }
             }
@@ -346,6 +361,46 @@ fn include_closure_graph(
     );
 }
 
+/// The arrowhead one dependency connector carries, in points.
+const EDGE_HEAD: f32 = 6.0;
+
+/// Draw one dependency edge between two drawn closure nodes.
+///
+/// `Painter::arrow` sizes its head as a fraction of the shaft, so an edge that
+/// crossed the pane grew a head the size of the pane — two enormous strokes
+/// fanning past the graph's own border, which is what this used to paint. The
+/// head is a fixed mark here, and the shaft leaves whichever side of the owner
+/// faces the target so a same-row edge no longer runs through the node between
+/// them.
+fn dependency_edge(ui: &Ui, owner: egui::Rect, target: egui::Rect, stroke: Stroke) {
+    let (from, to) = if target.top() >= owner.bottom() - 1.0 {
+        (owner.center_bottom(), target.center_top())
+    } else if target.top() <= owner.top() - 1.0 {
+        (owner.center_top(), target.center_bottom())
+    } else if target.center().x >= owner.center().x {
+        (owner.right_center(), target.left_center())
+    } else {
+        (owner.left_center(), target.right_center())
+    };
+    ui.painter().line_segment([from, to], stroke);
+    let shaft = to - from;
+    if shaft.length() <= EDGE_HEAD {
+        return;
+    }
+    let direction = shaft.normalized();
+    let normal = egui::vec2(-direction.y, direction.x);
+    let base = to - direction * EDGE_HEAD;
+    ui.painter().add(egui::epaint::Shape::convex_polygon(
+        vec![
+            to,
+            base + normal * (EDGE_HEAD * 0.45),
+            base - normal * (EDGE_HEAD * 0.45),
+        ],
+        stroke.color,
+        Stroke::NONE,
+    ));
+}
+
 /// One name an instance could reference, and everything that defines it.
 ///
 /// Readable outside the manager so the Simulation Studio's Models page can
@@ -356,7 +411,6 @@ pub(in crate::workbench::surfaces) struct DefinitionRow {
     pub(in crate::workbench::surfaces) definition: String,
     pub(in crate::workbench::surfaces) scope: crate::state::model_library::ModelConsumerScope,
     pub(in crate::workbench::surfaces) providers: Vec<String>,
-    pub(in crate::workbench::surfaces) provider_list: String,
     pub(in crate::workbench::surfaces) resolution: String,
     /// The library the manager's resolution record picked, where it picked one.
     ///
@@ -364,6 +418,15 @@ pub(in crate::workbench::surfaces) struct DefinitionRow {
     /// display prose: a sentence that becomes a load-bearing format is a
     /// sentence nobody can rewrite.
     pub(in crate::workbench::surfaces) resolved_provider: Option<String>,
+    /// The `.lib` sections the providers declare this name inside.
+    ///
+    /// A name declared outside any section has none, which is not the same as
+    /// a name whose section is unknown: the parser records the section every
+    /// definition came from, so an empty list here is positive evidence that
+    /// the definition sits in the file's unsectioned body. Where two providers
+    /// declare the same name in different sections both are carried, because
+    /// which one executes is a corner decision made on another page.
+    pub(in crate::workbench::surfaces) sections: Vec<String>,
 }
 
 impl DefinitionRow {
@@ -378,6 +441,51 @@ impl DefinitionRow {
     pub(in crate::workbench::surfaces) fn contested(&self) -> bool {
         self.providers.len() > 1 && self.resolved_provider.is_none()
     }
+
+    /// The provider the flat executable namespace will use, where one exists.
+    ///
+    /// A contested name has none — that is what contested means — and the cell
+    /// that shows this says so rather than printing the first candidate. The
+    /// column that used to head "WINNING PROVIDER" printed exactly that first
+    /// candidate for every row, which asserted a resolution policy the product
+    /// does not have.
+    fn effective_provider(&self) -> Option<&str> {
+        self.resolved_provider
+            .as_deref()
+            .or_else(|| match self.providers.as_slice() {
+                [only] => Some(only.as_str()),
+                _ => None,
+            })
+    }
+
+    /// Every other authenticated provider of the same name.
+    ///
+    /// For a settled duplicate these are the losers the override record left
+    /// standing — recorded, never dropped. For a contested name it is every
+    /// provider, since none of them won.
+    fn other_candidates(&self) -> String {
+        let effective = self.effective_provider();
+        let others = self
+            .providers
+            .iter()
+            .filter(|provider| Some(provider.as_str()) != effective)
+            .cloned()
+            .collect::<Vec<_>>();
+        if others.is_empty() {
+            "—".to_owned()
+        } else {
+            others.join(", ")
+        }
+    }
+
+    /// Where the providers declare it.
+    fn section_label(&self) -> String {
+        if self.sections.is_empty() {
+            "—".to_owned()
+        } else {
+            self.sections.join(", ")
+        }
+    }
 }
 
 /// Every definition name across the loaded libraries, with its providers.
@@ -387,16 +495,25 @@ impl DefinitionRow {
 pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<DefinitionRow> {
     use crate::state::model_library::ModelConsumerScope;
     let mut providers = BTreeMap::<(ModelConsumerScope, String), BTreeSet<String>>::new();
+    // The section a name is declared inside comes out of the same walk rather
+    // than a second lookup per row: the parser already recorded it on every
+    // model and subcircuit, and asking the catalog again per definition would
+    // turn one pass over the corpus into one per name in it.
+    let mut sections = BTreeMap::<(ModelConsumerScope, String), BTreeSet<String>>::new();
     for library in state.model_library_manager.libraries_sorted() {
         let active_sections = library.active_section_names();
         for model in library.models.values() {
+            let key = (
+                ModelConsumerScope::PrimitiveModel,
+                model.name.to_ascii_lowercase(),
+            );
             providers
-                .entry((
-                    ModelConsumerScope::PrimitiveModel,
-                    model.name.to_ascii_lowercase(),
-                ))
+                .entry(key.clone())
                 .or_default()
                 .insert(library.name.clone());
+            if let Some(section) = model.section.as_deref() {
+                sections.entry(key).or_default().insert(section.to_owned());
+            }
         }
         for subcircuit in library.subcircuits.values() {
             if subcircuit.section.as_deref().is_none_or(|section| {
@@ -404,19 +521,24 @@ pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<
                     .iter()
                     .any(|active| active.eq_ignore_ascii_case(section))
             }) {
+                let key = (
+                    ModelConsumerScope::Subcircuit,
+                    subcircuit.name.to_ascii_lowercase(),
+                );
                 providers
-                    .entry((
-                        ModelConsumerScope::Subcircuit,
-                        subcircuit.name.to_ascii_lowercase(),
-                    ))
+                    .entry(key.clone())
                     .or_default()
                     .insert(library.name.clone());
+                if let Some(section) = subcircuit.section.as_deref() {
+                    sections.entry(key).or_default().insert(section.to_owned());
+                }
             }
         }
     }
     providers
         .into_iter()
-        .map(|((scope, definition), candidates)| {
+        .map(|(key, candidates)| {
+            let (scope, definition) = key.clone();
             let resolved_provider = state
                 .model_library_manager
                 .model_resolution_record(scope, &definition)
@@ -434,10 +556,16 @@ pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<
             DefinitionRow {
                 definition,
                 scope,
-                provider_list: candidates.iter().cloned().collect::<Vec<_>>().join(", "),
+                // Every provider, in order. The joined display spelling this
+                // used to carry beside it went unread the moment the table
+                // split the effective provider from the candidates that lost.
                 providers: candidates.into_iter().collect(),
                 resolution,
                 resolved_provider,
+                sections: sections
+                    .remove(&key)
+                    .map(|sections| sections.into_iter().collect())
+                    .unwrap_or_default(),
             }
         })
         .collect()
@@ -481,10 +609,12 @@ fn include_definition_table(
         table_header(
             ui,
             &[
-                ("DEFINITION", 0.25),
-                ("KIND", 0.13),
-                ("PROVIDERS", 0.37),
-                ("RESOLUTION", 0.25),
+                ("DEFINITION", 0.22),
+                ("KIND", 0.11),
+                ("PROVIDER", 0.20),
+                ("SECTION", 0.11),
+                ("OTHER CANDIDATES", 0.20),
+                ("RESOLUTION", 0.16),
             ],
         );
         if matching.is_empty() {
@@ -500,19 +630,35 @@ fn include_definition_table(
             .max_height(ui.available_height().max(140.0))
             .show_rows(ui, ROW_H, matching.len(), |ui, range| {
                 for row in &matching[range] {
-                    // This column used to print the first provider under the
-                    // heading "WINNING PROVIDER", which asserted a resolution
-                    // policy that does not exist.
+                    // The provider column carries the one that *executes*, and
+                    // an em dash where nothing does. It used to print the first
+                    // provider under the heading "WINNING PROVIDER", which
+                    // asserted a resolution policy that does not exist.
+                    let provider = row.effective_provider().unwrap_or("—");
+                    let section = row.section_label();
+                    let others = row.other_candidates();
                     let response = selectable_data_row(
                         ui,
                         false,
                         &[
-                            (&row.definition, 0.25, true),
-                            (row.scope.label(), 0.13, false),
-                            (&row.provider_list, 0.37, false),
-                            (&row.resolution, 0.25, true),
+                            (&row.definition, 0.22, true),
+                            (row.scope.label(), 0.11, false),
+                            (provider, 0.20, false),
+                            (&section, 0.11, true),
+                            (&others, 0.20, false),
+                            (&row.resolution, 0.16, true),
                         ],
                     );
+                    let announcement = format!(
+                        "{} · {} · provider {provider} · section {section} · other candidates \
+                         {others} · {}",
+                        row.definition,
+                        row.scope.label(),
+                        row.resolution,
+                    );
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_label(announcement.clone());
+                    });
                     if response.clicked() {
                         if row.scope == ModelConsumerScope::Subcircuit
                             && let Ok(Some(provider)) = app
@@ -548,6 +694,273 @@ fn include_definition_table(
     }
     if let Some((library, subcircuit)) = create_subcircuit_symbol {
         app.queue_subcircuit_symbol(&library, &subcircuit);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// What happens when a name does not resolve
+// ---------------------------------------------------------------------------
+
+/// One shipped resolution policy, its settled value, and who enforces it.
+///
+/// Every row here was read out of the code that refuses, and the owner column
+/// names *that* code rather than the page a reader would like to edit it on.
+/// Three of these are the engine's; none of them is a preference. The mockup
+/// attributed four to the run plan and offered an "Edit in run plan…" control
+/// beside them — there is nothing there to edit, so the control is not offered
+/// and the owners say where the refusal actually comes from.
+const RESOLUTION_RULES: [(&str, &str, &str); 5] = [
+    (
+        "Unresolved model name",
+        "refused at the model-bindings stage",
+        "run preparation",
+    ),
+    (
+        "Duplicate definition",
+        "an explicit record, or refused",
+        "project catalog",
+    ),
+    (
+        "Missing named section",
+        "refused · no fallback body",
+        "engine parser",
+    ),
+    (
+        "Include cycle",
+        "refused · the cycle is named",
+        "engine parser",
+    ),
+    (
+        "Host model search path",
+        "none · the sealed closure only",
+        "engine parser",
+    ),
+];
+
+/// The rules in force, stated where the contested names are.
+///
+/// The mockup put a MODEL SEARCH PATH table under this card, listing the
+/// directories a name would be looked for in. RSpice has no such list and the
+/// absence is the design: `IncludeProcessor` resolves every dependency through
+/// the sealed bundle and refuses anything not in it, so a search path table
+/// here could only ever be a table of one row that is not a path. The last
+/// rule states the absence instead.
+fn resolution_rules_card(ui: &mut Ui) {
+    card(ui, |ui| {
+        card_title(ui, "RESOLUTION RULES IN FORCE", Some("fail closed"));
+        table_header(
+            ui,
+            &[("RULE", 0.30), ("RESOLVED VALUE", 0.44), ("OWNER", 0.26)],
+        );
+        for (rule, value, owner) in RESOLUTION_RULES {
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_H), Sense::hover());
+            paint_columns(
+                ui,
+                rect,
+                &[
+                    (rule, 0.30, false),
+                    (value, 0.44, true),
+                    (owner, 0.26, false),
+                ],
+            );
+            // Painter text publishes nothing, and a rule a reader cannot hear
+            // is a rule they will find out about from a refusal instead.
+            let announcement = format!("{rule}: {value}. Enforced by {owner}.");
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+            });
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::Label);
+                node.set_label(announcement.clone());
+            });
+        }
+        ui.label(
+            RichText::new(
+                "None of these is a preference. A name two providers declare is recorded as \
+                 contested and refuses to bind until an override record picks one; the loser is \
+                 kept as a candidate rather than dropped.",
+            )
+            .small()
+            .color(Tokens::get(ui.ctx()).color.text_faint),
+        );
+    });
+}
+
+/// One placed instance whose model name nothing in the closure defines.
+struct UnboundInstance {
+    component_id: u64,
+    instance: String,
+    sheet: String,
+    reference: String,
+}
+
+/// Rows the callout lists before it reports the remainder.
+const UNBOUND_ROWS: usize = 4;
+
+/// Instances the closure cannot answer for.
+///
+/// Derived from the definition index this page has already built — so no second
+/// walk of the corpus — plus one pass over the placed components of the active
+/// sheet. [`ConsumerIndex`][index] next door answers a richer question (which
+/// provider, and whether the instance's declared library agrees with it) and
+/// pays `definition_providers` — a full walk of every library — once per
+/// instance to do it. This page asks only the include graph's own question:
+/// does *anything* in the closure define this name. The index it is already
+/// holding answers that by lookup.
+///
+/// [index]: super::bindings::ConsumerIndex
+fn unbound_instances(state: &AppState, definitions: &[DefinitionRow]) -> Vec<UnboundInstance> {
+    let Some(schematic) = state.workspace.active_schematic() else {
+        return Vec::new();
+    };
+    let defined = definitions
+        .iter()
+        .map(|row| row.definition.as_str())
+        .collect::<BTreeSet<_>>();
+    let sheet = state.workspace.active_view.display_path();
+    let mut unbound = schematic
+        .components
+        .iter()
+        .filter_map(|component| {
+            let reference = explicit_component_model(component)?;
+            if defined.contains(reference.to_ascii_lowercase().as_str()) {
+                return None;
+            }
+            Some(UnboundInstance {
+                component_id: component.id,
+                instance: component.name.clone(),
+                sheet: sheet.clone(),
+                reference,
+            })
+        })
+        .collect::<Vec<_>>();
+    unbound.sort_by(|left, right| {
+        left.instance
+            .cmp(&right.instance)
+            .then_with(|| left.reference.cmp(&right.reference))
+    });
+    unbound
+}
+
+/// Every instance the closure does not answer for, and the two ways out.
+///
+/// Exception-only: a design where every reference resolves says so in one line
+/// rather than rendering an empty table. The routes are deliberately not a
+/// second binding control — the catalog page owns binding, and two authors for
+/// one repair is how two of them end up disagreeing — so "Bind a model…" takes
+/// the reader there with the instance already selected.
+fn instance_binding_card(
+    ui: &mut Ui,
+    app: &mut ManagerRenderContext<'_>,
+    unbound: &[UnboundInstance],
+) {
+    let t = Tokens::get(ui.ctx());
+    let mut bind = None;
+    let mut locate = None;
+    card(ui, |ui| {
+        card_title(
+            ui,
+            "INSTANCE BINDINGS",
+            Some(&if unbound.is_empty() {
+                "every reference resolves".to_owned()
+            } else {
+                format!(
+                    "{} unresolved instance{}",
+                    unbound.len(),
+                    if unbound.len() == 1 { "" } else { "s" }
+                )
+            }),
+        );
+        if unbound.is_empty() {
+            ui.label(
+                RichText::new(
+                    "Every model an instance on this sheet names is declared by a file in the \
+                     authenticated closure above.",
+                )
+                .small()
+                .color(t.color.ok),
+            );
+            return;
+        }
+        for instance in unbound.iter().take(UNBOUND_ROWS) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.label(RichText::new("unresolved").small().color(t.color.err));
+                ui.label(
+                    RichText::new(&instance.instance)
+                        .monospace()
+                        .small()
+                        .color(t.color.text),
+                );
+                ui.label(
+                    RichText::new(&instance.sheet)
+                        .small()
+                        .color(t.color.text_faint),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(&instance.reference)
+                            .monospace()
+                            .small()
+                            .color(t.color.warn),
+                    );
+                });
+            });
+            ui.label(
+                RichText::new(format!(
+                    "No file in the closure declares '{}'. Netlisting refuses the design until \
+                     the name resolves or the instance is removed; there is no host search path \
+                     to fall back to.",
+                    instance.reference
+                ))
+                .small()
+                .color(t.color.text_dim),
+            );
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if Button::new("Bind a model…")
+                    .show(ui)
+                    .on_hover_text(
+                        "Selects this instance and opens the catalog, where a model is bound to it.",
+                    )
+                    .clicked()
+                {
+                    bind = Some(instance.component_id);
+                }
+                if Button::new("Show instance")
+                    .show(ui)
+                    .on_hover_text("Selects this instance and opens the schematic it sits on.")
+                    .clicked()
+                {
+                    locate = Some(instance.component_id);
+                }
+            });
+        }
+        if unbound.len() > UNBOUND_ROWS {
+            ui.label(
+                RichText::new(format!(
+                    "…and {} more, all counted above. The catalog page lists every one.",
+                    unbound.len() - UNBOUND_ROWS
+                ))
+                .small()
+                .color(t.color.text_faint),
+            );
+        }
+    });
+    if let Some(component_id) = bind {
+        app.state
+            .schematic
+            .selection
+            .select_only_component(component_id);
+        app.queue_command(Command::ModelsPage(ModelsPage::Models));
+    }
+    if let Some(component_id) = locate {
+        app.state
+            .schematic
+            .selection
+            .select_only_component(component_id);
+        navigate_specialist(app, crate::workbench::SurfaceId::Design);
     }
 }
 

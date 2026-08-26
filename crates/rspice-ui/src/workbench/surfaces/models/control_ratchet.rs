@@ -463,7 +463,12 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
         "console receipt from geometry_findings",
     ),
     ("Trace schematic", "models_view.dialog = BindingTrace"),
+    ("Trace in schematic…", "models_view.dialog = BindingTrace"),
     // Include graph
+    (
+        "Bind a model…",
+        "schematic.selection + Command::ModelsPage(Models)",
+    ),
     (
         "Resolve drift…",
         "models_view.dialog = ResolveDrift, opened on the last scan's findings",
