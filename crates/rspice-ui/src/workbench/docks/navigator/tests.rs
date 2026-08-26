@@ -1143,3 +1143,74 @@ fn the_simulation_rail_derives_what_it_states_once_a_frame() {
         "the rail counts placed sources without resolving them"
     );
 }
+
+/// The simulation rail's filter reaches every line it paints.
+///
+/// It used to reach the nine route rows and stop there. Typing a corner name
+/// hid all nine and left the Run set axes, the Variation row and the standing
+/// capability notice sitting under a header for a section whose rows had all
+/// gone — a rail that answered a search with everything the search was not
+/// about.
+///
+/// Section headers are claims about what is under them, so one that retains no
+/// row goes with its rows. The creating action at the foot of the tree is not
+/// a datum and stays: it is how an empty plan is filled, including the plan a
+/// filter has emptied on screen.
+#[test]
+fn the_simulate_rail_filter_reaches_past_its_page_rows() {
+    fn rail(query: &str) -> Vec<String> {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.activate(Workspace::Simulate);
+        app.state.workbench.set_navigator_filter(query);
+        navigator_painted_lines(228.0, app)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    }
+
+    let unfiltered = rail("");
+    for line in [
+        "LAB CHARACTERIZATION",
+        "Analyses",
+        "RUN SET",
+        "Supply voltage",
+        "Variation",
+        "CAPABILITY POLICY",
+    ] {
+        assert!(
+            unfiltered.iter().any(|painted| painted.as_str() == line),
+            "an unfiltered rail still paints {line:?}; it painted {unfiltered:?}"
+        );
+    }
+
+    // Matches one axis by name and nothing else the rail holds.
+    let filtered = rail("supply");
+    assert!(
+        filtered
+            .iter()
+            .any(|painted| painted.as_str() == "Supply voltage"),
+        "the axis whose name matches survives; the rail painted {filtered:?}"
+    );
+    assert!(
+        filtered.iter().any(|painted| painted.as_str() == "RUN SET"),
+        "and the section that kept a row keeps its header; it painted {filtered:?}"
+    );
+    for dropped in [
+        "Variation",
+        "Analyses",
+        "LAB CHARACTERIZATION",
+        "CAPABILITY POLICY",
+    ] {
+        assert!(
+            !filtered.iter().any(|painted| painted.as_str() == dropped),
+            "{dropped:?} matches nothing the reader typed; the rail painted {filtered:?}"
+        );
+    }
+    assert!(
+        filtered
+            .iter()
+            .any(|painted| painted.starts_with("Add analysis")),
+        "the panel's own creating action is not a datum the filter can hide; \
+         the rail painted {filtered:?}"
+    );
+}

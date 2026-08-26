@@ -772,6 +772,27 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     nav_property(ui, "Integrity", "payloads verified on load");
 }
 
+/// The section that holds the standing capability notice.
+const CAPABILITY_POLICY_SECTION: &str = "Capability policy";
+/// What that notice says, named once so the filter and the paint agree.
+const CAPABILITY_POLICY_NOTICE: &str = "Every analysis declares release-engine, preview, \
+     compatibility, platform and sign-off contracts before it can be added.";
+
+/// Whether one line of the simulation rail survives the navigator's filter.
+///
+/// `query` arrives trimmed and lower-cased from the panel's own field. An
+/// empty one keeps everything and allocates nothing, which is the path the
+/// rail takes on nearly every frame; only a reader who is actually filtering
+/// pays for the comparison.
+///
+/// The rail used to spend the query on the nine route rows and nothing else,
+/// so a search for a corner name hid every page and left the Run set axes, the
+/// Variation row and the capability banner sitting under it, unfiltered and
+/// unrelated to what had been typed.
+fn nav_matches(query: &str, text: &str) -> bool {
+    query.is_empty() || text.to_lowercase().contains(query)
+}
+
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     use crate::simulation::plan::AnalysisKind;
 
@@ -794,7 +815,16 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .errors
         .is_empty()
         .then_some(run_set_validation.forecast.point_count);
-    section_header(ui, "Lab characterization", Some(&format!("{enabled} on")));
+    // The nine routes are resolved before the head is drawn, because the head
+    // is that section's own and a header over nothing is a claim the rail
+    // cannot support.
+    let routes = SimulationPage::NAVIGATION
+        .into_iter()
+        .filter(|page| nav_matches(&query, page.label()))
+        .collect::<Vec<_>>();
+    if !routes.is_empty() {
+        section_header(ui, "Lab characterization", Some(&format!("{enabled} on")));
+    }
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
         .show(ui, |ui| {
@@ -804,11 +834,8 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             // read "1 active · 1 enabled".
             let analyses_meta = format!("{enabled} / {total}");
             let mut requested = None;
-            for page in SimulationPage::NAVIGATION {
+            for page in routes {
                 let label = page.label();
-                if !query.is_empty() && !label.to_lowercase().contains(&query) {
-                    continue;
-                }
                 let meta = simulate_nav_meta(app, page, &analyses_meta, declared_points);
                 if nav_row(
                     ui,
@@ -833,11 +860,23 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             // dimensions, and nothing on the rail said so.
             let run_set = &app.state.sim_setup.run_set;
             let points = run_set_validation.forecast.point_count.max(1);
-            section_header(ui, "Run set", Some(&format!("{points} pts")));
-            if run_set.dimensions.is_empty() {
+            // An axis answers for its own name, which is what the row states.
+            // Matching the values instead would leave a row on screen for a
+            // query the reader cannot see the reason for.
+            let axes = run_set
+                .dimensions
+                .iter()
+                .filter(|dimension| nav_matches(&query, &dimension.name))
+                .collect::<Vec<_>>();
+            let no_axes = run_set.dimensions.is_empty() && nav_matches(&query, "Axes");
+            let variation = nav_matches(&query, "Variation");
+            if !axes.is_empty() || no_axes || variation {
+                section_header(ui, "Run set", Some(&format!("{points} pts")));
+            }
+            if no_axes {
                 nav_property(ui, "Axes", "none declared");
             }
-            for dimension in &run_set.dimensions {
+            for dimension in axes {
                 let values = dimension
                     .values
                     .iter()
@@ -871,22 +910,30 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                 };
                 nav_property(ui, &dimension.name, &value);
             }
-            nav_property(
-                ui,
-                "Variation",
-                if app
-                    .state
-                    .sim_setup
-                    .has_enabled_analysis_kind(AnalysisKind::MonteCarlo)
-                {
-                    "Monte Carlo enabled"
-                } else {
-                    "no Monte Carlo instance"
-                },
-            );
-            ui.add_space(8.0);
-            section_header(ui, "Capability policy", None);
-            capability_policy_banner(ui);
+            if variation {
+                nav_property(
+                    ui,
+                    "Variation",
+                    if app
+                        .state
+                        .sim_setup
+                        .has_enabled_analysis_kind(AnalysisKind::MonteCarlo)
+                    {
+                        "Monte Carlo enabled"
+                    } else {
+                        "no Monte Carlo instance"
+                    },
+                );
+            }
+            // The banner is prose rather than a row, so it answers for the
+            // sentence it paints as well as for the section that holds it.
+            if nav_matches(&query, CAPABILITY_POLICY_SECTION)
+                || nav_matches(&query, CAPABILITY_POLICY_NOTICE)
+            {
+                ui.add_space(8.0);
+                section_header(ui, CAPABILITY_POLICY_SECTION, None);
+                capability_policy_banner(ui);
+            }
         });
 }
 
@@ -984,11 +1031,9 @@ fn capability_policy_banner(ui: &mut Ui) {
                 WorkbenchIcon::Info.paint(ui.painter(), icon_rect, t.color.text_dim);
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(
-                            "Every analysis declares release-engine, preview, compatibility, platform and sign-off contracts before it can be added.",
-                        )
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
+                        egui::RichText::new(CAPABILITY_POLICY_NOTICE)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
                     )
                     .wrap(),
                 );
