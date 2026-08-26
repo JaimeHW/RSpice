@@ -1096,10 +1096,6 @@ fn navigator_object_context_menu(
             Command::FindInDesign.execute(app);
             ui.close();
         }
-        if ui.button("Show dependency impact…").clicked() {
-            Command::RevisionHistory.execute(app);
-            ui.close();
-        }
     });
 }
 
