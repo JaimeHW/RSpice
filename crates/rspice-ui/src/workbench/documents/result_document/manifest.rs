@@ -11,6 +11,7 @@ use crate::state::{
     AnalysisResultSourceDomain, AnalysisType, SavedOutputMaterializationStatus, SavedOutputReceipt,
     SimulationRun, SimulationRunLifecycle,
 };
+use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
@@ -802,7 +803,7 @@ fn stored_values_label(analysis: &AnalysisResult) -> String {
         parts.push(format!(
             "{} waveform{} / {samples} samples",
             analysis.waveforms.len(),
-            plural(analysis.waveforms.len())
+            plural_suffix(analysis.waveforms.len())
         ));
     }
     if let Some(op) = &analysis.dc_op {
@@ -820,7 +821,7 @@ fn stored_values_label(analysis: &AnalysisResult) -> String {
         parts.push(format!(
             "{} noise contributor{}",
             noise.rows.len(),
-            plural(noise.rows.len())
+            plural_suffix(noise.rows.len())
         ));
     }
     if let Some(family) = &analysis.family_metadata {
@@ -833,14 +834,14 @@ fn stored_values_label(analysis: &AnalysisResult) -> String {
         parts.push(format!(
             "{} measurement{}",
             analysis.measurements.len(),
-            plural(analysis.measurements.len())
+            plural_suffix(analysis.measurements.len())
         ));
     }
     if !analysis.saved_output_receipts.is_empty() {
         parts.push(format!(
             "{} saved-output receipt{}",
             analysis.saved_output_receipts.len(),
-            plural(analysis.saved_output_receipts.len())
+            plural_suffix(analysis.saved_output_receipts.len())
         ));
     }
     if parts.is_empty() {
@@ -1187,10 +1188,6 @@ const fn source_domain_label(domain: AnalysisResultSourceDomain) -> &'static str
         AnalysisResultSourceDomain::ManualDeck => "manual deck",
         AnalysisResultSourceDomain::LegacyUnclassified => "legacy unclassified",
     }
-}
-
-const fn plural(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
 }
 
 #[cfg(test)]

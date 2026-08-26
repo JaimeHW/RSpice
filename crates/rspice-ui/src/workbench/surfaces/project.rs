@@ -20,6 +20,7 @@ use egui::{
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
+use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
@@ -733,10 +734,6 @@ fn workspace_empty_table_row(ui: &mut Ui, width: f32, text: &str) {
 
 fn short_identity(identity: &str) -> String {
     identity.chars().take(8).collect()
-}
-
-fn plural(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
 }
 
 fn muted(ui: &mut Ui, text: &str) {

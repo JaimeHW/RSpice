@@ -402,7 +402,7 @@ fn no_active_configuration(ui: &mut Ui, count: usize) -> bool {
         "No active configuration",
         &format!(
             "The project catalog holds {count} configuration set{}. Activate one to pin the hierarchy, view-binding, and model-source contract every run executes.",
-            plural(count)
+            plural_suffix(count)
         ),
         |ui| {
             if Button::new("Manage configurations\u{2026}")
@@ -426,7 +426,7 @@ fn precedence_panel(ui: &mut Ui, configuration: &ConfigurationSet) {
         &format!(
             "{} ordered view{}",
             definition.executable_view_policy.len(),
-            plural(definition.executable_view_policy.len())
+            plural_suffix(definition.executable_view_policy.len())
         ),
         t.color.ok,
     );

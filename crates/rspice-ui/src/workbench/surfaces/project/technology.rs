@@ -65,9 +65,9 @@ pub(super) fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatal
                     "{} · {} model{} · {} authenticated source{}",
                     binding.display_label(),
                     binding.model_count(),
-                    plural(binding.model_count()),
+                    plural_suffix(binding.model_count()),
                     binding.source_closure().len(),
-                    plural(binding.source_closure().len()),
+                    plural_suffix(binding.source_closure().len()),
                 );
                 catalog.candidates.push(TechnologyCandidate {
                     binding,
@@ -810,7 +810,7 @@ pub(super) fn commit_technology_after_checkpoint(
         revision.get(),
         audit_receipt.sequence(),
         binding.source_closure().len(),
-        plural(binding.source_closure().len()),
+        plural_suffix(binding.source_closure().len()),
         checkpoint.checkpoint_id(),
         checkpoint.project_revision(),
     ))

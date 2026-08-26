@@ -16,6 +16,7 @@ use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, ParameterInheritance, PortDirection, PropertyType,
     SymbolDocument, SymbolParameterVisibility, SymbolSourceContract, ViewType,
 };
+use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
@@ -900,9 +901,9 @@ fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
             "Form revision r{} · {} section{} · {} field{} · exact emitted order: {}",
             definition.parameter_form.revision,
             definition.parameter_form.sections.len(),
-            plural(definition.parameter_form.sections.len()),
+            plural_suffix(definition.parameter_form.sections.len()),
             field_count,
-            plural(field_count),
+            plural_suffix(field_count),
             emitted_parameter_order(definition),
         ),
         |ui| {
@@ -970,7 +971,7 @@ fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
                     &format!(
                         "{} form diagnostic{} must be resolved before publication.",
                         diagnostics.len(),
-                        plural(diagnostics.len())
+                        plural_suffix(diagnostics.len())
                     ),
                     true,
                 );
@@ -1115,10 +1116,6 @@ fn section_card(ui: &mut Ui, title: &str, description: &str, add_body: impl FnOn
         node.set_role(egui::accesskit::Role::Region);
         node.set_label(title);
     });
-}
-
-const fn plural(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
 }
 
 #[cfg(test)]

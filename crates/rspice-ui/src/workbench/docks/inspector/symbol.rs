@@ -12,6 +12,7 @@ use crate::state::{
     PinSummary, Point, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolPinElectricalKind, SymbolPinSide, SymbolShape, SymbolTextAlign, SymbolTextSize,
 };
+use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::TreeRow;
@@ -160,11 +161,14 @@ fn summary_status(t: &Tokens, summary: PinSummary) -> (String, egui::Color32) {
     match summary {
         PinSummary::Match => ("pin contract matches the interface".to_owned(), t.color.ok),
         PinSummary::Unplaced(count) => (
-            format!("{count} declared pin{} unplaced", plural(count)),
+            format!("{count} declared pin{} unplaced", plural_suffix(count)),
             t.color.err,
         ),
         PinSummary::Orphaned(count) => (
-            format!("{count} pin{} not declared by the interface", plural(count)),
+            format!(
+                "{count} pin{} not declared by the interface",
+                plural_suffix(count)
+            ),
             t.color.err,
         ),
         PinSummary::NoSchematic => (
@@ -172,10 +176,6 @@ fn summary_status(t: &Tokens, summary: PinSummary) -> (String, egui::Color32) {
             t.color.warn,
         ),
     }
-}
-
-const fn plural(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
 }
 
 // =============================================================================
