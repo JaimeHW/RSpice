@@ -16,16 +16,18 @@ pub(super) fn include_page(
             diagnostics.edges,
             diagnostics.diagnostics()
         ),
+        // Outermost-right first: the band lays its actions out right to left.
         |ui| {
+            if Button::new("Export manifest").accent().show(ui).clicked() {
+                export_include_manifest(app);
+            }
             // It opens on the findings the last scan produced rather than
             // re-pinning outright: "resolve" used to mean "refresh and hope",
             // which accepted whatever the file had become without ever showing
             // the reader what that was.
-            if ui
-                .add_enabled(
-                    !app.state.workbench.models_view.model_import_in_progress,
-                    egui::Button::new("Resolve drift…"),
-                )
+            if Button::new("Resolve drift…")
+                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .show(ui)
                 .clicked()
             {
                 if let Some(library) = current_library_name(app) {
@@ -37,9 +39,6 @@ pub(super) fn include_page(
                         Err("Select a model source to resolve first.".to_owned()),
                     );
                 }
-            }
-            if ui.button("Export manifest").clicked() {
-                export_include_manifest(app);
             }
         },
     );

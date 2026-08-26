@@ -281,8 +281,9 @@ fn adopt_line(
     // rows start at three different columns and nothing scans.
     ui.horizontal(|ui| {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let clicked = ui
-                .add_enabled(idle && blocker.is_none(), compact_button("Adopt"))
+            let clicked = Button::new("Adopt")
+                .enabled(idle && blocker.is_none())
+                .show(ui)
                 .on_disabled_hover_text(blocker.clone().unwrap_or_else(|| {
                     "Another model-source operation is still running.".to_owned()
                 }))

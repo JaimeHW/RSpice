@@ -24,9 +24,20 @@ fn model_tabs_match_the_mockup_taxonomy() {
     );
 }
 
+/// Every page's actions stay inside its own title band.
+///
+/// The band is one row now rather than two — the mockup's `.model-section-bar`
+/// carries the title, the live meta and the action cluster on one line — so its
+/// bounds are stated as the composition's own constants rather than as the two
+/// magic numbers that described the stacked pair this replaces. The claim is
+/// unchanged: the action is inside the page bar and clear of the tab strip
+/// above it, at every width down to 561 px, where the actions squeeze the
+/// title rather than wrapping out of the band.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
+    let band_top = f64::from(manager::PAGE_TABS_H);
+    let band_bottom = band_top + f64::from(manager::SECTION_BAR_H);
     for (page, label) in [
         (ModelsPage::Symbols, "Create symbol"),
         (ModelsPage::Include, "Export manifest"),
@@ -68,12 +79,12 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
                 .and_then(|(_, node)| node.bounds())
                 .unwrap_or_else(|| panic!("missing {label} action"));
             assert!(
-                bounds.y1 <= 150.0,
-                "{label} escaped the models title band on {page:?} at {width}: {bounds:?}"
+                bounds.y1 <= band_bottom,
+                "{label} escaped the models title band (ends at {band_bottom}) on {page:?} at {width}: {bounds:?}"
             );
             assert!(
-                bounds.y0 >= 70.0,
-                "{label} overlapped the manager toolbar or page tabs on {page:?} at {width}: {bounds:?}"
+                bounds.y0 >= band_top,
+                "{label} overlapped the page tabs (they end at {band_top}) on {page:?} at {width}: {bounds:?}"
             );
             assert!(
                 !output.shapes.is_empty(),
@@ -474,4 +485,133 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         "0/1 current suite approvals retained"
     );
     assert!(summary.correlation_evidence_digest.is_none());
+}
+
+/// No page ends in the shell's own canvas.
+///
+/// This workspace is one continuous document surface: the mockup's
+/// `.models-view` sits on the panel colour from the tab strip to the bottom
+/// edge and separates its regions with one-pixel dividers. A page whose content
+/// stopped short exposed the charcoal canvas underneath, which reads as a page
+/// that failed to render rather than as a page with room left.
+///
+/// The probe is a point in the bottom band of the viewport: the panel had
+/// better be painted there, on every page, at a document width where the
+/// detail columns are at their widest.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn no_models_page_ends_in_unpainted_canvas() {
+    fn covers(shape: &egui::epaint::Shape, probe: egui::Pos2, fill: egui::Color32) -> bool {
+        match shape {
+            egui::epaint::Shape::Rect(rect) => rect.fill == fill && rect.rect.contains(probe),
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().any(|shape| covers(shape, probe, fill))
+            }
+            _ => false,
+        }
+    }
+
+    for page in ModelsPage::ALL {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.models_page = page;
+        let size = egui::vec2(1_180.0, 900.0);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| show(ui, &mut app));
+            },
+        );
+        let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
+        let probe = egui::pos2(size.x * 0.5, size.y - 4.0);
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|clipped| covers(&clipped.shape, probe, panel)),
+            "{page:?} left the document surface unpainted at {probe:?}"
+        );
+    }
+}
+
+/// The Models page's detail panes are one row of equal columns that reaches the
+/// panel's bottom edge.
+///
+/// The mockup's `.model-detail-body` is a single grid row of `minmax(0, 1fr)`
+/// columns; the surface used to split the pane 36 / 64 and let the cards stop
+/// at their own content, which left a band of the container's hairline colour
+/// under the shortest of them and a strip of unpainted canvas under all four.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_model_detail_panes_are_one_row_of_equal_columns_filling_the_document() {
+    fn walk(shape: &egui::epaint::Shape, fill: egui::Color32, out: &mut Vec<Rect>) {
+        match shape {
+            egui::epaint::Shape::Rect(rect) if rect.fill == fill => out.push(rect.rect),
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, fill, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.models_page = ModelsPage::Models;
+    let size = egui::vec2(1_180.0, 900.0);
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| show(ui, &mut app));
+        },
+    );
+
+    let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
+    let mut rects = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, panel, &mut rects);
+    }
+    // The four detail panes are the panel-filled boxes that end at the bottom
+    // of the document without spanning its whole width — the one that does is
+    // the document surface itself, laid down before any page painted on it.
+    let mut panes = rects
+        .iter()
+        .filter(|rect| (rect.bottom() - size.y).abs() <= 1.0 && rect.width() < size.x - 1.0)
+        .copied()
+        .collect::<Vec<_>>();
+    panes.sort_by(|left, right| left.left().total_cmp(&right.left()));
+    assert_eq!(
+        panes.len(),
+        4,
+        "a document wider than 1100 px lays the four panes out in one row: {panes:?}"
+    );
+    let first = panes[0];
+    for pane in &panes {
+        assert!(
+            (pane.top() - first.top()).abs() <= 1.0
+                && (pane.height() - first.height()).abs() <= 1.0,
+            "the detail panes are not one row of equal height: {panes:?}"
+        );
+    }
+    assert!(
+        (panes[0].left() - 0.0).abs() <= 1.0 && (panes[3].right() - size.x).abs() <= 1.0,
+        "the row does not span the document column: {panes:?}"
+    );
+    assert!(
+        first.height() >= 170.0,
+        "a pane is drawn shorter than the mockup's 170 px minimum: {first:?}"
+    );
 }

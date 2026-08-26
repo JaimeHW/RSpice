@@ -276,6 +276,52 @@ impl ProjectModelFacet {
     }
 }
 
+/// Which column of the project model catalog decides its order.
+///
+/// Presentation only: it reorders rows the page has already derived and never
+/// changes which rows those are. The default is the order the table has always
+/// opened in — model name, case-folded, library breaking ties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelsCatalogSortKey {
+    #[default]
+    Model,
+    Family,
+    Source,
+    UsedBy,
+    Vectors,
+    Status,
+}
+
+/// A sortable table's ordering: which column, and which direction.
+///
+/// Durable, because it is a reading preference rather than an engineering
+/// fact — a reader who ordered the catalog by status wants it that way again
+/// when the project reopens. Both halves carry `serde(default)` so a session
+/// written before this existed restores the default order instead of failing
+/// the whole view state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ModelsTableSort {
+    #[serde(default)]
+    pub key: ModelsCatalogSortKey,
+    /// `false` is ascending, which is what a column first clicked gives.
+    #[serde(default)]
+    pub descending: bool,
+}
+
+impl ModelsTableSort {
+    /// Apply a click on `key`: the same column toggles direction, a different
+    /// one takes over ascending.
+    pub fn toggle(&mut self, key: ModelsCatalogSortKey) {
+        if self.key == key {
+            self.descending = !self.descending;
+        } else {
+            self.key = key;
+            self.descending = false;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModelPackFacet {
@@ -687,6 +733,9 @@ pub struct ModelsWorkbenchViewState {
     pub part_facet: RSpicePartFacet,
     #[serde(default)]
     pub catalog_query: String,
+    /// How the project catalog table is ordered.
+    #[serde(default)]
+    pub catalog_sort: ModelsTableSort,
     #[serde(default)]
     pub selected_pack: Option<String>,
     /// Which shipped-corpus pack the corpus table below the ledger has
@@ -803,6 +852,7 @@ impl Default for ModelsWorkbenchViewState {
             pack_facet: ModelPackFacet::default(),
             part_facet: RSpicePartFacet::default(),
             catalog_query: String::new(),
+            catalog_sort: ModelsTableSort::default(),
             selected_pack: None,
             selected_corpus_pack: None,
             selected_part: None,
@@ -2053,7 +2103,10 @@ impl InlineEdit {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelHubFacet, ModelsOperationalState, RSpicePartFacet};
+    use super::{
+        ModelHubFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
+        ModelsWorkbenchViewState, RSpicePartFacet,
+    };
 
     /// Every class the catalog assigns is reachable from a class chip, or is
     /// named here as one nothing offers.
@@ -2118,6 +2171,54 @@ mod tests {
             serde_json::to_string(&ModelHubFacet::NeedsAttention).expect("serializes"),
             "\"needs-attention\"",
             "the spelling written today is the kebab-case one"
+        );
+    }
+
+    /// A session written before the catalog could be sorted still opens.
+    ///
+    /// The order is durable view state added after this struct shipped, so
+    /// every session on disk lacks the field. Without the `serde(default)` on
+    /// it the whole `ModelsWorkbenchViewState` fails to decode and the reader
+    /// loses every selection in the workspace to a table header.
+    #[test]
+    fn a_session_saved_before_the_catalog_could_be_sorted_still_opens() {
+        let restored = serde_json::from_str::<ModelsWorkbenchViewState>(
+            "{\"catalog_scope\":\"project\",\"catalog_query\":\"nch\"}",
+        )
+        .expect("a session with no recorded order still opens");
+        assert_eq!(restored.catalog_query, "nch");
+        assert_eq!(restored.catalog_sort, ModelsTableSort::default());
+        assert_eq!(restored.catalog_sort.key, ModelsCatalogSortKey::Model);
+        assert!(!restored.catalog_sort.descending);
+
+        // Half a record is enough too: the direction alone restores onto the
+        // default column rather than refusing the view state.
+        let partial =
+            serde_json::from_str::<ModelsTableSort>("{\"descending\":true}").expect("partial sort");
+        assert_eq!(partial.key, ModelsCatalogSortKey::Model);
+        assert!(partial.descending);
+        assert_eq!(
+            serde_json::to_string(&ModelsCatalogSortKey::UsedBy).expect("serializes"),
+            "\"used-by\"",
+            "the spelling written today is the kebab-case one"
+        );
+    }
+
+    /// Clicking the ordered column reverses it; clicking another takes it over
+    /// ascending, which is the only reading of a first click on a new column.
+    #[test]
+    fn a_second_click_on_the_ordered_column_reverses_it() {
+        let mut sort = ModelsTableSort::default();
+        sort.toggle(ModelsCatalogSortKey::Status);
+        assert_eq!(sort.key, ModelsCatalogSortKey::Status);
+        assert!(!sort.descending);
+        sort.toggle(ModelsCatalogSortKey::Status);
+        assert!(sort.descending);
+        sort.toggle(ModelsCatalogSortKey::Model);
+        assert_eq!(sort.key, ModelsCatalogSortKey::Model);
+        assert!(
+            !sort.descending,
+            "a column taken over inherits no direction from the one it replaced"
         );
     }
 

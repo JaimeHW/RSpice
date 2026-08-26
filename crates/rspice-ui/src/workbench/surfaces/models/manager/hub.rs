@@ -917,15 +917,16 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let idle = !app.state.workbench.models_view.model_import_in_progress;
-                    if ui
-                        .add_enabled(idle, compact_button("Refresh catalog"))
+                    if Button::new("Refresh catalog")
+                        .enabled(idle)
+                        .show(ui)
                         .on_disabled_hover_text("Another model-source operation is still running.")
                         .clicked()
                     {
                         app.queue_model_hub(ModelHubRequest::FetchSnapshot);
                     }
-                    if ui
-                        .add(compact_button("Catalog details…"))
+                    if Button::new("Catalog details…")
+                        .show(ui)
                         .on_hover_text(
                             "Who signed what this client holds, the contract it is accepted \
                              under, and the last thing this session tried.",
@@ -1057,11 +1058,9 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 state.consequence(),
             );
             if attempted.reissuable
-                && ui
-                    .add_enabled(
-                        !app.state.workbench.models_view.model_import_in_progress,
-                        compact_button("Retry the catalog refresh"),
-                    )
+                && Button::new("Retry the catalog refresh")
+                    .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                    .show(ui)
                     .on_disabled_hover_text("Another model-source operation is still running.")
                     .clicked()
             {
@@ -1206,7 +1205,7 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
                         "Facets derive from the signed catalog, what this machine holds, and \
                          what this project pinned.",
                     );
-                    if ui.button("Clear release filter").clicked() {
+                    if Button::new("Clear release filter").show(ui).clicked() {
                         app.state.workbench.models_view.hub_facet = ModelHubFacet::All;
                         app.state.workbench.models_view.catalog_query.clear();
                     }
@@ -1413,16 +1412,18 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
         .find(|release| Some(&release.version) == row.update.as_ref());
     if let Some(installed) = row.installed.as_ref() {
         if let Some(offered) = offered
-            && ui
-                .add_enabled(idle, compact_button("Update"))
+            && Button::new("Update")
+                .enabled(idle)
+                .show(ui)
                 .on_disabled_hover_text("Another model-source operation is still running.")
                 .clicked()
         {
             app.state.workbench.models_view.dialog =
                 Some(confirmation(offered, Some(installed.version.clone())));
         }
-        if ui
-            .add_enabled(idle, compact_button("Remove"))
+        if Button::new("Remove")
+            .enabled(idle)
+            .show(ui)
             .on_disabled_hover_text("Another model-source operation is still running.")
             .clicked()
         {
@@ -1431,8 +1432,9 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
                 version: installed.version.clone(),
             });
         }
-        if ui
-            .add_enabled(idle, compact_button("Verify installed"))
+        if Button::new("Verify installed")
+            .enabled(idle)
+            .show(ui)
             .on_disabled_hover_text("Another model-source operation is still running.")
             .on_hover_text(
                 "Reads the retained archive and re-proves it end to end under the release key. \
@@ -1453,15 +1455,18 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
     if !row.missing.is_empty() {
         // A refusal states its own reason where the action would be, rather
         // than as a button that fails after being pressed.
-        ui.add_enabled(false, compact_button("Install"))
+        Button::new("Install")
+            .enabled(false)
+            .show(ui)
             .on_disabled_hover_text(format!(
                 "This build does not offer {}.",
                 plain_list(&row.missing)
             ));
         return;
     }
-    if ui
-        .add_enabled(idle, compact_button("Install"))
+    if Button::new("Install")
+        .enabled(idle)
+        .show(ui)
         .on_disabled_hover_text("Another model-source operation is still running.")
         .clicked()
     {
@@ -1638,13 +1643,7 @@ fn confirmation(row: &HubPackRow, replaces: Option<String>) -> ModelsWorkbenchDi
 /// it happens: which release, under which licence, how many bytes, how many
 /// parts, and whether this engine can run it. The primary action is disabled —
 /// with the reason — when it cannot.
-pub(super) fn release_confirmation(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    pack_id: &str,
-    release: &PackReleaseConfirmation,
-) -> Option<bool> {
-    let mut decision = None;
+pub(super) fn release_confirmation(ui: &mut Ui, pack_id: &str, release: &PackReleaseConfirmation) {
     ui.label(if release.replaces.is_some() {
         "RSpice will download and prove the newer release, then remove the older copy. A project \
          that already added a part keeps the exact bytes it was built against."
@@ -1696,28 +1695,28 @@ pub(super) fn release_confirmation(
             property(ui, "Replaces", replaces, "removed after success");
         }
     });
-    ui.horizontal(|ui| {
-        if ui.button("Cancel").clicked() {
-            decision = Some(false);
-        }
-        let installable =
-            release.missing.is_empty() && !app.state.workbench.models_view.model_import_in_progress;
-        if ui
-            .add_enabled(installable, egui::Button::new("Install pack"))
-            .on_disabled_hover_text(if release.missing.is_empty() {
-                "Another model-source operation is still running.".to_owned()
-            } else {
-                format!(
-                    "This build does not offer {}.",
-                    plain_list(&release.missing)
-                )
-            })
-            .clicked()
-        {
-            decision = Some(true);
-        }
-    });
-    decision
+}
+
+/// Why this release cannot be installed at this instant, if it cannot.
+///
+/// The reason travels to the dialog's footer, where the transaction commits:
+/// a refusal stated beside the action it blocks is the only place a reader
+/// looks for it.
+pub(super) fn release_install_block_reason(
+    app: &ManagerRenderContext<'_>,
+    release: &PackReleaseConfirmation,
+) -> Option<String> {
+    if !release.missing.is_empty() {
+        return Some(format!(
+            "This build does not offer {}.",
+            plain_list(&release.missing)
+        ));
+    }
+    app.state
+        .workbench
+        .models_view
+        .model_import_in_progress
+        .then(|| "Another model-source operation is still running.".to_owned())
 }
 
 /// Turns the request this confirmation describes into hub work.

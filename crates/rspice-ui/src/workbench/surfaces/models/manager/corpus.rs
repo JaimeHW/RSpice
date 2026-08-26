@@ -90,7 +90,7 @@ pub(super) fn pack_catalog(
                         "No pack matches this facet.",
                         "Facets derive from the installed corpus manifest and live project attachments.",
                     );
-                    if ui.button("Clear filter").clicked() {
+                    if Button::new("Clear filter").show(ui).clicked() {
                         app.state.workbench.models_view.pack_facet = ModelPackFacet::All;
                         app.state.workbench.models_view.catalog_query.clear();
                     }
@@ -227,7 +227,7 @@ fn pack_detail(
         ui.add_space(12.0);
         ui.label(RichText::new(&pack.name).strong());
         ui.label(RichText::new(&pack.id).monospace().small());
-        if ui.button("Browse parts").clicked() {
+        if Button::new("Browse parts").show(ui).clicked() {
             app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::RSpiceLibrary;
             app.state.workbench.models_view.catalog_query.clear();
             app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
@@ -237,11 +237,9 @@ fn pack_detail(
         if built_in {
             ui.label(RichText::new("Built in").small());
         } else if let Some(library) = attached.first() {
-            if ui
-                .add_enabled(
-                    catalog_source_available && model_source_job_idle,
-                    egui::Button::new("Refresh snapshot"),
-                )
+            if Button::new("Refresh snapshot")
+                .enabled(catalog_source_available && model_source_job_idle)
+                .show(ui)
                 .on_disabled_hover_text(
                     if !model_source_job_idle {
                         "Another model-source operation is still running."
@@ -258,21 +256,21 @@ fn pack_detail(
             {
                 refresh_library(app, library);
             }
-            if ui.button("Detach…").clicked() {
+            if Button::new("Detach…").show(ui).clicked() {
                 app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
                     pack_id: pack.id.clone(),
                     release: None,
                     attach: false,
                 });
             }
-        } else if ui
-            .add_enabled(
+        } else if Button::new("Attach…")
+            .enabled(
                 pack.entry.is_some()
                     && pack.redistributable
                     && catalog_source_available
                     && model_source_job_idle,
-                egui::Button::new("Attach…"),
             )
+            .show(ui)
             .on_disabled_hover_text(if !pack.redistributable {
                 "This pack has no established redistribution grant."
             } else if pack.entry.is_none() {

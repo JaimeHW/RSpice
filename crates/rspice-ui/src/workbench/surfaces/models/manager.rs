@@ -41,6 +41,12 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+// The design system's widget vocabulary. Every page under this module reaches
+// it through `use super::*`, which is what keeps one spelling of a button, a
+// chip, a select and a modal across all six of them.
+use crate::ui::widgets::{
+    self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, SegmentedWidth,
+};
 use crate::workbench::app::open_create_subcircuit_bound_symbol_dialog;
 use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
@@ -48,8 +54,9 @@ use crate::workbench::app_state::design_history::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::{
-    ModelHubFacet, ModelPackFacet, ModelsCatalogScope, ModelsOperationalState, ModelsPage,
-    ModelsWorkbenchDialog, ProjectModelFacet, RSpicePartFacet,
+    ModelHubFacet, ModelPackFacet, ModelsCatalogScope, ModelsCatalogSortKey,
+    ModelsOperationalState, ModelsPage, ModelsTableSort, ModelsWorkbenchDialog, ProjectModelFacet,
+    RSpicePartFacet,
 };
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -57,6 +64,9 @@ use bindings::{ConsumerIndex, effective_model_consumers};
 // The shared painters, re-exported at this module's own path so every page
 // under it keeps naming them through its `use super::*` — the split moved
 // where they are written, not what any caller says.
+/// The page bar's height, which the surface test measures its band against.
+#[cfg(test)]
+pub(super) use paint::SECTION_BAR_H;
 use paint::*;
 
 /// Both scale counters live in the modules that own the work they count; the
@@ -74,8 +84,13 @@ const CATALOG_LIMIT: usize = 160;
 const PARAMETER_ROWS: usize = 24;
 /// Consumers the "where used" column lists before reporting the remainder.
 const USAGE_ROWS: usize = 12;
-const PAGE_TABS_H: f32 = 38.0;
+pub(super) const PAGE_TABS_H: f32 = 38.0;
 const CATALOG_BAR_H: f32 = 34.0;
+/// The mockup's `.model-browser` rows: `minmax(120px, 0.9fr)` for the
+/// catalogue over `minmax(220px, 1.1fr)` for the detail — the catalogue takes
+/// a little under half of what remains and the detail region fills the rest.
+const CATALOG_TRACK_FRACTION: f32 = 0.45;
+const CATALOG_TRACK_MIN_H: f32 = 120.0;
 
 enum ManagerAction {
     Command(Command),
@@ -195,6 +210,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // panes own their padding; the composition itself uses one-pixel dividers.
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     ui.visuals_mut().widgets.noninteractive.bg_fill = t.color.bg_panel;
+    paint_document_surface(ui);
 
     let mut pending_actions = Vec::new();
     {
@@ -265,6 +281,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ModelsPage::Qualification => unreachable!("qualification renders above"),
         }
     }
+    divide_document_remainder(ui);
 
     {
         let mut render = ManagerRenderContext {
@@ -329,6 +346,39 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
     }
+}
+
+/// Lay the document surface down before any page paints on it.
+///
+/// This workspace is one continuous document: the mockup's `.models-view` sits
+/// on the panel colour from the tab strip to the bottom edge and separates its
+/// regions with one-pixel dividers. Six pages compose six different bodies over
+/// it, and any of them can be shorter than the panel — a project with three
+/// symbols, an include graph with one file. Painting the surface once, first,
+/// is what makes "shorter than the panel" read as room rather than as the
+/// shell's own canvas showing through a page that failed to render.
+fn paint_document_surface(ui: &Ui) {
+    let surface = ui.available_rect_before_wrap();
+    if surface.height() <= 0.5 || surface.width() <= 0.5 {
+        return;
+    }
+    ui.painter()
+        .rect_filled(surface, 0.0, Tokens::get(ui.ctx()).color.bg_panel);
+}
+
+/// Close the page off with the composition's own divider where its content
+/// stops, so the remaining surface reads as one region rather than as a table
+/// that trailed off.
+fn divide_document_remainder(ui: &Ui) {
+    let remainder = ui.available_rect_before_wrap();
+    if remainder.height() <= 0.5 || remainder.width() <= 0.5 {
+        return;
+    }
+    ui.painter().hline(
+        remainder.x_range(),
+        remainder.top() + 0.5,
+        Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
+    );
 }
 
 fn open_subcircuit_symbol_workflow(
@@ -442,32 +492,36 @@ fn qualification_page(ui: &mut Ui, app: &mut RSpiceApp) {
         super::QualificationPageAction::RunSuite,
     );
 
+    // Authored outermost-right first: the band lays its action cluster out
+    // right to left, so the page's one accent primary is written first and
+    // lands hard against the right edge.
     section_title(ui, "Model qualification", &subtitle, |ui| {
-        let compare = ui.add_enabled(
-            compare_blocker.is_none(),
-            egui::Button::new("Compare approved"),
-        );
-        if let Some(reason) = compare_blocker.as_deref() {
-            compare.on_disabled_hover_text(reason);
-        } else if compare.clicked() {
-            requested_action = Some(super::QualificationPageAction::CompareRelease);
+        let run = Button::new("Run suite")
+            .accent()
+            .enabled(run_blocker.is_none())
+            .show(ui);
+        if let Some(reason) = run_blocker.as_deref() {
+            run.on_disabled_hover_text(reason);
+        } else if run.clicked() {
+            requested_action = Some(super::QualificationPageAction::RunSuite);
         }
 
-        let release = ui.add_enabled(
-            release_blocker.is_none(),
-            egui::Button::new("Release closure"),
-        );
+        let release = Button::new("Release closure")
+            .enabled(release_blocker.is_none())
+            .show(ui);
         if let Some(reason) = release_blocker.as_deref() {
             release.on_disabled_hover_text(reason);
         } else if release.clicked() {
             requested_action = Some(super::QualificationPageAction::ReviewReleaseBinding);
         }
 
-        let run = ui.add_enabled(run_blocker.is_none(), egui::Button::new("Run suite"));
-        if let Some(reason) = run_blocker.as_deref() {
-            run.on_disabled_hover_text(reason);
-        } else if run.clicked() {
-            requested_action = Some(super::QualificationPageAction::RunSuite);
+        let compare = Button::new("Compare approved")
+            .enabled(compare_blocker.is_none())
+            .show(ui);
+        if let Some(reason) = compare_blocker.as_deref() {
+            compare.on_disabled_hover_text(reason);
+        } else if compare.clicked() {
+            requested_action = Some(super::QualificationPageAction::CompareRelease);
         }
     });
 
@@ -841,16 +895,15 @@ fn qualification_suite_rail(
                 Some(selected),
                 super::QualificationPageAction::ReviewVectors,
             );
-            let review = ui.add_enabled(
-                review_blocker.is_none(),
-                egui::Button::new("Review qualification"),
-            );
+            let review = Button::new("Review qualification")
+                .enabled(review_blocker.is_none())
+                .show(ui);
             if let Some(reason) = review_blocker.as_deref() {
                 review.on_disabled_hover_text(reason);
             } else if review.clicked() {
                 *requested_action = Some(super::QualificationPageAction::ReviewVectors);
             }
-            if ui.button("Measurement correlation").clicked() {
+            if Button::new("Measurement correlation").show(ui).clicked() {
                 *requested_action = Some(super::QualificationPageAction::OpenCorrelation);
             }
         }
@@ -903,10 +956,9 @@ fn qualification_selected_contract(
                             Some(selected),
                             super::QualificationPageAction::ReviewVectors,
                         );
-                        let review = ui.add_enabled(
-                            blocker.is_none(),
-                            egui::Button::new("Review dispositions"),
-                        );
+                        let review = Button::new("Review dispositions")
+                            .enabled(blocker.is_none())
+                            .show(ui);
                         if let Some(reason) = blocker.as_deref() {
                             review.on_disabled_hover_text(reason);
                         } else if review.clicked() {
@@ -1039,38 +1091,61 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         for page in ModelsPage::ALL {
-                            let selected = app.state.workbench.models_page == page;
-                            let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-                            let text_width = ui
-                                .painter()
-                                .layout_no_wrap(page.label().to_owned(), font.clone(), t.color.text)
-                                .size()
-                                .x;
-                            let response = ui.add_sized(
-                                [text_width + 24.0, PAGE_TABS_H - 1.0],
-                                egui::Button::new(RichText::new(page.label()).font(font).color(
-                                    if selected {
-                                        t.color.text
-                                    } else {
-                                        t.color.text_dim
-                                    },
-                                ))
-                                .frame(false),
-                            );
-                            if selected {
-                                ui.painter().hline(
-                                    (response.rect.left() + 9.0)..=(response.rect.right() - 9.0),
-                                    response.rect.bottom() - 1.0,
-                                    Stroke::new(2.0, t.color.accent),
-                                );
-                            }
-                            if response.clicked() {
+                            if page_tab(ui, page.label(), app.state.workbench.models_page == page) {
                                 app.state.workbench.models_page = page;
                             }
                         }
                     });
                 });
         });
+}
+
+/// One tab of the workspace's page strip.
+///
+/// Painted rather than built from the design system's `Button`: the mockup's
+/// `.model-tabs button` is frameless with an accent underline on the active
+/// one, which is a tab and not an action — a bordered control here would read
+/// as six buttons in a row. It still publishes a selected button role and
+/// takes focus, which is what a tab owes a reader who cannot see it.
+fn page_tab(ui: &mut Ui, label: &str, selected: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let galley = ui.fonts_mut(|fonts| {
+        fonts.layout_no_wrap(label.to_owned(), font, egui::Color32::PLACEHOLDER)
+    });
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 24.0, PAGE_TABS_H - 1.0),
+        Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+    });
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        ui.painter().galley(
+            egui::pos2(
+                rect.center().x - galley.size().x * 0.5,
+                rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            if selected {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+        if selected {
+            ui.painter().hline(
+                (rect.left() + 9.0)..=(rect.right() - 9.0),
+                rect.bottom() - 1.0,
+                Stroke::new(2.0, t.color.accent),
+            );
+        }
+        theme::paint_focus_ring(ui, &response, rect);
+    }
+    response.clicked()
 }
 
 fn catalog_page(
@@ -1135,48 +1210,36 @@ fn catalog_bar(
             ui.set_height(CATALOG_BAR_H);
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
-                egui::Frame::NONE
-                    .stroke(Stroke::new(1.0, t.color.border))
-                    .corner_radius(5.0)
-                    .inner_margin(egui::Margin::ZERO)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = Vec2::ZERO;
-                            for (scope, count) in [
-                                (ModelsCatalogScope::Project, loaded),
-                                (ModelsCatalogScope::InstalledPacks, packs),
-                                (ModelsCatalogScope::RSpiceLibrary, parts),
-                            ] {
-                                let selected =
-                                    app.state.workbench.models_view.catalog_scope == scope;
-                                let response = ui.add_sized(
-                                    [scope_segment_width(scope), 20.0],
-                                    egui::Button::new(
-                                        RichText::new(format!("{}  {count}", scope.label()))
-                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                            .color(if selected {
-                                                t.color.text
-                                            } else {
-                                                t.color.text_dim
-                                            }),
-                                    )
-                                    .fill(if selected {
-                                        t.color.bg_active
-                                    } else {
-                                        Color32::TRANSPARENT
-                                    })
-                                    .stroke(Stroke::NONE)
-                                    .corner_radius(4.0),
-                                );
-                                if response.clicked() {
-                                    app.state.workbench.models_view.catalog_scope = scope;
-                                    app.state.workbench.models_view.catalog_query.clear();
-                                    app.state.workbench.models_view.part_catalog_offset = 0;
-                                    app.state.workbench.models_view.selected_part = None;
-                                }
-                            }
-                        });
-                    });
+                // The scope switcher is "one of these, and here are all of
+                // them" — the design system's segmented control, sized to its
+                // own labels rather than to three widths measured by hand.
+                const SCOPES: [ModelsCatalogScope; 3] = [
+                    ModelsCatalogScope::Project,
+                    ModelsCatalogScope::InstalledPacks,
+                    ModelsCatalogScope::RSpiceLibrary,
+                ];
+                let labels = [
+                    format!("{}  {loaded}", ModelsCatalogScope::Project.label()),
+                    format!("{}  {packs}", ModelsCatalogScope::InstalledPacks.label()),
+                    format!("{}  {parts}", ModelsCatalogScope::RSpiceLibrary.label()),
+                ];
+                let options = labels.each_ref().map(String::as_str);
+                let mut selected = SCOPES
+                    .iter()
+                    .position(|scope| *scope == app.state.workbench.models_view.catalog_scope)
+                    .unwrap_or(0);
+                if widgets::segmented(
+                    ui,
+                    "models-catalog-scope",
+                    &options,
+                    &mut selected,
+                    SegmentedWidth::Natural,
+                ) {
+                    app.state.workbench.models_view.catalog_scope = SCOPES[selected];
+                    app.state.workbench.models_view.catalog_query.clear();
+                    app.state.workbench.models_view.part_catalog_offset = 0;
+                    app.state.workbench.models_view.selected_part = None;
+                }
 
                 // The source mockup drops the facet rail before it can squeeze
                 // the scope switcher or search field in the document column.
@@ -1294,51 +1357,11 @@ fn catalog_bar(
         });
 }
 
-fn scope_segment_width(scope: ModelsCatalogScope) -> f32 {
-    match scope {
-        ModelsCatalogScope::Project => 74.0,
-        ModelsCatalogScope::InstalledPacks => 112.0,
-        ModelsCatalogScope::RSpiceLibrary => 108.0,
-    }
-}
-
+/// One facet of a catalog rail: the design system's toggle chip, carrying the
+/// count of what it would narrow to.
 fn facet_button(ui: &mut Ui, selected: bool, label: &str, count: Option<usize>) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
     let label = count.map_or_else(|| label.to_owned(), |count| format!("{label}  {count}"));
-    ui.add_sized(
-        [
-            (ui.painter()
-                .layout_no_wrap(
-                    label.clone(),
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_dim,
-                )
-                .size()
-                .x
-                + 16.0)
-                .max(44.0),
-            22.0,
-        ],
-        egui::Button::new(
-            RichText::new(label)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(if selected {
-                    t.color.text
-                } else {
-                    t.color.text_dim
-                }),
-        )
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(
-            1.0,
-            if selected {
-                t.color.accent
-            } else {
-                t.color.border
-            },
-        ))
-        .corner_radius(11.0),
-    )
+    widgets::chip(ui, &label, selected)
 }
 
 struct ProjectModelRow {
@@ -1452,15 +1475,60 @@ fn project_catalog_scan(
             });
         }
     }
-    rows.sort_by(|left, right| {
-        case_folded_cmp(&left.model, &right.model).then_with(|| left.library.cmp(&right.library))
-    });
+    sort_catalog_rows(&mut rows, app.state.workbench.models_view.catalog_sort);
     ProjectCatalogScan {
         rows,
         facets,
         review: review_shown,
         consumer_diagnostics: consumers.diagnostics.clone(),
     }
+}
+
+/// What the catalog's STATUS column says about a row.
+///
+/// One owner, because the cell and the column's ordering are the same fact:
+/// when the row painted its own status inline, ordering by status would have
+/// been ordering by a second reading of it.
+fn catalog_status(row: &ProjectModelRow) -> &'static str {
+    if row.review {
+        "review"
+    } else if row.pinned {
+        "pinned"
+    } else {
+        ""
+    }
+}
+
+/// Put the derived rows in the order the reader asked for.
+///
+/// This reorders a vector the page has already built — the rows that survived
+/// the facet and the query — so a header click costs a sort of what is on the
+/// page and never another pass over the corpus. The model identity is always
+/// the final tie-break, which is what keeps the order total: two rows equal on
+/// the chosen column still land in the same place on every frame.
+fn sort_catalog_rows(rows: &mut [ProjectModelRow], sort: ModelsTableSort) {
+    rows.sort_by(|left, right| {
+        let primary = match sort.key {
+            // The identity tie-break below *is* the model order.
+            ModelsCatalogSortKey::Model => std::cmp::Ordering::Equal,
+            ModelsCatalogSortKey::Family => case_folded_cmp(left.family, right.family),
+            ModelsCatalogSortKey::Source => case_folded_cmp(&left.source, &right.source),
+            ModelsCatalogSortKey::UsedBy => case_folded_cmp(
+                left.usage.as_deref().unwrap_or(""),
+                right.usage.as_deref().unwrap_or(""),
+            ),
+            ModelsCatalogSortKey::Vectors => left.vectors.cmp(&right.vectors),
+            ModelsCatalogSortKey::Status => catalog_status(left).cmp(catalog_status(right)),
+        };
+        let identity = case_folded_cmp(&left.model, &right.model)
+            .then_with(|| left.library.cmp(&right.library));
+        let ordering = primary.then(identity);
+        if sort.descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
 }
 
 /// Order two names exactly as comparing their `to_ascii_lowercase` would,
@@ -1510,21 +1578,33 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         app.state.workbench.selected_model = Some(row.model.clone());
     }
 
-    let table_h = (ui.available_height() * 0.36).max(120.0);
+    // The mockup's `.model-browser`: the catalogue keeps a little under half
+    // the pane and the detail region takes the rest, so the surface never ends
+    // in the dead space a fixed 36 % split left below it.
+    let table_h = ((ui.available_height() - HEADER_H - CATALOG_FOOT_H) * CATALOG_TRACK_FRACTION)
+        .max(CATALOG_TRACK_MIN_H);
     egui::Frame::NONE
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
         .show(ui, |ui| {
-        table_header(
+        let sort = app.state.workbench.models_view.catalog_sort;
+        if let Some(key) = sortable_table_header(
             ui,
+            "models-project-catalog-sort",
             &[
-                ("MODEL", 0.20),
-                ("FAMILY", 0.17),
-                ("SOURCE", 0.22),
-                ("USED BY", 0.16),
-                ("VECTORS", 0.10),
-                ("STATUS", 0.15),
+                sort_column("MODEL", 0.20, ModelsCatalogSortKey::Model),
+                sort_column("FAMILY", 0.17, ModelsCatalogSortKey::Family),
+                sort_column("SOURCE", 0.22, ModelsCatalogSortKey::Source),
+                sort_column("USED BY", 0.16, ModelsCatalogSortKey::UsedBy),
+                sort_column("VECTORS", 0.10, ModelsCatalogSortKey::Vectors),
+                sort_column("STATUS", 0.15, ModelsCatalogSortKey::Status),
             ],
-        );
+            sort.key,
+            sort.descending,
+        ) {
+            // Next frame's scan reads the new order; this frame's rows were
+            // derived under the old one and are painted as they were derived.
+            app.state.workbench.models_view.catalog_sort.toggle(key);
+        }
         let table = ScrollArea::vertical()
             .id_salt("models-project-table")
             .max_height(table_h);
@@ -1535,7 +1615,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
                     "No models match the current catalog filter.",
                     "Search covers names, families, sources, libraries, consumers and resolved parameters.",
                 );
-                if ui.button("Clear filter").clicked() {
+                if Button::new("Clear filter").show(ui).clicked() {
                     app.state.workbench.models_view.catalog_query.clear();
                     app.state.workbench.models_view.project_facet = ProjectModelFacet::All;
                 }
@@ -1612,13 +1692,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
         app.state.select_model_library(&row.library);
         app.state.workbench.selected_model = Some(row.model.clone());
     }
-    let status = if row.review {
-        "review"
-    } else if row.pinned {
-        "pinned"
-    } else {
-        ""
-    };
+    let status = catalog_status(row);
     paint_columns(
         ui,
         rect,
@@ -1702,11 +1776,6 @@ fn catalog_footer_capped(
             t.color.warn
         },
     );
-}
-
-fn compact_button(label: &str) -> egui::Button<'_> {
-    egui::Button::new(RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Regular)))
-        .min_size(egui::vec2(0.0, 24.0))
 }
 
 fn compare_models(
@@ -1922,26 +1991,27 @@ fn comparison_counterpart_picker(
             !(library.eq_ignore_ascii_case(left_library) && model.eq_ignore_ascii_case(left_model))
         })
         .collect::<Vec<_>>();
+    let options = candidates
+        .iter()
+        .map(|(library, model)| format!("{library} / {model}"))
+        .collect::<Vec<_>>();
     ui.horizontal(|ui| {
         ui.label("Compare against");
         let label = selected.as_ref().map_or_else(
             || "Choose a definition…".to_owned(),
             |(library, model)| format!("{library} / {model}"),
         );
-        egui::ComboBox::from_id_salt("models-compare-counterpart")
-            .selected_text(label)
-            .width(320.0)
-            .show_ui(ui, |ui| {
-                for (library, model) in &candidates {
-                    let chosen = selected.as_ref() == Some(&(library.clone(), model.clone()));
-                    if ui
-                        .selectable_label(chosen, format!("{library} / {model}"))
-                        .clicked()
-                    {
-                        *selected = Some((library.clone(), model.clone()));
-                    }
-                }
-            });
+        if let Some(index) = widgets::select(
+            ui,
+            "models-compare-counterpart",
+            "Compare against",
+            &label,
+            &options,
+            320.0,
+        ) && let Some((library, model)) = candidates.get(index)
+        {
+            *selected = Some((library.clone(), model.clone()));
+        }
     });
 }
 

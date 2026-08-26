@@ -233,13 +233,65 @@ fn a_pre_release_never_supersedes_the_release_it_precedes() {
     );
 }
 
+/// Render the whole install confirmation, footer included.
+///
+/// Its two actions moved into the design system's modal footer when this
+/// workspace adopted `Dialog`, so a fragment render of the body alone can no
+/// longer see them: the dialog is what has to be rendered for "are both
+/// actions reachable" to mean anything.
+fn confirm_pack_nodes(
+    state: &mut AppState,
+    confirmation: &PackReleaseConfirmation,
+) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
+    state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+        pack_id: "rspice-proving".to_owned(),
+        attach: true,
+        release: Some(Box::new(confirmation.clone())),
+    });
+    let catalog = HubCatalog::default();
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut pending = Vec::new();
+    // A modal registers its layer during the pass that draws it, so the first
+    // pass renders it against a workspace that has not yet been told a modal
+    // owns interaction and reports every control disabled. Three passes is the
+    // settled shape for reading a dialog headless.
+    let mut output = None;
+    for _ in 0..3 {
+        pending.clear();
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1024.0, 760.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut context = ManagerRenderContext {
+                        state,
+                        pending_actions: &mut pending,
+                    };
+                    super::super::dialogs::render_dialog(ui, &mut context, &catalog);
+                });
+            },
+        ));
+    }
+    output
+        .expect("three passes")
+        .platform_output
+        .accesskit_update
+        .expect("the models workspace publishes an access tree")
+        .nodes
+}
+
 #[test]
 fn the_release_confirmation_states_its_cost_and_exposes_both_actions() {
     let mut state = AppState::default();
     let confirmation = release(&[]);
-    let nodes = accessibility_nodes(&mut state, egui::vec2(640.0, 520.0), |ui, app| {
-        release_confirmation(ui, app, "rspice-proving", &confirmation);
-    });
+    let nodes = confirm_pack_nodes(&mut state, &confirmation);
     assert!(button(&nodes, "Cancel").is_some(), "cancel is reachable");
     let install = button(&nodes, "Install pack").expect("the primary action is reachable");
     assert!(
@@ -283,9 +335,7 @@ fn a_confirmed_update_replaces_the_release_it_names() {
 fn an_incompatible_release_is_described_and_refused_rather_than_hidden() {
     let mut state = AppState::default();
     let confirmation = release(&["nonexistent-capability"]);
-    let nodes = accessibility_nodes(&mut state, egui::vec2(640.0, 520.0), |ui, app| {
-        release_confirmation(ui, app, "rspice-proving", &confirmation);
-    });
+    let nodes = confirm_pack_nodes(&mut state, &confirmation);
     let install = button(&nodes, "Install pack").expect("the action is still present");
     assert!(
         install.is_disabled(),

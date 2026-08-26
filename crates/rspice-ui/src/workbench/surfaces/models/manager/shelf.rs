@@ -318,7 +318,7 @@ pub(super) fn parts_catalog(
                         "No addressable part matches the current search and class.",
                         "Private helper models declared inside macromodel bodies are intentionally excluded.",
                     );
-                    if ui.button("Clear search").clicked() {
+                    if Button::new("Clear search").show(ui).clicked() {
                         app.state.workbench.models_view.catalog_query.clear();
                         app.state.workbench.models_view.part_facet = RSpicePartFacet::All;
                         app.state.workbench.models_view.selected_pack = None;
@@ -528,10 +528,7 @@ fn parts_catalog_footer(
                         );
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add_enabled(end < total, egui::Button::new("Next"))
-                            .clicked()
-                        {
+                        if Button::new("Next").enabled(end < total).show(ui).clicked() {
                             app.state.workbench.models_view.part_catalog_offset =
                                 offset.saturating_add(CATALOG_LIMIT);
                             app.state.workbench.models_view.selected_part = None;
@@ -542,8 +539,9 @@ fn parts_catalog_footer(
                                 .small()
                                 .color(t.color.text_dim),
                         );
-                        if ui
-                            .add_enabled(offset > 0, egui::Button::new("Previous"))
+                        if Button::new("Previous")
+                            .enabled(offset > 0)
+                            .show(ui)
                             .clicked()
                         {
                             app.state.workbench.models_view.part_catalog_offset =
@@ -589,7 +587,7 @@ fn selected_part_detail(
         // that belongs to one. A project library is not a pack, and sending a
         // reader to a table that cannot contain what they asked for is worse
         // than not offering the trip.
-        if pack_scope_identity(app, &row).is_some() && ui.button("Show pack").clicked() {
+        if pack_scope_identity(app, &row).is_some() && Button::new("Show pack").show(ui).clicked() {
             app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
             app.state.workbench.models_view.selected_pack = pack_scope_identity(app, &row);
             app.state.workbench.models_view.catalog_query.clear();
@@ -603,14 +601,14 @@ fn selected_part_detail(
             ui.label(RichText::new("In this project").small());
         } else if matches!(row.origin, PartOrigin::InstalledPack { .. }) {
             ui.label(RichText::new("Installed pack").small());
-        } else if ui
-            .add_enabled(
+        } else if Button::new("Add to project…")
+            .enabled(
                 hit.source.as_ref().is_some_and(|path| path.is_file())
                     && hit.redistributable
                     && !hit.restricted
                     && !app.state.workbench.models_view.model_import_in_progress,
-                egui::Button::new("Add to project…"),
             )
+            .show(ui)
             .on_disabled_hover_text(if hit.restricted || !hit.redistributable {
                 "The source is not licensed for embedding in a project."
             } else {
@@ -623,7 +621,7 @@ fn selected_part_detail(
                 part_name: hit.name.clone(),
             });
         }
-        if ui.button("Open qualification").clicked() {
+        if Button::new("Open qualification").show(ui).clicked() {
             app.state.workbench.models_page = ModelsPage::Qualification;
         }
         // Refused rather than merely greyed. On a browser build the source is
@@ -631,7 +629,7 @@ fn selected_part_detail(
         // tooltip and no node description — visible, dead, and silent about
         // why. Nothing here gains a capability; the reason is stated.
         let refusal = browser::current_host().card_refusal(hit.source.as_deref());
-        let card_response = ui.add_enabled(refusal.is_none(), egui::Button::new("Open card"));
+        let card_response = Button::new("Open card").enabled(refusal.is_none()).show(ui);
         if let Some(reason) = refusal {
             // The same route the disabled Place control takes: the reason
             // reaches a screen reader on the button's own node, because a
@@ -719,14 +717,12 @@ fn place_action(
     row: &ShelfRow,
 ) {
     let offer = place::PlaceOffer::for_row(app.state, installed, row);
-    let response = ui.add_enabled(
-        offer.blocked.is_none(),
-        egui::Button::new("Place").fill(if offer.blocked.is_none() {
-            Tokens::get(ui.ctx()).color.bg_active
-        } else {
-            Color32::TRANSPARENT
-        }),
-    );
+    // The shelf's own primary: placing the selected part is what this table is
+    // for, so it carries the accent the way each page's one primary does.
+    let response = Button::new("Place")
+        .accent()
+        .enabled(offer.blocked.is_none())
+        .show(ui);
     if let Some(reason) = offer.blocked {
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_description(reason.clone());

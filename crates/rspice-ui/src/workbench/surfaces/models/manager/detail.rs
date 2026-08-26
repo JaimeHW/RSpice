@@ -117,7 +117,7 @@ fn project_selection<'a>(
     let mut parameters = model
         .parameters
         .iter()
-        .map(|(name, value)| (name.clone(), value.to_string(), "source card"))
+        .map(|(name, value)| (name.clone(), engineering_value(*value), "source card"))
         .collect::<Vec<_>>();
     parameters.extend(
         model
@@ -226,68 +226,84 @@ pub(super) fn selected_model_detail(
                     .color(t.color.text_dim),
                 );
             });
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let blocked = pin_source_block_reason(
-                    detail.has_root,
-                    app.state.workbench.models_view.model_import_in_progress,
-                );
-                if ui
-                    .add_enabled(
-                        blocked.is_none(),
-                        compact_button(if detail.pinned {
-                            "Refresh pin"
-                        } else {
-                            "Pin source"
-                        }),
-                    )
-                    .on_disabled_hover_text(blocked.unwrap_or_default())
-                    .clicked()
-                {
-                    refresh_library(app, &detail.library);
-                }
-                if ui
-                    .add_enabled(detail.source_available, compact_button("Open source"))
-                    .on_disabled_hover_text("This built-in definition has no source document.")
-                    .clicked()
-                {
-                    open_model_source(app, &detail.library, &detail.model);
-                }
-                if ui.add(compact_button("Compare…")).clicked() {
-                    open_model_compare(app, &detail.library, &detail.model);
-                }
-                if ui
-                    .add(compact_button(if detail.project_owned {
+            // Right to left, so the Models page's one accent primary — the
+            // binding this pane exists to make — sits hard against the right
+            // edge and the supporting actions read leftward from it.
+            //
+            // The row's height is allocated rather than inferred: a
+            // `right_to_left` layout handed the parent's whole remaining rect
+            // takes all of it, which turned this header band into four hundred
+            // points of inset colour and pushed the detail cards off the page.
+            let track = ui.available_width();
+            ui.allocate_ui_with_layout(
+                egui::vec2(track, t.metrics.ctl_h),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.set_min_width(track);
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let bind = Button::new("Bind to selection…")
+                        .accent()
+                        .enabled(
+                            detail.selected_component.is_some()
+                                && detail.binding_block_reason.is_none(),
+                        )
+                        .show(ui);
+                    let bind = if let Some(reason) = detail.binding_block_reason.as_deref() {
+                        bind.on_disabled_hover_text(reason)
+                    } else {
+                        bind
+                    };
+                    if bind.clicked()
+                        && let Some(component_id) = detail.selected_component
+                    {
+                        app.queue_model_binding(component_id, &detail.library, &detail.model);
+                    }
+                    if Button::new("Qualification").show(ui).clicked() {
+                        app.state.workbench.models_page = ModelsPage::Qualification;
+                    }
+                    if Button::new(if detail.project_owned {
                         "Model editor…"
                     } else {
                         "Author project copy…"
-                    }))
+                    })
+                    .show(ui)
                     .clicked()
-                {
-                    if detail.project_owned {
-                        app.queue_command(Command::ModelEditor);
-                    } else {
-                        app.queue_command(Command::ModelCreateProjectCopy);
+                    {
+                        if detail.project_owned {
+                            app.queue_command(Command::ModelEditor);
+                        } else {
+                            app.queue_command(Command::ModelCreateProjectCopy);
+                        }
                     }
-                }
-                if ui.add(compact_button("Qualification")).clicked() {
-                    app.state.workbench.models_page = ModelsPage::Qualification;
-                }
-                let bind = ui.add_enabled(
-                    detail.selected_component.is_some() && detail.binding_block_reason.is_none(),
-                    compact_button("Bind to selection…"),
-                );
-                let bind = if let Some(reason) = detail.binding_block_reason.as_deref() {
-                    bind.on_disabled_hover_text(reason)
-                } else {
-                    bind
-                };
-                if bind.clicked()
-                    && let Some(component_id) = detail.selected_component
-                {
-                    app.queue_model_binding(component_id, &detail.library, &detail.model);
-                }
-            });
+                    if Button::new("Compare…").show(ui).clicked() {
+                        open_model_compare(app, &detail.library, &detail.model);
+                    }
+                    if Button::new("Open source")
+                        .enabled(detail.source_available)
+                        .show(ui)
+                        .on_disabled_hover_text("This built-in definition has no source document.")
+                        .clicked()
+                    {
+                        open_model_source(app, &detail.library, &detail.model);
+                    }
+                    let blocked = pin_source_block_reason(
+                        detail.has_root,
+                        app.state.workbench.models_view.model_import_in_progress,
+                    );
+                    if Button::new(if detail.pinned {
+                        "Refresh pin"
+                    } else {
+                        "Pin source"
+                    })
+                    .enabled(blocked.is_none())
+                    .show(ui)
+                    .on_disabled_hover_text(blocked.unwrap_or_default())
+                    .clicked()
+                    {
+                        refresh_library(app, &detail.library);
+                    }
+                },
+            );
         });
     ui.painter().hline(
         ui.min_rect().x_range(),
@@ -299,33 +315,46 @@ pub(super) fn selected_model_detail(
     // say about this model, so it cannot be a property row among properties.
     drift::detail_banner(ui, app, &detail.library);
 
-    ScrollArea::vertical()
-        .id_salt("models-selected-detail")
-        .show(ui, |ui| {
-            let detail_width = ui.available_width();
-            if detail_width > 1100.0 {
-                ui.columns(4, |columns| {
-                    parameter_card(&mut columns[0], &detail);
-                    characteristic_card(&mut columns[1], &detail);
-                    qualification_card(&mut columns[2], &detail);
-                    usage_card(&mut columns[3], &detail, app);
-                });
-            } else if detail_width > 650.0 {
-                ui.columns(2, |columns| {
-                    parameter_card(&mut columns[0], &detail);
-                    characteristic_card(&mut columns[1], &detail);
-                });
-                ui.columns(2, |columns| {
-                    qualification_card(&mut columns[0], &detail);
-                    usage_card(&mut columns[1], &detail, app);
-                });
-            } else {
-                parameter_card(ui, &detail);
-                characteristic_card(ui, &detail);
-                qualification_card(ui, &detail);
-                usage_card(ui, &detail, app);
-            }
+    // The mockup reflows on the width of the *document column*, not the
+    // window, and both thresholds are the container queries it declares.
+    let detail_width = ui.available_width();
+    let region_h = ui.available_height().max(1.0);
+    if detail_width > 1100.0 {
+        // One row of equal columns filling the region: no outer scroll, so the
+        // panes reach the panel's bottom edge and each one scrolls its own
+        // rows. Anything less leaves the surface ending in dead space.
+        ui.columns(4, |columns| {
+            parameter_card(&mut columns[0], &detail, region_h);
+            characteristic_card(&mut columns[1], &detail, region_h);
+            qualification_card(&mut columns[2], &detail, region_h);
+            usage_card(&mut columns[3], &detail, app, region_h);
         });
+    } else if detail_width > 650.0 {
+        let row_h = (region_h * 0.5).max(DETAIL_PANE_MIN_H);
+        ScrollArea::vertical()
+            .id_salt("models-selected-detail")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.columns(2, |columns| {
+                    parameter_card(&mut columns[0], &detail, row_h);
+                    characteristic_card(&mut columns[1], &detail, row_h);
+                });
+                ui.columns(2, |columns| {
+                    qualification_card(&mut columns[0], &detail, row_h);
+                    usage_card(&mut columns[1], &detail, app, row_h);
+                });
+            });
+    } else {
+        ScrollArea::vertical()
+            .id_salt("models-selected-detail")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                parameter_card(ui, &detail, DETAIL_PANE_MIN_H);
+                characteristic_card(ui, &detail, DETAIL_PANE_MIN_H);
+                qualification_card(ui, &detail, DETAIL_PANE_MIN_H);
+                usage_card(ui, &detail, app, DETAIL_PANE_MIN_H);
+            });
+    }
 }
 
 /// Open the exact bytes behind a model.
@@ -388,11 +417,13 @@ fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, mod
     }
 }
 
-fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
-    detail_pane(
+fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
+    filled_detail_pane(
         ui,
         "RESOLVED PARAMETERS",
         Some(&format!("{} values", detail.parameter_total)),
+        height,
+        "models-detail-parameters",
         |ui| {
             if detail.parameters.is_empty() {
                 empty_state(
@@ -440,80 +471,120 @@ fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
 /// mistake for the device's behaviour has to come from the engine evaluating
 /// the actual model; until it does, this states only what the card itself
 /// declares.
-fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
-    detail_pane(ui, "DECLARED ENVELOPE", Some("from the card"), |ui| {
-        let envelope = &detail.envelope;
-        if let Some(vth) = envelope.vth0 {
-            property(ui, "VTH0", &format!("{vth:.6} V"), "source card");
-        }
-        if let Some(vdd) = envelope.vdd {
-            property(ui, "Supply", &format!("{vdd:.6} V"), "source card");
-        }
-        for (label, (low, high)) in [("Length", envelope.length), ("Width", envelope.width)] {
-            match (low, high) {
-                (Some(low), Some(high)) => {
-                    property(ui, label, &format!("{low:.4e} … {high:.4e} m"), "bin range");
-                }
-                (Some(low), None) => {
-                    property(ui, label, &format!("≥ {low:.4e} m"), "bin range");
-                }
-                (None, Some(high)) => {
-                    property(ui, label, &format!("≤ {high:.4e} m"), "bin range");
-                }
-                (None, None) => {}
+fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
+    filled_detail_pane(
+        ui,
+        "DECLARED ENVELOPE",
+        Some("from the card"),
+        height,
+        "models-detail-envelope",
+        |ui| {
+            let envelope = &detail.envelope;
+            if let Some(vth) = envelope.vth0 {
+                property(ui, "VTH0", &engineering_quantity(vth, "V"), "source card");
             }
-        }
-        if let Some((level, version)) = envelope.level {
-            property(
-                ui,
-                "Level",
-                &format!("{level} · version {version}"),
-                "source card",
-            );
-        }
-        if envelope.is_empty() {
-            empty_state(
-                ui,
-                "This card declares no operating envelope.",
-                "Bin ranges, threshold and supply are read from the card; nothing is inferred.",
-            );
-        }
-    });
+            if let Some(vdd) = envelope.vdd {
+                property(ui, "Supply", &engineering_quantity(vdd, "V"), "source card");
+            }
+            for (label, (low, high)) in [("Length", envelope.length), ("Width", envelope.width)] {
+                match (low, high) {
+                    (Some(low), Some(high)) => {
+                        property(
+                            ui,
+                            label,
+                            &format!(
+                                "{} … {}",
+                                engineering_value(low),
+                                engineering_quantity(high, "m")
+                            ),
+                            "bin range",
+                        );
+                    }
+                    (Some(low), None) => {
+                        property(
+                            ui,
+                            label,
+                            &format!("≥ {}", engineering_quantity(low, "m")),
+                            "bin range",
+                        );
+                    }
+                    (None, Some(high)) => {
+                        property(
+                            ui,
+                            label,
+                            &format!("≤ {}", engineering_quantity(high, "m")),
+                            "bin range",
+                        );
+                    }
+                    (None, None) => {}
+                }
+            }
+            if let Some((level, version)) = envelope.level {
+                property(
+                    ui,
+                    "Level",
+                    &format!("{level} · version {version}"),
+                    "source card",
+                );
+            }
+            if envelope.is_empty() {
+                empty_state(
+                    ui,
+                    "This card declares no operating envelope.",
+                    "Bin ranges, threshold and supply are read from the card; nothing is inferred.",
+                );
+            }
+        },
+    );
 }
 
-fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>) {
-    detail_pane(ui, "QUALIFICATION", Some("source-owned evidence"), |ui| {
-        if let Some(counts) = &detail.qualification {
-            property(ui, "Suites", &counts.suites.to_string(), "retained");
-            property(ui, "Vectors", &counts.vectors.to_string(), "declared");
-            property(ui, "Evidence", &counts.evidence.to_string(), "immutable");
-            property(ui, "Releases", &counts.releases.to_string(), "promoted");
-            property(
-                ui,
-                "Open dispositions",
-                &counts.open_dispositions.to_string(),
-                if counts.open_dispositions == 0 {
-                    "clean"
-                } else {
-                    "review required"
-                },
-            );
-        } else {
-            empty_state(
-                ui,
-                "This model has no qualification suite.",
-                "Qualification claims remain empty until a retained suite and exact-source evidence exist.",
-            );
-        }
-    });
+fn qualification_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
+    filled_detail_pane(
+        ui,
+        "QUALIFICATION",
+        Some("source-owned evidence"),
+        height,
+        "models-detail-qualification",
+        |ui| {
+            if let Some(counts) = &detail.qualification {
+                property(ui, "Suites", &counts.suites.to_string(), "retained");
+                property(ui, "Vectors", &counts.vectors.to_string(), "declared");
+                property(ui, "Evidence", &counts.evidence.to_string(), "immutable");
+                property(ui, "Releases", &counts.releases.to_string(), "promoted");
+                property(
+                    ui,
+                    "Open dispositions",
+                    &counts.open_dispositions.to_string(),
+                    if counts.open_dispositions == 0 {
+                        "clean"
+                    } else {
+                        "review required"
+                    },
+                );
+            } else {
+                empty_state(
+                    ui,
+                    "This model has no qualification suite.",
+                    "Qualification claims remain empty until a retained suite and exact-source evidence exist.",
+                );
+            }
+        },
+    );
 }
 
-fn usage_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, app: &mut ManagerRenderContext<'_>) {
+fn usage_card(
+    ui: &mut Ui,
+    detail: &SelectedModelDetail<'_>,
+    app: &mut ManagerRenderContext<'_>,
+    height: f32,
+) {
     let usages = detail.usages;
-    detail_pane(
+    filled_detail_pane(
         ui,
         "WHERE USED",
         Some(&format!("{} consumers", usages.len())),
+        height,
+        "models-detail-usage",
         |ui| {
             if usages.is_empty() {
                 empty_state(

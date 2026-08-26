@@ -8,18 +8,19 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         ui,
         "Symbols, pins & device forms",
         "Project and technology symbol contracts · pin order is netlist order",
+        // Outermost-right first: the band lays its actions out right to left.
         |ui| {
-            if ui.button("Library manager").clicked() {
-                navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
+            if Button::new("Create symbol").accent().show(ui).clicked() {
+                super::super::open_create_model_bound_symbol_dialog(app.state);
             }
-            if ui.button("Import symbol").clicked() {
-                super::super::open_symbol_import_dialog(app.state);
-            }
-            if ui.button("Form designer").clicked() {
+            if Button::new("Form designer").show(ui).clicked() {
                 super::super::open_symbol_parameter_form_dialog(app.state);
             }
-            if ui.button("Create symbol").clicked() {
-                super::super::open_create_model_bound_symbol_dialog(app.state);
+            if Button::new("Import symbol").show(ui).clicked() {
+                super::super::open_symbol_import_dialog(app.state);
+            }
+            if Button::new("Library manager").show(ui).clicked() {
+                navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
             }
         },
     );
@@ -282,12 +283,11 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                                     .color(t.color.text_faint),
                             );
                         }
-                        if ui
-                            .add(compact_button(if row.read_only() {
+                        if Button::new(if row.read_only() {
                                 "Author a variant…"
                             } else {
                                 "Open symbol editor"
-                            }))
+                            }).show(ui)
                             .clicked()
                         {
                             if matches!(
@@ -307,8 +307,7 @@ fn symbol_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Symbol
                                     .activate(crate::workbench::state::Workspace::Design);
                             }
                         }
-                        if ui
-                            .add_enabled(!row.read_only(), compact_button("Edit form…"))
+                        if Button::new("Edit form…").enabled(!row.read_only()).show(ui)
                             .on_disabled_hover_text(
                                 "Technology symbols must be copied into the project before editing.",
                             )

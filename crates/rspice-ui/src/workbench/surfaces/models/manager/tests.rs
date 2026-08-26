@@ -208,3 +208,109 @@ fn the_pin_action_names_whichever_reason_actually_blocks_it() {
         "a built-in source never becomes pinnable, so waiting is not the advice"
     );
 }
+
+/// Ordering the catalog reorders the rows the page already derived, and never
+/// leaves two of them in an order that depends on the frame.
+///
+/// The model identity is the final tie-break under every key, which is what
+/// makes the order total: a column full of equal cells still lands the same way
+/// twice, and reversing the direction reverses the whole order rather than
+/// shuffling within its ties.
+#[test]
+fn ordering_the_catalog_is_total_under_every_column_and_reverses_whole() {
+    fn row(model: &str, library: &str, family: &'static str, vectors: usize) -> ProjectModelRow {
+        ProjectModelRow {
+            library: library.to_owned(),
+            model: model.to_owned(),
+            family,
+            source: format!("{library}.lib"),
+            pinned: false,
+            review: false,
+            drifted: false,
+            usage: None,
+            vectors,
+        }
+    }
+
+    let original = || {
+        vec![
+            row("nch", "beta", "NMOS", 4),
+            row("pch", "alpha", "PMOS", 1),
+            row("Nch", "alpha", "NMOS", 9),
+        ]
+    };
+    let names = |rows: &[ProjectModelRow]| {
+        rows.iter()
+            .map(|row| format!("{}/{}", row.library, row.model))
+            .collect::<Vec<_>>()
+    };
+
+    // The default is the order the table has always opened in: model name,
+    // case-folded, library breaking ties.
+    let mut rows = original();
+    sort_catalog_rows(&mut rows, ModelsTableSort::default());
+    assert_eq!(names(&rows), ["alpha/Nch", "beta/nch", "alpha/pch"]);
+
+    let mut reversed = original();
+    sort_catalog_rows(
+        &mut reversed,
+        ModelsTableSort {
+            key: ModelsCatalogSortKey::Model,
+            descending: true,
+        },
+    );
+    let mut expected = names(&rows);
+    expected.reverse();
+    assert_eq!(names(&reversed), expected);
+
+    // A numeric column orders by the number, not by its printed form.
+    let mut by_vectors = original();
+    sort_catalog_rows(
+        &mut by_vectors,
+        ModelsTableSort {
+            key: ModelsCatalogSortKey::Vectors,
+            descending: false,
+        },
+    );
+    assert_eq!(
+        by_vectors.iter().map(|row| row.vectors).collect::<Vec<_>>(),
+        [1, 4, 9]
+    );
+
+    // A column whose cells are all equal still produces one order, and it is
+    // the identity order.
+    let mut tied = original();
+    sort_catalog_rows(
+        &mut tied,
+        ModelsTableSort {
+            key: ModelsCatalogSortKey::Status,
+            descending: false,
+        },
+    );
+    assert_eq!(names(&tied), names(&rows));
+}
+
+/// The STATUS column and the STATUS cell are one fact.
+#[test]
+fn the_status_column_orders_by_exactly_what_the_cell_says() {
+    let mut row = ProjectModelRow {
+        library: "alpha".to_owned(),
+        model: "nch".to_owned(),
+        family: "NMOS",
+        source: "alpha.lib".to_owned(),
+        pinned: false,
+        review: false,
+        drifted: false,
+        usage: None,
+        vectors: 0,
+    };
+    assert_eq!(catalog_status(&row), "");
+    row.pinned = true;
+    assert_eq!(catalog_status(&row), "pinned");
+    row.review = true;
+    assert_eq!(
+        catalog_status(&row),
+        "review",
+        "a finding outranks a pin: it is the thing an engineer has to act on"
+    );
+}

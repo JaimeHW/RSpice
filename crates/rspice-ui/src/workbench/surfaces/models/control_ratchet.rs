@@ -127,16 +127,32 @@ fn every_authored_control_declares_its_effect() {
 /// be added here, and the count floor in the caller is what makes forgetting
 /// that a red test rather than a silent gap.
 fn authored_control_labels(source: &str) -> Vec<String> {
-    /// `(pattern, whether the label is the pattern's own next literal)`.
+    /// The constructors this workspace uses to author a control whose label is
+    /// the next literal after the pattern.
+    ///
+    /// A new one has to be added here, and the count floor in the caller is
+    /// what makes forgetting that a red test rather than a silent gap.
+    ///
+    /// `Button::new("` is written without a path qualifier since the design
+    /// system's button replaced the raw egui one; matching the bare form also
+    /// catches a qualified `egui::Button::new("`, because the pattern is a
+    /// substring.
     ///
     /// `checkbox` and `selectable_label` take the bound value first, so their
-    /// label is the *following* string literal rather than the first argument.
+    /// pattern stops before the quote and their label is the following literal
+    /// — which is what the second field says.
     const CONSTRUCTORS: &[(&str, bool)] = &[
         ("ui.button(\"", true),
-        ("compact_button(\"", true),
-        ("egui::Button::new(\"", true),
+        ("Button::new(\"", true),
         ("ui.link(\"", true),
         (".hint_text(\"", true),
+        // A sortable table's header cell: clicking one reorders the table.
+        ("sort_column(\"", true),
+        // Two of the design system's three modal footer actions, which carry
+        // their own label. The third — the primary — is positional, and is
+        // read by `dialog_primary_labels` below.
+        (".secondary(\"", true),
+        (".ghost(\"", true),
         ("ui.checkbox(", false),
         ("ui.selectable_label(", false),
     ];
@@ -154,18 +170,115 @@ fn authored_control_labels(source: &str) -> Vec<String> {
             };
             let body = &rest[start..];
             let Some(end) = body.find('"') else { continue };
-            let label = &body[..end];
-            // A format string is a computed label, not an authored one: its
-            // content belongs to whatever produced it.
-            if label.is_empty() || label.contains('{') || label.contains('\\') {
-                continue;
-            }
-            labels.push(label.to_owned());
+            push_label(&mut labels, &body[..end]);
         }
     }
+    labels.extend(dialog_primary_labels(source));
     labels.sort();
     labels.dedup();
     labels
+}
+
+/// Keep an authored label; drop a computed one.
+///
+/// A format string's content belongs to whatever produced it, and an escaped
+/// quote means the naive quote walk above cut the literal in the wrong place.
+fn push_label(labels: &mut Vec<String>, label: &str) {
+    if label.is_empty() || label.contains('{') || label.contains('\\') {
+        return;
+    }
+    labels.push(label.to_owned());
+}
+
+/// Every primary-action label a modal's `Dialog::new` call authors.
+///
+/// That constructor takes a kicker, a title and the primary's label, in that
+/// order, and only the third is a control. Being positional rather than named,
+/// it cannot be found by a pattern that ends on a quote: the kicker and the
+/// title are prose that would be swept up with it, and either may be an
+/// expression rather than a literal. This walks the call's own parentheses
+/// instead, takes its third argument, and reads every literal inside it — one
+/// label for a plain call, and two for the dialogs whose primary reads
+/// `if duplicate { … } else { … }`, both of which really are authored controls.
+fn dialog_primary_labels(source: &str) -> Vec<String> {
+    // Spelled in two pieces so the design system's own source audit — which
+    // requires every production `Dialog` construction to publish purpose text —
+    // does not read this scanner's search pattern as a dialog being built here.
+    const CALL: &str = concat!("Dialog", "::new(");
+    let mut labels = Vec::new();
+    for (index, _) in source.match_indices(CALL) {
+        let open = index + CALL.len() - 1;
+        let Some(close) = matching_paren(source, open) else {
+            continue;
+        };
+        let arguments = &source[open + 1..close];
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut argument = 0usize;
+        let mut literal = String::new();
+        let mut characters = arguments.chars();
+        while let Some(character) = characters.next() {
+            if in_string {
+                match character {
+                    '\\' => {
+                        literal.push(character);
+                        if let Some(escaped) = characters.next() {
+                            literal.push(escaped);
+                        }
+                    }
+                    '"' => {
+                        in_string = false;
+                        if argument == 2 {
+                            push_label(&mut labels, &literal);
+                        }
+                        literal.clear();
+                    }
+                    _ => literal.push(character),
+                }
+                continue;
+            }
+            match character {
+                '"' => in_string = true,
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => argument += 1,
+                _ => {}
+            }
+        }
+    }
+    labels
+}
+
+/// The index of the `)` closing the `(` at `open`, ignoring parentheses inside
+/// string literals.
+fn matching_paren(source: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in source[open..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// `(control label, the state or command it moves)`.
@@ -178,6 +291,32 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
         "models_view.catalog_query",
     ),
     ("Search installed packs…", "models_view.catalog_query"),
+    // The project catalog's sortable header cells. Each one reorders the rows
+    // the page already derived; the order itself is durable session state.
+    (
+        "MODEL",
+        "models_view.catalog_sort = Model, read by sort_catalog_rows",
+    ),
+    (
+        "FAMILY",
+        "models_view.catalog_sort = Family, read by sort_catalog_rows",
+    ),
+    (
+        "SOURCE",
+        "models_view.catalog_sort = Source, read by sort_catalog_rows",
+    ),
+    (
+        "USED BY",
+        "models_view.catalog_sort = UsedBy, read by sort_catalog_rows",
+    ),
+    (
+        "VECTORS",
+        "models_view.catalog_sort = Vectors, read by sort_catalog_rows",
+    ),
+    (
+        "STATUS",
+        "models_view.catalog_sort = Status, read by sort_catalog_rows",
+    ),
     // Selected model detail
     ("Pin source", "refresh_library publishes a revision"),
     ("Refresh pin", "refresh_library publishes a revision"),
@@ -291,6 +430,11 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     ),
     ("Delete corner…", "models_view.dialog = ConfirmDeleteCorner"),
     ("Delete corner", "delete_corner publishes a revision"),
+    ("Save corner", "edit_corner publishes a revision"),
+    (
+        "Duplicate corner",
+        "edit_corner publishes a revision under the new name",
+    ),
     (
         "Use as the library default corner",
         "EditCorner.make_default",

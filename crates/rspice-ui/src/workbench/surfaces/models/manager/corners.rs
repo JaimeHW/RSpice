@@ -15,20 +15,13 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             rows.len(),
             unresolved
         ),
+        // Outermost-right first: the band lays its actions out right to left.
         |ui| {
-            if ui
-                .add_enabled(
-                    !app.state.workbench.models_view.model_import_in_progress,
-                    egui::Button::new("Import section map"),
-                )
-                .on_hover_text(
-                    "Import an authenticated SPICE model source whose .lib sections define the map.",
-                )
-                .clicked()
-            {
-                app.queue_model_source_import();
+            if Button::new("Validate bindings").accent().show(ui).clicked() {
+                let result = validate_current_model_execution_plan(app, unresolved);
+                receipt(app, result);
             }
-            if ui.button("Add corner…").clicked() {
+            if Button::new("Add corner…").show(ui).clicked() {
                 if let Some(library) = app
                     .state
                     .model_library_manager
@@ -56,9 +49,15 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     );
                 }
             }
-            if ui.button("Validate bindings").clicked() {
-                let result = validate_current_model_execution_plan(app, unresolved);
-                receipt(app, result);
+            if Button::new("Import section map")
+                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .show(ui)
+                .on_hover_text(
+                    "Import an authenticated SPICE model source whose .lib sections define the map.",
+                )
+                .clicked()
+            {
+                app.queue_model_source_import();
             }
         },
     );
@@ -119,7 +118,11 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                                 0.10,
                                 true,
                             ),
-                            (&format!("{:.1} °C", row.corner.temperature), 0.13, true),
+                            (
+                                &engineering_quantity(row.corner.temperature, " °C"),
+                                0.13,
+                                true,
+                            ),
                             (
                                 if row.active && row.resolved() {
                                     "active"
@@ -484,11 +487,9 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
                     .color(Tokens::get(ui.ctx()).color.accent),
             );
         }
-        if ui
-            .add_enabled(
-                !row.active && row.resolved(),
-                egui::Button::new("Use for execution"),
-            )
+        if Button::new("Use for execution")
+            .enabled(!row.active && row.resolved())
+            .show(ui)
             .on_disabled_hover_text(if row.active {
                 "This corner is already active for this library's executable model projection."
             } else {
@@ -498,44 +499,48 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
         {
             activate = true;
         }
-        if ui.button("Edit corner…").clicked() {
+        if Button::new("Edit corner…").show(ui).clicked() {
             open_editor = true;
         }
-        if ui.button("Duplicate…").clicked() {
+        if Button::new("Duplicate…").show(ui).clicked() {
             duplicate = true;
         }
-        if ui
-            .add_enabled(!row.corner.is_default, egui::Button::new("Set default"))
+        if Button::new("Set default")
+            .enabled(!row.corner.is_default)
+            .show(ui)
             .clicked()
         {
             make_default = true;
         }
-        if ui.button("Delete corner…").clicked() {
+        if Button::new("Delete corner…")
+            .destructive(true)
+            .show(ui)
+            .clicked()
+        {
             delete = true;
         }
-        if ui.button("Bind section…").clicked() {
+        if Button::new("Bind section…").show(ui).clicked() {
             open_corner_binding_dialog(app, &row);
         }
         for binding in row.corner.effective_section_bindings() {
-            if ui
-                .button(format!("Unbind {}", binding.domain.label()))
-                .clicked()
-            {
+            let unbind_label = format!("Unbind {}", binding.domain.label());
+            if Button::new(&unbind_label).show(ui).clicked() {
                 unbind = Some(binding.domain);
             }
         }
         // The corner's own retained file, not whichever model the library
         // happens to iterate first.
-        if ui
-            .add_enabled(row.source.is_some(), egui::Button::new("Open source"))
+        if Button::new("Open source")
+            .enabled(row.source.is_some())
+            .show(ui)
             .clicked()
         {
             open_corner_source(app, &row);
         }
-        if ui.button("View include graph").clicked() {
+        if Button::new("View include graph").show(ui).clicked() {
             app.state.workbench.models_page = ModelsPage::Include;
         }
-        if ui.button("Model editor…").clicked() {
+        if Button::new("Model editor…").show(ui).clicked() {
             app.queue_command(Command::ModelEditor);
         }
     });
@@ -597,13 +602,13 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, rows: &[Corner
             property(
                 ui,
                 "Supply factor",
-                &format!("{:.6}", row.corner.vdd_factor),
+                &engineering_value(row.corner.vdd_factor),
                 "environment axis",
             );
             property(
                 ui,
                 "Temperature",
-                &format!("{:.3} °C", row.corner.temperature),
+                &engineering_quantity(row.corner.temperature, " °C"),
                 "environment axis",
             );
             property(

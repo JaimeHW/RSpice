@@ -320,7 +320,7 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
                 RichText::new(DRIFT_EFFECT).small().color(t.color.text_dim),
                 DRIFT_EFFECT,
             );
-            if ui.add(compact_button("Resolve drift…")).clicked() {
+            if Button::new("Resolve drift…").show(ui).clicked() {
                 app.state.workbench.models_view.dialog =
                     Some(ModelsWorkbenchDialog::ResolveDrift {
                         library: library.to_owned(),
@@ -335,11 +335,7 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
 /// the check, so what a reader decided against is what they were shown. The
 /// repair is a re-pin — the same refresh the source pane offers — which reads
 /// the bytes as they are now and publishes a revision recording the change.
-pub(super) fn resolve_dialog(
-    ui: &mut Ui,
-    app: &mut ManagerRenderContext<'_>,
-    library: &str,
-) -> Option<bool> {
+pub(super) fn resolve_dialog(ui: &mut Ui, app: &ManagerRenderContext<'_>, library: &str) {
     let findings = findings_for(app.state, library).to_vec();
     let t = Tokens::get(ui.ctx());
     ui.label(format!(
@@ -379,27 +375,24 @@ pub(super) fn resolve_dialog(
                 }
             });
     });
-    let mut decision = None;
-    ui.horizontal(|ui| {
-        if ui.button("Cancel").clicked() {
-            decision = Some(false);
-        }
-        if ui
-            .add_enabled(
-                !app.state.workbench.models_view.model_import_in_progress && !findings.is_empty(),
-                egui::Button::new("Re-pin this library"),
-            )
-            .on_disabled_hover_text(if findings.is_empty() {
-                "There is nothing here to re-pin."
-            } else {
-                "Another model-source operation is still running."
-            })
-            .clicked()
-        {
-            decision = Some(true);
-        }
-    });
-    decision
+}
+
+/// Why the re-pin cannot run right now, if it cannot.
+///
+/// The dialog's footer owns the commit, so the reason a commit is blocked has
+/// to travel there with it.
+pub(super) fn repin_block_reason(
+    app: &ManagerRenderContext<'_>,
+    library: &str,
+) -> Option<&'static str> {
+    if findings_for(app.state, library).is_empty() {
+        return Some("There is nothing here to re-pin.");
+    }
+    app.state
+        .workbench
+        .models_view
+        .model_import_in_progress
+        .then_some("Another model-source operation is still running.")
 }
 
 #[cfg(test)]

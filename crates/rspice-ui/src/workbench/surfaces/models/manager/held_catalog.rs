@@ -23,29 +23,23 @@ use crate::workbench::state::ModelsAttemptedOperation;
 
 /// The held catalog's identity, its acceptance contract, and the last attempt.
 pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubCatalog) {
-    let mut open = true;
-    egui::Window::new("The held catalog")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_size(egui::vec2(660.0, 560.0))
+    // Reference material, not a transaction: the footer states what is being
+    // read rather than offering an action whose only effect is to close.
+    let choice = Dialog::new("Model packs", "The held catalog", "Close")
+        .description(
+            "Who signed the catalog snapshot this client holds, the contract it is accepted \
+             under, and the last hub operation this session attempted.",
+        )
+        .size(DialogSize::Manager)
+        .primary_on_enter(false)
+        .note_only_footer()
+        .hint("Model hub · identity, acceptance and history")
         .show(ui.ctx(), |ui| {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                RichText::new("MODEL HUB · IDENTITY, ACCEPTANCE AND HISTORY")
-                    .small()
-                    .color(t.color.text_faint),
-            );
             identity(ui, hub);
             contract(ui, hub);
             last_attempt(ui, app);
-            ui.horizontal(|ui| {
-                if ui.button("Close").clicked() {
-                    app.state.workbench.models_view.dialog = None;
-                }
-            });
         });
-    if !open {
+    if choice == DialogChoice::Cancelled {
         app.state.workbench.models_view.dialog = None;
     }
 }

@@ -234,8 +234,8 @@ fn unresolved_row(
                 .color(t.color.text_dim),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .add(compact_button("Show instance"))
+            if Button::new("Show instance")
+                .show(ui)
                 .on_hover_text("Selects this instance and opens the schematic it sits on.")
                 .clicked()
             {
@@ -262,7 +262,9 @@ fn unresolved_row(
                     .err()
                 }
             };
-            let bind = ui.add_enabled(blocked.is_none(), compact_button("Bind to selection…"));
+            let bind = Button::new("Bind to selection…")
+                .enabled(blocked.is_none())
+                .show(ui);
             let bind = match blocked.as_deref() {
                 Some(reason) => bind.on_disabled_hover_text(reason),
                 None => bind,

@@ -173,23 +173,13 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 .sum::<usize>(),
             findings.len()
         ),
+        // Outermost-right first: the band lays its actions out right to left.
         |ui| {
-            if ui
-                .add_enabled(
-                    !app.state.workbench.models_view.model_import_in_progress,
-                    egui::Button::new("Import bin map"),
-                )
-                .on_hover_text(
-                    "Import authenticated binned model cards; L, W, and NFIN bounds are evaluated by the simulator from the retained source.",
-                )
+            if Button::new("Audit all families")
+                .accent()
+                .show(ui)
                 .clicked()
             {
-                app.queue_model_source_import();
-            }
-            if ui.button("Edit cards…").clicked() {
-                app.queue_command(Command::ModelEditor);
-            }
-            if ui.button("Audit all families").clicked() {
                 receipt(
                     app,
                     if findings.is_empty() {
@@ -208,8 +198,9 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             // Gated on the fact it traces — the selected model — rather than
             // on a schematic selection it never reads, and it says which.
             let traced = app.state.workbench.selected_model.clone();
-            if ui
-                .add_enabled(traced.is_some(), egui::Button::new("Trace schematic"))
+            if Button::new("Trace schematic")
+                .enabled(traced.is_some())
+                .show(ui)
                 .on_disabled_hover_text("Select a model in the catalog first.")
                 .clicked()
                 && let Some(model) = traced
@@ -219,6 +210,19 @@ pub(super) fn bins_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                         consumers: effective_model_consumers(app, &model),
                         model,
                     });
+            }
+            if Button::new("Edit cards…").show(ui).clicked() {
+                app.queue_command(Command::ModelEditor);
+            }
+            if Button::new("Import bin map")
+                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .show(ui)
+                .on_hover_text(
+                    "Import authenticated binned model cards; L, W, and NFIN bounds are evaluated by the simulator from the retained source.",
+                )
+                .clicked()
+            {
+                app.queue_model_source_import();
             }
         },
     );
@@ -425,6 +429,39 @@ fn geometry_map(ui: &mut Ui, family: &str, cards: &[BinCard]) {
                 color,
             );
         }
+        // The decades the map actually spans. Without them the plot states
+        // that one card sits left of another and nothing about what either
+        // geometry *is*, which is the number an engineer came here for.
+        for (anchor, position, decade) in [
+            (
+                egui::Align2::LEFT_TOP,
+                plot.left_bottom() + egui::vec2(0.0, 3.0),
+                min_l,
+            ),
+            (
+                egui::Align2::RIGHT_TOP,
+                plot.right_bottom() + egui::vec2(0.0, 3.0),
+                max_l,
+            ),
+            (
+                egui::Align2::RIGHT_BOTTOM,
+                plot.left_bottom() + egui::vec2(-3.0, 0.0),
+                min_w,
+            ),
+            (
+                egui::Align2::RIGHT_TOP,
+                plot.left_top() + egui::vec2(-3.0, 0.0),
+                max_w,
+            ),
+        ] {
+            ui.painter().text(
+                position,
+                anchor,
+                engineering_quantity(10f64.powf(decade), "m"),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            );
+        }
     });
 }
 
@@ -479,10 +516,10 @@ fn geometry_instance_table(
                         format!("{} → {}", instance.requested_model, instance.selected_model);
                     let origin = format!(
                         "{selection} · L={} · W={} · NFIN={} · M={}",
-                        optional_bin_value(instance.length),
-                        optional_bin_value(instance.width),
-                        optional_bin_value(instance.nfin),
-                        optional_bin_value(instance.multiplier),
+                        optional_bin_length(instance.length),
+                        optional_bin_length(instance.width),
+                        optional_bin_count(instance.nfin),
+                        optional_bin_count(instance.multiplier),
                     );
                     property(ui, &instance.element, &value, &origin);
                 }
@@ -490,8 +527,15 @@ fn geometry_instance_table(
     });
 }
 
-fn optional_bin_value(value: Option<f64>) -> String {
-    value.map_or_else(|| "—".to_owned(), |value| format!("{value:.6e}"))
+/// A device dimension the instance declared, in metres.
+fn optional_bin_length(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), |value| engineering_quantity(value, "m"))
+}
+
+/// A count the instance declared — fins, multiplicity — which carries no unit
+/// and no decade prefix.
+fn optional_bin_count(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_owned(), engineering_value)
 }
 
 #[cfg(test)]
