@@ -946,7 +946,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             source.quantity(),
             source.summary()
         );
-        let object = excitation_object(&app.state, &source);
+        let object = placed_object(&app.state, source.component_id, &source.reference);
         let response = nav_row_indented_mono_response(
             ui,
             WorkbenchIcon::ArrowRight,
@@ -980,24 +980,31 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-/// The design object one excitation row stands for.
+/// The design object one derived row — a source, an RF port — stands for.
 ///
-/// Every command the shared menu carries acts on a placed object, so a source
-/// the sheet holds no instance for stands for nothing: it is still listed,
-/// still selectable, and offered no menu rather than a menu of dead entries.
-fn excitation_object(
+/// Every command the shared menu carries acts on a placed object, so a row
+/// whose instance the sheet no longer holds stands for nothing: it is still
+/// listed, still selectable, and offered no menu rather than a menu of dead
+/// entries.
+///
+/// Asked by component id rather than by the row that carries it, because the
+/// rails that need this answer read different derivations and the question is
+/// the same one every time: a row states a reference, and the menu acts on the
+/// instance that reference was taken from.
+fn placed_object(
     state: &crate::workbench::app_state::AppState,
-    source: &crate::simulation::placed_sources::PlacedSource,
+    component_id: u64,
+    reference: &str,
 ) -> Option<NavigatorObject> {
     let position = state
         .schematic
         .components
         .iter()
-        .find(|component| component.id == source.component_id)
+        .find(|component| component.id == component_id)
         .map(|component| component.pos)?;
     Some(NavigatorObject::Component {
-        id: source.component_id,
-        label: source.reference.clone(),
+        id: component_id,
+        label: reference.to_owned(),
         position,
     })
 }

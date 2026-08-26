@@ -1468,7 +1468,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
         .expect("the fixture source is placed");
 
     assert_eq!(
-        excitation_object(&app.state, placed),
+        placed_object(&app.state, placed.component_id, &placed.reference),
         Some(NavigatorObject::Component {
             id: 501,
             label: "VIN".to_owned(),
@@ -1479,7 +1479,10 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
     // A source the sheet holds no instance for is offered no menu rather than a
     // menu of commands that would act on nothing.
     app.state.schematic.components.clear();
-    assert_eq!(excitation_object(&app.state, placed), None);
+    assert_eq!(
+        placed_object(&app.state, placed.component_id, &placed.reference),
+        None
+    );
 }
 
 // ------------------------------------------------------------ shelf identity
