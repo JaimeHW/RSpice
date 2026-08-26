@@ -197,8 +197,17 @@ fn engineering_value(
         };
     }
 
-    const PREFIXES: [(i32, &str); 11] = [
-        (-18, "a"),
+    // Femto is the bottom of the ladder. The decade under it was written `a`,
+    // a spelling no parser in the toolchain reads back — so a value that lands
+    // there keeps its own exponent, which the copy path needs anyway: pinning
+    // it against a femto prefix would drive a sub-femto mantissa's digits off
+    // the end of the fixed decimals and copy the value as zero.
+    let decade = (value.abs().log10().floor() as i32).div_euclid(3) * 3;
+    if decade < -15 {
+        return format!("{value:e} {unit}");
+    }
+
+    const PREFIXES: [(i32, &str); 10] = [
         (-15, "f"),
         (-12, "p"),
         (-9, "n"),
@@ -210,7 +219,7 @@ fn engineering_value(
         (9, "G"),
         (12, "T"),
     ];
-    let exponent = ((value.abs().log10().floor() as i32).div_euclid(3) * 3).clamp(-18, 12);
+    let exponent = decade.min(12);
     let prefix = PREFIXES
         .iter()
         .find_map(|(candidate, prefix)| (*candidate == exponent).then_some(*prefix))
@@ -261,6 +270,27 @@ mod tests {
         assert_eq!(policy.copy_frequency(1_000.0), "1.00000000000000000e3 Hz");
         assert_eq!(policy.copy_temperature(300.0), "3.00000000000000000e2 K");
         assert_eq!(policy.copy_angle(0.5), "5.00000000000000000e-1 rad");
+    }
+
+    /// Femto is the bottom of the prefix ladder. The decade under it has no
+    /// spelling any parser in the toolchain reads back, so a value that lands
+    /// there keeps its own exponent rather than being shown against a prefix —
+    /// or, worse, copied as a run of zeros under a femto prefix that its
+    /// mantissa cannot fill.
+    #[test]
+    fn a_sub_femto_magnitude_keeps_its_exponent_instead_of_an_unreadable_prefix() {
+        let policy = QuantityPresentationPolicy {
+            copied_value_format: CopiedValueFormat::EngineeringNotationWithUnit,
+            ..QuantityPresentationPolicy::default()
+        };
+        assert_eq!(policy.format_frequency(1e-18, 3), "1e-18 Hz");
+        assert_eq!(policy.format_frequency(5e-19, 3), "5e-19 Hz");
+        assert_eq!(policy.copy_si_value(1e-18, "V"), "1e-18 V");
+        assert_eq!(
+            policy.format_frequency(2e-15, 3),
+            "2.000 fHz",
+            "femto is still a prefix"
+        );
     }
 
     #[test]

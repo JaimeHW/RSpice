@@ -60,6 +60,11 @@ pub fn parse_si_value(s: &str) -> Result<f64, ParseError> {
     }
     let suffix = suffix.trim().to_lowercase();
 
+    // No atto, in either spelling. `a` is a unit letter to every other reader
+    // in the toolchain — the engine's deck lexer has no atto at all — and the
+    // formatter below no longer writes one, so a decade nothing else reads
+    // would only be a way for an option's value to change meaning in transit.
+    // A sub-femto option is written and read as a plain exponent instead.
     let decade = match suffix.as_str() {
         "" => 0,
         "t" | "tera" => 12,
@@ -72,7 +77,6 @@ pub fn parse_si_value(s: &str) -> Result<f64, ParseError> {
         "n" | "nano" => -9,
         "p" | "pico" => -12,
         "f" | "femto" => -15,
-        "a" | "atto" => -18,
         other => return Err(ParseError::UnknownSuffix(other.to_string())),
     };
 
@@ -143,6 +147,15 @@ pub fn format_si_value(v: f64) -> String {
         return format!("{v}");
     };
 
+    // Below femto the ladder stops. The decade under it used to be written
+    // `a`, which the parser above no longer reads and no deck reader ever did,
+    // so a sub-femto option is written as the plain exponent every reader in
+    // the toolchain takes — and `{:e}` is already the shortest text that reads
+    // back as exactly this double, which is what this pair is for.
+    if exponent < -15 {
+        return format!("{mantissa}e{exponent}");
+    }
+
     let (decade, suffix) = match exponent {
         e if e >= 12 => (12, "T"),
         e if e >= 9 => (9, "G"),
@@ -153,12 +166,11 @@ pub fn format_si_value(v: f64) -> String {
         e if e >= -6 => (-6, "u"),
         e if e >= -9 => (-9, "n"),
         e if e >= -12 => (-12, "p"),
-        e if e >= -15 => (-15, "f"),
-        _ => (-18, "a"),
+        _ => (-15, "f"),
     };
     // `decade` is the multiple of three at or below `exponent`, so the shift
-    // is 0, 1 or 2 places — except far below atto, where the value keeps its
-    // own exponent rather than growing a run of leading zeros.
+    // is 0, 1 or 2 places — except far above tera, where the value keeps its
+    // own exponent rather than growing a run of trailing zeros.
     let Ok(shift) = u32::try_from(exponent - decade) else {
         return format!("{v}");
     };
@@ -281,6 +293,27 @@ mod tests {
         assert_eq!(parse_si_value("850f").expect("valid"), 8.5e-13);
         assert_eq!(parse_si_value("0.35u").expect("valid"), 3.5e-7);
         assert_eq!(parse_si_value("1.5e3m").expect("valid"), 1.5);
+    }
+
+    /// The decade below femto has no suffix any reader in the toolchain takes,
+    /// so an option that lands there is written as an exponent and read back
+    /// as one. `1a` is not a value here any more, in either spelling.
+    #[test]
+    fn a_sub_femto_option_is_written_and_read_as_a_plain_exponent() {
+        assert_eq!(format_si_value(1e-18), "1e-18");
+        assert_eq!(format_si_value(-2.5e-20), "-2.5e-20");
+        assert_eq!(parse_si_value("1e-18").expect("valid"), 1e-18);
+        assert_eq!(
+            format_si_value(1e-15),
+            "1f",
+            "femto is still the last suffix"
+        );
+        assert!(
+            matches!(parse_si_value("1a"), Err(ParseError::UnknownSuffix(suffix)) if suffix == "a")
+        );
+        assert!(
+            matches!(parse_si_value("1atto"), Err(ParseError::UnknownSuffix(suffix)) if suffix == "atto")
+        );
     }
 
     #[test]

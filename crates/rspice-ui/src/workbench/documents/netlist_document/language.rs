@@ -1769,6 +1769,19 @@ M1 d g s b nch W={w} L={l*2}\n\
         );
     }
 
+    /// A sub-femto value used to lose its engineering notation here. The
+    /// formatter spelled the decade below femto `a`, the parser read that `a`
+    /// as a unit rather than as atto, the round trip failed, and the hover
+    /// fell back to `0.000000000000000001` — eighteen zeros a reader has to
+    /// count. The formatter now writes the exponent, the parser reads it back
+    /// exactly, and the hover shows what was written.
+    #[test]
+    fn value_hover_shows_a_sub_femto_value_as_the_exponent_that_round_trips() {
+        assert_eq!(format_hover_value(1e-18), "1e-18");
+        assert_eq!(format_hover_value(-2.5e-20), "-2.5e-20");
+        assert_eq!(format_hover_value(1e-15), "1f", "femto still has a suffix");
+    }
+
     #[test]
     fn value_hover_states_why_an_undefined_reference_has_no_value() {
         let mut state = hover_state();

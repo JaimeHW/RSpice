@@ -174,6 +174,18 @@ pub fn format_engineering_value_with(value: f64, precision: EngineeringPrecision
         return "0".to_string();
     }
 
+    // Below femto the ladder runs out. The decade under it was spelled `a`,
+    // which no reader in the toolchain takes any more — not this module's
+    // parser, not the deck-bound one in `simulation::spice_value`, not the
+    // options one, and never the engine's own lexer, which has no atto at all
+    // — so writing it would be writing text nothing can read back. A plain
+    // exponent is what every one of them reads, and it is the same under all
+    // three decimal policies: there is no decade left for a mantissa to sit
+    // on, so there are no decimals to choose.
+    if abs_value < 1e-15 {
+        return format!("{value:e}");
+    }
+
     let (scaled, suffix) = if abs_value >= 1e12 {
         (value / 1e12, "T")
     } else if abs_value >= 1e9 {
@@ -192,10 +204,8 @@ pub fn format_engineering_value_with(value: f64, precision: EngineeringPrecision
         (value * 1e9, "n")
     } else if abs_value >= 1e-12 {
         (value * 1e12, "p")
-    } else if abs_value >= 1e-15 {
-        (value * 1e15, "f")
     } else {
-        (value * 1e18, "a")
+        (value * 1e15, "f")
     };
 
     // Rescaling by a decade carries rounding error, so "is this whole?" is
@@ -262,7 +272,10 @@ pub(crate) const PRECISION_CHARACTERIZATION: &[(f64, &str, &str, &str)] = &[
     (100.0e-9, "100n", "100n", "100n"),
     (47.0e-12, "47p", "47p", "47p"),
     (1e-15, "1f", "1f", "1f"),
-    (1e-18, "1a", "1a", "1a"),
+    // Femto is the last suffix. Under it the value is written as an exponent,
+    // which no decimal policy can decorate — and every parser reads back.
+    (1e-18, "1e-18", "1e-18", "1e-18"),
+    (2.5e-20, "2.5e-20", "2.5e-20", "2.5e-20"),
     (-6.8e3, "-6.8k", "-6.800k", "-6.8k"),
     (-0.25, "-250m", "-250m", "-250m"),
     (-3.3e6, "-3.3Meg", "-3.300Meg", "-3.3Meg"),
@@ -418,23 +431,38 @@ mod tests {
         }
     }
 
-    /// The formatter still spells the decade below femto `a`, which this
-    /// parser now reads as a unit rather than as atto — so a sub-femto value
-    /// no longer survives a round trip, and the netlist hover that checks the
-    /// round trip falls back to the raw float instead of showing `1a`.
+    /// The formatter no longer writes an `a` for the decade below femto: it
+    /// writes a plain exponent, which this parser, the deck-bound one, the
+    /// options one and the engine's own lexer all read back as the same
+    /// number. The suffix it used to write survived only as a spelling nothing
+    /// could read, which cost the netlist hover its engineering notation and
+    /// would have cost a saved option its value.
     ///
-    /// Pinned rather than fixed: the `a` the formatter writes is shared with
-    /// two other suffix ladders, and changing it is not this module's call.
+    /// `1a` still parses — as one of something, on the number's own decade,
+    /// because `a` is the unit letter of an ampere.
     #[test]
-    fn the_sub_femto_suffix_the_formatter_writes_no_longer_reads_back_as_atto() {
-        assert_eq!(format_engineering_value(1e-18), "1a");
+    fn the_decade_below_femto_is_written_as_an_exponent_every_parser_reads() {
+        for precision in [
+            EngineeringPrecision::Adaptive,
+            EngineeringPrecision::Fixed(3),
+            EngineeringPrecision::UpTo(6),
+        ] {
+            assert_eq!(format_engineering_value_with(1e-18, precision), "1e-18");
+            assert_eq!(
+                format_engineering_value_with(-2.5e-20, precision),
+                "-2.5e-20"
+            );
+        }
+        assert_eq!(parse_engineering_value("1e-18").unwrap(), 1e-18);
+        assert_eq!(format_engineering_value(1e-15), "1f", "femto still has one");
         assert_eq!(parse_engineering_value("1a").unwrap(), 1.0);
     }
 
     #[test]
     fn formatting_round_trips_through_the_parser_at_every_decade() {
         for value in [
-            3.3e6, 4.7e3, 1.0, 2.2e-3, 1.5e-6, 100.0e-9, 47.0e-12, 1.0e-15, 0.0, -6.8e3,
+            3.3e6, 4.7e3, 1.0, 2.2e-3, 1.5e-6, 100.0e-9, 47.0e-12, 1.0e-15, 1.0e-18, 2.5e-20, 0.0,
+            -6.8e3,
         ] {
             let formatted = format_engineering_value(value);
             let parsed = parse_engineering_value(&formatted)
