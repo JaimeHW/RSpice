@@ -9,6 +9,7 @@ mod accessibility;
 mod capture_groups;
 mod field_editing;
 mod plan_removal;
+mod press_sweep;
 mod registry_honesty;
 mod settings_switch;
 
