@@ -254,15 +254,18 @@ enum DesignNavigatorSection {
     Masters,
     Occurrences,
     Ports,
+    /// Drawn only by a design that places one; see [`rf_port_section`].
+    RfPorts,
     Nets,
     Excitations,
     NamedSignals,
 }
 
-const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 6] = [
+const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 7] = [
     DesignNavigatorSection::Masters,
     DesignNavigatorSection::Occurrences,
     DesignNavigatorSection::Ports,
+    DesignNavigatorSection::RfPorts,
     DesignNavigatorSection::Nets,
     DesignNavigatorSection::Excitations,
     DesignNavigatorSection::NamedSignals,
@@ -479,6 +482,7 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                         hierarchy_tree::occurrences_section(ui, app);
                     }
                     DesignNavigatorSection::Ports => port_section(ui, app),
+                    DesignNavigatorSection::RfPorts => rf_port_section(ui, app),
                     DesignNavigatorSection::Nets => net_section(ui, app),
                     DesignNavigatorSection::Excitations => excitation_section(ui, app),
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
@@ -883,6 +887,199 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         );
     }
+}
+
+/// Every RF port the design places, in the order an S-parameter matrix indexes
+/// them.
+///
+/// A rail of its own rather than rows among the interface pins above, because
+/// the two answer different questions: an interface pin is a name the enclosing
+/// deck binds by position, and an RF port is a Z0 termination an `.sp` run
+/// addresses by number. One rail stating both would have to drop the number,
+/// which is the only thing that tells two ports apart.
+///
+/// The band is absent from a design that places no port at all — not empty,
+/// absent. Every other rail here answers about something every design has;
+/// a permanent empty band would spend a row of a narrow rail, on every sheet
+/// that is not an RF testbench, to say that a device the design never used is
+/// still unused.
+///
+/// The list is resolved before the band is drawn, which is the one order that
+/// can decide the question: whether a port is placed is a fact about the
+/// design, and the scope control and the filter narrow what is *shown* rather
+/// than what exists. A rail that asked the filtered list would vanish the
+/// moment a reader typed a query that missed it.
+fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
+    let ports = crate::simulation::placed_sources::placed_rf_ports(
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
+    );
+    if ports.is_empty() {
+        return;
+    }
+    // Counted over every placed port for the same reason the ports rail counts
+    // repeated pin names over the whole cell: two ports claiming one number is
+    // a fact about the design, and narrowing the rail to one sheet does not
+    // un-claim it.
+    let collisions = crate::simulation::placed_sources::duplicate_port_numbers(&ports);
+    let scope = sheet_visibility::sheet_scope(ui.ctx());
+    let query = normalized(app.state.workbench.navigator_filter());
+    let listed = ports
+        .into_iter()
+        .filter(|port| sheet_visibility::object_is_in_scope(&app.state, scope, port.component_id))
+        .filter(|port| {
+            let number = port.port_number.to_string();
+            matches_query(
+                &query,
+                &[
+                    port.reference.as_str(),
+                    "rf",
+                    "port",
+                    number.as_str(),
+                    port.z0.as_str(),
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if !navigator_section_header(ui, "RF ports", &listed.len().to_string()) {
+        return;
+    }
+    if listed.is_empty() {
+        empty_navigator_row(
+            ui,
+            if query.is_empty() {
+                "No RF ports on this sheet"
+            } else {
+                "No RF ports match this filter"
+            },
+        );
+        return;
+    }
+    for port in listed {
+        let collides = collisions.contains(&port.port_number);
+        let meta = rf_port_meta(&port);
+        let response = hierarchy_tree::tree_row(
+            ui,
+            hierarchy_tree::TreeRow {
+                id: ui.id().with(("navigator-rf-port", port.component_id)),
+                level: 1,
+                disclosure: None,
+                // A coaxial face rather than a signal direction: the interface
+                // pins in the rail above take the arrows, and a port carries no
+                // direction of its own — an `.sp` run drives and measures every
+                // one of them.
+                icon: WorkbenchIcon::Target,
+                label: port.reference.as_str(),
+                mono: true,
+                meta: Some(meta.as_str()),
+                alert: collides,
+                selected: app
+                    .state
+                    .schematic
+                    .selection
+                    .has_component(port.component_id),
+            },
+        )
+        .row
+        .on_hover_text(rf_port_tooltip(&port, collides));
+        match placed_object(&app.state, port.component_id, &port.reference) {
+            Some(object) => {
+                if response.clicked() {
+                    select_navigator_object(app, &object);
+                }
+                navigator_object_context_menu(&response, app, object);
+            }
+            None => {
+                if response.clicked() {
+                    app.state
+                        .schematic
+                        .selection
+                        .select_only_component(port.component_id);
+                    app.state.schematic.net_highlight.clear();
+                    app.state.schematic.center_request = None;
+                }
+            }
+        }
+    }
+}
+
+/// The meta column: the number an S-parameter run addresses this port by, the
+/// impedance it presents, what it does behind that impedance, and who reads it.
+///
+/// `Z0 50` rather than `50 Ω`, and not because the unit is obvious: this column
+/// is set in the bundled mono face, which carries no `Ω`, so the unit sign would
+/// paint a missing-glyph box in the shipped app while every test here passed.
+/// `Z0` is also the spelling [`crate::simulation::placed_sources::PlacedRfPort::summary`]
+/// already carries into the studio's Excitations page, so the two surfaces name
+/// the quantity the same way.
+fn rf_port_meta(port: &crate::simulation::placed_sources::PlacedRfPort) -> String {
+    // Run-scoped, exactly as the excitations rail counts it: a disabled
+    // instance is not in the run this plan would dispatch.
+    let reading: Vec<_> = port
+        .consumers
+        .iter()
+        .filter(|consumer| consumer.reads())
+        .collect();
+    let readers = match reading.len() {
+        // Stated rather than flagged, and in the studio page's own words. A
+        // port no `.sp` run indexes is still terminating the design, which is
+        // not the case the excitation rail's `no reader` was written for —
+        // calling every termination in a time-domain testbench a finding is how
+        // a rail stops being read.
+        0 => "no S-parameter run".to_owned(),
+        1 => reading[0].role.to_owned(),
+        count => format!("{count} analyses"),
+    };
+    let mut meta = format!("#{}", port.port_number);
+    if !port.z0.is_empty() {
+        meta.push_str(&format!(" \u{00b7} Z0 {}", port.z0));
+    }
+    meta.push_str(&format!(
+        " \u{00b7} {} \u{00b7} {readers}",
+        port.mode.label()
+    ));
+    meta
+}
+
+/// The full reading of one RF port: what it presents, the terminals it sits
+/// across, and every analysis that indexes it.
+///
+/// A collision is named last and names its own number, because the reader's
+/// next action is to open the other port carrying it — and the meta column has
+/// room to paint the row as a hazard but not to say what the hazard is.
+fn rf_port_tooltip(
+    port: &crate::simulation::placed_sources::PlacedRfPort,
+    collides: bool,
+) -> String {
+    let mut lines = vec![format!("{} \u{00b7} {}", port.reference, port.summary())];
+    if !port.nets.is_empty() {
+        lines.push(port.nets.join(" \u{2192} "));
+    }
+    if port.consumers.is_empty() {
+        lines.push("No S-parameter analysis in this plan reads this port".to_owned());
+    } else {
+        for consumer in &port.consumers {
+            lines.push(format!(
+                "{} \u{00b7} {}{}",
+                consumer.analysis,
+                consumer.role,
+                if consumer.reads() {
+                    ""
+                } else {
+                    " \u{00b7} disabled"
+                }
+            ));
+        }
+    }
+    if collides {
+        lines.push(format!(
+            "Port number {} is claimed by more than one placed port, and an S-parameter run \
+             addresses a port by its number",
+            port.port_number
+        ));
+    }
+    lines.join("\n")
 }
 
 /// Every excitation placed on this sheet, and what the plan reads each one as.

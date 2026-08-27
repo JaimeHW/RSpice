@@ -503,6 +503,12 @@ fn design_tabs_flex_from_their_label_widths_like_the_mockup() {
 /// The hierarchy leads: a design is read as the masters it declares and the
 /// occurrences that instantiate them, and the object rails below answer about
 /// the one sheet on screen.
+///
+/// The RF ports rail sits with the interface pins rather than with the
+/// excitations, and that placement is the claim: a port is read as a terminal
+/// of the design — the thing an S-parameter matrix is indexed by — before it is
+/// read as something that may or may not be driving. The rails below it are the
+/// conductors and the stimulus those terminals carry.
 #[test]
 fn design_navigator_sections_lead_with_the_hierarchy() {
     assert_eq!(
@@ -511,6 +517,7 @@ fn design_navigator_sections_lead_with_the_hierarchy() {
             DesignNavigatorSection::Masters,
             DesignNavigatorSection::Occurrences,
             DesignNavigatorSection::Ports,
+            DesignNavigatorSection::RfPorts,
             DesignNavigatorSection::Nets,
             DesignNavigatorSection::Excitations,
             DesignNavigatorSection::NamedSignals,
@@ -1082,11 +1089,16 @@ fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
 }
 
 /// The titles the navigator's bands carry, in the order it stacks them.
+///
+/// Not all of them are unconditional — "RF ports" is drawn only by a design
+/// that places one — so this is the set of titles a band may carry rather than
+/// the set every frame paints.
 #[cfg(not(target_arch = "wasm32"))]
-const SECTION_TITLES: [&str; 6] = [
+const SECTION_TITLES: [&str; 7] = [
     "Masters",
     "Occurrences",
     "Ports",
+    "RF ports",
     "Nets",
     "Excitations",
     "Named signals",
@@ -1175,17 +1187,21 @@ impl NavigatorPanel {
             .unwrap_or_default();
     }
 
-    /// The one band announcing `title`.
-    fn band(&self, title: &str) -> (egui::Rect, Option<bool>) {
+    /// The one band announcing `title`, or nothing when this design draws no
+    /// such rail.
+    ///
+    /// Absence is an answer — the RF ports band is drawn only above a design
+    /// that places a port — but a title announced *twice* never is, so that
+    /// stays a failure either way.
+    fn band_if_present(&self, title: &str) -> Option<(egui::Rect, Option<bool>)> {
         let hits = self
             .controls
             .iter()
             .filter(|(label, _, _)| label == title)
             .collect::<Vec<_>>();
-        assert_eq!(
-            hits.len(),
-            1,
-            "expected exactly one control announcing {title:?}, found {}; the rail announces: \
+        assert!(
+            hits.len() <= 1,
+            "expected at most one control announcing {title:?}, found {}; the rail announces: \
              {:#?}",
             hits.len(),
             self.controls
@@ -1193,7 +1209,20 @@ impl NavigatorPanel {
                 .map(|(label, _, _)| label.as_str())
                 .collect::<Vec<_>>()
         );
-        (hits[0].1, hits[0].2)
+        hits.first().map(|(_, rect, expanded)| (*rect, *expanded))
+    }
+
+    /// The one band announcing `title`, which this design is expected to draw.
+    fn band(&self, title: &str) -> (egui::Rect, Option<bool>) {
+        self.band_if_present(title).unwrap_or_else(|| {
+            panic!(
+                "expected a control announcing {title:?}; the rail announces: {:#?}",
+                self.controls
+                    .iter()
+                    .map(|(label, _, _)| label.as_str())
+                    .collect::<Vec<_>>()
+            )
+        })
     }
 
     /// The disclosure position the band publishes to a screen reader.
@@ -1237,7 +1266,8 @@ impl NavigatorPanel {
         let next = SECTION_TITLES
             .iter()
             .filter(|other| **other != title)
-            .map(|other| self.band(other).0.top())
+            .filter_map(|other| self.band_if_present(other))
+            .map(|(rect, _)| rect.top())
             .filter(|top| *top > band.top())
             .fold(f32::INFINITY, f32::min);
         self.runs
@@ -1783,5 +1813,228 @@ fn shelf_rows_of_different_families_paint_distinct_glyph_slots() {
         slot_pixels(&capacitor),
         slot_pixels(&xspice),
         "a capacitor row and an XSPICE row paint one glyph"
+    );
+}
+
+// ------------------------------------------------------------------ RF ports
+
+/// One RF port, as the palette places it: a reference and the parameter string
+/// the property sheet writes.
+fn rf_port(id: u64, name: &str, params: &str) -> crate::state::Component {
+    let mut component = crate::state::Component::new(
+        id,
+        ComponentType::RfPort,
+        crate::state::Point::new(80, 40 + id as i32),
+    );
+    component.name = name.to_owned();
+    component.params = params.to_owned();
+    component
+}
+
+/// A design whose ports carry `params`, with the navigator active over it.
+fn rf_bench(ports: Vec<crate::state::Component>) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state.schematic.components.extend(ports);
+    app.state.sync_active_schematic_to_workspace();
+    app
+}
+
+/// The ports the rail lists, resolved the way the section resolves them.
+fn listed_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
+    crate::simulation::placed_sources::placed_rf_ports(
+        &app.state.schematic,
+        app.state.sim_setup.analysis_plan.as_ref(),
+    )
+}
+
+/// A plan holding one analysis of `kind`, enabled.
+fn plan_with(
+    kind: crate::simulation::plan::AnalysisKind,
+) -> crate::simulation::plan::SimulationPlan {
+    let mut plan = crate::simulation::plan::SimulationPlan::empty();
+    let (instance, _) = plan.insert(kind).expect("the fixture analysis inserts");
+    plan.set_enabled(instance, true)
+        .expect("the fixture analysis takes its enabled flag");
+    plan
+}
+
+/// The rail exists only above a design that places a port.
+///
+/// Every other band in this navigator answers about something every design
+/// has. A permanent empty "RF ports" band would spend a row of a narrow rail —
+/// on every sheet that is not an RF testbench, forever — to report that a
+/// device the design never reached for is still unused, which is the density
+/// bar this product is held to rather than a matter of taste.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_rf_port_rail_is_drawn_only_above_a_design_that_places_one() {
+    let announces = |panel: &NavigatorPanel| panel.band_if_present("RF ports").is_some();
+
+    // The ordinary design: an interface, conductors, no port.
+    assert!(
+        !announces(&NavigatorPanel::open(interface_design())),
+        "a design that places no RF port carries no RF band"
+    );
+
+    // One port is enough, and the band states what it holds.
+    let panel = NavigatorPanel::open(rf_bench(vec![rf_port(601, "P1", "port=1 z0=50")]));
+    assert!(announces(&panel));
+    assert_eq!(panel.stated_count("RF ports").as_deref(), Some("1"));
+    assert!(
+        panel.rows_under("RF ports").contains(&"P1".to_owned()),
+        "the band paints its row: {:?}",
+        panel.rows_under("RF ports")
+    );
+}
+
+/// The rail lists ports in the order an S-parameter matrix indexes them, and
+/// every row states the number it is indexed by, the impedance it presents and
+/// what it does behind that impedance.
+///
+/// Document order is the order the ports happened to be drawn in, which is no
+/// order at all: an `.sp` run addresses a port by its `port=` number, so a rail
+/// in drawing order would put the row a run calls port 1 second.
+#[test]
+fn the_rf_port_rail_indexes_its_rows_the_way_an_s_parameter_run_does() {
+    let app = rf_bench(vec![
+        rf_port(602, "PLOAD", "port=3 z0=75"),
+        rf_port(603, "PIN", "port=1 z0=50 pwr=-10"),
+        rf_port(604, "POUT", "port=2 z0=5e1"),
+    ]);
+
+    let rows = listed_rf_ports(&app);
+
+    assert_eq!(
+        rows.iter()
+            .map(|port| (port.reference.as_str(), rf_port_meta(port)))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "PIN",
+                "#1 \u{00b7} Z0 50 \u{00b7} drive \u{00b7} no S-parameter run".to_owned()
+            ),
+            // `5e1` and `50` are one impedance, and the rail prints them as one.
+            (
+                "POUT",
+                "#2 \u{00b7} Z0 50 \u{00b7} term \u{00b7} no S-parameter run".to_owned()
+            ),
+            (
+                "PLOAD",
+                "#3 \u{00b7} Z0 75 \u{00b7} term \u{00b7} no S-parameter run".to_owned()
+            ),
+        ]
+    );
+}
+
+/// The meta column names what reads the port, and says the plan reads none of
+/// them in the words the studio's Excitations page uses.
+///
+/// The distinction is the point: a source nothing reads is a finding, and a
+/// port nothing reads is a termination still loading the design. Borrowing the
+/// excitation rail's `no reader` here would call every port of a time-domain
+/// testbench a defect.
+#[test]
+fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
+    let mut app = rf_bench(vec![rf_port(605, "P1", "port=1 z0=50")]);
+
+    let unread = rf_port_meta(&listed_rf_ports(&app)[0]);
+    assert!(
+        unread.ends_with("no S-parameter run"),
+        "a plan with no `.sp` run states what is missing: {unread}"
+    );
+
+    // A transient reaches the port as the two-terminal element the netlist
+    // already carries, which is not readership: it would make every plan read
+    // every port.
+    app.state.sim_setup.analysis_plan =
+        Some(plan_with(crate::simulation::plan::AnalysisKind::Transient));
+    let loaded = rf_port_meta(&listed_rf_ports(&app)[0]);
+    assert!(
+        loaded.ends_with("no S-parameter run"),
+        "only an `.sp` run indexes a port: {loaded}"
+    );
+
+    app.state.sim_setup.analysis_plan =
+        Some(plan_with(crate::simulation::plan::AnalysisKind::SParameter));
+    let read = rf_port_meta(&listed_rf_ports(&app)[0]);
+    assert!(
+        read.ends_with("S-parameter port"),
+        "the row names the part the run reads it as: {read}"
+    );
+    let tooltip = rf_port_tooltip(&listed_rf_ports(&app)[0], false);
+    assert!(
+        tooltip.contains("S-parameter port") && !tooltip.contains("disabled"),
+        "{tooltip}"
+    );
+}
+
+/// Two ports claiming one number are marked on both rows, in the tone a hazard
+/// is stated in rather than the tone a count is, and the tooltip names the
+/// number they are fighting over.
+///
+/// An S-parameter run addresses a port by its number, so the ports sharing one
+/// cannot both be the port that run measures. The meta column has room to paint
+/// the row as a hazard but not to say what the hazard is, which is why the
+/// sentence is in the tooltip.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn two_rf_ports_claiming_one_number_are_marked_on_both_rows() {
+    let app = rf_bench(vec![
+        rf_port(606, "PA", "port=1 z0=50"),
+        rf_port(607, "PB", "port=1 z0=50"),
+        rf_port(608, "PC", "port=2 z0=50"),
+    ]);
+
+    let rows = listed_rf_ports(&app);
+    let collisions = crate::simulation::placed_sources::duplicate_port_numbers(&rows);
+    assert_eq!(collisions, vec![1]);
+
+    let tooltip = rf_port_tooltip(&rows[0], true);
+    assert!(
+        tooltip.contains("Port number 1 is claimed by more than one placed port"),
+        "the collision names its own number: {tooltip}"
+    );
+    assert!(
+        !rf_port_tooltip(&rows[2], false).contains("claimed by more than one"),
+        "the port claiming a number alone states no hazard"
+    );
+
+    // And the marking reaches the screen: a warning painted in the faint tone
+    // every other meta column uses is not a warning.
+    let panel = NavigatorPanel::open(app);
+    let warn = Tokens::get(&panel.ctx).color.warn;
+    let tone = |meta: &str| {
+        panel
+            .runs
+            .iter()
+            .find(|(run, _, _)| run.as_str() == meta)
+            .map(|(_, _, color)| *color)
+    };
+    assert_eq!(tone(&rf_port_meta(&rows[0])), Some(warn));
+    assert_eq!(tone(&rf_port_meta(&rows[1])), Some(warn));
+    assert_ne!(
+        tone(&rf_port_meta(&rows[2])),
+        Some(warn),
+        "the port claiming its number alone states no hazard"
+    );
+}
+
+/// The tooltip carries what the row has no room for: the terminals the port
+/// sits across, and the sentence that a plan holding no `.sp` run is not a
+/// plan that broke the port.
+#[test]
+fn an_rf_port_tooltip_reads_the_port_the_row_could_only_summarise() {
+    let app = rf_bench(vec![rf_port(609, "P1", "port=1 z0=50")]);
+    let rows = listed_rf_ports(&app);
+
+    let tooltip = rf_port_tooltip(&rows[0], false);
+    assert!(
+        tooltip.starts_with("P1 \u{00b7} term \u{00b7} Z0 50"),
+        "{tooltip}"
+    );
+    assert!(
+        tooltip.contains("No S-parameter analysis in this plan reads this port"),
+        "{tooltip}"
     );
 }
