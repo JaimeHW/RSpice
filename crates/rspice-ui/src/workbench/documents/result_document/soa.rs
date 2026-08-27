@@ -68,7 +68,7 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
 /// drops back under the limit. The table asked for both on every row of every
 /// frame, twice — once for the cell and once to decide whether the row's
 /// button could be pressed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct SoaRuleFacts {
     /// Index into the analysis' waveforms of this rule's verified stress
     /// history, when one is retained.
@@ -77,6 +77,12 @@ pub(super) struct SoaRuleFacts {
     interval_compact: String,
     /// The same interval, as the inspector prints it.
     interval_full: String,
+    /// The stress card's padded axis extents. Both walk the whole history,
+    /// and the card asked for them on every frame it was open.
+    stress_axes: Option<((f64, f64), (f64, f64))>,
+    /// Decimation-cache identity for the stress polyline. Without one the
+    /// renderer re-reduces every retained sample per frame.
+    stress_cache_key: u64,
 }
 
 /// Every rule's scanned facts, built once per retained SOA analysis.
@@ -84,7 +90,7 @@ pub(super) struct SoaRuleFacts {
 /// The visible-row lists are here too, one per filter. They cost no scan,
 /// but the table reads one of them by ordinal every frame and building them
 /// alongside the facts keeps the row a viewport names addressable in O(1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct SoaPlan {
     version: u64,
     analysis: AnalysisPresentationKey,
@@ -109,9 +115,17 @@ fn build_soa_plan(
     analysis: &AnalysisResult,
     evaluations: &[SoaEvaluationEvidence],
 ) -> SoaPlan {
+    let identity = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        version.hash(&mut hasher);
+        analysis_key.hash(&mut hasher);
+        hasher.finish()
+    };
     let rules: Vec<SoaRuleFacts> = evaluations
         .iter()
-        .map(|evaluation| {
+        .enumerate()
+        .map(|(rule, evaluation)| {
             let stress = stress_waveform(analysis, evaluation);
             SoaRuleFacts {
                 stress_waveform: stress.and_then(|found| {
@@ -122,6 +136,15 @@ fn build_soa_plan(
                 }),
                 interval_compact: worst_interval_text(stress, evaluation, true),
                 interval_full: worst_interval_text(stress, evaluation, false),
+                stress_axes: stress.map(|waveform| {
+                    let (x_min, x_max) = padded_range(waveform.x.iter().copied(), None);
+                    let (y_min, y_max) = padded_range(
+                        waveform.y.iter().copied(),
+                        Some([0.0, evaluation.limit_value, evaluation.worst_actual_value]),
+                    );
+                    ((x_min.max(0.0), x_max), (y_min.max(0.0), y_max))
+                }),
+                stress_cache_key: identity ^ (rule as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
             }
         })
         .collect();
@@ -268,12 +291,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         // The plan already located and verified this rule's history; drawing
         // it must not repeat that scan on every frame the card is open.
-        if let Some(waveform) = plan
-            .facts(rule)
-            .and_then(|facts| facts.stress_waveform)
-            .and_then(|index| analysis.waveforms.get(index))
-        {
-            stress_trace_card(ui, &mut state.ui.results, waveform, evaluation);
+        if let Some((facts, waveform)) = plan.facts(rule).and_then(|facts| {
+            facts
+                .stress_waveform
+                .and_then(|index| analysis.waveforms.get(index))
+                .map(|waveform| (facts, waveform))
+        }) {
+            stress_trace_card(ui, &mut state.ui.results, waveform, evaluation, facts);
         } else {
             legacy_stress_history_note(ui);
         }
@@ -793,6 +817,7 @@ fn stress_trace_card(
     results: &mut super::ResultsState,
     waveform: &WaveformData,
     evaluation: &SoaEvaluationEvidence,
+    facts: &SoaRuleFacts,
 ) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
@@ -824,13 +849,10 @@ fn stress_trace_card(
                 );
             });
 
-            let (x_min, x_max) = padded_range(waveform.x.iter().copied(), None);
-            let (y_min, y_max) = padded_range(
-                waveform.y.iter().copied(),
-                Some([0.0, evaluation.limit_value, evaluation.worst_actual_value]),
-            );
-            let x_min = x_min.max(0.0);
-            let y_min = y_min.max(0.0);
+            // The card's own extents are resolved with the plan; deriving
+            // them here walked the whole history twice per frame.
+            let ((x_min, x_max), (y_min, y_max)) =
+                facts.stress_axes.unwrap_or(((0.0, 1.0), (0.0, 1.0)));
             let view = results.plot_view(super::ResultViewer::Soa, 0);
             let (x_min, x_max) = view.x.unwrap_or((x_min, x_max));
             let (y_min, y_max) = view.y.unwrap_or((y_min, y_max));
@@ -855,11 +877,16 @@ fn stress_trace_card(
             )
             .accessible_name(&title)
             .accessible_detail(&detail);
-            spec.traces.push(Trace::new(
-                waveform.x.as_slice(),
-                waveform.y.as_slice(),
-                t.color.traces[0],
-            ));
+            spec.traces.push(
+                Trace::new(
+                    waveform.x.as_slice(),
+                    waveform.y.as_slice(),
+                    t.color.traces[0],
+                )
+                // Without an identity the renderer re-reduces every retained
+                // sample on every frame the card is open.
+                .cache_key(facts.stress_cache_key),
+            );
             spec.limit_lines.push(LimitLine {
                 y: evaluation.limit_value,
                 color: t.color.err,
@@ -1135,7 +1162,24 @@ mod tests {
                 worst_interval_text(scanned, evaluation, false),
                 "{rule}"
             );
+            let expected_axes = scanned.map(|waveform| {
+                let (x_min, x_max) = padded_range(waveform.x.iter().copied(), None);
+                let (y_min, y_max) = padded_range(
+                    waveform.y.iter().copied(),
+                    Some([0.0, evaluation.limit_value, evaluation.worst_actual_value]),
+                );
+                ((x_min.max(0.0), x_max), (y_min.max(0.0), y_max))
+            });
+            assert_eq!(facts.stress_axes, expected_axes, "{rule}");
         }
+        // Every rule's stress polyline needs its own decimation identity, or
+        // one rule's reduction is served under another rule's name.
+        let keys: std::collections::HashSet<u64> = plan
+            .rules
+            .iter()
+            .map(|facts| facts.stress_cache_key)
+            .collect();
+        assert_eq!(keys.len(), plan.rules.len());
         assert_eq!(plan.visible(SoaRuleFilter::Violations).len(), 6);
         assert_eq!(plan.visible(SoaRuleFilter::Passing).len(), 0);
         assert_eq!(plan.visible(SoaRuleFilter::All).len(), 6);
