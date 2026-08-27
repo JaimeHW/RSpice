@@ -40,6 +40,7 @@ use crate::workbench::{
     ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
 };
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
@@ -1516,6 +1517,7 @@ fn pane_y_range(
 /// intentionally project disjoint exact-row groups, so the range must cover
 /// every visible group rather than assuming the first trace is authoritative.
 fn x_range(model: &StripModel) -> Option<(f64, f64)> {
+    frame_work::note(DatasetWalk::WaveXRange);
     let mut x0 = f64::INFINITY;
     let mut x1 = f64::NEG_INFINITY;
     for x in model
@@ -1704,6 +1706,7 @@ struct FamilyEnvelopeSeries {
 }
 
 fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnvelopeSeries> {
+    frame_work::note(DatasetWalk::WaveEnvelope);
     let mut groups = HashMap::<(String, u8), Vec<&StripTrace>>::new();
     for trace in pane
         .traces

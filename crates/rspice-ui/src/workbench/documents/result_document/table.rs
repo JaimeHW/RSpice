@@ -20,6 +20,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::waves::{StripModel, cached_models};
 use super::{
     AnalysisPresentationKey, ResultsState, TracePresentationKey, exact_result_artifact_text,
@@ -520,6 +521,7 @@ fn resolved_columns(
 }
 
 fn nearest_sample_index(grid: &[f64], x: f64) -> Option<usize> {
+    frame_work::note(DatasetWalk::TableCursorScan);
     grid.iter()
         .enumerate()
         .filter(|(_, value)| value.is_finite())

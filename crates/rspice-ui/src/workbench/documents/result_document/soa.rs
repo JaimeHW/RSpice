@@ -13,6 +13,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
 use super::{
     AnalysisPresentationKey, SoaRuleFilter, SoaRuleSelection, panel_note, stat_table, well_hint,
@@ -32,10 +33,10 @@ fn active_soa(
     else {
         return None;
     };
-    if !analysis.success
-        || analysis.analysis_type != AnalysisType::Soa
-        || analysis.validate_retained_evidence().is_err()
-    {
+    if !analysis.success || analysis.analysis_type != AnalysisType::Soa || {
+        frame_work::note(DatasetWalk::EvidenceValidation);
+        analysis.validate_retained_evidence().is_err()
+    } {
         return None;
     }
     Some((analysis, evaluations, violations.len()))
@@ -457,6 +458,7 @@ fn stress_waveform<'a>(
     analysis: &'a AnalysisResult,
     evaluation: &SoaEvaluationEvidence,
 ) -> Option<&'a WaveformData> {
+    frame_work::note(DatasetWalk::SoaStressScan);
     let expected_samples = usize::try_from(evaluation.sample_count).ok()?;
     if expected_samples == 0 {
         return None;

@@ -10,6 +10,7 @@ mod create_document;
 mod events;
 mod eye;
 mod fft;
+mod frame_work;
 mod harmonic_balance;
 mod hist;
 pub(crate) mod manifest;
@@ -2118,7 +2119,10 @@ pub(crate) fn retained_evidence_is_valid(
         .runs
         .iter()
         .find_map(|run| analysis.resolve(run))
-        .is_some_and(|(_, resolved)| resolved.validate_retained_evidence().is_ok());
+        .is_some_and(|(_, resolved)| {
+            frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
+            resolved.validate_retained_evidence().is_ok()
+        });
     state
         .ui
         .results
@@ -5309,6 +5313,7 @@ pub(crate) fn incomplete_evidence_reason(analysis: &AnalysisResult) -> Option<&'
     if !analysis.success {
         return Some("the run did not complete — these samples stop where it failed");
     }
+    frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
     if analysis.validate_retained_evidence().is_err() {
         return Some("the retained evidence failed validation");
     }

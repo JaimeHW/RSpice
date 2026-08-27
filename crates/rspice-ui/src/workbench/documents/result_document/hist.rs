@@ -11,6 +11,7 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
@@ -69,6 +70,7 @@ fn nearly_equal(left: f64, right: f64) -> bool {
 }
 
 fn moments_from_samples(samples: &[f64]) -> Option<ExactMoments> {
+    frame_work::note(DatasetWalk::HistMoments);
     if samples.is_empty() || samples.iter().any(|value| !value.is_finite()) {
         return None;
     }
@@ -111,6 +113,7 @@ fn moments_match(
 }
 
 fn yield_result_is_consistent(result: &YieldResult) -> bool {
+    frame_work::note(DatasetWalk::HistMoments);
     let spec = &result.spec;
     let limits_valid = match spec.limit_type {
         SpecLimitType::Lower => spec.min.is_some_and(f64::is_finite) && spec.max.is_none(),

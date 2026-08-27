@@ -17,6 +17,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::virtual_rows::RowOffsets;
 use super::well_hint;
 
@@ -82,6 +83,7 @@ pub(crate) struct ManifestViewModel {
 impl ManifestViewModel {
     #[must_use]
     pub(crate) fn from_run(run: &SimulationRun) -> Self {
+        frame_work::note(DatasetWalk::ManifestViewModel);
         let provenance_validation = run.validate_provenance();
         let provenance_is_valid = provenance_validation.is_ok();
         let prepared = run.prepared_receipt();
@@ -217,7 +219,10 @@ impl ManifestViewModel {
 
         Self {
             dataset_id: run.dataset_id.to_string(),
-            dataset_digest: run.dataset_content_digest().to_string(),
+            dataset_digest: {
+                frame_work::note(DatasetWalk::DatasetDigest);
+                run.dataset_content_digest().to_string()
+            },
             run_id: run.run_id.to_string(),
             run_sequence: run.id.to_string(),
             run_label: run.label.clone(),

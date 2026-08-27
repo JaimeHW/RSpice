@@ -21,6 +21,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::virtual_rows::RowOffsets;
 use super::well_hint;
 
@@ -398,6 +399,7 @@ fn grouped_nodes<'a>(
     filter: &str,
     root: &str,
 ) -> BTreeMap<String, Vec<&'a crate::state::OperatingPointValue>> {
+    frame_work::note(DatasetWalk::OpPlan);
     let mut groups = BTreeMap::<String, Vec<_>>::new();
     for row in dc
         .node_voltages
@@ -426,6 +428,7 @@ fn grouped_devices<'a>(
     sort: Option<&(String, bool)>,
     root: &str,
 ) -> BTreeMap<String, Vec<&'a rspice_core::circuit::DeviceOpEntry>> {
+    frame_work::note(DatasetWalk::OpPlan);
     let mut groups = BTreeMap::<String, Vec<_>>::new();
     for entry in report
         .entries

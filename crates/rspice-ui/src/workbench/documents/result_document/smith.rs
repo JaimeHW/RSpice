@@ -12,6 +12,7 @@ use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 use crate::workbench::app_state::{ActiveViewer, SpecializedViewerCacheProvenance};
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
@@ -91,6 +92,7 @@ pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) ->
     else {
         return false;
     };
+    frame_work::note(DatasetWalk::EvidenceValidation);
     if analysis.validate_retained_evidence().is_err() {
         return false;
     }

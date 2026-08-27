@@ -15,6 +15,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
 use super::virtual_rows::RowOffsets;
 use super::{panel_note, well_hint};
@@ -82,6 +83,7 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
 /// Rank by normalized-sensitivity magnitude. Equal magnitudes are ordered by the
 /// retained parameter identity, giving identical results across platforms.
 fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<&SensitivityResultRow> {
+    frame_work::note(DatasetWalk::SensitivityRank);
     let mut ranked: Vec<_> = rows.iter().collect();
     ranked.sort_by(|left, right| {
         right

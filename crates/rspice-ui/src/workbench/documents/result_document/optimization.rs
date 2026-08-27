@@ -14,6 +14,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
 use super::{AnalysisPresentationKey, OptimizationSelection, panel_note, stat_table, well_hint};
 
@@ -32,6 +33,7 @@ fn active_optimization(simulation: &SimulationState) -> Option<OptimizationView<
 }
 
 fn optimization_for_analysis(analysis: &AnalysisResult) -> Option<OptimizationView<'_>> {
+    frame_work::note(DatasetWalk::OptimizationView);
     let Some(AnalysisResultFamilyMetadata::Optimization {
         iterations,
         best_cost,
@@ -44,7 +46,10 @@ fn optimization_for_analysis(analysis: &AnalysisResult) -> Option<OptimizationVi
     if !analysis.success
         || analysis.analysis_type != AnalysisType::Optimization
         || iterations.is_empty()
-        || analysis.validate_retained_evidence().is_err()
+        || {
+            frame_work::note(DatasetWalk::EvidenceValidation);
+            analysis.validate_retained_evidence().is_err()
+        }
     {
         return None;
     }

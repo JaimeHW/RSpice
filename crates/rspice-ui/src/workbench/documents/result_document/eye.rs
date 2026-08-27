@@ -18,6 +18,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
 use crate::workbench::AppState;
 
+use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
@@ -380,6 +381,7 @@ fn rasterize_density(
     size: [usize; 2],
     color: egui::Color32,
 ) -> egui::ColorImage {
+    frame_work::note(DatasetWalk::EyeRaster);
     let [width, height] = size;
     let mut coverage = vec![0.0f32; width * height];
     let x_scale = width as f64 / (x1 - x0).max(1e-12);
