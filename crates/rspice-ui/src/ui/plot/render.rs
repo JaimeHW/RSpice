@@ -10,6 +10,7 @@ use crate::ui::tokens::Tokens;
 
 use super::cursor::CursorPair;
 use super::decimate::{DecimationCache, DisplayDecimation};
+use super::scale::XScale;
 use super::spec::{MarkerShape, PlotSpec};
 
 /// Interaction contract selected by the owning result surface.
@@ -252,6 +253,57 @@ fn finite_runs(points: &[Pos2]) -> impl Iterator<Item = &[Pos2]> {
         .filter(|run| !run.is_empty())
 }
 
+/// Where a trace's categorical markers sit: evenly spaced along the curve.
+///
+/// Along the curve, not along the X axis. Walking X assumes the drawn path
+/// advances left to right, which a locus does not — it doubles back, so the
+/// search that only ever moved forward stuck at the turn and stamped the same
+/// marker repeatedly on one point while the whole return branch got none.
+/// Arc position is the same walk for an ordinary trace and the right one for
+/// every other, and it keeps the count bounded by the pane's width.
+fn trace_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
+    const MIN_SPACING: f32 = 96.0;
+    if points.len() < 2 || plot_rect.width() < 72.0 {
+        return Vec::new();
+    }
+    let finite = |point: &Pos2| point.x.is_finite() && point.y.is_finite();
+    let length = |a: Pos2, b: Pos2| (b - a).length();
+    let total: f32 = points
+        .windows(2)
+        .filter(|pair| finite(&pair[0]) && finite(&pair[1]))
+        .map(|pair| length(pair[0], pair[1]))
+        .sum();
+    if !(total > 0.0) {
+        return Vec::new();
+    }
+    let budget = ((plot_rect.width() - 72.0) / MIN_SPACING).floor().max(1.0);
+    let spacing = (total / budget).max(MIN_SPACING);
+    let bounds = plot_rect.shrink(4.0);
+    let mut placed = Vec::new();
+    let mut travelled = 0.0f32;
+    let mut next = spacing * 0.5;
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        if !(finite(&a) && finite(&b)) {
+            continue;
+        }
+        let segment = length(a, b);
+        if segment <= 0.0 {
+            continue;
+        }
+        while next <= travelled + segment {
+            let along = ((next - travelled) / segment).clamp(0.0, 1.0);
+            let point = a + (b - a) * along;
+            if bounds.contains(point) {
+                placed.push(point);
+            }
+            next += spacing;
+        }
+        travelled += segment;
+    }
+    placed
+}
+
 fn paint_trace_markers(
     painter: &egui::Painter,
     points: &[Pos2],
@@ -260,21 +312,8 @@ fn paint_trace_markers(
     color: Color32,
     background: Color32,
 ) {
-    if points.len() < 2 || plot_rect.width() < 72.0 {
-        return;
-    }
-
-    let mut point_index = 0;
-    let mut target_x = plot_rect.left() + 48.0;
-    while target_x < plot_rect.right() - 24.0 {
-        while point_index + 1 < points.len() && points[point_index].x < target_x {
-            point_index += 1;
-        }
-        let point = points[point_index];
-        if point.x.is_finite() && point.y.is_finite() && plot_rect.shrink(4.0).contains(point) {
-            paint_trace_marker(painter, point, shape, color, background);
-        }
-        target_x += 96.0;
+    for point in trace_marker_positions(points, plot_rect) {
+        paint_trace_marker(painter, point, shape, color, background);
     }
 }
 
@@ -412,17 +451,24 @@ pub fn show(
         view: ViewChange::default(),
         axes: ((spec.x.min, spec.x.max), (spec.y.min, spec.y.max)),
     };
-    if plot_rect.width() < 24.0
-        || plot_rect.height() < 24.0
-        || !matches!(
-            spec.x.max.partial_cmp(&spec.x.min),
-            Some(std::cmp::Ordering::Greater)
-        )
-        || !matches!(
-            spec.y.max.partial_cmp(&spec.y.min),
-            Some(std::cmp::Ordering::Greater)
-        )
-    {
+    if plot_rect.width() < 24.0 || plot_rect.height() < 24.0 {
+        theme::paint_focus_ring(ui, &out.response, rect);
+        return out;
+    }
+    if !matches!(
+        spec.x.max.partial_cmp(&spec.x.min),
+        Some(std::cmp::Ordering::Greater)
+    ) || !matches!(
+        spec.y.max.partial_cmp(&spec.y.min),
+        Some(std::cmp::Ordering::Greater)
+    ) {
+        // A view collapsed to a point has nothing to draw, but the gesture
+        // that would rescue it still has to arrive. Returning before the
+        // navigation left a stuck viewport with no way out but closing the
+        // pane: every zoom and pan is stated against the span it is handed,
+        // and a double-click to fit was being swallowed with them.
+        let painter = ui.painter_at(rect);
+        handle_navigation(ui, spec, &painter, plot_rect, &mut out, &t);
         theme::paint_focus_ring(ui, &out.response, rect);
         return out;
     }
@@ -436,17 +482,27 @@ pub fn show(
             - (spec.y_scale.normalize(y, spec.y.min, spec.y.max) as f32) * plot_rect.height()
     };
     let painter = ui.painter_at(rect);
+    // Everything that describes a position in the data belongs inside the
+    // plot area. Painted past it, a band or a limit line stops being a
+    // statement about the data and becomes one about the tick gutter.
+    let inside = ui.painter_at(plot_rect.expand(1.0));
     let tick_font = theme::mono(10.0, FontWeight::Regular);
     let grid = Stroke::new(1.0, c.canvas_grid);
     let frame = Stroke::new(1.0, c.border_strong);
 
     // ---- bands (under everything)
     for band in &spec.bands {
+        let (left, right) = (mx(band.x0), mx(band.x1));
         let band_rect = Rect::from_min_max(
-            pos2(mx(band.x0), plot_rect.top()),
-            pos2(mx(band.x1), plot_rect.bottom()),
+            pos2(left.min(right).max(plot_rect.left()), plot_rect.top()),
+            pos2(
+                left.max(right).min(plot_rect.right()),
+                plot_rect.bottom(),
+            ),
         );
-        painter.rect_filled(band_rect, 0.0, c.accent_dim.gamma_multiply(0.4));
+        if band_rect.width() > 0.0 && band_rect.is_finite() {
+            inside.rect_filled(band_rect, 0.0, c.accent_dim.gamma_multiply(0.4));
+        }
     }
 
     // ---- grid + ticks
@@ -467,32 +523,49 @@ pub fn show(
     // log decades at deep zoom) — every gridline still draws.
     if spec.minor_grid {
         let minor = Stroke::new(1.0, c.canvas_grid.gamma_multiply(0.45));
-        for pair in spec.x.ticks.windows(2) {
-            let a = spec.x_scale.normalize(pair[0].0, spec.x.min, spec.x.max);
-            let b = spec.x_scale.normalize(pair[1].0, spec.x.min, spec.x.max);
-            for step in 1..4 {
-                let value = spec.x_scale.denormalize(
-                    a + (b - a) * f64::from(step) / 4.0,
-                    spec.x.min,
-                    spec.x.max,
-                );
-                painter.vline(mx(value), plot_rect.y_range(), minor);
-            }
+        for value in
+            super::scale::minor_grid_values(spec.x_scale, &spec.x.ticks, spec.x.min, spec.x.max)
+        {
+            painter.vline(mx(value), plot_rect.y_range(), minor);
         }
-        for pair in spec.y.ticks.windows(2) {
-            for step in 1..4 {
-                let a = spec.y_scale.normalize(pair[0].0, spec.y.min, spec.y.max);
-                let b = spec.y_scale.normalize(pair[1].0, spec.y.min, spec.y.max);
-                let value = spec.y_scale.denormalize(
-                    a + (b - a) * f64::from(step) / 4.0,
-                    spec.y.min,
-                    spec.y.max,
-                );
-                painter.hline(plot_rect.x_range(), my(value), minor);
-            }
+        for value in
+            super::scale::minor_grid_values(spec.y_scale, &spec.y.ticks, spec.y.min, spec.y.max)
+        {
+            painter.hline(plot_rect.x_range(), my(value), minor);
         }
     }
+    // The Y column's chrome is either its unit or, when the window is too
+    // narrow to label absolutely, the anchor its ticks are offsets from —
+    // which carries the unit itself. Either way it owns the top of the
+    // column, so tick labels give way to it.
+    let y_chrome = spec
+        .y
+        .offset_anchor
+        .clone()
+        .unwrap_or_else(|| spec.y.unit.clone());
+    let y_chrome = (!y_chrome.is_empty())
+        .then(|| painter.layout_no_wrap(y_chrome, tick_font.clone(), c.text_dim));
+    let y_chrome_bottom = y_chrome
+        .as_ref()
+        .map_or(f32::NEG_INFINITY, |galley| rect.top() + 8.0 + galley.size().y * 0.5);
     let mut last_label_right = f32::NEG_INFINITY;
+    if spec.x_axis_chrome
+        && let Some(anchor) = &spec.x.offset_anchor
+    {
+        // Stated once, in the gutter the Y labels leave free, and brighter
+        // than the ticks: it is the value, and they are only the differences.
+        let galley = painter.layout_no_wrap(anchor.clone(), tick_font.clone(), c.text);
+        let width = galley.size().x;
+        painter.galley(
+            pos2(
+                rect.left() + 2.0,
+                rect.bottom() - 9.0 - galley.size().y * 0.5,
+            ),
+            galley,
+            c.text,
+        );
+        last_label_right = rect.left() + 2.0 + width;
+    }
     for (xv, label) in &spec.x.ticks {
         let px = mx(*xv);
         painter.vline(px, plot_rect.y_range(), grid);
@@ -507,22 +580,32 @@ pub fn show(
             );
         }
     }
+    // Y labels skip on collision exactly as the X row does. A pane a few
+    // rows tall carries the same tick count as a full-height one, and
+    // stacked labels are less readable than none.
+    let mut last_label_top = f32::INFINITY;
     for (yv, label) in &spec.y.ticks {
         let py = my(*yv);
         painter.hline(plot_rect.x_range(), py, grid);
-        painter.text(
-            pos2(plot_rect.left() - 7.0, py),
-            Align2::RIGHT_CENTER,
-            label,
-            tick_font.clone(),
-            c.text_dim,
-        );
+        let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.text_dim);
+        let (height, top) = (galley.size().y, py - galley.size().y * 0.5);
+        if top + height <= last_label_top - 2.0 && top >= y_chrome_bottom + 2.0 {
+            last_label_top = top;
+            painter.galley(
+                pos2(plot_rect.left() - 7.0 - galley.size().x, top),
+                galley,
+                c.text_dim,
+            );
+        }
     }
     // ---- reference lines
     let ref_stroke = Stroke::new(1.0, c.text_faint);
     for line in &spec.ref_lines {
+        if !(line.y >= spec.y.min && line.y <= spec.y.max) {
+            continue;
+        }
         let py = my(line.y);
-        painter.extend(Shape::dashed_line(
+        inside.extend(Shape::dashed_line(
             &[pos2(plot_rect.left(), py), pos2(plot_rect.right(), py)],
             ref_stroke,
             4.0,
@@ -530,15 +613,18 @@ pub fn show(
         ));
     }
     for line in &spec.limit_lines {
+        if !(line.y >= spec.y.min && line.y <= spec.y.max) {
+            continue;
+        }
         let py = my(line.y);
-        painter.extend(Shape::dashed_line(
+        inside.extend(Shape::dashed_line(
             &[pos2(plot_rect.left(), py), pos2(plot_rect.right(), py)],
             Stroke::new(1.0, line.color),
             6.0,
             4.0,
         ));
-        painter.text(
-            pos2(plot_rect.right() - 4.0, py - 3.0),
+        inside.text(
+            pos2(plot_rect.right() - 4.0, (py - 3.0).max(plot_rect.top() + 11.0)),
             Align2::RIGHT_BOTTOM,
             &line.label,
             theme::mono(9.0, FontWeight::Medium),
@@ -673,12 +759,13 @@ pub fn show(
     // ---- frame + axis units
     painter.vline(plot_rect.left(), plot_rect.y_range(), frame);
     painter.hline(plot_rect.x_range(), plot_rect.bottom(), frame);
-    if !spec.y.unit.is_empty() {
-        painter.text(
-            pos2(plot_rect.left() - 7.0, rect.top() + 8.0),
-            Align2::RIGHT_CENTER,
-            spec.y.unit.as_str(),
-            tick_font.clone(),
+    if let Some(galley) = y_chrome {
+        painter.galley(
+            pos2(
+                plot_rect.left() - 7.0 - galley.size().x,
+                rect.top() + 8.0 - galley.size().y * 0.5,
+            ),
+            galley,
             c.text_dim,
         );
     }
@@ -695,8 +782,17 @@ pub fn show(
     // ---- markers
     let tag_font = theme::mono(9.5, FontWeight::Regular);
     for marker in &spec.markers {
+        // A marker states where something is. Off the window there is no
+        // "where" to draw, and a dot pinned to the frame would claim a
+        // position the data does not have.
+        if !(marker.x >= spec.x.min && marker.x <= spec.x.max) {
+            continue;
+        }
         let px = mx(marker.x);
         let limit_line = marker.shape == MarkerShape::LimitLine;
+        if !limit_line && !(marker.y >= spec.y.min && marker.y <= spec.y.max) {
+            continue;
+        }
         // A limit line is a callout about the X position alone, so it spans
         // the plot and tags at the top; its `y` carries no meaning.
         let py = if limit_line {
@@ -705,7 +801,7 @@ pub fn show(
             my(marker.y)
         };
         if limit_line {
-            painter.extend(Shape::dashed_line(
+            inside.extend(Shape::dashed_line(
                 &[pos2(px, plot_rect.top()), pos2(px, plot_rect.bottom())],
                 Stroke::new(1.0, marker.color),
                 5.0,
@@ -713,14 +809,14 @@ pub fn show(
             ));
         } else {
             if marker.drop_line {
-                painter.extend(Shape::dashed_line(
+                inside.extend(Shape::dashed_line(
                     &[pos2(px, py), pos2(px, plot_rect.bottom())],
                     ref_stroke,
                     4.0,
                     3.0,
                 ));
             }
-            painter.circle(
+            inside.circle(
                 pos2(px, py),
                 3.0,
                 c.canvas_bg,
@@ -743,15 +839,27 @@ pub fn show(
         if ty < plot_rect.top() + 2.0 {
             ty = py + 9.0;
         }
+        // The tag belongs to the plot area even when its anchor sits at the
+        // very edge of it, and a staggering offset can push it past either
+        // end. Keep the whole tag inside rather than letting a corner of it
+        // spill over the axis chrome.
+        let tx = tx.clamp(
+            plot_rect.left() + 2.0,
+            (plot_rect.right() - tag_w - 2.0).max(plot_rect.left() + 2.0),
+        );
+        let ty = ty.clamp(
+            plot_rect.top() + 2.0,
+            (plot_rect.bottom() - tag_h - 2.0).max(plot_rect.top() + 2.0),
+        );
         let tag_rect = Rect::from_min_size(pos2(tx, ty), vec2(tag_w, tag_h));
-        painter.rect(
+        inside.rect(
             tag_rect,
             t.radius,
             c.bg_elevated,
             Stroke::new(1.0, c.border_strong),
             egui::StrokeKind::Inside,
         );
-        painter.galley(
+        inside.galley(
             pos2(tx + pad, ty + (tag_h - galley.size().y) * 0.5),
             galley,
             marker.color,
@@ -843,6 +951,45 @@ pub fn show(
     out
 }
 
+/// A range wide enough to still be a view, or nothing.
+///
+/// Screen coordinates are `f32`, so a window narrower than about a billionth
+/// of its own magnitude is already finer than the projection that draws it.
+/// A window of exactly zero is worse than useless: every gesture states its
+/// result as a fraction of the span it was handed, so a stored zero span is a
+/// viewport nothing but a fit can ever widen again.
+fn floored_span(range: (f64, f64), scale: XScale) -> Option<(f64, f64)> {
+    const RELATIVE_FLOOR: f64 = 1.0e-9;
+    let (low, high) = range;
+    if !(low.is_finite() && high.is_finite()) {
+        return None;
+    }
+    match scale {
+        XScale::Log10 => {
+            if !(low > 0.0 && high > 0.0) {
+                return None;
+            }
+            let (low, high) = if high > low { (low, high) } else { (high, low) };
+            if high / low >= 1.0 + RELATIVE_FLOOR {
+                return Some((low, high));
+            }
+            let centre = (low * high).sqrt();
+            let half = (1.0 + RELATIVE_FLOOR).sqrt();
+            (centre > 0.0 && centre.is_finite()).then(|| (centre / half, centre * half))
+        }
+        XScale::Linear => {
+            let (low, high) = if high > low { (low, high) } else { (high, low) };
+            let centre = (low + high) * 0.5;
+            let floor = (centre.abs() * RELATIVE_FLOOR).max(f64::MIN_POSITIVE);
+            if high - low >= floor {
+                return Some((low, high));
+            }
+            let (low, high) = (centre - floor * 0.5, centre + floor * 0.5);
+            (high > low).then_some((low, high))
+        }
+    }
+}
+
 /// Interpret wheel/drag gestures against the spec's current ranges and
 /// fill `out.view` with the resulting data-space ranges. The caller owns
 /// the view state (this engine is stateless across frames except for the
@@ -863,6 +1010,11 @@ fn handle_navigation(
     let fy_of = |py: f32| ((plot_rect.bottom() - py) / plot_rect.height()) as f64;
     let denorm_x = |frac: f64| spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
     let denorm_y = |frac: f64| spec.y_scale.denormalize(frac, spec.y.min, spec.y.max);
+    // Every range this reports is about to become the next frame's view, so
+    // none of them may be degenerate: a stored zero span is a viewport no
+    // later gesture can widen, because every gesture is relative to it.
+    let store_x = |range: (f64, f64)| floored_span(range, spec.x_scale);
+    let store_y = |range: (f64, f64)| floored_span(range, spec.y_scale);
 
     // Double-click restores the automatic fit.
     if interaction != InteractionMode::Select && out.response.double_clicked() {
@@ -876,10 +1028,14 @@ fn handle_navigation(
 
     // Zoom box: Shift+primary drag or right drag. The anchor survives
     // across frames in egui memory; the box zooms both axes on release.
-    let box_drag_started = (out.response.drag_started_by(egui::PointerButton::Primary)
-        && (shift || interaction == InteractionMode::Zoom))
-        || (interaction != InteractionMode::Select
-            && out.response.drag_started_by(egui::PointerButton::Secondary));
+    //
+    // Select mode arms none of it. Its contract is that the view does not
+    // move, and a modifier held for a selection gesture was rescaling the
+    // plot underneath the selection being made.
+    let box_drag_started = interaction != InteractionMode::Select
+        && ((out.response.drag_started_by(egui::PointerButton::Primary)
+            && (shift || interaction == InteractionMode::Zoom))
+            || out.response.drag_started_by(egui::PointerButton::Secondary));
     if box_drag_started
         && let Some(pos) = out.response.interact_pointer_pos()
         && plot_rect.contains(pos)
@@ -912,10 +1068,10 @@ fn handle_navigation(
             if let Some(corner) = corner {
                 let band = Rect::from_two_pos(anchor, corner);
                 if band.width() > 6.0 && band.height() > 6.0 {
-                    out.view.x = Some((fx_of(band.left()).max(0.0), fx_of(band.right()).min(1.0)))
-                        .map(|(a, b)| (denorm_x(a), denorm_x(b)));
+                    let (fx0, fx1) = (fx_of(band.left()).max(0.0), fx_of(band.right()).min(1.0));
+                    out.view.x = store_x((denorm_x(fx0), denorm_x(fx1)));
                     let (fy0, fy1) = (fy_of(band.bottom()).max(0.0), fy_of(band.top()).min(1.0));
-                    out.view.y = Some((denorm_y(fy0), denorm_y(fy1)));
+                    out.view.y = store_y((denorm_y(fy0), denorm_y(fy1)));
                 }
             }
         }
@@ -931,11 +1087,11 @@ fn handle_navigation(
         if delta != egui::Vec2::ZERO {
             let dfx = -f64::from(delta.x) / f64::from(plot_rect.width());
             if dfx != 0.0 {
-                out.view.x = Some((denorm_x(dfx), denorm_x(1.0 + dfx)));
+                out.view.x = store_x((denorm_x(dfx), denorm_x(1.0 + dfx)));
             }
             let dy = f64::from(delta.y) / f64::from(plot_rect.height());
             if dy != 0.0 {
-                out.view.y = Some((denorm_y(dy), denorm_y(1.0 + dy)));
+                out.view.y = store_y((denorm_y(dy), denorm_y(1.0 + dy)));
             }
         }
         return;
@@ -957,11 +1113,11 @@ fn handle_navigation(
             if ctrl {
                 let fy = fy_of(pointer.y);
                 let (f0, f1) = (fy * (1.0 - factor), fy + (1.0 - fy) * factor);
-                out.view.y = Some((denorm_y(f0), denorm_y(f1)));
+                out.view.y = store_y((denorm_y(f0), denorm_y(f1)));
             } else {
                 let fx = fx_of(pointer.x);
                 let (f0, f1) = (fx * (1.0 - factor), fx + (1.0 - fx) * factor);
-                out.view.x = Some((denorm_x(f0), denorm_x(f1)));
+                out.view.x = store_x((denorm_x(f0), denorm_x(f1)));
             }
         }
     }
@@ -1186,6 +1342,325 @@ mod tests {
         assert_eq!(spec.y_scale, XScale::Log10);
         assert!((spec.y_scale.normalize(10.0, spec.y.min, spec.y.max) - 0.5).abs() < 1.0e-12);
         assert!((spec.y_scale.denormalize(0.5, spec.y.min, spec.y.max) - 10.0).abs() < 1.0e-12);
+    }
+
+    /// Drive `show` for a sequence of input frames and hand back what the
+    /// last frame painted plus the navigation it reported. Painted shapes are
+    /// the only honest record of what a reader sees.
+    fn plot_frames(
+        spec: &PlotSpec<'_>,
+        size: egui::Vec2,
+        frames: &[Vec<egui::Event>],
+    ) -> (Vec<egui::epaint::ClippedShape>, ViewChange) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut cache = DecimationCache::default();
+        let mut view = ViewChange::default();
+        let mut shapes = Vec::new();
+        for events in frames {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), size)),
+                events: events.clone(),
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                let out = show(ui, spec, &mut cache, None, None);
+                view = out.view;
+            });
+            shapes = output.shapes;
+        }
+        (shapes, view)
+    }
+
+    fn press(at: Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        }
+    }
+
+    fn double_click(at: Pos2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(at),
+            press(at, egui::PointerButton::Primary, true),
+            press(at, egui::PointerButton::Primary, false),
+            press(at, egui::PointerButton::Primary, true),
+            press(at, egui::PointerButton::Primary, false),
+        ]
+    }
+
+    fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn painted_fills(shapes: &[egui::epaint::ClippedShape]) -> Vec<Rect> {
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                Shape::Rect(rect) if rect.fill != Color32::TRANSPARENT => Some(rect.rect),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn degenerate_spec<'a>(x: &'a [f64], y: &'a [f64], min: f64, max: f64) -> PlotSpec<'a> {
+        let mut spec = PlotSpec::new(
+            Axis::linear(min, max, "s"),
+            XScale::Linear,
+            Axis::linear(min, max, "V"),
+        );
+        spec.traces.push(Trace::new(x, y, egui::Color32::WHITE).cache_key(1));
+        spec
+    }
+
+    /// A view that has collapsed to a point cannot draw, but it must still
+    /// listen: the only way out of a stuck viewport is a gesture, and the
+    /// early return swallowed every one of them.
+    #[test]
+    fn a_degenerate_view_still_accepts_the_gesture_that_would_rescue_it() {
+        let x = [1.0, 1.0];
+        let y = [2.0, 2.0];
+        let spec = degenerate_spec(&x, &y, 1.0, 1.0);
+        let size = vec2(400.0, 240.0);
+        let inside = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec).center();
+        let (_, view) = plot_frames(
+            &spec,
+            size,
+            &[
+                vec![egui::Event::PointerMoved(inside)],
+                double_click(inside),
+            ],
+        );
+
+        assert!(view.reset, "a collapsed view ignored double-click to fit");
+    }
+
+    /// Degenerate data must paint quietly rather than panic: zero span, one
+    /// sample, and a wholly undefined trace all reach the painter in practice.
+    #[test]
+    fn degenerate_views_paint_without_panicking() {
+        let nan = [f64::NAN; 8];
+        let single = [1.0];
+        let cases: Vec<(Vec<f64>, Vec<f64>, f64, f64)> = vec![
+            (vec![1.0, 1.0], vec![2.0, 2.0], 1.0, 1.0),
+            (single.to_vec(), vec![0.5], 0.0, 1.0),
+            (nan.to_vec(), nan.to_vec(), 0.0, 1.0),
+            (vec![0.0, 1.0], vec![f64::NAN, f64::INFINITY], 0.0, 1.0),
+        ];
+        for (x, y, min, max) in cases {
+            let spec = degenerate_spec(&x, &y, min, max);
+            let (shapes, _) = plot_frames(&spec, vec2(320.0, 200.0), &[Vec::new()]);
+            assert!(shapes.iter().all(|clipped| clipped.shape.visual_bounding_rect().is_finite()
+                || clipped.shape.visual_bounding_rect().is_negative()));
+        }
+    }
+
+    /// Tick labels are chrome, and chrome that overlaps is unreadable. The X
+    /// row already skipped colliding labels; the Y column never did, so a
+    /// short pane stacked them on top of one another.
+    #[test]
+    fn y_tick_labels_never_overlap_however_short_the_pane_gets() {
+        let x = [0.0, 1.0];
+        let y = [0.0, 1000.0];
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear_with(0.0, 1000.0, "V", 40),
+        );
+        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
+        let size = vec2(420.0, 96.0);
+        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
+        let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
+
+        let mut rows: Vec<Rect> = painted_text(&shapes)
+            .into_iter()
+            .filter(|(_, at)| at.right() <= plot.left())
+            .map(|(_, at)| at)
+            .collect();
+        rows.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        for pair in rows.windows(2) {
+            assert!(
+                pair[1].top() >= pair[0].bottom(),
+                "y labels overlap: {:?} then {:?} ({} labels)",
+                pair[0],
+                pair[1],
+                rows.len()
+            );
+        }
+    }
+
+    /// A band is a statement about a region of the data. Painted outside the
+    /// plot area it is a statement about the tick gutter.
+    #[test]
+    fn a_band_outside_the_window_never_paints_over_the_axis_gutter() {
+        let x = [0.0, 1.0];
+        let y = [0.0, 1.0];
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear(0.0, 1.0, "V"),
+        );
+        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
+        spec.bands.push(super::super::spec::Band { x0: -4.0, x1: -2.0 });
+        spec.bands.push(super::super::spec::Band { x0: 0.4, x1: 3.0 });
+        let size = vec2(420.0, 260.0);
+        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
+        let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
+
+        for fill in painted_fills(&shapes) {
+            assert!(
+                plot.expand(1.0).contains_rect(fill),
+                "a band painted {fill:?} outside the plot area {plot:?}"
+            );
+        }
+    }
+
+    /// One Shift-drag, run in both modes. It has to zoom where zooming is the
+    /// contract and do nothing where preserving the view is: Select was
+    /// arming the zoom box off the same modifier, so a key held for a
+    /// selection gesture rescaled the plot underneath it.
+    #[test]
+    fn shift_drag_zooms_where_the_mode_allows_it_and_nowhere_else() {
+        let x = [0.0, 1.0];
+        let y = [0.0, 1.0];
+        let mut spec = PlotSpec::new(
+            Axis::linear(0.0, 1.0, "s"),
+            XScale::Linear,
+            Axis::linear(0.0, 1.0, "V"),
+        );
+        spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
+        let size = vec2(420.0, 260.0);
+        let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
+        let (from, to) = (
+            plot.left_top() + vec2(20.0, 20.0),
+            plot.left_top() + vec2(180.0, 140.0),
+        );
+        let shift = egui::Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        // The box anchors where the drag threshold is crossed, so the press
+        // needs a frame of travel past that threshold of its own before the
+        // sweep to the far corner.
+        let drag_frames = |modifiers: egui::Modifiers| -> Vec<Vec<egui::Event>> {
+            vec![
+                vec![egui::Event::PointerMoved(from)],
+                vec![
+                    egui::Event::PointerMoved(from),
+                    egui::Event::PointerButton {
+                        pos: from,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                    },
+                ],
+                vec![egui::Event::PointerMoved(from + vec2(30.0, 20.0))],
+                vec![egui::Event::PointerMoved(to)],
+                vec![
+                    egui::Event::PointerMoved(to),
+                    egui::Event::PointerButton {
+                        pos: to,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers,
+                    },
+                ],
+            ]
+        };
+
+        let outcome = |mode: InteractionMode| {
+            let ctx = egui::Context::default();
+            crate::ui::Theme::default().apply(&ctx);
+            let mut cache = DecimationCache::default();
+            let mut view = ViewChange::default();
+            for events in drag_frames(shift) {
+                set_interaction_mode(&ctx, mode);
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), size)),
+                    events,
+                    modifiers: shift,
+                    ..Default::default()
+                };
+                let _ = ctx.run_ui(input, |ui| {
+                    let out = show(ui, &spec, &mut cache, None, None);
+                    if out.view.any() {
+                        view = out.view;
+                    }
+                });
+            }
+            view
+        };
+
+        let zoomed = outcome(InteractionMode::All);
+        assert!(
+            zoomed.x.is_some() && zoomed.y.is_some(),
+            "the gesture never reached the zoom box: {zoomed:?}"
+        );
+        let selected = outcome(InteractionMode::Select);
+        assert!(!selected.any(), "Select mode changed the view: {selected:?}");
+    }
+
+    /// Markers follow the curve, not the abscissa. On a locus the X walk
+    /// stalled at the first turn and stamped one point over and over.
+    #[test]
+    fn trace_markers_walk_the_curve_rather_than_the_abscissa() {
+        let plot = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+        let circle: Vec<Pos2> = (0..=720)
+            .map(|step: u16| {
+                let angle = f32::from(step) * std::f32::consts::TAU / 720.0;
+                plot.center() + vec2(angle.cos(), angle.sin()) * 150.0
+            })
+            .collect();
+        let placed = trace_marker_positions(&circle, plot);
+
+        assert!(placed.len() >= 4, "{} markers on a locus", placed.len());
+        for pair in placed.windows(2) {
+            assert!(
+                (pair[1] - pair[0]).length() > 24.0,
+                "markers stacked at {:?}",
+                pair[0]
+            );
+        }
+        assert!(placed.iter().all(|point| plot.contains(*point)));
+
+        // An ordinary left-to-right trace keeps its even cadence.
+        let ramp: Vec<Pos2> = (0..=600u16)
+            .map(|step| pos2(f32::from(step), 200.0 + f32::from(step) * 0.1))
+            .collect();
+        let placed = trace_marker_positions(&ramp, plot);
+        assert!(placed.len() >= 4 && placed.len() <= 8, "{placed:?}");
+        assert!(placed.windows(2).all(|pair| pair[1].x > pair[0].x));
+    }
+
+    /// No gesture may store a view a later gesture cannot undo.
+    #[test]
+    fn a_stored_view_span_is_never_degenerate() {
+        for scale in [XScale::Linear, XScale::Log10] {
+            for range in [(1.0, 1.0), (1.0e-6, 1.0e-6), (5.0, 5.0)] {
+                let (low, high) = floored_span(range, scale).expect("a usable span");
+                assert!(high > low, "{scale:?} {range:?} stored {low}..{high}");
+            }
+        }
+        let (low, high) = floored_span((0.0, 0.0), XScale::Linear).expect("a usable span");
+        assert!(high > low);
+        assert_eq!(floored_span((-1.0, 2.0), XScale::Log10), None);
+        assert_eq!(floored_span((f64::NAN, 1.0), XScale::Linear), None);
+        // An ordinary range passes through untouched.
+        assert_eq!(
+            floored_span((0.0, 1.0), XScale::Linear),
+            Some((0.0, 1.0))
+        );
     }
 
     #[test]
