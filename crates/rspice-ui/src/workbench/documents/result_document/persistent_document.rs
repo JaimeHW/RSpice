@@ -15,7 +15,7 @@ use crate::product::{
 use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
     Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, EntityRef, Marker,
-    Measurement, Page, PageLayout, Pane, PaneDataBinding, PanePlacement, Trace, TypedValue,
+    Measurement, Page, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace, TypedValue,
 };
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::ui::theme::{self, FontWeight};
@@ -117,7 +117,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         return;
     }
 
-    let requested_active_pane = app.state.workbench.visualization_studio.active_pane;
+    // Which pane the reader is working in belongs to this document, not to
+    // whichever document last set the studio's global selection.
+    let requested_active_pane = app
+        .state
+        .ui
+        .results
+        .persistent_document_pane(document_id)
+        .map(PaneId::get);
     let active_pane_id = resolved_active_pane_id(
         requested_active_pane,
         page.panes.iter().map(|pane| pane.id.get()),
@@ -129,6 +136,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .iter()
         .find(|pane| pane.id.get() == active_pane_id)
         .expect("the resolved active pane belongs to the selected page");
+    app.state
+        .ui
+        .results
+        .select_persistent_document_pane(document_id, active_pane.id);
     if let Err(reason) = select_pane_binding(&mut app.state, active_pane) {
         unavailable_surface(ui, &active_pane.title, &reason);
         return;
@@ -185,6 +196,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .expect("a pane activated from this page remains in this page");
     if select_pane_binding(&mut app.state, restored_pane).is_ok() {
         app.state.workbench.visualization_studio.active_pane = Some(restored_pane_id);
+        app.state
+            .ui
+            .results
+            .select_persistent_document_pane(document_id, restored_pane.id);
         let restored_viewer = if activated_pane_id.is_some() {
             ResultViewer::from_viewer_document_id(&restored_pane.viewer_id)
         } else {
@@ -480,7 +495,11 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     };
     let panes = ordered_page_panes(document.panes(), page);
     let active_pane_id = resolved_active_pane_id(
-        state.workbench.visualization_studio.active_pane,
+        state
+            .ui
+            .results
+            .persistent_document_pane(document_id)
+            .map(PaneId::get),
         panes.iter().map(|pane| pane.id.get()),
     );
     let Some(pane) =
@@ -493,6 +512,10 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
         return false;
     }
     state.workbench.visualization_studio.active_pane = Some(pane.id.get());
+    state
+        .ui
+        .results
+        .select_persistent_document_pane(document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
         state.ui.results.viewer = viewer;
     }
@@ -1969,6 +1992,144 @@ mod tests {
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .expect("completed lifecycle");
         run
+    }
+
+    // -----------------------------------------------------------------
+    // per-document selection and lifecycle
+    // -----------------------------------------------------------------
+
+    /// Which pane a reader is working in is a fact about one document.
+    ///
+    /// A single global selection meant activating a pane in one document
+    /// selected the pane with the same serial in every other open one, and
+    /// coming back to a document forgot where the reader had been.
+    #[test]
+    fn pane_selection_belongs_to_the_document_it_was_made_in() {
+        let (mut app, first) = persistent_transient_fixture();
+        app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+            open: true,
+            name: "Second transient review".to_owned(),
+            name_touched: true,
+            dataset_id: Some(app.state.simulation.runs[0].dataset_id),
+            family_id: "waveform-worksheet".to_owned(),
+            viewer_id: "viewer-waveform".to_owned(),
+            layout_id: "two-linked-panes".to_owned(),
+            validation_error: None,
+        };
+        let second =
+            super::super::create_document::commit(&mut app).expect("a second document commits");
+
+        drive_frame(|ui| show(ui, &mut app, first));
+        let first_pane = app
+            .state
+            .ui
+            .results
+            .persistent_document_pane(first)
+            .expect("the first document selected a pane");
+
+        // The reader works in the second pane of the two-pane document.
+        let second_panes: Vec<PaneId> = app
+            .state
+            .workspace
+            .visualization_document(second)
+            .expect("the second document is retained")
+            .panes()
+            .iter()
+            .map(|pane| pane.id)
+            .collect();
+        assert_eq!(second_panes.len(), 2);
+        let working_pane = second_panes[1];
+        app.state
+            .ui
+            .results
+            .select_persistent_document_pane(second, working_pane);
+        drive_frame(|ui| show(ui, &mut app, second));
+        assert_eq!(
+            app.state.ui.results.persistent_document_pane(second),
+            Some(working_pane)
+        );
+        assert_eq!(
+            app.state.ui.results.persistent_document_pane(first),
+            Some(first_pane),
+            "drawing another document must not restate this one's selection"
+        );
+
+        // Coming back to each finds the reader where they were, rather than
+        // wherever the other document last left one global selection.
+        drive_frame(|ui| show(ui, &mut app, first));
+        assert_eq!(
+            app.state.workbench.visualization_studio.active_pane,
+            Some(first_pane.get())
+        );
+        drive_frame(|ui| show(ui, &mut app, second));
+        assert_eq!(
+            app.state.workbench.visualization_studio.active_pane,
+            Some(working_pane.get()),
+            "the second document went back to the pane it was left on"
+        );
+    }
+
+    /// (7) Closing a document and reopening it holds the reader's place: the
+    /// trace they selected, the readout they pinned, and the page and pane
+    /// they were on.
+    #[test]
+    fn closing_and_reopening_a_document_holds_the_readers_place() {
+        let (mut app, document_id) = persistent_transient_fixture();
+        drive_frame(|ui| show(ui, &mut app, document_id));
+        let pane = app
+            .state
+            .ui
+            .results
+            .persistent_document_pane(document_id)
+            .expect("the document selected a pane");
+        let page = app
+            .state
+            .ui
+            .results
+            .persistent_document_page(document_id)
+            .expect("the document selected a page");
+        let analysis = super::super::AnalysisPresentationKey::new(
+            app.state.simulation.runs[0].dataset_id,
+            &app.state.simulation.runs[0].analyses[0],
+        );
+        app.state.ui.results.selected_trace = Some(
+            super::super::SelectedResultTrace::from_identity(analysis, "V(out)"),
+        );
+        app.state
+            .ui
+            .results
+            .rf_pin
+            .insert(ResultViewer::Smith, (0, 3));
+
+        // Close: the reader goes back to the dataset quick view, which leaves
+        // the persistent projection behind.
+        drive_frame(|ui| super::super::show_compact_split(ui, &mut app));
+        assert!(app.state.ui.results.persistent_pane_context.is_none());
+
+        // Re-open, and hold it open.
+        for frame in 0..3 {
+            drive_frame(|ui| show(ui, &mut app, document_id));
+            assert!(
+                app.state.ui.results.selected_trace.is_some(),
+                "frame {frame} after re-opening lost the selected trace"
+            );
+            assert!(
+                app.state
+                    .ui
+                    .results
+                    .rf_pin
+                    .contains_key(&ResultViewer::Smith),
+                "frame {frame} after re-opening lost the pinned readout"
+            );
+        }
+        assert_eq!(
+            app.state.ui.results.persistent_document_pane(document_id),
+            Some(pane)
+        );
+        assert_eq!(
+            app.state.ui.results.persistent_document_page(document_id),
+            Some(page)
+        );
     }
 
     // -----------------------------------------------------------------

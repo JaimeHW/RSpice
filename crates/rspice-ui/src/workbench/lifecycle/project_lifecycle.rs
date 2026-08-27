@@ -286,8 +286,8 @@ pub(crate) fn snapshot(state: &AppState) -> Result<ProjectFile, ProjectLifecycle
         simulation_results,
         execution_context,
     )
-    .with_result_markers(state.ui.results.markers.clone())
-    .with_result_log_y_panes(state.ui.results.log_y_panes.iter().cloned().collect())
+    .with_result_markers(state.ui.results.project_markers(&state.simulation))
+    .with_result_log_y_panes(state.ui.results.project_log_y_panes(&state.simulation))
     .with_result_expression_groups(
         state
             .ui

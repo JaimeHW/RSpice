@@ -212,8 +212,10 @@ pub(crate) struct AnalysisPresentationKey {
     source: AnalysisPresentationSource,
 }
 
+/// Which authored analysis a result came from, independent of the dataset it
+/// was solved into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-enum AnalysisPresentationSource {
+pub(crate) enum AnalysisPresentationSource {
     Prepared(AnalysisInstanceId),
     Legacy(u64),
 }
@@ -229,6 +231,16 @@ impl AnalysisPresentationKey {
 
     pub(crate) const fn dataset_id(self) -> DatasetId {
         self.dataset_id
+    }
+
+    /// The authored analysis this key names, without the dataset one run of
+    /// it produced.
+    ///
+    /// Presentation decisions the reader makes about "the transient" are
+    /// about the analysis, not about the one solve of it that happened to be
+    /// on screen when they made them.
+    pub(crate) const fn authored(self) -> AnalysisPresentationSource {
+        self.source
     }
 
     pub(crate) fn resolve(self, run: &SimulationRun) -> Option<(usize, &AnalysisResult)> {
@@ -858,7 +870,14 @@ impl From<ResultArtifactPresentationKey> for ResultBrowserSelectionKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PlotPresentationKey {
     Global(usize),
-    Analysis(AnalysisPresentationKey),
+    /// One waveform stack strip, named by the analysis it draws rather than
+    /// by the one dataset that analysis produced.
+    ///
+    /// A re-run mints a new dataset identity, so keying the strip by the
+    /// dataset threw away the reader's zoom on every run — while the
+    /// ordinal-keyed single-canvas sheets beside it kept theirs, which is
+    /// what [`ResultsState::views`] says the map is for.
+    Analysis(AnalysisPresentationSource),
     Document(ResultDocumentId, PaneId),
 }
 
@@ -2141,6 +2160,17 @@ pub struct ResultsState {
         crate::product::ResultDocumentId,
         crate::results::visualization_document::PageId,
     >,
+    /// The retained dataset history this presentation state was last
+    /// reconciled against. Transient.
+    retained_datasets: HashSet<DatasetId>,
+    /// Device-local pane selection for each project-owned result document.
+    ///
+    /// Kept per document for the same reason page selection is: which pane a
+    /// reader is working in is a fact about one document. A single global
+    /// selection meant activating a pane in one document selected the pane
+    /// with the same serial in every other open one, and switching documents
+    /// forgot where the reader had been.
+    persistent_document_panes: std::collections::HashMap<crate::product::ResultDocumentId, PaneId>,
     /// Why Latest tracking could not advance one document onto one candidate
     /// dataset.
     ///
@@ -2894,6 +2924,41 @@ impl ResultsState {
         Ok(())
     }
 
+    fn dataset_is_retained(
+        simulation: &crate::state::SimulationState,
+        analysis: AnalysisPresentationKey,
+    ) -> bool {
+        simulation
+            .runs
+            .iter()
+            .any(|run| run.dataset_id == analysis.dataset_id())
+    }
+
+    /// The markers this project saves: the reader's own, about datasets the
+    /// project still holds.
+    pub(crate) fn project_markers(
+        &self,
+        simulation: &crate::state::SimulationState,
+    ) -> Vec<ResultMarker> {
+        self.markers
+            .iter()
+            .filter(|marker| Self::dataset_is_retained(simulation, marker.analysis))
+            .cloned()
+            .collect()
+    }
+
+    /// The logarithmic-axis choices this project saves.
+    pub(crate) fn project_log_y_panes(
+        &self,
+        simulation: &crate::state::SimulationState,
+    ) -> Vec<WavePanePresentationKey> {
+        self.log_y_panes
+            .iter()
+            .filter(|pane| Self::dataset_is_retained(simulation, pane.analysis))
+            .cloned()
+            .collect()
+    }
+
     /// Deterministic project projection of every stable expression trace.
     pub(crate) fn project_expression_groups(
         &self,
@@ -2912,9 +2977,14 @@ impl ResultsState {
                 }
             }
         }
+        // Retention discards datasets; a group naming one the project no
+        // longer holds would be written out only to fail its own resolvability
+        // check on the next load.
         let mut groups = stable
             .iter()
-            .filter(|(_, traces)| !traces.is_empty())
+            .filter(|(analysis, traces)| {
+                !traces.is_empty() && Self::dataset_is_retained(simulation, **analysis)
+            })
             .map(
                 |(analysis, traces)| crate::io::ProjectResultExpressionGroup {
                     analysis: *analysis,
@@ -2953,6 +3023,98 @@ impl ResultsState {
         page_id: crate::results::visualization_document::PageId,
     ) {
         self.persistent_document_pages.insert(document_id, page_id);
+    }
+
+    /// Drop presentation state naming datasets the project no longer retains.
+    ///
+    /// Retention discards a dataset. Every mark, filter, expression group and
+    /// memo the reader made *about* that dataset is then a statement about
+    /// something that no longer exists: left in place it accumulates for the
+    /// life of the session, and the project file is written with expression
+    /// groups and markers that resolve against nothing when it is reopened.
+    ///
+    /// Two stores are deliberately absent. `views` keys a strip's window by
+    /// the authored analysis rather than by one dataset, precisely so the
+    /// window survives a re-run; a document-keyed window belongs to its
+    /// document. `eye_timebase` keeps its prepared keys for the same reason,
+    /// and only its dataset-named legacy keys are pruned.
+    pub(crate) fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
+        let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
+        self.markers.retain(|marker| live(marker.analysis));
+        self.log_y_panes.retain(|pane| live(pane.analysis));
+        self.analysis_exprs.retain(|analysis, _| live(*analysis));
+        self.analysis_expr_cache
+            .retain(|(analysis, _), _| live(*analysis));
+        self.expr_projection_keys
+            .retain(|_, analysis| live(*analysis));
+        self.hidden_strips.retain(|analysis| live(*analysis));
+        self.maximized_strip = self.maximized_strip.filter(|analysis| live(*analysis));
+        self.retained_evidence_validity
+            .retain(|analysis, _| live(*analysis));
+        self.favorite_signals.retain(|key| live(key.analysis()));
+        self.recent_signals.retain(|key| live(key.analysis()));
+        self.favorite_result_artifacts
+            .retain(|key| live(key.analysis));
+        self.recent_result_artifacts
+            .retain(|key| live(key.analysis));
+        self.checked_result_quantities
+            .retain(|key| retained.contains(&key.dataset_id()));
+        self.browser_range_anchor = self
+            .browser_range_anchor
+            .take()
+            .filter(|key| retained.contains(&key.dataset_id()));
+        self.waveform_visibility
+            .retain(|key, _| live(key.analysis()));
+        self.hidden_family_traces.retain(|key| live(key.analysis()));
+        self.eye_timebase.retain(|key, _| match key {
+            crate::analysis::eye_diagram::EyeTimebaseKey::Prepared(_) => true,
+            crate::analysis::eye_diagram::EyeTimebaseKey::Legacy(dataset, _) => {
+                retained.contains(dataset)
+            }
+        });
+        self.selected_trace = self
+            .selected_trace
+            .take()
+            .filter(|selected| live(selected.analysis_key()));
+        self.selected_result_artifact = self
+            .selected_result_artifact
+            .take()
+            .filter(|key| live(key.analysis));
+    }
+
+    /// Bring dataset-scoped presentation state in step with the retained
+    /// history, at whatever moment the workspace next looks at it.
+    ///
+    /// Pruning happens in several places inside the simulation state, which
+    /// has no reach into presentation state at all. Reconciling against the
+    /// retained set here gives that one owner, and costs a comparison of a
+    /// short list unless the history actually changed.
+    pub(crate) fn reconcile_retained_datasets(
+        &mut self,
+        simulation: &crate::state::SimulationState,
+    ) {
+        let retained: HashSet<DatasetId> =
+            simulation.runs.iter().map(|run| run.dataset_id).collect();
+        if retained == self.retained_datasets {
+            return;
+        }
+        self.retain_datasets(&retained);
+        self.retained_datasets = retained;
+    }
+
+    pub(crate) fn persistent_document_pane(
+        &self,
+        document_id: crate::product::ResultDocumentId,
+    ) -> Option<PaneId> {
+        self.persistent_document_panes.get(&document_id).copied()
+    }
+
+    pub(crate) fn select_persistent_document_pane(
+        &mut self,
+        document_id: crate::product::ResultDocumentId,
+        pane_id: PaneId,
+    ) {
+        self.persistent_document_panes.insert(document_id, pane_id);
     }
 
     /// The standing reason one document's Latest retarget onto this exact
@@ -3197,7 +3359,11 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
         pane: usize,
     ) -> PlotView {
-        self.plot_view_pane_for(viewer, PlotPresentationKey::Analysis(analysis), pane)
+        self.plot_view_pane_for(
+            viewer,
+            PlotPresentationKey::Analysis(analysis.authored()),
+            pane,
+        )
     }
 
     /// Mutable zoom/pan override for one pane of one plot.
@@ -3228,7 +3394,7 @@ impl ResultsState {
             PlotPresentationKey::Global(_) => {
                 PlotPresentationKey::Document(context.document_id, context.pane_id)
             }
-            PlotPresentationKey::Analysis(analysis) if analysis == context.analysis => {
+            PlotPresentationKey::Analysis(authored) if authored == context.analysis.authored() => {
                 PlotPresentationKey::Document(context.document_id, context.pane_id)
             }
             PlotPresentationKey::Analysis(_) | PlotPresentationKey::Document(_, _) => plot,
@@ -3241,7 +3407,11 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
         pane: usize,
     ) -> &mut PlotView {
-        self.plot_view_pane_mut_for(viewer, PlotPresentationKey::Analysis(analysis), pane)
+        self.plot_view_pane_mut_for(
+            viewer,
+            PlotPresentationKey::Analysis(analysis.authored()),
+            pane,
+        )
     }
 
     /// Mutable zoom/pan override for a single-pane plot.
@@ -3283,13 +3453,16 @@ impl ResultsState {
         viewer: ResultViewer,
         analysis: AnalysisPresentationKey,
     ) {
-        self.reset_plot_view_for(viewer, PlotPresentationKey::Analysis(analysis));
+        self.reset_plot_view_for(viewer, PlotPresentationKey::Analysis(analysis.authored()));
     }
 
     /// Drop every analysis-keyed viewport override of one viewer.
     pub(super) fn reset_all_analysis_plot_views(&mut self, viewer: ResultViewer) {
         if let Some(context) = self.persistent_pane_context {
-            self.reset_plot_view_for(viewer, PlotPresentationKey::Analysis(context.analysis));
+            self.reset_plot_view_for(
+                viewer,
+                PlotPresentationKey::Analysis(context.analysis.authored()),
+            );
             return;
         }
         self.views.retain(|(key_viewer, key_plot, _), _| {
@@ -3303,7 +3476,7 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
         pane: usize,
     ) {
-        let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis));
+        let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis.authored()));
         self.views.remove(&(viewer, plot, pane));
     }
 
@@ -3325,7 +3498,7 @@ impl ResultsState {
         viewer: ResultViewer,
         analysis: AnalysisPresentationKey,
     ) -> bool {
-        self.plot_is_zoomed(viewer, PlotPresentationKey::Analysis(analysis))
+        self.plot_is_zoomed(viewer, PlotPresentationKey::Analysis(analysis.authored()))
     }
 
     /// Whether any pane of one strip pins the given axis.
@@ -3335,7 +3508,7 @@ impl ResultsState {
         analysis: AnalysisPresentationKey,
         axis: PaneAxis,
     ) -> bool {
-        let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis));
+        let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis.authored()));
         self.views.iter().any(|((key_viewer, key_plot, _), view)| {
             (*key_viewer, *key_plot) == (viewer, plot)
                 && match axis {
@@ -4185,6 +4358,10 @@ pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, view
 
 pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     synchronize_quick_view_dataset_authority(&mut app.state);
+    app.state
+        .ui
+        .results
+        .reconcile_retained_datasets(&app.state.simulation);
     let data_version = app.state.simulation.data_version;
     // The user's display-cache budget is session state, and the cache is not,
     // so applying it only where the setting is edited left a restored session
@@ -7676,6 +7853,133 @@ mod availability_tests {
     fn active_analysis_key(state: &AppState) -> AnalysisPresentationKey {
         let run = state.simulation.active_run().expect("active retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    }
+
+    /// Keeping the zoomed window across a re-run is what the viewport store
+    /// exists for — it is how an engineer compares one parameter tweak with
+    /// the last. The ordinal-keyed single-canvas sheets always did; the
+    /// waveform strips keyed themselves by the dataset a run produced, so
+    /// every re-run minted a new key and threw the reader's window away.
+    #[test]
+    fn a_re_run_keeps_the_window_the_reader_zoomed_the_wave_stack_to() {
+        let authored = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![WaveformData::new(
+                "V(out)",
+                vec![0.0, 1.0],
+                vec![0.0, 1.0],
+                "#ffbd2e",
+            )])
+            .with_provenance(
+                crate::state::AnalysisResultProvenance::new(
+                    AnalysisInstanceId::new(),
+                    crate::product::ObjectRevision::INITIAL,
+                    crate::product::ContentDigest::from_bytes([7; 32]),
+                    Vec::new(),
+                )
+                .expect("analysis provenance"),
+            );
+        let mut state = state_with_analysis(authored.clone());
+        let first = active_analysis_key(&state);
+        state
+            .ui
+            .results
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, first, 0)
+            .x = Some((0.25, 0.75));
+
+        // The same authored analysis, solved again into a new dataset.
+        let mut rerun = SimulationRun::new(2);
+        rerun.add_analysis(authored);
+        state.simulation.runs.insert(0, rerun);
+        assert!(state.simulation.select_run(0));
+        let second = active_analysis_key(&state);
+        assert_ne!(
+            first.dataset_id(),
+            second.dataset_id(),
+            "a re-run mints a new dataset identity"
+        );
+
+        assert_eq!(
+            state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, second, 0)
+                .x,
+            Some((0.25, 0.75)),
+            "the window follows the analysis, not the one solve of it"
+        );
+    }
+
+    /// Retention discards a dataset; every decision the reader made about it
+    /// is then a statement about nothing. Left in place they accumulate for
+    /// the session and are written into the project file.
+    #[test]
+    fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
+        let mut state = transient_state();
+        let kept = active_analysis_key(&state);
+        let mut discarded_run = SimulationRun::new(2);
+        discarded_run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(gone)", vec![0.0, 1.0], vec![0.0, 1.0], "#ffbd2e"),
+            ]),
+        );
+        let discarded =
+            AnalysisPresentationKey::new(discarded_run.dataset_id, &discarded_run.analyses[0]);
+        state.simulation.runs.push(discarded_run);
+        state
+            .ui
+            .results
+            .reconcile_retained_datasets(&state.simulation);
+
+        for (analysis, name) in [(kept, "V(out)"), (discarded, "V(gone)")] {
+            state.ui.results.add_marker(
+                analysis,
+                marker_anchor_for(analysis, name),
+                name.to_owned(),
+                0.5,
+            );
+            state
+                .ui
+                .results
+                .log_y_panes
+                .insert(WavePanePresentationKey {
+                    analysis,
+                    unit: "V".to_owned(),
+                });
+            state.ui.results.hidden_strips.insert(analysis);
+            state
+                .ui
+                .results
+                .favorite_signals
+                .insert(SourceWaveformPresentationKey::new(analysis, name));
+            state.ui.results.analysis_exprs.insert(analysis, Vec::new());
+        }
+
+        // Retention discards the second run.
+        state
+            .simulation
+            .runs
+            .retain(|run| run.dataset_id == kept.dataset_id());
+        state
+            .ui
+            .results
+            .reconcile_retained_datasets(&state.simulation);
+
+        assert_eq!(state.ui.results.markers.len(), 1);
+        assert_eq!(state.ui.results.markers[0].analysis, kept);
+        assert_eq!(state.ui.results.log_y_panes.len(), 1);
+        assert_eq!(state.ui.results.hidden_strips.len(), 1);
+        assert_eq!(state.ui.results.favorite_signals.len(), 1);
+        assert_eq!(state.ui.results.analysis_exprs.len(), 1);
+        assert!(state.ui.results.analysis_exprs.contains_key(&kept));
+        assert!(
+            state
+                .ui
+                .results
+                .project_expression_groups(&state.simulation)
+                .iter()
+                .all(|group| group.analysis == kept),
+            "a save must not carry a group about a dataset the project dropped"
+        );
     }
 
     /// The defect this pins: the waveform sheets key their viewports by

@@ -1156,8 +1156,9 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         analysis,
         unit: "V".to_owned(),
     };
-    // A pane whose analysis this project does not retain must not come
-    // back — it would put an axis in log space for nothing on screen.
+    // A pane whose analysis this project does not retain is not written out
+    // at all, and an older file that already carries one does not come back
+    // from it — either would put an axis in log space for nothing on screen.
     let orphan = WavePanePresentationKey {
         analysis: AnalysisPresentationKey::new(
             crate::product::DatasetId::new(),
@@ -1166,7 +1167,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         unit: "A".to_owned(),
     };
     state.ui.results.log_y_panes.insert(pane.clone());
-    state.ui.results.log_y_panes.insert(orphan);
+    state.ui.results.log_y_panes.insert(orphan.clone());
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1182,14 +1183,18 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     let _ = std::fs::remove_file(&path);
 
     assert!(saved);
-    assert_eq!(loaded.result_log_y_panes.len(), 2);
+    assert_eq!(
+        loaded.result_log_y_panes,
+        vec![pane.clone()],
+        "the save carries only the pane whose analysis this project retains"
+    );
 
+    // An older file that already carries an orphan is still filtered on load.
     let mut reopened = AppState::default();
     reopened.simulation = state.simulation.clone();
-    crate::workbench::documents::result_document::restore_log_y_panes(
-        &mut reopened,
-        loaded.result_log_y_panes,
-    );
+    let mut older_file = loaded.result_log_y_panes;
+    older_file.push(orphan);
+    crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
     assert_eq!(
         reopened.ui.results.log_y_panes.iter().collect::<Vec<_>>(),
         vec![&pane],

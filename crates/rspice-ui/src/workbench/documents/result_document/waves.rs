@@ -125,6 +125,11 @@ impl FamilyTraceVisibilityKey {
             trace_kind: trace_kind as u8,
         }
     }
+
+    /// The retained analysis this visibility override is a decision about.
+    pub(super) const fn analysis(self) -> AnalysisPresentationKey {
+        self.analysis
+    }
 }
 
 impl TraceKind {
