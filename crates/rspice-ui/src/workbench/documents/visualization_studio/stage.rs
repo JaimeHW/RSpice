@@ -112,7 +112,25 @@ pub(super) fn viewer_stage(ui: &mut Ui, app: &mut RSpiceApp) {
     exact_data_dock(ui, app);
 }
 
+/// Whether the sheet on screen draws the analysis's own retained sweep on its
+/// horizontal axis.
+///
+/// A marker or annotation is anchored by an X coordinate taken from a
+/// retained waveform — seconds on a transient, hertz on a noise sweep. The
+/// overlay maps that coordinate onto whatever the well is currently showing,
+/// so it must only draw where the well's horizontal axis is that same sweep.
+/// The unit-pane stack is exactly that set; the derived sheets — the folded
+/// eye, the binned histogram, the spectrum, the Smith and Nyquist charts —
+/// compute their own abscissa, and a time marker placed on one of those is
+/// drawn at a position that means nothing.
+pub(super) fn marker_domain_matches_the_pane(viewer: ResultViewer) -> bool {
+    result_document::viewer_uses_wave_stack(viewer)
+}
+
 pub(super) fn paint_visualization_markers(ui: &Ui, app: &mut RSpiceApp) {
+    if !marker_domain_matches_the_pane(app.state.ui.results.viewer) {
+        return;
+    }
     let Some(well) = app.state.ui.results.well_rect else {
         return;
     };

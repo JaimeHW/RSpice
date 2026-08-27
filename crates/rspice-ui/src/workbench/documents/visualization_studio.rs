@@ -4700,4 +4700,142 @@ mod integrity_scan_tests {
         assert!(window <= 180.0);
         assert!(body < window);
     }
+
+    /// The toolbar's magnification buttons follow the command's own gate.
+    ///
+    /// They were enabled for the waveform sheet alone, while `Command::ZoomIn`
+    /// is offered — and carried out — on every unit-pane sheet. A reader on
+    /// the DC, Bode or ordinary-noise sheet saw two greyed buttons for a
+    /// gesture the product performs.
+    #[test]
+    fn the_toolbar_offers_magnification_wherever_the_command_does() {
+        let mut app = app_with_exact_source();
+        for viewer in [
+            ResultViewer::Waves,
+            ResultViewer::DcSweep,
+            ResultViewer::Bode,
+            ResultViewer::NoiseContrib,
+        ] {
+            app.state.ui.results.viewer = viewer;
+            assert!(
+                result_document::zoom_gesture_available(&app.state),
+                "{viewer:?} answers the zoom gesture"
+            );
+            assert!(
+                sections::magnification_available(&app.state),
+                "{viewer:?} must offer the toolbar's magnification buttons"
+            );
+        }
+        // A sheet that owns its own canvas is still not offered the unit-pane
+        // gesture, so this is not a blanket enable.
+        app.state.ui.results.viewer = ResultViewer::Smith;
+        assert!(!sections::magnification_available(&app.state));
+    }
+
+    /// The readout states the viewport, in the status bar's unit.
+    ///
+    /// It printed `visualization_studio.zoom * 100` as a percentage — a
+    /// counter of button presses, not a fact about the sheet. It is now a
+    /// function of the shared-X status alone, which is why the studio's own
+    /// accumulator cannot appear in its signature.
+    #[test]
+    fn the_magnification_readout_reports_the_viewport_not_the_button_count() {
+        use result_document::SharedXStatus;
+
+        assert_eq!(sections::magnification_readout(None), "—");
+        assert_eq!(
+            sections::magnification_readout(Some(&SharedXStatus {
+                span: "0 s … 1 s".to_owned(),
+                zoom: 1.0,
+            })),
+            "1×"
+        );
+        assert_eq!(
+            sections::magnification_readout(Some(&SharedXStatus {
+                span: "0 s … 250 ms".to_owned(),
+                zoom: 4.0,
+            })),
+            "4×"
+        );
+        assert_eq!(
+            sections::magnification_readout(Some(&SharedXStatus {
+                span: "0 s … 8 ms".to_owned(),
+                zoom: 125.0,
+            })),
+            "125×"
+        );
+    }
+
+    /// Markers overlay only panes whose horizontal axis is the sweep the
+    /// marker's coordinate was taken in.
+    ///
+    /// The overlay maps a retained X coordinate onto whatever the well is
+    /// showing. On the folded eye, the binned histogram, the spectrum or a
+    /// Smith chart the abscissa is computed by the sheet, so a marker placed
+    /// in seconds was drawn at a position that means nothing.
+    #[test]
+    fn markers_overlay_only_panes_that_draw_the_retained_sweep() {
+        for viewer in [
+            ResultViewer::Waves,
+            ResultViewer::DcSweep,
+            ResultViewer::Bode,
+            ResultViewer::NoiseContrib,
+        ] {
+            assert!(
+                stage::marker_domain_matches_the_pane(viewer),
+                "{viewer:?} draws the retained sweep"
+            );
+        }
+        for viewer in [
+            ResultViewer::Fft,
+            ResultViewer::Eye,
+            ResultViewer::Hist,
+            ResultViewer::Smith,
+            ResultViewer::Nyquist,
+            ResultViewer::PhaseNoise,
+            ResultViewer::HarmonicBalance,
+        ] {
+            assert!(
+                !stage::marker_domain_matches_the_pane(viewer),
+                "{viewer:?} computes its own abscissa"
+            );
+        }
+    }
+
+    /// The Measurements section reads the stable expression state.
+    ///
+    /// It read `ResultsState::exprs`, the ordinal compatibility projection
+    /// that only the waveform sheet's build pass reconciles — so opening the
+    /// section without having drawn that sheet listed nothing at all.
+    #[test]
+    fn the_measurements_section_reads_expressions_the_document_actually_holds() {
+        let mut app = app_with_exact_source();
+        assert!(app.state.simulation.select_analysis(0));
+        let key = {
+            let run = app.state.simulation.active_run().expect("active run");
+            let analysis = app
+                .state
+                .simulation
+                .active_analysis()
+                .expect("active analysis");
+            AnalysisPresentationKey::new(run.dataset_id, analysis)
+        };
+
+        assert!(sections::active_analysis_expressions(&app.state).is_empty());
+
+        app.state.ui.results.analysis_exprs.insert(
+            key,
+            vec![result_document::ExprTrace {
+                text: "V(out)*2".to_owned(),
+                visible: true,
+            }],
+        );
+        // The ordinal projection is deliberately left empty: that is the
+        // state the section is opened in when no waveform sheet has run.
+        assert!(app.state.ui.results.exprs.is_empty());
+
+        let expressions = sections::active_analysis_expressions(&app.state);
+        assert_eq!(expressions.len(), 1);
+        assert_eq!(expressions[0].text, "V(out)*2");
+    }
 }

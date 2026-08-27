@@ -377,15 +377,7 @@ pub(super) fn measurements_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     table_header(ui, label);
                 }
                 ui.end_row();
-                let strip = app.state.simulation.active_analysis_idx.unwrap_or_default();
-                let expressions = app
-                    .state
-                    .ui
-                    .results
-                    .exprs
-                    .get(&strip)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default();
+                let expressions = active_analysis_expressions(&app.state);
                 for measurement in &app.state.workbench.visualization_studio.measurements {
                     measurement_row(
                         ui,
@@ -712,6 +704,59 @@ pub(super) fn viewers_section(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
     viewer_inspector(&mut inspector_ui, app, false);
 }
 
+/// Whether the toolbar's `+` and `−` can act on the sheet in the stage.
+///
+/// Magnification is not a waveform-coordinate question. Every unit-pane sheet
+/// carries the retained extents a zoom step is computed against, which is why
+/// `Command::ZoomIn` is offered on all of them — so this asks the command's
+/// own gate rather than a second, narrower one that greyed the buttons on
+/// three sheets that answer the gesture.
+pub(super) fn magnification_available(state: &AppState) -> bool {
+    result_document::zoom_gesture_available(state)
+}
+
+/// The toolbar's magnification readout.
+///
+/// A function of the viewport and nothing else. The readout used to print
+/// `visualization_studio.zoom`, a studio-local float multiplied by 1.25 and
+/// 0.8 as the buttons were pressed: it reported 125% for a sheet whose
+/// viewport had not moved, kept reporting it after a fit released the
+/// viewport, and reported 100% for a sheet the reader had zoomed with the
+/// mouse. The unit is the status bar's, from the status bar's own formatter,
+/// so one product does not state the same viewport two ways.
+pub(super) fn magnification_readout(status: Option<&result_document::SharedXStatus>) -> String {
+    status.map_or_else(
+        || "—".to_owned(),
+        |status| crate::workbench::chrome::status_bar::format_plot_zoom(status.zoom),
+    )
+}
+
+/// The expression traces bound to the active analysis.
+///
+/// `ResultsState::exprs` is the ordinal compatibility projection, and only
+/// the waveform sheet's own build pass reconciles it — so read on this
+/// surface it can be a projection of a previous run's analysis order, or
+/// empty because no waveform sheet has been drawn yet. `analysis_exprs` is
+/// where the stable state lives, and it is keyed by the identity the active
+/// analysis actually has.
+pub(super) fn active_analysis_expressions(state: &AppState) -> &[result_document::ExprTrace] {
+    state
+        .simulation
+        .active_run()
+        .zip(state.simulation.active_analysis_idx)
+        .and_then(|(run, index)| Some((run.dataset_id, run.analyses.get(index)?)))
+        .and_then(|(dataset_id, analysis)| {
+            state
+                .ui
+                .results
+                .analysis_exprs
+                .get(&result_document::AnalysisPresentationKey::new(
+                    dataset_id, analysis,
+                ))
+        })
+        .map_or(&[][..], Vec::as_slice)
+}
+
 pub(super) fn viewer_toolbar(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
     let t = Tokens::get(ui.ctx());
     let bar = Frame::NONE
@@ -731,6 +776,7 @@ pub(super) fn viewer_toolbar(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let waveform_coordinates =
                             app.state.ui.results.viewer == ResultViewer::Waves;
+                        let magnifiable = magnification_available(&app.state);
                         for tool in ViewerTool::ALL {
                             let active = app.state.workbench.visualization_studio.tool == tool;
                             if ui
@@ -789,23 +835,21 @@ pub(super) fn viewer_toolbar(ui: &mut Ui, app: &mut RSpiceApp, compact: bool) {
                                 fit_active_view(app);
                             }
                             if ui
-                                .add_enabled(waveform_coordinates, egui::Button::new("+"))
+                                .add_enabled(magnifiable, egui::Button::new("+"))
                                 .on_hover_text("Zoom in")
                                 .clicked()
                             {
                                 zoom_active(app, 1.25);
                             }
+                            let status =
+                                result_document::active_shared_x_status(&t, &mut app.state);
                             ui.label(
-                                RichText::new(format!(
-                                    "{}%",
-                                    (app.state.workbench.visualization_studio.zoom * 100.0).round()
-                                        as u32
-                                ))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(t.color.text_dim),
+                                RichText::new(magnification_readout(status.as_ref()))
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                    .color(t.color.text_dim),
                             );
                             if ui
-                                .add_enabled(waveform_coordinates, egui::Button::new("−"))
+                                .add_enabled(magnifiable, egui::Button::new("−"))
                                 .on_hover_text("Zoom out")
                                 .clicked()
                             {

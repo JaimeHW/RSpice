@@ -496,7 +496,10 @@ fn empty_schematic_cursor_summary(state: &crate::workbench::app_state::AppState)
 
 /// The zoom chip's waveform form: whole numbers once the magnification is
 /// deep, one decimal while it is shallow enough for the fraction to matter.
-fn format_plot_zoom(zoom: f64) -> String {
+///
+/// Shared with the Visualization Studio's viewer toolbar so one product does
+/// not report the same viewport in two units.
+pub(crate) fn format_plot_zoom(zoom: f64) -> String {
     if zoom >= 10.0 {
         return format!("{zoom:.0}×");
     }
