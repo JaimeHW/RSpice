@@ -38,6 +38,17 @@ fn selected_summary(state: &AppState) -> Option<(&NoiseSummary, &str)> {
     Some((analysis.noise_summary.as_ref()?, analysis.label.as_str()))
 }
 
+/// Why no contributor evidence is on screen. The table binds strictly to the
+/// selected noise analysis, so an empty table has two distinct causes and the
+/// reader is owed the one that applies.
+fn contributor_absence_reason(state: &AppState) -> &'static str {
+    if selected_noise_analysis(state).is_some() {
+        "This noise result contains a spectrum, but no band-integrated contributor evidence was retained."
+    } else {
+        "The selected analysis carries no usable ordinary-noise spectrum, so no contributor evidence is bound to it."
+    }
+}
+
 /// Export both halves of the ordinary-noise sheet: every displayed spectrum
 /// and its band-integrated contributor evidence. Independent frequency grids
 /// remain lossless because the CSV is long-form rather than padded.
@@ -119,10 +130,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some((summary, label)) = selected_summary(state) else {
         ui.add_space(8.0);
         section_header(ui, "Contributors", Some("not retained"));
-        super::panel_note(
-            ui,
-            "This noise result contains a spectrum, but no band-integrated contributor evidence was retained.",
-        );
+        super::panel_note(ui, contributor_absence_reason(state));
         return;
     };
     let summary = summary.clone();

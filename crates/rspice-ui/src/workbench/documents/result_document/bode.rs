@@ -63,19 +63,46 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
 }
 
 pub(super) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    matches!(
-        analysis.analysis_type,
-        AnalysisType::Noise | AnalysisType::Hbnoise
-    ) && analysis.waveforms.iter().any(|waveform| {
-        (is_input_noise_name(&waveform.name) || is_output_noise_name(&waveform.name))
-            && noise_waveform_is_renderable(waveform)
-    })
+    analysis.success
+        && matches!(
+            analysis.analysis_type,
+            AnalysisType::Noise | AnalysisType::Hbnoise
+        )
+        && analysis.waveforms.iter().any(|waveform| {
+            (is_input_noise_name(&waveform.name) || is_output_noise_name(&waveform.name))
+                && noise_waveform_is_renderable(waveform)
+        })
 }
 
-fn build_model(state: &mut AppState) -> Option<BodeModel> {
+/// Why the stability card has no numbers to show.
+#[derive(Debug)]
+enum NoMargins {
+    /// The active run holds no frequency response this sheet can read.
+    NoResponse,
+    /// A response is selected, but the solve behind it failed. Its retained
+    /// vectors are whatever the engine emitted before giving up, and margins
+    /// read off them are not measurements. The engine's own reason travels
+    /// with the refusal when it gave one.
+    AnalysisFailed(Option<String>),
+}
+
+fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     let simulation = &state.simulation;
-    let run = simulation.active_run()?;
-    let summary = ac_bode_summary_for_selection(run, simulation.active_analysis_idx)?;
+    let run = simulation.active_run().ok_or(NoMargins::NoResponse)?;
+    let summary = ac_bode_summary_for_selection(run, simulation.active_analysis_idx)
+        .ok_or(NoMargins::NoResponse)?;
+
+    // Fail closed, as every sibling sheet does. The summary resolves which
+    // exact analysis it read, so the gate names that one rather than the
+    // ordinal selection.
+    let analysis = run
+        .analyses
+        .get(summary.analysis_index)
+        .ok_or(NoMargins::NoResponse)?;
+    if !analysis.success {
+        return Err(NoMargins::AnalysisFailed(analysis.error_message.clone()));
+    }
+
     let phase = summary
         .phase_index
         .zip(summary.phase_deg.as_ref())
@@ -123,7 +150,7 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
         None => None,
     };
 
-    Some(BodeModel { phase_deg, margins })
+    Ok(BodeModel { phase_deg, margins })
 }
 
 fn normalized_noise_name(name: &str) -> String {
@@ -157,21 +184,35 @@ fn is_noise_contributor_name(name: &str) -> bool {
     name.starts_with("noise(") && name.ends_with(')')
 }
 
+/// Analyses whose selection states which noise result the reader means. A
+/// selection outside this family — a transient carried over from another
+/// viewer — says nothing about noise at all.
+fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
+    matches!(
+        analysis_type,
+        AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise | AnalysisType::Qpnoise
+    )
+}
+
+/// The one noise analysis both halves of the ordinary-noise sheet read.
+///
+/// A selected noise analysis binds strictly. If it carries no renderable
+/// ordinary spectrum — a phase-noise result, or one whose solve failed — the
+/// card is empty and says why; quietly substituting a neighbouring result
+/// would put a different analysis's contributors under the reader's
+/// selection. The run-wide fallback applies only when the selection expresses
+/// no noise intent for the binding to honour.
 pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.simulation.active_run()?;
-    state
-        .simulation
-        .active_analysis_idx
-        .filter(|&index| {
-            run.analyses
-                .get(index)
-                .is_some_and(ordinary_noise_spectrum_is_renderable)
-        })
-        .or_else(|| {
-            run.analyses
-                .iter()
-                .position(ordinary_noise_spectrum_is_renderable)
-        })
+    if let Some(selected) = state.simulation.active_analysis_idx
+        && let Some(analysis) = run.analyses.get(selected)
+        && is_noise_analysis(analysis.analysis_type)
+    {
+        return ordinary_noise_spectrum_is_renderable(analysis).then_some(selected);
+    }
+    run.analyses
+        .iter()
+        .position(ordinary_noise_spectrum_is_renderable)
 }
 
 fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)> {
@@ -239,9 +280,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     }
     section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let Some(model) = build_model(state) else {
-        super::panel_note(ui, "No usable frequency response in the active run.");
-        return;
+    let model = match build_model(state) {
+        Ok(model) => model,
+        Err(NoMargins::NoResponse) => {
+            super::panel_note(ui, "No usable frequency response in the active run.");
+            return;
+        }
+        Err(NoMargins::AnalysisFailed(reason)) => {
+            super::panel_note(
+                ui,
+                &match reason {
+                    Some(reason) => format!(
+                        "The selected frequency response did not converge, so no margins are reported: {reason}"
+                    ),
+                    None => "The selected frequency response did not converge, so no margins are reported. Its retained vectors are what the engine emitted before it stopped, not a measured response.".to_owned(),
+                },
+            );
+            return;
+        }
     };
     let m = model.margins;
 
@@ -392,8 +448,86 @@ mod tests {
         assert_eq!(second.margins.adc_db, Some(40.0));
     }
 
+    fn noise_result(analysis_type: AnalysisType, label: &str, name: &str) -> AnalysisResult {
+        AnalysisResult::new(1, analysis_type, label).with_waveforms(vec![WaveformData::new(
+            name,
+            vec![1.0, 10.0],
+            vec![1.0e-18, 1.0e-16],
+            "#fff",
+        )])
+    }
+
+    /// A diverged AC run still carries whatever partial vectors the engine
+    /// emitted before it gave up. Margins read off those vectors are not
+    /// measurements, and the sibling sheets all refuse them.
     #[test]
-    fn noise_model_excludes_phase_noise_and_converts_retained_psd_units() {
+    fn margins_are_withheld_when_the_selected_ac_run_failed() {
+        let mut failed = ac_result(AnalysisInstanceId::new(), "V(out)", [10.0, 1.0]);
+        failed.success = false;
+        failed.error_message = Some("AC analysis did not converge".to_owned());
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(failed);
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        assert!(state.simulation.select_analysis(0));
+
+        match build_model(&mut state) {
+            Err(NoMargins::AnalysisFailed(reason)) => {
+                assert_eq!(reason.as_deref(), Some("AC analysis did not converge"));
+            }
+            Err(NoMargins::NoResponse) => panic!("the response exists; only its solve failed"),
+            Ok(_) => panic!("a diverged AC run must not produce margins"),
+        }
+    }
+
+    /// A failed noise run is not a renderable spectrum, exactly as a failed
+    /// harmonic-balance or phase-noise run is not.
+    #[test]
+    fn a_failed_noise_analysis_is_not_a_renderable_ordinary_spectrum() {
+        let mut failed = noise_result(AnalysisType::Noise, "NOISE", "onoise");
+        failed.success = false;
+        failed.error_message = Some("noise analysis did not converge".to_owned());
+
+        assert!(!ordinary_noise_spectrum_is_renderable(&failed));
+    }
+
+    /// The contributor table and the spectrum card both bind through
+    /// `selected_noise_analysis_index`. When the reader has selected a noise
+    /// analysis that carries no ordinary spectrum, substituting a different
+    /// analysis puts another run's contributors under the selection.
+    #[test]
+    fn a_selected_noise_analysis_is_never_replaced_by_a_different_one() {
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(noise_result(AnalysisType::Pnoise, "PNOISE", "phase_noise"));
+        run.add_analysis(noise_result(AnalysisType::Noise, "NOISE", "onoise"));
+        run.add_analysis(AnalysisResult::new(3, AnalysisType::Transient, "TRAN"));
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        // The selection is a noise analysis with no ordinary spectrum: the
+        // card is empty, not filled from the neighbouring NOISE result.
+        assert!(state.simulation.select_analysis(0));
+        assert_eq!(selected_noise_analysis_index(&state), None);
+
+        // The selection is the ordinary-noise result itself.
+        assert!(state.simulation.select_analysis(1));
+        assert_eq!(selected_noise_analysis_index(&state), Some(1));
+
+        // The selection carries no noise intent at all, so the run's own
+        // spectrum is the only available answer and is used.
+        assert!(state.simulation.select_analysis(2));
+        assert_eq!(selected_noise_analysis_index(&state), Some(1));
+
+        state.simulation.active_analysis_idx = None;
+        assert_eq!(selected_noise_analysis_index(&state), Some(1));
+    }
+
+    #[test]
+    fn phase_noise_data_is_never_relabelled_as_an_ordinary_spectrum() {
         let mut run = SimulationRun::new(1);
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE").with_waveforms(vec![
@@ -410,14 +544,19 @@ mod tests {
         state.simulation.runs = vec![run];
         assert!(state.simulation.select_run(0));
 
+        // The selected PNOISE analysis holds no ordinary spectrum. Its own
+        // phase-noise trace must not be relabelled as one, and neither may
+        // the neighbouring NOISE result be substituted for it.
         assert!(state.simulation.select_analysis(0));
-        // The selected Pnoise analysis has no ordinary spectrum; the card
-        // falls back to the Noise analysis rather than relabeling
-        // phase-noise data. The nV/√Hz conversion itself is pinned by the
-        // waves pane-stack projection tests.
-        let fallback = build_noise_model(&state).expect("ordinary noise fallback");
-        assert_eq!(fallback.frequency.as_slice(), &[1.0, 10.0]);
-        assert_eq!(fallback.trace_count, 1);
+        assert!(build_noise_model(&state).is_none());
+
+        // Selecting the ordinary-noise result gives the card its evidence.
+        // The nV/√Hz conversion itself is pinned by the waves pane-stack
+        // projection tests.
+        assert!(state.simulation.select_analysis(1));
+        let model = build_noise_model(&state).expect("ordinary noise spectrum");
+        assert_eq!(model.frequency.as_slice(), &[1.0, 10.0]);
+        assert_eq!(model.trace_count, 1);
     }
 
     #[test]
