@@ -151,6 +151,24 @@ pub fn unavailable_hint(state: &AppState) -> Option<String> {
         .rejection_hint(source)
 }
 
+/// What the provenance line says when the stated rate is not the data's own.
+const INCOHERENT_NOTE: &str = " · crossings incoherent at this rate";
+/// The same fact in the header's own terms, where it carries the warning
+/// tone: the tag goes amber and this is the reason behind it.
+const INCOHERENT_REASON: &str =
+    "crossings incoherent at the set rate — folded as asked, not as the data runs";
+
+/// Is the eye on screen folded at a rate its own crossings disagree with?
+fn timebase_is_incoherent(state: &AppState) -> bool {
+    matches!(
+        state.analysis.eye_diagram_state.timebase_provenance(),
+        Some(EyeTimebaseProvenance::Explicit {
+            incoherent: true,
+            ..
+        })
+    )
+}
+
 /// One line describing what is on screen and where its bit period came from.
 fn timebase_summary(state: &AppState) -> String {
     match state.analysis.eye_diagram_state.timebase_provenance() {
@@ -168,10 +186,14 @@ fn timebase_summary(state: &AppState) -> String {
             },
             fmt_si(*unit_interval, "s", 3),
         ),
-        Some(EyeTimebaseProvenance::Explicit { unit_interval }) => format!(
-            "set · {} · {}",
+        Some(EyeTimebaseProvenance::Explicit {
+            unit_interval,
+            incoherent,
+        }) => format!(
+            "set · {} · {}{}",
             fmt_si(*unit_interval, "s", 3),
             fmt_si(1.0 / unit_interval, "b/s", 2),
+            if *incoherent { INCOHERENT_NOTE } else { "" },
         ),
         Some(EyeTimebaseProvenance::AutoRejected(_)) | None => {
             fmt_si(state.analysis.eye_diagram_state.data.data_rate, "b/s", 1)
@@ -196,6 +218,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     let summary = timebase_summary(state);
+    // Words alone would sit in the same faint grey as the rest of the
+    // provenance line, and the reader is being told the picture is not of
+    // their signal. The tag carries the tone and the reason behind it.
+    let incoherent = timebase_is_incoherent(state);
 
     let eye = &state.analysis.eye_diagram_state;
     let data = &eye.data;
@@ -209,7 +235,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         color: c.traces[0],
         on: true,
     }];
-    strip::StripHeader::new("EYE", &subtitle, &legend).show(ui);
+    strip::StripHeader::new("EYE", &subtitle, &legend)
+        .incomplete(incoherent.then_some(INCOHERENT_REASON))
+        .show(ui);
 
     let ui_count = f64::from(data.ui_count.max(1));
     let swing = (data.v_high - data.v_low).abs().max(1e-9);
@@ -596,6 +624,60 @@ mod tests {
 
         assert!(visible.pixels.iter().any(|pixel| pixel.a() > 0));
         assert!(outside.pixels.iter().all(|pixel| pixel.a() == 0));
+    }
+
+    /// The eye folds at whatever rate the reader states, so the only place
+    /// the disagreement can appear is the line that says what was folded.
+    /// It has to appear there in words — the picture of an eye folded at a
+    /// rate the data does not run at looks like an eye.
+    #[test]
+    fn a_stated_rate_the_crossings_reject_is_named_in_the_provenance_line() {
+        let mut state = AppState::default();
+        let mut data = EyeData::new(400e-12, 2);
+        data.add_trace(EyeTrace::new(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0]));
+
+        for (incoherent, expected) in [(true, true), (false, false)] {
+            state.analysis.eye_diagram_state.load_data_with_timebase(
+                data.clone(),
+                Some(EyeTimebaseProvenance::Explicit {
+                    unit_interval: 400e-12,
+                    incoherent,
+                }),
+            );
+
+            let summary = timebase_summary(&state);
+            assert!(summary.starts_with("set · "), "{summary}");
+            assert_eq!(
+                summary.contains("crossings incoherent at this rate"),
+                expected,
+                "{summary}"
+            );
+            assert_eq!(timebase_is_incoherent(&state), expected);
+        }
+    }
+
+    /// A recovered rate is never marked: the estimator refuses rather than
+    /// folding at a period the record does not carry, so there is nothing to
+    /// warn about and a warning would be noise.
+    #[test]
+    fn a_recovered_rate_carries_no_incoherence_mark() {
+        let mut state = AppState::default();
+        let mut data = EyeData::new(1e-9, 2);
+        data.add_trace(EyeTrace::new(vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 0.0]));
+        state.analysis.eye_diagram_state.load_data_with_timebase(
+            data,
+            Some(EyeTimebaseProvenance::Auto {
+                unit_interval: 1e-9,
+                edge_count: 40,
+                rms_residual_ui: 1e-9,
+                low_confidence: false,
+            }),
+        );
+
+        let summary = timebase_summary(&state);
+        assert!(summary.starts_with("auto · "), "{summary}");
+        assert!(!summary.contains("incoherent"), "{summary}");
+        assert!(!timebase_is_incoherent(&state));
     }
 
     #[test]

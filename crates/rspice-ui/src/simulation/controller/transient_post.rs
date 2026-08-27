@@ -449,6 +449,12 @@ impl SimulationController {
 /// bookkeeping beside it, because it is what the sheet is quoting to the
 /// reader. An eye with no recorded provenance makes no claim and is left
 /// alone.
+///
+/// Only what was *asked for* is compared — the variant and the unit interval.
+/// What the fold then discovered about the data (that its crossings do not
+/// agree at the stated rate) is an answer, not a request: keying on it would
+/// make every incoherent eye disagree with the rate that produced it and
+/// rebuild itself on every frame, forever.
 fn eye_matches_timebase(state: &AppState, requested: EyeTimebase) -> bool {
     let Some(provenance) = state.analysis.eye_diagram_state.timebase_provenance() else {
         return true;
@@ -459,7 +465,9 @@ fn eye_matches_timebase(state: &AppState, requested: EyeTimebase) -> bool {
             EyeTimebase::Auto,
         ) => true,
         (
-            EyeTimebaseProvenance::Explicit { unit_interval: had },
+            EyeTimebaseProvenance::Explicit {
+                unit_interval: had, ..
+            },
             EyeTimebase::Explicit {
                 unit_interval: want,
             },
@@ -506,12 +514,21 @@ pub(crate) fn build_eye_from_waveform(
                 return (None, EyeTimebaseProvenance::AutoRejected(rejection));
             }
         },
-        EyeTimebase::Explicit { unit_interval } => (
-            unit_interval,
-            crossing_phase_at(time, values, unit_interval)
-                .and_then(|fit| fold_anchor(fit.phase, unit_interval)),
-            EyeTimebaseProvenance::Explicit { unit_interval },
-        ),
+        EyeTimebase::Explicit { unit_interval } => {
+            // The stated rate is folded at either way. Whether the crossings
+            // agree with it is a separate fact and the reader's to keep: an
+            // eye folded at a rate the data does not run at still draws, and
+            // nothing about the picture admits it.
+            let fit = crossing_phase_at(time, values, unit_interval);
+            (
+                unit_interval,
+                fit.and_then(|fit| fold_anchor(fit.phase, unit_interval)),
+                EyeTimebaseProvenance::Explicit {
+                    unit_interval,
+                    incoherent: fit.is_some_and(|fit| !fit.is_coherent()),
+                },
+            )
+        }
     };
 
     let eye_data = EyeDataBuilder::new()
@@ -618,10 +635,60 @@ mod tests {
         );
         let stated = stated.expect("an explicit rate folds");
         assert!((stated.bit_period - 2e-9).abs() <= 1e-18);
+        // Twice the true rate is the two-bit fold this estimator exists to
+        // avoid: the 1010 clock's crossings land at two opposite phases of
+        // the doubled window and agree on neither. The reader gets the rate
+        // they asked for, marked.
         assert_eq!(
             stated_provenance,
             EyeTimebaseProvenance::Explicit {
-                unit_interval: 2e-9
+                unit_interval: 2e-9,
+                incoherent: true,
+            }
+        );
+    }
+
+    /// A stated rate the waveform does not run at still folds — the reader
+    /// asked for it — but the disagreement is the reader's to see. The fit
+    /// that produces the fold anchor already measures it; discarding it left
+    /// an eye whose every figure was a property of the fold, presented
+    /// exactly like one measured at the signal's own rate.
+    #[test]
+    fn a_stated_rate_the_crossings_reject_folds_and_carries_the_disagreement() {
+        let (time, signal) = clock(200, 0.137e-9);
+
+        // 1.37 ns against a 1 ns clock: 37 % off, and the crossings walk the
+        // whole period rather than sitting at one phase within it.
+        let (data, provenance) = build_eye_from_waveform(
+            &time,
+            &signal,
+            EyeTimebase::Explicit {
+                unit_interval: 1.37e-9,
+            },
+        );
+        assert!(data.is_some(), "the rate the reader stated still folds");
+        assert_eq!(
+            provenance,
+            EyeTimebaseProvenance::Explicit {
+                unit_interval: 1.37e-9,
+                incoherent: true,
+            }
+        );
+
+        // The rate the clock actually runs at carries no such mark.
+        let (data, provenance) = build_eye_from_waveform(
+            &time,
+            &signal,
+            EyeTimebase::Explicit {
+                unit_interval: 1e-9,
+            },
+        );
+        assert!(data.is_some());
+        assert_eq!(
+            provenance,
+            EyeTimebaseProvenance::Explicit {
+                unit_interval: 1e-9,
+                incoherent: false,
             }
         );
     }
@@ -665,6 +732,47 @@ mod tests {
             &state,
             EyeTimebase::Explicit {
                 unit_interval: 2e-9
+            }
+        ));
+    }
+
+    /// The incoherence mark rides on the provenance the staleness comparison
+    /// reads, so it has to be invisible to it. If it were not, the eye would
+    /// disagree with the rate that produced it, be discarded, be rebuilt with
+    /// the same mark, and disagree again — a rebuild every frame for as long
+    /// as the reader leaves the rate set.
+    #[test]
+    fn the_incoherence_mark_never_makes_the_loaded_eye_stale() {
+        let mut state = AppState::default();
+        let (time, signal) = clock(60, 0.137e-9);
+        let stated = EyeTimebase::Explicit {
+            unit_interval: 1.37e-9,
+        };
+        let (data, provenance) = build_eye_from_waveform(&time, &signal, stated);
+        assert_eq!(
+            provenance,
+            EyeTimebaseProvenance::Explicit {
+                unit_interval: 1.37e-9,
+                incoherent: true,
+            }
+        );
+        state
+            .analysis
+            .eye_diagram_state
+            .load_data_with_timebase(data.expect("folds"), Some(provenance));
+
+        // Every frame asks the same question and must get the same answer.
+        for frame in 0..3 {
+            assert!(
+                eye_matches_timebase(&state, stated),
+                "the incoherent eye went stale against its own rate on frame {frame}"
+            );
+        }
+        // A different rate is still a different measurement.
+        assert!(!eye_matches_timebase(
+            &state,
+            EyeTimebase::Explicit {
+                unit_interval: 1e-9
             }
         ));
     }

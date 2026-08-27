@@ -53,7 +53,21 @@ pub enum EyeTimebaseProvenance {
         low_confidence: bool,
     },
     /// Stated by the reader.
-    Explicit { unit_interval: f64 },
+    Explicit {
+        unit_interval: f64,
+        /// The record's crossings do not agree on a phase at this rate.
+        ///
+        /// The eye is folded anyway — the reader asked for this rate, and
+        /// refusing it would make the control decorative — but every figure
+        /// quoted off it is then a property of the fold rather than of the
+        /// signal, so the viewer has to say so.
+        ///
+        /// This is a fact about the data at the requested rate, not a second
+        /// rate: it deliberately takes no part in the staleness comparison
+        /// that decides whether the eye on screen still answers the rate
+        /// being asked for.
+        incoherent: bool,
+    },
     /// Nothing was folded: the waveform does not carry a recoverable bit
     /// period and the reader has not stated one.
     AutoRejected(UiEstimateRejection),
