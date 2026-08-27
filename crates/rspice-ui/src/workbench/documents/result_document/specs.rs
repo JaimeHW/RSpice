@@ -1027,6 +1027,18 @@ fn paint_table_header(ui: &mut Ui, content_width: f32, row_height: f32) {
     }
 }
 
+/// The row a hop last scrolled this table to, and the dataset it was in.
+///
+/// The dataset is half the key. The memo held the measurement name alone, so
+/// selecting a different run while the same limit stayed carried left the
+/// memo satisfied and the scroll request suppressed: the marked row sat below
+/// the fold of a table the reader had no reason to think had scrolled at all.
+#[derive(Clone, PartialEq, Eq)]
+struct CarriedRowArrival {
+    dataset: Option<crate::product::DatasetId>,
+    measurement: String,
+}
+
 fn paint_result_row(
     ui: &mut Ui,
     row: &SpecResultRow,
@@ -1035,6 +1047,7 @@ fn paint_result_row(
     row_height: f32,
     max_margin: f64,
     carried: bool,
+    scroll_into_view: bool,
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -1070,12 +1083,8 @@ fn paint_result_row(
         // Scrolled to once per arrival, not every frame: the carried selection
         // outlives the hop, and a row that re-centres itself forever would
         // take the scroll bar away from the reader.
-        let scrolled = egui::Id::new("rspice.results.specification-table.scrolled-to");
-        let last = ui.ctx().data(|data| data.get_temp::<String>(scrolled));
-        if last.as_deref() != Some(row.measurement.as_str()) {
+        if scroll_into_view {
             response.scroll_to_me(Some(egui::Align::Center));
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(scrolled, row.measurement.clone()));
         }
     } else if row_index % 2 == 1 {
         ui.painter()
@@ -1264,12 +1273,34 @@ fn paint_result_row(
 fn show_table_shell(
     ui: &mut Ui,
     rows: &[SpecResultRow],
+    dataset: Option<crate::product::DatasetId>,
     salt: impl std::hash::Hash + Copy + std::fmt::Debug,
     empty_message: Option<&str>,
     carried: Option<&str>,
 ) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let row_height = spec_table_row_height(t.metrics.ctl_h);
+    // Which row the table has to bring into view, once per arrival: a limit
+    // carried into a dataset it has not yet been shown in.
+    let arrival = carried
+        .filter(|measurement| {
+            rows.iter()
+                .any(|row| row.measurement.eq_ignore_ascii_case(measurement))
+        })
+        .map(|measurement| CarriedRowArrival {
+            dataset,
+            measurement: measurement.to_ascii_lowercase(),
+        });
+    let memo = egui::Id::new("rspice.results.specification-table.scrolled-to");
+    let is_new_arrival = arrival.as_ref().is_some_and(|arrival| {
+        ui.ctx()
+            .data(|data| data.get_temp::<CarriedRowArrival>(memo))
+            .as_ref()
+            != Some(arrival)
+    });
+    if is_new_arrival && let Some(arrival) = arrival {
+        ui.ctx().data_mut(|data| data.insert_temp(memo, arrival));
+    }
     // The pane's width, floored at what the columns can still be read in
     // rather than at what they would prefer. Floored at the preferred width,
     // the table was a fixed 1042 points and the pane simply cut the last
@@ -1323,6 +1354,7 @@ fn show_table_shell(
                                     row_height,
                                     max_margin,
                                     selected,
+                                    selected && is_new_arrival,
                                 )
                                 .or(focused);
                             }
@@ -1470,6 +1502,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         show_table_shell(
             ui,
             &[],
+            None,
             "no-active-dataset",
             Some(
                 "No active dataset — select a retained run or run the simulation to evaluate specifications",
@@ -1509,6 +1542,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let focus_analysis = show_table_shell(
         ui,
         &rows,
+        Some(dataset_id),
         dataset_id,
         Some(
             "No measurements — add .MEAS statements, run the simulation, then bind requirement limits",

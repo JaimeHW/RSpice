@@ -1003,3 +1003,106 @@ fn the_sheet_the_export_and_the_print_state_the_bound_the_run_was_judged_against
     );
     assert_eq!(printed.rows[0][8], sheet[0].status.label());
 }
+
+/// A workspace holding one long requirement contract and two runs that both
+/// measured every limit in it, with the last limit carried in from the studio.
+#[cfg(not(target_arch = "wasm32"))]
+fn two_runs_over_a_long_contract() -> AppState {
+    let names: Vec<String> = (0..60).map(|index| format!("m{index:02}")).collect();
+    let mut state = AppState::default();
+    for run_number in 1..=2 {
+        let mut run = SimulationRun::new(run_number);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "ac").with_measurements(
+                names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, name)| {
+                        rspice_core::MeasureResult::success(name, 1.0 + index as f64)
+                    })
+                    .collect(),
+            ),
+        );
+        state.simulation.runs.push(run);
+    }
+    state.simulation.active_run_idx = Some(0);
+    state.workspace.specs = names
+        .iter()
+        .map(|name| SpecEntry {
+            measurement: name.clone(),
+            expression: format!("max V({name})"),
+            min: Some(0.0),
+            max: None,
+            unit: "V".to_owned(),
+            scope: SpecPointScope::AllPoints,
+        })
+        .collect();
+    state.workbench.selected_specification = Some("m59".to_owned());
+    state
+}
+
+/// Where the carried row is painted, after the table has settled.
+///
+/// Forty frames because the scroll area animates towards a requested target
+/// rather than jumping to it, and this is the position the reader ends up
+/// looking at.
+#[cfg(not(target_arch = "wasm32"))]
+fn carried_row_position(
+    ctx: &egui::Context,
+    state: &mut AppState,
+    screen: egui::Rect,
+) -> egui::Rect {
+    let mut spans = Vec::new();
+    for _ in 0..40 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::show(ui, state));
+            },
+        );
+        spans = painted_spans(&output);
+    }
+    spans
+        .into_iter()
+        .find(|(text, _, _)| text == "m59")
+        .map(|(_, rect, _)| rect)
+        .expect("the carried requirement is one of the rows the table paints")
+}
+
+/// Hopping to another run scrolls the carried limit into view again.
+///
+/// The table remembered only which measurement it had last scrolled to, so
+/// after a hop carried `m59` into run #1 and the reader selected run #2 — a
+/// different dataset, a table drawn from the top — the memo still named `m59`
+/// and the request was suppressed. The selected row was marked sixty rows
+/// below the fold, in a table the reader had no reason to think had scrolled.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_carried_limit_is_scrolled_to_again_in_the_next_run() {
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 420.0));
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut state = two_runs_over_a_long_contract();
+
+    let first = carried_row_position(&ctx, &mut state, screen);
+    assert!(
+        screen.contains(first.center()),
+        "the hop into the first run puts its limit on screen: {first:?}"
+    );
+
+    state.simulation.active_run_idx = Some(1);
+    let second = carried_row_position(&ctx, &mut state, screen);
+
+    assert!(
+        screen.contains(second.center()),
+        "the same limit in the next run is {:.0} points below the fold, because the \
+         table's scroll memo was never told the dataset changed: {second:?}",
+        second.center().y - screen.bottom()
+    );
+}
