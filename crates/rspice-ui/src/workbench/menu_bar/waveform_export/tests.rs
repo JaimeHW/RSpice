@@ -73,6 +73,17 @@ fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
     WaveformData::new(name.to_owned(), x, y, "#4f81bd")
 }
 
+fn dc_op_with_one_node() -> crate::state::DcOpResult {
+    crate::state::DcOpResult {
+        node_voltages: vec![crate::state::OperatingPointValue {
+            name: "V(out)".to_owned(),
+            value: 1.25,
+            unit: "V".to_owned(),
+        }],
+        ..crate::state::DcOpResult::default()
+    }
+}
+
 #[test]
 fn export_registry_matches_the_fifteen_contract_ids_and_governs_availability() {
     assert_eq!(
@@ -966,5 +977,133 @@ fn csv_export_reports_browser_download_start_without_claiming_file_written() {
     assert_eq!(
         last_log_message(&state),
         "CSV download started: waveforms.csv (1 signals, 2 points; confirm the browser accepted the download)"
+    );
+}
+
+/// A run with two traces, one of them hidden by the reader, exported from a
+/// view showing `analyses` analyses.
+fn hidden_trace_state(analyses: usize) -> AppState {
+    let mut run = SimulationRun::new(7);
+    for index in 0..analyses {
+        run.add_analysis(
+            AnalysisResult::new(
+                index as u64 + 1,
+                AnalysisType::Transient,
+                format!("Transient {index}"),
+            )
+            .with_waveforms(vec![
+                waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2]),
+                waveform("V(mid)", vec![0.0, 1.0e-6], vec![0.0, 0.6]),
+            ]),
+        );
+    }
+    let mut state = AppState::default();
+    state.simulation.runs = vec![run];
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+    let waveforms = state.simulation.runs[0].analyses[0].waveforms.clone();
+    state.simulation.replace_waveforms(waveforms);
+    activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
+    // Hide the second trace of every displayed analysis, exactly as a legend
+    // chip or a navigator check-mark does.
+    for index in 0..analyses {
+        crate::workbench::documents::result_document::toggle_visibility(&mut state, index, 1);
+    }
+    state
+}
+
+/// Hiding a trace changes the export, whatever the view is showing.
+///
+/// The two routes disagreed. The long-form route read the dataset's own
+/// `visible` flag and never saw the reader's override; the single-analysis
+/// route read no visibility at all and wrote every retained trace. So hiding
+/// a trace altered the file only when the viewer happened to be displaying
+/// two analyses or more — and even then only if the flag had been written
+/// into the dataset rather than into the session.
+#[test]
+fn a_hidden_trace_stays_out_of_the_export_for_one_analysis_and_for_many() {
+    let mut single = hidden_trace_state(1);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut single, &io);
+    assert_eq!(io.datasets.borrow().len(), 1);
+    assert_eq!(io.datasets.borrow()[0].signal_names(), vec!["V(out)"]);
+
+    let mut stacked = hidden_trace_state(2);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut stacked, &io);
+    let written = io.text_files.borrow();
+    let contents = &written.last().expect("long-form CSV is written").1;
+    assert!(contents.contains(",V(out),display,"), "{contents}");
+    assert!(!contents.contains(",V(mid),"), "{contents}");
+}
+
+/// Hiding every trace refuses the export and says so.
+#[test]
+fn an_export_with_every_trace_hidden_names_the_hidden_traces() {
+    let mut state = hidden_trace_state(1);
+    crate::workbench::documents::result_document::toggle_visibility(&mut state, 0, 0);
+
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+
+    assert!(io.dialog_titles.borrow().is_empty());
+    assert!(io.datasets.borrow().is_empty());
+    assert_eq!(last_log_message(&state), ALL_TRACES_HIDDEN_MESSAGE);
+}
+
+/// The operating-point export refuses, rather than handing back whatever the
+/// payload router finds on the same analysis.
+///
+/// The OP sheet renders for any analysis retaining a DC solution, so a
+/// transient carrying `dc_op` shows it. Its export returned `None` and the
+/// chain below wrote that transient's *event history* under the menu item
+/// the reader pressed on the operating-point sheet.
+#[test]
+fn an_operating_point_export_that_cannot_be_produced_states_why() {
+    fn op_state(analysis: AnalysisResult) -> AppState {
+        let mut run = SimulationRun::new(7);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        activate_result_document(&mut state, crate::workbench::ResultViewer::Op);
+        state
+    }
+
+    let mut failed = AnalysisResult::new(1, AnalysisType::DcOp, "Operating point");
+    failed.dc_op = Some(dc_op_with_one_node());
+    failed.success = false;
+    failed.error_message = Some("gmin stepping did not converge".to_owned());
+    let mut state = op_state(failed);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+    assert!(io.dialog_titles.borrow().is_empty());
+    assert!(io.text_files.borrow().is_empty());
+    let message = last_log_message(&state);
+    assert!(
+        message.contains("no analysis in 'Run 7") && message.contains("completed successfully"),
+        "{message}"
+    );
+    assert!(
+        message.contains("gmin stepping did not converge"),
+        "{message}"
+    );
+
+    // A successful transient whose DC solution the OP sheet renders: the
+    // sheet's export does not apply, and the event history must not stand in
+    // for it.
+    let mut transient = AnalysisResult::new(2, AnalysisType::Transient, "Transient")
+        .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.2])]);
+    transient.dc_op = Some(dc_op_with_one_node());
+    let mut state = op_state(transient);
+    let io = MockExportWorkflowIo::default();
+    action_export_csv_with_io(&mut state, &io);
+    assert!(io.dialog_titles.borrow().is_empty());
+    assert!(io.text_files.borrow().is_empty());
+    let message = last_log_message(&state);
+    assert!(
+        message.contains("operating point cannot be exported"),
+        "{message}"
     );
 }

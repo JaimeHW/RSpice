@@ -213,3 +213,52 @@ fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
     app.state.simulation.is_running = true;
     assert!(!Command::ImportResultDataset.is_enabled(&app));
 }
+
+/// "Export dataset…" needs the document its export resolves from.
+///
+/// The export writes the *displayed* result view, and that resolution starts
+/// at the active Results document. The command was offered whenever any
+/// dataset was retained, so pressing it with no result document open produced
+/// a console warning instead of a file.
+#[test]
+fn exporting_the_dataset_requires_an_open_result_document() {
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+    use crate::workbench::state::WorkspaceDocumentId;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.project_open = true;
+    assert!(!Command::ExportWaveformsCsv.is_enabled(&app));
+    assert_eq!(
+        Command::ExportWaveformsCsv.availability(&app),
+        CommandAvailability::Disabled("no result dataset is available")
+    );
+
+    let mut run = SimulationRun::new(7);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#4f81bd"),
+        ]),
+    );
+    let dataset_id = run.dataset_id;
+    app.state.simulation.runs = vec![run];
+    app.state.simulation.active_run_idx = Some(0);
+    app.state.simulation.active_analysis_idx = Some(0);
+
+    // Retained, but nothing open to export from: the refusal names what is
+    // missing rather than claiming there is no dataset.
+    assert!(!Command::ExportWaveformsCsv.is_enabled(&app));
+    assert_eq!(
+        Command::ExportWaveformsCsv.availability(&app),
+        CommandAvailability::Disabled("open a result document in Results")
+    );
+
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
+    assert!(Command::ExportWaveformsCsv.is_enabled(&app));
+    assert_eq!(
+        Command::ExportWaveformsCsv.availability(&app),
+        CommandAvailability::Available
+    );
+}

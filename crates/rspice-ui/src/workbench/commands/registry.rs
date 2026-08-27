@@ -1129,6 +1129,9 @@ impl Command {
             Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
+            Self::ExportWaveformsCsv if app.state.simulation.has_results() => {
+                "open a result document in Results"
+            }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
             Self::CompareResultDatasets if app.state.workbench.workspace != Workspace::Results => {
                 "open an active result document"

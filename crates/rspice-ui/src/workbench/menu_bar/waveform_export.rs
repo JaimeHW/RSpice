@@ -7,6 +7,11 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
+/// An export that silently wrote an empty file would be indistinguishable
+/// from one that wrote the dataset, so the hidden traces are named as the
+/// reason rather than reported as an absence of samples.
+const ALL_TRACES_HIDDEN_MESSAGE: &str = "Every trace in the displayed analysis is hidden, so there is nothing to export. \
+     Show at least one trace first.";
 
 fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
     let data_version = state.simulation.data_version;
@@ -251,7 +256,18 @@ pub(crate) fn action_export_csv_with_io(
         return;
     }
 
-    if let Some(sheet) = prepare_active_sheet_csv(state, &displayed) {
+    let sheet = match prepare_active_sheet_csv(state, &displayed) {
+        // The sheet owns this viewer's export and cannot produce it. Falling
+        // through to the payload router below is how an operating-point
+        // export came back holding a transient's event history.
+        Some(Err(reason)) => {
+            state.push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+            return;
+        }
+        Some(Ok(sheet)) => Some(sheet),
+        None => None,
+    };
+    if let Some(sheet) = sheet {
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &sheet),
             EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &sheet),
@@ -342,17 +358,48 @@ struct PreparedTypedResultCsv {
     detail: String,
 }
 
+/// The export a Results sheet owns, if this viewer has one.
+///
+/// `None` means the viewer has no sheet export and the payload router below
+/// it should answer. `Some(Err)` means the sheet owns the export and cannot
+/// produce it: the reader is told why rather than handed whatever the router
+/// finds attached to the same analysis.
 fn prepare_active_sheet_csv(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
-) -> Option<PreparedTypedResultCsv> {
+) -> Option<Result<PreparedTypedResultCsv, String>> {
     use crate::workbench::ResultViewer;
     use crate::workbench::documents::result_document;
 
     let sheet = match displayed.viewer {
         ResultViewer::Manifest => Some(result_document::export_manifest_csv(displayed.run(state)?)),
+        // The operating point is the one sheet whose refusal has to be
+        // stated. Its export needs a successful DC solve, and the payload
+        // router underneath it answers for an `OperatingPoint` payload with
+        // the execution *contract* rather than the solved point, and for a
+        // transient carrying `dc_op` with that transient's event history —
+        // both under a menu item the reader pressed on the OP sheet.
         ResultViewer::Op => {
-            result_document::export_operating_point_csv(displayed.primary_analysis(state)?)
+            let analysis = displayed.primary_analysis(state)?;
+            if !analysis.success {
+                return Some(Err(format!(
+                    "The operating point cannot be exported: analysis '{}' did not complete \
+                     successfully.{}",
+                    analysis.label,
+                    analysis
+                        .error_message
+                        .as_deref()
+                        .map_or_else(String::new, |error| format!(" {error}"))
+                )));
+            }
+            let Some(sheet) = result_document::export_operating_point_csv(analysis) else {
+                return Some(Err(format!(
+                    "The operating point cannot be exported: analysis '{}' retains no node DC \
+                     solution and no device operating-point report.",
+                    analysis.label
+                )));
+            };
+            Some(sheet)
         }
         // The workspace contract is handed over as the legacy fallback only:
         // the sheet judges the run against the requirements the run froze, and
@@ -371,11 +418,11 @@ fn prepare_active_sheet_csv(
         ),
         _ => None,
     }?;
-    Some(PreparedTypedResultCsv {
+    Some(Ok(PreparedTypedResultCsv {
         default_name: sheet.default_name,
         contents: sheet.contents,
         detail: sheet.detail,
-    })
+    }))
 }
 
 /// The exact numbers behind a sheet that derives its own curve.
@@ -1346,17 +1393,79 @@ struct ExportSignalSlice<'a> {
     y_values: &'a [f64],
 }
 
+/// The traces an export of this analysis carries.
+///
+/// One population for every export route. The dataset's own `visible` flag is
+/// the default, and the reader's per-trace override for this analysis wins
+/// over it — that override is what the legend chips and the navigator's
+/// check-marks write, so an export that ignores it does not export what is on
+/// the sheet. It was ignored twice over: the long-form route read the raw
+/// dataset flag, and the single-analysis route read neither, so hiding a
+/// trace changed the file only when the viewer happened to be showing two
+/// analyses or more.
+fn exported_waveforms<'a>(
+    state: &AppState,
+    dataset_id: crate::product::DatasetId,
+    analysis: &'a crate::state::AnalysisResult,
+) -> Vec<&'a crate::state::WaveformData> {
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, SourceWaveformPresentationKey,
+    };
+
+    let analysis_key = AnalysisPresentationKey::new(dataset_id, analysis);
+    analysis
+        .waveforms
+        .iter()
+        .filter(|waveform| {
+            state.ui.results.waveform_visibility(
+                &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
+                waveform.visible,
+            )
+        })
+        .collect()
+}
+
+/// Why a dataset offers the displayed view no analysis at all.
+///
+/// Viewer compatibility excludes an unsuccessful solve, so a run that failed
+/// resolves to an empty view — and every route above this one then declines
+/// in turn until the last of them reports "no waveform samples", which is
+/// true and says nothing. A reader who pressed Export on the operating-point
+/// sheet of a run that did not converge is told that, and told the engine's
+/// own reason with it.
+fn failed_run_refusal(run: &crate::state::SimulationRun) -> Option<String> {
+    if run.analyses.is_empty() || run.analyses.iter().any(|analysis| analysis.success) {
+        return None;
+    }
+    let detail = run
+        .analyses
+        .iter()
+        .find_map(|analysis| analysis.error_message.as_deref());
+    Some(format!(
+        "The displayed result cannot be exported: no analysis in '{}' completed successfully.{}",
+        run.label,
+        detail.map_or_else(String::new, |error| format!(" {error}"))
+    ))
+}
+
 fn prepare_waveform_dataset(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
 ) -> Result<PreparedWaveformDataset, String> {
     if displayed.analysis_indices.is_empty() {
-        return Err(NO_SAMPLES_MESSAGE.to_owned());
+        return Err(displayed
+            .run(state)
+            .and_then(failed_run_refusal)
+            .unwrap_or_else(|| NO_SAMPLES_MESSAGE.to_owned()));
     }
     let analysis = displayed
         .primary_analysis(state)
         .ok_or_else(|| NO_ACTIVE_ANALYSIS_MESSAGE.to_string())?;
-    prepare_single_analysis_dataset(analysis)
+    let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);
+    if waveforms.is_empty() && !analysis.waveforms.is_empty() {
+        return Err(ALL_TRACES_HIDDEN_MESSAGE.to_owned());
+    }
+    prepare_single_analysis_dataset(analysis, &waveforms)
 }
 
 /// Long-form export for a viewer that is displaying more than one analysis.
@@ -1377,11 +1486,7 @@ fn prepare_displayed_analysis_stack_csv(
     let mut rows = 0_usize;
     let mut traces = 0_usize;
     for analysis in analyses {
-        for waveform in analysis
-            .waveforms
-            .iter()
-            .filter(|waveform| waveform.visible)
-        {
+        for waveform in exported_waveforms(state, displayed.dataset_id, analysis) {
             append_long_form_component(
                 &mut contents,
                 displayed.dataset_id,
@@ -1467,9 +1572,10 @@ fn append_long_form_component(
 
 fn prepare_single_analysis_dataset(
     analysis: &crate::state::AnalysisResult,
+    waveforms: &[&crate::state::WaveformData],
 ) -> Result<PreparedWaveformDataset, String> {
     let (x_name, x_signal_type) = axis_signal_for_analysis_type(analysis.analysis_type);
-    let mut prepared = prepare_flat_waveform_dataset(&analysis.waveforms, x_name, x_signal_type)?;
+    let mut prepared = prepare_flat_waveform_dataset(waveforms, x_name, x_signal_type)?;
     if let Some(crate::state::AnalysisResultFamilyMetadata::SParameter {
         reference_impedances_ohm,
     }) = analysis.family_metadata.as_ref()
@@ -1505,7 +1611,7 @@ fn prepare_single_analysis_dataset(
 }
 
 fn prepare_flat_waveform_dataset(
-    waveforms: &[crate::state::WaveformData],
+    waveforms: &[&crate::state::WaveformData],
     x_name: String,
     x_signal_type: crate::io::SignalType,
 ) -> Result<PreparedWaveformDataset, String> {
@@ -1538,7 +1644,7 @@ fn prepare_flat_waveform_dataset(
 }
 
 fn validate_shared_x_axis(
-    waveforms: &[crate::state::WaveformData],
+    waveforms: &[&crate::state::WaveformData],
     reference_x: &[f64],
 ) -> Result<(), String> {
     for waveform in waveforms {
