@@ -1214,3 +1214,159 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
          the rail painted {filtered:?}"
     );
 }
+
+/// A result artifact's menu is reachable without a pointer: the browser's rows
+/// are in the tab ring and Shift+F10 opens the focused row's menu. A keyboard
+/// open has no pointer position for the menu to sit at, so the row anchors it —
+/// on every frame it stays open, not only the one that opened it, or the menu
+/// would paint once and vanish before it could be read.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
+    /// The row the keyboard is on, as the accessibility tree reports it.
+    fn focused_label(output: &egui::FullOutput) -> Option<String> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .and_then(|(_, node)| node.label().map(str::to_owned))
+    }
+
+    /// Every painted run of text in the frame, with where it landed.
+    fn painted_runs(output: &egui::FullOutput) -> Vec<(String, egui::Rect)> {
+        fn walk(shape: &egui::epaint::Shape, into: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::epaint::Shape::Text(painted) => into.push((
+                    painted.galley.job.text.clone(),
+                    egui::Rect::from_min_size(painted.pos, painted.galley.size()),
+                )),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        walk(shape, into);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut runs = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut runs);
+        }
+        runs
+    }
+
+    fn browser_output(
+        ctx: &egui::Context,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 1600.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.set_width(260.0);
+                        super::show(ui, app);
+                    });
+            },
+        )
+    }
+
+    let mut app = result_navigator_app();
+    let mut values = std::collections::BTreeMap::new();
+    values.insert("settling_time".to_owned(), 0.5);
+    app.state.simulation.runs[0].analyses[0].result_payload =
+        Some(AnalysisResultPayload::ScalarMeasurements { values });
+    assert!(select_result_dataset(&mut app, 0));
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let _ = browser_output(&ctx, &mut app, Vec::new());
+    let _ = browser_output(&ctx, &mut app, Vec::new());
+
+    let key = |key, modifiers| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    // Walk the keyboard onto the artifact row the way a reader without a
+    // pointer reaches it. The check cell announces "Select …", so only the
+    // selection half of the row carries the artifact's own name.
+    let mut landed = false;
+    for _ in 0..80 {
+        let output = browser_output(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        if focused_label(&output)
+            .as_deref()
+            .is_some_and(|label| label.starts_with("Scalar result values"))
+        {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed,
+        "an artifact row must be reachable from the keyboard"
+    );
+
+    let _ = browser_output(
+        &ctx,
+        &mut app,
+        vec![key(egui::Key::F10, egui::Modifiers::SHIFT)],
+    );
+    // The frame after the opening one is the load-bearing frame: a menu whose
+    // anchor only lives on the opening frame is gone by now.
+    let output = browser_output(&ctx, &mut app, Vec::new());
+    let runs = painted_runs(&output);
+    let copy = runs
+        .iter()
+        .find(|(run, _)| run == "Copy canonical name")
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| {
+            panic!(
+                "Shift+F10 keeps the focused row's menu open; the frame painted {:?}",
+                runs.iter().map(|(run, _)| run.as_str()).collect::<Vec<_>>()
+            )
+        });
+
+    let click = |at: egui::Pos2| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]
+    };
+    let output = browser_output(&ctx, &mut app, click(copy.center()));
+    assert!(
+        output.platform_output.commands.iter().any(|command| matches!(
+            command,
+            egui::OutputCommand::CopyText(text) if text.as_str() == "payload/scalar-measurements"
+        )),
+        "and the menu acts on the row the keyboard was on"
+    );
+}

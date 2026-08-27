@@ -1944,18 +1944,9 @@ fn navigator_object_context_menu(
     app: &mut RSpiceApp,
     object: NavigatorObject,
 ) {
-    let keyboard_open = response.has_focus()
-        && response
-            .ctx
-            .input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
+    let (popup, keyboard_open) = super::row_context_menu(response);
     if response.secondary_clicked() || keyboard_open {
         select_navigator_object(app, &object);
-    }
-
-    let popup_id = egui::Popup::default_response_id(response);
-    let mut popup = egui::Popup::context_menu(response).id(popup_id);
-    if keyboard_open {
-        popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
     }
     popup.show(|ui| {
         ui.label(
@@ -3121,23 +3112,7 @@ fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
 /// editor. Shift+F10 opens it from the keyboard, as the navigator's object
 /// menu does.
 fn shelf_pin_context_menu(response: &Response, app: &mut RSpiceApp, entry: &ShelfEntry) {
-    let keyboard_open = response.has_focus()
-        && response
-            .ctx
-            .input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
-    let popup_id = egui::Popup::default_response_id(response);
-    let mut popup = egui::Popup::context_menu(response).id(popup_id);
-    if keyboard_open {
-        popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
-    }
-    // A context menu sits at the pointer position it was opened at. A menu
-    // raised from the keyboard has no such position, and a popup anchored to a
-    // position it does not have draws nothing at all — so anchor that one to
-    // the row instead, on every frame it stays open rather than only on the
-    // frame that opened it.
-    if egui::Popup::position_of_id(&response.ctx, popup_id).is_none() {
-        popup = popup.anchor(response);
-    }
+    let (popup, _) = super::row_context_menu(response);
     let pinned = is_pinned(app, entry);
     popup.show(|ui| {
         if ui

@@ -3108,3 +3108,102 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
         "and the menu acts on the row the keyboard was on"
     );
 }
+
+/// The object menu answers the same key on the navigator's own rails. A
+/// keyboard open has no pointer position for the menu to sit at, so the row
+/// anchors it — on every frame it stays open, not only the one that opened it,
+/// or the menu would paint once and vanish before it could be read.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
+    /// The row the keyboard is on, as the accessibility tree reports it.
+    fn focused_label(output: &egui::FullOutput) -> Option<String> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .and_then(|(_, node)| node.label().map(str::to_owned))
+    }
+
+    fn navigator_output(
+        ctx: &egui::Context,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 1600.0),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.set_width(260.0);
+                        navigator(ui, app);
+                    });
+            },
+        )
+    }
+
+    let mut app = interface_design();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let _ = navigator_output(&ctx, &mut app, Vec::new());
+    let _ = navigator_output(&ctx, &mut app, Vec::new());
+
+    let key = |key, modifiers| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    // Walk the keyboard onto a port row the way a reader without a pointer
+    // reaches it.
+    let mut landed = false;
+    for _ in 0..80 {
+        let output = navigator_output(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        );
+        if focused_label(&output).as_deref() == Some("ALPHA") {
+            landed = true;
+            break;
+        }
+    }
+    assert!(
+        landed,
+        "a navigator object row must be reachable from the keyboard"
+    );
+
+    let _ = navigator_output(
+        &ctx,
+        &mut app,
+        vec![key(egui::Key::F10, egui::Modifiers::SHIFT)],
+    );
+    // The frame after the opening one is the load-bearing frame: a menu whose
+    // anchor only lives on the opening frame is gone by now.
+    let output = navigator_output(&ctx, &mut app, Vec::new());
+    let runs = painted_runs(&output);
+    let find = run_rect(&runs, "Find references and consumers…").unwrap_or_else(|| {
+        panic!(
+            "Shift+F10 keeps the focused row's object menu open: {}",
+            painted_text(&output)
+        )
+    });
+
+    let _ = navigator_output(&ctx, &mut app, click_events(find.center()));
+    assert_eq!(
+        app.state.workbench.navigator_filter(),
+        "ALPHA",
+        "and the menu acts on the row the keyboard was on"
+    );
+}

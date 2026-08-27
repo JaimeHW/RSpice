@@ -5244,6 +5244,31 @@ fn select_result_browser_key(app: &mut RSpiceApp, key: &ResultBrowserSelectionKe
     }
 }
 
+/// A row's context menu, answered by the pointer and the keyboard alike:
+/// Shift+F10 on the focused row opens it. Returns the popup and whether the
+/// keyboard opened it this frame.
+///
+/// A context menu sits at the pointer position it was opened at. A menu
+/// raised from the keyboard has no such position, and a popup anchored to a
+/// position it does not have draws nothing at all — so anchor that one to
+/// the row instead, on every frame it stays open rather than only on the
+/// frame that opened it.
+fn row_context_menu(response: &egui::Response) -> (egui::Popup<'_>, bool) {
+    let keyboard_open = response.has_focus()
+        && response
+            .ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10));
+    let popup_id = egui::Popup::default_response_id(response);
+    let mut popup = egui::Popup::context_menu(response).id(popup_id);
+    if keyboard_open {
+        popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
+    }
+    if egui::Popup::position_of_id(&response.ctx, popup_id).is_none() {
+        popup = popup.anchor(response);
+    }
+    (popup, keyboard_open)
+}
+
 fn result_artifact_context_menu(
     response: &egui::Response,
     app: &mut RSpiceApp,
@@ -5257,18 +5282,7 @@ fn result_artifact_context_menu(
         )
         .err();
     let exact_available = exact_error.is_none();
-    let keyboard_open = response.has_focus()
-        && response
-            .ctx
-            .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10));
-    let popup = egui::Popup::context_menu(response);
-    let popup = if keyboard_open {
-        popup
-            .open_memory(egui::SetOpenCommand::Bool(true))
-            .anchor(response)
-    } else {
-        popup
-    };
+    let (popup, _) = row_context_menu(response);
     popup.show(|ui| {
         let open = ui.add_enabled(
             exact_available,
@@ -5422,18 +5436,7 @@ fn result_signal_context_menu(
         )
         .err();
     let exact_available = exact_error.is_none();
-    let keyboard_open = response.has_focus()
-        && response
-            .ctx
-            .input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10));
-    let popup = egui::Popup::context_menu(response);
-    let popup = if keyboard_open {
-        popup
-            .open_memory(egui::SetOpenCommand::Bool(true))
-            .anchor(response)
-    } else {
-        popup
-    };
+    let (popup, _) = row_context_menu(response);
     popup.show(|ui| {
         let membership = ui.add_enabled(
             exact_available,
