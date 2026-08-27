@@ -239,7 +239,8 @@ impl XyceTestRunner {
         let generated_reference_wrapper =
             purpose == XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily;
         let fileless_relational_family = generated_reference_wrapper
-            || purpose == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily;
+            || purpose == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
+            || purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily;
         if analytic_wrapper && !requires_wrapper {
             return Err(
                 "analytic transient oracle purpose requires wrapper provenance".to_string(),
@@ -447,7 +448,11 @@ impl XyceTestRunner {
             )?;
         }
         if !steps.is_empty() {
-            Self::validate_static_step_tran_contract(&netlist)?;
+            if purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily {
+                Self::validate_bug1190_son_static_tran_contract(&netlist)?;
+            } else {
+                Self::validate_static_step_tran_contract(&netlist)?;
+            }
         }
         if requires_wrapper && !scalar_measurement_only {
             if analytic_wrapper {

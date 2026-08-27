@@ -369,6 +369,21 @@ driven state; the empty wrapper owner, both independently qualified workers,
 complete retained family, removed wrapper, exclusion evidence, and absence of
 numerical gold are provenance-bound.
 
+Certification BUG 1190 SON reconstructs the three Release-7.10 process-
+parameter wrappers separately from the existing mutual-inductor contracts in
+the same directory. For BSIM3, BSIM4, and diode models, RSpice independently
+executes every Cartesian STEP coordinate first through the authored
+global-parameter to ordinary-parameter alias chain and then through the direct
+model-parameter control. Each fresh control table is the historical
+`file_compare.pl` gold denominator and the owner table is the candidate, using
+the wrapper's exact absolute, relative, and zero tolerances. Because that
+historical comparator contains a malformed FFT-phase escape clause, every
+non-phase cell is also checked with the same tolerances without that clause.
+The three direct-model controls are independently qualified; the complete ten-
+deck directory, five wrapper owners, historical exclusion and wrapper
+evidence, authored PRINT projections, and absence of numerical gold are
+provenance-bound.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification

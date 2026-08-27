@@ -11009,6 +11009,59 @@ fn test_xyce_bug1190_mutual_inductor_parameter_alias_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_bug1190_process_parameter_alias_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/bsim3.cir",
+            "bug1190_son_process_parameter_alias_relational_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/bsim3_modpar.cir",
+            "bug1190_son_direct_model_parameter_relational_control",
+            Some("Netlists/Certification_Tests/BUG_1190_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/bsim4.cir",
+            "bug1190_son_process_parameter_alias_relational_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/bsim4_modpar.cir",
+            "bug1190_son_direct_model_parameter_relational_control",
+            Some("Netlists/Certification_Tests/BUG_1190_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/diode.cir",
+            "bug1190_son_process_parameter_alias_relational_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1190_SON/diodeRef.cir",
+            "bug1190_son_direct_model_parameter_relational_control",
+            Some("Netlists/Certification_Tests/BUG_1190_SON/exclude"),
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact BUG 1190 process-parameter relational contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_classic_level1_mos_dtemp_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -62,15 +62,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 251;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 254;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "7b1487c89043319e840d87a0038838292f7e192fa16bfa8be70680eada6a0be7";
+    "9faa80eba75bf5d071460035182e6f43127a2bd75d88ef10205ebf3dc8201f23";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "08bc47835cf522bd79656e00b957dc3ce5df217ecff045b1f8b47df1cbea3a27";
+    "12c36ac0f8413ac2ccd3fd383cab90d6dc077dcec294a136ff3d30a73b3194ba";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "7bfed71bae2266ad23d4587def289c7b40eeedd1e590c9f08dbe980cdfd6fbba";
+    "b1c41d5404e327da0ad45da58fec7c63ce45f81b27d251173fedff0466311db8";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -8723,7 +8723,8 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
                             | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
                             | XyceStaticTranPlanPurpose::Bug805RelationalFamily
-                            | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily,
+                            | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
+                            | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily,
                         false,
                         XyceStaticTranContract::PlainStatic
                             | XyceStaticTranContract::PlainCsv
@@ -8734,7 +8735,8 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
                             | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
                             | XyceStaticTranPlanPurpose::Bug805RelationalFamily
-                            | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily,
+                            | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
+                            | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily,
                         true,
                         XyceStaticTranContract::WrapperStatic
                             | XyceStaticTranContract::WrapperCsv
@@ -9203,6 +9205,10 @@ enum XyceStaticTranPlanPurpose {
     /// deliberately available only after a dedicated family selector has
     /// proven the wrapper/sibling provenance and naming contract.
     GeneratedReferenceRelationalFamily,
+    /// Compare the exact Certification BUG 1190 SON process-parameter alias
+    /// owners with their direct model-parameter controls. Admission is scoped
+    /// to the dedicated provenance-bound diode family contract.
+    Bug1190SonProcessParameterRelationalFamily,
     /// Compare scoped-model and explicitly expanded representations under an
     /// exact qualified-topology, model-parameter, and waveform-parity
     /// contract. This purpose has a separately qualified native BJT envelope
@@ -9518,6 +9524,12 @@ impl XyceFileCompareTolerance {
     };
 
     const BUG1190_MUTUAL_INDUCTOR: Self = Self {
+        absolute: 1.0e-6,
+        relative: 1.0e-2,
+        zero: 1.0e-12,
+    };
+
+    const BUG1190_SON_PROCESS_PARAMETER: Self = Self {
         absolute: 1.0e-6,
         relative: 1.0e-2,
         zero: 1.0e-12,
@@ -12407,6 +12419,7 @@ mod contracts_bug1116;
 mod contracts_bug113;
 mod contracts_bug1152;
 mod contracts_bug1162;
+mod contracts_bug1190_son;
 mod contracts_bug1398;
 mod contracts_bug1455;
 mod contracts_bug159;

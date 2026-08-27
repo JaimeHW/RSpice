@@ -4178,6 +4178,11 @@ impl XyceTestRunner {
                         netlist,
                         &element.name,
                     ) => {}
+                ElementKind::Diode { .. }
+                    if purpose
+                        == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily =>
+                {
+                }
                 _ => {
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
@@ -4194,7 +4199,8 @@ impl XyceTestRunner {
                         ),
                         XyceStaticTranPlanPurpose::RelationalFamily
                         | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
-                        | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily => format!(
+                        | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+                        | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily => format!(
                             "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3, Level=2 TBV, and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
                         ),

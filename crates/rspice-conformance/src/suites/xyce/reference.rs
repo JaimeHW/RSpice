@@ -1859,15 +1859,29 @@ impl XyceTestRunner {
         if !plan.steps.is_empty() {
             return Err(".STEP static DC results require the stepped .prn contract".to_string());
         }
-        let mut columns = Vec::with_capacity(plan.print.probes.len() + 1);
-        columns.push("Index".to_string());
-        columns.extend(plan.print.probes.iter().cloned());
+        self.dc_projection_results_to_prn_table(&plan.print, &plan.dc, netlist, results)
+    }
 
-        let primary_points = plan.dc.primary_spec().points();
+    /// Render one already-materialized STEP coordinate with its authored DC
+    /// projection. The STEP planner owns the outer coordinate; this helper
+    /// deliberately accepts only the inner sweep and projection so callers do
+    /// not have to erase provenance from a cloned plan.
+    pub(super) fn dc_projection_results_to_prn_table(
+        &self,
+        print: &XycePrintRequest,
+        dc: &XyceDcSweep,
+        netlist: &Netlist,
+        results: &[DcSweepPointResult],
+    ) -> Result<XycePrnTable, String> {
+        let mut columns = Vec::with_capacity(print.probes.len() + 1);
+        columns.push("Index".to_string());
+        columns.extend(print.probes.iter().cloned());
+
+        let primary_points = dc.primary_spec().points();
         if primary_points.is_empty() {
             return Err("primary DC sweep has no points".to_string());
         }
-        let secondary_points = plan.dc.sweep2.as_ref().map(|sweep| sweep.spec().points());
+        let secondary_points = dc.sweep2.as_ref().map(|sweep| sweep.spec().points());
         if secondary_points.as_ref().is_some_and(Vec::is_empty) {
             return Err("secondary DC sweep has no points".to_string());
         }
@@ -1891,11 +1905,11 @@ impl XyceTestRunner {
 
             let mut row = Vec::with_capacity(columns.len());
             row.push(row_index as f64);
-            for probe in &plan.print.probes {
+            for probe in &print.probes {
                 row.push(Self::evaluate_dc_probe(
                     probe,
                     netlist,
-                    &plan.dc,
+                    dc,
                     sweep_point,
                     &point.result,
                     &point.device_op_report,
