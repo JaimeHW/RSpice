@@ -9,6 +9,7 @@
 
 mod documents;
 mod geometry;
+mod noise;
 mod prepared;
 mod report_inventory;
 mod results;
@@ -18,6 +19,9 @@ pub use documents::*;
 // Crate-private: `geometry` exposes only `pub(super)` helpers, which the
 // sibling modules reach through `use super::*`.
 pub(crate) use geometry::*;
+// Module-private: `noise` exposes only `pub(super)` predicates, and the
+// siblings reach them through their own `use super::*`.
+use noise::*;
 pub use prepared::*;
 pub use results::*;
 pub use semantic::*;
@@ -1049,6 +1053,19 @@ fn validate_source_set_member_authority(
     Ok(())
 }
 
+/// Whether the requirement set this run is judged against is empty.
+///
+/// The run-scoped spelling of the sheet's `resolved_specifications`: a
+/// dispatched run carries the requirements it froze, and only a legacy
+/// dataset from before prepared-run receipts falls back to the workspace's
+/// live contract.
+fn resolved_run_specifications_are_empty(state: &AppState, run: &SimulationRun) -> bool {
+    run.prepared_receipt().map_or_else(
+        || state.workspace.specs.is_empty(),
+        |receipt| receipt.specifications().is_empty(),
+    )
+}
+
 fn quick_result_availability(
     state: &AppState,
     run: &SimulationRun,
@@ -1067,7 +1084,16 @@ fn quick_result_availability(
         return RetainedHardcopySourceAvailability::Available;
     }
     if viewer == ResultViewer::Specs {
-        let has_evidence = !state.workspace.specs.is_empty()
+        // The requirement set a dispatched run was judged against is the one
+        // it froze into its receipt, and that is what the capture writes —
+        // `ResultsQuickViewPresentation::from_state` resolves it through the
+        // shared `run_specifications`. Offering the page on the workspace's
+        // currently authored set instead made the two disagree in both
+        // directions: a receipt-backed run whose frozen requirements had since
+        // been deleted from the workspace was refused a page it could fill,
+        // and a run prepared with no requirements at all was offered one that
+        // resolves to an empty table the moment a limit is authored.
+        let has_evidence = !resolved_run_specifications_are_empty(state, run)
             || run
                 .analyses
                 .iter()
@@ -1203,81 +1229,6 @@ fn quick_result_availability(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RetainedNoiseReference {
-    Input,
-    Output,
-}
-
-fn retained_noise_reference(name: &str) -> Option<RetainedNoiseReference> {
-    let name = name
-        .trim()
-        .to_ascii_lowercase()
-        .replace([' ', '-', '.'], "");
-    if matches!(
-        name.as_str(),
-        "inoise"
-            | "inoise_spectrum"
-            | "inoisespectrum"
-            | "v(inoise)"
-            | "v(inoise_spectrum)"
-            | "v(inoisespectrum)"
-    ) {
-        Some(RetainedNoiseReference::Input)
-    } else if matches!(
-        name.as_str(),
-        "onoise"
-            | "onoise_spectrum"
-            | "onoisespectrum"
-            | "v(onoise)"
-            | "v(onoise_spectrum)"
-            | "v(onoisespectrum)"
-    ) {
-        Some(RetainedNoiseReference::Output)
-    } else {
-        None
-    }
-}
-
-fn retained_noise_contributor(name: &str) -> bool {
-    let name = name.trim().to_ascii_lowercase();
-    name.starts_with("noise(") && name.ends_with(')')
-}
-
-fn retained_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
-    if waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
-        return false;
-    }
-    if waveform
-        .y
-        .iter()
-        .any(|density| !density.is_finite() || *density <= 0.0)
-    {
-        return false;
-    }
-    let mut previous = None;
-    for frequency in waveform.x.iter().copied() {
-        if !frequency.is_finite()
-            || frequency <= 0.0
-            || previous.is_some_and(|previous| frequency <= previous)
-        {
-            return false;
-        }
-        previous = Some(frequency);
-    }
-    true
-}
-
-fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    matches!(
-        analysis.analysis_type,
-        AnalysisType::Noise | AnalysisType::Hbnoise
-    ) && analysis.waveforms.iter().any(|waveform| {
-        retained_noise_reference(&waveform.name).is_some()
-            && retained_noise_waveform_is_renderable(waveform)
-    })
-}
-
 fn transient_waveform_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
         && analysis.analysis_type.is_time_domain()
@@ -1315,17 +1266,12 @@ fn quick_result_analysis_index(
                     .iter()
                     .position(transient_waveform_analysis_is_renderable)
             }),
-        ResultViewer::NoiseContrib => globally_selected
-            .filter(|&index| {
-                run.analyses
-                    .get(index)
-                    .is_some_and(ordinary_noise_spectrum_is_renderable)
-            })
-            .or_else(|| {
-                run.analyses
-                    .iter()
-                    .position(ordinary_noise_spectrum_is_renderable)
-            }),
+        // The one binding the sheet uses, so the page and the screen name the
+        // same analysis. `filter` + `or_else` is not that binding: it steps to
+        // the next renderable result whenever the reader's own selection is a
+        // noise analysis that carries no ordinary spectrum, and prints another
+        // analysis's contributors under the selected one's name.
+        ResultViewer::NoiseContrib => selected_noise_analysis_index(globally_selected, run),
         ResultViewer::DcSweep => globally_selected
             .filter(|&index| {
                 run.analyses

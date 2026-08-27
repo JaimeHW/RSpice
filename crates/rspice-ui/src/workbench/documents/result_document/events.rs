@@ -977,7 +977,6 @@ mod tests {
     #[test]
     fn an_unresolvable_event_selection_is_explained_rather_than_drawn_empty() {
         use crate::state::SimulationRun;
-        use crate::workbench::app_state::AppState;
 
         let analysis =
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![

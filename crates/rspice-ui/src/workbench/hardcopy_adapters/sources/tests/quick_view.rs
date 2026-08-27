@@ -307,3 +307,222 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
             .all(|(center, _)| *center != 9_999.0f64.to_bits())
     );
 }
+
+/// A failed noise solve is not printable evidence.
+///
+/// The hardcopy resolver carried its own copy of the sheet's renderability
+/// predicate, and that copy had no success gate. A noise run that did not
+/// converge retains whatever vectors the engine emitted before it gave up;
+/// the sheet refuses to draw them and the page must refuse to print them.
+#[test]
+fn a_failed_noise_solve_is_neither_offered_nor_printed() {
+    let mut analysis = AnalysisResult::new(9, AnalysisType::Noise, "Noise").with_waveforms(vec![
+        WaveformData::new(
+            "onoise",
+            vec![1.0, 10.0, 100.0],
+            vec![1.0e-18, 4.0e-18, 9.0e-18],
+            "#00ffff",
+        ),
+    ]);
+    analysis.success = false;
+    analysis.error_message = Some("noise analysis did not converge".to_owned());
+
+    let mut state = quick_view_state(analysis, ResultViewer::NoiseContrib);
+    let run = state.simulation.active_run().unwrap();
+
+    assert!(!quick_result_availability(&state, run).is_available());
+    assert!(resolve_quick_view(&state).is_err());
+
+    // And it does not shadow one that did converge. The run-wide fallback
+    // scanned for the first analysis the ungated predicate accepted, so a run
+    // that solved noise twice — once badly, once well — bound the page to the
+    // failed attempt and then refused the whole page for being unsuccessful.
+    state.simulation.runs[0].analyses.push(
+        AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
+            WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#0ff"),
+        ]),
+    );
+    state.simulation.runs[0].analyses.push(AnalysisResult::new(
+        11,
+        AnalysisType::Transient,
+        "TRAN",
+    ));
+    state.simulation.active_analysis_idx = Some(2);
+    let run = state.simulation.active_run().unwrap();
+    assert_eq!(
+        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        Some(1)
+    );
+    assert_eq!(
+        quick_result_availability(&state, run),
+        RetainedHardcopySourceAvailability::Available
+    );
+}
+
+/// A selected noise analysis binds strictly on paper too.
+///
+/// The resolver stepped to the next renderable result whenever the reader's
+/// own selection was a noise analysis carrying no ordinary spectrum — so a
+/// page printed from a selected PNOISE result showed a different analysis's
+/// spectrum, under the selected analysis's name. A selection that expresses
+/// no noise intent at all still falls back run-wide, exactly as the sheet
+/// does.
+#[test]
+fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
+    let phase = AnalysisResult::new(1, AnalysisType::Pnoise, "PNOISE").with_waveforms(vec![
+        WaveformData::new(
+            "phase_noise",
+            vec![1.0, 10.0],
+            vec![1.0e-18, 4.0e-18],
+            "#fff",
+        ),
+    ]);
+    let ordinary = AnalysisResult::new(2, AnalysisType::Noise, "NOISE").with_waveforms(vec![
+        WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#fff"),
+    ]);
+    let transient = AnalysisResult::new(3, AnalysisType::Transient, "TRAN");
+
+    let mut state = quick_view_state(phase, ResultViewer::NoiseContrib);
+    state.simulation.runs[0].analyses.push(ordinary);
+    state.simulation.runs[0].analyses.push(transient);
+
+    // The selection is a noise-family analysis with no ordinary spectrum:
+    // nothing is offered rather than the neighbouring NOISE result.
+    state.simulation.active_analysis_idx = Some(0);
+    let run = state.simulation.active_run().unwrap();
+    assert_eq!(
+        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        None
+    );
+    assert!(!quick_result_availability(&state, run).is_available());
+
+    // The selection is the ordinary-noise result itself.
+    state.simulation.active_analysis_idx = Some(1);
+    let run = state.simulation.active_run().unwrap();
+    assert_eq!(
+        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        Some(1)
+    );
+
+    // A transient selection expresses no noise intent, so the run-wide
+    // fallback still finds the one printable spectrum.
+    state.simulation.active_analysis_idx = Some(2);
+    let run = state.simulation.active_run().unwrap();
+    assert_eq!(
+        quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
+        Some(1)
+    );
+}
+
+/// The specifications page is offered on the requirements the run was judged
+/// against, which is what the capture writes.
+///
+/// The offering read `workspace.specs` — the currently authored contract. A
+/// receipt-backed run whose frozen requirements had since been deleted from
+/// the workspace was refused a page it could fill, and a run prepared with no
+/// requirements at all was offered one that resolves to an empty table the
+/// moment a limit is authored.
+#[test]
+fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
+    use crate::product::{AnalysisInstanceId, SimulationPlanId};
+    use crate::state::{
+        AnalysisResultSourceDomain, PreparedRunReceipt, PreparedRunTaskReceipt,
+        PreparedSourceCheckReceipt, PreparedSpecification, SpecEntry, SpecPointScope,
+        SpecificationDefinition,
+    };
+
+    fn receipt_run(requirements: usize) -> SimulationRun {
+        let task = PreparedRunTaskReceipt::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            Vec::new(),
+            1,
+            ContentDigest::from_bytes([0x72; 32]),
+        )
+        .expect("task receipt");
+        let definitions = (0..requirements)
+            .map(|index| {
+                let projection = SpecEntry {
+                    measurement: format!("gain{index}"),
+                    expression: String::new(),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    unit: "dB".to_owned(),
+                    scope: SpecPointScope::AllPoints,
+                };
+                PreparedSpecification::from_definition(SpecificationDefinition::from_legacy(
+                    SimulationPlanId::new(),
+                    index,
+                    &projection,
+                ))
+                .expect("prepared requirement")
+            })
+            .collect();
+        let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
+            AnalysisResultSourceDomain::SimulationPlan,
+            Some(SimulationPlanId::new()),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x71; 32]),
+            ContentDigest::from_bytes([0x73; 32]),
+            PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x74; 32])),
+            Vec::new(),
+            definitions,
+            vec![task],
+        )
+        .expect("prepared receipt");
+        let mut run = SimulationRun::new_prepared(1, receipt);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.analyses
+            .push(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
+        run
+    }
+
+    fn specs_state(run: SimulationRun) -> AppState {
+        let mut state = AppState::default();
+        state.simulation.runs.push(run);
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        state.ui.results.viewer = ResultViewer::Specs;
+        state
+    }
+
+    let workspace_only = SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: String::new(),
+        min: Some(0.0),
+        max: Some(1.0),
+        unit: "dB".to_owned(),
+        scope: SpecPointScope::AllPoints,
+    };
+
+    // Frozen requirements, no live workspace contract: the page is offered.
+    let state = specs_state(receipt_run(1));
+    assert!(state.workspace.specs.is_empty());
+    let run = state.simulation.active_run().unwrap();
+    assert_eq!(
+        quick_result_availability(&state, run),
+        RetainedHardcopySourceAvailability::Available
+    );
+
+    // No frozen requirements: a limit authored after the run does not conjure
+    // a page, because the capture resolves the frozen set and would write an
+    // empty table.
+    let mut state = specs_state(receipt_run(0));
+    state.workspace.specs.push(workspace_only.clone());
+    let run = state.simulation.active_run().unwrap();
+    assert!(!quick_result_availability(&state, run).is_available());
+
+    // A legacy dataset with no receipt still reads the workspace contract.
+    let mut legacy = SimulationRun::new(1);
+    legacy.lifecycle = SimulationRunLifecycle::Completed;
+    legacy
+        .analyses
+        .push(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
+    let mut state = specs_state(legacy);
+    state.workspace.specs.push(workspace_only);
+    let run = state.simulation.active_run().unwrap();
+    assert_eq!(
+        quick_result_availability(&state, run),
+        RetainedHardcopySourceAvailability::Available
+    );
+}

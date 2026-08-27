@@ -1139,3 +1139,120 @@ pub(super) fn resolved_viewer_availability(
     }
     Ok(viewer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AnalysisResult, AnalysisType, SimulationRun, WaveformData};
+
+    fn retained_transient_state() -> AppState {
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(17, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![-1.25, 2.5, 4.0], "#0af"),
+            ]),
+        );
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        assert!(state.simulation.select_analysis(0));
+        state
+    }
+
+    /// The toolbar's magnification buttons follow the command's own gate.
+    ///
+    /// They were enabled for the waveform sheet alone, while `Command::ZoomIn`
+    /// is offered — and carried out — on every unit-pane sheet. A reader on
+    /// the DC, Bode or ordinary-noise sheet saw two greyed buttons for a
+    /// gesture the product performs.
+    #[test]
+    fn the_toolbar_offers_magnification_wherever_the_command_does() {
+        let mut state = retained_transient_state();
+        for viewer in [
+            ResultViewer::Waves,
+            ResultViewer::DcSweep,
+            ResultViewer::Bode,
+            ResultViewer::NoiseContrib,
+        ] {
+            state.ui.results.viewer = viewer;
+            assert!(
+                result_document::zoom_gesture_available(&state),
+                "{viewer:?} answers the zoom gesture"
+            );
+            assert!(
+                magnification_available(&state),
+                "{viewer:?} must offer the toolbar's magnification buttons"
+            );
+        }
+        // A sheet that owns its own canvas is still not offered the unit-pane
+        // gesture, so this is not a blanket enable.
+        state.ui.results.viewer = ResultViewer::Smith;
+        assert!(!magnification_available(&state));
+    }
+
+    /// The readout states the viewport, in the status bar's unit.
+    ///
+    /// It printed `visualization_studio.zoom * 100` as a percentage — a
+    /// counter of button presses, not a fact about the sheet. It is now a
+    /// function of the shared-X status alone, which is why the studio's own
+    /// accumulator cannot appear in its signature.
+    #[test]
+    fn the_magnification_readout_reports_the_viewport_not_the_button_count() {
+        use result_document::SharedXStatus;
+
+        assert_eq!(magnification_readout(None), "—");
+        assert_eq!(
+            magnification_readout(Some(&SharedXStatus {
+                span: "0 s … 1 s".to_owned(),
+                zoom: 1.0,
+            })),
+            "1×"
+        );
+        assert_eq!(
+            magnification_readout(Some(&SharedXStatus {
+                span: "0 s … 250 ms".to_owned(),
+                zoom: 4.0,
+            })),
+            "4×"
+        );
+        assert_eq!(
+            magnification_readout(Some(&SharedXStatus {
+                span: "0 s … 8 ms".to_owned(),
+                zoom: 125.0,
+            })),
+            "125×"
+        );
+    }
+
+    /// The Measurements section reads the stable expression state.
+    ///
+    /// It read `ResultsState::exprs`, the ordinal compatibility projection
+    /// that only the waveform sheet's build pass reconciles — so opening the
+    /// section without having drawn that sheet listed nothing at all.
+    #[test]
+    fn the_measurements_section_reads_expressions_the_document_actually_holds() {
+        let mut state = retained_transient_state();
+        let key = {
+            let run = state.simulation.active_run().expect("active run");
+            let analysis = state.simulation.active_analysis().expect("active analysis");
+            result_document::AnalysisPresentationKey::new(run.dataset_id, analysis)
+        };
+
+        assert!(active_analysis_expressions(&state).is_empty());
+
+        state.ui.results.analysis_exprs.insert(
+            key,
+            vec![result_document::ExprTrace {
+                text: "V(out)*2".to_owned(),
+                visible: true,
+            }],
+        );
+        // The ordinal projection is deliberately left empty: that is the
+        // state the section is opened in when no waveform sheet has run.
+        assert!(state.ui.results.exprs.is_empty());
+
+        let expressions = active_analysis_expressions(&state);
+        assert_eq!(expressions.len(), 1);
+        assert_eq!(expressions[0].text, "V(out)*2");
+    }
+}

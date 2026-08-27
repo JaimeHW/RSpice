@@ -905,3 +905,44 @@ pub(super) const fn operation_label(state: OperationState) -> &'static str {
         OperationState::Completed => "completed",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Markers overlay only panes whose horizontal axis is the sweep the
+    /// marker's coordinate was taken in.
+    ///
+    /// The overlay maps a retained X coordinate onto whatever the well is
+    /// showing. On the folded eye, the binned histogram, the spectrum or a
+    /// Smith chart the abscissa is computed by the sheet, so a marker placed
+    /// in seconds was drawn at a position that means nothing.
+    #[test]
+    fn markers_overlay_only_panes_that_draw_the_retained_sweep() {
+        for viewer in [
+            ResultViewer::Waves,
+            ResultViewer::DcSweep,
+            ResultViewer::Bode,
+            ResultViewer::NoiseContrib,
+        ] {
+            assert!(
+                marker_domain_matches_the_pane(viewer),
+                "{viewer:?} draws the retained sweep"
+            );
+        }
+        for viewer in [
+            ResultViewer::Fft,
+            ResultViewer::Eye,
+            ResultViewer::Hist,
+            ResultViewer::Smith,
+            ResultViewer::Nyquist,
+            ResultViewer::PhaseNoise,
+            ResultViewer::HarmonicBalance,
+        ] {
+            assert!(
+                !marker_domain_matches_the_pane(viewer),
+                "{viewer:?} computes its own abscissa"
+            );
+        }
+    }
+}
