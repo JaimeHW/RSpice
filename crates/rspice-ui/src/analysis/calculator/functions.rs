@@ -634,7 +634,11 @@ fn duty(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 /// last finite samples.
 fn step_levels(name: &str, y: &[f64]) -> Result<(f64, f64), EvaluationError> {
     let no_sample = || EvaluationError::MathError(format!("{name} has no finite sample"));
-    let initial = y.iter().find(|v| v.is_finite()).copied().ok_or_else(no_sample)?;
+    let initial = y
+        .iter()
+        .find(|v| v.is_finite())
+        .copied()
+        .ok_or_else(no_sample)?;
     let settled = y
         .iter()
         .rev()
@@ -1076,7 +1080,10 @@ mod tests {
             "dB(0) is out of domain"
         );
         let (_, y) = series_of("db", vec![wave(vec![0.0, 1.0, 2.0], vec![1.0, 0.0, 10.0])]);
-        assert!(y[0].is_finite() && y[2].is_finite(), "finite samples survive");
+        assert!(
+            y[0].is_finite() && y[2].is_finite(),
+            "finite samples survive"
+        );
         assert!(y[1].is_nan(), "dB of a zero sample is a hole, got {}", y[1]);
     }
 
@@ -1260,7 +1267,10 @@ mod tests {
 
         // y = 2x + 1 at x = 1.3 is 3.6, exactly, under linear interpolation.
         assert_close(
-            scalar_of("yval", vec![wave(x.clone(), y.clone()), CalcValue::Scalar(1.3)]),
+            scalar_of(
+                "yval",
+                vec![wave(x.clone(), y.clone()), CalcValue::Scalar(1.3)],
+            ),
             3.6,
             1.0e-12,
             "yval inside the domain",
