@@ -1699,6 +1699,32 @@ fn parse_pspice_u_gate_ic_value(
     name: &str,
     line_num: usize,
 ) -> Result<(Option<Value>, Option<String>), ParseError> {
+    parse_digital_gate_ic_value(
+        raw_value,
+        params,
+        defer_simple_param_refs,
+        "PSpice U-device",
+        name,
+        line_num,
+    )
+}
+
+/// Parse a scalar digital-gate initial condition without prematurely binding
+/// subcircuit formals to their definition defaults.
+///
+/// Both PSpice U gates and Xyce's legacy Y gates permit `IC=<formal>` inside a
+/// parameterized subcircuit.  At definition time the formal's default is
+/// visible, but the authoritative value belongs to the eventual instance
+/// scope.  Returning it through `expr_params` lets the ordinary XSPICE
+/// flattener resolve it once that scope exists.
+fn parse_digital_gate_ic_value(
+    raw_value: &str,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    device_family: &str,
+    name: &str,
+    line_num: usize,
+) -> Result<(Option<Value>, Option<String>), ParseError> {
     let expression = strip_wrapping_expression_delimiters(raw_value).trim();
     let upper = expression.to_ascii_uppercase();
     if matches!(upper.as_str(), "FALSE" | "LOW") {
@@ -1723,8 +1749,7 @@ fn parse_pspice_u_gate_ic_value(
             Err(ParseError::Syntax {
                 line: line_num,
                 message: format!(
-                    "PSpice U-device '{}' IC parameter requires a numeric or logic-state value",
-                    name
+                    "{device_family} '{name}' IC parameter requires a numeric or logic-state value"
                 ),
             })
         }
@@ -4950,12 +4975,26 @@ pub(super) fn parse_lossy_tline(
     }
     if name.eq_ignore_ascii_case("YNOT") {
         if xyce_ydevice_remaining_fields(stream) < 6 {
-            return parse_xyce_y_legacy_gate(stream, line_num, elements, params, "YNOT");
+            return parse_xyce_y_legacy_gate(
+                stream,
+                line_num,
+                elements,
+                params,
+                defer_simple_param_refs,
+                "YNOT",
+            );
         }
         return parse_xyce_y_not(stream, line_num, elements);
     }
     if xyce_legacy_y_gate_spec(&name).is_some() {
-        return parse_xyce_y_legacy_gate(stream, line_num, elements, params, &name);
+        return parse_xyce_y_legacy_gate(
+            stream,
+            line_num,
+            elements,
+            params,
+            defer_simple_param_refs,
+            &name,
+        );
     }
     if let Some(keyword) = xyce_ydevice_keyword(&name) {
         return Err(ParseError::Syntax {
@@ -5021,6 +5060,7 @@ fn parse_xyce_y_legacy_gate(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
     keyword: &str,
 ) -> Result<(), ParseError> {
     let Some((model, input_count)) = xyce_legacy_y_gate_spec(keyword) else {
@@ -5037,6 +5077,7 @@ fn parse_xyce_y_legacy_gate(
     let output = expect_node(stream, line_num)?;
     let timing_model = expect_model_name(stream, line_num)?;
     let mut instance_params = Vec::new();
+    let mut expr_params = Vec::new();
 
     while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -5055,8 +5096,20 @@ fn parse_xyce_y_legacy_gate(
         let value_token = stream.peek().clone();
         stream.advance();
         if parameter.eq_ignore_ascii_case("IC") {
-            if let Some(value) = parse_xyce_y_ic_value(&value_token, params) {
+            let raw_value = value_token.kind.to_string();
+            let (resolved, deferred) = parse_digital_gate_ic_value(
+                &raw_value,
+                params,
+                defer_simple_param_refs,
+                "Legacy Xyce Y-device",
+                &instance_name,
+                line_num,
+            )?;
+            if let Some(value) = resolved {
                 instance_params.push(("ic".to_string(), value));
+            }
+            if let Some(expression) = deferred {
+                expr_params.push(("ic".to_string(), expression));
             }
         }
     }
@@ -5077,7 +5130,7 @@ fn parse_xyce_y_legacy_gate(
             }),
             ports: vec![input_port, XspicePort::Digital(output)],
             params: instance_params,
-            expr_params: Vec::new(),
+            expr_params,
             string_params: Vec::new(),
             string_expr_params: Vec::new(),
             string_vector_params: Vec::new(),

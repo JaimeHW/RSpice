@@ -14097,4 +14097,79 @@ mod tests {
             assert!(message.contains("CONTINUATION"), "{message}");
         }
     }
+
+    #[test]
+    fn legacy_xyce_y_gate_ic_formal_resolves_per_subcircuit_instance() {
+        let netlist = Netlist::parse(
+            "legacy Y gate parameterized initial conditions\n\
+             .subckt latch in_a in_b out params: valx=0\n\
+             YNAND N1 in_a in_b out DMOD IC=valx\n\
+             .ends latch\n\
+             Xone a b q1 latch params: valx=1\n\
+             Xzero a b q0 latch params: valx=0\n\
+             Xtrue a b qt latch params: valx=true\n\
+             Xfalse a b qf latch params: valx=false\n\
+             .model DMOD DIG (DELAY=20ns)\n\
+             .end\n",
+        )
+        .expect("parameterized legacy Y gates parse");
+
+        let ElementKind::Xspice {
+            params,
+            expr_params,
+            ..
+        } = &netlist.subcircuits[0].elements[0].kind
+        else {
+            panic!("legacy Y gate should lower to an XSPICE element");
+        };
+        assert!(
+            params
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("ic")),
+            "the subcircuit definition default must not be captured as the gate IC"
+        );
+        assert_eq!(expr_params, &[("ic".to_string(), "VALX".to_string())]);
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("legacy Y gate IC formals resolve while flattening");
+        let mut initial_states = flattened
+            .elements
+            .iter()
+            .filter_map(|element| {
+                let ElementKind::Xspice {
+                    model,
+                    params,
+                    expr_params,
+                    ..
+                } = &element.kind
+                else {
+                    return None;
+                };
+                if !model.eq_ignore_ascii_case("xyce_legacy_d_nand") {
+                    return None;
+                }
+                assert!(
+                    expr_params.is_empty(),
+                    "flattening must consume deferred ICs"
+                );
+                let ic = params
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("ic"))
+                    .map(|(_, value)| *value)
+                    .expect("flattened legacy gate has a resolved IC");
+                Some((element.name.to_ascii_uppercase(), ic))
+            })
+            .collect::<Vec<_>>();
+        initial_states.sort_by(|left, right| left.0.cmp(&right.0));
+
+        assert_eq!(
+            initial_states,
+            vec![
+                ("XFALSE.N1".to_string(), 0.0),
+                ("XONE.N1".to_string(), 1.0),
+                ("XTRUE.N1".to_string(), 1.0),
+                ("XZERO.N1".to_string(), 0.0),
+            ]
+        );
+    }
 }

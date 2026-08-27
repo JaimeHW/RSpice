@@ -1859,6 +1859,17 @@ impl XyceDLegacyGate {
         Ok((vref, vlo, vhi))
     }
 
+    fn authored_initial_state(ctx: &CmContext) -> Option<bool> {
+        let ic = ctx.param("ic");
+        if (ic - Q_HIGH).abs() <= 0.25 {
+            Some(true)
+        } else if ic.abs() <= 0.25 {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
     fn logic(&self, inputs: &[Option<bool>]) -> Option<bool> {
         XyceDGate {
             model_name: "xyce_legacy_logic",
@@ -1956,7 +1967,12 @@ impl XyceDLegacyGate {
         }
 
         if ctx.is_dc() {
-            q = desired;
+            // Xyce evaluates the combinational truth table first and then
+            // applies GateData::setIC while establishing the DC operating
+            // point.  An authored IC therefore owns the initial output even
+            // when it opposes the truth-table result.  The first transient
+            // evaluation will reconcile that state after the model DELAY.
+            q = Self::authored_initial_state(ctx).or(desired);
             transition_from = q;
             transition_start = 0.0;
             pending_q = None;
@@ -2263,14 +2279,8 @@ impl CodeModel for XyceDLegacyGate {
             ));
         }
         ctx.allocate_states(Self::INPUT_BASE + width * Self::INPUT_STRIDE);
-        let ic = ctx.param("ic");
-        let initial_q = if (ic - Q_HIGH).abs() <= 0.25 {
-            Q_HIGH
-        } else if ic.abs() <= 0.25 {
-            Q_LOW
-        } else {
-            Q_UNKNOWN
-        };
+        let initial_q = Self::authored_initial_state(ctx)
+            .map_or(Q_UNKNOWN, |state| if state { Q_HIGH } else { Q_LOW });
         ctx.set_initial_state(Self::Q_STATE, initial_q);
         ctx.set_initial_state(Self::Q_TRANSITION_START, 0.0);
         ctx.set_initial_state(Self::Q_TRANSITION_FROM, f64::NAN);
@@ -3977,6 +3987,26 @@ mod tests {
         ctx
     }
 
+    fn legacy_gate_context(ic: Value, inputs: &[Value]) -> CmContext {
+        let mut ctx = CmContext::new();
+        for spec in q_parameters() {
+            ctx.set_param(&spec.name, spec.default);
+        }
+        ctx.set_param("vref", 0.0);
+        ctx.set_param("vlo", 0.0);
+        ctx.set_param("vhi", 3.0);
+        ctx.set_param("ic", ic);
+        ctx.set_port_vector_terminals(
+            "in",
+            (0..inputs.len()).map(|index| (index + 1, 0)).collect(),
+        );
+        ctx.set_port_node("out", inputs.len() + 1);
+        ctx.set_input_analog_vector("in", inputs)
+            .expect("set legacy gate analog inputs");
+        ctx.set_input_analog("out", 0.0);
+        ctx
+    }
+
     #[test]
     fn metadata_matches_xyce_u_tff_terminal_order() {
         let ports = XyceDTff.ports();
@@ -4041,5 +4071,65 @@ mod tests {
         ctx.set_input_analog("clk", 3.0);
         XyceDTff.evaluate(&mut ctx).expect("evaluate xyce_d_tff");
         assert!(ctx.take_requested_breakpoints().contains(&(120.0e-9)));
+    }
+
+    #[test]
+    fn legacy_y_gate_dcop_applies_authored_ic_after_truth_table() {
+        let gate = XyceDLegacyGate::nand();
+
+        // NAND(high, high) is low, but Xyce GateData::setIC applies the
+        // authored high state while establishing DCOP.
+        let mut high_ic = legacy_gate_context(1.0, &[3.0, 3.0]);
+        high_ic.analysis = AnalysisType::DcOp;
+        gate.init(&mut high_ic).expect("initialize high-IC YNAND");
+        gate.evaluate(&mut high_ic)
+            .expect("evaluate high-IC YNAND DCOP");
+        assert_eq!(q_state(high_ic.state(XyceDLegacyGate::Q_STATE)), Some(true));
+
+        // NAND(low, low) is high; an authored low state has the same canonical
+        // precedence. Without an IC, the ordinary truth result remains active.
+        let mut low_ic = legacy_gate_context(0.0, &[0.0, 0.0]);
+        low_ic.analysis = AnalysisType::DcOp;
+        gate.init(&mut low_ic).expect("initialize low-IC YNAND");
+        gate.evaluate(&mut low_ic)
+            .expect("evaluate low-IC YNAND DCOP");
+        assert_eq!(q_state(low_ic.state(XyceDLegacyGate::Q_STATE)), Some(false));
+
+        let mut no_ic = legacy_gate_context(f64::NAN, &[0.0, 0.0]);
+        no_ic.analysis = AnalysisType::DcOp;
+        gate.init(&mut no_ic)
+            .expect("initialize uninitialized YNAND");
+        gate.evaluate(&mut no_ic)
+            .expect("evaluate uninitialized YNAND DCOP");
+        assert_eq!(q_state(no_ic.state(XyceDLegacyGate::Q_STATE)), Some(true));
+    }
+
+    #[test]
+    fn legacy_y_gate_transient_reconciles_dcop_ic_after_model_delay() {
+        let gate = XyceDLegacyGate::nand();
+        let delay = 20.0e-9;
+        let mut ctx = legacy_gate_context(1.0, &[3.0, 3.0]);
+        ctx.set_param("delay", delay);
+        ctx.analysis = AnalysisType::DcOp;
+        gate.init(&mut ctx).expect("initialize high-IC YNAND");
+        gate.evaluate(&mut ctx)
+            .expect("evaluate high-IC YNAND DCOP");
+        assert_eq!(q_state(ctx.state(XyceDLegacyGate::Q_STATE)), Some(true));
+
+        ctx.advance_state();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 0.0;
+        ctx.timestep = 0.0;
+        gate.evaluate(&mut ctx)
+            .expect("schedule post-DCOP truth reconciliation");
+        assert_eq!(q_state(ctx.state(XyceDLegacyGate::Q_STATE)), Some(true));
+        assert!(ctx.take_requested_breakpoints().contains(&delay));
+
+        ctx.advance_state();
+        ctx.time = delay;
+        ctx.timestep = delay;
+        gate.evaluate(&mut ctx)
+            .expect("apply delayed YNAND truth-table state");
+        assert_eq!(q_state(ctx.state(XyceDLegacyGate::Q_STATE)), Some(false));
     }
 }
