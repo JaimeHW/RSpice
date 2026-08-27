@@ -31,6 +31,135 @@ fn last_vout(path: &std::path::Path) -> (f64, f64) {
     )
 }
 
+const BUG_1284_FIRST: &str =
+    include_str!("../../../tests/xyce/Netlists/Certification_Tests/BUG_1284/bug_1284_first.cir");
+const BUG_1284_RESTARTED: &str = include_str!(
+    "../../../tests/xyce/Netlists/Certification_Tests/BUG_1284/bug_1284_restarted.cir"
+);
+
+#[test]
+fn xyce_bug_1284_job_writes_20ns_checkpoint_and_file_resumes_to_50ns() {
+    let dir = test_dir("bug1284_restart");
+    let first = dir.join("bug_1284_first.cir");
+    let restarted = dir.join("bug_1284_restarted.cir");
+    std::fs::write(&first, BUG_1284_FIRST).expect("write first-stage BUG_1284 deck");
+    std::fs::write(&restarted, BUG_1284_RESTARTED).expect("write restart BUG_1284 deck");
+
+    let output = run_rspice(&["--quiet", "run", first.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "BUG_1284 checkpoint writer failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in [
+        "trans_test0",
+        "trans_test5e-09",
+        "trans_test1e-08",
+        "trans_test1.5e-08",
+        "trans_test2e-08",
+    ] {
+        assert!(
+            dir.join(name).is_file(),
+            "missing restart checkpoint {name}"
+        );
+    }
+
+    let resumed_csv = dir.join("resumed.csv");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        restarted.to_str().unwrap(),
+        "-o",
+        resumed_csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "BUG_1284 checkpoint reader failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let final_time = std::fs::read_to_string(&resumed_csv)
+        .expect("read resumed transient output")
+        .lines()
+        .last()
+        .expect("resumed transient has samples")
+        .split(',')
+        .next()
+        .expect("resumed transient has a time column")
+        .parse::<f64>()
+        .expect("resumed final time is numeric");
+    assert!(
+        (final_time - 50e-9).abs() <= 1e-18,
+        "restart must reach the authored extended stop time, got {final_time:.17e}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xyce_restart_rejects_namespace_escape_and_cli_checkpoint_conflict() {
+    let dir = test_dir("restart_safety");
+    let escaping = dir.join("escaping.cir");
+    std::fs::write(
+        &escaping,
+        "* unsafe restart namespace\nV1 n 0 1\nR1 n 0 1k\n.TRAN 1n 2n\n.OPTIONS RESTART JOB=../escape INITIAL_INTERVAL=1n\n.END\n",
+    )
+    .expect("write unsafe restart deck");
+    let output = run_rspice(&["--quiet", "run", escaping.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("one portable filename") || stderr.contains("exactly one file"),
+        "restart path refusal should be precise: {stderr}"
+    );
+    assert!(!dir.parent().unwrap().join("escape0").exists());
+
+    let safe = dir.join("safe.cir");
+    std::fs::write(
+        &safe,
+        "* conflicting restart controls\nV1 n 0 1\nR1 n 0 1k\n.TRAN 1n 2n\n.OPTIONS RESTART JOB=safe INITIAL_INTERVAL=1n\n.END\n",
+    )
+    .expect("write restart conflict deck");
+    let explicit = dir.join("explicit.ckpt");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        safe.to_str().unwrap(),
+        "--checkpoint",
+        explicit.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be combined with --checkpoint or --resume"),
+        "restart control-plane conflict should be explicit: {stderr}"
+    );
+    assert!(!explicit.exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xyce_restart_diagnoses_authored_unsupported_encoding_control() {
+    let dir = test_dir("restart_pack");
+    let deck = dir.join("pack.cir");
+    std::fs::write(
+        &deck,
+        "* unsupported Xyce encoding selection\nV1 n 0 1\nR1 n 0 1k\n.TRAN 1n 2n\n.OPTIONS RESTART JOB=safe INITIAL_INTERVAL=1n PACK=1\n.END\n",
+    )
+    .expect("write PACK restart deck");
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("PACK") && stderr.contains("does not read or write"),
+        "unsupported authored restart encoding must not be ignored: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A run segmented through --checkpoint/--resume must land on the same
 /// final state as one uninterrupted run; resuming against a different deck
 /// must be refused.
