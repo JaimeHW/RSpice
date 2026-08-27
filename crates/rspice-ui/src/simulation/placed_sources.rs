@@ -327,8 +327,8 @@ pub fn placed_sources(
         .components
         .iter()
         .filter_map(|component| {
-            let (source, carries_ac) = placed_source(component, &nets)?;
-            Some(with_source_consumers(source, carries_ac, plan))
+            let (source, drive) = placed_source(component, &nets)?;
+            Some(with_source_consumers(source, drive, plan))
         })
         .collect();
     sources.sort_by(|left, right| source_order(left).cmp(&source_order(right)));
@@ -355,7 +355,7 @@ pub fn design_sources(
     design_excitations(libraries, projection)
         .sources
         .iter()
-        .map(|(source, carries_ac)| with_source_consumers(source.clone(), *carries_ac, plan))
+        .map(|(source, drive)| with_source_consumers(source.clone(), *drive, plan))
         .collect()
 }
 
@@ -395,10 +395,10 @@ pub fn design_rf_ports(
 /// [`placed_sources`] already paid on every frame, beside the net resolution
 /// that is now paid once.
 struct DesignExcitations {
-    /// Each placed source with an empty consumer list, paired with whether an
-    /// `.ac` run would drive it. The parameter string that answer was read
-    /// from is not retained; that one bit is all the plan-side walk needs.
-    sources: Vec<(PlacedSource, bool)>,
+    /// Each placed source with an empty consumer list, paired with what its
+    /// own annotations drive. The parameter string those answers were read
+    /// from is not retained; those bits are all the plan-side walk needs.
+    sources: Vec<(PlacedSource, SourceDrive)>,
     /// Each placed port with an empty consumer list. Nothing about which port
     /// it is decides its readership, so there is no second half to keep.
     ports: Vec<PlacedRfPort>,
@@ -494,9 +494,9 @@ fn walk_design(
         );
         let occurrence = binding.instance_path().clone();
         for component in &schematic.components {
-            if let Some((mut source, carries_ac)) = placed_source(component, &nets) {
+            if let Some((mut source, drive)) = placed_source(component, &nets) {
                 source.occurrence = Some(occurrence.clone());
-                sources.push((source, carries_ac));
+                sources.push((source, drive));
             } else if component.kind == ComponentType::RfPort {
                 let mut port = placed_rf_port(component, &nets);
                 port.occurrence = Some(occurrence.clone());
@@ -565,12 +565,22 @@ fn port_order(port: &PlacedRfPort) -> (u32, String, String) {
     )
 }
 
-/// One component read as a source, with whether an `.ac` run would drive it,
-/// or `None` for anything that is not an independent source.
+/// What this instance's own annotations drive, read once from its parameter
+/// string: the `.ac` magnitude and the two distortion tones. Retaining these
+/// three bits is what lets the parameter string itself go unretained.
+#[derive(Clone, Copy)]
+struct SourceDrive {
+    ac: bool,
+    distof1: bool,
+    distof2: bool,
+}
+
+/// One component read as a source, with what its annotations drive, or `None`
+/// for anything that is not an independent source.
 fn placed_source(
     component: &Component,
     nets: &HashMap<(u64, String), String>,
-) -> Option<(PlacedSource, bool)> {
+) -> Option<(PlacedSource, SourceDrive)> {
     let family = source_family(component.kind)?;
     let params = crate::state::parse_params_string(&component.params);
     Some((
@@ -584,7 +594,11 @@ fn placed_source(
             consumers: Vec::new(),
             occurrence: None,
         },
-        carries_ac_excitation(&params, component.kind),
+        SourceDrive {
+            ac: carries_ac_excitation(&params, component.kind),
+            distof1: carries_value(params.get("distof1_mag").map(String::as_str)),
+            distof2: carries_value(params.get("distof2_mag").map(String::as_str)),
+        },
     ))
 }
 
@@ -607,11 +621,11 @@ fn placed_rf_port(component: &Component, nets: &HashMap<(u64, String), String>) 
 /// The one place a resolved source is paired with what a plan reads it as.
 fn with_source_consumers(
     mut source: PlacedSource,
-    carries_ac: bool,
+    drive: SourceDrive,
     plan: Option<&SimulationPlan>,
 ) -> PlacedSource {
     source.consumers = plan
-        .map(|plan| consumers_for(plan, &source.reference, carries_ac))
+        .map(|plan| consumers_for(plan, &source.reference, drive))
         .unwrap_or_default();
     source
 }
@@ -729,13 +743,31 @@ fn port_consumers_for(plan: &SimulationPlan) -> Vec<SourceConsumer> {
 ///
 /// Every arm names a field that exists on the draft; a draft whose analysis
 /// takes no source contributes nothing rather than an empty row.
-fn consumers_for(plan: &SimulationPlan, reference: &str, carries_ac: bool) -> Vec<SourceConsumer> {
+fn consumers_for(
+    plan: &SimulationPlan,
+    reference: &str,
+    drive: SourceDrive,
+) -> Vec<SourceConsumer> {
     attribute_plan(plan, |draft, record| {
         match draft {
             AnalysisDraft::Ac(_) => {
                 // The analysis names nothing; the instance carries the drive.
-                if carries_ac {
+                if drive.ac {
                     record("AC excitation");
+                }
+            }
+            AnalysisDraft::Disto(disto) => {
+                // The analysis names nothing; the instance carries the tone. A
+                // distortion run takes its excitation only from the
+                // `DISTOF1`/`DISTOF2` annotations the instance's distortion
+                // properties emit — `build_distortion_rhs` in
+                // `rspice-core/src/engine/distortion.rs` skips every source
+                // whose spec carries no tone — so an AC magnitude contributes
+                // nothing here. The second-tone vector is built only by a run
+                // whose draft requests a ratio, so a source carrying only
+                // `DISTOF2` is read by exactly those runs.
+                if drive.distof1 || (requests_second_tone(&disto.f2_over_f1) && drive.distof2) {
+                    record("distortion drive");
                 }
             }
             // Whole-design readers. A transient re-evaluates every source at
@@ -840,18 +872,6 @@ fn consumers_for(plan: &SimulationPlan, reference: &str, carries_ac: bool) -> Ve
             // the plan's control over which sources they read is the tone list
             // this file already reads, so claiming the rest would state a
             // relationship the user cannot see or change.
-            //
-            // `.disto` is the one that looks like it belongs with `.ac` above
-            // and does not. A distortion run takes its excitation only from
-            // explicit `DISTOF1`/`DISTOF2` annotations on a source card:
-            // `build_distortion_rhs` in
-            // `rspice-core/src/engine/distortion.rs` skips every source whose
-            // spec carries no tone, and the run is refused outright when the
-            // vector it builds is zero. An AC magnitude contributes nothing to
-            // it. No property this product can author emits either annotation,
-            // so no placed source drives a distortion run at all, and recording
-            // an AC source as its drive would name a binding the run itself
-            // rejects.
             _ => {}
         }
     })
@@ -878,6 +898,16 @@ fn names_any(field: &str, reference: &str) -> bool {
         .split([',', ';'])
         .flat_map(str::split_whitespace)
         .any(|token| names(token, reference))
+}
+
+/// Whether a distortion draft's ratio field requests a second tone.
+///
+/// Empty and `auto` select single-tone harmonic distortion — the same reading
+/// `sim_setup` applies when it validates and dispatches the draft — and only a
+/// two-tone run builds the `DISTOF2` excitation vector.
+fn requests_second_tone(ratio: &str) -> bool {
+    let ratio = ratio.trim();
+    !ratio.is_empty() && !ratio.eq_ignore_ascii_case("auto")
 }
 
 /// Whether an `.ac` run would drive this source.
@@ -1513,24 +1543,59 @@ mod tests {
     ///
     /// Its excitation comes only from `DISTOF1`/`DISTOF2` annotations
     /// (`rspice-core` `engine::distortion::build_distortion_rhs` skips a source
-    /// whose spec carries no tone and refuses a run whose vector is zero), and
-    /// no property this product can author emits one. Recording an AC source as
-    /// a distortion drive would put a role on the row that dispatching the plan
-    /// then rejects, which is the same wrong answer as calling an unread source
-    /// read.
+    /// whose spec carries no tone and refuses a run whose vector is zero), so
+    /// an AC magnitude — or a distortion magnitude of zero, which is the
+    /// absence of the tone — claims nothing, and a source carrying only the
+    /// second tone is read by exactly the runs that request a second-tone
+    /// ratio.
     #[test]
-    fn a_distortion_run_claims_no_placed_source() {
+    fn a_distortion_run_claims_the_sources_carrying_its_tones() {
         let mut plan = SimulationPlan::empty();
-        plan.insert(AnalysisKind::Disto)
+        let (disto, _) = plan
+            .insert(AnalysisKind::Disto)
             .expect("a distortion analysis inserts");
         let schematic = schematic_with(vec![
-            source(1, ComponentType::VoltageSourceAc, "V1", ""),
-            source(2, ComponentType::VoltageSourceSin, "V2", "ac=1 freq=1k"),
+            source(1, ComponentType::VoltageSourceAc, "V1", "distof1_mag=0"),
+            source(
+                2,
+                ComponentType::VoltageSourceSin,
+                "V2",
+                "ac=1 freq=1k distof1_mag=1m",
+            ),
+            source(3, ComponentType::VoltageSource, "V3", "distof2_mag=2m"),
         ]);
+
+        let roles = |listed: &[PlacedSource], index: usize| -> Vec<&'static str> {
+            listed[index]
+                .consumers
+                .iter()
+                .map(|consumer| consumer.role)
+                .collect()
+        };
+
         let listed = placed_sources(&schematic, Some(&plan));
         assert!(
-            listed.iter().all(|source| source.consumers.is_empty()),
-            "an AC magnitude does not drive a distortion run: {listed:?}"
+            listed[0].consumers.is_empty(),
+            "an AC magnitude and a zero tone do not drive a distortion run: {listed:?}"
+        );
+        assert_eq!(roles(&listed, 1), vec!["distortion drive"]);
+        assert!(
+            listed[2].consumers.is_empty(),
+            "a single-tone run never builds the DISTOF2 vector: {listed:?}"
+        );
+
+        plan.edit(disto, |draft| {
+            let AnalysisDraft::Disto(draft) = draft else {
+                panic!("expected a Disto draft");
+            };
+            draft.f2_over_f1 = "0.9".to_owned();
+        })
+        .expect("Disto draft edits");
+        let listed = placed_sources(&schematic, Some(&plan));
+        assert_eq!(
+            roles(&listed, 2),
+            vec!["distortion drive"],
+            "a two-tone run reads its second-tone source"
         );
     }
 

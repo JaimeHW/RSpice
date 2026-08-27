@@ -87,9 +87,9 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             // Independent source properties are editor semantics, not arbitrary
-            // instance assignments.  Lower AC excitation and parasitics to
-            // native cards and reject unsupported PAC/XF data before a deck can
-            // reach the simulator.
+            // instance assignments.  Lower AC excitation, distortion tones, and
+            // parasitics to native cards and reject unsupported PAC/XF data
+            // before a deck can reach the simulator.
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
             | ComponentType::VoltageSourcePulse
@@ -1249,6 +1249,30 @@ impl<'a> NetlistGenerator<'a> {
             specification.push_str(&format!(" AC {} {}", magnitude.trim(), phase.trim()));
         }
 
+        // Distortion tones. A zero magnitude is the absence of the tone —
+        // `build_distortion_rhs` would fold it into a zero excitation vector
+        // and the engine refuses the run — and a phase with no magnitude has
+        // nothing to shift, so each annotation rides only behind a non-zero
+        // magnitude.
+        for (magnitude_key, phase_key, keyword) in [
+            ("distof1_mag", "distof1_phase", "DISTOF1"),
+            ("distof2_mag", "distof2_phase", "DISTOF2"),
+        ] {
+            let Some(magnitude) = params
+                .get(magnitude_key)
+                .map(String::as_str)
+                .filter(|value| !source_value_is_zero_or_blank(value))
+            else {
+                continue;
+            };
+            let phase = params
+                .get(phase_key)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+                .unwrap_or("0");
+            specification.push_str(&format!(" {keyword} {} {}", magnitude.trim(), phase));
+        }
+
         Some(format!(
             "{} {} {} {}",
             instance_name, positive_node, node_names[1], specification
@@ -1269,6 +1293,10 @@ fn common_source_parameter_names(is_voltage: bool) -> &'static [&'static str] {
         "pacmag",
         "pacdbm",
         "pacphase",
+        "distof1_mag",
+        "distof1_phase",
+        "distof2_mag",
+        "distof2_phase",
         "rp",
         "cpar",
         "isnoisy",
@@ -1282,6 +1310,10 @@ fn common_source_parameter_names(is_voltage: bool) -> &'static [&'static str] {
         "pacmag",
         "pacdbm",
         "pacphase",
+        "distof1_mag",
+        "distof1_phase",
+        "distof2_mag",
+        "distof2_phase",
         "rs",
         "rp",
         "cpar",
@@ -2208,6 +2240,49 @@ mod independent_source_lowering_tests {
             .expect("source line");
 
         assert!(main.contains("PULSE(0 5 0 1n 1n 1u 2u)"), "{main}");
+        assert_generated_cards_parse(&generator, &main);
+    }
+
+    /// The distortion tones ride the card behind the waveform and AC
+    /// annotations, in the `DISTOF1 mag phase` spelling the parser reads; an
+    /// unset phase is the parser's own zero default, spelled out so the card
+    /// reads the same however it was authored.
+    #[test]
+    fn distortion_tones_are_lowered_to_card_annotations() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(3, ComponentType::VoltageSourceSin, Point::origin())
+            .with_name_value("V1", "0");
+        component.params =
+            "freq=1k ac=1 distof1_mag=1m distof1_phase=-90 distof2_mag=2m".to_owned();
+
+        let main = generator
+            .generate_independent_source(&component, &nodes(), "V1")
+            .expect("source line");
+
+        assert!(
+            main.ends_with(" AC 1 0 DISTOF1 1m -90 DISTOF2 2m 0"),
+            "{main}"
+        );
+        assert_generated_cards_parse(&generator, &main);
+    }
+
+    /// A zero magnitude is the absence of the tone — emitting `DISTOF1 0`
+    /// would make the engine refuse the run it exists to drive — and a phase
+    /// with no magnitude has nothing to shift.
+    #[test]
+    fn a_zero_distortion_magnitude_emits_no_tone() {
+        let schematic = SchematicState::default();
+        let mut generator = NetlistGenerator::new(&schematic);
+        let mut component = Component::new(6, ComponentType::CurrentSource, Point::origin())
+            .with_name_value("I1", "1m");
+        component.params = "distof1_mag=0 distof1_phase=45 distof2_phase=30".to_owned();
+
+        let main = generator
+            .generate_independent_source(&component, &nodes(), "I1")
+            .expect("source line");
+
+        assert!(!main.contains("DISTOF"), "{main}");
         assert_generated_cards_parse(&generator, &main);
     }
 

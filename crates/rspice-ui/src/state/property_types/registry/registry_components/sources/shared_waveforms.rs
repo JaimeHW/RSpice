@@ -455,6 +455,7 @@ impl PropertyRegistry {
 
         Self::add_ac_params(&mut sheet, unit, 0.0);
         Self::add_advanced_ac_params(&mut sheet, unit);
+        Self::add_distortion_params(&mut sheet, unit);
         Self::add_parasitics_params(&mut sheet, driven.has_series_resistance());
         // The transient-noise train is the whole point of the device, so its
         // switch sits at the end of the Noise group rather than in the shared
@@ -562,10 +563,12 @@ impl PropertyRegistry {
         sheet
     }
 
-    /// The AC, advanced-AC, parasitic, and noise blocks every source carries.
+    /// The AC, advanced-AC, distortion, parasitic, and noise blocks every
+    /// source carries.
     fn finish_source_sheet(sheet: &mut PropertySheet, driven: Driven) {
         Self::add_ac_params(sheet, driven.unit(), 0.0);
         Self::add_advanced_ac_params(sheet, driven.unit());
+        Self::add_distortion_params(sheet, driven.unit());
         Self::add_parasitics_params(sheet, driven.has_series_resistance());
         Self::add_noise_params(sheet);
     }

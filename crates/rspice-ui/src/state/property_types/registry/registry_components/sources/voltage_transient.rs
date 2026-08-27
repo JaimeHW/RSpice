@@ -105,9 +105,10 @@ impl PropertyRegistry {
                 .with_category("Pulse"),
         );
 
-        // Spectre-parity categories: AC, Advanced AC, Parasitics, Noise
+        // Spectre-parity categories: AC, Advanced AC, Distortion, Parasitics, Noise
         Self::add_ac_params(&mut sheet, "V", 0.0);
         Self::add_advanced_ac_params(&mut sheet, "V");
+        Self::add_distortion_params(&mut sheet, "V");
         Self::add_parasitics_params(&mut sheet, true);
         Self::add_noise_params(&mut sheet);
 
@@ -193,9 +194,10 @@ impl PropertyRegistry {
                 .with_category("Sinusoid"),
         );
 
-        // Spectre-parity categories: AC, Advanced AC, Parasitics, Noise
+        // Spectre-parity categories: AC, Advanced AC, Distortion, Parasitics, Noise
         Self::add_ac_params(&mut sheet, "V", 0.0);
         Self::add_advanced_ac_params(&mut sheet, "V");
+        Self::add_distortion_params(&mut sheet, "V");
         Self::add_parasitics_params(&mut sheet, true);
         Self::add_noise_params(&mut sheet);
 
@@ -247,9 +249,10 @@ impl PropertyRegistry {
                 .with_category("PWL"),
         );
 
-        // Spectre-parity categories: AC, Advanced AC, Parasitics, Noise
+        // Spectre-parity categories: AC, Advanced AC, Distortion, Parasitics, Noise
         Self::add_ac_params(&mut sheet, "V", 0.0);
         Self::add_advanced_ac_params(&mut sheet, "V");
+        Self::add_distortion_params(&mut sheet, "V");
         Self::add_parasitics_params(&mut sheet, true);
         Self::add_noise_params(&mut sheet);
 
@@ -334,9 +337,10 @@ impl PropertyRegistry {
                 .with_category("Exponential"),
         );
 
-        // Spectre-parity categories: AC, Advanced AC, Parasitics, Noise
+        // Spectre-parity categories: AC, Advanced AC, Distortion, Parasitics, Noise
         Self::add_ac_params(&mut sheet, "V", 0.0);
         Self::add_advanced_ac_params(&mut sheet, "V");
+        Self::add_distortion_params(&mut sheet, "V");
         Self::add_parasitics_params(&mut sheet, true);
         Self::add_noise_params(&mut sheet);
 

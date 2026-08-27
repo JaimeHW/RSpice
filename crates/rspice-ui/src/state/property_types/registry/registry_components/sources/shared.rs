@@ -1,5 +1,6 @@
-//! Fields every source shares: the symbol it draws with, and the AC
-//! magnitude and phase that a small-signal analysis excites it at.
+//! Fields every source shares: the symbol it draws with, the AC magnitude and
+//! phase that a small-signal analysis excites it at, and the distortion tones
+//! a `.disto` run drives it with.
 
 use super::*;
 
@@ -97,6 +98,60 @@ impl PropertyRegistry {
                 .with_range(-360.0, 360.0)
                 .with_order(33)
                 .with_category("Advanced AC")
+                .advanced(),
+        );
+    }
+
+    /// Add distortion-analysis excitation parameters to a source sheet.
+    ///
+    /// Parameters: distof1_mag, distof1_phase, distof2_mag, distof2_phase
+    /// Used by: All sources; a distortion run takes its excitation only from
+    /// these tones, emitted as `DISTOF1`/`DISTOF2` card annotations.
+    pub(super) fn add_distortion_params(sheet: &mut PropertySheet, unit: &str) {
+        sheet.add(
+            PropertyDefinition::new("distof1_mag")
+                .with_display_name("Distortion F1 Magnitude")
+                .with_description("Distortion analysis excitation magnitude at the first tone")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit(unit)
+                .with_order(34)
+                .with_category("Distortion")
+                .advanced(),
+        );
+        sheet.add(
+            PropertyDefinition::new("distof1_phase")
+                .with_display_name("Distortion F1 Phase")
+                .with_description("Distortion analysis excitation phase at the first tone")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("°")
+                .with_range(-360.0, 360.0)
+                .with_order(35)
+                .with_category("Distortion")
+                .advanced(),
+        );
+        sheet.add(
+            PropertyDefinition::new("distof2_mag")
+                .with_display_name("Distortion F2 Magnitude")
+                .with_description("Distortion analysis excitation magnitude at the second tone")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit(unit)
+                .with_order(36)
+                .with_category("Distortion")
+                .advanced(),
+        );
+        sheet.add(
+            PropertyDefinition::new("distof2_phase")
+                .with_display_name("Distortion F2 Phase")
+                .with_description("Distortion analysis excitation phase at the second tone")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("°")
+                .with_range(-360.0, 360.0)
+                .with_order(37)
+                .with_category("Distortion")
                 .advanced(),
         );
     }

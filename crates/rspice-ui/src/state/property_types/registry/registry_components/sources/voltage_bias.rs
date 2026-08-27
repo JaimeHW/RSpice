@@ -10,6 +10,7 @@ impl PropertyRegistry {
     /// - DC bias value
     /// - AC small-signal parameters (magnitude, phase)
     /// - Advanced AC analysis (XF, PAC)
+    /// - Distortion excitation (DISTOF1, DISTOF2)
     /// - Parasitics (series/parallel resistance, capacitance)
     /// - Noise contribution control
     pub(super) fn register_vsource_dc(&mut self) {
@@ -117,6 +118,11 @@ impl PropertyRegistry {
                 .with_category("Advanced AC")
                 .advanced(),
         );
+
+        // =========================================================================
+        // Distortion Category (order 34-37) - .disto analysis excitation
+        // =========================================================================
+        Self::add_distortion_params(&mut sheet, "V");
 
         // =========================================================================
         // Parasitics Category (order 40-49) - Non-ideal source characteristics
@@ -285,6 +291,11 @@ impl PropertyRegistry {
                 .with_category("Advanced AC")
                 .advanced(),
         );
+
+        // =========================================================================
+        // Distortion Category (order 34-37) - .disto analysis excitation
+        // =========================================================================
+        Self::add_distortion_params(&mut sheet, "V");
 
         // =========================================================================
         // Parasitics Category (order 40-49)

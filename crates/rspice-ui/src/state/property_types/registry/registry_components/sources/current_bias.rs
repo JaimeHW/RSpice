@@ -113,6 +113,11 @@ impl PropertyRegistry {
         );
 
         // =========================================================================
+        // Distortion Category (order 34-37) - .disto analysis excitation
+        // =========================================================================
+        Self::add_distortion_params(&mut sheet, "A");
+
+        // =========================================================================
         // Parasitics Category (order 40-49) - Non-ideal source characteristics
         // =========================================================================
         sheet.add(
@@ -262,6 +267,11 @@ impl PropertyRegistry {
                 .with_category("Advanced AC")
                 .advanced(),
         );
+
+        // =========================================================================
+        // Distortion Category (order 34-37) - .disto analysis excitation
+        // =========================================================================
+        Self::add_distortion_params(&mut sheet, "A");
 
         // =========================================================================
         // Parasitics Category (order 40-49)
