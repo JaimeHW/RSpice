@@ -450,10 +450,13 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("run points", 12),
     ("design variable", 11),
     ("saved output", 9),
+    ("clone plan", 8),
+    ("capture group", 7),
+    ("design variable import", 12),
 ];
 
 /// Distinct controls the sweep presses in total.
-const PRESSED_FLOOR: usize = 248;
+const PRESSED_FLOOR: usize = 275;
 
 /// Controls that are wired to nothing.
 ///
