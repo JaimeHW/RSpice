@@ -12,14 +12,14 @@
 use std::collections::BTreeMap;
 
 use super::{DatasetWalk, WorkCounts};
+// Through the module under measurement rather than around it: this drives the
+// Results workspace's own surfaces with the session type that workspace
+// already holds, and does not reach for the session aggregate on its own.
+use super::super::{AppState, ResultViewer, eye, manifest, op_inspector, soa, table, waves};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, DcOpResult,
     OperatingPointValue, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
     SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
-};
-use crate::workbench::AppState;
-use crate::workbench::documents::result_document::{
-    ResultViewer, eye, manifest, op_inspector, soa, table, waves,
 };
 
 /// Retained samples per transient waveform.

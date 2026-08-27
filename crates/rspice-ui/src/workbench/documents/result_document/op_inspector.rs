@@ -6,6 +6,7 @@
 //! missing solver fact with a design-time or fixture value.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use egui::Ui;
 
@@ -21,6 +22,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
 use super::virtual_rows::RowOffsets;
 use super::well_hint;
@@ -56,15 +58,21 @@ struct SolveFacts {
     annotation: OperatingPointAnnotationEvidence,
 }
 
+/// The sheet's identity and solve facts, without the solution itself.
+///
+/// The retained node and device tables stay where they are; a viewer that
+/// copied a million operating-point rows to read six scalars off the header
+/// was paying for the whole solution twice a frame, once here and once in
+/// the right panel.
 #[derive(Clone)]
 struct OpEvidence {
     run_id: u64,
     label: String,
     success: bool,
     error: Option<String>,
-    dc: Option<DcOpResult>,
-    devices: Option<rspice_core::circuit::DeviceOpReport>,
-    detail: Option<RetainedDetail>,
+    detail_policy: Option<OperatingPointDeviceDetailEvidence>,
+    node_count: usize,
+    branch_count: usize,
     facts: Option<SolveFacts>,
 }
 
@@ -74,6 +82,24 @@ enum OpAction {
     LocateDevice(u64),
 }
 
+/// The retained device-detail scope, which is what decides whether a device
+/// row is allowed to appear at all. Read only when a plan is being built.
+fn retained_detail(analysis: &crate::state::AnalysisResult) -> Option<RetainedDetail> {
+    match analysis.result_payload.as_ref() {
+        Some(AnalysisResultPayload::OperatingPoint {
+            device_detail,
+            selected_devices,
+            violation_devices,
+            ..
+        }) => Some(RetainedDetail {
+            policy: *device_detail,
+            selected: selected_devices.clone(),
+            violations: violation_devices.clone(),
+        }),
+        _ => None,
+    }
+}
+
 fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
     let run = state.simulation.active_run()?;
     let analysis = state.simulation.active_analysis()?;
@@ -81,13 +107,11 @@ fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
         return None;
     }
 
-    let (detail, facts) = match analysis.result_payload.as_ref() {
+    let (detail_policy, facts) = match analysis.result_payload.as_ref() {
         Some(AnalysisResultPayload::OperatingPoint {
             temperature_celsius,
             annotation,
             device_detail,
-            selected_devices,
-            violation_devices,
             mna_node_names,
             mna_branch_names,
             run_point_index,
@@ -95,11 +119,7 @@ fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
             run_point_process,
             ..
         }) => (
-            Some(RetainedDetail {
-                policy: *device_detail,
-                selected: selected_devices.clone(),
-                violations: violation_devices.clone(),
-            }),
+            Some(*device_detail),
             Some(SolveFacts {
                 temperature_celsius: *temperature_celsius,
                 process: *run_point_process,
@@ -118,9 +138,15 @@ fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
         label: analysis.label.clone(),
         success: analysis.success,
         error: analysis.error_message.clone(),
-        dc: analysis.dc_op.clone(),
-        devices: analysis.device_op.clone(),
-        detail,
+        detail_policy,
+        node_count: analysis
+            .dc_op
+            .as_ref()
+            .map_or(0, |dc| dc.node_voltages.len()),
+        branch_count: analysis
+            .dc_op
+            .as_ref()
+            .map_or(0, |dc| dc.branch_currents.len()),
         facts,
     })
 }
@@ -307,8 +333,8 @@ fn process_label(process: OperatingPointProcessEvidence) -> &'static str {
     }
 }
 
-fn detail_label(detail: Option<&RetainedDetail>) -> &'static str {
-    match detail.map(|detail| detail.policy) {
+fn detail_label(policy: Option<OperatingPointDeviceDetailEvidence>) -> &'static str {
+    match policy {
         None => "legacy retained report",
         Some(OperatingPointDeviceDetailEvidence::AllDevices) => "all devices retained",
         Some(OperatingPointDeviceDetailEvidence::SelectedAndViolations) => {
@@ -394,87 +420,272 @@ fn device_matches(entry: &rspice_core::circuit::DeviceOpEntry, filter: &str, roo
             .any(|(name, _)| name.to_ascii_lowercase().contains(&filter))
 }
 
-fn grouped_nodes<'a>(
-    dc: &'a DcOpResult,
+/// Sort each group by its rows' leaf names, case-folded.
+///
+/// The fold happens once per row rather than twice per comparison: an
+/// `N log N` sort that allocates two strings per comparison is the shape
+/// that made a large operating point cost more to sort than to solve.
+fn sort_groups_by_leaf(groups: &mut BTreeMap<String, Vec<(String, usize)>>) {
+    for rows in groups.values_mut() {
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+}
+
+fn grouped_nodes(
+    dc: &DcOpResult,
     filter: &str,
     root: &str,
-) -> BTreeMap<String, Vec<&'a crate::state::OperatingPointValue>> {
-    frame_work::note(DatasetWalk::OpPlan);
-    let mut groups = BTreeMap::<String, Vec<_>>::new();
-    for row in dc
+) -> BTreeMap<String, Vec<(String, usize)>> {
+    let mut groups = BTreeMap::<String, Vec<(String, usize)>>::new();
+    for (index, row) in dc
         .node_voltages
         .iter()
-        .filter(|row| node_matches(row, filter, root))
+        .enumerate()
+        .filter(|(_, row)| node_matches(row, filter, root))
     {
         groups
             .entry(hierarchy_parts(&row.name, root).0)
             .or_default()
-            .push(row);
+            .push((signal_leaf(&row.name).to_ascii_lowercase(), index));
     }
-    for rows in groups.values_mut() {
-        rows.sort_by(|left, right| {
-            signal_leaf(&left.name)
-                .to_ascii_lowercase()
-                .cmp(&signal_leaf(&right.name).to_ascii_lowercase())
-        });
-    }
+    sort_groups_by_leaf(&mut groups);
     groups
 }
 
-fn grouped_devices<'a>(
-    report: &'a rspice_core::circuit::DeviceOpReport,
+fn grouped_devices(
+    report: &rspice_core::circuit::DeviceOpReport,
     detail: Option<&RetainedDetail>,
     filter: &str,
     sort: Option<&(String, bool)>,
     root: &str,
-) -> BTreeMap<String, Vec<&'a rspice_core::circuit::DeviceOpEntry>> {
-    frame_work::note(DatasetWalk::OpPlan);
-    let mut groups = BTreeMap::<String, Vec<_>>::new();
-    for entry in report
+) -> BTreeMap<String, Vec<(String, usize)>> {
+    let mut groups = BTreeMap::<String, Vec<(String, usize)>>::new();
+    for (index, entry) in report
         .entries
         .iter()
-        .filter(|entry| retained_detail_allows(&entry.name, detail))
-        .filter(|entry| device_matches(entry, filter, root))
+        .enumerate()
+        .filter(|(_, entry)| retained_detail_allows(&entry.name, detail))
+        .filter(|(_, entry)| device_matches(entry, filter, root))
     {
         groups
             .entry(hierarchy_parts(&entry.name, root).0)
             .or_default()
-            .push(entry);
+            .push((signal_leaf(&entry.name).to_ascii_lowercase(), index));
     }
+    let Some((key, ascending)) = sort else {
+        sort_groups_by_leaf(&mut groups);
+        return groups;
+    };
     for rows in groups.values_mut() {
-        rows.sort_by(|left, right| match sort {
-            Some((key, ascending)) => {
-                let left_value = device_sort_value(left, key);
-                let right_value = device_sort_value(right, key);
-                let value_order = match (left_value, right_value) {
-                    (Some(left), Some(right)) => {
-                        let order = left
-                            .abs()
-                            .total_cmp(&right.abs())
-                            .then_with(|| left.total_cmp(&right));
-                        if *ascending { order } else { order.reverse() }
-                    }
-                    // Missing and non-finite quantities stay below retained numeric
-                    // evidence in both directions.
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                };
-                value_order.then_with(|| compare_device_names(left, right))
-            }
-            None => compare_device_names(left, right),
+        rows.sort_by(|left, right| {
+            let left_value = device_sort_value(&report.entries[left.1], key);
+            let right_value = device_sort_value(&report.entries[right.1], key);
+            let value_order = match (left_value, right_value) {
+                (Some(left), Some(right)) => {
+                    let order = left
+                        .abs()
+                        .total_cmp(&right.abs())
+                        .then_with(|| left.total_cmp(&right));
+                    if *ascending { order } else { order.reverse() }
+                }
+                // Missing and non-finite quantities stay below retained numeric
+                // evidence in both directions.
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            };
+            value_order.then_with(|| left.0.cmp(&right.0))
         });
     }
     groups
 }
 
-fn compare_device_names(
-    left: &rspice_core::circuit::DeviceOpEntry,
-    right: &rspice_core::circuit::DeviceOpEntry,
-) -> std::cmp::Ordering {
-    signal_leaf(&left.name)
-        .to_ascii_lowercase()
-        .cmp(&signal_leaf(&right.name).to_ascii_lowercase())
+/// Everything the row plan below was built from.
+///
+/// The filter, sort and occurrence root are the reader's controls; the data
+/// version and analysis are the evidence. A plan whose key still matches is
+/// the same plan, so the frame reads it instead of rebuilding it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpPlanKey {
+    version: u64,
+    analysis: AnalysisPresentationKey,
+    filter: String,
+    sort: Option<(String, bool)>,
+    root: String,
+}
+
+/// One occurrence heading, with the column set its rows carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpScope {
+    scope: String,
+    columns: Vec<(&'static str, &'static str)>,
+    count: usize,
+}
+
+/// One drawable line of the node table, addressed by index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NodePlanRow {
+    Group(usize),
+    Value(usize),
+}
+
+/// One drawable line of the device table, addressed by index.
+///
+/// The gap between scopes is a row like any other so the plan's arithmetic
+/// stays exact — a gap left out of the offsets drifts the viewport by 8 px
+/// per group above it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevicePlanRow {
+    Group(usize),
+    ColumnHeader(usize),
+    Gap(usize),
+    Device { scope: usize, entry: usize },
+}
+
+impl NodePlanRow {
+    const fn height(self) -> f32 {
+        match self {
+            Self::Group(_) => GROUP_H,
+            Self::Value(_) => ROW_H,
+        }
+    }
+}
+
+impl DevicePlanRow {
+    const fn height(self) -> f32 {
+        match self {
+            Self::Group(_) => GROUP_H,
+            Self::ColumnHeader(_) => HEADER_H,
+            Self::Device { .. } => ROW_H,
+            Self::Gap(_) => DEVICE_GROUP_GAP,
+        }
+    }
+
+    const fn scope(self) -> usize {
+        match self {
+            Self::Group(scope)
+            | Self::ColumnHeader(scope)
+            | Self::Gap(scope)
+            | Self::Device { scope, .. } => scope,
+        }
+    }
+}
+
+/// The operating-point sheet's laid-out rows, built once per key.
+///
+/// `save_device_op` on a real block emits one row per device and one node
+/// row per net, and both tables grouped, sorted, flattened and measured all
+/// of them on every frame. Rows are held as indices into the retained
+/// evidence, so the plan is the order — never a second copy of the solution.
+#[derive(Debug, Clone)]
+pub(super) struct OpPlan {
+    key: OpPlanKey,
+    node_scopes: Vec<OpScope>,
+    node_rows: Vec<NodePlanRow>,
+    node_offsets: RowOffsets,
+    node_shown: usize,
+    device_scopes: Vec<OpScope>,
+    device_rows: Vec<DevicePlanRow>,
+    device_offsets: RowOffsets,
+    device_shown: usize,
+    /// Device rows the retained detail policy admits, before the reader's
+    /// text filter. The panel states the retained scope, not the search.
+    device_in_scope: usize,
+}
+
+fn build_op_plan(
+    key: OpPlanKey,
+    dc: Option<&DcOpResult>,
+    devices: Option<&rspice_core::circuit::DeviceOpReport>,
+    detail: Option<&RetainedDetail>,
+) -> OpPlan {
+    frame_work::note(DatasetWalk::OpPlan);
+    let mut node_scopes = Vec::new();
+    let mut node_rows = Vec::new();
+    let mut node_shown = 0;
+    if let Some(dc) = dc {
+        for (scope, rows) in grouped_nodes(dc, &key.filter, &key.root) {
+            let index = node_scopes.len();
+            node_shown += rows.len();
+            node_scopes.push(OpScope {
+                scope,
+                columns: Vec::new(),
+                count: rows.len(),
+            });
+            node_rows.push(NodePlanRow::Group(index));
+            node_rows.extend(rows.into_iter().map(|(_, row)| NodePlanRow::Value(row)));
+        }
+    }
+
+    let mut device_scopes = Vec::new();
+    let mut device_rows = Vec::new();
+    let mut device_shown = 0;
+    if let Some(report) = devices {
+        for (scope, rows) in
+            grouped_devices(report, detail, &key.filter, key.sort.as_ref(), &key.root)
+        {
+            let index = device_scopes.len();
+            device_shown += rows.len();
+            device_scopes.push(OpScope {
+                columns: device_columns(report, &rows),
+                scope,
+                count: rows.len(),
+            });
+            device_rows.push(DevicePlanRow::Group(index));
+            device_rows.push(DevicePlanRow::ColumnHeader(index));
+            device_rows.extend(rows.into_iter().map(|(_, entry)| DevicePlanRow::Device {
+                scope: index,
+                entry,
+            }));
+            device_rows.push(DevicePlanRow::Gap(index));
+        }
+    }
+
+    let device_in_scope = devices.map_or(0, |report| {
+        report
+            .entries
+            .iter()
+            .filter(|entry| retained_detail_allows(&entry.name, detail))
+            .count()
+    });
+    OpPlan {
+        key,
+        device_in_scope,
+        node_offsets: RowOffsets::from_heights(node_rows.iter().map(|row| row.height())),
+        node_scopes,
+        node_rows,
+        node_shown,
+        device_offsets: RowOffsets::from_heights(device_rows.iter().map(|row| row.height())),
+        device_scopes,
+        device_rows,
+        device_shown,
+    }
+}
+
+/// The row plan for the selected operating point under the current controls.
+fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Arc<OpPlan>> {
+    let key = OpPlanKey {
+        version: state.simulation.data_version,
+        analysis,
+        filter: state.ui.results.op_filter.clone(),
+        sort: state.ui.results.op_sort.clone(),
+        root: state.workspace.simulation_root_reference().cell,
+    };
+    if let Some(plan) = state.ui.results.plans.op.as_ref()
+        && plan.key == key
+    {
+        return Some(Arc::clone(plan));
+    }
+    let analysis_result = state.simulation.active_analysis()?;
+    let detail = retained_detail(analysis_result);
+    let built = Arc::new(build_op_plan(
+        key,
+        analysis_result.dc_op.as_ref(),
+        analysis_result.device_op.as_ref(),
+        detail.as_ref(),
+    ));
+    state.ui.results.plans.op = Some(Arc::clone(&built));
+    Some(built)
 }
 
 fn device_sort_value(entry: &rspice_core::circuit::DeviceOpEntry, key: &str) -> Option<f64> {
@@ -487,10 +698,12 @@ fn device_sort_value(entry: &rspice_core::circuit::DeviceOpEntry, key: &str) -> 
 }
 
 fn device_columns(
-    rows: &[&rspice_core::circuit::DeviceOpEntry],
+    report: &rspice_core::circuit::DeviceOpReport,
+    rows: &[(String, usize)],
 ) -> Vec<(&'static str, &'static str)> {
     let mut columns = Vec::new();
-    for entry in rows {
+    for (_, index) in rows {
+        let entry = &report.entries[*index];
         for (name, _) in &entry.params {
             if !columns.iter().any(|(candidate, _)| candidate == name) {
                 columns.push((*name, device_param_unit(entry.device_kind, name)));
@@ -858,11 +1071,8 @@ fn show_solve_strip(ui: &mut Ui, evidence: &OpEvidence) {
                         .color(t.color.text_dim),
                     );
                 }
-                let nodes = evidence.dc.as_ref().map_or(0, |dc| dc.node_voltages.len());
-                let branches = evidence
-                    .dc
-                    .as_ref()
-                    .map_or(0, |dc| dc.branch_currents.len());
+                let nodes = evidence.node_count;
+                let branches = evidence.branch_count;
                 ui.separator();
                 ui.label(
                     egui::RichText::new(format!("{nodes} nodes · {branches} branches"))
@@ -926,14 +1136,18 @@ fn node_value_text(row: &crate::state::OperatingPointValue) -> (String, bool) {
 
 fn show_node_card(
     ui: &mut Ui,
-    evidence: &OpEvidence,
+    plan: &OpPlan,
     filter: &str,
     root: &str,
     body_max_height: Option<f32>,
     action: &mut Option<OpAction>,
     state: &AppState,
 ) -> usize {
-    let Some(dc) = evidence.dc.as_ref() else {
+    let Some(dc) = state
+        .simulation
+        .active_analysis()
+        .and_then(|analysis| analysis.dc_op.as_ref())
+    else {
         unavailable_card(
             ui,
             "Node voltages",
@@ -949,10 +1163,9 @@ fn show_node_card(
         );
         return 0;
     }
-    let groups = grouped_nodes(dc, filter, root);
-    let count = groups.values().map(Vec::len).sum::<usize>();
+    let count = plan.node_shown;
     card_header(ui, "Node voltages", count, "shown");
-    if groups.is_empty() {
+    if plan.node_scopes.is_empty() {
         empty_table_message(ui, format!("No retained node matches “{filter}”."));
         return 0;
     }
@@ -961,11 +1174,10 @@ fn show_node_card(
     // beside it keeps the deck name the engine solved under.
     let notations = bus_notations(&state.workspace, &state.schematic);
     let table_width = ui.available_width().max(500.0);
-    // One flat row list, so the viewport plan below can address group headers
-    // and node rows alike. A retained DC solution is one row per node, and a
-    // real block has tens of thousands.
-    let flat = flatten_groups(&groups);
-    let offsets = RowOffsets::from_heights(flat.iter().map(NodeTableRow::height));
+    // The flat row list and its offsets come from the plan: a retained DC
+    // solution is one row per node, and a real block has tens of thousands.
+    let flat = plan.node_rows.as_slice();
+    let offsets = &plan.node_offsets;
     let mut scroll = egui::ScrollArea::both()
         .id_salt("rspice.results.op.nodes")
         .auto_shrink([false, false]);
@@ -993,18 +1205,19 @@ fn show_node_card(
             );
             // The header is content, not chrome, so the body's own offsets
             // start below it.
-            let plan = offsets.plan(egui::Rangef::new(
+            let view = offsets.plan(egui::Rangef::new(
                 viewport.min.y - HEADER_H,
                 viewport.max.y - HEADER_H,
             ));
-            ui.allocate_space(egui::vec2(table_width, plan.leading));
-            for entry in &flat[plan.range()] {
-                let row = match entry {
-                    NodeTableRow::Group { scope, count } => {
-                        group_header(ui, table_width, scope, *count);
+            ui.allocate_space(egui::vec2(table_width, view.leading));
+            for entry in &flat[view.range()] {
+                let row = match *entry {
+                    NodePlanRow::Group(scope) => {
+                        let scope = &plan.node_scopes[scope];
+                        group_header(ui, table_width, &scope.scope, scope.count);
                         continue;
                     }
-                    NodeTableRow::Value(row) => *row,
+                    NodePlanRow::Value(row) => &dc.node_voltages[row],
                 };
                 {
                     let (rect, response) = ui
@@ -1101,7 +1314,7 @@ fn show_node_card(
                     }
                 }
             }
-            ui.allocate_space(egui::vec2(table_width, plan.trailing));
+            ui.allocate_space(egui::vec2(table_width, view.trailing));
             })
             .response
         });
@@ -1112,51 +1325,18 @@ fn show_node_card(
     count
 }
 
-/// One drawable line of the node table: a scope heading, or a retained node.
-enum NodeTableRow<'a> {
-    Group { scope: &'a str, count: usize },
-    Value(&'a crate::state::OperatingPointValue),
-}
-
-impl NodeTableRow<'_> {
-    const fn height(&self) -> f32 {
-        match self {
-            Self::Group { .. } => GROUP_H,
-            Self::Value(_) => ROW_H,
-        }
-    }
-}
-
-fn flatten_groups<'a>(
-    groups: &'a BTreeMap<String, Vec<&'a crate::state::OperatingPointValue>>,
-) -> Vec<NodeTableRow<'a>> {
-    let mut flat = Vec::with_capacity(groups.len() + groups.values().map(Vec::len).sum::<usize>());
-    for (scope, rows) in groups {
-        flat.push(NodeTableRow::Group {
-            scope,
-            count: rows.len(),
-        });
-        flat.extend(rows.iter().copied().map(NodeTableRow::Value));
-    }
-    flat
-}
-
 fn show_device_card(
     ui: &mut Ui,
+    plan: &OpPlan,
     evidence: &OpEvidence,
     filter: &str,
-    root: &str,
     sort: Option<&(String, bool)>,
     body_max_height: Option<f32>,
     clicked_sort: &mut Option<String>,
     action: &mut Option<OpAction>,
     state: &AppState,
 ) -> usize {
-    if evidence
-        .detail
-        .as_ref()
-        .is_some_and(|detail| detail.policy == OperatingPointDeviceDetailEvidence::None)
-    {
+    if evidence.detail_policy == Some(OperatingPointDeviceDetailEvidence::None) {
         unavailable_card(
             ui,
             "Device operating points",
@@ -1164,7 +1344,11 @@ fn show_device_card(
         );
         return 0;
     }
-    let Some(report) = evidence.devices.as_ref() else {
+    let Some(report) = state
+        .simulation
+        .active_analysis()
+        .and_then(|analysis| analysis.device_op.as_ref())
+    else {
         unavailable_card(
             ui,
             "Device operating points",
@@ -1180,10 +1364,9 @@ fn show_device_card(
         );
         return 0;
     }
-    let groups = grouped_devices(report, evidence.detail.as_ref(), filter, sort, root);
-    let count = groups.values().map(Vec::len).sum::<usize>();
+    let count = plan.device_shown;
     card_header(ui, "Device operating points", count, "shown");
-    if groups.is_empty() {
+    if plan.device_scopes.is_empty() {
         if filter.trim().is_empty() {
             empty_table_message(
                 ui,
@@ -1197,18 +1380,11 @@ fn show_device_card(
 
     // Each scope carries its own column set, so the flat list references a
     // layout rather than repeating it per row. `save_device_op` on a real
-    // block is one row per device; drawing them all every frame is what this
-    // plan exists to stop.
-    let layouts: Vec<DeviceGroupLayout<'_>> = groups
-        .iter()
-        .map(|(scope, rows)| DeviceGroupLayout {
-            scope,
-            columns: device_columns(rows),
-            count: rows.len(),
-        })
-        .collect();
-    let flat = flatten_device_groups(&groups);
-    let offsets = RowOffsets::from_heights(flat.iter().map(DeviceTableRow::height));
+    // block is one row per device; grouping, sorting and measuring them all
+    // every frame is what the plan exists to stop.
+    let layouts = plan.device_scopes.as_slice();
+    let flat = plan.device_rows.as_slice();
+    let offsets = &plan.device_offsets;
     let mut scroll = egui::ScrollArea::both()
         .id_salt("rspice.results.op.devices")
         .auto_shrink([false, false]);
@@ -1218,39 +1394,39 @@ fn show_device_card(
     let table = scroll.show_viewport(ui, |ui, viewport| {
         ui.scope(|ui| {
             let available = ui.available_width();
-            let width_of = |layout: &DeviceGroupLayout<'_>| {
+            let width_of = |layout: &OpScope| {
                 (NAME_W + KIND_W + REGION_W + layout.columns.len() as f32 * VALUE_MIN_W + ACTION_W)
                     .max(available)
             };
             let widest = layouts.iter().map(width_of).fold(available, f32::max);
             ui.set_min_width(widest);
-            let plan = offsets.plan(viewport.y_range());
-            ui.allocate_space(egui::vec2(widest, plan.leading));
-            for row in &flat[plan.range()] {
-                let layout = &layouts[row.layout()];
+            let view = offsets.plan(viewport.y_range());
+            ui.allocate_space(egui::vec2(widest, view.leading));
+            for row in &flat[view.range()] {
+                let layout = &layouts[row.scope()];
                 let table_width = width_of(layout);
-                let entry = match row {
-                    DeviceTableRow::Group(_) => {
-                        group_header(ui, table_width, layout.scope, layout.count);
+                let entry = match *row {
+                    DevicePlanRow::Group(_) => {
+                        group_header(ui, table_width, &layout.scope, layout.count);
                         continue;
                     }
-                    DeviceTableRow::ColumnHeader(_) => {
+                    DevicePlanRow::ColumnHeader(_) => {
                         if let Some(key) = device_column_header(
                             ui,
                             table_width,
                             &layout.columns,
-                            layout.scope,
+                            &layout.scope,
                             sort,
                         ) {
                             *clicked_sort = Some(key);
                         }
                         continue;
                     }
-                    DeviceTableRow::Gap(_) => {
+                    DevicePlanRow::Gap(_) => {
                         ui.add_space(DEVICE_GROUP_GAP);
                         continue;
                     }
-                    DeviceTableRow::Device { entry, .. } => *entry,
+                    DevicePlanRow::Device { entry, .. } => &report.entries[entry],
                 };
                 let columns = &layout.columns;
                 {
@@ -1300,7 +1476,7 @@ fn show_device_card(
                         rect.bottom() - 0.5,
                         egui::Stroke::new(1.0, colors.border.gamma_multiply(0.6)),
                     );
-                    let (_, leaf) = hierarchy_parts(&entry.name, root);
+                    let (_, leaf) = hierarchy_parts(&entry.name, &plan.key.root);
                     paint_cell(
                         ui,
                         op_column_rect(rect, 0.0, NAME_W),
@@ -1371,7 +1547,7 @@ fn show_device_card(
                     }
                 }
             }
-            ui.allocate_space(egui::vec2(widest, plan.trailing));
+            ui.allocate_space(egui::vec2(widest, view.trailing));
         })
         .response
     });
@@ -1380,64 +1556,6 @@ fn show_device_card(
         node.set_label("Device operating points");
     });
     count
-}
-
-/// The column set one device scope draws, resolved once per frame.
-struct DeviceGroupLayout<'a> {
-    scope: &'a str,
-    columns: Vec<(&'static str, &'static str)>,
-    count: usize,
-}
-
-/// One drawable line of the device table.
-enum DeviceTableRow<'a> {
-    Group(usize),
-    ColumnHeader(usize),
-    Device {
-        layout: usize,
-        entry: &'a rspice_core::circuit::DeviceOpEntry,
-    },
-    /// The breathing room between scopes. It is a row like any other here so
-    /// the plan's arithmetic stays exact — a gap left out of the offsets
-    /// drifts the viewport by 8 px per group above it.
-    Gap(usize),
-}
-
-impl DeviceTableRow<'_> {
-    const fn height(&self) -> f32 {
-        match self {
-            Self::Group(_) => GROUP_H,
-            Self::ColumnHeader(_) => HEADER_H,
-            Self::Device { .. } => ROW_H,
-            Self::Gap(_) => DEVICE_GROUP_GAP,
-        }
-    }
-
-    const fn layout(&self) -> usize {
-        match self {
-            Self::Group(layout)
-            | Self::ColumnHeader(layout)
-            | Self::Gap(layout)
-            | Self::Device { layout, .. } => *layout,
-        }
-    }
-}
-
-fn flatten_device_groups<'a>(
-    groups: &'a BTreeMap<String, Vec<&'a rspice_core::circuit::DeviceOpEntry>>,
-) -> Vec<DeviceTableRow<'a>> {
-    let mut flat = Vec::new();
-    for (layout, rows) in groups.values().enumerate() {
-        flat.push(DeviceTableRow::Group(layout));
-        flat.push(DeviceTableRow::ColumnHeader(layout));
-        flat.extend(
-            rows.iter()
-                .copied()
-                .map(|entry| DeviceTableRow::Device { layout, entry }),
-        );
-        flat.push(DeviceTableRow::Gap(layout));
-    }
-    flat
 }
 
 fn region_color(region: &str, colors: &crate::ui::palette::Palette) -> egui::Color32 {
@@ -1458,7 +1576,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, message);
         return;
     };
-    if evidence.dc.is_none() && evidence.devices.is_none() {
+    let retains_values = state
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| analysis.dc_op.is_some() || analysis.device_op.is_some());
+    if !retains_values {
         well_hint(
             ui,
             "The selected operating-point analysis retained no node, branch, or device values.",
@@ -1469,11 +1591,24 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     show_solve_strip(ui, &evidence);
     ui.add_space(1.0);
 
-    let filter = state.ui.results.op_filter.clone();
-    let sort = state.ui.results.op_sort.clone();
+    let Some(analysis_key) = state.simulation.active_run().and_then(|run| {
+        state
+            .simulation
+            .active_analysis()
+            .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
+    }) else {
+        return;
+    };
+    // Both cards read one plan, so the retained rows are grouped, sorted and
+    // measured once per (dataset, filter, sort) rather than twice per frame.
+    let Some(plan) = op_plan(state, analysis_key) else {
+        return;
+    };
+    let filter = plan.key.filter.clone();
+    let sort = plan.key.sort.clone();
     // The occurrence a root-scoped row belongs to is the cell the active
     // configuration runs, or the project's top cell when none is active.
-    let root = state.workspace.simulation_root_reference().cell;
+    let root = plan.key.root.clone();
     let mut clicked_sort = None;
     let mut action = None;
     let available = ui.available_size();
@@ -1483,7 +1618,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             columns[1].set_min_height(available.y);
             show_node_card(
                 &mut columns[0],
-                &evidence,
+                &plan,
                 &filter,
                 &root,
                 None,
@@ -1492,9 +1627,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             );
             show_device_card(
                 &mut columns[1],
+                &plan,
                 &evidence,
                 &filter,
-                &root,
                 sort.as_ref(),
                 None,
                 &mut clicked_sort,
@@ -1509,7 +1644,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let stacked_body_height = stacked_body_height(available.y);
         show_node_card(
             ui,
-            &evidence,
+            &plan,
             &filter,
             &root,
             Some(stacked_body_height),
@@ -1519,9 +1654,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui.add_space(1.0);
         show_device_card(
             ui,
+            &plan,
             &evidence,
             &filter,
-            &root,
             sort.as_ref(),
             Some(stacked_body_height),
             &mut clicked_sort,
@@ -1551,29 +1686,22 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(evidence) = selected_op_evidence(state) else {
         return;
     };
+    let analysis_key = state.simulation.active_run().and_then(|run| {
+        state
+            .simulation
+            .active_analysis()
+            .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
+    });
 
     section_header(ui, "OP result", None);
     let run = format!("Run {}", evidence.run_id);
-    let node_count = evidence
-        .dc
-        .as_ref()
-        .map_or(0, |dc| dc.node_voltages.len())
-        .to_string();
-    let branch_count = evidence
-        .dc
-        .as_ref()
-        .map_or(0, |dc| dc.branch_currents.len())
-        .to_string();
-    let device_count = evidence
-        .devices
-        .as_ref()
-        .map_or(0, |report| {
-            report
-                .entries
-                .iter()
-                .filter(|entry| retained_detail_allows(&entry.name, evidence.detail.as_ref()))
-                .count()
-        })
+    let node_count = evidence.node_count.to_string();
+    let branch_count = evidence.branch_count.to_string();
+    // The in-scope device count is a property of the retained detail policy,
+    // so it comes off the plan rather than re-filtering every device row.
+    let device_count = analysis_key
+        .and_then(|key| op_plan(state, key))
+        .map_or(0, |plan| plan.device_in_scope)
         .to_string();
     measurement_table(
         ui,
@@ -1583,7 +1711,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ("Node values", node_count.as_str()),
             ("Branch values", branch_count.as_str()),
             ("Device rows", device_count.as_str()),
-            ("Device scope", detail_label(evidence.detail.as_ref())),
+            ("Device scope", detail_label(evidence.detail_policy)),
         ],
     );
 
@@ -1749,7 +1877,7 @@ mod tests {
         let evidence = selected_op_evidence(&state).expect("selected OP evidence");
         assert_eq!(evidence.run_id, 9);
         assert_eq!(evidence.label, "OP 1");
-        assert_eq!(evidence.dc.unwrap().node_voltages.len(), 1);
+        assert_eq!(evidence.node_count, 1);
     }
 
     #[test]
@@ -1773,11 +1901,13 @@ mod tests {
         state.simulation.active_analysis_idx = Some(0);
 
         let evidence = selected_op_evidence(&state).expect("retained OP evidence");
-        assert!(evidence.devices.is_none());
-        assert_eq!(
-            grouped_nodes(evidence.dc.as_ref().unwrap(), "out", "amplifier").len(),
-            1
-        );
+        assert_eq!(evidence.node_count, 1);
+        let dc = state.simulation.runs[0].analyses[0]
+            .dc_op
+            .as_ref()
+            .expect("retained node voltages");
+        assert!(state.simulation.runs[0].analyses[0].device_op.is_none());
+        assert_eq!(grouped_nodes(dc, "out", "amplifier").len(), 1);
     }
 
     #[test]
@@ -1793,7 +1923,7 @@ mod tests {
 
         let groups = grouped_nodes(&dc, "", "amplifier");
         assert_eq!(groups["amplifier"].len(), 1);
-        let (display, valid) = node_value_text(groups["amplifier"][0]);
+        let (display, valid) = node_value_text(&dc.node_voltages[groups["amplifier"][0].1]);
         assert_eq!(display, "invalid · non-finite");
         assert!(!valid);
     }
@@ -1829,20 +1959,184 @@ mod tests {
             ],
         };
 
+        let names_of = |groups: &BTreeMap<String, Vec<(String, usize)>>| {
+            groups["amplifier"]
+                .iter()
+                .map(|(_, index)| report.entries[*index].name.clone())
+                .collect::<Vec<_>>()
+        };
+
         let descending = ("gm".to_owned(), false);
         let groups = grouped_devices(&report, None, "", Some(&descending), "amplifier");
-        let names = groups["amplifier"]
-            .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["M_negative", "M_high", "M_low", "M_missing"]);
+        assert_eq!(
+            names_of(&groups),
+            vec!["M_negative", "M_high", "M_low", "M_missing"]
+        );
 
         let ascending = ("gm".to_owned(), true);
         let groups = grouped_devices(&report, None, "", Some(&ascending), "amplifier");
-        let names = groups["amplifier"]
+        assert_eq!(
+            names_of(&groups),
+            vec!["M_low", "M_high", "M_negative", "M_missing"]
+        );
+    }
+
+    /// A retained operating point with `nodes` nets and `devices` devices,
+    /// spread over four occurrences.
+    fn op_state(nodes: usize, devices: usize) -> AppState {
+        use crate::state::{AnalysisResult, SimulationRun};
+
+        let dc = DcOpResult {
+            node_voltages: (0..nodes)
+                .map(|index| crate::state::OperatingPointValue {
+                    name: format!("V(x{}.n{index})", index % 4),
+                    value: index as f64,
+                    unit: "V".to_owned(),
+                })
+                .collect(),
+            ..DcOpResult::default()
+        };
+        let report = rspice_core::circuit::DeviceOpReport {
+            entries: (0..devices)
+                .map(|index| rspice_core::circuit::DeviceOpEntry {
+                    name: format!("x{}.m{index}", index % 4),
+                    device_kind: "MOSFET",
+                    region: Some("saturation"),
+                    params: vec![("gm", index as f64 * 1.0e-3), ("id", 1.0e-6)],
+                })
+                .collect(),
+        };
+        let mut analysis = AnalysisResult::new(1, AnalysisType::DcOp, "OP");
+        analysis.dc_op = Some(dc);
+        analysis.device_op = Some(report);
+        let mut run = SimulationRun::new(3);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state.simulation.active_analysis_idx = Some(0);
+        state
+    }
+
+    fn active_key(state: &AppState) -> AnalysisPresentationKey {
+        let run = state.simulation.active_run().expect("retained run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    }
+
+    /// The plan replaced a per-frame grouping, so it has to lay the rows out
+    /// in exactly the order that grouping produced.
+    #[test]
+    fn the_plan_orders_rows_the_way_the_grouping_it_replaced_did() {
+        let mut state = op_state(40, 40);
+        let key = active_key(&state);
+        let plan = op_plan(&mut state, key).expect("a row plan for the active analysis");
+
+        let analysis = &state.simulation.runs[0].analyses[0];
+        let dc = analysis.dc_op.as_ref().expect("retained node voltages");
+        let report = analysis.device_op.as_ref().expect("retained device rows");
+        let root = state.workspace.simulation_root_reference().cell;
+
+        let mut expected = Vec::new();
+        for (scope, rows) in grouped_nodes(dc, "", &root) {
+            expected.push(format!("group {scope}"));
+            expected.extend(
+                rows.into_iter()
+                    .map(|(_, index)| dc.node_voltages[index].name.clone()),
+            );
+        }
+        let actual: Vec<String> = plan
+            .node_rows
             .iter()
-            .map(|entry| entry.name.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(names, vec!["M_low", "M_high", "M_negative", "M_missing"]);
+            .map(|row| match *row {
+                NodePlanRow::Group(scope) => format!("group {}", plan.node_scopes[scope].scope),
+                NodePlanRow::Value(index) => dc.node_voltages[index].name.clone(),
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(plan.node_shown, dc.node_voltages.len());
+
+        let mut expected = Vec::new();
+        for (scope, rows) in grouped_devices(report, None, "", None, &root) {
+            expected.push(format!("group {scope}"));
+            expected.push("columns".to_owned());
+            expected.extend(
+                rows.into_iter()
+                    .map(|(_, index)| report.entries[index].name.clone()),
+            );
+            expected.push("gap".to_owned());
+        }
+        let actual: Vec<String> = plan
+            .device_rows
+            .iter()
+            .map(|row| match *row {
+                DevicePlanRow::Group(scope) => {
+                    format!("group {}", plan.device_scopes[scope].scope)
+                }
+                DevicePlanRow::ColumnHeader(_) => "columns".to_owned(),
+                DevicePlanRow::Gap(_) => "gap".to_owned(),
+                DevicePlanRow::Device { entry, .. } => report.entries[entry].name.clone(),
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(plan.device_shown, report.entries.len());
+        assert_eq!(plan.device_in_scope, report.entries.len());
+
+        // The offsets must describe the rows the plan actually holds, or the
+        // scrollbar lies about how long the table is.
+        assert_eq!(plan.node_offsets.rows(), plan.node_rows.len());
+        assert_eq!(plan.device_offsets.rows(), plan.device_rows.len());
+    }
+
+    /// The controls are part of the key, so moving one has to rebuild.
+    #[test]
+    fn the_readers_controls_are_part_of_the_row_plan_key() {
+        let mut state = op_state(40, 40);
+        let key = active_key(&state);
+        let unfiltered = op_plan(&mut state, key).expect("a row plan");
+        assert!(Arc::ptr_eq(
+            &unfiltered,
+            &op_plan(&mut state, key).expect("a row plan")
+        ));
+
+        state.ui.results.op_filter = "m1".to_owned();
+        let filtered = op_plan(&mut state, key).expect("a row plan");
+        assert!(filtered.device_shown < unfiltered.device_shown);
+        assert!(
+            filtered.device_shown > 0,
+            "the filter matched nothing, so it proves nothing"
+        );
+
+        state.ui.results.op_filter.clear();
+        state.ui.results.op_sort = Some(("gm".to_owned(), true));
+        let sorted = op_plan(&mut state, key).expect("a row plan");
+        assert_ne!(
+            sorted.device_rows, unfiltered.device_rows,
+            "a new sort key served the previous ordering"
+        );
+    }
+
+    /// The rows are indices into retained evidence, so a new generation of
+    /// that evidence must not be read through the previous plan.
+    #[test]
+    fn a_new_dataset_generation_rebuilds_the_row_plan() {
+        let mut state = op_state(8, 8);
+        let key = active_key(&state);
+        let before = op_plan(&mut state, key).expect("a row plan");
+        assert_eq!(before.node_shown, 8);
+
+        state.simulation.runs[0].analyses[0]
+            .dc_op
+            .as_mut()
+            .expect("retained node voltages")
+            .node_voltages
+            .truncate(3);
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+        let after = op_plan(&mut state, key).expect("a row plan");
+        assert_eq!(
+            after.node_shown, 3,
+            "the sheet would have indexed rows the new dataset no longer retains"
+        );
+        assert_eq!(after.node_offsets.rows(), after.node_rows.len());
     }
 }
