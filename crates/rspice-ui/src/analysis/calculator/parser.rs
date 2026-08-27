@@ -257,10 +257,12 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    pub fn parse(&mut self) -> CalculatorExpr {
-        self.try_parse().unwrap_or(CalculatorExpr::Number(0.0))
-    }
-
+    /// Parse the input, or say why it cannot be parsed.
+    ///
+    /// There is deliberately no infallible sibling. One used to exist and
+    /// recovered a syntax error to the literal `0`, so `V(out) +` evaluated,
+    /// printed `= 0.0000` in the success colour, and was filed in the recall
+    /// history as a working expression.
     pub fn try_parse(&mut self) -> Result<CalculatorExpr, ParseError> {
         if let Some(error) = self.initial_error.take() {
             return Err(error);
@@ -470,11 +472,6 @@ fn describe_token(token: &Token) -> String {
 /// Helper to parse a string and report syntax errors.
 pub fn try_parse(input: &str) -> Result<CalculatorExpr, ParseError> {
     Parser::new(input).try_parse()
-}
-
-/// Helper to parse a string
-pub fn parse(input: &str) -> CalculatorExpr {
-    Parser::new(input).parse()
 }
 
 // =============================================================================

@@ -50,13 +50,24 @@ impl CalculatorPanel {
     }
 
     /// Evaluate the current expression against the live waveform set.
+    ///
+    /// A syntax error is an error, never a number. The parser used to
+    /// recover a malformed expression to the literal `0`, so a typo evaluated
+    /// cleanly, printed `= 0.0000` in the success colour, and joined the
+    /// recall history — a wrong answer indistinguishable from a right one.
     pub fn evaluate(&mut self, simulation: &SimulationState) {
         let text = self.expression.trim();
         if text.is_empty() {
             self.outcome = None;
             return;
         }
-        let expr = parser::parse(text);
+        let expr = match parser::try_parse(text) {
+            Ok(expr) => expr,
+            Err(error) => {
+                self.outcome = Some(Err(format!("syntax error: {error}")));
+                return;
+            }
+        };
         let ctx = SimulationContext::new(simulation);
         self.outcome = Some(match evaluator::evaluate(&expr, &ctx) {
             Ok(CalcValue::Scalar(value)) => Ok(format!("= {}", fmt_si(value, "", 4))),
@@ -83,5 +94,46 @@ impl CalculatorPanel {
         self.expression.clear();
         self.outcome = None;
         self.history_at = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::WaveformData;
+
+    fn simulation_with_a_ramp() -> SimulationState {
+        let mut simulation = SimulationState::default();
+        simulation.waveforms = vec![WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 1.0, 2.0],
+            "#00aaff",
+        )];
+        simulation
+    }
+
+    #[test]
+    fn a_syntax_error_never_reports_a_numeric_result() {
+        let simulation = simulation_with_a_ramp();
+        for text in ["V(out) +", "avg(V(out)", "1 2", "V()", "*3"] {
+            let mut panel = CalculatorPanel::new();
+            panel.expression = text.to_owned();
+            panel.evaluate(&simulation);
+
+            let outcome = panel.outcome.as_ref().expect("evaluation reports something");
+            let message = match outcome {
+                Ok(value) => panic!("{text:?} produced a result instead of an error: {value}"),
+                Err(message) => message.clone(),
+            };
+            assert!(
+                !message.contains('='),
+                "{text:?} error must not read as a result: {message}"
+            );
+            assert!(
+                panel.history.is_empty(),
+                "{text:?} must not enter the recall history"
+            );
+        }
     }
 }
