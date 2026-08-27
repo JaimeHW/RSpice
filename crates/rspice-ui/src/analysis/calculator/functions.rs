@@ -470,12 +470,20 @@ fn pp(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 
 /// Linear interpolation inside the swept range. Callers check the range
 /// first, because nothing in this module extrapolates.
+///
+/// The bracket search runs whichever way the grid does. A `.dc V1 5 0 -0.1`
+/// sweep stores its samples with a *descending* x, and an ascending-only
+/// search short-circuits on the very first comparison there, answering every
+/// in-range query with the first stored sample. The arithmetic itself needs
+/// no mirroring — `dx` is signed — so only the comparisons flip.
 fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
-    if at <= x[0] {
+    let descending = x.len() > 1 && x[0] > x[x.len() - 1];
+    let before = |a: f64, b: f64| if descending { a >= b } else { a <= b };
+    if before(at, x[0]) {
         return y[0];
     }
     for i in 1..x.len() {
-        if at <= x[i] {
+        if before(at, x[i]) {
             let dx = x[i] - x[i - 1];
             if dx == 0.0 {
                 return y[i];
@@ -484,6 +492,30 @@ fn interpolate(x: &[f64], y: &[f64], at: f64) -> f64 {
         }
     }
     y[y.len() - 1]
+}
+
+/// Refuse a domain that runs backwards.
+///
+/// Every measurement that reaches for this reads its x-axis as elapsed time:
+/// "the first crossing", "the last excursion outside the band", "rising".
+/// Run those over a reversed sweep — the grid a `.dc V1 5 0 -0.1` produces —
+/// and each one answers in reverse: a rise reads as a fall, a delay comes
+/// back negative, settling measures from the end. None of that is visible in
+/// the single number the panel prints, so the sweep is refused instead.
+///
+/// Duplicated timepoints are not a reversal, so the test is `<`, not `<=`;
+/// the aggregates (`avg`, `rms`) and the sample-wise transforms are absent
+/// here because a signed width and a signed `dx` already carry the direction.
+fn forward_domain(name: &str, x: &[f64]) -> Result<(), EvaluationError> {
+    match (1..x.len()).find(|&i| x[i] < x[i - 1]) {
+        Some(index) => Err(EvaluationError::MathError(format!(
+            "{name} reads its x-axis as elapsed time, but this sweep runs backwards \
+             (x steps from {} to {}); reverse it before measuring",
+            x[index - 1],
+            x[index]
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// `yval(w, at)` — the value of `w` where its domain reads `at`.
@@ -512,7 +544,9 @@ struct Crossing {
     rising: bool,
 }
 
-/// Every crossing of `level`, in domain order.
+/// Every crossing of `level`, in domain order — which is storage order, so
+/// every caller clears its grid through [`forward_domain`] first. `rising`
+/// likewise means rising *in x*, not merely increasing along the samples.
 ///
 /// A sample sitting exactly on the level is not itself a crossing — a curve
 /// that touches the level and turns back has not crossed it. A run of
@@ -566,6 +600,7 @@ fn mid_level(name: &str, y: &[f64]) -> Result<f64, EvaluationError> {
 fn cross(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("cross", &args, 3)?;
     let (x, y) = series_arg("cross", &args[0])?;
+    forward_domain("cross", x)?;
     let level = scalar_arg("cross", "level", &args[1])?;
     let ordinal = scalar_arg("cross", "ordinal", &args[2])?;
     if !(ordinal >= 1.0) || ordinal.fract() != 0.0 {
@@ -612,12 +647,14 @@ fn fundamental(name: &str, x: &[f64], y: &[f64]) -> Result<f64, EvaluationError>
 fn freq(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("freq", &args, 1)?;
     let (x, y) = series_arg("freq", &args[0])?;
+    forward_domain("freq", x)?;
     Ok(CalcValue::Scalar(fundamental("freq", x, y)?))
 }
 
 fn period(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("period", &args, 1)?;
     let (x, y) = series_arg("period", &args[0])?;
+    forward_domain("period", x)?;
     Ok(CalcValue::Scalar(1.0 / fundamental("period", x, y)?))
 }
 
@@ -626,6 +663,7 @@ fn period(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 fn duty(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("duty", &args, 1)?;
     let (x, y) = series_arg("duty", &args[0])?;
+    forward_domain("duty", x)?;
     let mid = mid_level("duty", y)?;
     let found = crossings(x, y, mid);
     let mut total = 0.0;
@@ -684,7 +722,9 @@ fn step_levels(name: &str, y: &[f64]) -> Result<(f64, f64), EvaluationError> {
 /// relative to the step it took to get there.
 fn overshoot(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("overshoot", &args, 1)?;
-    let (_, y) = series_arg("overshoot", &args[0])?;
+    let (x, y) = series_arg("overshoot", &args[0])?;
+    // "Final value" is the last sample in time, so the direction matters.
+    forward_domain("overshoot", x)?;
     let (initial, settled) = step_levels("overshoot", y)?;
     let (low, high) = extremes("overshoot", y)?;
     let step = settled - initial;
@@ -723,12 +763,14 @@ fn edge(name: &str, x: &[f64], y: &[f64], rising: bool) -> Result<f64, Evaluatio
 fn rise(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("rise", &args, 1)?;
     let (x, y) = series_arg("rise", &args[0])?;
+    forward_domain("rise", x)?;
     Ok(CalcValue::Scalar(edge("rise", x, y, true)?))
 }
 
 fn fall(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("fall", &args, 1)?;
     let (x, y) = series_arg("fall", &args[0])?;
+    forward_domain("fall", x)?;
     Ok(CalcValue::Scalar(edge("fall", x, y, false)?))
 }
 
@@ -738,6 +780,7 @@ fn fall(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 fn settling(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_count("settling", &args, 2)?;
     let (x, y) = series_arg("settling", &args[0])?;
+    forward_domain("settling", x)?;
     let band = scalar_arg("settling", "band", &args[1])?;
     if !(band > 0.0) {
         return Err(EvaluationError::MathError(
@@ -782,6 +825,8 @@ fn delay(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_range("delay", &args, 2, 3)?;
     let (from_x, from_y) = series_arg("delay", &args[0])?;
     let (to_x, to_y) = series_arg("delay", &args[1])?;
+    forward_domain("delay", from_x)?;
+    forward_domain("delay", to_x)?;
     let (from_level, to_level) = match args.get(2) {
         Some(value) => {
             let level = scalar_arg("delay", "level", value)?;
@@ -835,6 +880,7 @@ fn window(x: &[f64], y: &[f64], from: f64, to: f64) -> (Vec<f64>, Vec<f64>) {
 fn thd(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_range("thd", &args, 1, 2)?;
     let (x, y) = series_arg("thd", &args[0])?;
+    forward_domain("thd", x)?;
     let harmonics = match args.get(1) {
         Some(value) => {
             let count = scalar_arg("thd", "harmonic count", value)?;
@@ -1054,6 +1100,21 @@ mod tests {
         x.dedup_by(|a, b| (*a - *b).abs() < 1.0e-12);
         let y = x.iter().map(|t| pwl_at(breaks, *t)).collect();
         (x, y)
+    }
+
+    /// The same curve swept the other way: a `.dc V1 5 0 -0.1` grid, whose
+    /// domain steps backwards while the samples stay paired with their x.
+    fn reversed(value: &CalcValue) -> CalcValue {
+        match value {
+            CalcValue::Waveform(x, y) => {
+                let mut x = x.clone();
+                let mut y = y.clone();
+                x.reverse();
+                y.reverse();
+                wave(x, y)
+            }
+            other => other.clone(),
+        }
     }
 
     /// SPICE-shaped pulse with duplicated timepoints at the vertical edges:
@@ -1327,6 +1388,93 @@ mod tests {
             call("yval", vec![wave(x, y), CalcValue::Scalar(9.0)]).is_err(),
             "yval never extrapolates"
         );
+    }
+
+    #[test]
+    fn yval_reads_a_backwards_sweep_off_the_same_curve() {
+        // A `.dc V1 5 0 -0.1` grid: x descends. `yval` already normalizes its
+        // range check for this, so an in-range query must land on the curve
+        // rather than short-circuiting to the first stored sample.
+        let x = vec![5.0, 4.0, 3.0, 2.0, 1.0, 0.0];
+        let y: Vec<f64> = x.iter().map(|v| 10.0 * v).collect();
+        for (at, want) in [(2.5, 25.0), (4.25, 42.5), (5.0, 50.0), (0.0, 0.0)] {
+            assert_close(
+                scalar_of(
+                    "yval",
+                    vec![wave(x.clone(), y.clone()), CalcValue::Scalar(at)],
+                ),
+                want,
+                1.0e-12,
+                &format!("yval at {at} on a descending sweep"),
+            );
+        }
+        assert!(
+            call(
+                "yval",
+                vec![wave(x.clone(), y.clone()), CalcValue::Scalar(6.0)]
+            )
+            .is_err(),
+            "yval never extrapolates, whichever way the sweep runs"
+        );
+
+        // The window aggregates divide a signed integral by a signed width,
+        // so a reversed sweep is the same mean rather than an error.
+        assert_close(
+            scalar_of("avg", vec![wave(x, y)]),
+            25.0,
+            1.0e-12,
+            "avg of a descending sweep",
+        );
+    }
+
+    #[test]
+    fn time_ordered_measurements_refuse_a_backwards_sweep() {
+        // Everything below reads the domain as elapsed time — "the first
+        // crossing", "the last excursion", "rising". On a reversed grid each
+        // of those answers comes out backwards, so the measurement must
+        // refuse rather than report a plausible wrong number.
+        let train = pulse_train();
+        let (rx, ry) = pwl_series(&[(0.0, 0.0), (1.0, 10.0), (2.0, 10.0)], 19);
+        let rising_ramp = wave(rx, ry);
+        let (fx, fy) = pwl_series(&[(0.0, 10.0), (1.0, 10.0), (2.0, 0.0)], 19);
+        let falling_ramp = wave(fx, fy);
+        let (sx, sy) = pwl_series(
+            &[(0.0, 0.0), (1.0, 1.2), (2.0, 0.9), (3.0, 1.0), (4.0, 1.0)],
+            23,
+        );
+        let step = wave(sx, sy);
+
+        let cases: Vec<(&str, Vec<CalcValue>)> = vec![
+            (
+                "cross",
+                vec![
+                    train.clone(),
+                    CalcValue::Scalar(5.0),
+                    CalcValue::Scalar(1.0),
+                ],
+            ),
+            ("freq", vec![train.clone()]),
+            ("period", vec![train.clone()]),
+            ("duty", vec![train.clone()]),
+            ("thd", vec![train]),
+            ("rise", vec![rising_ramp.clone()]),
+            ("fall", vec![falling_ramp]),
+            ("overshoot", vec![step.clone()]),
+            ("settling", vec![step, CalcValue::Scalar(5.0)]),
+            ("delay", vec![rising_ramp.clone(), rising_ramp]),
+        ];
+        for (name, args) in cases {
+            assert!(
+                call(name, args.clone()).is_ok(),
+                "{name} must answer on the forward sweep, or the reversal below proves nothing"
+            );
+            let backwards: Vec<CalcValue> = args.iter().map(reversed).collect();
+            let outcome = call(name, backwards);
+            assert!(
+                outcome.is_err(),
+                "{name} must refuse a reversed sweep, got {outcome:?}"
+            );
+        }
     }
 
     #[test]
