@@ -121,6 +121,31 @@ impl SpecificationVerdict {
     pub const fn worst_member(&self) -> Option<&super::FamilyMemberId> {
         self.worst_member.as_ref()
     }
+
+    /// Judge one frozen requirement set against retained evidence.
+    ///
+    /// The judge, for every surface that has to state a verdict. A guard
+    /// band, a point scope and a producing-analysis binding are requirement
+    /// semantics: they belong to the requirement, not to the moment a run
+    /// reaches its terminal state. A reader watching a run stream is
+    /// therefore shown the answer this function gives over the evidence
+    /// retained so far, and sealing the run re-asks the same question of the
+    /// same function — so nothing about a row may change at the terminality
+    /// boundary unless the evidence itself changed.
+    ///
+    /// It is exposed because the Results specification sheet used to keep a
+    /// projection of its own for the streaming case, which knew about none of
+    /// the three and additionally refused any measurement published by more
+    /// than one prepared task. Verdicts visibly flipped the instant a run
+    /// completed, and an ordinary corner sweep read as an ambiguous lineage
+    /// until it did.
+    #[must_use]
+    pub fn evaluate(
+        specifications: &[PreparedSpecification],
+        analyses: &[AnalysisResult],
+    ) -> Vec<Self> {
+        evaluate_specifications(specifications, analyses)
+    }
 }
 
 struct Candidate {
