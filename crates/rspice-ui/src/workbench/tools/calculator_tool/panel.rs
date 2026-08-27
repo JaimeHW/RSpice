@@ -173,18 +173,39 @@ impl CalculatorPanel {
         self.handle_history_keys(ui, &response);
 
         // Inline outcome row — result in ok, error in err, hint otherwise.
+        // The readout is rounded to eight significant digits, so a result
+        // is click-to-copy: the clipboard gets the exact f64 behind it.
         ui.add_space(4.0);
+        let mut copy: Option<String> = None;
         ui.horizontal(|ui| {
             let (text, color) = match &self.outcome {
-                Some(Ok(value)) => (value.as_str(), c.ok),
+                Some(Ok(result)) => (result.readout.as_str(), c.ok),
                 Some(Err(error)) => (error.as_str(), c.err),
                 None => ("evaluate to see the result here", c.text_faint),
             };
-            ui.label(
+            let mut readout = egui::Label::new(
                 egui::RichText::new(text)
                     .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                     .color(color),
             );
+            if let Some(Ok(_)) = &self.outcome {
+                readout = readout.sense(egui::Sense::click());
+            }
+            let response = ui.add(readout);
+            if let Some(Ok(result)) = &self.outcome {
+                let exact = result.exact_text();
+                let what = if result.exact_is_last_sample {
+                    "last sample"
+                } else {
+                    "result"
+                };
+                let response = response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(format!("Click to copy the exact {what}: {exact}"));
+                if response.clicked() {
+                    copy = Some(exact);
+                }
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if !self.history.is_empty() {
                     ui.label(
@@ -195,6 +216,9 @@ impl CalculatorPanel {
                 }
             });
         });
+        if let Some(exact) = copy {
+            ui.ctx().copy_text(exact);
+        }
         ui.add_space(8.0);
 
         // Two panes: signals rail + function reference.
