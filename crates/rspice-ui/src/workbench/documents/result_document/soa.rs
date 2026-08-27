@@ -60,19 +60,133 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
     active_soa(&state.simulation, active_evidence_is_valid(state)).is_some()
 }
 
+/// What one rule's retained stress history says, once someone has read it.
+///
+/// Both facts cost a scan: locating the history means comparing a candidate
+/// waveform's complete time axis and values against the rule's evidence, and
+/// the interval means walking outward from the worst sample until the stress
+/// drops back under the limit. The table asked for both on every row of every
+/// frame, twice — once for the cell and once to decide whether the row's
+/// button could be pressed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SoaRuleFacts {
+    /// Index into the analysis' waveforms of this rule's verified stress
+    /// history, when one is retained.
+    stress_waveform: Option<usize>,
+    /// The worst-interval cell, as the table prints it.
+    interval_compact: String,
+    /// The same interval, as the inspector prints it.
+    interval_full: String,
+}
+
+/// Every rule's scanned facts, built once per retained SOA analysis.
+///
+/// The visible-row lists are here too, one per filter. They cost no scan,
+/// but the table reads one of them by ordinal every frame and building them
+/// alongside the facts keeps the row a viewport names addressable in O(1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct SoaPlan {
+    version: u64,
+    analysis: AnalysisPresentationKey,
+    rules: Vec<SoaRuleFacts>,
+    visible: [Vec<usize>; SoaRuleFilter::ALL.len()],
+}
+
+impl SoaPlan {
+    fn facts(&self, rule: usize) -> Option<&SoaRuleFacts> {
+        self.rules.get(rule)
+    }
+
+    /// The rules one filter shows, in retained order.
+    fn visible(&self, filter: SoaRuleFilter) -> &[usize] {
+        &self.visible[filter.ordinal()]
+    }
+}
+
+fn build_soa_plan(
+    version: u64,
+    analysis_key: AnalysisPresentationKey,
+    analysis: &AnalysisResult,
+    evaluations: &[SoaEvaluationEvidence],
+) -> SoaPlan {
+    let rules: Vec<SoaRuleFacts> = evaluations
+        .iter()
+        .map(|evaluation| {
+            let stress = stress_waveform(analysis, evaluation);
+            SoaRuleFacts {
+                stress_waveform: stress.and_then(|found| {
+                    analysis
+                        .waveforms
+                        .iter()
+                        .position(|w| std::ptr::eq(w, found))
+                }),
+                interval_compact: worst_interval_text(stress, evaluation, true),
+                interval_full: worst_interval_text(stress, evaluation, false),
+            }
+        })
+        .collect();
+    let visible = SoaRuleFilter::ALL.map(|filter| {
+        evaluations
+            .iter()
+            .enumerate()
+            .filter(|(_, evaluation)| filter.matches(evaluation.verdict))
+            .map(|(index, _)| index)
+            .collect()
+    });
+    SoaPlan {
+        version,
+        analysis: analysis_key,
+        rules,
+        visible,
+    }
+}
+
+/// The scanned facts for the active SOA analysis, rebuilding them only when
+/// the dataset generation or the selected analysis changes.
+fn soa_plan(
+    state: &mut AppState,
+    analysis_key: AnalysisPresentationKey,
+    evidence_is_valid: bool,
+) -> Option<std::sync::Arc<SoaPlan>> {
+    let version = state.simulation.data_version;
+    if let Some(plan) = state.ui.results.plans.soa.as_ref()
+        && plan.version == version
+        && plan.analysis == analysis_key
+    {
+        return Some(std::sync::Arc::clone(plan));
+    }
+    let (analysis, evaluations, _) = active_soa(&state.simulation, evidence_is_valid)?;
+    let built = std::sync::Arc::new(build_soa_plan(version, analysis_key, analysis, evaluations));
+    state.ui.results.plans.soa = Some(std::sync::Arc::clone(&built));
+    Some(built)
+}
+
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some(dataset_id) = state.simulation.active_run().map(|run| run.dataset_id) else {
         well_hint(ui, "Select a dataset with retained SOA evidence");
         return;
     };
     let evidence_is_valid = active_evidence_is_valid(state);
+    let Some(analysis_key) = state
+        .simulation
+        .active_analysis()
+        .map(|analysis| AnalysisPresentationKey::new(dataset_id, analysis))
+    else {
+        well_hint(ui, "Select a validated safe-operating-area analysis");
+        return;
+    };
+    // Built before the retained evidence is borrowed, so the scan happens at
+    // most once per dataset generation rather than once per row per frame.
+    let Some(plan) = soa_plan(state, analysis_key, evidence_is_valid) else {
+        well_hint(ui, "Select a validated safe-operating-area analysis");
+        return;
+    };
     let Some((analysis, evaluations, violation_count)) =
         active_soa(&state.simulation, evidence_is_valid)
     else {
         well_hint(ui, "Select a validated safe-operating-area analysis");
         return;
     };
-    let analysis_key = AnalysisPresentationKey::new(dataset_id, analysis);
     let selected = state.ui.results.selected_soa_rule.clone();
     let initial_filter = state.ui.results.soa_rule_filter;
     let mut filter = initial_filter;
@@ -100,10 +214,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(super::ResultViewer::Soa, 0);
     }
 
-    let attention_count = evaluations
-        .iter()
-        .filter(|evaluation| SoaRuleFilter::Violations.matches(evaluation.verdict))
-        .count();
+    let attention_count = plan.visible(SoaRuleFilter::Violations).len();
     let passing_count = evaluations.len().saturating_sub(attention_count);
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
@@ -150,22 +261,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if trace_open
         && let Some(selection) = requested.as_ref()
         && selection.analysis == analysis_key
-        && let Some(evaluation) = evaluations.iter().find(|evaluation| {
+        && let Some((rule, evaluation)) = evaluations.iter().enumerate().find(|(_, evaluation)| {
             selection.device_id == evaluation.device_id
                 && selection.parameter == evaluation.parameter
         })
     {
-        if let Some(waveform) = stress_waveform(analysis, evaluation) {
+        // The plan already located and verified this rule's history; drawing
+        // it must not repeat that scan on every frame the card is open.
+        if let Some(waveform) = plan
+            .facts(rule)
+            .and_then(|facts| facts.stress_waveform)
+            .and_then(|index| analysis.waveforms.get(index))
+        {
             stress_trace_card(ui, &mut state.ui.results, waveform, evaluation);
         } else {
             legacy_stress_history_note(ui);
         }
     }
 
-    let visible_evaluations = evaluations
-        .iter()
-        .filter(|evaluation| filter.matches(evaluation.verdict))
-        .collect::<Vec<_>>();
+    let visible_rules = plan.visible(filter);
 
     let width = ui.available_width().max(1_270.0);
     egui::ScrollArea::horizontal()
@@ -199,101 +313,93 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         header.col(|ui| table_header(ui, label));
                     }
                 })
-                .body(|mut body| {
-                    for &evaluation in &visible_evaluations {
+                // Only the rows the viewport can show. A real block SOAs
+                // thousands of rules, and every row here costs a schematic
+                // lookup for its cross-probe button.
+                .body(|body| {
+                    body.rows(ROW_HEIGHT, visible_rules.len(), |mut row| {
+                        let rule = visible_rules[row.index()];
+                        let evaluation = &evaluations[rule];
+                        let facts = plan.facts(rule).expect("one fact set per retained rule");
                         let is_selected = selected.as_ref().is_some_and(|selection| {
                             selection.analysis == analysis_key
                                 && selection.device_id == evaluation.device_id
                                 && selection.parameter == evaluation.parameter
                         });
-                        body.row(ROW_HEIGHT, |mut row| {
-                            row.set_selected(is_selected);
-                            row.col(|ui| {
-                                if ui
-                                    .selectable_label(
-                                        is_selected,
-                                        RichText::new(&evaluation.device_id).monospace(),
+                        row.set_selected(is_selected);
+                        row.col(|ui| {
+                            if ui
+                                .selectable_label(
+                                    is_selected,
+                                    RichText::new(&evaluation.device_id).monospace(),
+                                )
+                                .clicked()
+                            {
+                                requested = Some(SoaRuleSelection {
+                                    analysis: analysis_key,
+                                    device_id: evaluation.device_id.clone(),
+                                    parameter: evaluation.parameter,
+                                });
+                            }
+                        });
+                        row.col(|ui| {
+                            ui.label(parameter_label(evaluation.parameter));
+                        });
+                        row.col(|ui| {
+                            exact_quantity(ui, evaluation.worst_actual_value, &evaluation.unit)
+                        });
+                        row.col(|ui| exact_quantity(ui, evaluation.limit_value, &evaluation.unit));
+                        row.col(|ui| {
+                            exact_quantity(
+                                ui,
+                                evaluation.limit_value - evaluation.worst_actual_value,
+                                &evaluation.unit,
+                            )
+                        });
+                        row.col(|ui| mono(ui, &facts.interval_compact));
+                        row.col(|ui| verdict(ui, evaluation.verdict));
+                        row.col(|ui| {
+                            ui.horizontal(|ui| {
+                                let response = ui
+                                    .add_enabled(
+                                        facts.stress_waveform.is_some(),
+                                        egui::Button::new("Stress trace"),
                                     )
-                                    .clicked()
-                                {
+                                    .on_disabled_hover_text(
+                                        "This dataset predates exact SOA stress-history retention; run the analysis again.",
+                                    );
+                                if response.clicked() {
                                     requested = Some(SoaRuleSelection {
                                         analysis: analysis_key,
                                         device_id: evaluation.device_id.clone(),
                                         parameter: evaluation.parameter,
                                     });
+                                    trace_open = true;
+                                }
+
+                                let schematic_available =
+                                    soa_device_target(state, analysis_key, &evaluation.device_id)
+                                        .is_some();
+                                let response = ui
+                                    .add_enabled(schematic_available, egui::Button::new("Schematic"))
+                                    .on_disabled_hover_text(
+                                        "The result is stale or the retained device has no exact identity in the active schematic.",
+                                    );
+                                if response.clicked() {
+                                    let selection = SoaRuleSelection {
+                                        analysis: analysis_key,
+                                        device_id: evaluation.device_id.clone(),
+                                        parameter: evaluation.parameter,
+                                    };
+                                    requested = Some(selection.clone());
+                                    cross_probe = Some(selection);
                                 }
                             });
-                            row.col(|ui| {
-                                ui.label(parameter_label(evaluation.parameter));
-                            });
-                            row.col(|ui| {
-                                exact_quantity(ui, evaluation.worst_actual_value, &evaluation.unit)
-                            });
-                            row.col(|ui| {
-                                exact_quantity(ui, evaluation.limit_value, &evaluation.unit)
-                            });
-                            row.col(|ui| {
-                                exact_quantity(
-                                    ui,
-                                    evaluation.limit_value - evaluation.worst_actual_value,
-                                    &evaluation.unit,
-                                )
-                            });
-                            row.col(|ui| {
-                                mono(ui, &worst_interval_text(analysis, evaluation, true))
-                            });
-                            row.col(|ui| verdict(ui, evaluation.verdict));
-                            row.col(|ui| {
-                                ui.horizontal(|ui| {
-                                    let trace_available =
-                                        stress_waveform(analysis, evaluation).is_some();
-                                    let response = ui
-                                        .add_enabled(
-                                            trace_available,
-                                            egui::Button::new("Stress trace"),
-                                        )
-                                        .on_disabled_hover_text(
-                                            "This dataset predates exact SOA stress-history retention; run the analysis again.",
-                                        );
-                                    if response.clicked() {
-                                        requested = Some(SoaRuleSelection {
-                                            analysis: analysis_key,
-                                            device_id: evaluation.device_id.clone(),
-                                            parameter: evaluation.parameter,
-                                        });
-                                        trace_open = true;
-                                    }
-
-                                    let schematic_available = soa_device_target(
-                                        state,
-                                        analysis_key,
-                                        &evaluation.device_id,
-                                    )
-                                    .is_some();
-                                    let response = ui
-                                        .add_enabled(
-                                            schematic_available,
-                                            egui::Button::new("Schematic"),
-                                        )
-                                        .on_disabled_hover_text(
-                                            "The result is stale or the retained device has no exact identity in the active schematic.",
-                                        );
-                                    if response.clicked() {
-                                        let selection = SoaRuleSelection {
-                                            analysis: analysis_key,
-                                            device_id: evaluation.device_id.clone(),
-                                            parameter: evaluation.parameter,
-                                        };
-                                        requested = Some(selection.clone());
-                                        cross_probe = Some(selection);
-                                    }
-                                });
-                            });
                         });
-                    }
+                    });
                 });
         });
-    if visible_evaluations.is_empty() {
+    if visible_rules.is_empty() {
         well_hint(ui, "No retained SOA rules match the selected filter");
     }
 
@@ -326,6 +432,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
+    // The panel reads the same scanned facts the table does, so opening it
+    // does not re-scan the histories the sheet already walked.
+    let plan = soa_plan(state, selection.analysis, active_evidence_is_valid(state));
     let Some(run) = state.simulation.active_run() else {
         state.ui.results.selected_soa_rule = None;
         section_header(ui, "SOA rule selection", None);
@@ -360,7 +469,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
-    let Some(evaluation) = evaluations.iter().find(|evaluation| {
+    let Some((rule, evaluation)) = evaluations.iter().enumerate().find(|(_, evaluation)| {
         evaluation.device_id == selection.device_id && evaluation.parameter == selection.parameter
     }) else {
         state.ui.results.selected_soa_rule = None;
@@ -368,6 +477,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         panel_note(ui, "The selected SOA rule is no longer retained.");
         return;
     };
+    let facts = plan.as_ref().and_then(|plan| plan.facts(rule));
     let event_count = violations
         .iter()
         .filter(|event| {
@@ -408,7 +518,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
             (
                 "Worst interval",
-                worst_interval_text(analysis, evaluation, false),
+                facts.map_or_else(
+                    || worst_interval_text(None, evaluation, false),
+                    |facts| facts.interval_full.clone(),
+                ),
                 false,
             ),
             (
@@ -421,7 +534,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     );
     panel_note(ui, &evaluation.description);
 
-    let trace_available = stress_waveform(analysis, evaluation).is_some();
+    let trace_available = facts.is_some_and(|facts| facts.stress_waveform.is_some());
     let schematic_available =
         soa_device_target(state, selection.analysis, &evaluation.device_id).is_some();
     let mut open_trace = false;
@@ -453,6 +566,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
 impl SoaRuleFilter {
     const ALL: [Self; 3] = [Self::Violations, Self::Passing, Self::All];
+
+    /// Position in [`Self::ALL`], which indexes the plan's visible-row lists.
+    const fn ordinal(self) -> usize {
+        match self {
+            Self::Violations => 0,
+            Self::Passing => 1,
+            Self::All => 2,
+        }
+    }
 
     const fn label(self) -> &'static str {
         match self {
@@ -511,7 +633,7 @@ fn stress_waveform<'a>(
 }
 
 fn worst_interval_text(
-    analysis: &AnalysisResult,
+    stress: Option<&WaveformData>,
     evaluation: &SoaEvaluationEvidence,
     compact: bool,
 ) -> String {
@@ -522,7 +644,7 @@ fn worst_interval_text(
             "Not applicable (rule passed)".to_owned()
         };
     }
-    let Some(waveform) = stress_waveform(analysis, evaluation) else {
+    let Some(waveform) = stress else {
         return if compact {
             format!("worst {:.6e} s", evaluation.worst_time_s)
         } else {
@@ -918,5 +1040,166 @@ mod tests {
         assert_eq!(active_interval_indices(&values, 2, 1.0), Some((1, 2)));
         assert_eq!(active_interval_indices(&values, 4, 1.0), Some((4, 4)));
         assert_eq!(active_interval_indices(&values, 3, 1.0), None);
+    }
+
+    /// A retained SOA analysis with `rules` warning rules, each carrying its
+    /// own verified stress history whose last sample is the worst.
+    fn soa_state(rules: usize, samples: usize, peak: f64) -> AppState {
+        use crate::state::{SoaViolationEvidence, SoaViolationSeverityEvidence};
+
+        let time: Vec<f64> = (0..samples).map(|index| index as f64 * 1.0e-12).collect();
+        let mut waveforms = Vec::new();
+        let mut evaluations = Vec::new();
+        let mut violations = Vec::new();
+        for rule in 0..rules {
+            let device_id = format!("M{rule:04}");
+            let y: Vec<f64> = (0..samples)
+                .map(|index| peak * (index as f64 + 1.0) / samples as f64)
+                .collect();
+            let worst_actual_value = y[samples - 1];
+            let worst_time_s = time[samples - 1];
+            waveforms.push(WaveformData::new(
+                crate::services::safety::soa_stress_waveform_name(
+                    &device_id,
+                    crate::services::safety::SoAParameter::Vds,
+                ),
+                time.clone(),
+                y,
+                "#00aaff",
+            ));
+            evaluations.push(SoaEvaluationEvidence {
+                device_id: device_id.clone(),
+                parameter: SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                worst_actual_value,
+                worst_time_s,
+                sample_count: samples as u64,
+                unit: "V".to_owned(),
+                description: "Maximum drain-source voltage".to_owned(),
+                verdict: SoaRuleVerdictEvidence::Warning,
+            });
+            violations.push(SoaViolationEvidence {
+                device_id,
+                parameter: SoaParameterEvidence::DrainSourceVoltage,
+                limit_value: 3.3,
+                actual_value: worst_actual_value,
+                time_s: worst_time_s,
+                severity: SoaViolationSeverityEvidence::Warning,
+            });
+        }
+
+        let analysis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time })
+            .with_waveforms(waveforms)
+            .with_result_payload(AnalysisResultPayload::Soa {
+                evaluations,
+                violations,
+            });
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(analysis);
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state
+    }
+
+    fn active_key(state: &AppState) -> AnalysisPresentationKey {
+        let run = state.simulation.active_run().expect("retained run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    }
+
+    /// The plan is a memo, so it must say exactly what the scan it replaced
+    /// said — for every rule, not just the one the fixture looks at.
+    #[test]
+    fn the_plan_states_what_a_direct_scan_of_each_rule_states() {
+        let mut state = soa_state(6, 32, 3.0);
+        let key = active_key(&state);
+        let plan = soa_plan(&mut state, key, true).expect("a validated SOA plan");
+
+        let analysis = &state.simulation.runs[0].analyses[0];
+        let Some(AnalysisResultPayload::Soa { evaluations, .. }) = analysis.result_payload.as_ref()
+        else {
+            panic!("the fixture retains an SOA payload");
+        };
+        for (rule, evaluation) in evaluations.iter().enumerate() {
+            let scanned = stress_waveform(analysis, evaluation);
+            let facts = plan.facts(rule).expect("one fact set per rule");
+            assert_eq!(facts.stress_waveform.is_some(), scanned.is_some(), "{rule}");
+            assert_eq!(
+                facts.interval_compact,
+                worst_interval_text(scanned, evaluation, true),
+                "{rule}"
+            );
+            assert_eq!(
+                facts.interval_full,
+                worst_interval_text(scanned, evaluation, false),
+                "{rule}"
+            );
+        }
+        assert_eq!(plan.visible(SoaRuleFilter::Violations).len(), 6);
+        assert_eq!(plan.visible(SoaRuleFilter::Passing).len(), 0);
+        assert_eq!(plan.visible(SoaRuleFilter::All).len(), 6);
+    }
+
+    /// A memo that survives its dataset is worse than the scan it saved.
+    #[test]
+    fn a_new_dataset_generation_rebuilds_the_stress_facts() {
+        let mut state = soa_state(2, 32, 3.0);
+        let key = active_key(&state);
+        let before = soa_plan(&mut state, key, true).expect("a validated SOA plan");
+        let before_interval = before.facts(0).expect("rule 0").interval_compact.clone();
+
+        // Replace the stress history with one that never crosses the warning
+        // band, so the interval the plan reports has to change.
+        let flattened: Vec<f64> = vec![0.1; 32];
+        state.simulation.runs[0].analyses[0].waveforms[0].y = std::sync::Arc::new(flattened);
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+        let after = soa_plan(&mut state, key, true).expect("a validated SOA plan");
+        assert_ne!(
+            after.facts(0).expect("rule 0").interval_compact,
+            before_interval,
+            "the plan reported the previous dataset generation's interval"
+        );
+        assert!(
+            after.facts(0).expect("rule 0").stress_waveform.is_none(),
+            "the replaced history no longer reproduces the rule, so no trace is offered"
+        );
+    }
+
+    /// The table lays out what the viewport can show, not what the dataset
+    /// retains. Counted through the real sheet's accessibility tree, because
+    /// that is what a screen reader — and a frame — actually pays for.
+    #[test]
+    fn the_rule_table_lays_out_only_the_rows_the_viewport_shows() {
+        let mut state = soa_state(400, 8, 3.0);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state));
+            },
+        );
+        let drawn = output
+            .platform_output
+            .accesskit_update
+            .expect("the SOA sheet publishes an accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Stress trace"))
+            .count();
+        assert!(drawn > 0, "the sheet drew no rules at all");
+        assert!(
+            drawn < 100,
+            "the sheet laid out {drawn} of 400 retained rules for a 1020 px viewport"
+        );
     }
 }

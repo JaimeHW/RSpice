@@ -30,6 +30,7 @@ mod specs;
 mod table;
 mod transfer_function;
 pub(crate) mod view_context;
+mod view_plans;
 mod virtual_rows;
 
 /// Lossless CSV projection of the exact evidence rendered by a Results sheet.
@@ -2435,6 +2436,8 @@ pub struct ResultsState {
     /// Memoized retained-evidence verdict per (data version, analysis); see
     /// [`retained_evidence_is_valid`].
     pub(super) retained_evidence_validity: RefCell<HashMap<(u64, AnalysisPresentationKey), bool>>,
+    /// Memoized viewer projections; see [`view_plans::ViewPlans`].
+    plans: view_plans::ViewPlans,
     /// Row/column selection for the TABLE viewer.
     pub table: table::TableView,
     /// Last row count the table rendered, as its footer states it. Written
