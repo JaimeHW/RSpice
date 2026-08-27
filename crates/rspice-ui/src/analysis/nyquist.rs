@@ -12,12 +12,13 @@
 //!
 //! # Architecture
 //!
-//! Integrates with Bode data for AC/STB analysis.
+//! The locus is the loop gain a stability run measures — see
+//! [`state::NyquistState`] for why there is exactly one of it.
 
 pub(crate) mod data;
 pub(crate) mod state;
 
-pub use data::NyquistData;
+pub use data::{EncirclementCount, NyquistData, NyquistMargin, closed_loop_rhp_poles};
 pub use state::NyquistState;
 
 // =============================================================================

@@ -6,7 +6,7 @@
 
 use egui::Ui;
 
-use crate::analysis::nyquist::NyquistData;
+use crate::analysis::nyquist::{EncirclementCount, NyquistData, NyquistMargin};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
@@ -15,47 +15,46 @@ use crate::workbench::AppState;
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
-/// The active curve and its actual cache identity (prefer the selected one).
-fn active_curve(state: &AppState) -> Option<(usize, &NyquistData)> {
-    let nyquist = &state.analysis.nyquist_state;
-    nyquist
-        .curves
-        .get(nyquist.selected)
-        .map(|curve| (nyquist.selected, curve))
-        .or_else(|| nyquist.curves.first().map(|curve| (0, curve)))
-        .filter(|(_, curve)| !curve.is_empty())
+/// What the tab needs, spelled the way the reader can act on it.
+///
+/// The locus is a *loop gain*, and the numbers beside it are the Nyquist
+/// criterion applied to one. An AC node response or a harmonic-balance
+/// spectrum is not a loop gain, and drawing one here with stability numbers
+/// attached would put a verdict on a quantity that has none — so nothing but
+/// a retained loop-gain contour reaches this sheet.
+const NEEDS_LOOP_GAIN: &str =
+    "No loop gain — run a stability (.STB) analysis with its Nyquist contour retained";
+
+/// The retained loop-gain locus.
+fn active_curve(state: &AppState) -> Option<&NyquistData> {
+    state
+        .analysis
+        .nyquist_state
+        .curve()
+        .filter(|curve| !curve.is_empty())
 }
 
-/// Stability numbers, cached on the data version and selected curve.
+/// Stability numbers, cached on the data version.
 #[derive(Debug, Clone, Copy)]
 pub struct NyquistDerived {
     pub(crate) version: u64,
-    pub(crate) curve_index: usize,
-    pub(crate) encirclements: i32,
-    /// The Nyquist stability criterion also requires the number of open-loop
-    /// right-half-plane poles. Current viewer data does not retain that
-    /// authority, so this remains explicit instead of being inferred.
-    pub(crate) open_loop_rhp_poles: Option<u32>,
+    pub(crate) encirclements: EncirclementCount,
     pub(crate) min_distance: Option<f64>,
-    pub(crate) gain_margin: Option<f64>,
-    pub(crate) phase_margin: Option<f64>,
+    pub(crate) gain_margin: Option<NyquistMargin>,
+    pub(crate) phase_margin: Option<NyquistMargin>,
 }
 
 fn derived(state: &mut AppState) -> Option<NyquistDerived> {
     let version = state.simulation.data_version;
-    let curve_index = active_curve(state)?.0;
     if let Some(cached) = state.ui.results.nyquist
         && cached.version == version
-        && cached.curve_index == curve_index
     {
         return Some(cached);
     }
-    let curve = active_curve(state)?.1;
+    let curve = active_curve(state)?;
     let computed = NyquistDerived {
         version,
-        curve_index,
         encirclements: curve.count_encirclements(),
-        open_loop_rhp_poles: None,
         min_distance: curve.min_distance_from_critical(),
         gain_margin: curve.gain_margin(),
         phase_margin: curve.phase_margin(),
@@ -64,40 +63,46 @@ fn derived(state: &mut AppState) -> Option<NyquistDerived> {
     Some(computed)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NyquistStabilityVerdict {
-    Stable,
-    Unstable,
-    Indeterminate,
-}
-
-impl NyquistStabilityVerdict {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Stable => "stable",
-            Self::Unstable => "unstable",
-            Self::Indeterminate => "indeterminate",
-        }
+/// How an encirclement count reads in the panel.
+fn encirclement_row(count: EncirclementCount) -> String {
+    match count {
+        EncirclementCount::Counted(n) => n.to_string(),
+        EncirclementCount::TouchesCriticalPoint => "on −1 + j0".to_owned(),
+        EncirclementCount::Unresolved { turns } => format!("unresolved ({turns:+.2} turns)"),
+        EncirclementCount::NotFinite => "non-finite locus".to_owned(),
     }
 }
 
-fn stability_verdict(
-    encirclements: i32,
-    open_loop_rhp_poles: Option<u32>,
-) -> NyquistStabilityVerdict {
-    let Some(open_loop_rhp_poles) = open_loop_rhp_poles else {
-        return NyquistStabilityVerdict::Indeterminate;
+/// The criterion, written out for the count this locus actually has.
+///
+/// P — the number of open-loop right-half-plane poles — is not something a
+/// loop-gain sweep can measure, and no retained result here supplies it: a
+/// pole-zero run on the deck the probe measured returns the poles of the
+/// circuit as connected, which is the *closed* loop. So the criterion is
+/// stated rather than resolved, with the one case the reader can settle from
+/// the schematic (P = 0, an open loop with no unstable poles of its own)
+/// spelled out.
+fn criterion_note(count: EncirclementCount) -> String {
+    let Some(n) = count.counted() else {
+        return "The contour has no encirclement count, so the criterion Z = N + P cannot be applied to it.".to_owned();
     };
-    if i64::from(encirclements) == -i64::from(open_loop_rhp_poles) {
-        NyquistStabilityVerdict::Stable
-    } else {
-        NyquistStabilityVerdict::Unstable
-    }
+    let z = crate::analysis::nyquist::closed_loop_rhp_poles(n, 0);
+    let verdict = if z == 0 { "stable" } else { "unstable" };
+    format!(
+        "Nyquist criterion: Z = N + P = {n:+} + P closed-loop right-half-plane poles, where P counts \
+         the open-loop ones. P has to come from a pole-zero analysis of the loop-broken deck — a \
+         pole-zero run on this deck returns closed-loop poles. With P = 0 the loop is {verdict} (Z = {z})."
+    )
 }
 
-const fn curve_cache_key(base: u64, curve_index: usize) -> u64 {
-    base ^ (curve_index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-}
+/// Viewer-scoped base for this sheet's entries in the workspace-wide derived
+/// and decimation caches; the series ordinals below separate its own arrays.
+/// Composed through [`plot::trace_cache_key`], which moves the ordinal clear
+/// of the base instead of folding it in where the base already has bits.
+const NYQUIST_CACHE_BASE: u64 = 0x917_0000;
+const REAL_SERIES: usize = 0;
+const IMAGINARY_SERIES: usize = 1;
+const LOCUS_SERIES: usize = 2;
 
 // ---------------------------------------------------------------------------
 // center view
@@ -109,8 +114,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let c = t.color;
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
 
-    let Some((curve_index, curve)) = active_curve(state) else {
-        well_hint(ui, "No loop-gain data — run an AC analysis");
+    let Some(curve) = active_curve(state) else {
+        well_hint(ui, NEEDS_LOOP_GAIN);
         return;
     };
     let name = curve.name.clone();
@@ -120,23 +125,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let (re, im) = {
         let points: Vec<_> = curve.points.clone();
         let derived = &mut state.ui.results.derived;
-        let re = derived.get_or(curve_cache_key(0x917_0001, curve_index), || {
-            std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>())
-        });
-        let im = derived.get_or(curve_cache_key(0x917_0002, curve_index), || {
-            std::sync::Arc::new(points.iter().map(|p| p.imag).collect::<Vec<_>>())
-        });
+        let re = derived.get_or(
+            plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
+            || std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>()),
+        );
+        let im = derived.get_or(
+            plot::trace_cache_key(NYQUIST_CACHE_BASE, IMAGINARY_SERIES),
+            || std::sync::Arc::new(points.iter().map(|p| p.imag).collect::<Vec<_>>()),
+        );
         (re, im)
     };
 
     let stats = derived(state);
 
+    // The legend names the quantity that is actually plotted, which is the
+    // retained contour's own name rather than a fixed label.
     let legend = [LegendChip {
-        name: "loop gain",
+        name: &name,
         color: c.traces[0],
         on: true,
     }];
-    strip::StripHeader::new("NYQ", &format!("{name} · {point_count} pts"), &legend).show(ui);
+    strip::StripHeader::new("NYQ", &format!("{point_count} pts"), &legend).show(ui);
 
     // Equal-aspect ranges around the locus and the critical point.
     let mut extent = 1.3f64;
@@ -161,7 +170,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         // Re L(jω) is a coordinate, not an ordering — the locus encircles.
         Trace::new(&re, &im, c.traces[0])
             .parametric()
-            .cache_key(curve_cache_key(0x917_00FF, curve_index)),
+            .cache_key(plot::trace_cache_key(NYQUIST_CACHE_BASE, LOCUS_SERIES)),
     );
 
     // Critical point.
@@ -202,7 +211,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let readout = move |_x: f64| -> Vec<(String, String)> {
         let mut rows = Vec::new();
         if let Some(s) = stats_for_readout {
-            rows.push(("N".to_owned(), s.encirclements.to_string()));
+            rows.push(("N".to_owned(), encirclement_row(s.encirclements)));
             if let Some(d) = s.min_distance {
                 rows.push(("min |1+L|".to_owned(), fmt_si(d, "", 2)));
             }
@@ -282,7 +291,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         painter.circle_stroke(pos, 4.0, egui::Stroke::new(1.5, c.accent));
 
         let frequency = active_curve(state)
-            .and_then(|(_, curve)| curve.points.get(i).map(|p| p.frequency))
+            .and_then(|curve| curve.points.get(i).map(|p| p.frequency))
             .unwrap_or(0.0);
         let magnitude = (re[i] * re[i] + im[i] * im[i]).sqrt();
         let phase_radians = im[i].atan2(re[i]);
@@ -314,52 +323,51 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(s) = derived(state) else {
-        super::panel_note(
-            ui,
-            "Stability numbers appear once AC loop-gain data is loaded.",
-        );
+        super::panel_note(ui, NEEDS_LOOP_GAIN);
         return;
     };
 
-    let verdict = stability_verdict(s.encirclements, s.open_loop_rhp_poles);
-    let fmt_opt =
-        |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
+    let margin = |margin: Option<NyquistMargin>, render: &dyn Fn(f64) -> String| -> String {
+        margin.map_or_else(
+            || "—".to_owned(),
+            |margin| {
+                format!(
+                    "{} at {}",
+                    render(margin.value),
+                    quantity_policy.format_frequency(margin.frequency, 3)
+                )
+            },
+        )
+    };
     let rows = [
-        ("Encirclements", s.encirclements.to_string(), true),
-        ("Verdict", verdict.label().to_owned(), true),
         (
-            "Open-loop RHP poles",
-            s.open_loop_rhp_poles
-                .map_or_else(|| "not retained".to_owned(), |count| count.to_string()),
+            "Encirclements N (CW)",
+            encirclement_row(s.encirclements),
             true,
         ),
         (
             "Min distance to −1",
-            fmt_opt(s.min_distance, &|v| fmt_si(v, "", 3)),
+            s.min_distance
+                .map_or_else(|| "—".to_owned(), |v| fmt_si(v, "", 3)),
             false,
         ),
         (
             "Gain margin",
-            fmt_opt(s.gain_margin, &|v| format!("{:.1} dB", 20.0 * v.log10())),
+            margin(s.gain_margin, &|ratio| {
+                format!("{:.2} dB", 20.0 * ratio.log10())
+            }),
             false,
         ),
         (
             "Phase margin",
-            fmt_opt(s.phase_margin, &|degrees| {
+            margin(s.phase_margin, &|degrees| {
                 quantity_policy.format_angle(degrees.to_radians(), 1)
             }),
             false,
         ),
     ];
     super::stat_table(ui, &rows);
-    super::panel_note(
-        ui,
-        if verdict == NyquistStabilityVerdict::Indeterminate {
-            "Encirclements are retained, but closed-loop stability is indeterminate without the retained open-loop RHP pole count."
-        } else {
-            "Verdict applies the retained open-loop RHP pole count to encirclements around −1 + j0."
-        },
-    );
+    super::panel_note(ui, &criterion_note(s.encirclements));
 }
 
 #[cfg(test)]
@@ -367,41 +375,73 @@ mod tests {
     use super::*;
     use crate::analysis::nyquist::NyquistData;
 
+    /// The derived numbers are cached on the retained data version, so a new
+    /// result replaces them instead of serving the previous locus's stability.
     #[test]
-    fn selected_curve_is_part_of_the_derived_cache_authority() {
+    fn derived_stability_follows_the_retained_data_version() {
         let mut state = AppState::default();
-        state.analysis.nyquist_state.curves = vec![
-            NyquistData::from_arrays("near", &[1.0], &[0.0], &[0.0]),
-            NyquistData::from_arrays("far", &[1.0], &[-1.0], &[2.0]),
-        ];
+        state
+            .analysis
+            .nyquist_state
+            .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[0.0], &[0.0]));
 
-        let first = derived(&mut state).expect("first selected curve");
-        assert_eq!(first.curve_index, 0);
+        let first = derived(&mut state).expect("a loaded locus has stability numbers");
         assert_eq!(first.min_distance, Some(1.0));
 
-        state.analysis.nyquist_state.selected = 1;
-        let second = derived(&mut state).expect("second selected curve");
-        assert_eq!(second.curve_index, 1);
+        state
+            .analysis
+            .nyquist_state
+            .load_data(NyquistData::from_arrays("L(jω)", &[1.0], &[-1.0], &[2.0]));
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        let second = derived(&mut state).expect("the replacement locus is derived afresh");
         assert_eq!(second.min_distance, Some(2.0));
     }
 
+    /// The panel states the criterion instead of pronouncing a verdict it
+    /// cannot support: P is not something this run retains, so it stays in
+    /// the sentence rather than being silently assumed away.
     #[test]
-    fn stability_is_indeterminate_without_open_loop_pole_authority() {
+    fn the_criterion_note_carries_the_count_and_names_what_p_needs() {
+        let note = criterion_note(EncirclementCount::Counted(2));
+
+        assert!(note.contains("Z = N + P"), "{note}");
+        assert!(note.contains("+2"), "{note}");
+        assert!(
+            note.contains("pole-zero analysis of the loop-broken deck"),
+            "{note}"
+        );
+        assert!(note.contains("With P = 0 the loop is unstable"), "{note}");
+
+        let stable = criterion_note(EncirclementCount::Counted(0));
+        assert!(stable.contains("With P = 0 the loop is stable"), "{stable}");
+    }
+
+    /// A contour with no winding number gets no criterion applied to it.
+    #[test]
+    fn a_contour_without_a_winding_number_carries_no_criterion() {
+        let note = criterion_note(EncirclementCount::TouchesCriticalPoint);
+
+        assert!(note.contains("cannot be applied"), "{note}");
         assert_eq!(
-            stability_verdict(0, None),
-            NyquistStabilityVerdict::Indeterminate
+            encirclement_row(EncirclementCount::TouchesCriticalPoint),
+            "on −1 + j0"
         );
         assert_eq!(
-            stability_verdict(0, Some(0)),
-            NyquistStabilityVerdict::Stable
+            encirclement_row(EncirclementCount::Unresolved { turns: 0.37 }),
+            "unresolved (+0.37 turns)"
         );
+    }
+
+    /// The three arrays this sheet caches must not collide with each other,
+    /// and the composition is the plot engine's, not a bitwise fold.
+    #[test]
+    fn the_cached_series_keys_stay_distinct() {
+        let keys = [REAL_SERIES, IMAGINARY_SERIES, LOCUS_SERIES]
+            .map(|series| plot::trace_cache_key(NYQUIST_CACHE_BASE, series));
+
         assert_eq!(
-            stability_verdict(-1, Some(1)),
-            NyquistStabilityVerdict::Stable
-        );
-        assert_eq!(
-            stability_verdict(0, Some(1)),
-            NyquistStabilityVerdict::Unstable
+            keys.iter().collect::<std::collections::HashSet<_>>().len(),
+            3
         );
     }
 }

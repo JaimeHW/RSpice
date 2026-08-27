@@ -110,16 +110,15 @@ impl SimulationController {
 
             bode_data.add_response();
 
-            let nyquist_curve = crate::analysis::nyquist::data::NyquistData::from_arrays(
-                &name,
-                frequencies,
-                &waveform.y_values,
-                imag,
-            );
-            if loaded_nyquist {
-                state.analysis.nyquist_state.add_curve(nyquist_curve);
-            } else {
-                state.analysis.nyquist_state.load_data(nyquist_curve);
+            if !loaded_nyquist {
+                state.analysis.nyquist_state.load_data(
+                    crate::analysis::nyquist::NyquistData::from_arrays(
+                        &name,
+                        frequencies,
+                        &waveform.y_values,
+                        imag,
+                    ),
+                );
                 loaded_nyquist = true;
             }
         }

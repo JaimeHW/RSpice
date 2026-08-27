@@ -1,4 +1,10 @@
-//! Nyquist viewer state: the loaded curves and which one is selected.
+//! Nyquist viewer state: the loop-gain locus currently loaded.
+//!
+//! One locus, because a result carries one loop gain: a stability run measures
+//! the return ratio at one probe and retains one contour for it. The list of
+//! curves and the selected index that used to live here were filled by handing
+//! every complex AC waveform to the viewer as though each were a loop gain,
+//! and nothing ever moved the selection.
 //!
 //! The Nyquist viewer draws its own axes, critical point, and annotations, so
 //! this holds no display policy. The overlay enum, the grid/critical-point/
@@ -11,32 +17,28 @@ use super::data::NyquistData;
 /// Complete Nyquist plot viewer state
 #[derive(Debug, Clone, Default)]
 pub struct NyquistState {
-    /// Nyquist data curves
-    pub curves: Vec<NyquistData>,
-    /// Selected curve index
-    pub selected: usize,
+    /// The retained loop-gain locus.
+    curve: Option<NyquistData>,
 }
 
 impl NyquistState {
-    /// Replace the contents with a single curve.
+    /// Replace the contents with a single locus.
     pub fn load_data(&mut self, data: NyquistData) {
-        self.curves = vec![data];
-        self.selected = 0;
+        self.curve = Some(data);
     }
 
-    /// Append a curve alongside the ones already loaded.
-    pub fn add_curve(&mut self, data: NyquistData) {
-        self.curves.push(data);
+    /// The loaded locus, if there is one.
+    pub fn curve(&self) -> Option<&NyquistData> {
+        self.curve.as_ref()
     }
 
-    /// Drop every curve.
+    /// Drop the locus.
     pub fn clear(&mut self) {
-        self.curves.clear();
-        self.selected = 0;
+        self.curve = None;
     }
 
     /// Is empty?
     pub fn is_empty(&self) -> bool {
-        self.curves.is_empty()
+        self.curve.as_ref().is_none_or(NyquistData::is_empty)
     }
 }
