@@ -23,6 +23,7 @@ mod cursor;
 mod decimate;
 mod format;
 mod render;
+mod sample;
 mod scale;
 mod spec;
 
@@ -31,10 +32,16 @@ pub use decimate::{
     DEFAULT_DISPLAY_CACHE_MIB, DecimationCache, DisplayDecimation, SampleInterpolation, sample_at,
     sample_at_with,
 };
+pub use sample::{
+    BranchSample, MonotoneRun, SHAPE_RUN_CAP, SweepClass, SweepShape, XOrientation, nearest_sample,
+    sample_at_with_shape, sample_branches_into,
+};
 pub use format::{fmt_si, fmt_si_significant, fmt_significant};
 pub use render::{
     InteractionMode, PlotResponse, ViewChange, plot_rect, set_interaction_mode, show,
     square_outer_rect,
 };
 pub use scale::XScale;
-pub use spec::{Axis, Band, LimitLine, Marker, MarkerShape, PlotSpec, RefLine, Trace};
+pub use spec::{
+    Axis, Band, LimitLine, Marker, MarkerShape, PlotSpec, RefLine, Trace, trace_cache_key,
+};

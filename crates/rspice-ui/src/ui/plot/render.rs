@@ -596,6 +596,7 @@ pub fn show(
                             rows,
                         },
                         trace.parametric,
+                        trace.shape,
                     )
                     .iter()
                     .map(|p| pos2(mx(p[0]), my(p[1])))

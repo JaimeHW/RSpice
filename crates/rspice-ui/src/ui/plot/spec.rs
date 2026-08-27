@@ -5,6 +5,7 @@ use egui::Color32;
 
 use super::decimate::DisplayDecimation;
 use super::format::tick_label;
+use super::sample::SweepShape;
 use super::scale::{XScale, decade_ticks, linear_ticks};
 
 /// One axis: range, tick positions/labels, and the unit shown at its end.
@@ -172,6 +173,16 @@ pub struct Trace<'a> {
     /// renderer reduces in source order instead. It is a fact about the
     /// data, never about the user's display preference.
     pub parametric: bool,
+    /// What this trace's X column actually is, when the owner has already
+    /// classified it.
+    ///
+    /// A reverse sweep and a hysteresis loop are both ordinary results and
+    /// neither is a locus, but both break an ascending reduction. Declaring
+    /// the shape routes the trace to a reduction that can describe it. `None`
+    /// reads as ascending, which is what every caller meant before shapes
+    /// existed. Classifying is O(n), so it belongs in the owner's cache, not
+    /// in the per-frame render path.
+    pub shape: Option<&'a SweepShape>,
 }
 
 impl<'a> Trace<'a> {
@@ -188,6 +199,7 @@ impl<'a> Trace<'a> {
             width: 1.8,
             cache_key: None,
             parametric: false,
+            shape: None,
         }
     }
 
@@ -238,6 +250,27 @@ impl<'a> Trace<'a> {
         self.parametric = true;
         self
     }
+
+    /// Declare the monotone structure of this trace's X column, so the
+    /// renderer picks a reduction that can describe it.
+    #[must_use]
+    pub fn shape(mut self, shape: &'a SweepShape) -> Self {
+        self.shape = Some(shape);
+        self
+    }
+}
+
+/// Compose a per-trace decimation cache key from a viewer-scoped base and a
+/// trace ordinal.
+///
+/// The ordinal moves into bits the base cannot occupy. Folding it in with a
+/// bitwise OR — the obvious spelling — silently aliases as soon as the ordinal
+/// reaches a bit the base already sets, and two traces sharing a key serve
+/// each other's envelopes: one curve drawn in another's place, with nothing to
+/// show that anything went wrong.
+#[must_use]
+pub fn trace_cache_key(base: u64, index: usize) -> u64 {
+    (base & 0xFFFF_FFFF) | ((index as u64) << 32)
 }
 
 /// How a [`Marker`] draws.
@@ -451,5 +484,36 @@ impl<'a> PlotSpec<'a> {
     pub fn with_log_y(mut self) -> Self {
         self.y_scale = XScale::Log10;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A viewer composing a per-trace cache key from a viewer-scoped base and
+    /// a trace ordinal must not fold the ordinal into bits the base already
+    /// occupies: two traces sharing a key serve each other's envelopes, which
+    /// draws one curve in another's place. Smith's base ends in 0xF0, so the
+    /// bitwise OR it used aliased from the seventeenth trace onwards — well
+    /// inside a four-port sheet.
+    #[test]
+    fn trace_cache_keys_stay_distinct_past_sixteen_traces() {
+        let keys = (0..64usize)
+            .map(|index| trace_cache_key(0x501_00F0, index))
+            .collect::<std::collections::HashSet<_>>();
+
+        assert_eq!(keys.len(), 64, "trace cache keys aliased");
+    }
+
+    /// Two viewers must not collide either, at any ordinal.
+    #[test]
+    fn trace_cache_keys_separate_their_viewers() {
+        let smith = (0..32usize).map(|index| trace_cache_key(0x501_00F0, index));
+        let nyquist = (0..32usize)
+            .map(|index| trace_cache_key(0x419_0000, index))
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(smith.into_iter().all(|key| !nyquist.contains(&key)));
     }
 }
