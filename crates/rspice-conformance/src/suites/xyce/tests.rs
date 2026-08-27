@@ -148,6 +148,73 @@ fn upstream_exclusion_promotions_fail_closed_when_contracts_go_stale() {
 }
 
 #[test]
+fn promoted_top_level_worker_uses_authenticated_owner_execution_dir_and_oracle() {
+    let root = tempfile::tempdir().expect("create top-level worker fixture");
+    let family = root.path().join("Netlists/TOP_LEVEL_WORKER");
+    let worker_directory = family.join("top_level");
+    fs::create_dir_all(&worker_directory).expect("create top-level worker directory");
+    let owner_relative = "Netlists/TOP_LEVEL_WORKER/deck.cir";
+    let worker_relative = "Netlists/TOP_LEVEL_WORKER/top_level/deck.cir";
+    fs::write(family.join("deck.cir"), "* wrapper-owned placeholder\n")
+        .expect("write top-level worker owner");
+    fs::write(
+        worker_directory.join("deck.cir"),
+        ".INC execution.inc\n.DC V1 1 2 1\n.PRINT DC V(1)\nV1 1 0 1\n.END\n",
+    )
+    .expect("write top-level worker deck");
+    fs::write(family.join("execution.inc"), "R1 1 0 1\n")
+        .expect("write execution-directory include");
+    fs::write(
+        root.path().join(HARNESS_MANIFEST_FILE),
+        format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+    )
+    .expect("write top-level worker harness manifest");
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        upstream_exclusion_manifest(&[&format!(
+            "{worker_relative}\tNetlists/TOP_LEVEL_WORKER/top_level/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\twrapper_top_level_execution_dir_worker_prn_dc"
+        )]),
+    )
+    .expect("write top-level worker exclusion manifest");
+    let output = root.path().join("OutputData/TOP_LEVEL_WORKER");
+    fs::create_dir_all(&output).expect("create top-level worker oracle directory");
+    fs::write(
+        output.join("deck.cir.prn"),
+        "Index V(1)\n0 1.00000000e+00\n1 2.00000000e+00\nEnd of Xyce(TM) Simulation\n",
+    )
+    .expect("write top-level worker oracle");
+
+    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let result = runner.run_test(worker_directory.join("deck.cir"));
+    assert!(
+        result.passed,
+        "authenticated worker should pass: {result:?}"
+    );
+    assert!(!result.upstream_excluded);
+    assert_eq!(
+        result.contract,
+        "wrapper_top_level_execution_dir_worker_prn_dc"
+    );
+    assert_eq!(
+        result.upstream_exclusion_source.as_deref(),
+        Some("Netlists/TOP_LEVEL_WORKER/top_level/exclude")
+    );
+
+    fs::write(root.path().join(HARNESS_MANIFEST_FILE), "")
+        .expect("remove top-level worker owner authentication");
+    let unauthenticated = XyceTestRunner::new(root.path(), XyceRunnerConfig::default())
+        .run_test(worker_directory.join("deck.cir"));
+    assert!(
+        !unauthenticated.passed,
+        "worker must fail closed without its authenticated owner relation: {unauthenticated:?}"
+    );
+    assert_eq!(
+        unauthenticated.contract,
+        "upstream_exclusion_promotion_mismatch"
+    );
+}
+
+#[test]
 fn upstream_exclusion_manifest_rejects_malformed_or_unsafe_records() {
     let cases = [
         (

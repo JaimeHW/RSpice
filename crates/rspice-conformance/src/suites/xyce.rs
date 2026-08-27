@@ -63,15 +63,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 257;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 258;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "c375f386b918f6b2505c781f5b9b741c89d00be22119f0fa9e1d37fd4d9e4dc7";
+    "a5215d8ffa93e97bac0f0e69b24bdb263ab4ae9b9fa21e9199b660bbef662b4a";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "d15773520765811e9252b8e9acc5a445965bad4af035bc54700d3f0511f187ab";
+    "1062dbd6c4bd0b93a1f601d87577398187c3de00079100f9382c24eb2292b122";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "af13cb4ac273f26fabe5fcf9b638f32b5c8a59c9523c9b68bfd4ea34ee1f3466";
+    "57c5e66e18bcb25e30085160d3419eae568832ea616a41d3e6997d63a1b157be";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -11746,6 +11746,7 @@ enum XyceStaticDcContract {
     WrapperRaw,
     WrapperResistorDefault,
     WrapperTopLevelExecutionDir,
+    WrapperTopLevelExecutionDirWorker,
     WrapperVoltageAccessor,
 }
 
@@ -11781,6 +11782,12 @@ impl XyceStaticDcContract {
             (Self::WrapperTopLevelExecutionDir, false) => "wrapper_top_level_execution_dir_prn_dc",
             (Self::WrapperTopLevelExecutionDir, true) => {
                 "wrapper_top_level_execution_dir_prn_step_dc"
+            }
+            (Self::WrapperTopLevelExecutionDirWorker, false) => {
+                "wrapper_top_level_execution_dir_worker_prn_dc"
+            }
+            (Self::WrapperTopLevelExecutionDirWorker, true) => {
+                "wrapper_top_level_execution_dir_worker_prn_step_dc"
             }
             (Self::WrapperVoltageAccessor, false) => "wrapper_voltage_accessor_prn_dc",
             (Self::WrapperVoltageAccessor, true) => "wrapper_voltage_accessor_prn_step_dc",

@@ -2342,29 +2342,42 @@ fn test_xyce_include_alias_and_path_resolution_cases_run() {
 }
 
 #[test]
-fn test_xyce_top_level_execution_dir_include_wrapper_case_runs_natively() {
+fn test_xyce_top_level_execution_dir_include_wrapper_family_runs_natively() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/Certification_Tests/BUG_1325_SON/top_level_file_path.cir";
+    let owner = "Netlists/Certification_Tests/BUG_1325_SON/top_level_file_path.cir";
+    let worker = "Netlists/Certification_Tests/BUG_1325_SON/top_level/top_level_file_path.cir";
 
     assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain its removed upstream top-level execution-directory wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce include execution-directory comparison, got {result:?}"
+        runner.requires_upstream_wrapper(owner),
+        "{owner} should retain its removed upstream top-level execution-directory wrapper provenance"
     );
     assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
+        !runner.requires_upstream_wrapper(worker),
+        "{worker} is the retained worker, not a second wrapper owner"
     );
-    assert_eq!(
-        result.contract, "wrapper_top_level_execution_dir_prn_dc",
-        "{relative} should report the native top-level execution-directory wrapper contract"
-    );
+
+    for relative in [owner, worker] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should run as a native Xyce include execution-directory comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract,
+            if relative == owner {
+                "wrapper_top_level_execution_dir_prn_dc"
+            } else {
+                "wrapper_top_level_execution_dir_worker_prn_dc"
+            },
+            "{relative} should report the native top-level execution-directory wrapper contract"
+        );
+    }
 }
 
 #[test]

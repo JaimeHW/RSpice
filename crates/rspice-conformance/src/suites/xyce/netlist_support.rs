@@ -406,6 +406,82 @@ impl XyceTestRunner {
             && Self::top_level_execution_deck_path(deck_path).is_ok_and(|path| path.is_file())
     }
 
+    /// Recover the wrapper owner for a retained `top_level/` worker deck.
+    ///
+    /// Some upstream Xyce regression wrappers keep a comments-only owner at
+    /// the family root and execute a same-named deck below `top_level/` while
+    /// retaining the family root as the process working directory.  The
+    /// nested deck is also retained by the corpus census, so independently
+    /// qualifying that record must preserve both the wrapper's execution
+    /// directory and its owner-relative numerical oracle.  This relation is
+    /// accepted only when the harness manifest authenticates the sibling
+    /// owner; an arbitrary nested deck must never inherit a parent directory
+    /// or a sibling oracle by filename coincidence alone.
+    pub(super) fn top_level_execution_worker_owner(
+        &self,
+        deck: &XyceDeck,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(worker_directory) = deck.path.parent() else {
+            return Ok(None);
+        };
+        if !worker_directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("top_level"))
+        {
+            return Ok(None);
+        }
+        let Some(family_directory) = worker_directory.parent() else {
+            return Ok(None);
+        };
+        let Some(file_name) = deck.path.file_name() else {
+            return Ok(None);
+        };
+        let owner = family_directory.join(file_name);
+        let owner_relative = self.relative_key(&owner);
+        if !self.requires_upstream_wrapper(&owner_relative) {
+            return Ok(None);
+        }
+
+        let metadata = fs::symlink_metadata(&owner).map_err(|error| {
+            format!(
+                "top-level execution-directory wrapper owner {} is unavailable: {error}",
+                self.display_path(&owner)
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "top-level execution-directory wrapper owner {} must be a regular non-symlink file",
+                self.display_path(&owner)
+            ));
+        }
+        if !Self::same_path(&Self::top_level_execution_deck_path(&owner)?, &deck.path) {
+            return Err(format!(
+                "top-level execution-directory worker {} does not match authenticated owner {}",
+                self.display_path(&deck.path),
+                self.display_path(&owner)
+            ));
+        }
+
+        let owner_source = fs::read_to_string(&owner).map_err(|error| {
+            format!(
+                "failed to read top-level execution-directory wrapper owner {}: {error}",
+                self.display_path(&owner)
+            )
+        })?;
+        if !Self::logical_netlist_lines(&owner_source)
+            .iter()
+            .all(|line| Self::strip_netlist_comment(line).trim().is_empty())
+        {
+            return Err(format!(
+                "top-level execution-directory wrapper owner {} must contain only comments and whitespace",
+                self.display_path(&owner)
+            ));
+        }
+
+        Ok(Some(owner))
+    }
+
     pub(super) fn is_native_absolute_inc_lib_wrapper_candidate(
         deck_path: &Path,
         source: &str,

@@ -980,12 +980,15 @@ impl XyceTestRunner {
 
     pub(super) fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        let top_level_worker_owner = self.top_level_execution_worker_owner(deck)?;
+        let oracle_deck_path = top_level_worker_owner.as_deref().unwrap_or(&deck.path);
         let mut source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
         source =
             Self::source_with_static_dc_wrapper_bindings(&source, &deck.path, requires_wrapper)?;
 
-        let measurement_reference_paths = self.measurement_reference_paths(&deck.path, "ms")?;
+        let measurement_reference_paths =
+            self.measurement_reference_paths(oracle_deck_path, "ms")?;
 
         let wrapper_contract = if requires_wrapper {
             if measurement_reference_paths.is_empty() {
@@ -1011,6 +1014,16 @@ impl XyceTestRunner {
                     deck.path
                         .parent()
                         .ok_or_else(|| "wrapper deck has no parent directory".to_string())?
+                        .to_path_buf(),
+                ),
+            )
+        } else if let Some(owner) = top_level_worker_owner.as_deref() {
+            (
+                deck.path.clone(),
+                Some(
+                    owner
+                        .parent()
+                        .ok_or_else(|| "wrapper owner has no parent directory".to_string())?
                         .to_path_buf(),
                 ),
             )
@@ -1053,7 +1066,7 @@ impl XyceTestRunner {
         let continuous_measurement_reference_paths =
             if parsed_netlist.options.measure_use_cont_files() {
                 self.continuous_measurement_reference_paths(
-                    &deck.path,
+                    oracle_deck_path,
                     &parsed_netlist,
                     "DC_CONT",
                     "ms",
@@ -1064,6 +1077,8 @@ impl XyceTestRunner {
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(contract, &static_plan)?;
             contract
+        } else if top_level_worker_owner.is_some() {
+            XyceStaticDcContract::WrapperTopLevelExecutionDirWorker
         } else {
             Self::static_dc_contract_for_print_format(false, static_plan.print_format.as_deref())?
         };
@@ -1074,7 +1089,7 @@ impl XyceTestRunner {
             );
         }
         let reference_path = self
-            .static_output_reference_path(&deck.path, contract.reference_extension())
+            .static_output_reference_path(oracle_deck_path, contract.reference_extension())
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
         if !reference_path.is_file()
             && measurement_reference_paths.is_empty()
