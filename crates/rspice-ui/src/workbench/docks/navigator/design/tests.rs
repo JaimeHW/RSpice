@@ -2256,3 +2256,55 @@ fn the_occurrence_in_front_of_the_reader_is_listed_once_and_from_its_buffer() {
             .collect::<Vec<_>>()
     );
 }
+
+/// A code model whose port widths are not fixed cannot be armed until they are
+/// chosen, so its click raises the placement dialog and arms nothing. The
+/// decision is held in one place, so every row that offers the model asks the
+/// same question.
+#[test]
+fn a_code_model_with_open_port_widths_asks_before_it_arms() {
+    let (mut open, mut fixed) = (None, None);
+    for descriptor in engine_only_xspice_devices() {
+        if builtin_xspice_library_binding(descriptor).is_err() {
+            continue;
+        }
+        let Ok(ports) = builtin_xspice_vector_ports(descriptor) else {
+            continue;
+        };
+        if ports
+            .iter()
+            .any(|port| port.maximum.is_none_or(|maximum| maximum != port.minimum))
+        {
+            open.get_or_insert(descriptor);
+        } else {
+            fixed.get_or_insert(descriptor);
+        }
+    }
+    let open = open.expect("the registry carries a code model with an open port width");
+    let fixed = fixed.expect("the registry carries a code model whose ports are all fixed");
+
+    let mut app = RSpiceApp::test_instance();
+    assert!(
+        place_builtin_xspice(&mut app, fixed.stable_id).is_some(),
+        "{} has nothing left to choose, so it arms straight away",
+        fixed.stable_id
+    );
+    assert!(
+        !app.state.dialogs.builtin_xspice_placement.open,
+        "and asks nothing"
+    );
+
+    assert!(
+        place_builtin_xspice(&mut app, open.stable_id).is_none(),
+        "{} cannot be armed until its widths are chosen",
+        open.stable_id
+    );
+    assert!(
+        app.state.dialogs.builtin_xspice_placement.open,
+        "so the click raises the placement dialog instead"
+    );
+    assert_eq!(
+        app.state.dialogs.builtin_xspice_placement.stable_id, open.stable_id,
+        "for the model the row named"
+    );
+}

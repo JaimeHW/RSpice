@@ -2109,16 +2109,19 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     } else if let Some(binding) = cell {
         arm_cell(&mut app.state, binding, ui.ctx());
     } else if let Some(row) = requested_part {
-        match row.action {
-            LibraryPartAction::Arm(placement) => {
-                arm_library_part(&mut app.state, *placement, ui.ctx());
-            }
-            LibraryPartAction::Review {
-                pack_id, version, ..
-            } => request_library_part(app, row.part_id, pack_id, version),
-            // A refused row renders disabled, so its click never arrives.
-            LibraryPartAction::Refused(_) => {}
-        }
+        apply_library_part_row(app, row, ui.ctx());
+    }
+}
+
+/// Complete one click on a library-part row.
+fn apply_library_part_row(app: &mut RSpiceApp, row: LibraryPartRow, ctx: &egui::Context) {
+    match row.action {
+        LibraryPartAction::Arm(placement) => arm_library_part(&mut app.state, *placement, ctx),
+        LibraryPartAction::Review {
+            pack_id, version, ..
+        } => request_library_part(app, row.part_id, pack_id, version),
+        // A refused row renders disabled, so its click never arrives.
+        LibraryPartAction::Refused(_) => {}
     }
 }
 
@@ -2929,45 +2932,56 @@ fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCel
             Some(descriptor.model_type),
             if query.is_empty() { 2 } else { 0 },
         );
+        let stable_id = descriptor.stable_id;
         match builtin_xspice_library_binding(descriptor) {
             Ok(binding) => {
                 response
                     .dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
                 if response.clicked() {
-                    match builtin_xspice_vector_ports(descriptor) {
-                        Ok(vector_ports)
-                            if vector_ports.iter().any(|port| {
-                                port.maximum.is_none_or(|maximum| maximum != port.minimum)
-                            }) =>
-                        {
-                            app.state.dialogs.builtin_xspice_placement.open(
-                                descriptor.stable_id,
-                                descriptor.display_name,
-                                vector_ports,
-                                app.state.design_execution_epoch,
-                                app.state.active_schematic_epoch,
-                                app.state.workspace.active_view.display_path(),
-                            );
-                        }
-                        Ok(_) => armed = Some(binding),
-                        Err(error) => {
-                            log::error!(
-                                "Cannot configure {} in the XSPICE catalog: {error}",
-                                descriptor.stable_id
-                            );
-                        }
-                    }
+                    armed = place_builtin_xspice(app, stable_id).or(armed);
                 }
             }
             Err(error) => {
-                log::error!(
-                    "Cannot expose {} in the XSPICE catalog: {error}",
-                    descriptor.stable_id
-                );
+                log::error!("Cannot expose {stable_id} in the XSPICE catalog: {error}");
             }
         }
     }
     armed
+}
+
+/// Decide what one built-in XSPICE click does.
+///
+/// A code model whose vector ports are not fixed cannot be armed until their
+/// widths are chosen, so the click raises the placement dialog and arms
+/// nothing. Held as one decision, by stable id, so every row that offers the
+/// model asks the same question.
+fn place_builtin_xspice(app: &mut RSpiceApp, stable_id: &str) -> Option<LibraryCellInstance> {
+    let descriptor = engine_only_xspice_devices()
+        .iter()
+        .find(|descriptor| descriptor.stable_id == stable_id)?;
+    let binding = builtin_xspice_library_binding(descriptor).ok()?;
+    match builtin_xspice_vector_ports(descriptor) {
+        Ok(vector_ports)
+            if vector_ports
+                .iter()
+                .any(|port| port.maximum.is_none_or(|maximum| maximum != port.minimum)) =>
+        {
+            app.state.dialogs.builtin_xspice_placement.open(
+                descriptor.stable_id,
+                descriptor.display_name,
+                vector_ports,
+                app.state.design_execution_epoch,
+                app.state.active_schematic_epoch,
+                app.state.workspace.active_view.display_path(),
+            );
+            None
+        }
+        Ok(_) => Some(binding),
+        Err(error) => {
+            log::error!("Cannot configure {stable_id} in the XSPICE catalog: {error}");
+            None
+        }
+    }
 }
 
 fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> {
