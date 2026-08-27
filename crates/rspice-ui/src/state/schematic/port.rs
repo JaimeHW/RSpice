@@ -674,8 +674,8 @@ impl SchematicState {
 /// [`super::BusDeclaration::parse`] — the single authority for range syntax —
 /// and a name with no bus delimiters is one conductor. Nothing between the two
 /// is a pin. `DATA[3]` selects one member of a bus, and the bus is the pin
-/// rather than the bit; the deck cannot carry that spelling either, because a
-/// probe written `V(DATA[3])` reaches the engine as `v(data3)`.
+/// rather than the bit; the deck does not carry that spelling either — a
+/// projected bit travels under its deck spelling, `DATA#3`.
 ///
 /// Width is bounded here because this is where the width is decided. Every
 /// conductor a pin declares becomes one formal of the `.SUBCKT` header and one

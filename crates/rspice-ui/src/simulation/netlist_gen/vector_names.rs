@@ -3,11 +3,12 @@
 //! A schematic authors and displays bus members Virtuoso-style: `A<3:0>` for
 //! the declaration, `A<3>` for one bit. That spelling cannot be what the deck
 //! carries. `<` and `>` are not identifier characters in the engine's lexer,
-//! so they arrive as standalone tokens, and the probe parser keeps only the
-//! identifier and number pieces of a `v(...)` operand: `.PRINT TRAN V(A<3>)`
-//! reaches the engine as `v(a3)`, silently naming an unrelated node instead of
-//! failing. `[` and `]` collapse the same way, and an XSPICE port written
-//! `A<3>` is rejected outright.
+//! so a delimited bit name arrives as a run of standalone tokens that every
+//! deck position must reassemble for itself. Element cards and probe operands
+//! do glue a source-contiguous run back together, but an XSPICE port written
+//! `A<3>` is rejected outright — `[` and `]` split the same way — and a name
+//! that is whole only where a path chooses to reassemble it cannot be the
+//! deck spelling of a bit.
 //!
 //! The deck therefore spells one bit `A#3`. `#` is an identifier character, so
 //! a bit name is a single token that no path splits, folds, or drops — element
@@ -193,12 +194,13 @@ mod tests {
         }
     }
 
-    /// The evidence behind the `#` decision: the authored delimiters are not
-    /// merely unconventional in a deck, they are destroyed by it — and only on
-    /// some of the paths a bit name has to cross, which is why reading an
-    /// element card alone would suggest they were safe.
+    /// The evidence behind the `#` decision: an authored delimiter is not an
+    /// identifier character, so a delimited bit name is whole only where a
+    /// deck path reassembles its token run — and the XSPICE path does not,
+    /// which is why reading an element card alone would suggest the authored
+    /// spelling was safe.
     #[test]
-    fn authored_delimiters_do_not_survive_the_probe_and_xspice_paths() {
+    fn authored_delimiters_survive_only_where_a_path_reassembles_them() {
         // An element card does reassemble them, so a bus that is only ever
         // wired looks fine right up to the point where it must be observed.
         for (card, node) in [("R1 A<3> 0 1k", "A<3>"), ("R1 A[3] 0 1k", "A[3]")] {
@@ -207,14 +209,16 @@ mod tests {
             assert_eq!(nodes_of(&netlist, "R1"), [node, "0"]);
         }
 
-        // A probe operand keeps only its identifier and number pieces, so all
-        // three of these name the same node: the authored delimiters are
-        // dropped rather than rejected, and `V(A<3>)` silently becomes a probe
-        // on `A3` — a node the same deck may legitimately declare.
+        // A probe operand is reassembled from its source-contiguous tokens,
+        // so a delimited spelling reaches the engine verbatim, lower-cased:
+        // `V(A<3>)` probes `a<3>`, a node distinct from the `a3` the plain
+        // spelling names. The probe path carries every spelling whole; the
+        // deck still emits `#` because the XSPICE path below refuses the
+        // authored delimiters.
         for (probe, expected) in [
             ("V(A#3)", "a#3"),
-            ("V(A<3>)", "a3"),
-            ("V(A[3])", "a3"),
+            ("V(A<3>)", "a<3>"),
+            ("V(A[3])", "a[3]"),
             ("V(A3)", "a3"),
         ] {
             let deck = format!("probe\nR1 A 0 1k\n.PRINT TRAN {probe}\n.TRAN 1n 10n\n.END\n");
