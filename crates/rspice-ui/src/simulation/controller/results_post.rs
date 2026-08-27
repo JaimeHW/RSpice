@@ -52,18 +52,20 @@ impl SimulationController {
         let input_options = state.analysis.fft_state.input_options_for_waveform(time);
 
         let provenance = self.in_flight_specialized_viewer_provenance(state);
-        if let Some(bit_period) = Self::estimate_ui_period(time, values) {
-            let eye_data = crate::analysis::eye_diagram::EyeDataBuilder::new()
-                .bit_period(bit_period)
-                .ui_count(2)
-                .skip_initial(2)
-                .build(time, values);
-            if eye_data.trace_count() > 0 {
-                state.analysis.eye_diagram_state.load_data(eye_data);
-                if let Some(provenance) = provenance {
-                    state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, provenance);
-                }
-            }
+        // Same builder as the lazy path in `transient_post`, at the same
+        // reader-chosen bit period. Seeding the viewer eagerly must not mean
+        // seeding it from a second, differently-behaved estimator.
+        let timebase = provenance
+            .map(|owner| state.eye_timebase_for(owner))
+            .unwrap_or_default();
+        let (eye_data, eye_provenance) = build_eye_from_waveform(time, values, timebase);
+        let folded = eye_data.is_some();
+        state
+            .analysis
+            .eye_diagram_state
+            .load_data_with_timebase(eye_data.unwrap_or_default(), Some(eye_provenance));
+        if folded && let Some(provenance) = provenance {
+            state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, provenance);
         }
 
         if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
@@ -232,68 +234,6 @@ impl SimulationController {
                 FftSourceKind::Current => 2,
             },
         }
-    }
-
-    pub(super) fn estimate_ui_period(time: &[f64], signal: &[f64]) -> Option<f64> {
-        let n = time.len().min(signal.len());
-        if n < 8 {
-            return None;
-        }
-
-        let mut v_min = f64::INFINITY;
-        let mut v_max = f64::NEG_INFINITY;
-        for &v in signal.iter().take(n) {
-            if v.is_finite() {
-                v_min = v_min.min(v);
-                v_max = v_max.max(v);
-            }
-        }
-        if !v_min.is_finite() || !v_max.is_finite() || (v_max - v_min) <= 0.0 {
-            return None;
-        }
-
-        let threshold = (v_min + v_max) * 0.5;
-        let edges = crate::analysis::eye_diagram::find_edges(&time[..n], &signal[..n], threshold);
-        if edges.len() < 3 {
-            return None;
-        }
-
-        let mut rising_times: Vec<f64> = edges
-            .iter()
-            .filter(|edge| edge.rising)
-            .filter(|edge| edge.time.is_finite())
-            .map(|edge| edge.time)
-            .collect();
-        rising_times.sort_by(|a, b| a.total_cmp(b));
-
-        let edge_times: Vec<f64> = if rising_times.len() >= 3 {
-            rising_times
-        } else {
-            let mut all: Vec<f64> = edges
-                .iter()
-                .map(|edge| edge.time)
-                .filter(|time| time.is_finite())
-                .collect();
-            all.sort_by(|a, b| a.total_cmp(b));
-            all
-        };
-        if edge_times.len() < 3 {
-            return None;
-        }
-
-        let mut intervals = Vec::with_capacity(edge_times.len().saturating_sub(1));
-        for pair in edge_times.windows(2) {
-            let dt = pair[1] - pair[0];
-            if dt.is_finite() && dt > 0.0 {
-                intervals.push(dt);
-            }
-        }
-        if intervals.is_empty() {
-            return None;
-        }
-        intervals.sort_by(|a, b| a.total_cmp(b));
-        let median = intervals[intervals.len() / 2];
-        (median.is_finite() && median > 0.0).then_some(median)
     }
 }
 

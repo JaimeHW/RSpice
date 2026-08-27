@@ -914,6 +914,15 @@ pub struct UiSessionStateSer {
     text_locale: crate::workbench::UiTextLocale,
     #[serde(default)]
     result_viewer: crate::workbench::documents::result_document::ResultViewer,
+    /// Bit periods the reader pinned eyes to, for results that carry prepared
+    /// provenance. Legacy keys name a run-local analysis id that a later
+    /// session will never mint again, so they are dropped on save rather than
+    /// restored onto whichever result inherits the number.
+    #[serde(default)]
+    eye_timebase: Vec<(
+        crate::analysis::eye_diagram::EyeTimebaseKey,
+        crate::analysis::eye_diagram::EyeTimebase,
+    )>,
 }
 
 fn default_autosave_minutes() -> u8 {
@@ -964,6 +973,13 @@ impl From<&UiSessionState> for UiSessionStateSer {
             browser_spoken_feedback: session.browser_spoken_feedback,
             text_locale: session.text_locale,
             result_viewer: session.results.viewer,
+            eye_timebase: session
+                .results
+                .eye_timebase
+                .iter()
+                .filter(|(key, _)| key.is_persistable())
+                .map(|(key, timebase)| (*key, *timebase))
+                .collect(),
         }
     }
 }
@@ -1014,6 +1030,11 @@ impl From<UiSessionStateSer> for UiSessionState {
             ..Self::new()
         };
         session.results.viewer = ser.result_viewer;
+        session.results.eye_timebase = ser
+            .eye_timebase
+            .into_iter()
+            .filter(|(key, _)| key.is_persistable())
+            .collect();
         session
     }
 }

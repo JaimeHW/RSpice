@@ -10,6 +10,8 @@
 
 mod diagram;
 mod mask;
+mod timebase;
 
-pub use diagram::EyeDiagramState;
+pub use diagram::{EyeDiagramState, EyeRateEditor};
 pub use mask::EyeMask;
+pub use timebase::{EyeTimebase, EyeTimebaseKey, EyeTimebaseProvenance, parse_eye_timebase};

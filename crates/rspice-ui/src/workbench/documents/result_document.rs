@@ -170,6 +170,7 @@ use egui::{Ui, WidgetInfo, WidgetType};
 use serde::{Deserialize, Serialize};
 
 use super::visualization_family::SourceSampleSelection;
+use crate::analysis::eye_diagram::EyeTimebase;
 use crate::product::{AnalysisInstanceId, DatasetId, ResultDocumentId};
 use crate::results::visualization_document::PaneId;
 use crate::simulation::SimulationController;
@@ -1808,6 +1809,14 @@ pub struct ResultsState {
     /// into `analysis_exprs` before use; stable state lives there.
     pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
     pub(crate) analysis_exprs: std::collections::HashMap<AnalysisPresentationKey, Vec<ExprTrace>>,
+    /// Bit period the reader has pinned the eye to, per result.
+    ///
+    /// Absent means the eye recovers the period from the waveform. Project
+    /// scoped like the log-axis panes: a rate stated about one project's
+    /// result is not a statement about the next project's, and
+    /// `clear_project_scoped_state` resets it with the rest of the document.
+    pub(crate) eye_timebase:
+        std::collections::HashMap<crate::analysis::eye_diagram::EyeTimebaseKey, EyeTimebase>,
     /// Identity map behind the ordinal compatibility projection.
     expr_projection_keys: std::collections::HashMap<usize, AnalysisPresentationKey>,
     /// The inline expression editor, when open (one strip at a time).
@@ -4677,12 +4686,7 @@ fn result_viewer_actions(ui: &mut Ui, state: &mut AppState) {
                 );
             }
         }
-        ResultViewer::Eye => {
-            let mask_on = state.analysis.eye_diagram_state.show_mask;
-            if chip(ui, "mask", mask_on).clicked() {
-                state.analysis.eye_diagram_state.show_mask = !mask_on;
-            }
-        }
+        ResultViewer::Eye => eye::inline_actions(ui, state),
         ResultViewer::Op => {
             let filter = &mut state.ui.results.op_filter;
             if !filter.is_empty() && chip(ui, "clear", true).clicked() {
@@ -5176,7 +5180,17 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             app.state.ui.results.clear_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
             );
-            well_hint(ui, "The active analysis does not contain a usable source");
+            // The eye can be unavailable for a reason the reader can act on
+            // — no consistent bit period, too few transitions — and saying
+            // only "no usable source" hides the rate control that fixes it.
+            let hint = (viewer == ActiveViewer::EyeDiagram)
+                .then(|| eye::unavailable_hint(&app.state))
+                .flatten();
+            well_hint(
+                ui,
+                hint.as_deref()
+                    .unwrap_or("The active analysis does not contain a usable source"),
+            );
             false
         }
     }

@@ -4,7 +4,10 @@
 //! the toolbar for a viewer is derived from the viewer rather than
 //! maintained alongside it.
 
-use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
+use crate::analysis::eye_diagram::{EyeTimebase, EyeTimebaseKey};
+use crate::workbench::app_state::{
+    ActiveViewer, AppState, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+};
 
 /// Availability metadata for a specialized viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +113,45 @@ impl AppState {
             run.dataset_id,
             analysis,
         ))
+    }
+
+    /// The bit period the eye folds this result at.
+    ///
+    /// Lives on `AppState` rather than in the simulation controller because
+    /// the choice belongs to the Results document that offers the control,
+    /// and the controller must not reach up into `workbench::documents` to
+    /// read it.
+    pub(crate) fn eye_timebase_for(
+        &self,
+        provenance: SpecializedViewerCacheProvenance,
+    ) -> EyeTimebase {
+        self.ui
+            .results
+            .eye_timebase
+            .get(&eye_timebase_key(provenance))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Record the reader's bit period for this result.
+    ///
+    /// Setting it back to [`EyeTimebase::Auto`] forgets the entry rather than
+    /// storing a default, so a session file carries only the rates a reader
+    /// actually stated.
+    pub(crate) fn set_eye_timebase(
+        &mut self,
+        provenance: SpecializedViewerCacheProvenance,
+        timebase: EyeTimebase,
+    ) {
+        let key = eye_timebase_key(provenance);
+        match timebase {
+            EyeTimebase::Auto => {
+                self.ui.results.eye_timebase.remove(&key);
+            }
+            explicit => {
+                self.ui.results.eye_timebase.insert(key, explicit);
+            }
+        }
     }
 
     /// Bind a freshly populated mutable viewer cache to its immutable owner.
@@ -344,6 +386,16 @@ impl AppState {
             .iter()
             .map(|wf| wf.x.len().min(wf.y.len()))
             .max()
+    }
+}
+
+/// The timebase map's key for one result.
+fn eye_timebase_key(provenance: SpecializedViewerCacheProvenance) -> EyeTimebaseKey {
+    match provenance.analysis_identity {
+        SpecializedViewerAnalysisIdentity::Prepared(instance) => EyeTimebaseKey::Prepared(instance),
+        SpecializedViewerAnalysisIdentity::LegacyResultId(id) => {
+            EyeTimebaseKey::Legacy(provenance.dataset_id, id)
+        }
     }
 }
 
