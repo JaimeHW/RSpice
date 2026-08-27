@@ -1238,6 +1238,23 @@ impl NavigatorPanel {
             .map(|(run, _, _)| run.clone())
     }
 
+    /// The accessible names of the controls `keep` admits, top to bottom.
+    ///
+    /// Ordered by where they were laid out rather than by the order the tree
+    /// was published in: the accessibility update is a node set, and a rail's
+    /// claim is about the order a reader meets its rows in.
+    fn announced_rows(&self, keep: impl Fn(&str) -> bool) -> Vec<String> {
+        let mut hits = self
+            .controls
+            .iter()
+            .filter(|(label, _, _)| keep(label))
+            .collect::<Vec<_>>();
+        hits.sort_by(|(_, left, _), (_, right, _)| left.top().total_cmp(&right.top()));
+        hits.into_iter()
+            .map(|(label, _, _)| label.clone())
+            .collect()
+    }
+
     /// Every run one section painted under its own band.
     ///
     /// Read from the band down to the next one rather than from the frame at
@@ -1947,7 +1964,7 @@ fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
         read.ends_with("S-parameter port"),
         "the row names the part the run reads it as: {read}"
     );
-    let tooltip = rf_port_tooltip(&listed_rf_ports(&app)[0], false);
+    let tooltip = rf_port_tooltip(&listed_rf_ports(&app)[0], false, None);
     assert!(
         tooltip.contains("S-parameter port") && !tooltip.contains("disabled"),
         "{tooltip}"
@@ -1975,13 +1992,13 @@ fn two_rf_ports_claiming_one_number_are_marked_on_both_rows() {
     let collisions = crate::simulation::placed_sources::duplicate_port_numbers(&rows);
     assert_eq!(collisions, vec![1]);
 
-    let tooltip = rf_port_tooltip(&rows[0], true);
+    let tooltip = rf_port_tooltip(&rows[0], true, None);
     assert!(
         tooltip.contains("Port number 1 is claimed by more than one placed port"),
         "the collision names its own number: {tooltip}"
     );
     assert!(
-        !rf_port_tooltip(&rows[2], false).contains("claimed by more than one"),
+        !rf_port_tooltip(&rows[2], false, None).contains("claimed by more than one"),
         "the port claiming a number alone states no hazard"
     );
 
@@ -2013,7 +2030,7 @@ fn an_rf_port_tooltip_reads_the_port_the_row_could_only_summarise() {
     let app = rf_bench(vec![rf_port(609, "P1", "port=1 z0=50")]);
     let rows = listed_rf_ports(&app);
 
-    let tooltip = rf_port_tooltip(&rows[0], false);
+    let tooltip = rf_port_tooltip(&rows[0], false, None);
     assert!(
         tooltip.starts_with("P1 \u{00b7} term \u{00b7} Z0 50"),
         "{tooltip}"
@@ -2021,5 +2038,221 @@ fn an_rf_port_tooltip_reads_the_port_the_row_could_only_summarise() {
     assert!(
         tooltip.contains("No S-parameter analysis in this plan reads this port"),
         "{tooltip}"
+    );
+}
+
+// -------------------------------------------- the whole design's excitations
+
+/// One independent source, as the palette places it.
+fn source(id: u64, kind: ComponentType, name: &str, params: &str) -> crate::state::Component {
+    let mut component =
+        crate::state::Component::new(id, kind, crate::state::Point::new(120, 40 + id as i32));
+    component.name = name.to_owned();
+    component.params = params.to_owned();
+    component
+}
+
+/// The design this half of the rail exists for: the root places `VDD` and two
+/// instances of one master, and that master places a source and an RF port.
+///
+/// Two instances rather than one, because the multiplicity is the claim — a run
+/// flattens the hierarchy, so the master's `V1` is two cards in the deck and the
+/// rail owes the reader a row for each.
+fn hierarchical_excitations() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Design);
+    app.state
+        .schematic
+        .components
+        .push(source(701, ComponentType::VoltageSource, "VDD", "dc=5"));
+    app.state
+        .schematic
+        .components
+        .push(placed(702, "XA", "work", "afe"));
+    app.state
+        .schematic
+        .components
+        .push(placed(703, "XB", "work", "afe"));
+    app.state.sync_active_schematic_to_workspace();
+
+    let mut child = SchematicState::default();
+    child.components.push(source(
+        711,
+        ComponentType::VoltageSourceSin,
+        "V1",
+        "freq=1k",
+    ));
+    child.components.push(rf_port(712, "P1", "port=1 z0=50"));
+    add_master(&mut app.state, "work", "afe", child);
+    app
+}
+
+/// The whole design, at every occurrence the run reaches a source through.
+///
+/// The rail read the editor's buffer, so the root of every hierarchical design
+/// reported that it places nothing but its own supplies — while the run drove
+/// every source drawn below it. Each row of another occurrence states the path
+/// in front of the reference, because `V1` names nothing until the path is read
+/// and one drawn source becomes two rows here.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_excitation_rail_lists_every_occurrence_the_run_reaches_a_source_through() {
+    let panel = NavigatorPanel::open(hierarchical_excitations());
+
+    assert_eq!(
+        panel.announced_rows(|label| label.ends_with("VDD") || label.ends_with("V1")),
+        ["VDD", "/XA/V1", "/XB/V1"],
+        "the root's own source leads, and each occurrence of the master states \
+         where the run reaches its source"
+    );
+    assert_eq!(
+        panel.stated_count("Excitations").as_deref(),
+        Some("3"),
+        "the band counts what the run drives, not what the sheet holds"
+    );
+}
+
+/// The RF rail joins the same two readings, and keeps the one order an
+/// S-parameter run has.
+///
+/// A number claimed by two occurrences is the finding: the run indexes the
+/// flattened design, so one port drawn once and reached twice claims one index
+/// of one matrix.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_rf_rail_marks_the_number_two_occurrences_of_one_master_both_claim() {
+    let panel = NavigatorPanel::open(hierarchical_excitations());
+
+    assert_eq!(
+        panel.announced_rows(|label| label.ends_with("P1")),
+        ["/XA/P1", "/XB/P1"]
+    );
+    assert_eq!(panel.stated_count("RF ports").as_deref(), Some("2"));
+
+    let warn = Tokens::get(&panel.ctx).color.warn;
+    let meta = panel
+        .runs
+        .iter()
+        .filter(|(run, _, _)| run.starts_with("#1 \u{00b7} Z0 50"))
+        .map(|(_, _, color)| *color)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        meta,
+        vec![warn, warn],
+        "both rows carry the hazard, because the collision is a fact about the pair"
+    );
+}
+
+/// A row of another occurrence answers a click by opening that occurrence.
+///
+/// The one thing it must not do is select here: a component id is unique inside
+/// one buffer and repeats across them, so applying the row's id to the sheet in
+/// front of the reader selects whatever that sheet happens to carry under it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
+    let mut panel = NavigatorPanel::open(hierarchical_excitations());
+    let occurrence = InstancePath::root()
+        .child("XB")
+        .expect("the fixture instance is nameable");
+
+    panel.click("/XB/V1");
+
+    assert_eq!(
+        panel.app.state.workspace.occurrence_path(),
+        occurrence,
+        "the click lands the session on the occurrence the row names"
+    );
+    assert_eq!(
+        panel.app.state.workspace.active_view,
+        CellViewRef::new("work", "afe", "schematic")
+    );
+    assert!(
+        panel.app.state.schematic.selection.has_component(711),
+        "and selects the instance there, once the session is standing on it"
+    );
+}
+
+/// Sheet scope narrows the active cell view, and a row of another occurrence is
+/// on no sheet of it.
+///
+/// Narrowing those rows away would make a control that says "this sheet"
+/// silently answer a question about the hierarchy that it does not ask — and
+/// would hide, at the position most readers leave it in, every source the run
+/// drives below the root. The narrowing itself is unchanged and still reaches
+/// the rows of the sheet on screen; see
+/// [`the_sheet_scope_narrows_the_object_rails_to_the_active_sheet`].
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_sheet_scope_leaves_the_rows_of_another_occurrence_alone() {
+    let mut app = two_sheet_named_signals();
+    let elsewhere = InstancePath::root()
+        .child("XA")
+        .expect("the fixture instance is nameable");
+    app.state
+        .schematic
+        .components
+        .push(placed(304, "XA", "work", "afe"));
+    app.state.sync_active_schematic_to_workspace();
+
+    for scope in SheetScope::OPTIONS {
+        assert!(
+            derived_row_is_in_scope(&app.state, scope, Some(&elsewhere), 302),
+            "{scope:?} has no authority over a row drawn in another occurrence"
+        );
+    }
+    // 302 is the source the catalog assigned to the sheet the session is not
+    // on, which is exactly the row the scope control does narrow.
+    assert!(
+        !derived_row_is_in_scope(&app.state, SheetScope::ActiveSheet, None, 302),
+        "a row of the sheet on screen is still the scope control's to narrow"
+    );
+}
+
+/// The occurrence being edited is listed once, from the live buffer.
+///
+/// Both readings can reach it — the projection binds it and the editor holds
+/// it — and the row that has to survive is the editor's, because that is the one
+/// carrying uncommitted edits and answering the object menu.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_occurrence_in_front_of_the_reader_is_listed_once_and_from_its_buffer() {
+    let mut app = hierarchical_excitations();
+    let occurrence = InstancePath::root()
+        .child("XA")
+        .expect("the fixture instance is nameable");
+    hierarchy_tree::open_occurrence(&mut app.state, &occurrence);
+
+    let rows = whole_design_sources(&app);
+
+    assert_eq!(
+        rows.iter()
+            .map(|source| (source.occurrence_label(), source.reference.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("/".to_owned(), "V1"),
+            ("/".to_owned(), "VDD"),
+            ("/XB".to_owned(), "V1"),
+        ],
+        "the sheet on screen is read as its own root and the second instance \
+         keeps the row that reaches it"
+    );
+    assert_eq!(
+        row_is_elsewhere(&app.state, rows[0].occurrence.as_ref()),
+        None,
+        "the row of the occurrence being edited carries no path in front of it"
+    );
+
+    // The design root is its own separator: read from inside a child master,
+    // the root's supply is `/VDD` and not `//VDD`.
+    let panel = NavigatorPanel::open(app);
+    assert!(
+        panel.controls.iter().any(|(label, _, _)| label == "/VDD"),
+        "the rail announces: {:#?}",
+        panel
+            .controls
+            .iter()
+            .map(|(label, _, _)| label.as_str())
+            .collect::<Vec<_>>()
     );
 }

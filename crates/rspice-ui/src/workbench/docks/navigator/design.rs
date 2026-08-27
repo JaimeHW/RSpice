@@ -249,6 +249,153 @@ fn nav_row_indented_mono_response(
     schematic_nav_row_indented_response(ui, icon, label, selected, meta, level, true, false, false)
 }
 
+/// One object row of a rail that reads the whole design, with the occurrence
+/// path in front of its reference.
+///
+/// The prefix is painted in the faint register the meta column uses and the
+/// reference in the row's own, because they are two different claims: the
+/// reference is the instance's name, and the path is where the run reaches it.
+/// A row on the sheet in front of the reader carries no prefix at all — every
+/// row would otherwise be `/`-prefixed to say nothing.
+///
+/// Its geometry is the navigator's own indented mono row, not a second
+/// grammar: same height, same 33.5 px icon slot, same 47 px label column, same
+/// right-aligned meta. What it adds is a second text run inside that one label
+/// column, which the shared painter cannot express — it takes one string and
+/// one colour.
+struct OccurrenceObjectRow<'a> {
+    icon: WorkbenchIcon,
+    /// `/XAFE`, or `None` for a row of the occurrence being edited.
+    occurrence: Option<&'a crate::state::InstancePath>,
+    reference: &'a str,
+    meta: &'a str,
+    /// The meta states a condition rather than a count, so it is painted as
+    /// one — the same flag the hierarchy tree's rows carry.
+    alert: bool,
+    selected: bool,
+}
+
+fn occurrence_object_row(ui: &mut Ui, row: OccurrenceObjectRow<'_>) -> Response {
+    let t = Tokens::get(ui.ctx());
+    // The design root already prints as `/`, so it is its own separator: a row
+    // the reader reaches from inside a child master lists the root's supplies
+    // as `/VDD` rather than `//VDD`.
+    let prefix = row
+        .occurrence
+        .map(|occurrence| {
+            let path = occurrence.to_string();
+            if path.ends_with('/') {
+                path
+            } else {
+                format!("{path}/")
+            }
+        })
+        .unwrap_or_default();
+    // The accessible name is the whole name: a screen reader given `V1` twice
+    // is given no way to tell the two occurrences apart.
+    let announced = format!("{prefix}{}", row.reference);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), SCHEMATIC_NAV_ROW_HEIGHT),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            row.selected,
+            announced.clone(),
+        )
+    });
+    if row.selected || response.hovered() {
+        ui.painter().rect_filled(
+            rect,
+            0.0,
+            if row.selected {
+                t.color.accent_dim
+            } else {
+                t.color.bg_hover
+            },
+        );
+    }
+    if row.selected {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + 2.0, rect.bottom()),
+            ),
+            0.0,
+            t.color.accent,
+        );
+    }
+    let indent = 14.0;
+    row.icon.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 33.5 + indent, rect.center().y),
+            egui::Vec2::splat(15.0),
+        ),
+        if row.selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    let meta_color = if row.alert {
+        t.color.warn
+    } else {
+        t.color.text_faint
+    };
+    let font = theme::mono(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular);
+    let meta_width = ui
+        .painter()
+        .layout_no_wrap(
+            row.meta.to_owned(),
+            theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular),
+            meta_color,
+        )
+        .size()
+        .x;
+    let label_left = rect.left() + 47.0 + indent;
+    let label_right = rect.right() - 14.0 - meta_width;
+    let painter = ui.painter().with_clip_rect(egui::Rect::from_x_y_ranges(
+        label_left..=label_right.max(label_left),
+        rect.y_range(),
+    ));
+    let prefix_width = if prefix.is_empty() {
+        0.0
+    } else {
+        painter
+            .text(
+                egui::pos2(label_left, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                &prefix,
+                font.clone(),
+                t.color.text_faint,
+            )
+            .width()
+    };
+    painter.text(
+        egui::pos2(label_left + prefix_width, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        row.reference,
+        font,
+        if row.selected {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    ui.painter().text(
+        egui::pos2(rect.right() - 8.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        row.meta,
+        theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular),
+        meta_color,
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+    response
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DesignNavigatorSection {
     Masters,
@@ -909,6 +1056,162 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+// ------------------------------------------------- whole-design object rails
+
+/// Every excitation the design places, joined from the two readings a rail owes
+/// its reader.
+///
+/// - The occurrence in front of the reader is listed from the live editor
+///   buffer, exactly as this rail always listed it. Uncommitted edits are in
+///   it, and a cell view opened outside the configured hierarchy — a library
+///   part being inspected — still has its own sources listed, which a
+///   projection-only reading would take away.
+/// - Every other occurrence comes from the frozen projection, tagged with the
+///   path the run reaches it through. A source drawn inside a child master is
+///   driven by the run, and this rail could not see it.
+///
+/// The active occurrence is dropped from the projection side rather than the
+/// two readings deduplicated, because where two occurrences share the master
+/// being edited only one of them is the sheet in front of the reader — and the
+/// other is a row that has to stay.
+fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedSource> {
+    let plan = app.state.sim_setup.analysis_plan.as_ref();
+    let mut rows = crate::simulation::placed_sources::placed_sources(&app.state.schematic, plan);
+    let Some(projection) = design_projection(app) else {
+        return rows;
+    };
+    let active = app.state.workspace.occurrence_path();
+    rows.extend(
+        crate::simulation::placed_sources::design_sources(
+            &app.state.library_manager,
+            &projection,
+            plan,
+        )
+        .into_iter()
+        .filter(|source| source.occurrence.as_ref() != Some(&active)),
+    );
+    rows
+}
+
+/// The same two readings for the RF-port rail.
+fn whole_design_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
+    let plan = app.state.sim_setup.analysis_plan.as_ref();
+    let mut rows = crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, plan);
+    let Some(projection) = design_projection(app) else {
+        return rows;
+    };
+    let active = app.state.workspace.occurrence_path();
+    rows.extend(
+        crate::simulation::placed_sources::design_rf_ports(
+            &app.state.library_manager,
+            &projection,
+            plan,
+        )
+        .into_iter()
+        .filter(|port| port.occurrence.as_ref() != Some(&active)),
+    );
+    // Re-sorted across the join: an `.sp` run indexes the flattened design by
+    // port number, so a port of a child master belongs beside the root's port
+    // of the same number rather than after every one of them.
+    rows.sort_by_key(|port| {
+        (
+            port.port_number,
+            port.occurrence_label(),
+            port.reference.to_ascii_uppercase(),
+        )
+    });
+    rows
+}
+
+/// The frozen projection, or `None` when the configured design does not
+/// resolve.
+///
+/// The rails that join it to the editor's buffer state no error of their own:
+/// the Nets rail above already puts the reason in the reader's way, and every
+/// object rail repeating it would spend the panel on one sentence.
+fn design_projection(
+    app: &RSpiceApp,
+) -> Option<std::sync::Arc<crate::state::workspace::DesignProjection>> {
+    app.state
+        .workspace
+        .design_projection(
+            &app.state.library_manager,
+            &app.state.workspace.active_view,
+            &app.state.schematic,
+        )
+        .ok()
+}
+
+/// Whether a derived row is one the sheet scope can speak about.
+///
+/// Sheet scope narrows the active cell view to the sheet on screen. A row of
+/// another occurrence is not on any sheet of that view, so it is outside the
+/// control's authority by definition and stays listed at either position —
+/// narrowing it away would make the scope control silently answer a question
+/// about the hierarchy that it does not ask.
+fn derived_row_is_in_scope(
+    state: &crate::workbench::app_state::AppState,
+    scope: SheetScope,
+    occurrence: Option<&crate::state::InstancePath>,
+    component_id: u64,
+) -> bool {
+    if occurrence.is_some_and(|occurrence| *occurrence != state.workspace.occurrence_path()) {
+        return true;
+    }
+    sheet_visibility::object_is_in_scope(state, scope, component_id)
+}
+
+/// The occurrence a derived row is drawn in, when that is not the one on
+/// screen. `None` means the row stands on the sheet in front of the reader.
+fn row_is_elsewhere<'a>(
+    state: &crate::workbench::app_state::AppState,
+    occurrence: Option<&'a crate::state::InstancePath>,
+) -> Option<&'a crate::state::InstancePath> {
+    occurrence.filter(|occurrence| **occurrence != state.workspace.occurrence_path())
+}
+
+/// Land the session on the occurrence a row names, then select and centre the
+/// instance it names there.
+///
+/// The descent is the hierarchy tree's own, so a click here and a click on the
+/// occurrence row that owns it end in the same place: ascend to the shared
+/// prefix, descend the rest, never part of the way. The selection is applied
+/// only once the session is actually standing on that occurrence, because a
+/// component id is unique inside one buffer and repeats across them — applying
+/// it to a failed descent would select whatever the sheet on screen happened to
+/// carry under that id.
+///
+/// The position is read after the descent rather than carried from the
+/// projection: a materialized buffer translates its components onto per-sheet
+/// offsets, so the projection's coordinates are not the ones the canvas is
+/// about to be centred in.
+fn descend_to_placed(
+    app: &mut RSpiceApp,
+    occurrence: &crate::state::InstancePath,
+    component_id: u64,
+) {
+    hierarchy_tree::open_occurrence(&mut app.state, occurrence);
+    if app.state.workspace.occurrence_path() != *occurrence {
+        return;
+    }
+    let Some(position) = app
+        .state
+        .schematic
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .map(|component| component.pos)
+    else {
+        return;
+    };
+    app.state
+        .schematic
+        .selection
+        .select_only_component(component_id);
+    app.state.schematic.net_highlight.clear();
+    app.state.schematic.center_request = Some(position);
+}
+
 /// Every RF port the design places, in the order an S-parameter matrix indexes
 /// them.
 ///
@@ -930,10 +1233,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// than what exists. A rail that asked the filtered list would vanish the
 /// moment a reader typed a query that missed it.
 fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
-    let ports = crate::simulation::placed_sources::placed_rf_ports(
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
-    );
+    let ports = whole_design_rf_ports(app);
     if ports.is_empty() {
         return;
     }
@@ -946,9 +1246,17 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = normalized(app.state.workbench.navigator_filter());
     let listed = ports
         .into_iter()
-        .filter(|port| sheet_visibility::object_is_in_scope(&app.state, scope, port.component_id))
+        .filter(|port| {
+            derived_row_is_in_scope(
+                &app.state,
+                scope,
+                port.occurrence.as_ref(),
+                port.component_id,
+            )
+        })
         .filter(|port| {
             let number = port.port_number.to_string();
+            let occurrence = port.occurrence_label();
             matches_query(
                 &query,
                 &[
@@ -957,6 +1265,7 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     "port",
                     number.as_str(),
                     port.z0.as_str(),
+                    occurrence.as_str(),
                 ],
             )
         })
@@ -980,33 +1289,38 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     }
+    let mut descend = None;
     for port in listed {
         let collides = collisions.contains(&port.port_number);
         let meta = rf_port_meta(&port);
-        let response = hierarchy_tree::tree_row(
+        let elsewhere = row_is_elsewhere(&app.state, port.occurrence.as_ref());
+        let response = occurrence_object_row(
             ui,
-            hierarchy_tree::TreeRow {
-                id: ui.id().with(("navigator-rf-port", port.component_id)),
-                level: 1,
-                disclosure: None,
+            OccurrenceObjectRow {
                 // A coaxial face rather than a signal direction: the interface
                 // pins in the rail above take the arrows, and a port carries no
                 // direction of its own — an `.sp` run drives and measures every
                 // one of them.
                 icon: WorkbenchIcon::Target,
-                label: port.reference.as_str(),
-                mono: true,
-                meta: Some(meta.as_str()),
+                occurrence: elsewhere,
+                reference: port.reference.as_str(),
+                meta: meta.as_str(),
                 alert: collides,
-                selected: app
-                    .state
-                    .schematic
-                    .selection
-                    .has_component(port.component_id),
+                selected: elsewhere.is_none()
+                    && app
+                        .state
+                        .schematic
+                        .selection
+                        .has_component(port.component_id),
             },
         )
-        .row
-        .on_hover_text(rf_port_tooltip(&port, collides));
+        .on_hover_text(rf_port_tooltip(&port, collides, elsewhere));
+        if let Some(occurrence) = elsewhere {
+            if response.clicked() {
+                descend = Some((occurrence.clone(), port.component_id));
+            }
+            continue;
+        }
         match placed_object(&app.state, port.component_id, &port.reference) {
             Some(object) => {
                 if response.clicked() {
@@ -1025,6 +1339,12 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
         }
+    }
+    // Applied after the rail is painted, because the descent replaces the
+    // active document and every row above it was laid out against the one it
+    // replaces.
+    if let Some((occurrence, component_id)) = descend {
+        descend_to_placed(app, &occurrence, component_id);
     }
 }
 
@@ -1075,8 +1395,12 @@ fn rf_port_meta(port: &crate::simulation::placed_sources::PlacedRfPort) -> Strin
 fn rf_port_tooltip(
     port: &crate::simulation::placed_sources::PlacedRfPort,
     collides: bool,
+    elsewhere: Option<&crate::state::InstancePath>,
 ) -> String {
     let mut lines = vec![format!("{} \u{00b7} {}", port.reference, port.summary())];
+    if let Some(occurrence) = elsewhere {
+        lines.push(format!("Drawn in {occurrence} \u{00b7} click to open it"));
+    }
     if !port.nets.is_empty() {
         lines.push(port.nets.join(" \u{2192} "));
     }
@@ -1106,7 +1430,7 @@ fn rf_port_tooltip(
     lines.join("\n")
 }
 
-/// Every excitation placed on this sheet, and what the plan reads each one as.
+/// Every excitation the design places, and what the plan reads each one as.
 ///
 /// The row worth finding is the one with no reader: a source that is drawn,
 /// will be netlisted, that no analysis in the plan names, and that none of the
@@ -1114,30 +1438,45 @@ fn rf_port_tooltip(
 /// row itself is what makes that visible without opening anything, so the count
 /// is never elided.
 ///
+/// The design rather than the sheet, because a run flattens the hierarchy: a
+/// source drawn inside a child master drives this circuit and this rail could
+/// not see it, so the root of every hierarchical design read as one that places
+/// nothing. Those rows carry the occurrence path in front of the reference and
+/// descend to it when clicked; see [`whole_design_sources`] for the two
+/// readings they are joined from.
+///
 /// A source is an instance like any other row in these rails, so it carries the
 /// same object menu: the rail that could select a source but not open, rename
-/// or find it was the one rail whose rows answered to the pointer alone.
+/// or find it was the one rail whose rows answered to the pointer alone. The
+/// menu is offered only on the rows of the occurrence being edited, exactly as
+/// the hierarchy tree offers it only where its commands can act.
 fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(app.state.workbench.navigator_filter());
-    let sources = crate::simulation::placed_sources::placed_sources(
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
-    )
-    .into_iter()
-    .filter(|source| sheet_visibility::object_is_in_scope(&app.state, scope, source.component_id))
-    .filter(|source| {
-        matches_query(
-            &query,
-            &[
-                source.reference.as_str(),
-                source.family,
-                source.key_figure.as_str(),
-                "excitation",
-            ],
-        )
-    })
-    .collect::<Vec<_>>();
+    let sources = whole_design_sources(app)
+        .into_iter()
+        .filter(|source| {
+            derived_row_is_in_scope(
+                &app.state,
+                scope,
+                source.occurrence.as_ref(),
+                source.component_id,
+            )
+        })
+        .filter(|source| {
+            let occurrence = source.occurrence_label();
+            matches_query(
+                &query,
+                &[
+                    source.reference.as_str(),
+                    source.family,
+                    source.key_figure.as_str(),
+                    "excitation",
+                    occurrence.as_str(),
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
 
     if !navigator_section_header(
         ui,
@@ -1157,6 +1496,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     }
+    let mut descend = None;
     for source in sources {
         // Run-scoped, exactly as the studio's Excitations page counts it: a
         // disabled instance is not in the run this plan would dispatch.
@@ -1171,20 +1511,31 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             source.quantity(),
             source.summary()
         );
-        let object = placed_object(&app.state, source.component_id, &source.reference);
-        let response = nav_row_indented_mono_response(
+        let elsewhere = row_is_elsewhere(&app.state, source.occurrence.as_ref());
+        let response = occurrence_object_row(
             ui,
-            WorkbenchIcon::ArrowRight,
-            &source.reference,
-            app.state
-                .schematic
-                .selection
-                .has_component(source.component_id),
-            Some(&meta),
-            1,
+            OccurrenceObjectRow {
+                icon: WorkbenchIcon::ArrowRight,
+                occurrence: elsewhere,
+                reference: source.reference.as_str(),
+                meta: meta.as_str(),
+                alert: false,
+                selected: elsewhere.is_none()
+                    && app
+                        .state
+                        .schematic
+                        .selection
+                        .has_component(source.component_id),
+            },
         )
-        .on_hover_text(excitation_tooltip(&source));
-        match object {
+        .on_hover_text(excitation_tooltip(&source, elsewhere));
+        if let Some(occurrence) = elsewhere {
+            if response.clicked() {
+                descend = Some((occurrence.clone(), source.component_id));
+            }
+            continue;
+        }
+        match placed_object(&app.state, source.component_id, &source.reference) {
             Some(object) => {
                 if response.clicked() {
                     select_navigator_object(app, &object);
@@ -1202,6 +1553,11 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
         }
+    }
+    // Applied after the rail is painted; see the same line in
+    // [`rf_port_section`].
+    if let Some((occurrence, component_id)) = descend {
+        descend_to_placed(app, &occurrence, component_id);
     }
 }
 
@@ -1234,14 +1590,20 @@ fn placed_object(
     })
 }
 
-/// The full reading of one excitation: its terminals, and every analysis that
-/// names it with the part it plays there.
-fn excitation_tooltip(source: &crate::simulation::placed_sources::PlacedSource) -> String {
+/// The full reading of one excitation: where it is drawn, its terminals, and
+/// every analysis that names it with the part it plays there.
+fn excitation_tooltip(
+    source: &crate::simulation::placed_sources::PlacedSource,
+    elsewhere: Option<&crate::state::InstancePath>,
+) -> String {
     let mut lines = vec![format!(
         "{} \u{00b7} {}",
         source.reference,
         source.summary()
     )];
+    if let Some(occurrence) = elsewhere {
+        lines.push(format!("Drawn in {occurrence} \u{00b7} click to open it"));
+    }
     if !source.nets.is_empty() {
         lines.push(source.nets.join(" \u{2192} "));
     }
