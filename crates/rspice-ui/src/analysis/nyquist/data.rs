@@ -11,6 +11,11 @@
 //!
 //! - Encirclements are **clockwise-positive**, the sign the criterion
 //!   Z = N + P is written in.
+//! - A count is only reported when the sweep's **ends are settled**. Neither
+//!   end of the closed contour is measured — both are chords — so a sweep
+//!   that still has gain at its top, or is still off the real axis at its
+//!   bottom, is wound around the counter's own invention rather than around
+//!   the loop.
 //! - Margins are read from **interpolated** crossings, never from the nearest
 //!   sample. A margin is a ratio, so no absolute "close enough" tolerance can
 //!   be right at more than one locus scale.
@@ -74,8 +79,10 @@ pub enum EncirclementCount {
     /// The contour passes through −1 + j0. The winding is undefined there,
     /// and the closed loop has a root on the imaginary axis.
     TouchesCriticalPoint,
-    /// The closed contour did not wind a whole number of turns. The retained
-    /// fraction is carried so the reader can see how far off it was.
+    /// The winding is not one the contour supports — either the sweep does
+    /// not settle at its ends, so the chords that close it are fabricated, or
+    /// the closed contour did not wind a whole number of turns. The turns it
+    /// did make are carried so the reader can see what was rejected.
     Unresolved { turns: f64 },
     /// The locus carries a non-finite sample.
     NotFinite,
@@ -110,6 +117,21 @@ pub struct NyquistMargin {
     /// The interpolated crossing frequency, in Hz.
     pub frequency: f64,
 }
+
+/// |L(jω_max)| below which the chord back to the conjugate mirror stands in
+/// for the arc at infinity.
+///
+/// A tenth is well inside the unit circle, so the locus the sweep did not
+/// reach can no longer come near −1 + j0 and the chord cannot enclose it.
+const SETTLED_HIGH_FREQUENCY_MAGNITUDE: f64 = 0.1;
+
+/// |Im L(jω_min)| / |L(jω_min)| below which the gap between the mirror and the
+/// sweep is a chord *along* the real axis rather than one across it.
+///
+/// A hundredth is about half a degree off the axis — a single pole a hundred
+/// times above the start of the sweep, which is the point past which the DC
+/// closure stops depending on where exactly the sweep began.
+const SETTLED_LOW_FREQUENCY_AXIS_RATIO: f64 = 1.0e-2;
 
 // =============================================================================
 // Nyquist Data
@@ -156,6 +178,30 @@ impl NyquistData {
             .fold(None, |acc, d| Some(acc.map_or(d, |a: f64| a.min(d))))
     }
 
+    /// Whether the sweep's ends settle the closure the criterion needs.
+    ///
+    /// Neither end of the closed contour is measured. The chord from ω_max
+    /// back to its conjugate mirror stands in for the arc at infinity, and the
+    /// gap at ω_min stands in for the contour's crossing of the real axis at
+    /// DC — including, for a loop with a pole at the origin, the indentation
+    /// around it, which closes through +∞ on the *right* of the critical point
+    /// where a straight chord would run down the left of it. Both stand-ins
+    /// are only faithful when the sweep has settled into them: |L| well below
+    /// unity at the top, so the unmeasured tail can no longer reach −1 + j0 at
+    /// all, and the locus back on the real axis at the bottom, so the gap is
+    /// a chord *along* the axis rather than one across it.
+    ///
+    /// The low-frequency test is on the *direction* of L, not its size: a
+    /// settled DC gain of either sign, however large, is on the real axis and
+    /// closes correctly.
+    fn ends_settle_the_closure(&self) -> bool {
+        let (Some(start), Some(end)) = (self.points.first(), self.points.last()) else {
+            return false;
+        };
+        end.magnitude() < SETTLED_HIGH_FREQUENCY_MAGNITUDE
+            && start.imag.abs() <= SETTLED_LOW_FREQUENCY_AXIS_RATIO * start.magnitude()
+    }
+
     /// The closed Nyquist contour, as the criterion needs it.
     ///
     /// Vertices run from ω = −ω_max up to ω = +ω_max: the conjugate mirror of
@@ -171,6 +217,11 @@ impl NyquistData {
     }
 
     /// Encirclements of −1 + j0 by the closed contour, clockwise-positive.
+    ///
+    /// Reported only for a sweep whose ends settle the closure — see
+    /// [`Self::ends_settle_the_closure`]. One that does not is `Unresolved`
+    /// rather than counted, because the number would be the chords' and not
+    /// the loop's.
     pub fn count_encirclements(&self) -> EncirclementCount {
         if self.points.iter().any(|point| !point.is_finite()) {
             return EncirclementCount::NotFinite;
@@ -199,6 +250,15 @@ impl NyquistData {
         }
 
         let turns = clockwise_turns_about_critical_point(&contour);
+
+        // The two chords that close the contour are the counter's own, not the
+        // sweep's, so they only carry a winding once the sweep has settled
+        // into them. A whole number of turns is no evidence either way here —
+        // a closed polygon always winds a whole number of them.
+        if !self.ends_settle_the_closure() {
+            return EncirclementCount::Unresolved { turns };
+        }
+
         let whole = turns.round();
         if !turns.is_finite() || (turns - whole).abs() > 1e-6 {
             // A closed polygon winds a whole number of turns, so a fraction
@@ -550,6 +610,17 @@ mod tests {
         move |s| k / (s / w - 1.0)
     }
 
+    /// L(s) = K / (s(1 + s/w)) — a type-1 loop, with K/w = `dc_slope`.
+    ///
+    /// The pole at the origin is what the sweep cannot measure: Re L(jω→0)
+    /// tends to −K/w while Im L runs off to −∞, so the locus leaves the plot
+    /// down the line Re = −K/w instead of returning to the real axis.
+    fn integrator_with_pole(dc_slope: f64, f_pole: f64) -> impl Fn(Complex64) -> Complex64 {
+        let w = std::f64::consts::TAU * f_pole;
+        let k = dc_slope * w;
+        move |s| k / (s * (1.0 + s / w))
+    }
+
     // -- encirclements ----------------------------------------------------
 
     /// A two-pole loop never reaches −180°, so its locus cannot enclose the
@@ -631,14 +702,17 @@ mod tests {
 
     /// A locus that grazes the critical point without meeting it still has a
     /// winding number; the near miss is reported by `min |1 + L|`, which is
-    /// the quantity that measures it.
+    /// the quantity that measures it. The sweep is carried down to the real
+    /// axis and out past the unit circle so the closure guard has the settled
+    /// ends it needs — the near miss is what is on trial here, not the
+    /// closure.
     #[test]
     fn a_near_miss_keeps_its_winding_and_shows_up_as_a_small_distance() {
         let curve = NyquistData::from_arrays(
             "L(jw)",
-            &[1.0, 2.0, 3.0, 4.0],
-            &[0.5, -0.4, -1.0, -0.2],
-            &[0.8, 0.5, 1.0e-4, -0.3],
+            &[1.0, 2.0, 3.0, 4.0, 5.0],
+            &[1.5, 0.5, -0.4, -1.0, -0.02],
+            &[0.0, 0.8, 0.5, 1.0e-4, -0.01],
         );
 
         assert!(matches!(
@@ -688,6 +762,100 @@ mod tests {
         assert!(
             (branch_turns - 2.0).abs() > 0.5,
             "the measured branch alone gave {branch_turns} turns"
+        );
+    }
+
+    // -- closure trust ----------------------------------------------------
+
+    /// A type-1 loop's low-frequency closure is a fabrication, and the count
+    /// drawn from it is one too.
+    ///
+    /// L = K/(s(1 + s/ω_p)) closes as s² + ω_p·s + K·ω_p = 0 — every
+    /// coefficient positive, so both roots sit in the left half-plane for
+    /// every gain. With no open-loop right-half-plane pole either, the truth
+    /// is P = 0 and Z = 0, so N = 0. But Re L(jω→0) → −K/ω_p = −10, and the
+    /// chord across the gap between the mirror and the sweep therefore
+    /// crosses the real axis at −10, *left* of the critical point — where the
+    /// contour the criterion is stated about closes through +∞ on the right
+    /// of it, around the indentation at the pole at the origin. The chord's
+    /// winding is not the loop's, and the instrument has to say so rather
+    /// than print a stable loop as unstable.
+    #[test]
+    fn a_type_one_loop_leaves_its_low_frequency_closure_uncertified() {
+        let curve = swept_loop(1.0, 1.0e6, 20, integrator_with_pole(10.0, 1.0e3));
+
+        let start = curve.points.first().expect("the sweep has points");
+        assert!(
+            start.real < -1.0,
+            "the fabricated chord has to cross left of −1: Re = {}",
+            start.real
+        );
+        assert!(
+            matches!(
+                curve.count_encirclements(),
+                EncirclementCount::Unresolved { .. }
+            ),
+            "{:?}",
+            curve.count_encirclements()
+        );
+    }
+
+    /// A sweep that stops while the loop still has gain has no closure at its
+    /// top end either. The k = 16 three-pole loop that winds twice over a full
+    /// sweep is truncated at 500 Hz, where |L| is still about 11: the arc at
+    /// infinity has not been reached, so the chord back to the conjugate
+    /// mirror encloses whatever the truncation happened to leave — here
+    /// nothing, which would read as an unconditionally stable loop.
+    #[test]
+    fn a_sweep_truncated_above_unity_gain_leaves_its_winding_uncertified() {
+        let truncated = swept_loop(1.0, 500.0, 20, three_pole(16.0, 1.0e3));
+
+        let end = truncated.points.last().expect("the sweep has points");
+        assert!(end.magnitude() > 1.0, "|L(w_max)| = {}", end.magnitude());
+        assert!(
+            matches!(
+                truncated.count_encirclements(),
+                EncirclementCount::Unresolved { .. }
+            ),
+            "{:?}",
+            truncated.count_encirclements()
+        );
+
+        // And the count the truncation would have reported is not the truth
+        // the same loop reports once the sweep reaches the arc at infinity.
+        assert_eq!(
+            swept_loop(1.0, 1.0e6, 20, three_pole(16.0, 1.0e3)).count_encirclements(),
+            EncirclementCount::Counted(2)
+        );
+    }
+
+    /// The closure guard must not swallow the loci that do settle. Both
+    /// oracles here end far below unity and start on the real axis, so their
+    /// chords are the ones the criterion's contour actually has — and their
+    /// counts, one of each sign, have to survive untouched.
+    #[test]
+    fn settled_sweeps_keep_their_counts_under_the_closure_guard() {
+        let unstable = swept_loop(1.0, 1.0e6, 20, three_pole(16.0, 1.0e3));
+        let stabilized = swept_loop(1.0e-2, 1.0e6, 20, right_half_plane_pole(2.0, 1.0e3));
+
+        for curve in [&unstable, &stabilized] {
+            let start = curve.points.first().expect("the sweep has points");
+            let end = curve.points.last().expect("the sweep has points");
+            assert!(end.magnitude() < 0.1, "|L(w_max)| = {}", end.magnitude());
+            assert!(
+                start.imag.abs() < 1.0e-2 * start.magnitude(),
+                "|Im/L| at w_min = {}",
+                start.imag.abs() / start.magnitude()
+            );
+        }
+
+        assert_eq!(
+            unstable.count_encirclements(),
+            EncirclementCount::Counted(2)
+        );
+        assert_eq!(
+            stabilized.count_encirclements(),
+            EncirclementCount::Counted(-1)
         );
     }
 

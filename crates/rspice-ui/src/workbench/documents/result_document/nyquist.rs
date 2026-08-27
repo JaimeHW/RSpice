@@ -84,7 +84,18 @@ fn encirclement_row(count: EncirclementCount) -> String {
 /// spelled out.
 fn criterion_note(count: EncirclementCount) -> String {
     let Some(n) = count.counted() else {
-        return "The contour has no encirclement count, so the criterion Z = N + P cannot be applied to it.".to_owned();
+        return match count {
+            EncirclementCount::Unresolved { turns } => format!(
+                "{turns:+.2} turns about −1 + j0, and nothing certifies them as a winding: both \
+                 ends of the contour are chords rather than measurements, and they only stand for \
+                 the loop once |L| has fallen well below 1 at the top of the sweep and the locus \
+                 is back on the real axis at the bottom. Widen the sweep — no encirclement count, \
+                 and so no verdict, follows from this locus."
+            ),
+            _ => "The contour has no encirclement count, so the criterion Z = N + P cannot be \
+                  applied to it."
+                .to_owned(),
+        };
     };
     let z = crate::analysis::nyquist::closed_loop_rhp_poles(n, 0);
     let verdict = if z == 0 { "stable" } else { "unstable" };
@@ -430,6 +441,18 @@ mod tests {
             encirclement_row(EncirclementCount::Unresolved { turns: 0.37 }),
             "unresolved (+0.37 turns)"
         );
+    }
+
+    /// A winding the closure guard would not certify gets the reason, not a
+    /// verdict: the sweep did not settle at its ends, so the chords that close
+    /// the contour are the counter's own invention.
+    #[test]
+    fn an_uncertified_winding_names_the_unsettled_sweep_instead_of_a_verdict() {
+        let note = criterion_note(EncirclementCount::Unresolved { turns: -1.0 });
+
+        assert!(note.contains("-1.00 turns"), "{note}");
+        assert!(note.contains("real axis"), "{note}");
+        assert!(!note.contains("stable"), "{note}");
     }
 
     /// The three arrays this sheet caches must not collide with each other,
