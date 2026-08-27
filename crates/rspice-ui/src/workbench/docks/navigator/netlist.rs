@@ -2247,7 +2247,7 @@ pub(super) fn schematic_nav_row_indented_response(
     expanded: bool,
     child_guide: bool,
 ) -> Response {
-    nav_row_indented_styled_with_metrics(
+    let response = nav_row_indented_styled_with_metrics(
         ui,
         icon,
         label,
@@ -2264,7 +2264,11 @@ pub(super) fn schematic_nav_row_indented_response(
         // `nav_row_indented_styled_with_metrics`, which allocates the row and
         // owns both its WidgetInfo and its focus ring.
         egui::Sense::click(),
-    )
+    );
+    // One level deeper than the row draws itself: the rail's own level 0 is
+    // the section band above it, which is what Left climbs out to.
+    super::rail::row(ui, &response, level + 1, None);
+    response
 }
 
 pub(super) fn schematic_nav_row_indented_drag_response(
@@ -2278,7 +2282,7 @@ pub(super) fn schematic_nav_row_indented_drag_response(
     expanded: bool,
     child_guide: bool,
 ) -> Response {
-    nav_row_indented_styled_with_metrics(
+    let response = nav_row_indented_styled_with_metrics(
         ui,
         icon,
         label,
@@ -2293,7 +2297,9 @@ pub(super) fn schematic_nav_row_indented_drag_response(
         child_guide,
         // accessibility-pointer-shim: same forwarding wrapper, drag variant.
         egui::Sense::click_and_drag(),
-    )
+    );
+    super::rail::row(ui, &response, level + 1, None);
+    response
 }
 
 #[cfg(test)]

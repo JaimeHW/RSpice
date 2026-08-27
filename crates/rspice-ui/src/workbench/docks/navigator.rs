@@ -4,11 +4,12 @@ mod design;
 mod symbol;
 
 mod netlist;
+mod rail;
 mod source_bundle;
 
 use netlist::*;
 
-use egui::{Align, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
+use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::product::DatasetId;
 use crate::simulation::netlist_gen::bus_notations;
@@ -325,7 +326,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
+fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> bool {
     let placeholder = match workspace {
         Workspace::Project => match app.state.workbench.project_page {
             ProjectPage::Overview | ProjectPage::Library => "Filter libraries, cells, views…",
@@ -346,18 +347,25 @@ fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) {
         "workbench.navigator.filter",
         placeholder,
         &mut app.state.workbench.focus_navigator_search,
-    );
+    )
 }
 
+/// The panel's filter field.
+///
+/// Returns whether Down was pressed in the field — the reader stepping out of
+/// the query and into the rows it narrowed. The field consumes that press
+/// itself, because only the field knows it had the focus; where it lands is
+/// the rail's answer, not this function's.
 pub(super) fn panel_search(
     ui: &mut Ui,
     query: &mut String,
     id: &'static str,
     placeholder: &'static str,
     focus_pending: &mut bool,
-) {
+) -> bool {
     let t = Tokens::get(ui.ctx());
     let field_width = panel_search_field_width(ui.available_width());
+    let mut enter_rows = false;
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -387,11 +395,14 @@ pub(super) fn panel_search(
             ),
             t.color.text_faint,
         );
+        enter_rows = response.has_focus()
+            && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
         if std::mem::take(focus_pending) {
             response.request_focus();
         }
     });
     ui.add_space(8.0);
+    enter_rows
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {

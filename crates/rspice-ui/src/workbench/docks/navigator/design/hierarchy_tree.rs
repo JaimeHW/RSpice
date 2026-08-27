@@ -33,6 +33,7 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState};
 
+use super::super::rail::{self, RailDisclosure, RailFold};
 use super::super::{SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT};
 use super::{
     DesignNavigatorSection, NavigatorObject, WorkbenchIcon, empty_navigator_row, matches_query,
@@ -436,8 +437,9 @@ fn declared_masters(
 pub(super) struct TreeRow<'a> {
     pub id: egui::Id,
     pub level: usize,
-    /// `Some(unfolded)` when the node has children to disclose.
-    pub disclosure: Option<bool>,
+    /// Present when the node has children to disclose: which way it stands,
+    /// and where that position is kept so the keyboard can move it too.
+    pub disclosure: Option<RailDisclosure>,
     pub icon: WorkbenchIcon,
     pub label: &'a str,
     /// The label names a net or a deck identifier rather than a design object,
@@ -480,7 +482,11 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
             row.label,
         )
     });
-    if let Some(unfolded) = row.disclosure {
+    let unfolded = row
+        .disclosure
+        .as_ref()
+        .map(|disclosure| disclosure.unfolded);
+    if let Some(unfolded) = unfolded {
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_expanded(unfolded);
         });
@@ -508,12 +514,13 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
     }
 
     let indent = TREE_LEVEL_INDENT * row.level as f32;
-    let disclosure = row.disclosure.map(|unfolded| {
+    let caret_id = row.id.with("disclosure");
+    let disclosure = unfolded.map(|unfolded| {
         let caret = egui::Rect::from_center_size(
             egui::pos2(rect.left() + 14.0 + indent, rect.center().y),
             egui::Vec2::splat(SCHEMATIC_NAV_ROW_HEIGHT),
         );
-        let response = ui.interact(caret, row.id.with("disclosure"), egui::Sense::click());
+        let response = ui.interact(caret, caret_id, egui::Sense::click());
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::Button,
@@ -603,6 +610,13 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
+    // The caret is a hit target of its own and sits in the Tab ring beside the
+    // row, so the traversal is told about both: a reader who arrives on the
+    // caret is on the row, not between two of them.
+    //
+    // One level deeper than the row draws itself, because the rail's level 0
+    // is the section band this tree hangs under.
+    rail::row_with_caret(ui, &response, caret_id, row.level + 1, row.disclosure);
     TreeRowResponse {
         row: response,
         disclosure,
@@ -649,7 +663,10 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
             TreeRow {
                 id: ui.id().with(("navigator-master-library", library)),
                 level: 0,
-                disclosure: Some(unfolded),
+                disclosure: Some(RailDisclosure {
+                    unfolded,
+                    fold: RailFold::Tree(library_node.clone()),
+                }),
                 icon: WorkbenchIcon::Models,
                 label: library.as_str(),
                 mono: false,
@@ -674,7 +691,10 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                 TreeRow {
                     id: ui.id().with(("navigator-master-cell", &key)),
                     level: 1,
-                    disclosure: Some(unfolded),
+                    disclosure: Some(RailDisclosure {
+                        unfolded,
+                        fold: RailFold::Tree(cell_node.clone()),
+                    }),
                     icon: WorkbenchIcon::Design,
                     label: cell.as_str(),
                     mono: false,
@@ -790,7 +810,12 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                             row.state,
                             OccurrenceState::Collapsed | OccurrenceState::Expanded
                         )
-                        .then_some(row.state == OccurrenceState::Expanded),
+                        .then(|| RailDisclosure {
+                            unfolded: row.state == OccurrenceState::Expanded,
+                            fold: RailFold::Tree(NavigatorTreeNode::Occurrence(
+                                row.path.fold_key(),
+                            )),
+                        }),
                         icon: if row.state == OccurrenceState::Recursive {
                             WorkbenchIcon::Refresh
                         } else {

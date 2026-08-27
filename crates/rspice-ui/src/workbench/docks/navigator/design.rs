@@ -28,6 +28,7 @@ use super::super::super::design_system::{
     PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, schematic_section_header as shelf_section_header,
 };
 use super::super::super::state::{DesignPanel, Workspace};
+use super::rail::{self, RailDisclosure, RailFold};
 use super::{
     SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
     empty_navigator_row, panel_search, schematic_nav_row_indented_drag_response,
@@ -393,6 +394,9 @@ fn occurrence_object_row(ui: &mut Ui, row: OccurrenceObjectRow<'_>) -> Response 
         meta_color,
     );
     theme::paint_focus_ring(ui, &response, rect);
+    // The row draws itself at one level of indent, so it sits two levels under
+    // the rail's band — the same place the nets and probes rails put theirs.
+    rail::row(ui, &response, 2, None);
     response
 }
 
@@ -580,7 +584,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
 }
 
 fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    navigator_search(ui, &mut app.state);
+    let enter_rows = navigator_search(ui, &mut app.state);
     let (occurrence, master, can_ascend) = navigator_path(&app.state.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
@@ -637,6 +641,8 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::AscendHierarchy.execute(app);
     }
 
+    rail::open(ui.ctx());
+    let mut folded = None;
     ScrollArea::vertical()
         .id_salt("workbench.design.navigator")
         .show(ui, |ui| {
@@ -655,7 +661,22 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     DesignNavigatorSection::NamedSignals => named_signal_section(ui, app),
                 }
             }
+            // Inside the scroll area and below the last row: the traversal
+            // needs the whole rail before it can answer, and the row it lands
+            // on has to be scrolled to by the area it sits in.
+            folded = rail::traverse(ui, enter_rows);
         });
+    // Applied after the rail is painted, exactly as a press on the caret is:
+    // every row above was laid out against the position the tree held when the
+    // frame began.
+    if let Some(node) = folded {
+        let workspace = app.state.workbench.workspace;
+        app.state
+            .workbench
+            .navigator_trees
+            .for_workspace(workspace)
+            .toggle(node);
+    }
 }
 
 /// The navigator's location line: the occurrence the session is editing, the
@@ -712,7 +733,7 @@ fn sheet_scope_control(ui: &mut Ui, scope: SheetScope) -> Option<SheetScope> {
     changed.then(|| SheetScope::OPTIONS[index])
 }
 
-fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
+fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) -> bool {
     let workspace = state.workbench.workspace;
     panel_search(
         ui,
@@ -720,7 +741,7 @@ fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppSta
         "workbench.design.navigator.search",
         "Find instance, net or port…",
         &mut state.workbench.focus_navigator_search,
-    );
+    )
 }
 
 /// A net is listed while any conductor or terminal it binds is in scope.
@@ -2071,7 +2092,8 @@ fn raw_probe_target(expression: &str) -> Option<RawProbeTarget<'_>> {
 
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     observe_placements(ui, app);
-    shelf_search(ui, app);
+    let enter_rows = shelf_search(ui, app);
+    rail::open(ui.ctx());
     let query = normalized(&app.state.workbench.placement_query);
     let library_parts = library_part_rows(app, &query);
     let cells = cell_candidates(app);
@@ -2095,6 +2117,16 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
             if !query.is_empty() && visible_matches == 0 {
                 empty_navigator_row(ui, "No component or cell matches this filter");
             }
+            // Every fold position on the shelf is persisted under its own
+            // group row, so the traversal moves all of them itself and has
+            // nothing to hand back. Bound rather than discarded, so a row
+            // added later that folds a navigator-tree node is caught here
+            // instead of quietly answering no key.
+            let _unmoved = rail::traverse(ui, enter_rows);
+            debug_assert!(
+                _unmoved.is_none(),
+                "the shelf keeps every fold position under its own row"
+            );
         });
     if let Some(arm) = band {
         apply_shelf_arm(app, arm, ui.ctx());
@@ -2472,14 +2504,14 @@ fn component_shelf_match_count(app: &RSpiceApp, query: &str) -> usize {
     primitive_matches + builtin_matches + generated_matches + library_matches
 }
 
-fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
+fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) -> bool {
     panel_search(
         ui,
         &mut app.state.workbench.placement_query,
         "workbench.design.component_shelf.search",
         "Place component or cell…",
         &mut app.state.workbench.focus_placement_search,
-    );
+    )
 }
 
 /// One rail's band: what the section is called, how many rows it stands over,
@@ -2573,6 +2605,17 @@ fn navigator_section_header(ui: &mut Ui, section: DesignNavigatorSection, count:
         t.color.text_dim,
     );
     theme::paint_focus_ring(ui, &response, rect);
+    // The band is the rail's own root row: Left climbs out to it from every
+    // row below, and folds it once there.
+    rail::row(
+        ui,
+        &response,
+        0,
+        Some(RailDisclosure {
+            unfolded: open,
+            fold: RailFold::Persisted(id),
+        }),
+    );
     open
 }
 
@@ -3284,6 +3327,7 @@ fn shelf_part_row(
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
+    rail::row(ui, &response, level + 1, None);
     response
 }
 
@@ -3693,6 +3737,17 @@ fn catalog_group_row(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_expanded(open);
     });
+    // The shelf's own root row: the band above it paints no control and takes
+    // no focus, so this is what Left climbs out to from a part row.
+    rail::row(
+        ui,
+        &response,
+        0,
+        Some(RailDisclosure {
+            unfolded: open,
+            fold: RailFold::Persisted(id),
+        }),
+    );
     open
 }
 
