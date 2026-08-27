@@ -3013,6 +3013,17 @@ impl ResultsState {
         }
     }
 
+    /// The unit-pane ordinal a retained pane's axis ranges describe.
+    ///
+    /// A retained pane carries one horizontal and one vertical axis, while the
+    /// waveform stack draws several unit panes inside it — volts and amps do
+    /// not share a Y scale. The document can therefore only state one of those
+    /// verticals, and it states the first, by construction. Every other unit
+    /// pane's zoom is session state and stays out of the document rather than
+    /// being written into it under whichever ordinal a hash map happened to
+    /// yield first.
+    const RETAINED_PANE_ORDINAL: usize = 0;
+
     fn project_persistent_plot_view(
         &mut self,
         viewer: ResultViewer,
@@ -3024,10 +3035,15 @@ impl ResultsState {
         };
         let viewer = Self::persistent_viewer_key(viewer);
         let plot = PlotPresentationKey::Document(context.document_id, context.pane_id);
-        self.views
-            .retain(|(key_viewer, key_plot, _), _| (*key_viewer, *key_plot) != (viewer, plot));
+        let key = (viewer, plot, Self::RETAINED_PANE_ORDINAL);
+        // Only the ordinal the document actually states is replaced. Clearing
+        // every ordinal here destroyed the zoom of every other unit pane on
+        // every frame the document drew, so a multi-pane document could not
+        // hold a zoom on anything but its first pane.
         if x.is_some() || y.is_some() {
-            self.views.insert((viewer, plot, 0), PlotView { x, y });
+            self.views.insert(key, PlotView { x, y });
+        } else {
+            self.views.remove(&key);
         }
     }
 
@@ -3038,13 +3054,9 @@ impl ResultsState {
         let viewer = Self::persistent_viewer_key(viewer);
         let plot = PlotPresentationKey::Document(context.document_id, context.pane_id);
         self.views
-            .iter()
-            .filter(|((key_viewer, key_plot, _), _)| (*key_viewer, *key_plot) == (viewer, plot))
-            .fold(PlotView::default(), |mut projected, (_, view)| {
-                projected.x = projected.x.or(view.x);
-                projected.y = projected.y.or(view.y);
-                projected
-            })
+            .get(&(viewer, plot, Self::RETAINED_PANE_ORDINAL))
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Flip one signal's membership in the browser's Favorites scope.

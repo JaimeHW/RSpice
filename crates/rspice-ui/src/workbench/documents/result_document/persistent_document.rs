@@ -1972,6 +1972,80 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
+    // per-pane viewport retention
+    // -----------------------------------------------------------------
+
+    /// A retained pane holds one vertical axis while the waveform stack draws
+    /// a unit pane per quantity. Zooming the amps pane of a V+I document must
+    /// land on the amps pane, and must not be written into the document's one
+    /// vertical axis in place of the volts pane the document actually states.
+    #[test]
+    fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
+        let (mut app, document_id) = persistent_transient_fixture();
+        let pane = projected_pane(&mut app, document_id);
+        let analysis = super::super::AnalysisPresentationKey::new(
+            app.state.simulation.runs[0].dataset_id,
+            &app.state.simulation.runs[0].analyses[0],
+        );
+
+        // The volts pane — the one the document's vertical axis states.
+        let volts =
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0);
+        volts.x = Some((0.2, 0.8));
+        volts.y = Some((-1.0, 1.0));
+        // The amps pane, whose scale the document cannot also state.
+        let amps =
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 1);
+        amps.y = Some((-5.0e-3, 5.0e-3));
+
+        capture_pane_presentation(&mut app.state, &pane, ResultViewer::Waves);
+
+        let vertical = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("captured document")
+            .axes()
+            .iter()
+            .find(|axis| axis.orientation == AxisOrientation::VerticalLeft)
+            .and_then(|axis| axis.range);
+        assert_eq!(
+            vertical,
+            Some(AxisRange::new(-1.0, 1.0).expect("a valid range")),
+            "the document states its own pane's vertical axis, not whichever \
+             unit pane a hash map yielded first"
+        );
+
+        // Re-projecting must leave the amps pane's zoom alone: it is the only
+        // owner of that window, and wiping it every frame made a multi-pane
+        // document unable to hold a zoom on anything but its first pane.
+        let _pane = projected_pane(&mut app, document_id);
+        assert_eq!(
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, analysis, 1)
+                .y,
+            Some((-5.0e-3, 5.0e-3))
+        );
+        assert_eq!(
+            app.state
+                .ui
+                .results
+                .analysis_plot_view_pane(ResultViewer::Waves, analysis, 0)
+                .y,
+            Some((-1.0, 1.0)),
+            "the retained pane's own window comes back from the document"
+        );
+    }
+
+    // -----------------------------------------------------------------
     // Latest tracking
     // -----------------------------------------------------------------
 
