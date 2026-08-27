@@ -256,6 +256,12 @@ enum PreparedHistogramMode {
 #[serde(deny_unknown_fields)]
 pub(super) struct PreparedResultsPresentation {
     viewer: ResultViewer,
+    /// The reading the sheet was carrying: hidden traces, placed cursors,
+    /// anchored markers. It travels with the controls because the page is
+    /// resolved on the worker, and a page missing the reader's own annotation
+    /// is not the page they reviewed.
+    #[serde(default)]
+    overlay: RetainedQuickViewOverlays,
     specs: Vec<crate::state::SpecEntry>,
     fft_selected_source: Option<String>,
     fft_normalization: PreparedFftNormalization,
@@ -283,6 +289,7 @@ impl PreparedResultsPresentation {
         )?;
         let captured = Self {
             viewer: value.viewer,
+            overlay: value.overlay,
             specs: value.specs,
             fft_selected_source: value.fft.selected_source,
             fft_normalization: match value.fft.normalization {
@@ -333,6 +340,7 @@ impl PreparedResultsPresentation {
     }
 
     fn validate(&self) -> Result<(), HardcopySourceError> {
+        self.overlay.validate()?;
         if self.specs.len() > 10_000 {
             return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
                 "prepared specification count exceeds the governed limit".to_owned(),
@@ -416,6 +424,7 @@ impl PreparedResultsPresentation {
         fft.sample_count = self.fft_sample_count;
         Ok(ResultsQuickViewPresentation {
             viewer: self.viewer,
+            overlay: self.overlay,
             specs: self.specs,
             fft,
             histogram_selected: self.histogram_selected,

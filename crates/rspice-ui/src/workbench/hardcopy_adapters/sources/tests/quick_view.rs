@@ -308,6 +308,183 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     );
 }
 
+/// The page carries the reading, not only the samples.
+///
+/// A quick marker the reader anchored, and the A/B cursors they placed, were
+/// absent from every printed quick-view page: the capture froze the retained
+/// samples and the viewer controls and nothing else. They are placed here
+/// through the same mapping the traces go through, so a marker sits on its
+/// curve on the page for the reason it sits on it on screen — and the exact
+/// source coordinates travel beside the geometry.
+#[test]
+fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
+    use crate::workbench::documents::result_document::{
+        AnalysisPresentationKey, marker_anchor_for,
+    };
+
+    let analysis =
+        AnalysisResult::new(4, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 4.0, 8.0], "#0af"),
+        ]);
+    let mut state = quick_view_state(analysis, ResultViewer::Waves);
+    let analysis_key = {
+        let run = state.simulation.active_run().expect("active run");
+        AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
+    };
+    let marker_id = state.ui.results.add_marker(
+        analysis_key,
+        marker_anchor_for(analysis_key, "V(out)"),
+        "V(out)".to_owned(),
+        1.0,
+    );
+    state.ui.results.cursors.a = Some(0.0);
+    state.ui.results.cursors.b = Some(2.0);
+
+    let resolved = resolve_quick_view(&state).expect("quick view resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected a semantic waveform plot")
+    };
+
+    // The marker rides its trace: the exact source coordinates travel, and
+    // the resampled Y is the trace's own value at the anchor.
+    assert_eq!(plot.markers.len(), 1, "{:?}", plot.markers);
+    let marker = &plot.markers[0];
+    assert_eq!(marker.label, format!("M{marker_id}"));
+    assert_eq!(marker.source_x_bits, Some(1.0f64.to_bits()));
+    assert_eq!(marker.source_y_bits, Some(4.0f64.to_bits()));
+    assert_eq!(marker.trace_id, Some(plot.traces[0].trace_id));
+
+    // The anchor is the midpoint of a linear 0..2 sweep, so it lands on the
+    // horizontal centre of the axis rectangle.
+    let position = marker.position.expect("a marker carries a page position");
+    assert_eq!(position.x_um, PLOT_WIDTH_UM / 2);
+
+    // Both cursors are full-height lines at their own source X: A on the
+    // left inset, B on the right.
+    let cursors: Vec<&str> = plot
+        .cursors
+        .iter()
+        .map(|cursor| cursor.label.as_str())
+        .collect();
+    assert_eq!(cursors, ["A", "B"]);
+    let a = &plot.cursors[0];
+    let b = &plot.cursors[1];
+    assert_eq!(a.source_x_bits, 0.0f64.to_bits());
+    assert_eq!(b.source_x_bits, 2.0f64.to_bits());
+    assert_eq!(a.start.x_um, a.end.x_um);
+    assert_eq!(b.start.x_um, b.end.x_um);
+    assert!(a.start.x_um < b.start.x_um);
+    assert_ne!(a.start.y_um, a.end.y_um);
+
+    // A page with nothing placed on it carries neither.
+    state.ui.results.markers.clear();
+    state.ui.results.cursors.a = None;
+    state.ui.results.cursors.b = None;
+    let bare = resolve_quick_view(&state).expect("quick view resolves");
+    let HardcopySemanticDocument::Plot(bare) = bare.semantic_document() else {
+        panic!("expected a semantic waveform plot")
+    };
+    assert!(bare.markers.is_empty());
+    assert!(bare.cursors.is_empty());
+}
+
+/// A retained document marker reaches the page as itself.
+///
+/// The two stores allocate independently and label distinctly, so a `D`
+/// marker must arrive with its own tag rather than being restated as a quick
+/// one. A spec limit arrives as the full-height line the sheet draws, because
+/// it constrains the axis position rather than one curve.
+#[test]
+fn a_retained_document_marker_and_a_spec_limit_reach_the_page_as_themselves() {
+    use crate::workbench::documents::result_document::MarkerKind;
+
+    let series = vec![QuickResultSeries {
+        identity: "trace-identity".to_owned(),
+        label: "V(out)".to_owned(),
+        points: vec![(0.0, 0.0), (1.0, 4.0), (2.0, 8.0)],
+    }];
+    let overlay = RetainedQuickViewOverlay::for_test(
+        None,
+        None,
+        vec![
+            RetainedQuickMarker {
+                label: "D7 · settling".to_owned(),
+                kind: MarkerKind::Peak,
+                x: 1.0,
+                trace_name: Some("V(out)".to_owned()),
+            },
+            RetainedQuickMarker {
+                label: "M2 · upper limit".to_owned(),
+                kind: MarkerKind::Spec,
+                x: 2.0,
+                trace_name: None,
+            },
+            RetainedQuickMarker {
+                label: "M3 · other pane".to_owned(),
+                kind: MarkerKind::Note,
+                x: 1.0,
+                trace_name: Some("V(elsewhere)".to_owned()),
+            },
+        ],
+    );
+
+    let plot = quick_plot_from_series(ResultViewer::Waves, "Results", 0, series, Some(&overlay))
+        .expect("plot resolves");
+
+    assert_eq!(
+        plot.markers
+            .iter()
+            .map(|marker| marker.label.as_str())
+            .collect::<Vec<_>>(),
+        ["D7 · settling"],
+        "a spec limit is a line, and a marker whose trace is not on this page is skipped"
+    );
+    assert_eq!(plot.markers[0].source_y_bits, Some(4.0f64.to_bits()));
+    assert_eq!(
+        plot.cursors
+            .iter()
+            .map(|cursor| cursor.label.as_str())
+            .collect::<Vec<_>>(),
+        ["M2 · upper limit"]
+    );
+    let limit = &plot.cursors[0];
+    assert_eq!(limit.start.x_um, limit.end.x_um);
+    assert_eq!(limit.source_x_bits, 2.0f64.to_bits());
+}
+
+/// A trace the reader hid does not print.
+///
+/// The capture filtered on the dataset's own `visible` flag, which a session
+/// override never touches, so a trace hidden on the sheet stayed on the page.
+#[test]
+fn a_trace_hidden_on_the_sheet_is_not_printed() {
+    let analysis =
+        AnalysisResult::new(5, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#0af"),
+            WaveformData::new("V(mid)", vec![0.0, 1.0], vec![0.0, 0.5], "#fa0"),
+        ]);
+    let mut state = quick_view_state(analysis, ResultViewer::Waves);
+
+    let resolved = resolve_quick_view(&state).expect("quick view resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected a semantic waveform plot")
+    };
+    assert_eq!(plot.traces.len(), 2);
+
+    crate::workbench::documents::result_document::toggle_visibility(&mut state, 0, 1);
+    let resolved = resolve_quick_view(&state).expect("quick view resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected a semantic waveform plot")
+    };
+    assert_eq!(
+        plot.traces
+            .iter()
+            .map(|trace| trace.label.as_str())
+            .collect::<Vec<_>>(),
+        ["V(out)"]
+    );
+}
+
 /// A failed noise solve is not printable evidence.
 ///
 /// The hardcopy resolver carried its own copy of the sheet's renderability

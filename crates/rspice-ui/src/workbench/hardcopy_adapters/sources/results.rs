@@ -596,9 +596,16 @@ pub(super) fn resolve_results_quick_view_parts(
     let viewer = presentation.viewer;
     let semantic_document = match viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => {
-            HardcopySemanticDocument::Plot(quick_waveform_plot(active, viewer)?)
+            HardcopySemanticDocument::Plot(quick_waveform_plot(
+                active,
+                viewer,
+                &presentation.overlay.for_analysis(active.analysis.id),
+            )?)
         }
-        ResultViewer::Bode => HardcopySemanticDocument::Plot(quick_bode_plot(active)?),
+        ResultViewer::Bode => HardcopySemanticDocument::Plot(quick_bode_plot(
+            active,
+            &presentation.overlay.for_analysis(active.analysis.id),
+        )?),
         ResultViewer::Fft => HardcopySemanticDocument::Plot(quick_fft_plot(presentation, active)?),
         ResultViewer::HarmonicBalance => {
             HardcopySemanticDocument::Plot(quick_harmonic_balance_plot(active)?)
@@ -614,9 +621,10 @@ pub(super) fn resolve_results_quick_view_parts(
         ResultViewer::Smith => {
             HardcopySemanticDocument::Plot(quick_complex_plot(active, ResultViewer::Smith)?)
         }
-        ResultViewer::NoiseContrib => {
-            HardcopySemanticDocument::Plot(quick_noise_spectrum_plot(active)?)
-        }
+        ResultViewer::NoiseContrib => HardcopySemanticDocument::Plot(quick_noise_spectrum_plot(
+            active,
+            &presentation.overlay.for_analysis(active.analysis.id),
+        )?),
         ResultViewer::Op
         | ResultViewer::Contribution
         | ResultViewer::TransferFunction
@@ -1115,12 +1123,15 @@ pub(super) fn active_quick_result(
 pub(super) fn quick_waveform_plot(
     active: ActiveQuickResult<'_>,
     viewer: ResultViewer,
+    overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     let series = active
         .analysis
         .waveforms
         .iter()
-        .filter(|waveform| waveform.visible)
+        // The reader's per-trace override, not the dataset's flag alone: a
+        // trace hidden on the sheet was still printed.
+        .filter(|waveform| overlay.trace_is_visible(&waveform.name, waveform.visible))
         .map(|waveform| QuickResultSeries {
             identity: format!(
                 "{}:{}:{}:{}",
@@ -1135,13 +1146,16 @@ pub(super) fn quick_waveform_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(viewer, "Results", 0, series)
+    quick_plot_from_series(viewer, "Results", 0, series, Some(overlay))
 }
 
-fn quick_bode_plot(active: ActiveQuickResult<'_>) -> Result<SemanticPlot, HardcopySourceError> {
+fn quick_bode_plot(
+    active: ActiveQuickResult<'_>,
+    overlay: &RetainedQuickViewOverlay,
+) -> Result<SemanticPlot, HardcopySourceError> {
     let Some(summary) = crate::state::ac_bode_summary_for_analysis(active.analysis, 0) else {
         if active.analysis.analysis_type.is_raw_frequency_curve() {
-            return quick_waveform_plot(active, ResultViewer::Bode);
+            return quick_waveform_plot(active, ResultViewer::Bode, overlay);
         }
         return Err(HardcopySourceError::MissingViewerEvidence(
             "frequency response",
@@ -1175,11 +1189,12 @@ fn quick_bode_plot(active: ActiveQuickResult<'_>) -> Result<SemanticPlot, Hardco
                 .collect(),
         });
     }
-    quick_plot_from_series(ResultViewer::Bode, "Results", 0, series)
+    quick_plot_from_series(ResultViewer::Bode, "Results", 0, series, Some(overlay))
 }
 
 fn quick_noise_spectrum_plot(
     active: ActiveQuickResult<'_>,
+    overlay: &RetainedQuickViewOverlay,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     if !ordinary_noise_spectrum_is_renderable(active.analysis) {
         return Err(HardcopySourceError::MissingViewerEvidence(
@@ -1248,7 +1263,13 @@ fn quick_noise_spectrum_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::NoiseContrib, "Results", 0, series)
+    quick_plot_from_series(
+        ResultViewer::NoiseContrib,
+        "Results",
+        0,
+        series,
+        Some(overlay),
+    )
 }
 
 fn quick_harmonic_balance_plot(
@@ -1288,7 +1309,7 @@ fn quick_harmonic_balance_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::HarmonicBalance, "Results", 0, series)
+    quick_plot_from_series(ResultViewer::HarmonicBalance, "Results", 0, series, None)
 }
 
 fn quick_phase_noise_plot(
@@ -1325,7 +1346,7 @@ fn quick_phase_noise_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::PhaseNoise, "Results", 0, series)
+    quick_plot_from_series(ResultViewer::PhaseNoise, "Results", 0, series, None)
 }
 
 #[cfg(test)]
@@ -1390,6 +1411,7 @@ pub(super) fn quick_fft_plot(
                 .map(|point| (point.frequency, point.magnitude))
                 .collect(),
         }],
+        None,
     )
 }
 
@@ -1433,7 +1455,7 @@ pub(super) fn quick_eye_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::Eye, "Results", 0, series)
+    quick_plot_from_series(ResultViewer::Eye, "Results", 0, series, None)
 }
 
 pub(super) fn quick_histogram_plot(
@@ -1506,6 +1528,7 @@ pub(super) fn quick_histogram_plot(
                 .map(|(bin, ordinate)| (bin.center(), ordinate))
                 .collect(),
         }],
+        None,
     )
 }
 
@@ -1533,7 +1556,7 @@ pub(super) fn quick_complex_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(viewer, "Results", 0, series)
+    quick_plot_from_series(viewer, "Results", 0, series, None)
 }
 
 pub(super) fn selected_retained_waveform<'a>(
@@ -1682,11 +1705,19 @@ pub(super) fn retained_eye_bit_period(
     }
 }
 
+/// Build the printable plot for one sheet.
+///
+/// `overlay` is the reading the sheet was carrying — hidden traces already
+/// applied by the caller, plus the cursors and markers this function places.
+/// It is `None` for the sheets that compute their own abscissa: a marker
+/// anchored in seconds has no position on a folded eye or a binned
+/// distribution, and drawing it at one would be an invention.
 pub(super) fn quick_plot_from_series(
     viewer: ResultViewer,
     page: &str,
     pane_id: u64,
     series: Vec<QuickResultSeries>,
+    overlay: Option<&RetainedQuickViewOverlay>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
     if series.is_empty() {
         return Err(HardcopySourceError::MissingViewerEvidence(
@@ -1728,6 +1759,28 @@ pub(super) fn quick_plot_from_series(
     let (y_minimum, y_maximum) = nondegenerate_range(y_minimum, y_maximum);
     let plot_width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
     let plot_height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
+    let x_span = x_maximum - x_minimum;
+    let y_span = y_maximum - y_minimum;
+    let (cursors, markers) = overlay.map_or_else(
+        || Ok((Vec::new(), Vec::new())),
+        |overlay| {
+            resolved_overlay_geometry(
+                viewer,
+                overlay,
+                &series,
+                PlotFrame {
+                    x_minimum,
+                    x_maximum,
+                    y_minimum,
+                    y_maximum,
+                    x_span,
+                    y_span,
+                    plot_width,
+                    plot_height,
+                },
+            )
+        },
+    )?;
     let mut trace_ids = std::collections::HashSet::new();
     let traces = series
         .into_iter()
@@ -1762,8 +1815,8 @@ pub(super) fn quick_plot_from_series(
         page_id: stable_page_id(page),
         pane_id,
         traces,
-        cursors: Vec::new(),
-        markers: Vec::new(),
+        cursors,
+        markers,
         annotations: Vec::new(),
     })
 }

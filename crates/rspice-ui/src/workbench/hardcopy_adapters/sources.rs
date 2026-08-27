@@ -11,6 +11,7 @@ mod documents;
 mod geometry;
 mod noise;
 mod prepared;
+mod quick_view_overlay;
 mod report_inventory;
 mod results;
 mod semantic;
@@ -19,10 +20,11 @@ pub use documents::*;
 // Crate-private: `geometry` exposes only `pub(super)` helpers, which the
 // sibling modules reach through `use super::*`.
 pub(crate) use geometry::*;
-// Module-private: `noise` exposes only `pub(super)` predicates, and the
-// siblings reach them through their own `use super::*`.
+// Module-private: `noise` and `quick_view_overlay` expose only `pub(super)`
+// items, and the siblings reach them through their own `use super::*`.
 use noise::*;
 pub use prepared::*;
+use quick_view_overlay::*;
 pub use results::*;
 pub use semantic::*;
 
@@ -190,6 +192,10 @@ pub(crate) struct ResultsQuickViewHardcopySource<'a> {
 #[derive(Debug, Clone)]
 struct ResultsQuickViewPresentation {
     viewer: ResultViewer,
+    /// The reading each strip was carrying: hidden traces, placed cursors,
+    /// anchored markers. Frozen here so the worker resolves the page the
+    /// reader reviewed rather than a bare plot of the same samples.
+    overlay: RetainedQuickViewOverlays,
     specs: Vec<crate::state::SpecEntry>,
     fft: crate::analysis::FftState,
     histogram_selected: usize,
@@ -198,6 +204,21 @@ struct ResultsQuickViewPresentation {
     histogram_custom_min: f64,
     histogram_custom_max: f64,
     histogram_mode: crate::analysis::histogram::HistogramDisplayMode,
+}
+
+/// The retained run a quick-view capture is taken from.
+///
+/// The active Results document is the authority, exactly as it is for the
+/// descriptor that offers the page. The simulation's own selection stands in
+/// only when no result document is open — a capture reached from the command
+/// palette rather than from the workspace.
+fn captured_results_run(state: &AppState) -> Option<&SimulationRun> {
+    match state.workbench.documents.active(Workspace::Results) {
+        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => {
+            state.simulation.run_by_dataset_id(*dataset_id)
+        }
+        _ => state.simulation.active_run(),
+    }
 }
 
 impl ResultsQuickViewPresentation {
@@ -212,8 +233,14 @@ impl ResultsQuickViewPresentation {
         fft.time_window_end = state.analysis.fft_state.time_window_end;
         fft.sample_count_auto = state.analysis.fft_state.sample_count_auto;
         fft.sample_count = state.analysis.fft_state.sample_count;
+        // Every strip of the captured run, because a stacked wave view
+        // resolves one page per analysis through this one presentation.
+        let overlay = captured_results_run(state)
+            .map(|run| RetainedQuickViewOverlays::capture(state, run))
+            .unwrap_or_default();
         Self {
             viewer: state.ui.results.viewer,
+            overlay,
             specs: crate::workbench::documents::result_document::run_specifications(state),
             fft,
             histogram_selected: state.analysis.histogram_state.selected,

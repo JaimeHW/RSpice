@@ -14,7 +14,7 @@ use std::cell::RefCell;
 
 use super::state::{
     ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, VerificationPage,
-    WorkbenchState, Workspace, WorkspaceDocumentId,
+    WorkbenchState, Workspace,
 };
 
 pub(crate) mod code_context;
@@ -948,20 +948,7 @@ impl Command {
             Self::OpenTaskDeck => result_navigation::task_deck_hop(app).is_ok(),
             Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
             Self::ExpressionDiagnostics => state.simulation.has_results(),
-            // "Export dataset…" exports the *displayed* result view, and that
-            // resolution starts at the active Results document. Offering it
-            // whenever any dataset is retained meant pressing it from another
-            // workspace produced a console warning instead of a file.
-            Self::ExportWaveformsCsv => {
-                state.simulation.has_results()
-                    && matches!(
-                        state.workbench.documents.active(Workspace::Results),
-                        Some(
-                            WorkspaceDocumentId::ResultDataset(_)
-                                | WorkspaceDocumentId::VisualizationDocument(_)
-                        )
-                    )
-            }
+            Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
             Self::VerificationPage(page) if !page.is_operational() => false,
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => !state.log_buffer.is_empty(),

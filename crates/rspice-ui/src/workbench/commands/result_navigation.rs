@@ -12,6 +12,25 @@ use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
 
 use super::vocabulary::Command;
 
+/// Whether "Export dataset…" has a displayed view to write.
+///
+/// The export writes the *displayed* result view, and that resolution starts
+/// at the active Results document. Offering the command whenever any dataset
+/// was retained meant pressing it from another workspace produced a console
+/// warning instead of a file.
+pub(super) fn dataset_export_is_resolvable(state: &crate::workbench::AppState) -> bool {
+    use crate::workbench::state::{Workspace, WorkspaceDocumentId};
+
+    state.simulation.has_results()
+        && matches!(
+            state.workbench.documents.active(Workspace::Results),
+            Some(
+                WorkspaceDocumentId::ResultDataset(_)
+                    | WorkspaceDocumentId::VisualizationDocument(_)
+            )
+        )
+}
+
 /// Select the newest run that actually holds a dataset, then activate Results.
 ///
 /// The controls that say "the results" without naming a run — the status
