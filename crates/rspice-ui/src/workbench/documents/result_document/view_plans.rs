@@ -16,6 +16,8 @@ use std::sync::Arc;
 /// Every memoized viewer projection the Results workspace holds.
 #[derive(Debug, Clone, Default)]
 pub(super) struct ViewPlans {
+    /// The dataset manifest projection; see [`super::manifest`].
+    pub(super) manifest: Option<Arc<super::manifest::ManifestPlan>>,
     /// Safe-operating-area per-rule stress facts; see [`super::soa`].
     pub(super) soa: Option<Arc<super::soa::SoaPlan>>,
 }

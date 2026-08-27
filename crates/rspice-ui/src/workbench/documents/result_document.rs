@@ -4638,7 +4638,7 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         ResultViewer::Soa => soa::show(ui, &mut app.state),
         ResultViewer::Reliability => reliability::show(ui, &mut app.state),
         ResultViewer::Optimization => optimization::show(ui, &mut app.state),
-        ResultViewer::Manifest => manifest::show(ui, &app.state),
+        ResultViewer::Manifest => manifest::show(ui, &mut app.state),
     }
 }
 

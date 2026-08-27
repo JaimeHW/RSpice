@@ -17,6 +17,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use std::sync::Arc;
+
 use super::frame_work::{self, DatasetWalk};
 use super::virtual_rows::RowOffsets;
 use super::well_hint;
@@ -244,12 +246,50 @@ impl ManifestViewModel {
     }
 }
 
-pub(crate) fn show(ui: &mut Ui, state: &AppState) {
-    let Some(run) = state.simulation.active_run() else {
+/// The manifest projection for one run, and the run generation it describes.
+///
+/// [`ManifestViewModel::from_run`] validates the run's provenance, projects a
+/// row per retained task and takes the dataset's content digest — a SHA-256
+/// over every retained sample in the run. None of that changes while the
+/// reader looks at it, and all of it happened on every frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ManifestPlan {
+    version: u64,
+    run: u64,
+    pub(super) model: ManifestViewModel,
+}
+
+/// The active run's manifest projection, rebuilt only for a new run or a new
+/// dataset generation.
+pub(super) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
+    let version = state.simulation.data_version;
+    let run_id = state.simulation.active_run()?.id;
+    if let Some(plan) = state.ui.results.plans.manifest.as_ref()
+        && plan.version == version
+        && plan.run == run_id
+    {
+        return Some(Arc::clone(plan));
+    }
+    let model = ManifestViewModel::from_run(state.simulation.active_run()?);
+    let built = Arc::new(ManifestPlan {
+        version,
+        run: run_id,
+        model,
+    });
+    state.ui.results.plans.manifest = Some(Arc::clone(&built));
+    Some(built)
+}
+
+pub(crate) fn show(ui: &mut Ui, state: &mut AppState) {
+    let Some(plan) = active_manifest(state) else {
         well_hint(ui, "No retained dataset is selected");
         return;
     };
-    let manifest = ManifestViewModel::from_run(run);
+    let manifest = &plan.model;
+    let lifecycle_is_terminal = state
+        .simulation
+        .active_run()
+        .is_some_and(|run| run.lifecycle.is_terminal());
     let t = Tokens::get(ui.ctx());
 
     let header = ui
@@ -279,7 +319,7 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
                         manifest.lifecycle, manifest.inventory_status
                     ))
                     .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                    .color(if run.lifecycle.is_terminal() {
+                    .color(if lifecycle_is_terminal {
                         t.color.ok
                     } else {
                         t.color.warn
@@ -353,7 +393,13 @@ pub(crate) fn show(ui: &mut Ui, state: &AppState) {
 }
 
 pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some((manifest, saved_outputs, run_sequence)) = state.simulation.active_run().map(|run| {
+    // The panel reads the same projection the sheet does rather than taking a
+    // second dataset digest of the same immutable run.
+    let Some(plan) = active_manifest(state) else {
+        return;
+    };
+    let manifest = &plan.model;
+    let Some((saved_outputs, run_sequence)) = state.simulation.active_run().map(|run| {
         let saved_outputs = state.simulation.active_analysis().map(|analysis| {
             (
                 run.run_id,
@@ -362,7 +408,7 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 analysis.saved_output_receipts.clone(),
             )
         });
-        (ManifestViewModel::from_run(run), saved_outputs, run.id)
+        (saved_outputs, run.id)
     }) else {
         return;
     };
@@ -1435,5 +1481,97 @@ mod tests {
             assert!(!meta.axis.is_empty(), "{kind:?}");
             assert!(!meta.precision.is_empty(), "{kind:?}");
         }
+    }
+
+    fn state_with_run(label: &str) -> AppState {
+        let mut run = SimulationRun::new(7);
+        run.lifecycle = SimulationRunLifecycle::Completed;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, label).with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
+            ]),
+        );
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state
+    }
+
+    /// The memo has to be the same projection, digest included — that digest
+    /// is what binds every statement on the sheet to the retained samples.
+    #[test]
+    fn the_memoized_manifest_is_the_projection_it_replaced() {
+        let mut state = state_with_run("Transient");
+        let direct = ManifestViewModel::from_run(
+            state
+                .simulation
+                .active_run()
+                .expect("the fixture selects a run"),
+        );
+
+        let plan = active_manifest(&mut state).expect("a manifest for the active run");
+        assert_eq!(plan.model, direct);
+        assert_eq!(
+            plan.model.dataset_digest,
+            state
+                .simulation
+                .active_run()
+                .expect("the fixture selects a run")
+                .dataset_content_digest()
+                .to_string()
+        );
+
+        // Asking again is the same answer from the same allocation.
+        let again = active_manifest(&mut state).expect("a manifest for the active run");
+        assert!(Arc::ptr_eq(&plan, &again));
+    }
+
+    /// The digest addresses the samples, so a changed dataset must produce a
+    /// changed manifest rather than the one the memo happens to hold.
+    #[test]
+    fn a_new_dataset_generation_reprojects_the_manifest() {
+        let mut state = state_with_run("Transient");
+        let before = active_manifest(&mut state).expect("a manifest for the active run");
+        let before_digest = before.model.dataset_digest.clone();
+
+        state.simulation.runs[0].analyses[0].waveforms[0].y = std::sync::Arc::new(vec![0.0, 9.0]);
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+        let after = active_manifest(&mut state).expect("a manifest for the active run");
+        assert_ne!(
+            after.model.dataset_digest, before_digest,
+            "the sheet kept the previous dataset generation's content digest"
+        );
+        assert_eq!(
+            after.model.dataset_digest,
+            state.simulation.runs[0]
+                .dataset_content_digest()
+                .to_string()
+        );
+    }
+
+    /// Selecting a different run is a different manifest, even at the same
+    /// dataset generation.
+    #[test]
+    fn selecting_another_run_reprojects_the_manifest() {
+        let mut state = state_with_run("First");
+        let first = active_manifest(&mut state)
+            .expect("a manifest for the active run")
+            .model
+            .clone();
+
+        let mut second = SimulationRun::new(9);
+        second.lifecycle = SimulationRunLifecycle::Completed;
+        second.add_analysis(
+            AnalysisResult::new(2, AnalysisType::Transient, "Second").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![5.0, 6.0], "#ffbd2e"),
+            ]),
+        );
+        state.simulation.runs.push(second);
+        assert!(state.simulation.select_run(1));
+
+        let after = active_manifest(&mut state).expect("a manifest for the active run");
+        assert_ne!(after.model.run_sequence, first.run_sequence);
+        assert_ne!(after.model.dataset_digest, first.dataset_digest);
     }
 }
