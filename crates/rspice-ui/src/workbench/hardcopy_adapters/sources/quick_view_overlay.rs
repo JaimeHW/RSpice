@@ -312,12 +312,20 @@ pub(super) fn resolved_overlay_geometry(
     viewer: ResultViewer,
     overlay: &RetainedQuickViewOverlay,
     series: &[QuickResultSeries],
-    frame: PlotFrame,
+    x_scale: AxisScale,
+    y_scale: AxisScale,
+    frame: &PlotFrame,
 ) -> Result<(Vec<SemanticPlotCursor>, Vec<SemanticPlotMarker>), HardcopySourceError> {
     let mut cursors = Vec::new();
     let mut markers = Vec::new();
-    let mut vertical = |label: &str, x: f64| -> Result<(), HardcopySourceError> {
-        if !x.is_finite() || x < frame.x_minimum || x > frame.x_maximum {
+    let mut vertical = |label: &str, source_x: f64| -> Result<(), HardcopySourceError> {
+        // The frame is in the axes' own space, so the source coordinate is
+        // projected before it is placed — and the exact source value still
+        // travels beside the geometry.
+        let Some(x) = project(x_scale, source_x) else {
+            return Ok(());
+        };
+        if x < frame.x_minimum || x > frame.x_maximum {
             return Ok(());
         }
         let point = |y| {
@@ -335,7 +343,7 @@ pub(super) fn resolved_overlay_geometry(
         cursors.push(SemanticPlotCursor {
             cursor_id: stable_overlay_id(viewer, "cursor", label),
             label: label.to_owned(),
-            source_x_bits: x.to_bits(),
+            source_x_bits: source_x.to_bits(),
             start: point(frame.y_minimum)?,
             end: point(frame.y_maximum)?,
         });
@@ -362,13 +370,11 @@ pub(super) fn resolved_overlay_geometry(
         else {
             continue;
         };
-        let y = overlay.marker_y(&source.points, marker.x);
-        if !marker.x.is_finite()
-            || marker.x < frame.x_minimum
-            || marker.x > frame.x_maximum
-            || !y.is_finite()
-            || y < frame.y_minimum
-            || y > frame.y_maximum
+        let source_y = overlay.marker_y(&source.points, marker.x);
+        let (Some(x), Some(y)) = (project(x_scale, marker.x), project(y_scale, source_y)) else {
+            continue;
+        };
+        if x < frame.x_minimum || x > frame.x_maximum || y < frame.y_minimum || y > frame.y_maximum
         {
             continue;
         }
@@ -377,9 +383,9 @@ pub(super) fn resolved_overlay_geometry(
             label: marker.label.clone(),
             trace_id: Some(stable_quick_trace_id(viewer, index, &source.identity)),
             source_x_bits: Some(marker.x.to_bits()),
-            source_y_bits: Some(y.to_bits()),
+            source_y_bits: Some(source_y.to_bits()),
             position: Some(map_plot_point(
-                marker.x,
+                x,
                 y,
                 frame.x_minimum,
                 frame.y_minimum,

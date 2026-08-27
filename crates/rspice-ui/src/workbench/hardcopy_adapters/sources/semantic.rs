@@ -32,6 +32,9 @@ use crate::state::{
     DrawingSheetTitleFieldId, Junction, NetLabel, SchematicSheetFormat, SheetPageNumbering,
     SymbolDocument, Wire,
 };
+// The visualization document's own axis vocabulary, so the printed page and
+// the authored pane describe a logarithmic axis the same way.
+use crate::results::visualization_document::AxisScale;
 use crate::workbench::documents::result_document::ResultViewer;
 
 use super::{
@@ -216,11 +219,55 @@ pub struct SemanticPlot {
     pub viewer: ResultViewer,
     pub page_id: u64,
     pub pane_id: u64,
+    /// How each axis maps its quantity onto the page.
+    ///
+    /// Declared rather than assumed. Geometry here is already mapped through
+    /// it — a decade of a logarithmic sweep occupies the same width as every
+    /// other decade — and the renderer reads it to rule the grid the same way
+    /// the sheet rules it. Absent it, a frequency response printed with its
+    /// first decade compressed into a pixel and nine even divisions ruled
+    /// across a span that has none.
+    #[serde(default = "linear_axis")]
+    pub x_scale: AxisScale,
+    #[serde(default = "linear_axis")]
+    pub y_scale: AxisScale,
+    /// The gridlines and their captions, in page coordinates.
+    ///
+    /// Positions are computed where the mapping is known, so the renderer
+    /// rules what the axis says rather than dividing the frame by ten.
+    #[serde(default)]
+    pub axis_ticks: Vec<SemanticAxisTick>,
     pub traces: Vec<SemanticPlotTrace>,
     #[serde(default)]
     pub cursors: Vec<SemanticPlotCursor>,
     pub markers: Vec<SemanticPlotMarker>,
     pub annotations: Vec<SemanticPlotAnnotation>,
+}
+
+const fn linear_axis() -> AxisScale {
+    AxisScale::Linear
+}
+
+/// Which axis a gridline belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SemanticAxisKind {
+    Horizontal,
+    Vertical,
+}
+
+/// One ruled gridline and the value it stands for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticAxisTick {
+    pub axis: SemanticAxisKind,
+    /// Both ends of the line, in page coordinates.
+    pub start: SemanticPoint,
+    pub end: SemanticPoint,
+    /// The caption, empty for a minor line. A log axis rules nine minor lines
+    /// per decade and captions none of them, exactly as the sheet does.
+    pub label: String,
+    pub major: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

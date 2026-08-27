@@ -25,6 +25,9 @@ fn overlay_plot() -> SemanticPlot {
         viewer: crate::workbench::ResultViewer::Waves,
         page_id: 1,
         pane_id: 0,
+        x_scale: crate::results::visualization_document::AxisScale::Linear,
+        y_scale: crate::results::visualization_document::AxisScale::Linear,
+        axis_ticks: Vec::new(),
         traces: vec![SemanticPlotTrace {
             trace_id: 11,
             label: "V(out)".to_owned(),

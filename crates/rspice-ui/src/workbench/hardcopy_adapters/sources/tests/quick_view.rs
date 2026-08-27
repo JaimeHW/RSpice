@@ -485,6 +485,134 @@ fn a_trace_hidden_on_the_sheet_is_not_printed() {
     );
 }
 
+/// A frequency response prints on the axis it is read on.
+///
+/// The page mapped every sheet the same way — value minus minimum, over the
+/// span, across the frame — so a 1 Hz to 1 MHz sweep printed with five of its
+/// six decades squeezed into the leftmost tenth of the frame, under nine
+/// evenly spaced division lines ruled across a span that has no even
+/// divisions. The decade positions below are the analytic oracle: on a log
+/// axis each decade occupies an equal share of the frame, so the midpoint of
+/// a six-decade sweep is the middle of the plot and 10 Hz sits one fifth in.
+#[test]
+fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
+    let frequency = (0..=6)
+        .map(|decade| 10.0f64.powi(decade))
+        .collect::<Vec<_>>();
+    let gain = frequency.iter().map(|_| 1.0).collect::<Vec<_>>();
+    let analysis = AnalysisResult::new(6, AnalysisType::Disto, "DISTO")
+        .with_waveforms(vec![WaveformData::new("V(out)", frequency, gain, "#0af")]);
+    let state = quick_view_state(analysis, ResultViewer::Bode);
+
+    let resolved = resolve_quick_view(&state).expect("the sweep resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected a semantic frequency plot")
+    };
+
+    assert_eq!(plot.x_scale, AxisScale::Logarithmic);
+
+    // Seven decades, so the minor lines stand down and only the decades are
+    // ruled — and each is captioned with the frequency it stands for.
+    let major = plot
+        .axis_ticks
+        .iter()
+        .filter(|tick| tick.major)
+        .collect::<Vec<_>>();
+    assert_eq!(major.len(), 7, "{:?}", plot.axis_ticks);
+    assert_eq!(
+        major
+            .iter()
+            .map(|tick| tick.label.as_str())
+            .collect::<Vec<_>>(),
+        ["1.00", "10.0", "100", "1.00 k", "10.0 k", "100 k", "1.00 M"]
+    );
+    assert!(
+        plot.axis_ticks.iter().all(|tick| tick.major),
+        "seven decades is past the point where minor lines read as a grid"
+    );
+
+    // Equal decades: 1 Hz on the left inset, 1 kHz in the middle, 1 MHz on
+    // the right edge. Under the old linear mapping 1 kHz sat a thousandth of
+    // the way across.
+    let position = |index: usize| major[index].start.x_um;
+    assert_eq!(position(0), PLOT_INSET_UM);
+    assert_eq!(position(3), PLOT_WIDTH_UM / 2);
+    assert_eq!(position(6), PLOT_WIDTH_UM - PLOT_INSET_UM);
+    assert_eq!(
+        position(1) - position(0),
+        position(6) - position(5),
+        "every decade occupies the same width"
+    );
+
+    // A sweep of two decades rules its minor lines as well, nine to a decade.
+    let frequency = [1.0, 10.0, 100.0];
+    let analysis = AnalysisResult::new(7, AnalysisType::Disto, "DISTO").with_waveforms(vec![
+        WaveformData::new("V(out)", frequency.to_vec(), vec![1.0, 1.0, 1.0], "#0af"),
+    ]);
+    let state = quick_view_state(analysis, ResultViewer::Bode);
+    let resolved = resolve_quick_view(&state).expect("the sweep resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected a semantic frequency plot")
+    };
+    assert_eq!(plot.axis_ticks.iter().filter(|tick| tick.major).count(), 3);
+    assert_eq!(
+        plot.axis_ticks.iter().filter(|tick| !tick.major).count(),
+        16,
+        "eight minor lines above each of the first two decades, none above the last"
+    );
+    assert!(
+        plot.axis_ticks
+            .iter()
+            .all(|tick| tick.major != tick.label.is_empty()),
+        "a minor line carries no caption, and a decade always does"
+    );
+}
+
+/// The spectrum prints in the unit its sheet reads.
+///
+/// The FFT sheet is a decibel instrument — it plots `magnitude_db` against a
+/// reference-aware level unit — and the page took the linear magnitude, so a
+/// printed spectrum showed one peak on a flat floor where the sheet showed
+/// every harmonic above a noise floor sixty decibels down.
+#[test]
+fn the_printed_spectrum_is_in_decibels() {
+    let time = (0..64)
+        .map(|index| index as f64 * 1.0e-6)
+        .collect::<Vec<_>>();
+    let values = (0..64)
+        .map(|index| (index as f64 * std::f64::consts::TAU / 8.0).sin())
+        .collect::<Vec<_>>();
+    let analysis = AnalysisResult::new(8, AnalysisType::Transient, "Transient")
+        .with_waveforms(vec![WaveformData::new("V(active)", time, values, "#0af")]);
+    let mut state = quick_view_state(analysis, ResultViewer::Fft);
+    state.analysis.fft_state.selected_source = Some("V(active)".to_owned());
+
+    let resolved = resolve_quick_view(&state).expect("the spectrum resolves");
+    let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+        panic!("expected a semantic spectrum plot")
+    };
+
+    assert_eq!(plot.y_scale, AxisScale::Decibels);
+    // The sheet's frequency axis is linear, so the page's is too.
+    assert_eq!(plot.x_scale, AxisScale::Linear);
+    assert!(plot.axis_ticks.is_empty());
+
+    let levels = plot.traces[0]
+        .source_samples
+        .iter()
+        .map(|(_, y)| f64::from_bits(*y))
+        .collect::<Vec<_>>();
+    // Decibels: the peak is near zero and the floor is far below it. A linear
+    // magnitude spectrum of the same signal is bounded by one and above zero.
+    let peak = levels.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let floor = levels.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!(peak <= 0.5, "peak level {peak} is not a decibel level");
+    assert!(
+        floor < -20.0,
+        "floor level {floor} did not come from a decibel projection"
+    );
+}
+
 /// A failed noise solve is not printable evidence.
 ///
 /// The hardcopy resolver carried its own copy of the sheet's renderability

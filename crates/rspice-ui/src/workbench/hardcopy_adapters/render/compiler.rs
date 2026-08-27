@@ -1701,22 +1701,7 @@ impl<'a> SemanticSceneCompiler<'a> {
             stroke: Some(frame_stroke),
             fill: None,
         });
-        for division in 1..10_u64 {
-            let x = self.extent.width().micrometres() * division / 10;
-            self.primitives.push(ScenePrimitive::Line {
-                from: ScenePoint::new(Length::from_micrometres(x), frame.y),
-                to: ScenePoint::new(
-                    Length::from_micrometres(x),
-                    Length::from_micrometres(frame.y.micrometres() + frame.height.micrometres()),
-                ),
-                stroke: StrokeStyle::try_new(
-                    SemanticColor::Grid,
-                    Length::from_micrometres(120),
-                    StrokePattern::Dotted,
-                    None,
-                )?,
-            });
-        }
+        self.plot_grid(plot, frame)?;
         for (index, trace) in plot.traces.iter().enumerate() {
             let stable_id = format!("trace:{}", trace.trace_id);
             let stroke = self.mapped_stroke(
@@ -2465,6 +2450,7 @@ impl<'a> SemanticSceneCompiler<'a> {
     }
 }
 
+mod plot_grid;
 mod title_block;
 pub(super) use title_block::*;
 mod symbol_document;

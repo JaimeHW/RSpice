@@ -7,6 +7,7 @@
 //! No type in this module contains pixels, an egui paint command, or a screen
 //! rectangle.
 
+mod axis;
 mod documents;
 mod geometry;
 mod noise;
@@ -20,8 +21,9 @@ pub use documents::*;
 // Crate-private: `geometry` exposes only `pub(super)` helpers, which the
 // sibling modules reach through `use super::*`.
 pub(crate) use geometry::*;
-// Module-private: `noise` and `quick_view_overlay` expose only `pub(super)`
-// items, and the siblings reach them through their own `use super::*`.
+// Module-private: `axis`, `noise` and `quick_view_overlay` expose only
+// `pub(super)` items, and the siblings reach them through `use super::*`.
+use axis::*;
 use noise::*;
 pub use prepared::*;
 use quick_view_overlay::*;
@@ -42,7 +44,7 @@ use crate::results::report_document::{
     ReportReferenceSnapshot, ReportSourceId,
 };
 use crate::results::visualization_document::{
-    AnnotationAnchor, Page, PageId, Pane, PaneId, TypedValue, VisualizationDocument,
+    AnnotationAnchor, AxisScale, Page, PageId, Pane, PaneId, TypedValue, VisualizationDocument,
 };
 use crate::results::visualization_raster::{
     ResolvedCartesianLineScene, VisualizationRasterError, resolve_cartesian_line_scene,

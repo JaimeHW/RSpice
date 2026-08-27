@@ -646,6 +646,11 @@ pub fn resolve_plot_source(
         viewer: ResultViewer::Waves,
         page_id: source.scene.page_id().get(),
         pane_id: source.scene.pane_id().get(),
+        // The Cartesian raster scene resolves only linear axes today; a
+        // logarithmic pane is refused upstream by `resolve_cartesian_line_scene`.
+        x_scale: AxisScale::Linear,
+        y_scale: AxisScale::Linear,
+        axis_ticks: Vec::new(),
         traces,
         cursors: source
             .scene

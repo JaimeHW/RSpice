@@ -504,6 +504,11 @@ pub(crate) fn resolve_active_studio_pane_source(
         viewer: pane.viewer,
         page_id: stable_page_id(&pane.page),
         pane_id: pane.id,
+        // The studio pane's own axis declarations are not projected into this
+        // adapter yet, and a scale it has not been told is linear.
+        x_scale: AxisScale::Linear,
+        y_scale: AxisScale::Linear,
+        axis_ticks: Vec::new(),
         traces,
         cursors: Vec::new(),
         markers,
@@ -1146,7 +1151,34 @@ pub(super) fn quick_waveform_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(viewer, "Results", 0, series, Some(overlay))
+    quick_plot_from_scaled_series(
+        viewer,
+        "Results",
+        0,
+        series,
+        Some(overlay),
+        waveform_abscissa_scale(active.analysis.analysis_type),
+        AxisScale::Linear,
+    )
+}
+
+/// How a retained sweep's abscissa is ruled.
+///
+/// One question, asked of the analysis rather than of the viewer, and
+/// answered the way `waves::build_models` answers it for the sheet: every
+/// frequency family is a decade axis, everything else is linear.
+pub(super) const fn waveform_abscissa_scale(analysis: AnalysisType) -> AxisScale {
+    if analysis.is_bode_response()
+        || analysis.is_raw_frequency_curve()
+        || matches!(
+            analysis,
+            AnalysisType::Noise | AnalysisType::Pnoise | AnalysisType::Hbnoise
+        )
+    {
+        AxisScale::Logarithmic
+    } else {
+        AxisScale::Linear
+    }
 }
 
 fn quick_bode_plot(
@@ -1189,7 +1221,19 @@ fn quick_bode_plot(
                 .collect(),
         });
     }
-    quick_plot_from_series(ResultViewer::Bode, "Results", 0, series, Some(overlay))
+    // Frequency is ruled in decades on the sheet, so the page rules it in
+    // decades too. The ordinate is left linear: the magnitude series is in
+    // decibels and the phase series in degrees, and one axis cannot honestly
+    // claim to be either while it carries both.
+    quick_plot_from_scaled_series(
+        ResultViewer::Bode,
+        "Results",
+        0,
+        series,
+        Some(overlay),
+        AxisScale::Logarithmic,
+        AxisScale::Linear,
+    )
 }
 
 fn quick_noise_spectrum_plot(
@@ -1263,12 +1307,16 @@ fn quick_noise_spectrum_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(
+    // The ordinary-noise sheet sweeps frequency in decades like every other
+    // frequency instrument. The density itself is plotted linearly there.
+    quick_plot_from_scaled_series(
         ResultViewer::NoiseContrib,
         "Results",
         0,
         series,
         Some(overlay),
+        AxisScale::Logarithmic,
+        AxisScale::Linear,
     )
 }
 
@@ -1346,7 +1394,17 @@ fn quick_phase_noise_plot(
                 .collect(),
         })
         .collect();
-    quick_plot_from_series(ResultViewer::PhaseNoise, "Results", 0, series, None)
+    // Offset frequency in decades, phase noise in dBc/Hz: the two axes of
+    // every phase-noise plot ever published.
+    quick_plot_from_scaled_series(
+        ResultViewer::PhaseNoise,
+        "Results",
+        0,
+        series,
+        None,
+        AxisScale::Logarithmic,
+        AxisScale::Decibels,
+    )
 }
 
 #[cfg(test)]
@@ -1391,13 +1449,18 @@ pub(super) fn quick_fft_plot(
     if data.points.is_empty() {
         return Err(HardcopySourceError::MissingViewerEvidence("FFT spectrum"));
     }
-    quick_plot_from_series(
+    // The spectrum sheet is a decibel instrument: it plots `magnitude_db`
+    // against a reference-aware level unit, and the harmonic table beside it
+    // is in dBc. The page took the linear magnitude instead, so a printed
+    // spectrum showed one peak and a flat floor where the sheet showed a
+    // noise floor sixty decibels down and every harmonic in it.
+    quick_plot_from_scaled_series(
         ResultViewer::Fft,
         "Results",
         0,
         vec![QuickResultSeries {
             identity: format!(
-                "{}:{}:{}:{}:fft:{}",
+                "{}:{}:{}:{}:fft-db:{}",
                 active.run.dataset_id,
                 active.run.run_id,
                 active.analysis.id,
@@ -1408,10 +1471,12 @@ pub(super) fn quick_fft_plot(
             points: data
                 .points
                 .iter()
-                .map(|point| (point.frequency, point.magnitude))
+                .map(|point| (point.frequency, point.magnitude_db()))
                 .collect(),
         }],
         None,
+        AxisScale::Linear,
+        AxisScale::Decibels,
     )
 }
 
@@ -1719,6 +1784,32 @@ pub(super) fn quick_plot_from_series(
     series: Vec<QuickResultSeries>,
     overlay: Option<&RetainedQuickViewOverlay>,
 ) -> Result<SemanticPlot, HardcopySourceError> {
+    quick_plot_from_scaled_series(
+        viewer,
+        page,
+        pane_id,
+        series,
+        overlay,
+        AxisScale::Linear,
+        AxisScale::Linear,
+    )
+}
+
+/// The same page, on axes that say how they map.
+///
+/// The geometry below is laid out in the axes' own space, so a decade of a
+/// logarithmic sweep occupies the same width as every other decade. Retained
+/// samples are untouched: they travel as the engine's own values, and only
+/// the page coordinates move.
+pub(super) fn quick_plot_from_scaled_series(
+    viewer: ResultViewer,
+    page: &str,
+    pane_id: u64,
+    series: Vec<QuickResultSeries>,
+    overlay: Option<&RetainedQuickViewOverlay>,
+    x_scale: AxisScale,
+    y_scale: AxisScale,
+) -> Result<SemanticPlot, HardcopySourceError> {
     if series.is_empty() {
         return Err(HardcopySourceError::MissingViewerEvidence(
             "visible plot series",
@@ -1735,66 +1826,70 @@ pub(super) fn quick_plot_from_series(
             "active viewer series".to_owned(),
         ));
     }
-    let x_minimum = series
+    // A logarithmic axis has no position for a non-positive value, so those
+    // samples are dropped rather than clamped — exactly as the sheet drops
+    // them. A series that is entirely non-positive on a log axis has nothing
+    // the page can show.
+    let projected = series
         .iter()
-        .flat_map(|series| series.points.iter().map(|point| point.0))
-        .min_by(f64::total_cmp)
-        .ok_or(HardcopySourceError::InvalidResultRange)?;
-    let x_maximum = series
-        .iter()
-        .flat_map(|series| series.points.iter().map(|point| point.0))
-        .max_by(f64::total_cmp)
-        .ok_or(HardcopySourceError::InvalidResultRange)?;
-    let y_minimum = series
-        .iter()
-        .flat_map(|series| series.points.iter().map(|point| point.1))
-        .min_by(f64::total_cmp)
-        .ok_or(HardcopySourceError::InvalidResultRange)?;
-    let y_maximum = series
-        .iter()
-        .flat_map(|series| series.points.iter().map(|point| point.1))
-        .max_by(f64::total_cmp)
-        .ok_or(HardcopySourceError::InvalidResultRange)?;
+        .map(|series| {
+            series
+                .points
+                .iter()
+                .filter_map(|&(x, y)| Some((project(x_scale, x)?, project(y_scale, y)?)))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if projected.iter().any(Vec::is_empty) {
+        return Err(HardcopySourceError::InvalidRetainedWaveform(
+            "active viewer series has no sample its axis can place".to_owned(),
+        ));
+    }
+    let extreme = |select: fn(&(f64, f64)) -> f64, pick: fn(&f64, &f64) -> std::cmp::Ordering| {
+        projected
+            .iter()
+            .flat_map(|points| points.iter().map(select))
+            .min_by(pick)
+            .ok_or(HardcopySourceError::InvalidResultRange)
+    };
+    let x_minimum = extreme(|point| point.0, f64::total_cmp)?;
+    let x_maximum = extreme(|point| point.0, |left, right| right.total_cmp(left))?;
+    let y_minimum = extreme(|point| point.1, f64::total_cmp)?;
+    let y_maximum = extreme(|point| point.1, |left, right| right.total_cmp(left))?;
     let (x_minimum, x_maximum) = nondegenerate_range(x_minimum, x_maximum);
     let (y_minimum, y_maximum) = nondegenerate_range(y_minimum, y_maximum);
     let plot_width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
     let plot_height = PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM;
-    let x_span = x_maximum - x_minimum;
-    let y_span = y_maximum - y_minimum;
+    let frame = PlotFrame {
+        x_minimum,
+        x_maximum,
+        y_minimum,
+        y_maximum,
+        x_span: x_maximum - x_minimum,
+        y_span: y_maximum - y_minimum,
+        plot_width,
+        plot_height,
+    };
+    let axis_ticks = plot_axis_ticks(x_scale, &frame)?;
     let (cursors, markers) = overlay.map_or_else(
         || Ok((Vec::new(), Vec::new())),
-        |overlay| {
-            resolved_overlay_geometry(
-                viewer,
-                overlay,
-                &series,
-                PlotFrame {
-                    x_minimum,
-                    x_maximum,
-                    y_minimum,
-                    y_maximum,
-                    x_span,
-                    y_span,
-                    plot_width,
-                    plot_height,
-                },
-            )
-        },
+        |overlay| resolved_overlay_geometry(viewer, overlay, &series, x_scale, y_scale, &frame),
     )?;
     let mut trace_ids = std::collections::HashSet::new();
     let traces = series
-        .into_iter()
+        .iter()
+        .zip(projected.iter())
         .enumerate()
-        .map(|(index, series)| {
+        .map(|(index, (series, points))| {
             let trace_id = stable_quick_trace_id(viewer, index, &series.identity);
             if !trace_ids.insert(trace_id) {
                 return Err(HardcopySourceError::DuplicateStableTraceIdentity(trace_id));
             }
             Ok(SemanticPlotTrace {
                 trace_id,
-                label: series.label,
+                label: series.label.clone(),
                 paths: clipped_plot_paths(
-                    &series.points,
+                    points,
                     x_minimum,
                     x_maximum,
                     y_minimum,
@@ -1814,6 +1909,9 @@ pub(super) fn quick_plot_from_series(
         viewer,
         page_id: stable_page_id(page),
         pane_id,
+        x_scale,
+        y_scale,
+        axis_ticks,
         traces,
         cursors,
         markers,
