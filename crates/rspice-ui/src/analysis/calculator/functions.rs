@@ -806,13 +806,24 @@ fn settling(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
         )));
     }
     let (before, after) = (outside, outside + 1);
-    let out = (y[before] - settled).abs();
-    let inside = (y[after] - settled).abs();
-    let entry = if out == inside {
-        x[after]
-    } else {
-        x[before] + (out - tolerance) * (x[after] - x[before]) / (out - inside)
-    };
+    if !y[after].is_finite() {
+        return Err(EvaluationError::MathError(format!(
+            "the signal's last excursion outside {band} % of its step is followed by a hole, \
+             so there is no sample to place the band entry against"
+        )));
+    }
+    // Interpolate on the *signed* deviation, toward the band edge the signal
+    // actually crosses — the one on the side it was last outside. A response
+    // that flies past the settled value between these two samples lands on
+    // the far side of it, and reading unsigned magnitudes there interpolates
+    // toward the wrong edge and reports the entry late.
+    let departure = y[before] - settled;
+    let arrival = y[after] - settled;
+    let band_edge = if departure > 0.0 { tolerance } else { -tolerance };
+    let travel = arrival - departure;
+    // |departure| > tolerance >= |arrival|, so the two deviations differ and
+    // this cannot divide by zero; a duplicated timepoint gives x[before].
+    let entry = x[before] + (band_edge - departure) * (x[after] - x[before]) / travel;
     Ok(CalcValue::Scalar(entry - x[0]))
 }
 
@@ -1596,15 +1607,58 @@ mod tests {
     }
 
     #[test]
-    fn settling_finds_the_entry_into_the_band() {
+    fn settling_reports_the_last_entry_into_the_band() {
         // Step 0 → 1. |y − 1| falls linearly from 0.05 at x = 1 to 0 at x = 2,
-        // so a 2 % band (of the 1.0 step) is entered at x = 1.6.
+        // so a 2 % band (of the 1.0 step) is entered at x = 1.6 and never
+        // left again — the monotone case, where first and last entry agree.
         let (x, y) = pwl_series(&[(0.0, 0.0), (1.0, 1.05), (2.0, 1.0), (3.0, 1.0)], 17);
         assert_close(
             scalar_of("settling", vec![wave(x, y), CalcValue::Scalar(2.0)]),
             1.6,
             1.0e-12,
             "settling time to a 2 % band",
+        );
+    }
+
+    #[test]
+    fn settling_ignores_an_early_pass_through_the_band_of_a_ringing_step() {
+        // Step 0 → 1 that overshoots to 1.10, falls back *through* the 2 %
+        // band (the sample at x = 1.5 sits exactly on 1.00), re-exits below
+        // it to 0.94, and only then approaches. Settling is the LAST entry:
+        // the deviation runs −0.06 at x = 2 to −0.01 at x = 3, reaching the
+        // −0.02 band edge at x = 2 + 0.04/0.05 = 2.8. A first-entry reading
+        // answers 1.4 — the fall back through the band — instead, and the
+        // true entry falls strictly between two retained samples, so
+        // snapping to the first inside sample (x = 3) is wrong too.
+        let ringing = wave(
+            vec![0.0, 0.4, 1.0, 1.5, 2.0, 3.0, 4.0],
+            vec![0.0, 0.6, 1.10, 1.00, 0.94, 0.99, 1.00],
+        );
+        assert_close(
+            scalar_of("settling", vec![ringing, CalcValue::Scalar(2.0)]),
+            2.8,
+            1.0e-12,
+            "settling of a ringing step",
+        );
+    }
+
+    #[test]
+    fn settling_interpolates_toward_the_band_edge_it_actually_crosses() {
+        // The last excursion, at x = 2, sits 0.05 *above* the settled 1.0;
+        // the next sample, at x = 3, sits 0.01 *below* it. The band edge the
+        // signal crosses is therefore the upper one, reached where the signed
+        // deviation passes +0.02: x = 2 + (0.05 − 0.02)/(0.05 + 0.01) = 2.5.
+        // Interpolating on unsigned magnitudes instead — 0.05 down to 0.01 —
+        // reports the entry late, at 2.75.
+        let flyback = wave(
+            vec![0.0, 0.5, 1.25, 2.0, 3.0, 4.0],
+            vec![0.0, 0.6, 1.10, 1.05, 0.99, 1.00],
+        );
+        assert_close(
+            scalar_of("settling", vec![flyback, CalcValue::Scalar(2.0)]),
+            2.5,
+            1.0e-12,
+            "settling across the band edge",
         );
     }
 
