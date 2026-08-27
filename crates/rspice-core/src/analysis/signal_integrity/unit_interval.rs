@@ -46,6 +46,12 @@ const MAX_REFIT_ITERS: usize = 3;
 /// exactly 60/40 puts the two clusters at a ratio of exactly 1.5, so the gate
 /// has to be inclusive of its own boundary in floating point.
 const PAIR_RATIO_EPS: f64 = 1e-6;
+/// Resultant length below which the crossings do not agree on a phase at the
+/// period they were folded against. A record whose crossings all sit at one
+/// phase scores 1; crossings spread evenly over the period average to 0. Half
+/// is far from both: an ideal clock at its own rate scores above 0.99, and
+/// the same clock at a rate 37 % away scores below 0.2.
+const MIN_CROSSING_COHERENCE: f64 = 0.5;
 
 /// A recovered unit interval and what it was recovered from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,6 +91,19 @@ pub struct CrossingPhaseFit {
     pub coherence: f64,
     /// Crossings the fit was built from.
     pub crossing_count: usize,
+}
+
+impl CrossingPhaseFit {
+    /// Do the crossings agree on a phase at this period?
+    ///
+    /// The answer does not decide whether to fold — a rate the reader stated
+    /// is the rate the eye folds at, because they asked for it. It decides
+    /// what the viewer must say about the result: an eye folded at a period
+    /// the crossings do not share is a picture of the fold, and a reader who
+    /// is not told that will read jitter, width and mask margin off it.
+    pub fn is_coherent(&self) -> bool {
+        self.coherence >= MIN_CROSSING_COHERENCE
+    }
 }
 
 /// Recover the unit interval of a sampled digital waveform.
@@ -585,6 +604,7 @@ mod tests {
 
         let matched = crossing_phase_at(&time, &signal, UI).expect("crossings exist");
         assert!(matched.coherence > 0.99, "coherence {}", matched.coherence);
+        assert!(matched.is_coherent());
         assert!((matched.phase - 0.137e-9).abs() <= 1e-3 * UI);
 
         let mismatched = crossing_phase_at(&time, &signal, 1.37e-9).expect("crossings exist");
@@ -593,5 +613,6 @@ mod tests {
             "coherence {} at a wrong rate",
             mismatched.coherence
         );
+        assert!(!mismatched.is_coherent());
     }
 }
