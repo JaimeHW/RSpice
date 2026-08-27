@@ -41,6 +41,19 @@
 //! rather than through the browser download helper: that one synthesizes the
 //! anchor click itself, so the file goes wherever the user agent puts downloads
 //! without the reader being asked at all.
+//!
+//! # Why a test build never opens a dialog
+//!
+//! The desktop picker blocks the calling thread on a real window. A unit test
+//! that reaches a control which starts one therefore stops dead until a person
+//! sitting at the machine closes it — and the studio's press sweep does reach
+//! that control, so an unattended run hangs and an attended one records
+//! whichever answer the person gave. Under `cfg(test)` the two `rfd` calls are
+//! replaced by [`chosen_source`] and [`chosen_destination`], which answer from
+//! a thread-local script and default to a cancellation. Only the dialog is
+//! replaced: the ceiling, the decode and the compare-and-exchange publication
+//! all run exactly as they do on the desktop, so a scripted path that cannot be
+//! read produces the refusal a mis-picked file produces.
 
 use std::sync::{Arc, Mutex};
 
@@ -103,10 +116,7 @@ pub(crate) fn open_file(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let outcome = match rfd::FileDialog::new()
-            .add_filter(kind.label, kind.extensions)
-            .pick_file()
-        {
+        let outcome = match chosen_source(kind) {
             Some(path) => read_bounded_utf8(&path, kind, max_bytes).map(|text| {
                 Some(OpenedFile {
                     name: chosen_name(&path, kind),
@@ -157,11 +167,7 @@ pub(crate) fn save_file(
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let outcome = match rfd::FileDialog::new()
-            .add_filter(kind.label, kind.extensions)
-            .set_file_name(&file_name)
-            .save_file()
-        {
+        let outcome = match chosen_destination(kind, &file_name) {
             Some(path) => publish(&path, &bytes, kind).map(Some),
             None => Ok(None),
         };
@@ -240,6 +246,108 @@ where
     let outcome = mailbox.lock().ok().and_then(|mut slot| slot.take())?;
     ctx.data_mut(|data| data.remove::<Mailbox<T>>(id));
     Some(outcome)
+}
+
+// ------------------------------------------------------- the desktop pickers
+//
+// One pair of one-line functions, so the dialog is the only thing a test build
+// stands in for. Everything the picker's answer is put through afterwards is
+// the production code path on both sides of the `cfg`.
+
+/// Ask the reader which file to read.
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+fn chosen_source(kind: FileKind) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter(kind.label, kind.extensions)
+        .pick_file()
+}
+
+/// Ask the reader where to write, opening on `file_name`.
+#[cfg(all(not(target_arch = "wasm32"), not(test)))]
+fn chosen_destination(kind: FileKind, file_name: &str) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter(kind.label, kind.extensions)
+        .set_file_name(file_name)
+        .save_file()
+}
+
+/// What a test build answers a desktop picker with, in place of the dialog.
+///
+/// A refusal is not a variant because the desktop picker has none: `rfd`
+/// reports a cancellation and nothing else, and every error this module can
+/// produce comes from what it does with the path afterwards. So a test that
+/// wants a refusal scripts a path that cannot be read, which is the failure a
+/// reader actually reaches.
+#[cfg(all(not(target_arch = "wasm32"), test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ScriptedChoice {
+    /// The reader chose this path.
+    Chose(std::path::PathBuf),
+    /// The reader cancelled.
+    Cancelled,
+}
+
+#[cfg(all(not(target_arch = "wasm32"), test))]
+thread_local! {
+    /// Answers waiting for the next pickers this thread opens, in order.
+    ///
+    /// Thread-local rather than shared: libtest runs tests in parallel on
+    /// threads of their own, so a shared queue would let one test's answer land
+    /// in another test's picker.
+    static SCRIPTED_CHOICES: std::cell::RefCell<std::collections::VecDeque<ScriptedChoice>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+
+    /// The filter label of every picker this thread has opened and not yet
+    /// accounted for. A press that reached a dialog instead of the seam leaves
+    /// nothing here, which is how a test tells the two apart.
+    static PICKERS_OPENED: std::cell::RefCell<Vec<&'static str>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Answer the next picker this thread opens with `choice`.
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) fn script_next_choice(choice: ScriptedChoice) {
+    SCRIPTED_CHOICES.with_borrow_mut(|queue| queue.push_back(choice));
+}
+
+/// How many scripted answers are still waiting.
+///
+/// A test that scripted a pick and finds one still queued pressed something
+/// that never opened a picker at all.
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) fn scripted_choices_remaining() -> usize {
+    SCRIPTED_CHOICES.with_borrow(std::collections::VecDeque::len)
+}
+
+/// The pickers this thread has opened since this was last called, by the label
+/// their filter announces, and clear the record.
+#[cfg(all(not(target_arch = "wasm32"), test))]
+pub(crate) fn take_pickers_opened() -> Vec<&'static str> {
+    PICKERS_OPENED.with_borrow_mut(std::mem::take)
+}
+
+/// The answer this thread scripted, or a cancellation.
+///
+/// Cancellation is the default because it is the one answer that leaves
+/// nothing behind: an unscripted picker in a test build reads exactly as a
+/// reader who opened the dialog and closed it again.
+#[cfg(all(not(target_arch = "wasm32"), test))]
+fn next_scripted_choice(kind: FileKind) -> Option<std::path::PathBuf> {
+    PICKERS_OPENED.with_borrow_mut(|opened| opened.push(kind.label));
+    match SCRIPTED_CHOICES.with_borrow_mut(std::collections::VecDeque::pop_front) {
+        Some(ScriptedChoice::Chose(path)) => Some(path),
+        Some(ScriptedChoice::Cancelled) | None => None,
+    }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), test))]
+fn chosen_source(kind: FileKind) -> Option<std::path::PathBuf> {
+    next_scripted_choice(kind)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), test))]
+fn chosen_destination(kind: FileKind, _file_name: &str) -> Option<std::path::PathBuf> {
+    next_scripted_choice(kind)
 }
 
 /// Refuse an oversized payload before any of it is decoded, then decode.
@@ -392,5 +500,138 @@ mod tests {
                 .is_none(),
             "a cancellation is `None`, not an error"
         );
+    }
+
+    /// An unscripted picker in a test build answers at once, and answers the
+    /// way a reader who closed the dialog does.
+    ///
+    /// This is the property the whole seam exists for: the call returns rather
+    /// than blocking on a window nobody is there to close, and it delivers a
+    /// cancellation, which is the answer that leaves no trace for a caller to
+    /// act on.
+    #[test]
+    fn an_unscripted_picker_answers_with_a_cancellation_and_does_not_block() {
+        let ctx = Context::default();
+        let id = Id::new("io.file_exchange.tests.unscripted");
+
+        open_file(&ctx, id, SHEET, 1024).expect("the exchange starts");
+        assert!(
+            take_opened(&ctx, id)
+                .expect("the answer is already waiting")
+                .expect("a cancellation is not a refusal")
+                .is_none()
+        );
+
+        save_file(&ctx, id, SHEET, "loads.csv".to_owned(), b"name\n".to_vec())
+            .expect("the exchange starts");
+        assert!(
+            take_saved(&ctx, id)
+                .expect("the answer is already waiting")
+                .expect("a cancellation is not a refusal")
+                .is_none()
+        );
+
+        assert_eq!(
+            take_pickers_opened(),
+            [SHEET.label, SHEET.label],
+            "both directions went through the seam, and neither wrote anything"
+        );
+    }
+
+    /// A scripted path is read through the production path — the ceiling, the
+    /// decode and the name the picker's answer is called by.
+    #[test]
+    fn a_scripted_path_is_read_the_way_a_picked_one_is() {
+        let directory = scratch_directory("read");
+        let path = directory.join("loads.csv");
+        std::fs::write(&path, "name,value\nvdd,1.8\n").expect("the scratch sheet is written");
+
+        let ctx = Context::default();
+        let id = Id::new("io.file_exchange.tests.scripted");
+        script_next_choice(ScriptedChoice::Chose(path));
+        open_file(&ctx, id, SHEET, 1024).expect("the exchange starts");
+        assert_eq!(
+            scripted_choices_remaining(),
+            0,
+            "the picker took the answer"
+        );
+
+        let opened = take_opened(&ctx, id)
+            .expect("the answer is waiting")
+            .expect("the sheet reads")
+            .expect("it is not a cancellation");
+        assert_eq!(opened.name, "loads.csv");
+        assert_eq!(opened.text, "name,value\nvdd,1.8\n");
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    /// A scripted path the platform cannot hand back produces the refusal a
+    /// mis-picked file produces, which is how a test reaches the error arm
+    /// without a dialog that has no error to give.
+    #[test]
+    fn a_scripted_path_that_cannot_be_read_refuses_the_way_a_picked_one_does() {
+        let ctx = Context::default();
+        let id = Id::new("io.file_exchange.tests.unreadable");
+        script_next_choice(ScriptedChoice::Chose(
+            std::env::temp_dir().join("rspice-file-exchange-no-such-sheet.csv"),
+        ));
+        open_file(&ctx, id, SHEET, 1024).expect("the exchange starts");
+
+        let error = take_opened(&ctx, id)
+            .expect("the answer is waiting")
+            .expect_err("an unreadable path is a refusal");
+        assert!(
+            error.starts_with("the spec sheet could not be opened"),
+            "{error}"
+        );
+    }
+
+    /// The queue is consumed in order, and an explicit cancellation is one of
+    /// its answers rather than only the default.
+    #[test]
+    fn scripted_answers_are_taken_in_the_order_they_were_written() {
+        let directory = scratch_directory("ordered");
+        let path = directory.join("second.csv");
+        std::fs::write(&path, "name\n").expect("the scratch sheet is written");
+
+        let ctx = Context::default();
+        script_next_choice(ScriptedChoice::Cancelled);
+        script_next_choice(ScriptedChoice::Chose(path));
+        assert_eq!(scripted_choices_remaining(), 2);
+
+        let first = Id::new("io.file_exchange.tests.ordered.first");
+        open_file(&ctx, first, SHEET, 1024).expect("the exchange starts");
+        assert!(
+            take_opened(&ctx, first)
+                .expect("the answer is waiting")
+                .expect("a cancellation is not a refusal")
+                .is_none()
+        );
+
+        let second = Id::new("io.file_exchange.tests.ordered.second");
+        open_file(&ctx, second, SHEET, 1024).expect("the exchange starts");
+        assert_eq!(
+            take_opened(&ctx, second)
+                .expect("the answer is waiting")
+                .expect("the sheet reads")
+                .expect("it is not a cancellation")
+                .name,
+            "second.csv"
+        );
+        assert_eq!(scripted_choices_remaining(), 0);
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    /// A scratch directory of this test's own, so parallel tests never share a
+    /// path.
+    fn scratch_directory(purpose: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-file-exchange-{purpose}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("the scratch directory is made");
+        directory
     }
 }

@@ -504,12 +504,19 @@ const HELD_SELECTION_CEILING: usize = 2;
 
 /// Presses whose whole product leaves this process.
 ///
-/// `page_variables.rs`'s import opens a spec-sheet picker, and
-/// `io::file_exchange::open_file` answers it with a blocking native file
-/// dialog whose result is delivered into egui's own data store rather than
-/// into the application state. The press reaches its handler; nothing this
-/// sweep can read records that it did. Exact, like the others: if the harness
-/// ever grows a way to see this, the entry has to go.
+/// `page_variables.rs`'s import opens a spec-sheet picker through
+/// `io::file_exchange::open_file`, and the picker's answer is delivered into
+/// egui's own data store rather than into the application state. In a test
+/// build the picker is answered by the scripted seam rather than by a desktop
+/// dialog, and an unscripted press is a cancellation — which a reader's own
+/// cancellation is too, and which by design leaves nothing behind. The press
+/// reaches its handler; nothing this sweep can read records that it did.
+///
+/// [`the_sweep_press_that_starts_a_picker_answers_without_a_dialog`] is the
+/// evidence behind that sentence: it names this exact control as the only one
+/// the sweep reaches that starts a picker, and shows that a scripted sheet does
+/// come back through it. Exact, like the others: if the harness ever grows a
+/// way to see this, the entry has to go.
 const PRESSES_THIS_HARNESS_CANNOT_SEE: &[&str] = &["Variables: Button \"Import…\""];
 
 /// How many sweep presses open a modal.
@@ -782,6 +789,92 @@ fn every_destructive_press_is_reviewed_or_receipted() {
         "the sweep found {destructive} destructive controls, against a measured \
          {DESTRUCTIVE_FLOOR}; it is not reaching the registries it claims to cover"
     );
+}
+
+/// The one sweep press that starts a file picker answers inside the frame.
+///
+/// `page_variables.rs`'s "Import…" is the only control any surface this sweep
+/// opens reaches `rfd` from: every other picker in the studio is behind a route
+/// the sweep's fixtures do not stand on — the plan manager's package import and
+/// export are drawn only in its exchange mode, and its draft opens in Browse.
+/// That one control used to raise a real Open dialog on the developer's desktop
+/// and hold the test thread until a person closed it, so an unattended sweep
+/// hung and an attended one recorded whichever file the person picked.
+///
+/// Both halves are checked from the press itself. Scripting a cancellation and
+/// finding the script consumed is what says the press reached the seam rather
+/// than a dialog; scripting a sheet and finding the guided import open on it is
+/// what says the seam is the whole path, and not a stub that swallows the
+/// press.
+#[test]
+fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
+    use crate::io::file_exchange::{
+        ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,
+    };
+    use crate::workbench::state::SimulationWorkflowDialog;
+
+    let index = (0..surface_count())
+        .find(|&index| sweep_surface(index).0 == "Variables")
+        .expect("the sweep covers the Variables route");
+    fn import_control(nodes: &[(NodeId, Node)]) -> NodeId {
+        nodes
+            .iter()
+            .find(|(_, node)| is_pressable(node) && announced(node) == "Import…")
+            .map(|(id, _)| *id)
+            .expect("the Variables route publishes the import control")
+    }
+
+    // A cancellation, which is what a reader who closes the picker gives.
+    let (name, app) = sweep_surface(index);
+    let mut sweep = Sweep::open(app);
+    let (_, nodes) = sweep.settle(&name);
+    let import = import_control(&nodes);
+    take_pickers_opened();
+    script_next_choice(ScriptedChoice::Cancelled);
+    sweep.press(import);
+    assert_eq!(
+        take_pickers_opened(),
+        ["Design variable spec sheet"],
+        "the press did not reach the picker seam, so on a desktop build it reached a dialog"
+    );
+    assert_eq!(
+        scripted_choices_remaining(),
+        0,
+        "the picker took the answer"
+    );
+    assert!(
+        sweep.app.state.workbench.simulation_workflow.is_none(),
+        "a cancelled pick opened a dialog"
+    );
+
+    // And a sheet, on a fixture of its own, which is the whole point of the
+    // control.
+    let directory =
+        std::env::temp_dir().join(format!("rspice-press-sweep-picker-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("the scratch directory is made");
+    let sheet = directory.join("variables.csv");
+    std::fs::write(&sheet, "Name,Value\nvdd,1.8\n").expect("the scratch sheet is written");
+
+    let (name, app) = sweep_surface(index);
+    let mut sweep = Sweep::open(app);
+    let (_, nodes) = sweep.settle(&name);
+    let import = import_control(&nodes);
+    script_next_choice(ScriptedChoice::Chose(sheet));
+    sweep.press(import);
+    assert_eq!(
+        scripted_choices_remaining(),
+        0,
+        "the picker took the answer"
+    );
+    assert!(
+        matches!(
+            sweep.app.state.workbench.simulation_workflow,
+            Some(SimulationWorkflowDialog::DesignVariableImport(_))
+        ),
+        "the picked sheet did not open the guided import"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
 }
 
 // ----------------------------------------------------------------- the gates
