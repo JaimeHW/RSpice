@@ -133,6 +133,16 @@ const SETTLED_HIGH_FREQUENCY_MAGNITUDE: f64 = 0.1;
 /// closure stops depending on where exactly the sweep began.
 const SETTLED_LOW_FREQUENCY_AXIS_RATIO: f64 = 1.0e-2;
 
+/// How close two −180° crossings have to be in dB before the gain margin
+/// stops preferring either on magnitude and breaks the tie at the unity-gain
+/// frequency instead.
+///
+/// A hundredth of a dB is what the interpolation between sweep samples is
+/// good to, so anything inside it is a distinction the measurement does not
+/// carry — and picking on it would make the reported crossing a function of
+/// the sweep's point density.
+const GAIN_MARGIN_TIE_DECIBELS: f64 = 1.0e-2;
+
 // =============================================================================
 // Nyquist Data
 // =============================================================================
@@ -269,21 +279,33 @@ impl NyquistData {
         EncirclementCount::Counted(whole as i32)
     }
 
-    /// Gain margin at the negative-real-axis crossing nearest −1.
+    /// Gain margin at the negative-real-axis crossing nearest unity in dB.
     ///
     /// The crossing is interpolated, not picked from the nearest sample: the
     /// phase is interpolated to ±180° in log-frequency and the magnitude read
     /// there in log-magnitude, which is exact for the straight segments of a
     /// Bode response and close to it everywhere else. The value is the gain
     /// ratio 1/|L| at the crossing, so 1 is the critical point and a panel
-    /// reads it out as 20·log₁₀.
+    /// reads it out as a signed 20·log₁₀.
     ///
-    /// Nearest −1 rather than lowest in frequency: a loop that crosses −180°
-    /// more than once is limited by the crossing closest to the critical
-    /// point, and that is the margin the reader has to see.
+    /// A loop that crosses −180° more than once is limited by one of those
+    /// crossings, and the one that binds is the one closest to unity **in
+    /// dB** — least |20·log₁₀|L|| — not the one closest to −1 along the axis.
+    /// A gain margin is the factor the loop gain may be multiplied by before
+    /// the locus reaches −1, so it lives in ratios: linear distance makes
+    /// |L| = 0.45 (+6.94 dB of headroom left) look tighter than |L| = 2
+    /// (−6.02 dB, already past the critical point), which inverts the
+    /// reading. Ties — two crossings the interpolation cannot separate, being
+    /// good to about a hundredth of a dB — go to whichever sits nearer the
+    /// unity-gain frequency in log-frequency, the crossing the loop is
+    /// actually working at.
+    ///
+    /// This is the rule the Bode card's gain margin is read by too; the two
+    /// have to name the same crossing for the same loop.
     pub fn gain_margin(&self) -> Option<NyquistMargin> {
         let branch = self.measured_branch()?;
-        let mut best: Option<(f64, NyquistMargin)> = None;
+        let unity_gain = branch.binding_unity_crossing().map(|(at, _)| at);
+        let mut best: Option<(f64, f64, NyquistMargin)> = None;
         for index in 0..branch.len() - 1 {
             let Some(crossing) = branch.phase_crossover(index) else {
                 continue;
@@ -292,12 +314,19 @@ impl NyquistData {
             if !(magnitude.is_finite() && magnitude > 0.0) {
                 continue;
             }
-            // The crossing sits at −|L| on the real axis, so its distance
-            // from the critical point is ||L| − 1|.
-            let distance = (magnitude - 1.0).abs();
-            if best.is_none_or(|(closest, _)| distance < closest) {
+            let decibels = (20.0 * magnitude.log10()).abs();
+            let from_unity_gain = unity_gain.map_or(0.0, |unity| (crossing - unity).abs());
+            let binds = best.is_none_or(|(closest, closest_from_unity_gain, _)| {
+                if (decibels - closest).abs() <= GAIN_MARGIN_TIE_DECIBELS {
+                    from_unity_gain < closest_from_unity_gain
+                } else {
+                    decibels < closest
+                }
+            });
+            if binds {
                 best = Some((
-                    distance,
+                    decibels,
+                    from_unity_gain,
                     NyquistMargin {
                         value: 1.0 / magnitude,
                         frequency: 10f64.powf(crossing),
@@ -305,7 +334,7 @@ impl NyquistData {
                 ));
             }
         }
-        best.map(|(_, margin)| margin)
+        best.map(|(_, _, margin)| margin)
     }
 
     /// Phase margin at the unity-magnitude crossing, in degrees.
@@ -319,24 +348,11 @@ impl NyquistData {
     /// binds — the smallest margin in magnitude.
     pub fn phase_margin(&self) -> Option<NyquistMargin> {
         let branch = self.measured_branch()?;
-        let mut best: Option<NyquistMargin> = None;
-        for index in 0..branch.len() - 1 {
-            let Some(crossing) = branch.unity_crossover(index) else {
-                continue;
-            };
-            let phase = branch.interpolate(&branch.phase, index, crossing);
-            if !phase.is_finite() {
-                continue;
-            }
-            let candidate = NyquistMargin {
-                value: wrap_degrees(180.0 + phase.to_degrees()),
-                frequency: 10f64.powf(crossing),
-            };
-            if best.is_none_or(|current| candidate.value.abs() < current.value.abs()) {
-                best = Some(candidate);
-            }
-        }
-        best
+        let (crossing, value) = branch.binding_unity_crossing()?;
+        Some(NyquistMargin {
+            value,
+            frequency: 10f64.powf(crossing),
+        })
     }
 
     /// The measured branch, prepared for interpolation.
@@ -484,6 +500,33 @@ impl MeasuredBranch {
         self.solve(&self.phase, index, half_turns * PI)
     }
 
+    /// The binding unity crossing: its log-frequency, and the phase margin
+    /// there in degrees.
+    ///
+    /// The margin is measured from the negative real axis, PM = 180° + ∠L, on
+    /// the *unwrapped* phase, so a loop past −180° reports a negative margin
+    /// instead of a wrapped positive one. A loop that crosses unity more than
+    /// once binds at the smallest margin in magnitude — and that crossing's
+    /// frequency is the unity-gain frequency the gain margin's tie-break is
+    /// measured against.
+    fn binding_unity_crossing(&self) -> Option<(f64, f64)> {
+        let mut best: Option<(f64, f64)> = None;
+        for index in 0..self.len() - 1 {
+            let Some(crossing) = self.unity_crossover(index) else {
+                continue;
+            };
+            let phase = self.interpolate(&self.phase, index, crossing);
+            if !phase.is_finite() {
+                continue;
+            }
+            let margin = wrap_degrees(180.0 + phase.to_degrees());
+            if best.is_none_or(|(_, current)| margin.abs() < current.abs()) {
+                best = Some((crossing, margin));
+            }
+        }
+        best
+    }
+
     /// The log-frequency where step `index` passes through |L| = 1.
     fn unity_crossover(&self, index: usize) -> Option<f64> {
         let (lm0, lm1) = (self.log_magnitude[index], self.log_magnitude[index + 1]);
@@ -619,6 +662,37 @@ mod tests {
         let w = std::f64::consts::TAU * f_pole;
         let k = dc_slope * w;
         move |s| k / (s * (1.0 + s / w))
+    }
+
+    /// L(s) = g(1 + s/10w)² / (1 + s/w)³ — the conditionally stable shape,
+    /// with two −180° crossings and a phase that recovers above it in between.
+    fn conditionally_stable(gain: f64, f_pole: f64) -> impl Fn(Complex64) -> Complex64 {
+        let w = std::f64::consts::TAU * f_pole;
+        move |s| gain * (1.0 + s / (10.0 * w)).powi(2) / (1.0 + s / w).powi(3)
+    }
+
+    /// Both −180° crossings of [`conditionally_stable`], from the closed form:
+    /// the frequency in u = f/f_pole, and the magnitude there at unit gain.
+    ///
+    /// The phase 2·atan(u/10) − 3·atan(u) reaches −180° at u² = 8 and u² = 35
+    /// exactly, where |L|/g is 1.08/27 and 1.35/216. The bisection below is
+    /// that closed form solved rather than its two roots asserted, so the
+    /// fixture stays honest if the shape is ever retuned.
+    fn conditional_crossings() -> [(f64, f64); 2] {
+        let phase = |u: f64| 2.0 * (u / 10.0).atan() - 3.0 * u.atan() + PI;
+        let magnitude = |u: f64| (1.0 + (u / 10.0).powi(2)) / (1.0 + u * u).powf(1.5);
+        let solve = |mut lo: f64, mut hi: f64| {
+            for _ in 0..200 {
+                let mid = (lo * hi).sqrt();
+                if phase(lo) * phase(mid) <= 0.0 {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            (lo * hi).sqrt()
+        };
+        [solve(1.0, 4.0), solve(4.0, 20.0)].map(|u| (u, magnitude(u)))
     }
 
     // -- encirclements ----------------------------------------------------
@@ -977,6 +1051,95 @@ mod tests {
         assert!(
             (20.0 * unit_margin.log10() - 20.0 * (8.0f64 / 16.0).log10()).abs() < 0.01,
             "unit-scale gain margin {unit_margin}"
+        );
+    }
+
+    /// The binding −180° crossing is the one nearest unity **in dB**, which is
+    /// not the one nearest −1 along the axis.
+    ///
+    /// The conditionally stable shape crosses −180° twice, at u² = 8 and
+    /// u² = 35, where the unit-gain magnitude is 1.08/27 and 1.35/216. A gain
+    /// of 50 puts those at |L| = 2 and |L| = 0.3125: the sub-unity crossing is
+    /// nearer −1 by linear distance (0.6875 against 1.0), the super-unity one
+    /// is nearer unity in dB (6.02 dB against 10.10 dB). A gain margin is a
+    /// ratio, so dB is the metric that means anything — and here the two
+    /// disagree by 16 dB and by the sign of the answer.
+    #[test]
+    fn gain_margin_binds_at_the_crossing_nearest_unity_in_decibels() {
+        let (gain, f_pole) = (50.0, 1.0e3);
+        let curve = swept_loop(1.0e2, 1.0e6, 40, conditionally_stable(gain, f_pole));
+
+        let [(u_above, unit_above), (_, unit_below)] = conditional_crossings();
+        let (above, below) = (gain * unit_above, gain * unit_below);
+        assert!(above > 1.0 && below < 1.0, "{above} and {below}");
+        assert!(
+            (below - 1.0).abs() < (above - 1.0).abs(),
+            "the linear metric has to prefer the sub-unity crossing: {above}, {below}"
+        );
+        assert!(
+            above.log10().abs() < below.log10().abs(),
+            "the dB metric has to prefer the super-unity crossing: {above}, {below}"
+        );
+
+        let gain_margin = curve.gain_margin().expect("the locus crosses −180° twice");
+        let measured_db = 20.0 * gain_margin.value.log10();
+        let closed_form_db = -20.0 * above.log10();
+        assert!(
+            (measured_db - closed_form_db).abs() < 0.05,
+            "gain margin {measured_db:.4} dB vs closed form {closed_form_db:.4} dB \
+             (the sub-unity crossing reads {:.4} dB)",
+            -20.0 * below.log10()
+        );
+        let closed_form_frequency = u_above * f_pole;
+        assert!(
+            (gain_margin.frequency / closed_form_frequency - 1.0).abs() < 0.01,
+            "crossing at {} Hz vs closed form {closed_form_frequency} Hz",
+            gain_margin.frequency
+        );
+    }
+
+    /// Two crossings the sweep cannot separate in dB are told apart by which
+    /// one sits nearer the unity-gain frequency, not by sweep order.
+    ///
+    /// The gain here is solved for from the closed form so that the sub-unity
+    /// crossing wins on magnitude by 0.005 dB — inside the hundredth of a dB
+    /// the interpolation is good to, so the two are tied as far as this
+    /// instrument can see. The super-unity crossing is the one nearer the UGF
+    /// in log-frequency, so it is the one that binds.
+    #[test]
+    fn a_tie_in_decibels_is_broken_at_the_unity_gain_frequency() {
+        let f_pole = 1.0e3;
+        let [(u_above, unit_above), (u_below, unit_below)] = conditional_crossings();
+        // |20·log₁₀(g·above)| − |20·log₁₀(g·below)| = 40·log₁₀ g + 20·log₁₀(above·below).
+        let bias_db = 0.005;
+        let gain = 10f64.powf((bias_db - 20.0 * (unit_above * unit_below).log10()) / 40.0);
+        let (above, below) = (gain * unit_above, gain * unit_below);
+        assert!(
+            ((20.0 * above.log10()) - (-20.0 * below.log10()) - bias_db).abs() < 1.0e-9,
+            "the fixture has to be a tie the sub-unity crossing wins: {above}, {below}"
+        );
+
+        let curve = swept_loop(1.0e2, 1.0e6, 60, conditionally_stable(gain, f_pole));
+        let unity = curve
+            .phase_margin()
+            .expect("the locus crosses |L| = 1")
+            .frequency;
+        let from_unity_gain = |u: f64| ((u * f_pole).log10() - unity.log10()).abs();
+        assert!(
+            from_unity_gain(u_above) < from_unity_gain(u_below),
+            "the super-unity crossing has to be the one nearer the UGF: {} vs {}",
+            from_unity_gain(u_above),
+            from_unity_gain(u_below)
+        );
+
+        let gain_margin = curve.gain_margin().expect("the locus crosses −180° twice");
+        let measured_db = 20.0 * gain_margin.value.log10();
+        let closed_form_db = -20.0 * above.log10();
+        assert!(
+            (measured_db - closed_form_db).abs() < 0.05,
+            "gain margin {measured_db:.4} dB vs closed form {closed_form_db:.4} dB \
+             (the sub-unity crossing reads {:.4} dB)",
+            -20.0 * below.log10()
         );
     }
 }
