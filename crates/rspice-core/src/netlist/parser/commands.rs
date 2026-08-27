@@ -1026,10 +1026,7 @@ pub(super) fn parse_save_command(
                 }
                 first_token = false;
 
-                if skip_analysis_type
-                    && matches!(stream.peek_n(1).kind, TokenKind::Equals)
-                    && is_xyce_print_option_name(&upper)
-                {
+                if skip_analysis_type && matches!(stream.peek_n(1).kind, TokenKind::Equals) {
                     stream.advance();
                     stream.advance();
                     let value = stream.peek().clone();
@@ -1303,26 +1300,6 @@ pub(super) fn parse_save_command(
         delimiter,
         operands,
     })
-}
-
-fn is_xyce_print_option_name(name: &str) -> bool {
-    matches!(
-        name,
-        "TYPE"
-            | "FILE"
-            | "FORMAT"
-            | "DATAFORMAT"
-            | "LINTYPE"
-            | "DELIMITER"
-            | "WIDTH"
-            | "PRECISION"
-            | "TIMESCALEFACTOR"
-            | "FILTER"
-            | "INDEX"
-            | "OUTPUT_SAMPLE_STATS"
-            | "OUTPUT_ALL_SAMPLES"
-            | "OUTPUT_PCE_COEFFS"
-    )
 }
 
 fn xyce_print_delimiter_from_value(
@@ -5719,7 +5696,7 @@ mod tests {
         let netlist = Netlist::parse_validated(
             "punctuated print metadata\n\
              V1 b 0 1\n\
-             .PRINT AC FILE=ac-sens-step-gnuplot.cir.FD.SENS.splot.prn FORMAT=SPLOT VR(b)\n\
+             .PRINT AC FILE=ac-sens-step-gnuplot.cir.FD.SENS.splot.prn FORMAT=SPLOT NOINDEX=TRUE FUTURE_OPTION=1 VR(b)\n\
              .AC DEC 2 1 10\n\
              .END\n",
         )
