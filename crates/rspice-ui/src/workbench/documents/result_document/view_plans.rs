@@ -24,6 +24,9 @@ pub(super) struct ViewPlans {
     pub(super) artifact: Option<Arc<super::table::ArtifactTextPlan>>,
     /// Family envelopes for the drawn wave pane; see [`super::waves`].
     pub(super) envelope: Option<Arc<super::waves::FamilyEnvelopePlan>>,
+    /// Descriptive statistics for the drawn distribution; see
+    /// [`super::hist`].
+    pub(super) hist: Option<Arc<super::hist::HistPlan>>,
     /// The operating-point sheet's row plan; see [`super::op_inspector`].
     pub(super) op: Option<Arc<super::op_inspector::OpPlan>>,
     /// Where the retained optimizer history is; see

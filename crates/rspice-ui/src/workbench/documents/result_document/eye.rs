@@ -274,8 +274,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .accessible_name("Eye diagram")
         .accessible_detail(&accessible_detail);
 
-    // Bake (or fetch) the density texture for the current plot size. The
-    // bake walks every acquisition once; frames just draw the quad.
+    // Bake (or fetch) the density texture. The bake walks every acquisition
+    // once; frames just draw the quad.
+    //
+    // It is baked over the data's own extent rather than the current view, so
+    // panning and zooming re-map the same texture instead of re-walking every
+    // acquisition. Before, a drag rebaked on every frame of the gesture — the
+    // one moment where the cost is most visible. The texture is therefore
+    // keyed by the data revision, its resolution and its ink, and the draw
+    // below maps the reader's window onto it.
     let plot_rect = plot::plot_rect(ui, &spec);
     let tex_size = [
         (plot_rect.width().round() as usize).max(8),
@@ -283,20 +290,32 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     ];
     let revision = eye.data_revision();
     let trace_color = c.traces[0];
-    let x_range_bits = [x0.to_bits(), x1.to_bits()];
-    let y_range_bits = [y0.to_bits(), y1.to_bits()];
+    let extent = (0.0_f64, ui_count, auto_y0, auto_y1);
+    let extent_bits = [
+        extent.0.to_bits(),
+        extent.1.to_bits(),
+        extent.2.to_bits(),
+        extent.3.to_bits(),
+    ];
     let needs_bake = match &state.ui.results.eye_texture {
         Some(tex) => {
             tex.revision != revision
                 || tex.size != tex_size
                 || tex.color != trace_color
-                || tex.x_range_bits != x_range_bits
-                || tex.y_range_bits != y_range_bits
+                || tex.extent_bits != extent_bits
         }
         None => true,
     };
     if needs_bake {
-        let image = rasterize_density(data, x0, x1, y0, y1, tex_size, trace_color);
+        let image = rasterize_density(
+            data,
+            extent.0,
+            extent.1,
+            extent.2,
+            extent.3,
+            tex_size,
+            trace_color,
+        );
         let handle =
             ui.ctx()
                 .load_texture("rspice.eye.density", image, egui::TextureOptions::LINEAR);
@@ -304,8 +323,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             revision,
             size: tex_size,
             color: trace_color,
-            x_range_bits,
-            y_range_bits,
+            extent_bits,
             handle,
         });
     }
@@ -315,6 +333,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .eye_texture
         .as_ref()
         .map(|tex| tex.handle.id());
+    let density_uv = density_uv(extent, (x0, x1), (y0, y1));
 
     // Underlay: the density quad, then the mask above it.
     let show_mask = eye.show_mask && eye.mask.enabled && !eye.mask.inner.points.is_empty();
@@ -329,12 +348,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let err = c.err;
     spec.underlay = Some(Box::new(move |painter, mapper| {
         if let Some(texture_id) = texture_id {
-            painter.image(
-                texture_id,
-                mapper.rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
+            painter.image(texture_id, mapper.rect, density_uv, egui::Color32::WHITE);
         }
         if show_mask {
             let points: Vec<egui::Pos2> = mask_points
@@ -368,6 +382,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .plot_view_mut(super::ResultViewer::Eye, 0)
             .apply(&response.view);
     }
+}
+
+/// Where the reader's window sits inside the baked density texture.
+///
+/// `extent` is the data window the texture covers, as `(x0, x1, y0, y1)`.
+/// Texture row 0 is the *top* of that window, matching how the raster is
+/// accumulated, so the vertical fractions run the other way.
+fn density_uv(extent: (f64, f64, f64, f64), x: (f64, f64), y: (f64, f64)) -> egui::Rect {
+    let (ex0, ex1, ey0, ey1) = extent;
+    let x_span = (ex1 - ex0).abs().max(1e-12);
+    let y_span = (ey1 - ey0).abs().max(1e-12);
+    let u = |value: f64| ((value - ex0) / x_span) as f32;
+    let v = |value: f64| ((ey1 - value) / y_span) as f32;
+    egui::Rect::from_min_max(egui::pos2(u(x.0), v(y.1)), egui::pos2(u(x.1), v(y.0)))
 }
 
 /// Rasterize every acquisition into an alpha-accumulated density image —
@@ -689,5 +717,87 @@ mod tests {
 
         assert_eq!(clipped, (0.0, 16.0, 31.0, 16.0));
         assert!(clip_line_to_raster(-100.0, -50.0, -10.0, -5.0, 32, 32).is_none());
+    }
+
+    /// The unzoomed view is the baked extent, so it samples the whole
+    /// texture — a drawn eye that is not the picture the raster holds would
+    /// be a silent change of what the reader is looking at.
+    #[test]
+    fn the_unzoomed_view_samples_the_whole_density_texture() {
+        let extent = (0.0, 2.0, -0.5, 1.5);
+        let uv = density_uv(extent, (0.0, 2.0), (-0.5, 1.5));
+        assert!((uv.min.x - 0.0).abs() < 1e-6, "{uv:?}");
+        assert!((uv.min.y - 0.0).abs() < 1e-6, "{uv:?}");
+        assert!((uv.max.x - 1.0).abs() < 1e-6, "{uv:?}");
+        assert!((uv.max.y - 1.0).abs() < 1e-6, "{uv:?}");
+    }
+
+    /// Zooming samples the part of the texture the window covers, with row
+    /// zero at the top of the data extent — the orientation the raster is
+    /// accumulated in.
+    #[test]
+    fn zooming_samples_the_window_the_reader_asked_for() {
+        let extent = (0.0, 2.0, 0.0, 4.0);
+        let uv = density_uv(extent, (0.5, 1.5), (1.0, 3.0));
+        assert!((uv.min.x - 0.25).abs() < 1e-6, "{uv:?}");
+        assert!((uv.max.x - 0.75).abs() < 1e-6, "{uv:?}");
+        // y = 3 is a quarter down from the top of the extent; y = 1 is three
+        // quarters down.
+        assert!((uv.min.y - 0.25).abs() < 1e-6, "{uv:?}");
+        assert!((uv.max.y - 0.75).abs() < 1e-6, "{uv:?}");
+    }
+
+    /// Panning and zooming must not rebake. The bake walks every acquisition,
+    /// and a drag is exactly when the reader can least afford it.
+    #[test]
+    fn moving_the_view_does_not_rebake_the_density() {
+        let mut state = AppState::default();
+        let mut data = EyeData::new(1.0e-9, 2);
+        for trace in 0..8 {
+            data.add_trace(EyeTrace::new(
+                vec![0.0, 0.5, 1.0, 1.5],
+                vec![0.0, 1.0, 0.0, f64::from(trace) * 0.1],
+            ));
+        }
+        state.analysis.eye_diagram_state.load_data(data);
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let frame = |state: &mut AppState| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1_200.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| show(ui, state));
+                },
+            );
+        };
+
+        frame(&mut state);
+        let baseline = super::super::frame_work::WorkCounts::reset();
+
+        // The reader zooms into the middle of the eye, then pans.
+        for window in [(0.4, 1.2, 0.1, 0.8), (0.6, 1.4, 0.2, 0.9)] {
+            let view = state
+                .ui
+                .results
+                .plot_view_mut(super::super::ResultViewer::Eye, 0);
+            view.x = Some((window.0, window.1));
+            view.y = Some((window.2, window.3));
+            frame(&mut state);
+        }
+
+        assert_eq!(
+            baseline
+                .since()
+                .get(super::super::frame_work::DatasetWalk::EyeRaster),
+            0,
+            "the eye rebaked its density texture while the reader moved the view"
+        );
     }
 }

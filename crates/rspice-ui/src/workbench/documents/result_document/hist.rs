@@ -21,7 +21,11 @@ use super::well_hint;
 /// limits and verdict for another variable. Duplicate target evidence is also
 /// rejected: the UI must not choose an arbitrary result when retained state is
 /// malformed or came from an older, less constrained schema.
-fn selected_yield_result<'a>(
+///
+/// This half is cheap — name matching over the retained result list. Whether
+/// the result is internally consistent walks the whole retained population,
+/// and that verdict comes from the plan instead.
+fn matching_yield_result<'a>(
     simulation: &'a SimulationState,
     histogram_name: &str,
 ) -> Option<&'a YieldResult> {
@@ -30,7 +34,17 @@ fn selected_yield_result<'a>(
         .iter()
         .filter(|result| yield_target_measurement(&result.spec.target) == histogram_name);
     let result = matches.next()?;
-    (matches.next().is_none() && yield_result_is_consistent(result)).then_some(result)
+    matches.next().is_none().then_some(result)
+}
+
+fn selected_yield_result<'a>(
+    simulation: &'a SimulationState,
+    histogram_name: &str,
+    consistent: bool,
+) -> Option<&'a YieldResult> {
+    consistent
+        .then(|| matching_yield_result(simulation, histogram_name))
+        .flatten()
 }
 
 /// `mean(name)` is an accepted Monte-Carlo yield target spelling and refers
@@ -234,8 +248,52 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<ExactMoments>
         });
     }
 
-    let result = selected_yield_result(&state.simulation, histogram_name)?;
+    let result = matching_yield_result(&state.simulation, histogram_name)
+        .filter(|result| yield_result_is_consistent(result))?;
     moments_from_samples(&result.samples)
+}
+
+/// The descriptive moments and yield verdict behind one distribution.
+///
+/// Both walk the retained Monte-Carlo population several times over — the
+/// moments are four passes and the yield verdict counts, filters and then
+/// recomputes the moments to check the retained summary against them. The
+/// sheet and its panel each asked for both on every frame.
+#[derive(Debug, Clone)]
+pub(super) struct HistPlan {
+    version: u64,
+    histogram: String,
+    moments: Option<ExactMoments>,
+    yield_is_consistent: bool,
+}
+
+/// Resolve the distribution's statistics once per (generation, histogram).
+fn hist_plan(state: &mut AppState, histogram: &str) -> std::sync::Arc<HistPlan> {
+    let version = state.simulation.data_version;
+    if let Some(plan) = state.ui.results.plans.hist.as_ref()
+        && plan.version == version
+        && plan.histogram == histogram
+    {
+        return std::sync::Arc::clone(plan);
+    }
+    let built = std::sync::Arc::new(HistPlan {
+        version,
+        histogram: histogram.to_owned(),
+        moments: exact_moments(state, histogram),
+        yield_is_consistent: matching_yield_result(&state.simulation, histogram)
+            .is_some_and(yield_result_is_consistent),
+    });
+    state.ui.results.plans.hist = Some(std::sync::Arc::clone(&built));
+    built
+}
+
+/// The distribution the reader has selected, by name.
+fn selected_histogram_name(state: &AppState) -> Option<String> {
+    let hist_state = &state.analysis.histogram_state;
+    hist_state
+        .histograms
+        .get(hist_state.selected)
+        .map(|histogram| histogram.name.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +305,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
+    let Some(name) = selected_histogram_name(state) else {
+        well_hint(ui, "No distribution yet — run a Monte Carlo analysis");
+        return;
+    };
+    // Resolved before the distribution is borrowed, so the population is
+    // walked once per dataset generation rather than once per frame.
+    let plan = hist_plan(state, &name);
     let hist_state = &state.analysis.histogram_state;
     let Some(histogram) = hist_state.histograms.get(hist_state.selected) else {
         well_hint(ui, "No distribution yet — run a Monte Carlo analysis");
@@ -256,9 +321,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "The selected distribution is empty");
         return;
     }
-    let moments = exact_moments(state, &histogram.name);
-    let spec_limits = selected_yield_result(&state.simulation, &histogram.name)
-        .map(|result| (result.spec.min, result.spec.max));
+    let moments = plan.moments;
+    let spec_limits =
+        selected_yield_result(&state.simulation, &histogram.name, plan.yield_is_consistent)
+            .map(|result| (result.spec.min, result.spec.max));
 
     let subtitle = format!("{} · {} samples", histogram.name, histogram.total_count);
     let mut legend = vec![LegendChip {
@@ -435,6 +501,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 /// Distribution stats + spec/yield verdict.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    let Some(name) = selected_histogram_name(state) else {
+        section_header(ui, "Distribution", None);
+        super::panel_note(ui, "Stats appear once a Monte Carlo run is loaded.");
+        return;
+    };
+    let plan = hist_plan(state, &name);
     let hist_state = &state.analysis.histogram_state;
     let Some(histogram) = hist_state.histograms.get(hist_state.selected) else {
         section_header(ui, "Distribution", None);
@@ -443,7 +515,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
 
     section_header(ui, "Distribution", None);
-    if let Some(moments) = exact_moments(state, &histogram.name) {
+    if let Some(moments) = plan.moments {
         let rows = [
             ("Measure", histogram.name.clone(), false),
             ("Exact samples", moments.count.to_string(), false),
@@ -505,7 +577,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ],
     );
 
-    if let Some(yield_result) = selected_yield_result(&state.simulation, &histogram.name) {
+    if let Some(yield_result) =
+        selected_yield_result(&state.simulation, &histogram.name, plan.yield_is_consistent)
+    {
         section_header(ui, "Spec", None);
         let cpk = yield_result
             .stats
@@ -605,7 +679,7 @@ mod tests {
             Some(provenance(&run)),
         );
 
-        let selected = selected_yield_result(&simulation, "V(out)")
+        let selected = selected_yield_result(&simulation, "V(out)", true)
             .expect("the exact selected measurement is authoritative");
         assert_eq!(selected.spec.target, "V(out)");
         assert_eq!(selected.yield_percent, 97.0);
@@ -621,7 +695,7 @@ mod tests {
         simulation
             .replace_yield_evidence(vec![result("V(out)", 23.0)], Some(provenance(&stale_run)));
 
-        assert!(selected_yield_result(&simulation, "V(out)").is_none());
+        assert!(selected_yield_result(&simulation, "V(out)", true).is_none());
     }
 
     #[test]
@@ -631,13 +705,13 @@ mod tests {
         simulation.runs.push(run.clone());
         simulation.active_run_idx = Some(0);
         simulation.replace_yield_evidence(vec![result("gain", 90.0)], Some(provenance(&run)));
-        assert!(selected_yield_result(&simulation, "V(out)").is_none());
+        assert!(selected_yield_result(&simulation, "V(out)", true).is_none());
 
         simulation.replace_yield_evidence(
             vec![result("V(out)", 90.0), result("mean(V(out))", 10.0)],
             Some(provenance(&run)),
         );
-        assert!(selected_yield_result(&simulation, "V(out)").is_none());
+        assert!(selected_yield_result(&simulation, "V(out)", true).is_none());
     }
 
     #[test]
@@ -650,10 +724,10 @@ mod tests {
             .replace_yield_evidence(vec![result("mean(V(out))", 88.0)], Some(provenance(&run)));
 
         assert_eq!(
-            selected_yield_result(&simulation, "V(out)").map(|result| result.yield_percent),
+            selected_yield_result(&simulation, "V(out)", true).map(|result| result.yield_percent),
             Some(88.0)
         );
-        assert!(selected_yield_result(&simulation, "v(out)").is_none());
+        assert!(selected_yield_result(&simulation, "v(out)", true).is_none());
     }
 
     fn mc_variable(name: &str) -> MonteCarloVariableMetadata {
@@ -752,5 +826,68 @@ mod tests {
         let mut bad_stats = valid;
         bad_stats.stats.mean += 0.25;
         assert!(!yield_result_is_consistent(&bad_stats));
+    }
+
+    /// The population is walked once per (generation, distribution), and the
+    /// answer must move when either does.
+    #[test]
+    fn the_distribution_statistics_are_resolved_once_per_generation() {
+        let analysis = AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
+            AnalysisResultFamilyMetadata::MonteCarlo {
+                member_measurements: Vec::new(),
+                seed: 3,
+                runs_requested: 3,
+                runs_completed: 3,
+                failures: 0,
+                all_converged: true,
+                variables: vec![mc_variable("gain"), mc_variable("offset")],
+            },
+        );
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        let first = hist_plan(&mut state, "gain");
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &hist_plan(&mut state, "gain")
+        ));
+        assert_eq!(first.moments.expect("retained moments").mean, 2.0);
+        // The memo is the projection it replaced.
+        assert_eq!(
+            first.moments.expect("retained moments").std_dev,
+            exact_moments(&state, "gain")
+                .expect("retained moments")
+                .std_dev
+        );
+
+        // Another distribution is another answer, at the same generation.
+        let other = hist_plan(&mut state, "offset");
+        assert!(!std::sync::Arc::ptr_eq(&first, &other));
+
+        // A new generation of the population is a new answer.
+        let AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } = state.simulation.runs[0]
+            .analyses[0]
+            .family_metadata
+            .as_mut()
+            .expect("Monte Carlo metadata")
+        else {
+            panic!("the fixture retains Monte Carlo metadata");
+        };
+        variables[0].samples = vec![10.0, 20.0, 30.0];
+        variables[0].mean = 20.0;
+        variables[0].std_dev = 10.0;
+        variables[0].min = 10.0;
+        variables[0].max = 30.0;
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+        let after = hist_plan(&mut state, "gain");
+        assert_eq!(
+            after.moments.expect("retained moments").mean,
+            20.0,
+            "the sheet reported the previous population's mean"
+        );
     }
 }

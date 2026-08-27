@@ -3594,8 +3594,9 @@ pub struct EyeTexture {
     pub(crate) revision: u64,
     pub(crate) size: [usize; 2],
     pub(crate) color: egui::Color32,
-    pub(crate) x_range_bits: [u64; 2],
-    pub(crate) y_range_bits: [u64; 2],
+    /// The data-space window the texture covers, which the draw maps onto
+    /// whatever the reader has zoomed to.
+    pub(crate) extent_bits: [u64; 4],
     pub(crate) handle: egui::TextureHandle,
 }
 
@@ -3604,8 +3605,7 @@ impl std::fmt::Debug for EyeTexture {
         f.debug_struct("EyeTexture")
             .field("revision", &self.revision)
             .field("size", &self.size)
-            .field("x_range_bits", &self.x_range_bits)
-            .field("y_range_bits", &self.y_range_bits)
+            .field("extent_bits", &self.extent_bits)
             .finish_non_exhaustive()
     }
 }
