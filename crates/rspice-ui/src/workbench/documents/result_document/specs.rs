@@ -1555,8 +1555,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .simulation
             .active_run()
             .and_then(|run| run.analyses.get(analysis_index))
-            .map(|analysis| source_viewer(state, analysis.analysis_type))
-            .unwrap_or(ResultViewer::Manifest);
+            .map_or(ResultViewer::Manifest, source_viewer);
         if state.simulation.select_analysis(analysis_index) {
             state.ui.results.viewer = viewer;
             state.ui.results.clear_cursors();
@@ -1564,34 +1563,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn source_viewer(state: &AppState, analysis_type: crate::state::AnalysisType) -> ResultViewer {
-    use crate::state::AnalysisType;
-
-    let candidate = match analysis_type {
-        AnalysisType::DcOp => ResultViewer::Op,
-        AnalysisType::DcSweep => ResultViewer::DcSweep,
-        AnalysisType::Ac
-        | AnalysisType::Pac
-        | AnalysisType::Pxf
-        | AnalysisType::Stb
-        | AnalysisType::Disto => ResultViewer::Bode,
-        AnalysisType::Pstb => ResultViewer::Table,
-        AnalysisType::Pss | AnalysisType::Envelope | AnalysisType::Soa => ResultViewer::Waves,
-        AnalysisType::Noise | AnalysisType::Hbnoise => ResultViewer::NoiseContrib,
-        AnalysisType::Fourier => ResultViewer::HarmonicBalance,
-        AnalysisType::HarmonicBalance => ResultViewer::HarmonicBalance,
-        AnalysisType::Pnoise | AnalysisType::Qpnoise => ResultViewer::PhaseNoise,
-        AnalysisType::Sensitivity => ResultViewer::Contribution,
-        AnalysisType::Tf | AnalysisType::Qpxf => ResultViewer::TransferFunction,
-        AnalysisType::PoleZero => ResultViewer::PoleZero,
-        AnalysisType::SParameter | AnalysisType::Hbsp | AnalysisType::Psp => ResultViewer::Table,
-        _ => ResultViewer::Waves,
-    };
-    if super::viewer_availability(state, candidate).available {
-        candidate
-    } else {
-        ResultViewer::Manifest
-    }
+/// The sheet that shows this retained analysis, in tab order.
+///
+/// Through the shared compatibility predicate and the shared pair refinement,
+/// never a table of its own. This module kept an analysis-type-to-viewer map
+/// beside them, and it drifted in two ways at once: it named viewers by
+/// analysis kind rather than by the evidence the analysis actually retained —
+/// so a Monte Carlo campaign or an optimizer run resolved to `Waves` — and it
+/// asked whether its answer was available of the *globally selected* analysis
+/// rather than the one whose row was clicked, which for every analysis-scoped
+/// sheet is a different question. Both dropped the reader on the manifest
+/// instead of the source they had asked for.
+///
+/// The Specs sheet itself is excluded: it is the sheet the button was pressed
+/// on, so it is not somewhere to open.
+fn source_viewer(analysis: &crate::state::AnalysisResult) -> ResultViewer {
+    ResultViewer::PRIMARY
+        .into_iter()
+        .filter(|viewer| {
+            *viewer != ResultViewer::Specs
+                && super::view_context::analysis_supports_viewer(*viewer, analysis)
+        })
+        .map(|viewer| super::project_viewer_for_analysis(viewer, analysis))
+        .next()
+        .unwrap_or(ResultViewer::Manifest)
 }
 
 /// The inline governed-requirement editor. Exact comparison kind, limits,

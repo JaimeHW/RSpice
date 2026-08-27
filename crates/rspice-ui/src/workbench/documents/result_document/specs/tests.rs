@@ -1106,3 +1106,42 @@ fn the_carried_limit_is_scrolled_to_again_in_the_next_run() {
         second.center().y - screen.bottom()
     );
 }
+
+/// The source button opens the sheet the shared map names for that analysis.
+///
+/// This module kept an analysis-type-to-viewer table of its own, and asked
+/// whether the answer was available of the *previously* selected analysis
+/// rather than the one the reader clicked. An optimizer's cost history is the
+/// plain case: the shared compatibility predicate names the optimization
+/// sheet, and the private table answered `Waves`, found it unavailable for the
+/// old selection, and dropped the reader on the manifest.
+#[test]
+fn the_source_button_opens_the_viewer_the_shared_map_names() {
+    let mut state = AppState::default();
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("cost", 1.0)]),
+    );
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Optimization, "Optimize").with_family_metadata(
+            AnalysisResultFamilyMetadata::Optimization {
+                iterations: vec![4.0, 2.0, 1.0],
+                best_cost: 1.0,
+                best_variables: std::collections::BTreeMap::new(),
+                converged: true,
+            },
+        ),
+    );
+    state.simulation.runs = vec![run];
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+
+    let optimization = state.simulation.runs[0].analyses[1].clone();
+
+    assert_eq!(
+        super::source_viewer(&optimization),
+        crate::workbench::ResultViewer::Optimization,
+        "the retained optimizer history is what the shared map answers with"
+    );
+}
