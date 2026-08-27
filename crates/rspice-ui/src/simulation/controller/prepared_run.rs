@@ -2286,16 +2286,18 @@ fn touchstone_export_policy<'a>(
         return Ok(TouchstoneExportPolicy::disabled());
     }
 
-    touchstone_export_policy_for_dialog(&state.sim_setup.sp, source_path)
+    let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
+    touchstone_export_policy_for_dialog(&state.sim_setup.sp, &placed, source_path)
 }
 
 pub(super) fn touchstone_export_policy_for_dialog(
     dialog: &crate::simulation::dialog::SpDialogState,
+    placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
     source_path: Option<&Path>,
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
     let mut dialog = dialog.clone();
     dialog.ensure_initialized();
-    let config = dialog.to_config().map_err(|error| {
+    let config = dialog.to_config(Some(placed_rf_ports)).map_err(|error| {
         PreparationError::new(
             PreparationStage::AnalysisPlan,
             format!("Invalid Touchstone export settings: {error}"),

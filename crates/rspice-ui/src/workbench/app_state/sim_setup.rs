@@ -552,7 +552,20 @@ impl SimSetupState {
                     "s"
                 }
             ),
-            12 => format!("{} ports · Z0 {}", self.sp.ports.len(), self.sp.z0),
+            // Which ports, not how many rows: this summary cannot see the
+            // design, and stating the ad-hoc table's length for an analysis
+            // reading the sheet's placed ports would name a count the run
+            // never has.
+            12 => match self.sp.port_source_idx.and_then(|index| {
+                crate::simulation::dialog::SpPortSource::ALL
+                    .get(index)
+                    .copied()
+            }) {
+                Some(crate::simulation::dialog::SpPortSource::Placed) => {
+                    format!("placed RF ports · Z0 {}", self.sp.z0)
+                }
+                _ => format!("{} ports · Z0 {}", self.sp.ports.len(), self.sp.z0),
+            },
             13 => format!(
                 "{} <- {} · {} -> {}",
                 self.pac.output_node,
@@ -729,7 +742,11 @@ impl SimSetupState {
             9 => self.stb.to_config().err(),
             10 => self.temp.to_config(&self.run_set, self.reference_pvt).err(),
             11 => self.hb.to_config().err(),
-            12 => self.sp.to_config().err(),
+            // Design-blind, and it says so: this state holds the simulation
+            // setup and not the sheet, so it checks the sweep, the impedance
+            // and the ad-hoc table it owns, and leaves the placed-port roster
+            // to the dispatching path that can read the design.
+            12 => self.sp.to_config(None).err(),
             13 => self.pac.to_config().err(),
             14 => self.pnoise.to_config().err(),
             15 => self.pxf.to_config().err(),

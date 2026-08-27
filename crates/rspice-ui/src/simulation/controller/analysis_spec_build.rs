@@ -671,11 +671,21 @@ impl SimulationController {
         })
     }
 
+    /// The S-parameter run, resolved against the ports the design places.
+    ///
+    /// This is the one surface that can see both declarations at once, so it
+    /// is where the choice between them is enforced. In placed mode the port
+    /// list below is a description of the deck's own `P` cards rather than a
+    /// second declaration: the runner materializes ports only for a deck that
+    /// declares none (`services::simulation_runner::sparameter::resolve_ports`),
+    /// so nothing here is synthesized — it is copied so that the Touchstone
+    /// header and the saved-output contract read the run's real roster.
     pub(super) fn build_sp_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         let mut sp_state = state.sim_setup.sp.clone();
         sp_state.ensure_initialized();
+        let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
         let sp_cfg = sp_state
-            .to_config()
+            .to_config(Some(&placed))
             .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
         let ports = sp_cfg
             .ports

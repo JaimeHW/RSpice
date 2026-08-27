@@ -2276,6 +2276,12 @@ fn analysis_form_body(
     let placed_loop_probes = matches!(draft, AnalysisDraft::Stb(_))
         .then(|| app.state.schematic.placed_loop_probe_names())
         .unwrap_or_default();
+    // Only the S-parameter form reads the design's RF ports, and the
+    // derivation walks the design's nets. Every other analysis leaves it
+    // unmeasured.
+    let placed_rf_ports = matches!(draft, AnalysisDraft::SParameter(_))
+        .then(|| crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, None))
+        .unwrap_or_default();
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
     egui::Frame::new()
@@ -2296,6 +2302,7 @@ fn analysis_form_body(
                 app.state.ui.number_locale,
                 envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
                 &placed_loop_probes,
+                &placed_rf_ports,
                 noise_domain
                     .as_ref()
                     .map(NoiseDomainCatalog::domain)

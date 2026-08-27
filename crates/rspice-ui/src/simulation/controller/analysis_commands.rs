@@ -327,8 +327,9 @@ impl SimulationController {
     pub(super) fn build_sp_command(&self, state: &AppState) -> Result<String, String> {
         let mut sp_state = state.sim_setup.sp.clone();
         sp_state.ensure_initialized();
+        let placed = crate::simulation::placed_sources::placed_rf_ports(&state.schematic, None);
         let sp_cfg = sp_state
-            .to_config()
+            .to_config(Some(&placed))
             .map_err(|e| format!("invalid S-parameter settings: {}", e))?;
         Ok(sp_cfg.to_spice())
     }

@@ -83,7 +83,7 @@ pub use pxf::PxfDialogState;
 // Re-exports - RF/Microwave
 #[cfg(test)]
 pub use sp::SpConfig;
-pub use sp::SpDialogState;
+pub use sp::{SpDialogState, SpPortSource};
 
 // Re-exports - Transfer Function
 pub use pz::PzDialogState;

@@ -49,9 +49,38 @@ fn analysis_form_height_in_domain(draft: AnalysisDraft, noise_domain: NoiseDomai
 /// satisfy an assertion about the resolver, and would still paint the wrong
 /// units beside the mode selector.
 #[cfg(not(target_arch = "wasm32"))]
-fn render_analysis_form(
+fn render_analysis_form(draft: AnalysisDraft, noise_domain: NoiseDomain<'_>) -> (f32, Vec<String>) {
+    render_analysis_form_against(draft, noise_domain, &[])
+}
+
+/// Render one analysis form off-screen against a design that places the given
+/// RF ports.
+#[cfg(not(target_arch = "wasm32"))]
+fn render_analysis_form_against(
     mut draft: AnalysisDraft,
     noise_domain: NoiseDomain<'_>,
+    placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
+) -> (f32, Vec<String>) {
+    render_analysis_form_into(&mut draft, noise_domain, placed_rf_ports, VIEWPORT_HEIGHT)
+}
+
+/// The viewport every geometry assertion is measured in. A form taller than
+/// this still lays out, but egui does not paint a widget it can see is
+/// off-screen, so a test reading painted text from the bottom of a long form
+/// has to say how tall a viewport it is reading.
+#[cfg(not(target_arch = "wasm32"))]
+const VIEWPORT_HEIGHT: f32 = 600.0;
+
+/// The same render, keeping the draft the form edited.
+///
+/// A form is a mutation as much as a painting, and what it did *not* write is
+/// as much of its contract as what it painted.
+#[cfg(not(target_arch = "wasm32"))]
+fn render_analysis_form_into(
+    draft: &mut AnalysisDraft,
+    noise_domain: NoiseDomain<'_>,
+    placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
+    viewport_height: f32,
 ) -> (f32, Vec<String>) {
     // The run-space forms read the plan; a height measurement supplies a
     // plan-shaped fixture rather than letting the form invent one.
@@ -70,7 +99,7 @@ fn render_analysis_form(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(964.0, 600.0),
+                egui::vec2(964.0, viewport_height),
             )),
             ..Default::default()
         },
@@ -81,11 +110,12 @@ fn render_analysis_form(
                     let top = ui.cursor().top();
                     form(
                         ui,
-                        &mut draft,
+                        draft,
                         QuantityPresentationPolicy::default(),
                         UiNumberLocale::default(),
                         &["VIN_AM".to_owned(), "VIN_IQ".to_owned()],
                         &["VLOOP1".to_owned()],
+                        placed_rf_ports,
                         noise_domain,
                         OpContextAvailability::default(),
                         &run_space_fixture,
@@ -757,4 +787,181 @@ fn both_loop_stability_forms_offer_the_probes_the_drawing_holds() {
             "{kind:?} must state how many probes the drawing holds: {painted:?}"
         );
     }
+}
+
+/// A design that places the given RF ports, resolved through the one
+/// derivation the navigator and the studio also read.
+#[cfg(not(target_arch = "wasm32"))]
+fn placed_ports(ports: &[(&str, &str)]) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
+    let mut schematic = crate::state::SchematicState::default();
+    schematic.components = ports
+        .iter()
+        .enumerate()
+        .map(|(index, (name, params))| {
+            let mut component = crate::state::Component::new(
+                index as u64 + 1,
+                crate::state::ComponentType::RfPort,
+                crate::state::Point::origin(),
+            )
+            .with_name_value(*name, "");
+            component.params = (*params).to_owned();
+            component
+        })
+        .collect();
+    crate::simulation::placed_sources::placed_rf_ports(&schematic, None)
+}
+
+/// A fresh S-parameter setup, as inserting the analysis produces one.
+#[cfg(not(target_arch = "wasm32"))]
+fn sp_setup() -> crate::simulation::dialog::SpDialogState {
+    let mut draft = AnalysisDraft::for_kind(AnalysisKind::SParameter);
+    let AnalysisDraft::SParameter(setup) = &mut draft else {
+        unreachable!("for_kind returns the draft of the kind it was given");
+    };
+    setup.ensure_initialized();
+    setup.clone()
+}
+
+/// The S-parameter form asks the design which declaration owns its ports, and
+/// a form nobody has told takes the design's answer: an RF bench reads its
+/// placed ports, a netlist-first sheet keeps the node table.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_port_source_defaults_to_whichever_declaration_the_design_makes() {
+    let bench = placed_ports(&[("P1", "port=1 z0=50"), ("P2", "port=2 z0=75")]);
+    let (_, painted) = render_analysis_form_against(
+        AnalysisDraft::SParameter(sp_setup()),
+        NoiseDomain::default(),
+        &bench,
+    );
+    assert!(
+        painted.iter().any(|line| line == "From placed RF ports"),
+        "a design that places ports enters placed mode: {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|line| line == "Node +"),
+        "and the ad-hoc node table goes quiet: {painted:?}"
+    );
+
+    let (_, painted) = render_analysis_form(
+        AnalysisDraft::SParameter(sp_setup()),
+        NoiseDomain::default(),
+    );
+    assert!(
+        painted.iter().any(|line| line == "Ad-hoc node ports"),
+        "a design that places none keeps the node table: {painted:?}"
+    );
+    assert!(painted.iter().any(|line| line == "Node +"), "{painted:?}");
+}
+
+/// The placed rows are the derivation's, read-only: number, reference, and
+/// what the port does behind which impedance.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn placed_mode_states_each_placed_port_without_offering_to_edit_it() {
+    let bench = placed_ports(&[("PIN", "port=1 ac_mag=1 z0=50"), ("POUT", "port=2 z0=75")]);
+    let (_, painted) = render_analysis_form_against(
+        AnalysisDraft::SParameter(sp_setup()),
+        NoiseDomain::default(),
+        &bench,
+    );
+
+    for expected in [
+        "PORT 1",
+        "PORT 2",
+        "PIN",
+        "POUT",
+        "AC drive \u{00b7} Z0 50",
+        "term \u{00b7} Z0 75",
+    ] {
+        assert!(
+            painted.iter().any(|line| line == expected),
+            "the placed roster must state {expected:?}: {painted:?}"
+        );
+    }
+    assert!(
+        !painted.iter().any(|line| line == "+ Add port"),
+        "the design owns the roster, so the form does not add to it: {painted:?}"
+    );
+}
+
+/// Every placed-mode refusal is stated on the form, beside the ports it is
+/// about, in the same words dispatch refuses with.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn a_placed_roster_that_cannot_run_says_so_on_the_form() {
+    let mut setup = sp_setup();
+    setup.port_source_idx = Some(crate::simulation::dialog::SpPortSource::Placed.index());
+
+    for (ports, expected) in [
+        (vec![("PA", "port=1"), ("PB", "port=1")], "port number 1"),
+        (vec![("PA", "port=1"), ("PB", "port=3")], "skip port 2"),
+        (Vec::new(), "the sheet places none"),
+    ] {
+        let placed = placed_ports(&ports);
+        let reason = setup
+            .port_roster_error(&placed)
+            .expect("this roster cannot run");
+        assert!(reason.contains(expected), "{reason}");
+
+        let (_, painted) = render_analysis_form_against(
+            AnalysisDraft::SParameter(setup.clone()),
+            NoiseDomain::default(),
+            &placed,
+        );
+        assert!(
+            painted.iter().any(|line| *line == reason),
+            "the form must state the refusal dispatch will give: {painted:?}"
+        );
+    }
+}
+
+/// Ad-hoc mode beside placed ports states the true consequence: the deck's own
+/// `P` cards are what the run measures, so the table below would not be used.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn ad_hoc_mode_beside_placed_ports_states_that_the_table_is_not_what_runs() {
+    let mut setup = sp_setup();
+    setup.port_source_idx = Some(crate::simulation::dialog::SpPortSource::AdHoc.index());
+    let bench = placed_ports(&[("P1", "port=1"), ("P2", "port=2")]);
+
+    let reason = setup
+        .port_roster_error(&bench)
+        .expect("two declarations of one thing is no run");
+    assert!(reason.contains("would not be used"), "{reason}");
+
+    // The node table plus its advisory runs past a 600-point viewport, and
+    // egui does not paint what it can see is off-screen.
+    let (_, painted) = render_analysis_form_into(
+        &mut AnalysisDraft::SParameter(setup),
+        NoiseDomain::default(),
+        &bench,
+        1200.0,
+    );
+    assert!(painted.iter().any(|line| *line == reason), "{painted:?}");
+    assert!(
+        painted.iter().any(|line| line == "Node +"),
+        "the table stays visible, because switching back to it is a real answer: {painted:?}"
+    );
+}
+
+/// Drawing the form must not record a choice nobody made: an untouched row
+/// leaves the analysis following the design.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn drawing_the_form_does_not_stamp_a_port_source_choice() {
+    let mut draft = AnalysisDraft::SParameter(sp_setup());
+    render_analysis_form_into(
+        &mut draft,
+        NoiseDomain::default(),
+        &placed_ports(&[("P1", "port=1"), ("P2", "port=2")]),
+        VIEWPORT_HEIGHT,
+    );
+    let AnalysisDraft::SParameter(setup) = &mut draft else {
+        unreachable!("the draft is the one just built");
+    };
+    assert_eq!(
+        setup.port_source_idx, None,
+        "an untouched row leaves the choice to the design"
+    );
 }

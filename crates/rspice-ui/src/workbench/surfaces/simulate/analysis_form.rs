@@ -1224,6 +1224,93 @@ fn periodic_network_fields(
     }
 }
 
+/// The S-parameter run's ports, from whichever of the two declarations owns
+/// them. Returns the form's note.
+///
+/// A port is a Z0 plane the run drives and measures, and a design can declare
+/// one in two places: `RF Port` components on the sheet, which the netlist
+/// carries as `P` cards, or node pairs typed here, which the runner
+/// materializes only for a deck that declares none of its own
+/// (`services::simulation_runner::sparameter::resolve_ports`). Both at once is
+/// not a richer setup, it is two answers to one question — so this row picks
+/// the owner, and the other declaration goes quiet rather than half-applying.
+fn sp_port_fields(
+    ui: &mut Ui,
+    setup: &mut crate::simulation::dialog::SpDialogState,
+    placed: &[crate::simulation::placed_sources::PlacedRfPort],
+) -> &'static str {
+    use crate::simulation::dialog::SpPortSource;
+
+    let labels: Vec<&str> = SpPortSource::ALL
+        .iter()
+        .map(|source| source.display_name())
+        .collect();
+    let resolved = setup.port_source(placed.len());
+    let mut selected = resolved.index();
+    choice_row(ui, "Ports", &labels, &mut selected);
+    // Written back only when the reader actually moves it. Stamping the
+    // resolved value every frame would record a choice on a project that never
+    // made one, and pin it to whatever the sheet happened to hold the first
+    // time this form was drawn.
+    if selected != resolved.index() {
+        setup.port_source_idx = Some(selected);
+    }
+
+    let source = setup.port_source(placed.len());
+    if source == SpPortSource::Placed {
+        // Read-only: these are the design's, and an editable copy of them here
+        // is the second declaration this switch exists to remove.
+        for port in placed {
+            sub_header(ui, &format!("Port {}", port.port_number));
+            property_row(ui, "Instance", &port.reference);
+            property_row(ui, "Role", &port.summary());
+        }
+    } else {
+        let mut remove: Option<usize> = None;
+        let port_count = setup.ports.len();
+        for (idx, port) in setup.ports.iter_mut().enumerate() {
+            sub_header(ui, &format!("Port {}", idx + 1));
+            input_row(ui, "Node +", &mut port.node_pos);
+            check_row(ui, "Differential", &mut port.differential);
+            if port.differential {
+                input_row(ui, "Node −", &mut port.node_neg);
+            }
+            check_row(ui, "Z0 override", &mut port.z0_override);
+            if port.z0_override {
+                input_row(ui, "Port Z0", &mut port.z0);
+            }
+            if port_count > 1 && action_line(ui, "Remove port") {
+                remove = Some(idx);
+            }
+        }
+        if let Some(idx) = remove {
+            setup.ports.remove(idx);
+        }
+        ui.add_space(4.0);
+        if action_line(ui, "+ Add port") {
+            setup.ports.push(Default::default());
+        }
+    }
+
+    // The same resolution dispatch performs, stated here so the reason a run
+    // will be refused is visible beside the ports it is about.
+    if let Some(reason) = setup.port_roster_error(placed) {
+        field_advisory(ui, &reason);
+    }
+
+    match source {
+        SpPortSource::Placed => {
+            "Scattering parameters between the RF ports the design places. Their P cards are \
+             the ports the run drives and measures; nothing is added to the netlist for it."
+        }
+        SpPortSource::AdHoc => {
+            "Scattering parameters between the node pairs named here. Each becomes a generator \
+             behind its reference impedance, which only a deck that declares no ports of its \
+             own accepts."
+        }
+    }
+}
+
 fn network_port_fields(ui: &mut Ui, index: usize, port: &mut NetworkPortDraft) {
     sub_header(ui, &format!("Port {}", index + 1));
     input_row(ui, "Node +", &mut port.node_pos);
@@ -1239,6 +1326,10 @@ pub(super) fn form(
     locale: UiNumberLocale,
     envelope_modulation_sources: &[String],
     placed_loop_probes: &[String],
+    // The RF ports the design places, resolved once by the caller. The
+    // S-parameter form reads these rather than keeping a copy: an editable
+    // second declaration of the same ports is what this list replaces.
+    placed_rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
     noise_domain: NoiseDomain<'_>,
     op_context: OpContextAvailability,
     run_space: &run_space::RunSpaceContext<'_>,
@@ -1648,31 +1739,7 @@ pub(super) fn form(
             input_row(ui, "Z0", &mut setup.z0);
             check_row(ui, "Noise parameters", &mut setup.do_noise);
             check_row(ui, "Touchstone export", &mut setup.touchstone_export);
-            let mut remove: Option<usize> = None;
-            let port_count = setup.ports.len();
-            for (idx, port) in setup.ports.iter_mut().enumerate() {
-                sub_header(ui, &format!("Port {}", idx + 1));
-                input_row(ui, "Node +", &mut port.node_pos);
-                check_row(ui, "Differential", &mut port.differential);
-                if port.differential {
-                    input_row(ui, "Node −", &mut port.node_neg);
-                }
-                check_row(ui, "Z0 override", &mut port.z0_override);
-                if port.z0_override {
-                    input_row(ui, "Port Z0", &mut port.z0);
-                }
-                if port_count > 1 && action_line(ui, "Remove port") {
-                    remove = Some(idx);
-                }
-            }
-            if let Some(idx) = remove {
-                setup.ports.remove(idx);
-            }
-            ui.add_space(4.0);
-            if action_line(ui, "+ Add port") {
-                setup.ports.push(Default::default());
-            }
-            "Scattering parameters between the defined ports."
+            sp_port_fields(ui, setup, placed_rf_ports)
         }
         AnalysisDraft::Pac(setup) => {
             quantity_input_row(
