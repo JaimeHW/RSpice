@@ -9,14 +9,175 @@
 
 use egui::Ui;
 
-use crate::analysis::eye_diagram::EyeData;
+use crate::analysis::eye_diagram::{
+    EyeData, EyeRateEditor, EyeTimebase, EyeTimebaseProvenance, parse_eye_timebase,
+};
 use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::section_header;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{chip, section_header};
 use crate::workbench::AppState;
 
 use super::strip::{self, LegendChip};
 use super::well_hint;
+
+// ---------------------------------------------------------------------------
+// timebase control
+// ---------------------------------------------------------------------------
+
+/// EYE docbar controls: the compliance mask, and what the eye folds at.
+pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
+    let mask_on = state.analysis.eye_diagram_state.show_mask;
+    let mask_response = chip(ui, "mask", mask_on).on_hover_text(if mask_on {
+        "Compliance mask on — tested against the loaded acquisitions"
+    } else {
+        "Compliance mask off — click to test the loaded acquisitions against it"
+    });
+    mask_response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, mask_on, "mask")
+    });
+    if mask_response.clicked() {
+        // Toggling runs the test now, against what is loaded now. Latching
+        // the verdict at load time is how an untested mask reads as a pass.
+        state.analysis.eye_diagram_state.set_show_mask(!mask_on);
+    }
+
+    let Some(owner) = state.active_specialized_viewer_cache_provenance() else {
+        return;
+    };
+    let timebase = state.eye_timebase_for(owner);
+    let editing = state.analysis.eye_diagram_state.rate_editor.is_some();
+    let label = match timebase {
+        EyeTimebase::Auto => "auto".to_owned(),
+        EyeTimebase::Explicit { unit_interval } => fmt_si(unit_interval, "s", 2),
+    };
+    let rate_response = chip(ui, &label, editing).on_hover_text(match timebase {
+        EyeTimebase::Auto => "Bit period recovered from the waveform — click to set it",
+        EyeTimebase::Explicit { .. } => "Bit period set by you — click to change it",
+    });
+    rate_response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, editing, label.as_str())
+    });
+    if rate_response.clicked() {
+        state.analysis.eye_diagram_state.rate_editor = if editing {
+            None
+        } else {
+            Some(EyeRateEditor {
+                text: match timebase {
+                    EyeTimebase::Auto => String::new(),
+                    EyeTimebase::Explicit { unit_interval } => fmt_si(unit_interval, "s", 3),
+                },
+                error: None,
+                needs_focus: true,
+            })
+        };
+    }
+
+    // The editor is taken out for the frame so the commit below can reach
+    // `AppState` mutably while the field is being edited.
+    let mut editor = state.analysis.eye_diagram_state.rate_editor.take();
+    let mut commit = None;
+    if let Some(open) = editor.as_mut() {
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut open.text)
+                .desired_width(96.0)
+                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                .hint_text("2.5G · 400p"),
+        );
+        if open.needs_focus {
+            field.request_focus();
+            open.needs_focus = false;
+        }
+        let escaped = field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            commit = Some(open.text.clone());
+        }
+        if escaped {
+            editor = None;
+        }
+        if let Some(open) = editor.as_ref()
+            && let Some(message) = open.error.as_deref()
+        {
+            ui.label(
+                egui::RichText::new(message)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(Tokens::get(ui.ctx()).color.err),
+            );
+        }
+    }
+    if let Some(text) = commit {
+        match parse_eye_timebase(&text) {
+            Ok(unit_interval) => {
+                state.set_eye_timebase(owner, EyeTimebase::Explicit { unit_interval });
+                editor = None;
+            }
+            Err(message) => {
+                editor = Some(EyeRateEditor {
+                    text,
+                    error: Some(message),
+                    needs_focus: false,
+                });
+            }
+        }
+    }
+    state.analysis.eye_diagram_state.rate_editor = editor;
+
+    if matches!(timebase, EyeTimebase::Explicit { .. })
+        && chip(ui, "auto", false)
+            .on_hover_text("Go back to recovering the bit period from the waveform")
+            .clicked()
+    {
+        state.set_eye_timebase(owner, EyeTimebase::Auto);
+        state.analysis.eye_diagram_state.rate_editor = None;
+    }
+}
+
+/// What to tell the reader when no eye could be folded.
+///
+/// A refusal that says only "no usable source" leaves the reader with no
+/// move. Each rejection names what the waveform lacked and points at the rate
+/// control, which is the remedy in every case.
+pub fn unavailable_hint(state: &AppState) -> Option<String> {
+    let source = state
+        .analysis
+        .fft_state
+        .selected_source
+        .as_deref()
+        .unwrap_or("the active trace");
+    state
+        .analysis
+        .eye_diagram_state
+        .timebase_provenance()?
+        .rejection_hint(source)
+}
+
+/// One line describing what is on screen and where its bit period came from.
+fn timebase_summary(state: &AppState) -> String {
+    match state.analysis.eye_diagram_state.timebase_provenance() {
+        Some(EyeTimebaseProvenance::Auto {
+            unit_interval,
+            edge_count,
+            low_confidence,
+            ..
+        }) => format!(
+            "{} · {} · {edge_count} edges",
+            if *low_confidence {
+                "auto (low confidence)"
+            } else {
+                "auto"
+            },
+            fmt_si(*unit_interval, "s", 3),
+        ),
+        Some(EyeTimebaseProvenance::Explicit { unit_interval }) => format!(
+            "set · {} · {}",
+            fmt_si(*unit_interval, "s", 3),
+            fmt_si(1.0 / unit_interval, "b/s", 2),
+        ),
+        Some(EyeTimebaseProvenance::AutoRejected(_)) | None => {
+            fmt_si(state.analysis.eye_diagram_state.data.data_rate, "b/s", 1)
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // center view
@@ -27,21 +188,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let eye = &state.analysis.eye_diagram_state;
-    let data = &eye.data;
-    if data.traces.is_empty() {
-        well_hint(
-            ui,
-            "No eye yet — the eye folds the active transient at the bit period",
-        );
+    if state.analysis.eye_diagram_state.data.traces.is_empty() {
+        let hint = unavailable_hint(state).unwrap_or_else(|| {
+            "No eye yet — the eye folds the active transient at the bit period".to_owned()
+        });
+        well_hint(ui, &hint);
         return;
     }
+    let summary = timebase_summary(state);
 
+    let eye = &state.analysis.eye_diagram_state;
+    let data = &eye.data;
     let subtitle = format!(
-        "{} acquisitions · {} UI · {}",
+        "{} acquisitions · {} UI · {summary}",
         data.traces.len(),
         data.ui_count,
-        fmt_si(data.data_rate, "b/s", 1)
     );
     let legend = [LegendChip {
         name: "density",
@@ -314,33 +475,60 @@ fn accumulate_line(
 
 /// Eye metrics + mask verdict.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let eye = &state.analysis.eye_diagram_state;
-    if eye.data.traces.is_empty() {
+    if state.analysis.eye_diagram_state.data.traces.is_empty() {
         section_header(ui, "Eye", None);
         super::panel_note(
             ui,
-            "Metrics appear once the eye is built from the transient.",
+            &unavailable_hint(state).unwrap_or_else(|| {
+                "Metrics appear once the eye is built from the transient.".to_owned()
+            }),
         );
         return;
     }
+
+    let summary = timebase_summary(state);
+    let eye = &state.analysis.eye_diagram_state;
     let m = &eye.measurements;
 
     section_header(ui, "Eye", None);
     let rows = [
+        ("Unit interval", fmt_si(m.unit_interval, "s", 3), true),
+        ("Data rate", fmt_si(m.data_rate, "b/s", 2), false),
         ("Eye height", fmt_si(m.eye_height, "V", 0), true),
         ("Eye width", format!("{:.2} UI", m.eye_width), true),
         ("Jitter rms", fmt_si(m.jitter_rms, "s", 1), false),
         ("Jitter p-p", fmt_si(m.jitter_pp, "s", 1), false),
         (
             "Crossing",
-            format!("{:.1} %", m.crossing_percentage * 100.0),
+            or_unmeasured(m.crossing_percentage, |value| {
+                format!("{:.1} %", value * 100.0)
+            }),
             false,
         ),
-        ("Rise 20–80", fmt_si(m.rise_time, "s", 0), false),
-        ("Fall 80–20", fmt_si(m.fall_time, "s", 0), false),
-        ("Q factor", format!("{:.1}", m.q_factor), false),
+        (
+            "Rise 20–80",
+            or_unmeasured(m.rise_time, |value| fmt_si(value, "s", 0)),
+            false,
+        ),
+        (
+            "Fall 80–20",
+            or_unmeasured(m.fall_time, |value| fmt_si(value, "s", 0)),
+            false,
+        ),
+        (
+            "Q factor",
+            or_unmeasured(m.q_factor, |value| {
+                if value.is_infinite() {
+                    "∞".to_owned()
+                } else {
+                    format!("{value:.1}")
+                }
+            }),
+            false,
+        ),
     ];
     super::stat_table(ui, &rows);
+    super::panel_note(ui, &format!("Folded at {summary}."));
 
     if eye.mask.enabled {
         section_header(ui, "Mask", None);
@@ -354,7 +542,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
             (
                 "Margin",
-                format!("{:.0} %", mask.get_margin() * 100.0),
+                or_unmeasured(mask.margin, |value| format!("{:+.0} %", value * 100.0)),
+                true,
+            ),
+            (
+                "Pass rate",
+                or_unmeasured(mask.pass_rate(), |value| format!("{:.3} %", value * 100.0)),
                 false,
             ),
         ];
@@ -378,6 +571,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ui,
         "Acquisitions folded at the configured bit period; thresholds 20/50/80 %.",
     );
+}
+
+/// An em dash where the data could not support a figure.
+///
+/// A blank is not a zero and must not print as one: `0 s` of rise time and
+/// `0.0 %` of crossing are readings an engineer would act on.
+fn or_unmeasured(value: Option<f64>, format: impl FnOnce(f64) -> String) -> String {
+    value.map_or_else(|| "—".to_owned(), format)
 }
 
 #[cfg(test)]

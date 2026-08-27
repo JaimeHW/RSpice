@@ -1,5 +1,6 @@
 //! Waveform export actions.
 
+use crate::analysis::eye_diagram::EyeTimebaseProvenance;
 use crate::workbench::EngineeringExportFormat;
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
@@ -476,18 +477,45 @@ fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     })
 }
 
+/// A measurement that could not be made exports as an empty cell, not as a
+/// zero: a spreadsheet that averages a column of rise times must not be handed
+/// a `0 s` that no acquisition contains.
+fn csv_measurement(value: Option<f64>) -> String {
+    value.map_or_else(String::new, |value| format!("{value:.17e}"))
+}
+
 fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
     let eye = &state.analysis.eye_diagram_state;
     if eye.data.traces.is_empty() {
         return None;
     }
     let m = &eye.measurements;
+    // An exported eye measurement is quoted against a bit period, and where
+    // that period came from is part of the measurement: a rate the reader
+    // stated and one recovered from six edges are different claims.
+    let unit_interval_source = match eye.timebase_provenance() {
+        Some(EyeTimebaseProvenance::Auto {
+            edge_count,
+            low_confidence,
+            ..
+        }) => {
+            let confidence = if *low_confidence {
+                " (low confidence)"
+            } else {
+                ""
+            };
+            format!("auto from {edge_count} edges{confidence}")
+        }
+        Some(EyeTimebaseProvenance::Explicit { .. }) => "explicit".to_owned(),
+        Some(EyeTimebaseProvenance::AutoRejected(_)) | None => "unknown".to_owned(),
+    };
     let mut contents = String::from("field,value,unit\n");
     for (field, value, unit) in [
         ("acquisitions", eye.data.traces.len().to_string(), ""),
         ("unit_intervals", eye.data.ui_count.to_string(), ""),
         ("data_rate", format!("{:.17e}", m.data_rate), "b/s"),
         ("unit_interval", format!("{:.17e}", m.unit_interval), "s"),
+        ("unit_interval_source", csv_text(&unit_interval_source), ""),
         ("eye_height", format!("{:.17e}", m.eye_height), "V"),
         ("eye_width", format!("{:.17e}", m.eye_width), "UI"),
         ("eye_area", format!("{:.17e}", m.eye_area), ""),
@@ -501,20 +529,20 @@ fn eye_measurements_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
             format!("{:.17e}", m.horizontal_margin),
             "UI",
         ),
-        ("rise_time", format!("{:.17e}", m.rise_time), "s"),
-        ("fall_time", format!("{:.17e}", m.fall_time), "s"),
+        ("rise_time", csv_measurement(m.rise_time), "s"),
+        ("fall_time", csv_measurement(m.fall_time), "s"),
         ("jitter_pp", format!("{:.17e}", m.jitter_pp), "s"),
         ("jitter_rms", format!("{:.17e}", m.jitter_rms), "s"),
         ("jitter_dj", format!("{:.17e}", m.jitter_dj), "s"),
-        ("crossing_level", format!("{:.17e}", m.crossing_level), "V"),
+        ("crossing_level", csv_measurement(m.crossing_level), "V"),
         (
             "crossing_percentage",
-            format!("{:.17e}", m.crossing_percentage),
+            csv_measurement(m.crossing_percentage),
             "",
         ),
-        ("snr", format!("{:.17e}", m.snr_db), "dB"),
-        ("q_factor", format!("{:.17e}", m.q_factor), ""),
-        ("estimated_ber", format!("{:.17e}", m.estimated_ber), ""),
+        ("snr", csv_measurement(m.snr_db), "dB"),
+        ("q_factor", csv_measurement(m.q_factor), ""),
+        ("estimated_ber", csv_measurement(m.estimated_ber), ""),
     ] {
         contents.push_str(&format!("{field},{value},{unit}\n"));
     }

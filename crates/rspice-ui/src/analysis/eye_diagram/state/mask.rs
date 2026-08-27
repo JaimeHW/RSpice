@@ -44,6 +44,13 @@ pub struct EyeMask {
     pub violation_count: usize,
     /// Total samples tested
     pub total_samples: usize,
+    /// Geometric margin from the last test — how far the mask can be grown
+    /// about its centre before the first sample touches it, as a fraction of
+    /// its authored size. Negative when the eye already violates. `None`
+    /// until a test has run against acquisitions. Never serialized: it is a
+    /// property of the data on screen, not of the mask.
+    #[serde(skip)]
+    pub margin: Option<f64>,
 }
 
 impl Default for EyeMask {
@@ -58,6 +65,7 @@ impl Default for EyeMask {
             reference_swing: NOMINAL_SWING,
             violation_count: 0,
             total_samples: 0,
+            margin: None,
         }
     }
 }
@@ -111,13 +119,76 @@ impl EyeMask {
         self.inner_in_ui_volts().contains(t_ui, volts)
     }
 
-    /// Get mask margin (minimum distance to mask)
-    pub fn get_margin(&self) -> f64 {
-        if self.total_samples == 0 {
-            return 1.0;
-        }
-        1.0 - (self.violation_count as f64 / self.total_samples as f64)
+    /// Fraction of tested samples that stayed out of the mask.
+    ///
+    /// This is a pass rate, not a margin, and it is labelled as one. The
+    /// distinction matters: an eye that grazes the mask with one sample in a
+    /// hundred thousand has a pass rate of 99.999 % and a margin of zero.
+    ///
+    /// `None` when nothing has been tested — a mask with no samples has not
+    /// passed, and reporting 100 % for an empty test is how a mask verdict
+    /// comes to mean nothing.
+    pub fn pass_rate(&self) -> Option<f64> {
+        (self.total_samples > 0)
+            .then(|| 1.0 - (self.violation_count as f64 / self.total_samples as f64))
     }
+}
+
+/// How far the mask can be scaled about its centre before the first sample
+/// falls inside it, less one.
+///
+/// This is the margin an eye instrument reports: a positive value is
+/// headroom — the eye would still pass a mask that much larger — and a
+/// negative one says how far the mask must shrink to pass. It is a geometric
+/// property of the acquisitions against the polygon, which is what the reader
+/// is asking when they ask how close this eye is to failing.
+///
+/// `None` when there is nothing to test against.
+pub(super) fn geometric_margin(
+    inner: &MaskPolygon,
+    traces: &[rspice_core::analysis::signal_integrity::EyeTrace],
+) -> Option<f64> {
+    /// Largest scaling searched. Beyond this the mask has left the eye
+    /// entirely and the exact number stops being informative.
+    const MAX_SCALE: f64 = 4.0;
+    /// Bisection steps; the bracket is `MAX_SCALE` wide.
+    const STEPS: usize = 22;
+
+    if inner.points.len() < 3 {
+        return None;
+    }
+    let center = inner.centroid()?;
+    let has_samples = traces
+        .iter()
+        .any(|trace| trace.time.len().min(trace.amplitude.len()) > 0);
+    if !has_samples {
+        return None;
+    }
+
+    let violates = |scale: f64| {
+        let scaled = inner.scaled_about(center, scale);
+        traces.iter().any(|trace| {
+            let n = trace.time.len().min(trace.amplitude.len());
+            (0..n).any(|i| scaled.contains(trace.time[i], trace.amplitude[i]))
+        })
+    };
+
+    if !violates(MAX_SCALE) {
+        return Some(MAX_SCALE - 1.0);
+    }
+    // A degenerate polygon contains nothing, so the search is always
+    // bracketed and an already-violating mask returns a negative margin.
+    let mut clear = 0.0f64;
+    let mut hit = MAX_SCALE;
+    for _ in 0..STEPS {
+        let middle = 0.5 * (clear + hit);
+        if violates(middle) {
+            hit = middle;
+        } else {
+            clear = middle;
+        }
+    }
+    Some(0.5 * (clear + hit) - 1.0)
 }
 
 /// Migration shim: legacy masks stored polygons normalized to the eye
@@ -186,6 +257,9 @@ impl<'de> Deserialize<'de> for EyeMask {
             reference_swing: swing,
             violation_count: de.violation_count,
             total_samples: de.total_samples,
+            // A margin is a property of the data on screen, not of the mask,
+            // so a restored mask has none until it is tested.
+            margin: None,
         })
     }
 }
@@ -204,10 +278,15 @@ pub struct MaskPolygon {
 }
 
 impl MaskPolygon {
-    /// Default inner mask: hexagonal eye opening centered on the crossing
-    /// at 1 UI of the nominal 1 Gb/s eye, ±0.2 V about a 0 V crossing
-    /// (25 % of the nominal 0.8 V swing) — the same geometry the old
-    /// normalized mask produced on the default 2-UI, 1 Gb/s eye.
+    /// Default inner mask: hexagonal keep-out spanning the eye opening at
+    /// the centre of the nominal 1 Gb/s two-UI window, ±0.2 V about a 0 V
+    /// crossing level (25 % of the nominal 0.8 V swing) — the same geometry
+    /// the old normalized mask produced on the default eye.
+    ///
+    /// It sits on the *opening*, at 1 UI, not on a crossing: a mask
+    /// straddling a crossing would be violated by every waveform that has
+    /// edges, which is all of them. The fold anchors the opening at 1 UI for
+    /// exactly this reason.
     pub fn default_inner() -> Self {
         Self {
             points: vec![
@@ -230,6 +309,49 @@ impl MaskPolygon {
             points: points
                 .iter()
                 .map(|&(tn, vn)| (tn * window_seconds, NOMINAL_V_CROSS + vn * NOMINAL_SWING))
+                .collect(),
+        }
+    }
+
+    /// Area centroid, which is the point a compliance mask grows and shrinks
+    /// about. Falls back to the vertex mean for a degenerate (zero-area)
+    /// polygon, where the area centroid is undefined.
+    fn centroid(&self) -> Option<(f64, f64)> {
+        let n = self.points.len();
+        if n < 3 {
+            return None;
+        }
+        let mut twice_area = 0.0;
+        let mut cx = 0.0;
+        let mut cy = 0.0;
+        for i in 0..n {
+            let (x0, y0) = self.points[i];
+            let (x1, y1) = self.points[(i + 1) % n];
+            let cross = x0 * y1 - x1 * y0;
+            twice_area += cross;
+            cx += (x0 + x1) * cross;
+            cy += (y0 + y1) * cross;
+        }
+        if twice_area.abs() > f64::EPSILON {
+            return Some((cx / (3.0 * twice_area), cy / (3.0 * twice_area)));
+        }
+        let mean_x = self.points.iter().map(|p| p.0).sum::<f64>() / n as f64;
+        let mean_y = self.points.iter().map(|p| p.1).sum::<f64>() / n as f64;
+        (mean_x.is_finite() && mean_y.is_finite()).then_some((mean_x, mean_y))
+    }
+
+    /// The polygon scaled about a point, keeping its shape.
+    fn scaled_about(&self, center: (f64, f64), scale: f64) -> Self {
+        Self {
+            points: self
+                .points
+                .iter()
+                .map(|&(x, y)| {
+                    (
+                        center.0 + (x - center.0) * scale,
+                        center.1 + (y - center.1) * scale,
+                    )
+                })
                 .collect(),
         }
     }
