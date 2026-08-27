@@ -56,9 +56,16 @@ impl std::ops::Deref for PaneProjection {
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocumentId) {
-    if let Err(reason) = refresh_latest_binding(&mut app.state, document_id) {
-        unavailable_surface(ui, "Result document tracking blocked", &reason);
-        return;
+    // A document that cannot advance onto the newest run is still a document
+    // about a real dataset. Blanking it withheld the evidence the reader
+    // already had over a decision about which evidence to show next.
+    match refresh_latest_binding(&mut app.state, document_id) {
+        LatestBinding::Current => {}
+        LatestBinding::Degraded(reason) => tracking_banner(ui, &reason),
+        LatestBinding::Missing(reason) => {
+            unavailable_surface(ui, "Result document unavailable", &reason);
+            return;
+        }
     }
     let Some(document) = projection(&app.state, document_id) else {
         unavailable_surface(
@@ -290,37 +297,68 @@ fn latest_successful_authored_analysis(
         .filter(|analysis| analysis.success)
 }
 
-fn refresh_latest_binding(
-    state: &mut AppState,
-    document_id: ResultDocumentId,
-) -> Result<(), String> {
+/// What Latest tracking could do for one document on this frame.
+enum LatestBinding {
+    /// Nothing to report: pinned, already current, or freshly retargeted.
+    Current,
+    /// The document keeps the last binding that worked, and the reader is
+    /// told why it is not advancing.
+    Degraded(String),
+    /// The document itself is gone, so there is nothing to render.
+    Missing(String),
+}
+
+/// The banner text for a retarget the document could not complete.
+///
+/// It names the cause and the control that settles it, because the reader's
+/// two useful answers are "fix the design so the run resolves again" and "pin
+/// this document to the dataset it was built on".
+fn degraded_tracking_reason(cause: &str) -> String {
+    format!(
+        "{cause} Showing the dataset this document last resolved. \
+         Use the Latest / Pinned control in the toolbar to pin it here."
+    )
+}
+
+fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -> LatestBinding {
     use crate::results::visualization_document::{DocumentEdit, ResultDocumentTrackingMode};
 
-    let document = state
-        .workspace
-        .visualization_document(document_id)
-        .ok_or_else(|| "The selected project result document no longer exists.".to_owned())?;
+    let Some(document) = state.workspace.visualization_document(document_id) else {
+        return LatestBinding::Missing(
+            "The selected project result document no longer exists.".to_owned(),
+        );
+    };
     let tracking = document.tracking();
     if tracking.mode != ResultDocumentTrackingMode::Latest {
-        return Ok(());
+        state.ui.results.clear_latest_retarget_failure(document_id);
+        return LatestBinding::Current;
     }
-    let plan_id = tracking
-        .simulation_plan_id
-        .ok_or_else(|| "Latest tracking has no exact simulation-plan identity.".to_owned())?;
-    let authored_analysis_id = tracking
-        .authored_analysis_id
-        .ok_or_else(|| "Latest tracking has no exact authored-analysis identity.".to_owned())?;
-    let previous = document
+    // A tracking claim the document cannot substantiate is a reason to stop
+    // advancing, not a reason to stop rendering: the immutable binding the
+    // document already holds is still exactly what it says it is.
+    let (Some(plan_id), Some(authored_analysis_id)) =
+        (tracking.simulation_plan_id, tracking.authored_analysis_id)
+    else {
+        return LatestBinding::Degraded(degraded_tracking_reason(
+            "This document tracks the latest run but retains no exact simulation-plan and \
+             authored-analysis identity to follow.",
+        ));
+    };
+    let Some(previous) = document
         .panes()
         .iter()
         .filter_map(|pane| pane.binding)
         .next()
-        .ok_or_else(|| "The result document has no retained pane binding.".to_owned())?
-        .dataset;
+        .map(|binding| binding.dataset)
+    else {
+        return LatestBinding::Degraded(degraded_tracking_reason(
+            "This document retains no pane binding for Latest tracking to advance.",
+        ));
+    };
     let project_revision = state.workspace.project.revision();
     let source_digest = current_result_source_digest(state);
 
-    let Some((run, analysis)) = state
+    let Some(candidate) = state
         .simulation
         .runs
         .iter()
@@ -335,37 +373,94 @@ fn refresh_latest_binding(
                 .then_with(|| left.timestamp.total_cmp(&right.timestamp))
                 .then_with(|| left.dataset_id.as_uuid().cmp(&right.dataset_id.as_uuid()))
         })
+        .map(|(run, analysis)| (run.dataset_id, run.dataset_content_digest(), analysis.id))
     else {
         // Latest tracking is non-destructive. When no authenticated current
         // producer exists, keep the last immutable binding readable; the
         // Results toolbar marks it Historical until a matching completed run
         // can advance it again.
-        return Ok(());
+        return LatestBinding::Current;
     };
-    let next = crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+    let (candidate_dataset, candidate_digest, _) = candidate;
+    let next = crate::product::DatasetBinding::new(candidate_dataset, candidate_digest);
     if next == previous {
-        return Ok(());
+        state.ui.results.clear_latest_retarget_failure(document_id);
+        return LatestBinding::Current;
     }
-    let next_source =
-        super::create_document::source_dataset(run, analysis).map_err(|error| error.to_string())?;
-    let revision = state
+    // Retargeting rebuilds the retained source dataset from the run. Re-trying
+    // a retarget that has already failed would pay for that rebuild on every
+    // frame and report the same refusal every frame, so a failure is held
+    // against the exact candidate that produced it and re-tried only when a
+    // different run becomes the candidate.
+    if let Some(reason) = state
+        .ui
+        .results
+        .latest_retarget_failure(document_id, candidate_dataset)
+    {
+        return LatestBinding::Degraded(reason.to_owned());
+    }
+
+    let prepared = state
+        .simulation
+        .runs
+        .iter()
+        .find(|run| run.dataset_id == candidate_dataset)
+        .and_then(|run| {
+            latest_successful_authored_analysis(run, authored_analysis_id).map(|analysis| {
+                (
+                    super::create_document::source_dataset(run, analysis),
+                    analysis_identity(run, analysis),
+                )
+            })
+        });
+    let Some((source, analysis_id)) = prepared else {
+        return LatestBinding::Current;
+    };
+    let refuse = |state: &mut AppState, cause: String| {
+        let reason = degraded_tracking_reason(&cause);
+        state.ui.results.record_latest_retarget_failure(
+            document_id,
+            candidate_dataset,
+            reason.clone(),
+        );
+        LatestBinding::Degraded(reason)
+    };
+    let next_source = match source {
+        Ok(source) => source,
+        Err(error) => {
+            return refuse(
+                state,
+                format!(
+                    "The newest run of this document's analysis no longer builds its retained source: {error}."
+                ),
+            );
+        }
+    };
+    let Some(revision) = state
         .workspace
         .visualization_document(document_id)
-        .ok_or_else(|| "The selected project result document is no longer retained.".to_owned())?
-        .revision();
-    state
-        .workspace
-        .transact_visualization_document(
-            document_id,
-            revision,
-            vec![DocumentEdit::RetargetTrackedDataset {
-                previous,
-                next: next_source,
-                analysis_id: analysis_identity(run, analysis),
-            }],
-        )
-        .map_err(|error| error.to_string())?;
-    Ok(())
+        .map(|document| document.revision())
+    else {
+        return LatestBinding::Missing(
+            "The selected project result document is no longer retained.".to_owned(),
+        );
+    };
+    if let Err(error) = state.workspace.transact_visualization_document(
+        document_id,
+        revision,
+        vec![DocumentEdit::RetargetTrackedDataset {
+            previous,
+            next: next_source,
+            analysis_id,
+        }],
+    ) {
+        return refuse(
+            state,
+            format!("This document could not be retargeted onto the newest run: {error}."),
+        );
+    }
+    state.ui.results.clear_latest_retarget_failure(document_id);
+    LatestBinding::Current
 }
 
 pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> bool {
@@ -1151,6 +1246,33 @@ pub(super) fn renderer_supports_analysis(id: &str, analysis: &AnalysisResult) ->
     }
 }
 
+/// One-line strip above the document stating why Latest tracking is standing
+/// still, without taking the document's own surface away from the reader.
+fn tracking_banner(ui: &mut Ui, reason: &str) {
+    let t = Tokens::get(ui.ctx());
+    let height = ui.text_style_height(&egui::TextStyle::Body) + 10.0;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
+    ui.painter().rect_filled(
+        egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, rect.height())),
+        0.0,
+        t.color.warn,
+    );
+    ui.painter().text(
+        pos2(rect.left() + 13.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        reason,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, reason));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_label(reason);
+    });
+}
+
 fn unavailable_surface(ui: &mut Ui, title: &str, reason: &str) {
     let t = Tokens::get(ui.ctx());
     let rect = ui.available_rect_before_wrap();
@@ -1847,6 +1969,261 @@ mod tests {
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .expect("completed lifecycle");
         run
+    }
+
+    // -----------------------------------------------------------------
+    // Latest tracking
+    // -----------------------------------------------------------------
+
+    /// A document that follows the newest run of one authored analysis, plus
+    /// the identities a second run needs to be a candidate for it.
+    struct LatestFixture {
+        app: RSpiceApp,
+        document_id: ResultDocumentId,
+        plan_id: SimulationPlanId,
+        authored_analysis_id: AnalysisInstanceId,
+        source_digest: ContentDigest,
+    }
+
+    fn authored_run(
+        run_sequence: u64,
+        plan_id: SimulationPlanId,
+        project_revision: ObjectRevision,
+        source_digest: ContentDigest,
+        authored_analysis_id: AnalysisInstanceId,
+        trace_name: &str,
+    ) -> SimulationRun {
+        let mut run = completed_prepared_run(plan_id, project_revision, source_digest);
+        run.id = run_sequence;
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "Transient")
+                .with_waveforms(vec![crate::state::WaveformData::new(
+                    trace_name,
+                    vec![0.0, 0.5, 1.0],
+                    vec![0.0, 1.0, 0.0],
+                    "#fff",
+                )])
+                .with_provenance(
+                    AnalysisResultProvenance::new(
+                        authored_analysis_id,
+                        ObjectRevision::INITIAL,
+                        digest(0x51),
+                        Vec::new(),
+                    )
+                    .expect("analysis provenance"),
+                ),
+        );
+        run
+    }
+
+    fn latest_tracking_fixture() -> LatestFixture {
+        use crate::results::visualization_document::{
+            DocumentEdit, ResultDocumentTracking, ResultDocumentTrackingMode,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        // Latest tracking only follows runs the current authored source
+        // authorizes, so the fixture has to be that source.
+        app.state.simulation.netlist_content = "* latest tracking\nV1 out 0 1\n.end\n".to_owned();
+        let input_digest = digest(0x60);
+        app.state.ui.netlist.generation_error = None;
+        app.state.ui.netlist.generated_input_digest = Some(input_digest);
+        app.state.ui.netlist.current_generation_input_digest = Some(input_digest);
+        let source_digest = current_result_source_digest(&app.state)
+            .expect("the fixture states a current authored source");
+
+        let plan_id = SimulationPlanId::new();
+        let authored_analysis_id = AnalysisInstanceId::new();
+        let project_revision = app.state.workspace.project.revision();
+        let run = authored_run(
+            1,
+            plan_id,
+            project_revision,
+            source_digest,
+            authored_analysis_id,
+            "V(out)",
+        );
+        let dataset_id = run.dataset_id;
+        app.state.simulation.runs = vec![run];
+        assert!(app.state.simulation.select_run(0));
+        assert!(app.state.simulation.select_analysis(0));
+        app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+            open: true,
+            name: "Latest transient review".to_owned(),
+            name_touched: true,
+            dataset_id: Some(dataset_id),
+            family_id: "waveform-worksheet".to_owned(),
+            viewer_id: "viewer-waveform".to_owned(),
+            layout_id: "single-pane".to_owned(),
+            validation_error: None,
+        };
+        let document_id =
+            super::super::create_document::commit(&mut app).expect("persistent document commits");
+        let revision = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("retained document")
+            .revision();
+        app.state
+            .workspace
+            .transact_visualization_document(
+                document_id,
+                revision,
+                vec![DocumentEdit::SetTracking(ResultDocumentTracking::for_plan(
+                    ResultDocumentTrackingMode::Latest,
+                    plan_id,
+                    authored_analysis_id,
+                ))],
+            )
+            .expect("the document tracks the latest run");
+
+        LatestFixture {
+            app,
+            document_id,
+            plan_id,
+            authored_analysis_id,
+            source_digest,
+        }
+    }
+
+    /// A Latest document whose newest run renamed the net it plots keeps
+    /// drawing the dataset it last resolved, under a banner naming the cause
+    /// and the control that settles it. Blanking the surface withheld the
+    /// evidence the reader already had.
+    #[test]
+    fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
+        let LatestFixture {
+            mut app,
+            document_id,
+            plan_id,
+            authored_analysis_id,
+            source_digest,
+        } = latest_tracking_fixture();
+        let good_dataset = app.state.simulation.runs[0].dataset_id;
+        let project_revision = app.state.workspace.project.revision();
+        // The newest run of the same authored analysis no longer carries the
+        // signal this document's traces name.
+        app.state.simulation.runs.push(authored_run(
+            2,
+            plan_id,
+            project_revision,
+            source_digest,
+            authored_analysis_id,
+            "V(renamed)",
+        ));
+        let stale_dataset = app.state.simulation.runs[1].dataset_id;
+        assert_ne!(good_dataset, stale_dataset);
+
+        let LatestBinding::Degraded(reason) = refresh_latest_binding(&mut app.state, document_id)
+        else {
+            panic!("a document that cannot retarget must degrade, not advance or blank");
+        };
+        assert!(
+            reason.contains("Latest / Pinned"),
+            "the banner has to name the control that settles this: {reason}"
+        );
+        assert!(
+            reason.contains("could not be retargeted onto the newest run")
+                || reason.contains("no longer builds its retained source"),
+            "the banner has to name the cause, not just the remedy: {reason}"
+        );
+
+        // The document still draws: the pane resolves, against the binding it
+        // last had.
+        drive_frame(|ui| show(ui, &mut app, document_id));
+        let context = app
+            .state
+            .ui
+            .results
+            .persistent_pane_context
+            .expect("the document still projects a pane");
+        assert_eq!(context.document_id, document_id);
+        assert_eq!(
+            app.state
+                .simulation
+                .active_run()
+                .expect("an active run")
+                .dataset_id,
+            good_dataset,
+            "the last binding that resolved is the one still on screen"
+        );
+    }
+
+    /// A refused retarget rebuilds the retained source dataset. Re-trying it
+    /// every frame would pay for that rebuild every frame, so the refusal is
+    /// held against the candidate that produced it.
+    #[test]
+    fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
+        let LatestFixture {
+            mut app,
+            document_id,
+            plan_id,
+            authored_analysis_id,
+            source_digest,
+        } = latest_tracking_fixture();
+        let project_revision = app.state.workspace.project.revision();
+        app.state.simulation.runs.push(authored_run(
+            2,
+            plan_id,
+            project_revision,
+            source_digest,
+            authored_analysis_id,
+            "V(renamed)",
+        ));
+        let stale_dataset = app.state.simulation.runs[1].dataset_id;
+
+        assert!(matches!(
+            refresh_latest_binding(&mut app.state, document_id),
+            LatestBinding::Degraded(_)
+        ));
+        let first = app
+            .state
+            .ui
+            .results
+            .latest_retarget_failure(document_id, stale_dataset)
+            .expect("the refusal is held against the candidate that caused it")
+            .to_owned();
+        let revision_after_first = app
+            .state
+            .workspace
+            .visualization_document(document_id)
+            .expect("retained document")
+            .revision();
+
+        for _ in 0..3 {
+            assert!(matches!(
+                refresh_latest_binding(&mut app.state, document_id),
+                LatestBinding::Degraded(_)
+            ));
+        }
+
+        assert_eq!(
+            app.state
+                .ui
+                .results
+                .latest_retarget_failure(document_id, stale_dataset),
+            Some(first.as_str())
+        );
+        assert_eq!(
+            app.state
+                .workspace
+                .visualization_document(document_id)
+                .expect("retained document")
+                .revision(),
+            revision_after_first,
+            "a held refusal must not keep re-transacting against the document"
+        );
+
+        // A genuinely new candidate is tried again rather than inheriting the
+        // previous refusal.
+        assert_eq!(
+            app.state
+                .ui
+                .results
+                .latest_retarget_failure(document_id, crate::product::DatasetId::new()),
+            None
+        );
     }
 
     #[test]

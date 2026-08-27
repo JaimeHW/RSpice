@@ -2141,6 +2141,15 @@ pub struct ResultsState {
         crate::product::ResultDocumentId,
         crate::results::visualization_document::PageId,
     >,
+    /// Why Latest tracking could not advance one document onto one candidate
+    /// dataset.
+    ///
+    /// Retargeting rebuilds the retained source dataset from the run, so a
+    /// refusal that is re-attempted every frame pays for that rebuild every
+    /// frame. Keyed by document and held against the exact candidate that was
+    /// refused, so a genuinely new run is still tried once. Transient.
+    latest_retarget_failures:
+        std::collections::HashMap<crate::product::ResultDocumentId, (DatasetId, String)>,
     /// Exact retained pane currently projected through a native renderer.
     /// This scopes otherwise session-only plot state and routes edits back to
     /// the project-owned visualization document.
@@ -2944,6 +2953,36 @@ impl ResultsState {
         page_id: crate::results::visualization_document::PageId,
     ) {
         self.persistent_document_pages.insert(document_id, page_id);
+    }
+
+    /// The standing reason one document's Latest retarget onto this exact
+    /// candidate was refused, if it already was.
+    pub(crate) fn latest_retarget_failure(
+        &self,
+        document_id: crate::product::ResultDocumentId,
+        candidate: DatasetId,
+    ) -> Option<&str> {
+        self.latest_retarget_failures
+            .get(&document_id)
+            .filter(|(failed, _)| *failed == candidate)
+            .map(|(_, reason)| reason.as_str())
+    }
+
+    pub(crate) fn record_latest_retarget_failure(
+        &mut self,
+        document_id: crate::product::ResultDocumentId,
+        candidate: DatasetId,
+        reason: String,
+    ) {
+        self.latest_retarget_failures
+            .insert(document_id, (candidate, reason));
+    }
+
+    pub(crate) fn clear_latest_retarget_failure(
+        &mut self,
+        document_id: crate::product::ResultDocumentId,
+    ) {
+        self.latest_retarget_failures.remove(&document_id);
     }
 
     fn enter_persistent_pane(
