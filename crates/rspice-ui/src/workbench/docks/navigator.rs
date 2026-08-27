@@ -58,6 +58,15 @@ const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
 const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
+/// The right inset a filter field keeps while it holds a query, so its text
+/// column ends before the control that empties it.
+const PANEL_SEARCH_CLEAR_INSET: i8 = 26;
+/// The clear control's hit target — the field's own height less its border, so
+/// the whole right inset answers the pointer.
+const PANEL_SEARCH_CLEAR_TARGET: f32 = 22.0;
+/// The crossing strokes inside that target, at the size the search mark
+/// opposite it is drawn.
+const PANEL_SEARCH_CLEAR_MARK: f32 = 13.0;
 const SCHEMATIC_NAV_ROW_HEIGHT: f32 = 24.0;
 const SCHEMATIC_NAV_LABEL_SIZE: f32 = tokens::FS_1;
 const SCHEMATIC_NAV_META_SIZE: f32 = 10.0;
@@ -350,12 +359,18 @@ fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> b
     )
 }
 
-/// The panel's filter field.
+/// The panel's filter field: the query, the control that empties it, and the
+/// two keys a filter standing above a list owes its reader.
 ///
 /// Returns whether Down was pressed in the field — the reader stepping out of
 /// the query and into the rows it narrowed. The field consumes that press
 /// itself, because only the field knows it had the focus; where it lands is
 /// the rail's answer, not this function's.
+///
+/// Escape empties the field. egui surrenders the focus of a text field on
+/// Escape on its own, so the pair is one gesture: the query goes and the
+/// keyboard comes back out. An already-empty field keeps its hands off the
+/// press, so Escape goes on meaning "put the tool away" everywhere else.
 pub(super) fn panel_search(
     ui: &mut Ui,
     query: &mut String,
@@ -370,6 +385,9 @@ pub(super) fn panel_search(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(PANEL_SEARCH_MARGIN_X);
+        // The clear control lives inside the field's own right inset, so the
+        // text column gives way to it rather than running underneath it.
+        let clearable = !query.is_empty();
         let response = ui.add_sized(
             [field_width, t.metrics.ctl_h],
             egui::TextEdit::singleline(query)
@@ -378,7 +396,11 @@ pub(super) fn panel_search(
                 .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                 .margin(egui::Margin {
                     left: 29,
-                    right: 8,
+                    right: if clearable {
+                        PANEL_SEARCH_CLEAR_INSET
+                    } else {
+                        8
+                    },
                     top: 5,
                     bottom: 5,
                 }),
@@ -395,6 +417,21 @@ pub(super) fn panel_search(
             ),
             t.color.text_faint,
         );
+        let cleared = clearable && panel_search_clear(ui, id, &response);
+        // `lost_focus` as well as `has_focus`: egui takes the focus off a text
+        // field the moment it reads the Escape, so by the time the field is
+        // painted the press has already cost it the focus it is being asked
+        // about.
+        let escaped = clearable
+            && (response.has_focus() || response.lost_focus())
+            && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
+        if cleared || escaped {
+            query.clear();
+        }
+        if cleared {
+            // The pointer emptied the field; the reader is still in it.
+            response.request_focus();
+        }
         enter_rows = response.has_focus()
             && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
         if std::mem::take(focus_pending) {
@@ -403,6 +440,43 @@ pub(super) fn panel_search(
     });
     ui.add_space(8.0);
     enter_rows
+}
+
+/// The control that empties the filter, drawn in the field's right inset.
+///
+/// The mark is [`WorkbenchIcon::Close`] — the same crossing strokes every
+/// other dismissal in the workbench paints — rather than a `✕` set in text.
+/// The bundled IBM Plex cuts are Latin subsets and the character is not in
+/// them, so a text mark would ship as a replacement box while every test that
+/// only reads the announced control still passed.
+fn panel_search_clear(ui: &mut Ui, id: &'static str, field: &Response) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(
+            field.rect.right() - PANEL_SEARCH_CLEAR_INSET as f32 * 0.5 - 2.0,
+            field.rect.center().y,
+        ),
+        egui::Vec2::splat(PANEL_SEARCH_CLEAR_TARGET),
+    );
+    let response = ui.interact(rect, egui::Id::new((id, "clear")), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            "Clear the filter",
+        )
+    });
+    WorkbenchIcon::Close.paint(
+        ui.painter(),
+        egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(PANEL_SEARCH_CLEAR_MARK)),
+        if response.hovered() || response.has_focus() {
+            t.color.text
+        } else {
+            t.color.text_faint
+        },
+    );
+    theme::paint_focus_ring(ui, &response, rect);
+    response.clicked()
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
