@@ -12,18 +12,66 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::AppState;
 
-use super::{MarkerEditDraft, MarkerKind, cached_models};
+use super::{MarkerEditDraft, MarkerKind, MarkerSelector, cached_models};
 
 /// Open the dialog for one marker, seeding the draft from its current state.
-pub(in super::super) fn open(state: &mut AppState, id: u32) {
-    let Some(marker) = state.ui.results.markers.iter().find(|m| m.id == id) else {
+pub(in super::super) fn open(state: &mut AppState, selector: MarkerSelector) {
+    let seed = match selector {
+        MarkerSelector::Quick(id) => state
+            .ui
+            .results
+            .markers
+            .iter()
+            .find(|marker| marker.id == id)
+            .map(|marker| (marker.note.clone(), marker.kind)),
+        MarkerSelector::Document { marker_id, .. } => state
+            .ui
+            .results
+            .document_marker(marker_id)
+            .map(|marker| (marker.note.clone(), marker.kind)),
+    };
+    let Some((note, kind)) = seed else {
         return;
     };
     state.ui.results.marker_edit = Some(MarkerEditDraft {
-        id,
-        note: marker.note.clone(),
-        kind: marker.kind,
+        selector,
+        note,
+        kind,
     });
+}
+
+/// What the dialog reports about the marker it is editing.
+struct MarkerFacts {
+    display_id: String,
+    analysis: super::AnalysisPresentationKey,
+    trace_name: String,
+    x: f64,
+    persistence: &'static str,
+}
+
+fn marker_facts(state: &AppState, selector: MarkerSelector) -> Option<MarkerFacts> {
+    match selector {
+        MarkerSelector::Quick(id) => {
+            let marker = state.ui.results.markers.iter().find(|m| m.id == id)?;
+            Some(MarkerFacts {
+                display_id: format!("M{id}"),
+                analysis: marker.analysis,
+                trace_name: marker.trace_name.clone(),
+                x: marker.x,
+                persistence: "Saved with the project · survives zoom, pan and reload",
+            })
+        }
+        MarkerSelector::Document { marker_id, .. } => {
+            let marker = state.ui.results.document_marker(marker_id)?;
+            Some(MarkerFacts {
+                display_id: format!("D{}", marker_id.get()),
+                analysis: marker.analysis,
+                trace_name: marker.trace_name.clone(),
+                x: marker.x,
+                persistence: "Retained by this result document · travels with the document",
+            })
+        }
+    }
 }
 
 /// Render the dialog while a draft is open.
@@ -31,16 +79,10 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
     let Some(mut draft) = state.ui.results.marker_edit.clone() else {
         return;
     };
-    let Some(marker) = state
-        .ui
-        .results
-        .markers
-        .iter()
-        .find(|marker| marker.id == draft.id)
-        .cloned()
-    else {
-        // The marker vanished under the dialog (dataset change): the draft
-        // has nothing to apply to and must not linger.
+    let Some(marker) = marker_facts(state, draft.selector) else {
+        // The marker vanished under the dialog (dataset change, or a document
+        // that stopped retaining it): the draft has nothing to apply to and
+        // must not linger.
         state.ui.results.marker_edit = None;
         return;
     };
@@ -76,7 +118,7 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
     let mut window_open = true;
     let mut apply = false;
     let mut cancel = false;
-    egui::Window::new(format!("Marker M{}", marker.id))
+    egui::Window::new(format!("Marker {}", marker.display_id))
         .id(egui::Id::new("rspice.results.marker-edit"))
         .open(&mut window_open)
         .collapsible(false)
@@ -115,10 +157,7 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
                     for (label, value) in [
                         ("Anchor", anchor_text.as_str()),
                         ("Sheet", sheet_text.as_str()),
-                        (
-                            "Persistence",
-                            "Saved with the project · survives zoom, pan and reload",
-                        ),
+                        ("Persistence", marker.persistence),
                     ] {
                         ui.label(RichText::new(label).color(t.color.text_faint));
                         ui.label(
@@ -142,70 +181,16 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
         });
 
     if apply {
-        let retained_update = state
-            .ui
-            .results
-            .persistent_pane_context
-            .and_then(|context| {
-                state
-                    .workspace
-                    .visualization_document(context.document_id)
-                    .and_then(|document| {
-                        document
-                            .markers()
-                            .iter()
-                            .find(|retained| {
-                                retained.pane_id == context.pane_id
-                                    && u32::try_from(retained.id.get()).ok() == Some(draft.id)
-                            })
-                            .map(|retained| {
-                                (
-                                    context.document_id,
-                                    document.revision(),
-                                    retained.id,
-                                    retained.coordinate.clone(),
-                                    retained.scope,
-                                    retained.source_specification.clone(),
-                                )
-                            })
-                    })
-            });
-        if let Some((document_id, revision, marker_id, coordinate, scope, source_specification)) =
-            retained_update
+        // The selector names the store, so Apply reaches exactly the marker
+        // the dialog opened on and nothing that merely shares its number.
+        if let Err(error) =
+            super::super::commit_marker_edit(state, draft.selector, &draft.note, draft.kind)
         {
-            let kind = match draft.kind {
-                MarkerKind::Note => {
-                    crate::results::visualization_document::PlotMarkerKind::PointNote
-                }
-                MarkerKind::Peak => crate::results::visualization_document::PlotMarkerKind::Peak,
-                MarkerKind::Spec => {
-                    crate::results::visualization_document::PlotMarkerKind::SpecificationLine
-                }
-            };
-            if let Err(error) = state.workspace.transact_visualization_document(
-                document_id,
-                revision,
-                vec![
-                    crate::results::visualization_document::DocumentEdit::SetMarker {
-                        marker_id,
-                        coordinate,
-                        label: draft.note.clone(),
-                        kind,
-                        scope,
-                        source_specification,
-                    },
-                ],
-            ) {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
-                    "Could not retain marker edit: {error}"
-                )));
-                state.ui.results.marker_edit = Some(draft);
-                return;
-            }
-        }
-        if let Some(marker) = state.ui.results.marker_mut(draft.id) {
-            marker.note = draft.note.clone();
-            marker.kind = draft.kind;
+            state.push_user_message(crate::diagnostics::ConsoleMessage::error(format!(
+                "Could not retain marker edit: {error}"
+            )));
+            state.ui.results.marker_edit = Some(draft);
+            return;
         }
         state.ui.results.marker_edit = None;
     } else if cancel || !window_open {

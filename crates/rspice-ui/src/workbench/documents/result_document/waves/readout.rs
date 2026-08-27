@@ -66,15 +66,14 @@ pub(super) fn on_screen_strips(state: &AppState) -> Vec<AnalysisPresentationKey>
     }
 }
 
-/// Markers the strip will list, in placement order.
-pub(super) fn visible_markers(state: &AppState) -> Vec<&ResultMarker> {
-    let strips = on_screen_strips(state);
-    state
-        .ui
-        .results
-        .markers
-        .iter()
-        .filter(|marker| strips.contains(&marker.analysis))
+/// Markers the strip will list, in placement order, across both stores.
+///
+/// A persistent pane's retained markers are listed here beside the dataset's
+/// quick markers so the reader has exactly one marker list, not one per owner.
+pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
+    on_screen_strips(state)
+        .into_iter()
+        .flat_map(|analysis| state.ui.results.strip_markers(analysis))
         .collect()
 }
 
@@ -512,9 +511,33 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
         &t,
     );
 
-    let shown: Vec<u32> = visible_markers(state)
+    // Rows are derived once, up front, so a row can never describe a marker
+    // the plot placed somewhere else — and so the borrow of the marker stores
+    // ends before the row widgets need `state` mutably.
+    struct MarkerRow {
+        selector: MarkerSelector,
+        display_id: String,
+        kind: MarkerKind,
+        anchor: WaveformPresentationKey,
+        x: f64,
+        analysis: AnalysisPresentationKey,
+        trace_name: String,
+        note: String,
+        retained: bool,
+    }
+    let shown: Vec<MarkerRow> = visible_markers(state)
         .into_iter()
-        .map(|marker| marker.id)
+        .map(|marker| MarkerRow {
+            selector: marker.selector(),
+            display_id: marker.display_id(),
+            kind: marker.kind(),
+            anchor: marker.anchor().clone(),
+            x: marker.x(),
+            analysis: marker.analysis(),
+            trace_name: marker.trace_name().to_owned(),
+            note: marker.note().to_owned(),
+            retained: matches!(marker, MarkerView::Document(_)),
+        })
         .collect();
     if shown.is_empty() {
         ui.painter().text(
@@ -527,25 +550,20 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let mut remove: Option<u32> = None;
-    let mut edit: Option<u32> = None;
-    for (index, id) in shown.iter().copied().enumerate() {
+    let mut remove: Option<MarkerSelector> = None;
+    let mut edit: Option<MarkerSelector> = None;
+    for (index, entry) in shown.iter().enumerate() {
         let top = rect.top() + index as f32 * MARKER_ROW_H;
         let row = egui::Rect::from_min_max(
             egui::pos2(rect.left() + READOUT_PAD_X, top),
             egui::pos2(rect.right() - READOUT_PAD_X, top + MARKER_ROW_H),
         );
-        // Everything the row reports is derived here, from the same model
-        // the plot drew, so a row can never describe a marker the plot
-        // placed somewhere else.
-        let Some(marker) = state.ui.results.markers.iter().find(|m| m.id == id) else {
-            continue;
-        };
-        let kind = marker.kind;
-        let anchor = marker.anchor.clone();
-        let marker_x = marker.x;
-        let analysis_key = marker.analysis;
-        let trace_name = marker.trace_name.clone();
+        let selector = entry.selector;
+        let kind = entry.kind;
+        let anchor = entry.anchor.clone();
+        let marker_x = entry.x;
+        let analysis_key = entry.analysis;
+        let trace_name = entry.trace_name.clone();
         let model = models
             .iter()
             .find(|model| model.analysis_key == analysis_key);
@@ -587,11 +605,17 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
         row_ui.set_clip_rect(row);
         row_ui.spacing_mut().item_spacing.x = 8.0;
         let color = marker_color(kind, &t);
-        row_ui.label(
-            egui::RichText::new(format!("M{id}"))
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(color),
-        );
+        row_ui
+            .label(
+                egui::RichText::new(&entry.display_id)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(color),
+            )
+            .on_hover_text(if entry.retained {
+                "Retained by this result document"
+            } else {
+                "Saved with the project"
+            });
         // The kind is stated, not cycled: a click that silently reclassifies
         // what a marker asserts is a decision made by accident.
         row_ui.label(
@@ -599,6 +623,15 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(color),
         );
+        // Which store owns the marker changes what removing it means, so the
+        // row states it rather than leaving the reader to infer it.
+        if entry.retained {
+            row_ui.label(
+                egui::RichText::new("retained")
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(c.text_faint),
+            );
+        }
         if row_ui
             .add(
                 egui::Button::new(
@@ -611,7 +644,7 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
             .on_hover_text("Edit this marker's label and kind")
             .clicked()
         {
-            edit = Some(id);
+            edit = Some(selector);
         }
         if row_ui
             .add(
@@ -622,10 +655,14 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
                 )
                 .frame(false),
             )
-            .on_hover_text("Remove this marker")
+            .on_hover_text(if entry.retained {
+                "Remove this marker from the result document"
+            } else {
+                "Remove this marker"
+            })
             .clicked()
         {
-            remove = Some(id);
+            remove = Some(selector);
         }
         row_ui.label(
             egui::RichText::new(trace_name)
@@ -651,13 +688,7 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
         // The note takes what is left of the row. It reads as text here and
         // is edited in the marker dialog, so a stray keystroke over the strip
         // cannot rewrite what a marker says.
-        let note = state
-            .ui
-            .results
-            .markers
-            .iter()
-            .find(|m| m.id == id)
-            .map_or_else(String::new, |m| m.note.clone());
+        let note = &entry.note;
         if note.is_empty() {
             row_ui.label(
                 egui::RichText::new("no label")
@@ -667,18 +698,18 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
         } else {
             row_ui
                 .label(
-                    egui::RichText::new(&note)
+                    egui::RichText::new(note)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(c.text_dim),
                 )
-                .on_hover_text(&note);
+                .on_hover_text(note);
         }
     }
-    if let Some(id) = remove {
-        state.ui.results.remove_marker(id);
+    if let Some(selector) = remove {
+        super::super::remove_marker(state, selector);
     }
-    if let Some(id) = edit {
-        super::marker_dialog::open(state, id);
+    if let Some(selector) = edit {
+        super::marker_dialog::open(state, selector);
     }
 }
 

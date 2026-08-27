@@ -43,7 +43,7 @@ use crate::workbench::{
 use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
-    HorizontalWaveCursor, MarkerEditDraft, MarkerKind, ResultMarker, ResultsState,
+    HorizontalWaveCursor, MarkerEditDraft, MarkerKind, MarkerSelector, MarkerView, ResultsState,
     SelectedResultTrace, SourceWaveformPresentationKey, TracePresentationKey,
     WavePanePresentationKey, WaveformPresentationKey, WaveformSeriesResult, waveform_color,
     well_hint,
@@ -1784,6 +1784,7 @@ fn cursor_marker_target(
     WaveformPresentationKey,
     String,
     f64,
+    std::sync::Arc<Vec<f64>>,
 )> {
     let cursor_x = state
         .ui
@@ -1843,6 +1844,7 @@ fn cursor_marker_target(
             anchor_key(model, trace),
             trace.name.clone(),
             cursor_x,
+            trace.x.clone(),
         )
     })
 }
@@ -1866,13 +1868,24 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
         presentation.complex_number_display(),
         t,
     );
-    let Some((analysis, anchor, trace_name, x)) = cursor_marker_target(state, &models) else {
+    let Some((analysis, anchor, trace_name, x, samples)) = cursor_marker_target(state, &models)
+    else {
         return;
     };
-    let marker = state.ui.results.add_marker(analysis, anchor, trace_name, x);
-    // Placing a marker is normally the first half of saying what it means, so
-    // the purpose dialog opens on the one just placed.
-    marker_dialog::open(state, marker);
+    // Same ownership rule as a plot click: the pane the cursor is on decides
+    // which store retains the marker.
+    let placement = super::MarkerPlacement {
+        analysis,
+        anchor,
+        trace_name,
+        x,
+        samples: samples.as_slice(),
+    };
+    if let Some(selector) = super::place_marker(state, placement) {
+        // Placing a marker is normally the first half of saying what it means,
+        // so the purpose dialog opens on the one just placed.
+        marker_dialog::open(state, selector);
+    }
 }
 
 fn scaled_range(range: (f64, f64), factor: f64, logarithmic: bool) -> Option<(f64, f64)> {
@@ -2373,11 +2386,13 @@ fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
 }
 
 /// Tag text: the id always, the note only when the user wrote one.
-fn marker_label(marker: &ResultMarker) -> String {
-    if marker.note.trim().is_empty() {
-        format!("M{}", marker.id)
+fn marker_label(marker: MarkerView<'_>) -> String {
+    let id = marker.display_id();
+    let note = marker.note().trim();
+    if note.is_empty() {
+        id
     } else {
-        format!("M{} · {}", marker.id, marker.note.trim())
+        format!("{id} · {note}")
     }
 }
 
@@ -4069,29 +4084,29 @@ fn show_unit_pane(
     // Markers ride their anchored trace: Y is resampled here rather than
     // stored, so zoom, pan, and a re-run all leave the tag on the curve.
     for marker in state.ui.results.strip_markers(model.analysis_key) {
-        let color = marker_color(marker.kind, &t);
+        let color = marker_color(marker.kind(), &t);
         let label = marker_label(marker);
-        if marker.kind == MarkerKind::Spec {
+        if marker.kind() == MarkerKind::Spec {
             // A spec constrains the X position, which every pane of the
             // strip shares — so it draws on all of them.
             spec.markers
-                .push(plot::Marker::limit_line(marker.x, color, label));
+                .push(plot::Marker::limit_line(marker.x(), color, label));
             continue;
         }
         // A marker belongs to the pane that owns its trace's unit; the
         // other panes are a different scale and would misplace it.
         let anchored = pane_traces
             .iter()
-            .find(|(_, trace)| !trace.overlay && anchor_key(model, trace) == marker.anchor);
+            .find(|(_, trace)| !trace.overlay && anchor_key(model, trace) == *marker.anchor());
         let Some((_, trace)) = anchored else {
             continue;
         };
-        let y = sample_at_with(&trace.x, &trace.y, marker.x, interpolation);
+        let y = sample_at_with(&trace.x, &trace.y, marker.x(), interpolation);
         if !y.is_finite() {
             continue;
         }
         spec.markers
-            .push(plot::Marker::point(marker.x, y, color, label));
+            .push(plot::Marker::point(marker.x(), y, color, label));
     }
 
     let model_cursor_domain = model.cursor_domain();
@@ -4164,14 +4179,20 @@ fn show_unit_pane(
             })
             .min_by(|(_, a), (_, b)| a.total_cmp(b));
         if let Some((trace, _)) = nearest {
-            let anchor = anchor_key(model, trace);
-            let name = trace.name.clone();
-            let id = state
-                .ui
-                .results
-                .add_marker(model.analysis_key, anchor, name, clicked_x);
-            // Placing one is normally the first half of saying what it means.
-            marker_dialog::open(state, id);
+            let placement = super::MarkerPlacement {
+                analysis: model.analysis_key,
+                anchor: anchor_key(model, trace),
+                trace_name: trace.name.clone(),
+                x: clicked_x,
+                samples: trace.x.as_slice(),
+            };
+            // The pane being drawn owns the marker: on a persistent pane it
+            // is retained by the document, otherwise by the dataset.
+            if let Some(selector) = super::place_marker(state, placement) {
+                // Placing one is normally the first half of saying what it
+                // means.
+                marker_dialog::open(state, selector);
+            }
         }
     } else if let Some(clicked_x) = response.clicked_x
         && state.ui.results.cursor_placement_enabled()

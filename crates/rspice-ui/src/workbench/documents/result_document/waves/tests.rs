@@ -759,7 +759,7 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
         .ui
         .results
         .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5);
-    marker_dialog::open(&mut state, first);
+    marker_dialog::open(&mut state, MarkerSelector::Quick(first));
     assert!(state.ui.results.marker_edit.is_some());
 
     state.ui.results.remove_marker(first);
@@ -793,10 +793,10 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
         marker.kind = MarkerKind::Peak;
     }
 
-    marker_dialog::open(&mut state, id);
+    marker_dialog::open(&mut state, MarkerSelector::Quick(id));
 
     let draft = state.ui.results.marker_edit.clone().expect("draft opened");
-    assert_eq!(draft.id, id);
+    assert_eq!(draft.selector, MarkerSelector::Quick(id));
     assert_eq!(draft.note, "overshoot");
     assert_eq!(draft.kind, MarkerKind::Peak);
 }
@@ -827,7 +827,7 @@ fn only_a_spec_marker_declines_to_report_a_trace_value() {
 fn a_marker_tag_names_the_note_only_when_there_is_one() {
     let analysis_result = AnalysisResult::new(1, AnalysisType::Transient, "marker analysis");
     let analysis = AnalysisPresentationKey::new(DatasetId::new(), &analysis_result);
-    let mut marker = ResultMarker {
+    let mut marker = super::super::ResultMarker {
         id: 3,
         analysis,
         anchor: WaveformPresentationKey {
@@ -843,10 +843,28 @@ fn a_marker_tag_names_the_note_only_when_there_is_one() {
         kind: MarkerKind::Note,
         note: String::new(),
     };
-    assert_eq!(marker_label(&marker), "M3");
+    assert_eq!(marker_label(MarkerView::Quick(&marker)), "M3");
 
     marker.note = "  settling  ".to_owned();
-    assert_eq!(marker_label(&marker), "M3 · settling");
+    assert_eq!(marker_label(MarkerView::Quick(&marker)), "M3 · settling");
+
+    // The two stores allocate independently, so a retained marker's tag can
+    // never be mistaken for the quick marker that happens to share its number.
+    let retained = super::super::DocumentMarker {
+        document_id: crate::product::ResultDocumentId::new(),
+        pane_id: super::super::retained_entity_id(1),
+        retained_id: super::super::retained_entity_id(3),
+        analysis,
+        anchor: marker.anchor.clone(),
+        trace_name: "V(out)".to_owned(),
+        x: 0.0,
+        kind: MarkerKind::Note,
+        note: "  ringing  ".to_owned(),
+    };
+    assert_eq!(
+        marker_label(MarkerView::Document(&retained)),
+        "D3 · ringing"
+    );
 }
 
 #[test]
