@@ -132,6 +132,10 @@ pub struct EyeDataBuilder {
     skip_initial: usize,
     /// Points per UI for interpolation
     points_per_ui: usize,
+    /// Absolute time, modulo the bit period, that phase 0 of every folded
+    /// window lands on. `None` starts the first window at the first usable
+    /// sample — an arbitrary phase.
+    fold_anchor: Option<f64>,
 }
 
 impl Default for EyeDataBuilder {
@@ -141,6 +145,7 @@ impl Default for EyeDataBuilder {
             ui_count: 2,
             skip_initial: 10,
             points_per_ui: 100,
+            fold_anchor: None,
         }
     }
 }
@@ -180,6 +185,23 @@ impl EyeDataBuilder {
     /// Set interpolation resolution
     pub fn points_per_ui(mut self, points: usize) -> Self {
         self.points_per_ui = points.max(10);
+        self
+    }
+
+    /// Pin phase 0 of the folded window to an absolute time.
+    ///
+    /// Without an anchor the first window starts at whatever sample follows
+    /// the settling skip, so where the crossings and the opening land in the
+    /// window depends on when the record happens to begin. Every downstream
+    /// measurement that samples a fixed phase — eye height and the noise
+    /// statistics at the window centre, and every compliance mask — is then
+    /// reading an arbitrary point on the waveform.
+    ///
+    /// Pass [`super::unit_interval::fold_anchor`] of the recovered mean
+    /// crossing phase to put crossings at half-integer phases and the eye
+    /// opening at the window centre.
+    pub fn fold_anchor(mut self, anchor: Option<f64>) -> Self {
+        self.fold_anchor = anchor.filter(|value| value.is_finite());
         self
     }
 
@@ -229,7 +251,16 @@ impl EyeDataBuilder {
 
         // Build traces by slicing waveform into windows and resampling each window
         // to a consistent point count for stable rendering and measurement fidelity.
-        let mut window_start = first_time;
+        let mut window_start = match self.fold_anchor {
+            // First anchored window at or after the settling skip. Every
+            // later window is one bit period on, so all of them share the
+            // anchor's phase.
+            Some(anchor) => {
+                let steps = ((first_time - anchor) / self.bit_period).ceil();
+                anchor + self.bit_period * steps
+            }
+            None => first_time,
+        };
         let mut sample_start_idx = start_idx;
         let mut sample_end_idx = start_idx;
         while window_start + window_duration <= last_time {
