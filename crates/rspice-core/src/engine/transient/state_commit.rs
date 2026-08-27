@@ -51,6 +51,7 @@ impl Engine {
         current_abstol: Value,
         dynamic_breakpoints_added: &mut usize,
         warned_dynamic_breakpoint_cap: &mut bool,
+        pending_dynamic_breakpoints: &mut Vec<Value>,
     ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         let capacitor_accepted_states = capacitor_accepted_states
@@ -162,6 +163,7 @@ impl Engine {
                             tstop,
                             dynamic_breakpoints_added,
                             warned_dynamic_breakpoint_cap,
+                            pending_dynamic_breakpoints,
                         );
                     }
                 }
@@ -182,6 +184,7 @@ impl Engine {
                         tstop,
                         dynamic_breakpoints_added,
                         warned_dynamic_breakpoint_cap,
+                        pending_dynamic_breakpoints,
                     );
                 }
                 tl.compact_ltra_history_if_straight();
@@ -197,6 +200,7 @@ impl Engine {
                     voltage_abstol,
                     dynamic_breakpoints_added,
                     warned_dynamic_breakpoint_cap,
+                    pending_dynamic_breakpoints,
                 );
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
@@ -209,6 +213,7 @@ impl Engine {
                     voltage_abstol,
                     dynamic_breakpoints_added,
                     warned_dynamic_breakpoint_cap,
+                    pending_dynamic_breakpoints,
                 );
             }
         }
@@ -286,6 +291,7 @@ impl Engine {
                     voltage_abstol,
                     dynamic_breakpoints_added,
                     warned_dynamic_breakpoint_cap,
+                    pending_dynamic_breakpoints,
                 );
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
@@ -298,6 +304,7 @@ impl Engine {
                     voltage_abstol,
                     dynamic_breakpoints_added,
                     warned_dynamic_breakpoint_cap,
+                    pending_dynamic_breakpoints,
                 );
             }
         }

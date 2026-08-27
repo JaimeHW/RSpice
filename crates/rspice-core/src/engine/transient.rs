@@ -252,7 +252,9 @@ pub(self) use truncation::NgspiceChargeTruncationContext;
 mod vbic;
 
 pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
-pub(crate) use checkpoint::{netlist_checkpoint_identity, simulation_checkpoint_identity};
+pub(crate) use checkpoint::{
+    netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
+};
 
 mod history;
 pub(self) use history::*;
@@ -261,6 +263,24 @@ pub(self) use history::*;
 struct DerivedTransientBranchCurrent {
     kind: DerivedTransientBranchCurrentKind,
     index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResumeValidation {
+    ExactNetlist,
+    AuthoredRestart,
+}
+
+/// One checkpoint emitted by a nominal restart-save schedule.
+///
+/// Xyce evaluates restart saves after accepted steps. `nominal_time` is the
+/// due time used in the filename, while `checkpoint.time` is the first
+/// accepted solver time at or after it; these can differ without changing the
+/// integration trajectory.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScheduledTransientCheckpoint {
+    pub nominal_time: Value,
+    pub checkpoint: TransientCheckpoint,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1716,6 +1736,111 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
+            Some(expanded) => engine
+                .run_tran_resolved_with_resume(
+                    &expanded,
+                    netlist,
+                    tstop,
+                    max_step,
+                    startup_mode,
+                    abort,
+                    None,
+                    ResumeValidation::ExactNetlist,
+                    &[],
+                )
+                .map(|(result, checkpoint, _)| (result, checkpoint)),
+            None => engine
+                .run_tran_resolved_with_resume(
+                    netlist,
+                    netlist,
+                    tstop,
+                    max_step,
+                    startup_mode,
+                    abort,
+                    None,
+                    ResumeValidation::ExactNetlist,
+                    &[],
+                )
+                .map(|(result, checkpoint, _)| (result, checkpoint)),
+        }
+    }
+
+    /// Run one continuous transient and capture checkpoints at exact accepted
+    /// solver points.
+    ///
+    /// The schedule does not add solver breakpoints. After each accepted step,
+    /// the first due nominal time emits one checkpoint and all additional
+    /// nominal times already crossed are advanced without another file,
+    /// matching Xyce 7.10. Keeping nominal filename time separate from actual
+    /// accepted state time prevents checkpointing from perturbing the physical
+    /// trajectory.
+    pub fn run_tran_checkpoint_schedule_with_startup_mode(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        checkpoint_times: &[Value],
+    ) -> Result<(TransientResult, Vec<ScheduledTransientCheckpoint>), SimulationError> {
+        self.run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+            netlist,
+            tstop,
+            max_step,
+            startup_mode,
+            checkpoint_times,
+            &NoAbort,
+        )
+    }
+
+    /// Cancellable form of
+    /// [`Engine::run_tran_checkpoint_schedule_with_startup_mode`].
+    pub fn run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        startup_mode: TransientStartupMode,
+        checkpoint_times: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, Vec<ScheduledTransientCheckpoint>), SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        let mut previous = None;
+        for (index, &time) in checkpoint_times.iter().enumerate() {
+            if !time.is_finite() || time < 0.0 || time > tstop {
+                return Err(SimulationError::Circuit(format!(
+                    "scheduled checkpoint time {index} must be finite and within [0, {tstop:.17e}], found {time:.17e}"
+                )));
+            }
+            if previous.is_some_and(|previous| time <= previous) {
+                return Err(SimulationError::Circuit(format!(
+                    "scheduled checkpoint times must be strictly increasing; found {time:.17e} after {:.17e}",
+                    previous.expect("checked above")
+                )));
+            }
+            previous = Some(time);
+        }
+        let retained_schedules = netlist
+            .options
+            .output_time_points
+            .len()
+            .saturating_add(netlist.options.timeint_breakpoints.len())
+            .saturating_add(
+                netlist
+                    .options
+                    .restart
+                    .as_ref()
+                    .map_or(0, |restart| restart.intervals.len()),
+            )
+            .saturating_add(checkpoint_times.len());
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            retained_schedules,
+            self.config.resource_limits.max_analysis_points,
+        )?;
+
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_transient_request_floor(tstop, max_step)?;
+        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => engine.run_tran_resolved_with_resume(
                 &expanded,
                 netlist,
@@ -1724,6 +1849,8 @@ impl Engine {
                 startup_mode,
                 abort,
                 None,
+                ResumeValidation::ExactNetlist,
+                checkpoint_times,
             ),
             None => engine.run_tran_resolved_with_resume(
                 netlist,
@@ -1733,8 +1860,11 @@ impl Engine {
                 startup_mode,
                 abort,
                 None,
+                ResumeValidation::ExactNetlist,
+                checkpoint_times,
             ),
         }
+        .map(|(result, _, checkpoints)| (result, checkpoints))
     }
 
     /// Continue a transient from a checkpoint to a later stop time.
@@ -1745,9 +1875,10 @@ impl Engine {
     /// order one with absolute-time source evaluation. Higher-order integration
     /// resumes only after one real post-checkpoint interval has been accepted,
     /// because nonlinear charge histories and accepted-step timing provenance
-    /// are intentionally not serialized. Nonlinear-device iteration memories
-    /// and transmission-line delay histories also re-derive from the restored
-    /// solution on the first step.
+    /// are intentionally not serialized. Ordinary scalar lossless
+    /// transmission-line histories are restored bit-exactly. Distributed
+    /// LTRA/TXL and coupled-line runtimes fail closed until their complete
+    /// convolution state has a versioned checkpoint contract.
     ///
     /// TRNOISE decks regenerate their sample train for each segment's
     /// horizon; run noise decks unsegmented when a single continuous
@@ -1771,6 +1902,63 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_resume_validated(
+            netlist,
+            checkpoint,
+            tstop,
+            max_step,
+            abort,
+            ResumeValidation::ExactNetlist,
+        )
+    }
+
+    /// Continue an authored Xyce-style restart deck from a checkpoint.
+    ///
+    /// This API is intentionally separate from [`Engine::run_tran_resume`].
+    /// It permits only the differences inherent to a restart workflow: the
+    /// `.TRAN` stop horizon and `.OPTIONS RESTART` file-management metadata.
+    /// A collision-resistant semantic identity still binds circuit topology,
+    /// values, sources, models, outputs, external dependency contents, and all
+    /// trajectory-affecting transient controls. Checkpoints written before the
+    /// restart identity was introduced fail closed.
+    pub fn run_tran_restart_resume(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_restart_resume_with_abort(netlist, checkpoint, tstop, max_step, &NoAbort)
+    }
+
+    /// Cancellable form of [`Engine::run_tran_restart_resume`].
+    pub fn run_tran_restart_resume_with_abort(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_resume_validated(
+            netlist,
+            checkpoint,
+            tstop,
+            max_step,
+            abort,
+            ResumeValidation::AuthoredRestart,
+        )
+    }
+
+    fn run_tran_resume_validated(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+        validation: ResumeValidation,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         if !tstop.is_finite() || tstop <= checkpoint.time {
             return Err(SimulationError::Circuit(format!(
@@ -1788,24 +1976,32 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
-            Some(expanded) => engine.run_tran_resolved_with_resume(
-                &expanded,
-                netlist,
-                tstop,
-                max_step,
-                startup_mode,
-                abort,
-                Some(checkpoint),
-            ),
-            None => engine.run_tran_resolved_with_resume(
-                netlist,
-                netlist,
-                tstop,
-                max_step,
-                startup_mode,
-                abort,
-                Some(checkpoint),
-            ),
+            Some(expanded) => engine
+                .run_tran_resolved_with_resume(
+                    &expanded,
+                    netlist,
+                    tstop,
+                    max_step,
+                    startup_mode,
+                    abort,
+                    Some(checkpoint),
+                    validation,
+                    &[],
+                )
+                .map(|(result, checkpoint, _)| (result, checkpoint)),
+            None => engine
+                .run_tran_resolved_with_resume(
+                    netlist,
+                    netlist,
+                    tstop,
+                    max_step,
+                    startup_mode,
+                    abort,
+                    Some(checkpoint),
+                    validation,
+                    &[],
+                )
+                .map(|(result, checkpoint, _)| (result, checkpoint)),
         }
     }
 
@@ -1930,8 +2126,75 @@ impl Engine {
             startup_mode,
             abort,
             None,
+            ResumeValidation::ExactNetlist,
+            &[],
         )
-        .map(|(result, _)| result)
+        .map(|(result, _, _)| result)
+    }
+
+    fn capture_scheduled_checkpoint_if_due(
+        &self,
+        scheduled_times: &[Value],
+        cursor: &mut usize,
+        accepted_time: Value,
+        fingerprint: u64,
+        netlist_identity: &Option<String>,
+        restart_identity: &Option<String>,
+        simulation_identity: &str,
+        solution: &[Value],
+        circuit: &crate::circuit::CircuitData,
+        startup_mode: TransientStartupMode,
+        integration_max_step: Value,
+        pending_tline_arrivals: &[Value],
+        dynamic_tline_breakpoints_added: usize,
+        lte_estimator: &LteEstimator,
+        retained_result_values: usize,
+        retained_scheduled_checkpoint_values: &mut usize,
+        captured: &mut Vec<ScheduledTransientCheckpoint>,
+    ) -> Result<(), SimulationError> {
+        self.ensure_result_values(
+            retained_result_values.saturating_add(*retained_scheduled_checkpoint_values),
+        )?;
+        let Some(&requested_time) = scheduled_times.get(*cursor) else {
+            return Ok(());
+        };
+        if accepted_time < requested_time {
+            return Ok(());
+        }
+        let checkpoint = TransientCheckpoint::capture_with_restart_identity(
+            fingerprint,
+            netlist_identity.clone(),
+            restart_identity.clone(),
+            simulation_identity.to_owned(),
+            accepted_time,
+            solution,
+            circuit,
+            startup_mode,
+            Some(integration_max_step),
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
+            Some(lte_estimator),
+        );
+        let retained_checkpoint_values = checkpoint.retained_value_count().saturating_add(1);
+        self.ensure_result_values(
+            retained_result_values
+                .saturating_add(*retained_scheduled_checkpoint_values)
+                .saturating_add(retained_checkpoint_values),
+        )?;
+        captured.push(ScheduledTransientCheckpoint {
+            nominal_time: requested_time,
+            checkpoint,
+        });
+        *retained_scheduled_checkpoint_values =
+            retained_scheduled_checkpoint_values.saturating_add(retained_checkpoint_values);
+        *cursor += 1;
+        while scheduled_times
+            .get(*cursor)
+            .is_some_and(|time| *time <= accepted_time)
+        {
+            *cursor += 1;
+        }
+        Ok(())
     }
 
     /// The transient integration body. `resume` injects a checkpointed
@@ -1948,7 +2211,16 @@ impl Engine {
         startup_mode: TransientStartupMode,
         abort: &dyn AbortSignal,
         resume: Option<&TransientCheckpoint>,
-    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        resume_validation: ResumeValidation,
+        scheduled_checkpoint_times: &[Value],
+    ) -> Result<
+        (
+            TransientResult,
+            TransientCheckpoint,
+            Vec<ScheduledTransientCheckpoint>,
+        ),
+        SimulationError,
+    > {
         if !netlist.fft_analyses.is_empty() {
             return Err(SimulationError::Circuit(
                 "transient .FFT post-processing is parsed but not yet implemented".to_string(),
@@ -1956,10 +2228,23 @@ impl Engine {
         }
         let fingerprint = netlist_fingerprint(checkpoint_netlist);
         let netlist_identity = netlist_checkpoint_identity(checkpoint_netlist);
+        let restart_identity = restart_checkpoint_identity(checkpoint_netlist);
         let simulation_identity = simulation_checkpoint_identity(&self.config);
+        let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
+        let mut scheduled_checkpoint_cursor = 0_usize;
+        let mut retained_scheduled_checkpoint_values = 0_usize;
         if let Some(checkpoint) = resume {
+            match resume_validation {
+                ResumeValidation::ExactNetlist => {
+                    checkpoint.validate_for_with_config(checkpoint_netlist, &self.config)
+                }
+                ResumeValidation::AuthoredRestart => {
+                    checkpoint.validate_for_restart_with_config(checkpoint_netlist, &self.config)
+                }
+            }
+            .map_err(SimulationError::Circuit)?;
             checkpoint
-                .validate_for_with_config(checkpoint_netlist, &self.config)
+                .validate_integration_max_step(max_step)
                 .map_err(SimulationError::Circuit)?;
         }
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
@@ -1979,17 +2264,42 @@ impl Engine {
                 device_op_traces: Vec::new(),
                 store_traces: Vec::new(),
             };
-            let checkpoint = TransientCheckpoint::capture(
+            let checkpoint = TransientCheckpoint::capture_with_restart_identity(
                 fingerprint,
                 netlist_identity,
+                restart_identity,
                 simulation_identity,
                 0.0,
                 &[],
                 &circuit,
                 startup_mode,
+                Some(max_step),
+                &[],
+                0,
                 None,
             );
-            return Ok((result, checkpoint));
+            if scheduled_checkpoint_times.iter().any(|time| *time != 0.0) {
+                return Err(SimulationError::Circuit(
+                    "a topology-free transient cannot produce positive-time scheduled checkpoints"
+                        .to_string(),
+                ));
+            }
+            scheduled_checkpoints.extend(scheduled_checkpoint_times.iter().map(|&nominal_time| {
+                ScheduledTransientCheckpoint {
+                    nominal_time,
+                    checkpoint: checkpoint.clone(),
+                }
+            }));
+            retained_scheduled_checkpoint_values = checkpoint
+                .retained_value_count()
+                .saturating_add(1)
+                .saturating_mul(scheduled_checkpoints.len());
+            self.ensure_result_values(
+                Self::transient_result_value_count(&result)
+                    .saturating_add(retained_scheduled_checkpoint_values)
+                    .saturating_add(checkpoint.retained_value_count()),
+            )?;
+            return Ok((result, checkpoint, scheduled_checkpoints));
         }
         Self::ensure_supported_transient_dynamic_charges(&circuit)?;
         let hinted_max_step = circuit
@@ -2356,6 +2666,16 @@ impl Engine {
             self.config.resource_limits.max_analysis_points,
         )?;
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
+        let mut pending_dynamic_tline_breakpoints = resume
+            .map(|checkpoint| checkpoint.pending_tline_arrivals().to_vec())
+            .unwrap_or_default();
+        if let Some(checkpoint) = resume {
+            for &arrival in checkpoint.pending_tline_arrivals() {
+                if arrival <= tstop {
+                    breakpoints.add(arrival);
+                }
+            }
+        }
         breakpoints.discard_through(resume_time);
         let initial_remaining_breakpoints = breakpoints
             .times()
@@ -2409,7 +2729,9 @@ impl Engine {
             preferred_min_dt,
             startup_max_dt,
         );
-        let mut dynamic_tline_breakpoints_added = 0_usize;
+        let mut dynamic_tline_breakpoints_added = resume
+            .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
+            .unwrap_or(0);
         let mut warned_dynamic_tline_breakpoint_cap = false;
         let transient_lte_reltol = self.transient_lte_reltol();
         let transient_lte_abstol = self.transient_lte_abstol();
@@ -2838,8 +3160,17 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(&solution);
         circuit.update_multi_winding_transformer_state(&solution);
 
-        // Resume: replace the flat (DC-style) reactive histories written
-        // above with the exact integrator histories from the checkpoint.
+        // Seed transient line bookkeeping before checkpoint injection. A
+        // supported scalar lossless checkpoint replaces the seed with its
+        // complete accepted delay history; unsupported distributed/coupled
+        // line state fails closed during injection instead of starting a new
+        // wave trajectory at the seam.
+        let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
+        let coupled_tline_refs =
+            Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
+
+        // Resume: replace the flat (DC-style) reactive and transmission-line
+        // histories written above with the exact checkpointed state.
         if let Some(checkpoint) = resume {
             checkpoint
                 .inject(&mut circuit)
@@ -2904,10 +3235,26 @@ impl Engine {
                 .initialize_direct_xyce_accepted_q(accepted_q)
                 .map_err(SimulationError::Circuit)?;
         }
+        self.capture_scheduled_checkpoint_if_due(
+            scheduled_checkpoint_times,
+            &mut scheduled_checkpoint_cursor,
+            resume_time,
+            fingerprint,
+            &netlist_identity,
+            &restart_identity,
+            &simulation_identity,
+            &solution,
+            &circuit,
+            startup_mode,
+            max_step,
+            &pending_dynamic_tline_breakpoints,
+            dynamic_tline_breakpoints_added,
+            &lte_estimator,
+            retained_result_values,
+            &mut retained_scheduled_checkpoint_values,
+            &mut scheduled_checkpoints,
+        )?;
 
-        let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
-        let coupled_tline_refs =
-            Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
         // A checkpoint intentionally does not serialize nonlinear charge histories
         // or their accepted timestep chain. Mark that chain unknown on resume so
         // every variable-step companion fails safe until one real interval has
@@ -5466,6 +5813,7 @@ impl Engine {
                         self.current_abstol(),
                         &mut dynamic_tline_breakpoints_added,
                         &mut warned_dynamic_tline_breakpoint_cap,
+                        &mut pending_dynamic_tline_breakpoints,
                     )?;
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
@@ -5573,6 +5921,25 @@ impl Engine {
                             ));
                     }
                     self.ensure_transient_result_limits(&result, retained_result_values)?;
+                    self.capture_scheduled_checkpoint_if_due(
+                        scheduled_checkpoint_times,
+                        &mut scheduled_checkpoint_cursor,
+                        t,
+                        fingerprint,
+                        &netlist_identity,
+                        &restart_identity,
+                        &simulation_identity,
+                        &solution,
+                        &circuit,
+                        startup_mode,
+                        max_step,
+                        &pending_dynamic_tline_breakpoints,
+                        dynamic_tline_breakpoints_added,
+                        &lte_estimator,
+                        retained_result_values,
+                        &mut retained_scheduled_checkpoint_values,
+                        &mut scheduled_checkpoints,
+                    )?;
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -6582,6 +6949,7 @@ impl Engine {
                         self.current_abstol(),
                         &mut dynamic_tline_breakpoints_added,
                         &mut warned_dynamic_tline_breakpoint_cap,
+                        &mut pending_dynamic_tline_breakpoints,
                     )?;
                     if circuit.has_xspice_devices() {
                         if capture_xyce_static_history {
@@ -6689,6 +7057,25 @@ impl Engine {
                             ));
                     }
                     self.ensure_transient_result_limits(&result, retained_result_values)?;
+                    self.capture_scheduled_checkpoint_if_due(
+                        scheduled_checkpoint_times,
+                        &mut scheduled_checkpoint_cursor,
+                        t,
+                        fingerprint,
+                        &netlist_identity,
+                        &restart_identity,
+                        &simulation_identity,
+                        &solution,
+                        &circuit,
+                        startup_mode,
+                        max_step,
+                        &pending_dynamic_tline_breakpoints,
+                        dynamic_tline_breakpoints_added,
+                        &lte_estimator,
+                        retained_result_values,
+                        &mut retained_scheduled_checkpoint_values,
+                        &mut scheduled_checkpoints,
+                    )?;
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -6919,6 +7306,7 @@ impl Engine {
                 self.current_abstol(),
                 &mut dynamic_tline_breakpoints_added,
                 &mut warned_dynamic_tline_breakpoint_cap,
+                &mut pending_dynamic_tline_breakpoints,
             )?;
             total_history_nanos += history_phase_start.elapsed().as_nanos();
             let tail_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
@@ -7045,6 +7433,25 @@ impl Engine {
                     ));
             }
             self.ensure_transient_result_limits(&result, retained_result_values)?;
+            self.capture_scheduled_checkpoint_if_due(
+                scheduled_checkpoint_times,
+                &mut scheduled_checkpoint_cursor,
+                t,
+                fingerprint,
+                &netlist_identity,
+                &restart_identity,
+                &simulation_identity,
+                &solution,
+                &circuit,
+                startup_mode,
+                max_step,
+                &pending_dynamic_tline_breakpoints,
+                dynamic_tline_breakpoints_added,
+                &lte_estimator,
+                retained_result_values,
+                &mut retained_scheduled_checkpoint_values,
+                &mut scheduled_checkpoints,
+            )?;
             if first_accepted_transient_step {
                 let accepted_max_step =
                     self.transient_device_max_timestep(&circuit, t, hinted_max_step);
@@ -7257,17 +7664,32 @@ impl Engine {
         let bypassed = circuit.b3soi_bypass_hits();
         self.record_convergence(|quality| quality.bypassed_device_evaluations = bypassed);
 
-        let final_checkpoint = TransientCheckpoint::capture(
+        let final_checkpoint = TransientCheckpoint::capture_with_restart_identity(
             fingerprint,
             netlist_identity,
+            restart_identity,
             simulation_identity,
             t,
             &solution,
             &circuit,
             startup_mode,
+            Some(max_step),
+            &pending_dynamic_tline_breakpoints,
+            dynamic_tline_breakpoints_added,
             Some(&lte_estimator),
         );
-        Ok((result, final_checkpoint))
+        self.ensure_result_values(
+            retained_result_values
+                .saturating_add(retained_scheduled_checkpoint_values)
+                .saturating_add(final_checkpoint.retained_value_count()),
+        )?;
+        if scheduled_checkpoint_cursor != scheduled_checkpoint_times.len() {
+            return Err(SimulationError::Circuit(format!(
+                "transient ended at {t:.17e}s before scheduled checkpoint {:.17e}s was captured",
+                scheduled_checkpoint_times[scheduled_checkpoint_cursor]
+            )));
+        }
+        Ok((result, final_checkpoint, scheduled_checkpoints))
     }
 
     /// Run transient analysis with waveform compression
@@ -8030,6 +8452,253 @@ mod tests {
         assert!(
             (after - before).abs() <= 1.0e-12,
             "resume current discontinuity: before={before}, resumed={after}"
+        );
+    }
+
+    #[test]
+    fn authored_restart_resume_allows_only_the_dedicated_compatible_identity() {
+        let first = Netlist::parse(
+            "authored restart API\n\
+             V1 in 0 PULSE(0 1 0 1u 1u 20u 50u)\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             .TRAN 1u 20u\n\
+             .PRINT TRAN V(out)\n\
+             .OPTIONS RESTART JOB=restart_api INITIAL_INTERVAL=5u\n\
+             .END\n",
+        )
+        .expect("checkpoint-writer deck parses");
+        let restarted = Netlist::parse(
+            "authored restart API\n\
+             V1 in 0 PULSE(0 1 0 1u 1u 20u 50u)\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             .TRAN 1u 50u\n\
+             .PRINT TRAN V(out)\n\
+             .OPTIONS RESTART FILE=restart_api2e-05\n\
+             .END\n",
+        )
+        .expect("restart-reader deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&first, 20.0e-6, 1.0e-6)
+            .expect("checkpoint-writer segment solves");
+
+        let exact_error = engine
+            .run_tran_resume(&restarted, &checkpoint, 50.0e-6, 1.0e-6)
+            .expect_err("ordinary resume must remain exact-source strict");
+        assert!(
+            exact_error.to_string().contains("different netlist"),
+            "unexpected exact resume error: {exact_error}"
+        );
+
+        let (continued, _) = engine
+            .run_tran_restart_resume(&restarted, &checkpoint, 50.0e-6, 1.0e-6)
+            .expect("dedicated authored-restart API accepts the compatible deck");
+        assert_eq!(continued.time.first().copied(), Some(checkpoint.time));
+        assert_eq!(continued.time.last().copied(), Some(50.0e-6));
+        assert!(
+            continued.time.len() > 1,
+            "restart must advance past its seam"
+        );
+    }
+
+    #[test]
+    fn bug_1284_scheduled_restart_preserves_nonquiescent_lossless_line_history() {
+        let deck = |stop: &str, restart: &str| {
+            format!(
+                "Transmission Line Circuit\n\
+                 VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)\n\
+                 RIN 1 2 50\n\
+                 TLINE 2 0 3 0 Z0=50 TD=10N\n\
+                 RL 3 0 50\n\
+                 .TRAN 0.25N {stop}\n\
+                 .PRINT TRAN V(2) V(3)\n\
+                 {restart}\n\
+                 .END\n"
+            )
+        };
+        let baseline = Netlist::parse(&deck("50N", "")).expect("baseline parses");
+        let first = Netlist::parse(&deck(
+            "20N",
+            ".OPTIONS RESTART JOB=trans_test INITIAL_INTERVAL=5N",
+        ))
+        .expect("checkpoint writer parses");
+        let restarted = Netlist::parse(&deck("50N", ".OPTIONS RESTART FILE=trans_test5e-09"))
+            .expect("restart reader parses");
+        let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        config.integration_method = IntegrationMethod::Gear2;
+        let engine = Engine::new(config);
+        let baseline_result = engine
+            .run_tran(&baseline, 50.0e-9, 0.25e-9)
+            .expect("uninterrupted BUG_1284 baseline solves");
+        let schedule = [0.0, 5.0e-9, 10.0e-9, 15.0e-9, 20.0e-9];
+        let (_, checkpoints) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &first,
+                20.0e-9,
+                0.25e-9,
+                TransientStartupMode::OperatingPoint,
+                &schedule,
+            )
+            .expect("one continuous first run captures the restart schedule");
+        assert_eq!(checkpoints.len(), schedule.len());
+        for (index, (scheduled, requested)) in checkpoints.iter().zip(schedule).enumerate() {
+            assert_eq!(scheduled.nominal_time.to_bits(), requested.to_bits());
+            assert!(scheduled.checkpoint.time >= requested);
+            if let Some(next_nominal) = schedule.get(index + 1) {
+                assert!(scheduled.checkpoint.time < *next_nominal);
+            }
+        }
+
+        let checkpoint = TransientCheckpoint::from_text(&checkpoints[1].checkpoint.to_text())
+            .expect("the nonquiescent 5 ns checkpoint survives serialization");
+        let checkpoint_time = checkpoint.time;
+        let (continued, _) = engine
+            .run_tran_restart_resume(&restarted, &checkpoint, 50.0e-9, 0.25e-9)
+            .expect("the 5 ns lossless-line state resumes to the extended horizon");
+        assert_eq!(continued.time.first().copied(), Some(checkpoint_time));
+        assert_eq!(continued.time.last().copied(), Some(50.0e-9));
+
+        fn interpolate(time: &[Value], values: &[Value], target: Value) -> Value {
+            match time.binary_search_by(|probe| probe.total_cmp(&target)) {
+                Ok(index) => values[index],
+                Err(upper) => {
+                    let lower = upper - 1;
+                    let fraction = (target - time[lower]) / (time[upper] - time[lower]);
+                    values[lower] + fraction * (values[upper] - values[lower])
+                }
+            }
+        }
+        fn xyce_normalized_rms(
+            good_time: &[Value],
+            good: &[Value],
+            test_time: &[Value],
+            test: &[Value],
+        ) -> Value {
+            let errors = test_time
+                .iter()
+                .zip(test)
+                .map(|(&time, &actual)| {
+                    let expected = interpolate(good_time, good, time);
+                    let difference = expected - actual;
+                    if difference.abs() < 1.0e-12 {
+                        0.0
+                    } else {
+                        difference / (0.01 * expected.abs() + 1.0e-12)
+                    }
+                })
+                .collect::<Vec<_>>();
+            let weighted_square = test_time
+                .windows(2)
+                .zip(errors.windows(2))
+                .map(|(time, error)| {
+                    (time[1] - time[0]) * 0.5 * (error[0] * error[0] + error[1] * error[1])
+                })
+                .sum::<Value>();
+            (weighted_square / (test_time.last().unwrap() - test_time[0])).sqrt()
+        }
+
+        for node in ["2", "3"] {
+            let rms = xyce_normalized_rms(
+                &baseline_result.time,
+                baseline_result
+                    .try_voltage_waveform_named(node)
+                    .expect("baseline node exists"),
+                &continued.time,
+                continued
+                    .try_voltage_waveform_named(node)
+                    .expect("continued node exists"),
+            );
+            assert!(
+                rms <= 1.0,
+                "BUG_1284 nonquiescent 5 ns restart exceeds xyce_verify tolerance at V({node}): RMS={rms:.17e}"
+            );
+        }
+    }
+
+    #[test]
+    fn restart_reinstates_pending_dynamic_lossless_line_arrivals() {
+        let netlist = Netlist::parse(
+            "dynamic line arrivals across restart\n\
+             V1 src 0 PULSE(0 1 1n 100p 100p 20n 40n)\n\
+             RS src drive 50\n\
+             CS drive 0 10p\n\
+             T1 drive 0 out 0 Z0=50 TD=5n\n\
+             RL out 0 100\n\
+             .TRAN 250p 12n\n\
+             .END\n",
+        )
+        .expect("dynamic-arrival deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let (_, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                12.0e-9,
+                0.25e-9,
+                TransientStartupMode::OperatingPoint,
+                &[2.0e-9],
+            )
+            .expect("dynamic-arrival checkpoint run solves");
+        let checkpoint = &scheduled[0].checkpoint;
+        assert!(
+            !checkpoint.pending_tline_arrivals().is_empty(),
+            "the RC-shaped launch must discover future arrivals not present in the authored source schedule"
+        );
+        let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("pending arrivals survive serialization");
+        assert_eq!(
+            serialized.pending_tline_arrivals(),
+            checkpoint.pending_tline_arrivals()
+        );
+
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &serialized, 12.0e-9, 0.25e-9)
+            .expect("dynamic-arrival checkpoint resumes");
+        for &arrival in serialized
+            .pending_tline_arrivals()
+            .iter()
+            .filter(|&&arrival| arrival <= 12.0e-9)
+        {
+            assert!(
+                resumed
+                    .time
+                    .binary_search_by(|time| time.total_cmp(&arrival))
+                    .is_ok(),
+                "resumed integration missed pending line arrival {arrival:.17e}s"
+            );
+        }
+    }
+
+    #[test]
+    fn scheduled_checkpoints_share_the_transient_result_value_budget() {
+        let netlist = Netlist::parse(
+            "bounded scheduled checkpoints\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 50n\n\
+             .END\n",
+        )
+        .expect("bounded checkpoint deck parses");
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_result_values = 500;
+        let engine = Engine::new(config);
+        let schedule = (0..50)
+            .map(|index| index as Value * 1.0e-9)
+            .collect::<Vec<_>>();
+        let error = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                50.0e-9,
+                1.0e-9,
+                TransientStartupMode::OperatingPoint,
+                &schedule,
+            )
+            .expect_err("aggregate checkpoint retention must obey the result-value budget");
+        assert!(
+            error.to_string().contains("result_values"),
+            "unexpected resource diagnostic: {error}"
         );
     }
 

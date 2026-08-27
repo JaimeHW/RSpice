@@ -7,14 +7,13 @@
 //! evaluation — the same numerical regime as a breakpoint restart, which
 //! the integrator already performs at every source discontinuity.
 //!
-//! Scope, stated precisely: accepted linear-reactive histories, generated
-//! Verilog-A `ddt`/`idt` histories and limiter anchors, and XSPICE model-owned
-//! checkpoint state are captured bit-exactly. Continuation deliberately takes
-//! one order-one breakpoint-restart step before higher-order integration
-//! resumes. Other nonlinear iteration memories and transmission-line delay
-//! histories re-derive from the restored solution. Decks dominated by
-//! transmission-line delays should prefer unsegmented runs (a warning is
-//! logged at capture).
+//! Scope, stated precisely: accepted linear-reactive histories, ordinary
+//! lossless scalar transmission-line delay histories, generated Verilog-A
+//! `ddt`/`idt` histories and limiter anchors, and XSPICE model-owned checkpoint
+//! state are captured bit-exactly. Continuation deliberately takes one
+//! order-one breakpoint-restart step before higher-order integration resumes.
+//! Distributed LTRA/TXL and coupled-line convolution runtimes fail closed until
+//! their complete native state has a versioned checkpoint contract.
 //!
 //! The on-disk format is a versioned, line-oriented text format using
 //! Rust's shortest-round-trip float formatting, so save/load reproduces
@@ -27,6 +26,7 @@ use crate::device::veriloga_builtins::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
 };
+use crate::device::{TransmissionLine, TransmissionLineCheckpoint};
 use crate::engine::SimulationConfig;
 use crate::expr::{Expr, Function, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
@@ -43,11 +43,12 @@ use super::TransientStartupMode;
 
 /// Format version written to and required from checkpoint files.
 ///
-/// Version 13 widened the `inductors` section to four columns (the flux
-/// truncation test needs `i_prev_prev_prev`) behind an explicit
-/// `inductor_flux_history_available` line, so a file that predates it is
-/// still readable but is refused for resume when it carries inductors.
-const FORMAT_VERSION: u32 = 13;
+/// Version 14 adds validated scalar lossless transmission-line history,
+/// pending dynamic line arrivals, the per-run maximum-step contract, and a
+/// collision-resistant authored-restart compatibility identity. Earlier files
+/// remain readable, but fail closed for these capabilities because inventing
+/// delayed waves or authorizing a changed trajectory would be unsafe.
+const FORMAT_VERSION: u32 = 14;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +63,11 @@ pub struct TransientCheckpoint {
     /// Collision-resistant identity of the fully elaborated semantic netlist.
     /// Legacy files have no safe identity and are refused for resume.
     netlist_identity: Option<String>,
+    /// Collision-resistant trajectory identity for authored restart decks.
+    /// Unlike `netlist_identity`, this deliberately excludes only the
+    /// transient stop horizon and `.OPTIONS RESTART` control-plane metadata.
+    /// Legacy files have no safe compatible identity and fail closed.
+    restart_identity: Option<String>,
     /// Identity of the resolved, state-affecting simulation configuration.
     /// Kept optional solely so legacy checkpoint files can be parsed and
     /// rejected with a precise diagnostic.
@@ -69,6 +75,19 @@ pub struct TransientCheckpoint {
     /// Startup contract of the selected `.TRAN` analysis. Optional only so
     /// older files can be parsed and rejected with a precise resume error.
     startup_mode: Option<TransientStartupMode>,
+    /// Per-call transient maximum-step bound. This is separate from the
+    /// resolved configuration identity because transient APIs accept an
+    /// explicit cap that materially controls the integration trajectory.
+    integration_max_step: Option<Value>,
+    /// Dynamically discovered transmission-line arrivals that had not yet
+    /// occurred at `time`. These are distinct from authored/source
+    /// breakpoints: they arise from accepted wave changes and cannot always be
+    /// reconstructed from the compacted delay history after a restart.
+    pending_tline_arrivals: Vec<Value>,
+    /// Total unique dynamic line arrivals admitted during the trajectory.
+    /// Preserving this counter keeps the resource cap identical across a
+    /// restart seam rather than granting each segment a fresh allowance.
+    dynamic_tline_breakpoints_added: usize,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -85,6 +104,9 @@ pub struct TransientCheckpoint {
     inductor_flux_history_available: bool,
     xyce_memristor_resistance_stores: Vec<Value>,
     generic_switch_stores: Vec<[Value; 4]>,
+    tline_state_available: bool,
+    tline_resume_blockers: Vec<String>,
+    tline_states: Vec<TransmissionLineCheckpoint>,
     lte_signal_global_reference: Value,
     lte_signal_local_reference: Vec<Value>,
     lte_reference_history_available: bool,
@@ -533,12 +555,9 @@ fn hash_effective_device_initial_condition_overlay(hasher: &mut blake3::Hasher, 
     }
 }
 
-/// Collision-resistant identity of the fully elaborated semantic netlist.
-/// Source paths, diagnostics, and original source spelling are excluded;
-/// expanded include/SPEF content and public post-parse AST edits are included.
-pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
+fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-transient-elaborated-netlist-v6\0");
+    hasher.update(domain);
     hash_field(&mut hasher, "title", &netlist.title);
     hash_field(&mut hasher, "elements", &netlist.elements);
     hash_field(&mut hasher, "analyses", &netlist.analyses);
@@ -603,7 +622,39 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     hash_field(&mut hasher, "spef_includes", &netlist.spef_includes);
     hash_effective_device_initial_condition_overlay(&mut hasher, netlist);
     hash_external_dependencies(&mut hasher, netlist);
-    Some(hasher.finalize().to_hex().to_string())
+    hasher.finalize().to_hex().to_string()
+}
+
+/// Collision-resistant identity of the fully elaborated semantic netlist.
+/// Source paths, diagnostics, and original source spelling are excluded;
+/// expanded include/SPEF content and public post-parse AST edits are included.
+pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
+    Some(semantic_netlist_identity(
+        netlist,
+        b"rspice-transient-elaborated-netlist-v6\0",
+    ))
+}
+
+/// Collision-resistant trajectory identity used by authored checkpoint/restart
+/// decks whose run horizon and restart I/O metadata necessarily differ.
+///
+/// Only the stop horizon of `.TRAN` commands and the complete
+/// `.OPTIONS RESTART` control plane are normalized. The transient print step,
+/// start time, maximum step, UIC contract, circuit/model/source semantics,
+/// output requests, external dependency content, and every other typed option
+/// remain part of the identity through [`semantic_netlist_identity`].
+pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
+    let mut normalized = netlist.clone();
+    for analysis in &mut normalized.analyses {
+        if let crate::netlist::AnalysisCommand::Tran { stop, .. } = analysis {
+            *stop = 0.0;
+        }
+    }
+    normalized.options.restart = None;
+    Some(semantic_netlist_identity(
+        &normalized,
+        b"rspice-transient-restart-compatible-netlist-v1\0",
+    ))
 }
 
 pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> String {
@@ -907,6 +958,152 @@ fn read_nonempty_line_vector(
     Ok(values)
 }
 
+fn read_tline_states(
+    lines: &mut CheckpointLines<'_>,
+) -> Result<Vec<TransmissionLineCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'tline_states' section".to_string())?;
+    let count = parse_count_header(header, "tline_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "tline_states")?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'tline_states' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("tline_state") {
+            return Err(format!("malformed 'tline_state' header: '{line}'"));
+        }
+        let name = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its instance name"))?;
+        let impedance = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its impedance"))?
+            .parse::<Value>()
+            .map_err(|_| format!("tline state row {row} has invalid impedance"))?;
+        let initialized = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its initialized flag"))
+            .and_then(|field| parse_checkpoint_bool(field, &format!("tline state row {row}")))?;
+        let current_time = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing current time"))?
+            .parse::<Value>()
+            .map_err(|_| format!("tline state row {row} has invalid current time"))?;
+        let launched_forward = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its forward wave"))?
+            .parse::<Value>()
+            .map_err(|_| format!("tline state row {row} has invalid forward wave"))?;
+        let launched_backward = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its backward wave"))?
+            .parse::<Value>()
+            .map_err(|_| format!("tline state row {row} has invalid backward wave"))?;
+        let initial_present = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its initial-state flag"))
+            .and_then(|field| {
+                parse_checkpoint_bool(field, &format!("tline state row {row} initial state"))
+            })?;
+        let sample_count = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its sample count"))?
+            .parse::<usize>()
+            .map_err(|_| format!("tline state row {row} has an invalid sample count"))?;
+        let forward_count = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its forward sample count"))?
+            .parse::<usize>()
+            .map_err(|_| format!("tline state row {row} has an invalid forward sample count"))?;
+        let backward_count = fields
+            .next()
+            .ok_or_else(|| format!("tline state row {row} is missing its backward sample count"))?
+            .parse::<usize>()
+            .map_err(|_| format!("tline state row {row} has an invalid backward sample count"))?;
+        if let Some(extra) = fields.next() {
+            return Err(format!("tline state row {row}: extra field '{extra}'"));
+        }
+
+        let read_sample = |lines: &mut CheckpointLines<'_>, label: &str| {
+            let sample_line = lines
+                .next()
+                .ok_or_else(|| format!("'{label}' is missing"))?;
+            let mut sample_fields = sample_line.split_whitespace();
+            if sample_fields.next() != Some(label) {
+                return Err(format!("malformed '{label}' row: '{sample_line}'"));
+            }
+            let mut sample = [0.0; 5];
+            for value in &mut sample {
+                let field = sample_fields
+                    .next()
+                    .ok_or_else(|| format!("'{label}' row is short"))?;
+                *value = field
+                    .parse::<Value>()
+                    .map_err(|_| format!("'{label}' row has invalid value '{field}'"))?;
+            }
+            if let Some(extra) = sample_fields.next() {
+                return Err(format!("'{label}' row has extra field '{extra}'"));
+            }
+            Ok(sample)
+        };
+
+        let initial_state = initial_present
+            .then(|| read_sample(lines, "tline_initial"))
+            .transpose()?;
+        let mut state_history = allocate_checkpoint_rows(lines, sample_count, "tline_samples")?;
+        for _ in 0..sample_count {
+            state_history.push(read_sample(lines, "tline_sample")?);
+        }
+        let read_delay_sample = |lines: &mut CheckpointLines<'_>, label: &str| {
+            let sample_line = lines
+                .next()
+                .ok_or_else(|| format!("'{label}' is missing"))?;
+            let mut sample_fields = sample_line.split_whitespace();
+            if sample_fields.next() != Some(label) {
+                return Err(format!("malformed '{label}' row: '{sample_line}'"));
+            }
+            let mut sample = [0.0; 3];
+            for value in &mut sample {
+                let field = sample_fields
+                    .next()
+                    .ok_or_else(|| format!("'{label}' row is short"))?;
+                *value = field
+                    .parse::<Value>()
+                    .map_err(|_| format!("'{label}' row has invalid value '{field}'"))?;
+            }
+            if let Some(extra) = sample_fields.next() {
+                return Err(format!("'{label}' row has extra field '{extra}'"));
+            }
+            Ok(sample)
+        };
+        let mut forward_history =
+            allocate_checkpoint_rows(lines, forward_count, "tline_forward_samples")?;
+        for _ in 0..forward_count {
+            forward_history.push(read_delay_sample(lines, "tline_forward")?);
+        }
+        let mut backward_history =
+            allocate_checkpoint_rows(lines, backward_count, "tline_backward_samples")?;
+        for _ in 0..backward_count {
+            backward_history.push(read_delay_sample(lines, "tline_backward")?);
+        }
+        states.push(TransmissionLineCheckpoint {
+            name: name.to_string(),
+            impedance,
+            initial_state,
+            state_history,
+            forward_history,
+            backward_history,
+            launched_forward,
+            launched_backward,
+            history_initialized: initialized,
+            current_time,
+        });
+    }
+    Ok(states)
+}
+
 fn read_xspice_instance_states(
     lines: &mut CheckpointLines<'_>,
     version: u32,
@@ -1085,6 +1282,40 @@ impl TransientCheckpoint {
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
+        if self
+            .integration_max_step
+            .is_some_and(|max_step| !max_step.is_finite() || max_step <= 0.0)
+        {
+            return Err(
+                "checkpoint integration maximum step must be finite and positive".to_string(),
+            );
+        }
+        let mut previous_arrival = None;
+        for &arrival in &self.pending_tline_arrivals {
+            if !arrival.is_finite() || arrival <= self.time {
+                return Err(format!(
+                    "checkpoint pending transmission-line arrival must be finite and later than {:.17e}s, found {arrival:.17e}s",
+                    self.time
+                ));
+            }
+            if previous_arrival.is_some_and(|previous| arrival <= previous) {
+                return Err(format!(
+                    "checkpoint pending transmission-line arrivals must be strictly increasing, found {arrival:.17e}s after {:.17e}s",
+                    previous_arrival.expect("checked above")
+                ));
+            }
+            previous_arrival = Some(arrival);
+        }
+        if self.dynamic_tline_breakpoints_added < self.pending_tline_arrivals.len()
+            || self.dynamic_tline_breakpoints_added > super::MAX_DYNAMIC_TLINE_BREAKPOINTS
+        {
+            return Err(format!(
+                "checkpoint dynamic transmission-line breakpoint count {} is inconsistent with {} pending arrivals or exceeds the trajectory cap {}",
+                self.dynamic_tline_breakpoints_added,
+                self.pending_tline_arrivals.len(),
+                super::MAX_DYNAMIC_TLINE_BREAKPOINTS
+            ));
+        }
         if self.netlist_identity.as_ref().is_some_and(|identity| {
             identity.len() != 64
                 || !identity
@@ -1093,6 +1324,16 @@ impl TransientCheckpoint {
         }) {
             return Err(
                 "checkpoint netlist identity must be 64 lowercase hexadecimal digits".to_string(),
+            );
+        }
+        if self.restart_identity.as_ref().is_some_and(|identity| {
+            identity.len() != 64
+                || !identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }) {
+            return Err(
+                "checkpoint restart identity must be 64 lowercase hexadecimal digits".to_string(),
             );
         }
         if self.solution.iter().any(|value| !value.is_finite()) {
@@ -1185,6 +1426,17 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
+        if !self.tline_state_available && !self.tline_states.is_empty() {
+            return Err(
+                "transmission-line checkpoint state is present without availability provenance"
+                    .to_string(),
+            );
+        }
+        for (index, state) in self.tline_states.iter().enumerate() {
+            TransmissionLine::validate_checkpoint_state(state).map_err(|error| {
+                format!("transmission-line checkpoint state {index} is malformed: {error}")
+            })?;
+        }
         for (index, instance) in self.generated_veriloga_instance_states.iter().enumerate() {
             if instance.instance_name.is_empty()
                 || instance.instance_name.chars().any(char::is_whitespace)
@@ -1246,11 +1498,56 @@ impl TransientCheckpoint {
         startup_mode: TransientStartupMode,
         lte_estimator: Option<&LteEstimator>,
     ) -> Self {
-        if !circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty() {
+        Self::capture_with_restart_identity(
+            fingerprint,
+            netlist_identity,
+            None,
+            simulation_identity,
+            time,
+            solution,
+            circuit,
+            startup_mode,
+            None,
+            &[],
+            0,
+            lte_estimator,
+        )
+    }
+
+    /// Capture transient state together with the authored-restart identity.
+    pub(crate) fn capture_with_restart_identity(
+        fingerprint: u64,
+        netlist_identity: Option<String>,
+        restart_identity: Option<String>,
+        simulation_identity: String,
+        time: Value,
+        solution: &[Value],
+        circuit: &CircuitData,
+        startup_mode: TransientStartupMode,
+        integration_max_step: Option<Value>,
+        pending_tline_arrivals: &[Value],
+        dynamic_tline_breakpoints_added: usize,
+        lte_estimator: Option<&LteEstimator>,
+    ) -> Self {
+        let mut tline_states = Vec::with_capacity(circuit.tlines.len());
+        let mut tline_resume_blockers = Vec::new();
+        for line in &circuit.tlines {
+            match line.checkpoint_state() {
+                Ok(state) => tline_states.push(state),
+                Err(blocker) => tline_resume_blockers.push(blocker),
+            }
+        }
+        tline_resume_blockers.extend(circuit.coupled_tlines.iter().map(|line| {
+            format!(
+                "coupled transmission line '{}': convolution history is not checkpointable",
+                line.name
+            )
+        }));
+        if !tline_resume_blockers.is_empty() {
             log::warn!(
-                "transient checkpoint at t={time:.6e}: transmission-line delay \
-                 histories are re-derived on resume (breakpoint-restart \
-                 semantics); prefer unsegmented runs for delay-dominated decks"
+                "transient checkpoint at t={time:.6e}: resume will be refused because \
+                 transmission-line state is incomplete: {}",
+                tline_resume_blockers.join("; ")
             );
         }
         let xspice_instances: Vec<String> = circuit
@@ -1278,14 +1575,25 @@ impl TransientCheckpoint {
             .map_or((0.0, Vec::new()), |(global, local)| {
                 (global, local.to_vec())
             });
+        let mut pending_tline_arrivals = pending_tline_arrivals
+            .iter()
+            .copied()
+            .filter(|arrival| arrival.is_finite() && *arrival > time)
+            .collect::<Vec<_>>();
+        pending_tline_arrivals.sort_by(Value::total_cmp);
+        pending_tline_arrivals.dedup_by(|left, right| left.to_bits() == right.to_bits());
 
         Self {
             time,
             solution: solution.to_vec(),
             netlist_fingerprint: fingerprint,
             netlist_identity,
+            restart_identity,
             simulation_identity: Some(simulation_identity),
             startup_mode: Some(startup_mode),
+            integration_max_step,
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -1302,6 +1610,9 @@ impl TransientCheckpoint {
                 .map(|binding| binding.resistance_store)
                 .collect(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
+            tline_state_available: true,
+            tline_resume_blockers,
+            tline_states,
             lte_signal_global_reference,
             lte_signal_local_reference,
             lte_reference_history_available: lte_estimator.is_some(),
@@ -1328,6 +1639,64 @@ impl TransientCheckpoint {
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
         )?;
+        if !self.tline_resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint resume cannot restore unsupported transmission-line state: {}",
+                self.tline_resume_blockers.join("; ")
+            ));
+        }
+        if !self.tline_state_available
+            && (!circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty())
+        {
+            return Err(
+                "legacy transient checkpoint does not contain transmission-line history; re-run the transient from t=0"
+                    .to_string(),
+            );
+        }
+        if !circuit.coupled_tlines.is_empty() {
+            return Err(
+                "transient checkpoint does not contain coupled transmission-line convolution history"
+                    .to_string(),
+            );
+        }
+        if self.tline_states.len() != circuit.tlines.len() {
+            return Err(format!(
+                "checkpoint transmission-line shape mismatch: captured {}, circuit has {}",
+                self.tline_states.len(),
+                circuit.tlines.len()
+            ));
+        }
+        let mut restored_tlines = circuit.tlines.clone();
+        for (line, state) in restored_tlines.iter_mut().zip(&self.tline_states) {
+            if line.is_zero_length_pass_through() {
+                if state.history_initialized
+                    || state.initial_state.is_some()
+                    || !state.state_history.is_empty()
+                    || !state.forward_history.is_empty()
+                    || !state.backward_history.is_empty()
+                    || state.current_time.to_bits() != 0.0f64.to_bits()
+                {
+                    return Err(format!(
+                        "checkpoint zero-length transmission line '{}' contains noncanonical dynamic history",
+                        line.name
+                    ));
+                }
+            } else if !state.history_initialized
+                || state.initial_state.is_none()
+                || state.state_history.is_empty()
+                || state.forward_history.is_empty()
+                || state.backward_history.is_empty()
+                || state.current_time.to_bits() != self.time.to_bits()
+                || state.state_history.last().map(|sample| sample[0].to_bits())
+                    != Some(self.time.to_bits())
+            {
+                return Err(format!(
+                    "checkpoint transmission line '{}' does not contain complete accepted history at {:.17e}s",
+                    line.name, self.time
+                ));
+            }
+            line.restore_checkpoint_state(state)?;
+        }
         if !self.inductor_flux_history_available && !circuit.inductors.is_empty() {
             return Err(format!(
                 "checkpoint predates the inductor flux history (format {FORMAT_VERSION} \
@@ -1439,6 +1808,7 @@ impl TransientCheckpoint {
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
         )?;
+        circuit.tlines = restored_tlines;
         Ok(())
     }
 
@@ -1493,6 +1863,36 @@ impl TransientCheckpoint {
                 self.netlist_fingerprint, fingerprint
             ));
         }
+        self.validate_resume_capabilities(netlist)
+    }
+
+    /// Validate this checkpoint for an authored `.OPTIONS RESTART FILE` deck.
+    ///
+    /// Restart decks intentionally change their transient stop horizon and
+    /// restart I/O metadata. This validation path therefore uses the dedicated
+    /// collision-resistant restart identity and intentionally does not consult
+    /// the legacy source-text fingerprint. All physical netlist semantics,
+    /// output contracts, external dependencies, and trajectory-affecting
+    /// transient controls remain identity-bound.
+    pub fn validate_for_restart(&self, netlist: &Netlist) -> Result<(), String> {
+        self.validate_numeric_state()?;
+        let target_identity = restart_checkpoint_identity(netlist)
+            .expect("restart identity is available for every elaborated AST");
+        let Some(captured_identity) = self.restart_identity.as_deref() else {
+            return Err(
+                "legacy transient checkpoint does not contain a collision-resistant restart identity"
+                    .to_string(),
+            );
+        };
+        if captured_identity != target_identity {
+            return Err(format!(
+                "checkpoint was captured from a restart-incompatible netlist (identity {captured_identity}, this deck is {target_identity}); refusing to resume mismatched state"
+            ));
+        }
+        self.validate_resume_capabilities(netlist)
+    }
+
+    fn validate_resume_capabilities(&self, netlist: &Netlist) -> Result<(), String> {
         if !self.xspice_resume_blockers.is_empty() {
             return Err(format!(
                 "transient checkpoint resume cannot restore unsupported XSPICE \
@@ -1517,6 +1917,19 @@ impl TransientCheckpoint {
         config: &SimulationConfig,
     ) -> Result<(), String> {
         self.validate_for(netlist)?;
+        self.validate_resolved_config(config)
+    }
+
+    pub(crate) fn validate_for_restart_with_config(
+        &self,
+        netlist: &Netlist,
+        config: &SimulationConfig,
+    ) -> Result<(), String> {
+        self.validate_for_restart(netlist)?;
+        self.validate_resolved_config(config)
+    }
+
+    fn validate_resolved_config(&self, config: &SimulationConfig) -> Result<(), String> {
         let Some(captured_identity) = self.simulation_identity.as_deref() else {
             return Err(
                 "legacy transient checkpoint does not contain a collision-resistant simulation configuration identity"
@@ -1536,6 +1949,85 @@ impl TransientCheckpoint {
             );
         }
         Ok(())
+    }
+
+    pub(crate) fn validate_integration_max_step(
+        &self,
+        requested_max_step: Value,
+    ) -> Result<(), String> {
+        let Some(captured_max_step) = self.integration_max_step else {
+            return Err(
+                "legacy transient checkpoint does not record its per-run maximum step".to_string(),
+            );
+        };
+        if captured_max_step.to_bits() != requested_max_step.to_bits() {
+            return Err(format!(
+                "checkpoint maximum step {captured_max_step:.17e}s does not match requested maximum step {requested_max_step:.17e}s"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Future dynamically discovered transmission-line arrivals that must be
+    /// reinstated in the breakpoint manager before resumed integration.
+    pub(crate) fn pending_tline_arrivals(&self) -> &[Value] {
+        &self.pending_tline_arrivals
+    }
+
+    pub(crate) fn dynamic_tline_breakpoints_added(&self) -> usize {
+        self.dynamic_tline_breakpoints_added
+    }
+
+    /// Number of scalar trajectory values retained by this snapshot. This is
+    /// used with the transient result budget so a checkpoint schedule cannot
+    /// multiply memory without bound even when every individual snapshot is
+    /// valid.
+    pub(crate) fn retained_value_count(&self) -> usize {
+        let mut count = 7_usize
+            .saturating_add(self.solution.len())
+            .saturating_add(self.cap_v_prev.len())
+            .saturating_add(self.cap_v_prev_prev.len())
+            .saturating_add(self.cap_v_prev_prev_prev.len())
+            .saturating_add(self.cap_i_prev.len())
+            .saturating_add(self.cap_i_eq.len())
+            .saturating_add(self.ind_i_prev.len())
+            .saturating_add(self.ind_i_prev_prev.len())
+            .saturating_add(self.ind_i_prev_prev_prev.len())
+            .saturating_add(self.ind_v_prev.len())
+            .saturating_add(self.xyce_memristor_resistance_stores.len())
+            .saturating_add(self.generic_switch_stores.len().saturating_mul(4))
+            .saturating_add(self.pending_tline_arrivals.len())
+            .saturating_add(self.lte_signal_local_reference.len());
+
+        for state in &self.tline_states {
+            count = count
+                .saturating_add(5)
+                .saturating_add(usize::from(state.initial_state.is_some()).saturating_mul(5))
+                .saturating_add(state.state_history.len().saturating_mul(5))
+                .saturating_add(state.forward_history.len().saturating_mul(3))
+                .saturating_add(state.backward_history.len().saturating_mul(3));
+        }
+        for instance in &self.xspice_instance_states {
+            count = count
+                .saturating_add(2)
+                .saturating_add(instance.context.state.len())
+                .saturating_add(instance.context.state_prev.len())
+                .saturating_add(instance.context.int_state.len());
+        }
+        for instance in &self.generated_veriloga_instance_states {
+            let state = &instance.state;
+            count = count
+                .saturating_add(1)
+                .saturating_add(state.ddt_previous.len())
+                .saturating_add(state.ddt_older.len())
+                .saturating_add(state.ddt_derivative_previous.len())
+                .saturating_add(state.ddt_initialized.len())
+                .saturating_add(state.idt_previous.len())
+                .saturating_add(state.idt_initialized.len())
+                .saturating_add(state.limiter_anchor.len())
+                .saturating_add(state.limiter_initialized.len());
+        }
+        count
     }
 
     /// Startup contract captured for the selected transient analysis.
@@ -1560,6 +2052,10 @@ impl TransientCheckpoint {
             self.netlist_identity.as_deref().unwrap_or("none")
         ));
         out.push_str(&format!(
+            "restart_identity {}\n",
+            self.restart_identity.as_deref().unwrap_or("none")
+        ));
+        out.push_str(&format!(
             "simulation_identity {}\n",
             self.simulation_identity.as_deref().unwrap_or("none")
         ));
@@ -1570,6 +2066,24 @@ impl TransientCheckpoint {
         };
         out.push_str(&format!("startup_mode {startup_mode}\n"));
         out.push_str(&format!("time {}\n", self.time));
+        out.push_str(&format!(
+            "integration_max_step {}\n",
+            self.integration_max_step
+                .map_or_else(|| "none".to_string(), |value| value.to_string())
+        ));
+        out.push_str(&format!(
+            "pending_tline_arrivals {}",
+            self.pending_tline_arrivals.len()
+        ));
+        for arrival in &self.pending_tline_arrivals {
+            out.push(' ');
+            out.push_str(&arrival.to_string());
+        }
+        out.push('\n');
+        out.push_str(&format!(
+            "dynamic_tline_breakpoints_added {}\n",
+            self.dynamic_tline_breakpoints_added
+        ));
 
         let section = |out: &mut String, name: &str, rows: &[&[Value]]| {
             let len = rows.first().map_or(0, |r| r.len());
@@ -1648,6 +2162,58 @@ impl TransientCheckpoint {
                 "{} {} {} {}\n",
                 store[0], store[1], store[2], store[3]
             ));
+        }
+        out.push_str(&format!(
+            "tline_state_available {}\n",
+            u8::from(self.tline_state_available)
+        ));
+        out.push_str(&format!(
+            "tline_blockers {}\n",
+            self.tline_resume_blockers.len()
+        ));
+        for blocker in &self.tline_resume_blockers {
+            out.push_str(blocker);
+            out.push('\n');
+        }
+        out.push_str(&format!("tline_states {}\n", self.tline_states.len()));
+        for state in &self.tline_states {
+            out.push_str(&format!(
+                "tline_state {} {} {} {} {} {} {} {} {} {}\n",
+                state.name,
+                state.impedance,
+                u8::from(state.history_initialized),
+                state.current_time,
+                state.launched_forward,
+                state.launched_backward,
+                u8::from(state.initial_state.is_some()),
+                state.state_history.len(),
+                state.forward_history.len(),
+                state.backward_history.len()
+            ));
+            if let Some(sample) = state.initial_state {
+                out.push_str(&format!(
+                    "tline_initial {} {} {} {} {}\n",
+                    sample[0], sample[1], sample[2], sample[3], sample[4]
+                ));
+            }
+            for sample in &state.state_history {
+                out.push_str(&format!(
+                    "tline_sample {} {} {} {} {}\n",
+                    sample[0], sample[1], sample[2], sample[3], sample[4]
+                ));
+            }
+            for sample in &state.forward_history {
+                out.push_str(&format!(
+                    "tline_forward {} {} {}\n",
+                    sample[0], sample[1], sample[2]
+                ));
+            }
+            for sample in &state.backward_history {
+                out.push_str(&format!(
+                    "tline_backward {} {} {}\n",
+                    sample[0], sample[1], sample[2]
+                ));
+            }
         }
         out.push_str(&format!("xspice {}\n", self.xspice_instances.len()));
         for instance in &self.xspice_instances {
@@ -1773,6 +2339,29 @@ impl TransientCheckpoint {
             None
         };
 
+        let restart_identity = if version >= 14 {
+            let identity_line = lines.next().ok_or("missing restart identity line")?;
+            let identity = identity_line
+                .strip_prefix("restart_identity ")
+                .map(str::trim)
+                .ok_or_else(|| format!("malformed restart identity line: '{identity_line}'"))?;
+            if identity == "none" {
+                None
+            } else if identity.len() == 64
+                && identity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                Some(identity.to_string())
+            } else {
+                return Err(format!(
+                    "malformed restart identity line: '{identity_line}'"
+                ));
+            }
+        } else {
+            None
+        };
+
         let simulation_identity = if version >= 9 {
             let identity_line = lines.next().ok_or("missing simulation identity line")?;
             let identity = identity_line
@@ -1813,6 +2402,85 @@ impl TransientCheckpoint {
             .strip_prefix("time ")
             .and_then(|v| v.trim().parse().ok())
             .ok_or_else(|| format!("malformed time line: '{time_line}'"))?;
+
+        let integration_max_step =
+            if version >= 14 {
+                let line = lines
+                    .next()
+                    .ok_or_else(|| "missing integration maximum-step line".to_string())?;
+                let field = line
+                    .strip_prefix("integration_max_step ")
+                    .map(str::trim)
+                    .ok_or_else(|| format!("malformed integration maximum-step line: '{line}'"))?;
+                if field == "none" {
+                    None
+                } else {
+                    Some(field.parse::<Value>().map_err(|_| {
+                        format!("malformed integration maximum-step line: '{line}'")
+                    })?)
+                }
+            } else {
+                None
+            };
+
+        let pending_tline_arrivals = if version >= 14 {
+            let line = lines
+                .next()
+                .ok_or_else(|| "missing pending transmission-line arrivals line".to_string())?;
+            let mut fields = line.split_whitespace();
+            if fields.next() != Some("pending_tline_arrivals") {
+                return Err(format!(
+                    "malformed pending transmission-line arrivals line: '{line}'"
+                ));
+            }
+            let count = fields
+                .next()
+                .ok_or_else(|| {
+                    "pending transmission-line arrivals line is missing its count".to_string()
+                })?
+                .parse::<usize>()
+                .map_err(|_| {
+                    format!("malformed pending transmission-line arrivals line: '{line}'")
+                })?;
+            if count > super::MAX_DYNAMIC_TLINE_BREAKPOINTS {
+                return Err(format!(
+                    "pending transmission-line arrivals count {count} exceeds checkpoint limit {}",
+                    super::MAX_DYNAMIC_TLINE_BREAKPOINTS
+                ));
+            }
+            let arrivals = fields
+                .map(|field| {
+                    field.parse::<Value>().map_err(|_| {
+                        format!("malformed pending transmission-line arrival '{field}'")
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if arrivals.len() != count {
+                return Err(format!(
+                    "pending transmission-line arrivals declared {count} values but contained {}",
+                    arrivals.len()
+                ));
+            }
+            arrivals
+        } else {
+            Vec::new()
+        };
+        let dynamic_tline_breakpoints_added = if version >= 14 {
+            let line = lines.next().ok_or_else(|| {
+                "missing dynamic transmission-line breakpoint count line".to_string()
+            })?;
+            let field = line
+                .strip_prefix("dynamic_tline_breakpoints_added ")
+                .map(str::trim)
+                .ok_or_else(|| {
+                    format!("malformed dynamic transmission-line breakpoint count line: '{line}'")
+                })?;
+            field.parse::<usize>().map_err(|_| {
+                format!("malformed dynamic transmission-line breakpoint count line: '{line}'")
+            })?
+        } else {
+            0
+        };
 
         let mut solution_cols = read_value_section(&mut lines, "solution", 1)?;
         if solution_cols[0].iter().any(|value| !value.is_finite()) {
@@ -1918,6 +2586,37 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
+        let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
+            let availability_line = lines
+                .next()
+                .ok_or_else(|| "missing 'tline_state_available' line".to_string())?;
+            let mut fields = availability_line.split_whitespace();
+            if fields.next() != Some("tline_state_available") {
+                return Err(format!(
+                    "malformed transmission-line availability line: '{availability_line}'"
+                ));
+            }
+            let available = fields
+                .next()
+                .ok_or_else(|| {
+                    "transmission-line availability line is missing its boolean".to_string()
+                })
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, "transmission-line state availability")
+                })?;
+            if let Some(extra) = fields.next() {
+                return Err(format!(
+                    "transmission-line availability line has extra field '{extra}'"
+                ));
+            }
+            (
+                available,
+                read_nonempty_line_vector(&mut lines, "tline_blockers")?,
+                read_tline_states(&mut lines)?,
+            )
+        } else {
+            (false, Vec::new(), Vec::new())
+        };
         let xspice_instances = if version >= 2 {
             read_nonempty_line_vector(&mut lines, "xspice")?
         } else {
@@ -1977,8 +2676,12 @@ impl TransientCheckpoint {
             solution: solution_cols.swap_remove(0),
             netlist_fingerprint,
             netlist_identity,
+            restart_identity,
             simulation_identity,
             startup_mode,
+            integration_max_step,
+            pending_tline_arrivals,
+            dynamic_tline_breakpoints_added,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -1991,6 +2694,9 @@ impl TransientCheckpoint {
             inductor_flux_history_available,
             xyce_memristor_resistance_stores,
             generic_switch_stores,
+            tline_state_available,
+            tline_resume_blockers,
+            tline_states,
             lte_signal_global_reference,
             lte_signal_local_reference,
             lte_reference_history_available: lte_reference_mode.is_some(),
@@ -2182,8 +2888,12 @@ mod tests {
             solution: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
             netlist_fingerprint: 0xDEAD_BEEF_0123_4567,
             netlist_identity: Some("fedcba9876543210".repeat(4)),
+            restart_identity: Some("1234567890abcdef".repeat(4)),
             simulation_identity: Some("abcdef0123456789".repeat(4)),
             startup_mode: Some(TransientStartupMode::Uic),
+            integration_max_step: Some(2.5e-9),
+            pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
+            dynamic_tline_breakpoints_added: 3,
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -2196,6 +2906,9 @@ mod tests {
             inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
+            tline_state_available: true,
+            tline_resume_blockers: Vec::new(),
+            tline_states: Vec::new(),
             lte_signal_global_reference: 3.25,
             lte_signal_local_reference: Vec::new(),
             lte_reference_history_available: true,
@@ -2260,6 +2973,18 @@ mod tests {
             if version < 8 && line.starts_with("netlist_identity ") {
                 continue;
             }
+            if version < 14 && line.starts_with("restart_identity ") {
+                continue;
+            }
+            if version < 14 && line.starts_with("integration_max_step ") {
+                continue;
+            }
+            if version < 14 && line.starts_with("pending_tline_arrivals ") {
+                continue;
+            }
+            if version < 14 && line.starts_with("dynamic_tline_breakpoints_added ") {
+                continue;
+            }
             if version < 9 && line.starts_with("simulation_identity ") {
                 continue;
             }
@@ -2292,6 +3017,24 @@ mod tests {
                         .next()
                         .expect("complete generic switch checkpoint rows");
                 }
+                continue;
+            }
+            if version < 14 && line.starts_with("tline_state_available ") {
+                continue;
+            }
+            if version < 14
+                && (line.starts_with("tline_blockers ") || line.starts_with("tline_states "))
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("transmission-line checkpoint row count")
+                    .parse::<usize>()
+                    .expect("numeric transmission-line checkpoint row count");
+                assert_eq!(
+                    count, 0,
+                    "the generic legacy fixture only supports empty transmission-line state"
+                );
                 continue;
             }
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
@@ -2468,14 +3211,18 @@ mod tests {
             .expect("captured PEM circuit builds");
         captured_circuit.xyce_memristors[0].resistance_store = 4321.25;
         let solution = vec![0.0; captured_circuit.num_nodes() + captured_circuit.num_branches()];
-        let checkpoint = TransientCheckpoint::capture(
+        let checkpoint = TransientCheckpoint::capture_with_restart_identity(
             netlist_fingerprint(&netlist),
             netlist_checkpoint_identity(&netlist),
+            restart_checkpoint_identity(&netlist),
             simulation_checkpoint_identity(engine.config()),
             0.0,
             &solution,
             &captured_circuit,
             TransientStartupMode::OperatingPoint,
+            None,
+            &[],
+            0,
             None,
         );
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
@@ -3062,6 +3809,98 @@ mod tests {
     }
 
     #[test]
+    fn bug_1284_restart_identity_normalizes_only_horizon_and_restart_control_plane() {
+        let deck = |tran: &str, restart: &str| {
+            format!(
+                "Transmission Line Circuit\n\
+                 VIN 1 0 PULSE(0 5 0 0.1N 0.1N 5N 25N)\n\
+                 RIN 1 2 50\n\
+                 TLINE 2 0 3 0 Z0=50 TD=10N\n\
+                 RL 3 0 50\n\
+                 {tran}\n\
+                 .PRINT TRAN V(2) V(3)\n\
+                 {restart}\n\
+                 .END\n"
+            )
+        };
+        let baseline = Netlist::parse(&deck(".TRAN 0.25N 50N", ""))
+            .expect("BUG_1284 baseline semantics parse");
+        let first = Netlist::parse(&deck(
+            ".TRAN 0.25N 20N",
+            ".OPTIONS RESTART JOB=trans_test INITIAL_INTERVAL=5n",
+        ))
+        .expect("BUG_1284 first-run semantics parse");
+        let restarted = Netlist::parse(&deck(
+            ".TRAN 0.25N 50N",
+            ".OPTIONS RESTART FILE=trans_test2e-08",
+        ))
+        .expect("BUG_1284 restarted-run semantics parse");
+
+        let compatible = restart_checkpoint_identity(&first).expect("restart identity");
+        assert_eq!(
+            restart_checkpoint_identity(&baseline).as_deref(),
+            Some(compatible.as_str()),
+            "a no-RESTART baseline has the same physical trajectory contract"
+        );
+        assert_eq!(
+            restart_checkpoint_identity(&restarted).as_deref(),
+            Some(compatible.as_str()),
+            "restart horizon and file metadata are control-plane differences"
+        );
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&restarted),
+            "the ordinary resume identity must remain exact"
+        );
+
+        let mut checkpoint = sample();
+        checkpoint.netlist_fingerprint = netlist_fingerprint(&first);
+        checkpoint.netlist_identity = netlist_checkpoint_identity(&first);
+        checkpoint.restart_identity = Some(compatible);
+        checkpoint
+            .validate_for_restart(&restarted)
+            .expect("canonical restarted deck is restart-compatible");
+        let exact_error = checkpoint
+            .validate_for(&restarted)
+            .expect_err("ordinary resume must remain same-deck strict");
+        assert!(
+            exact_error.contains("different netlist"),
+            "unexpected exact-resume diagnostic: {exact_error}"
+        );
+
+        let drifted_decks = [
+            deck(".TRAN 0.25N 50N", "").replace("RIN 1 2 50", "RIN 1 2 51"),
+            deck(".TRAN 0.25N 50N", "")
+                .replace(".TRAN 0.25N 50N", "CEXTRA 2 0 1p\n.TRAN 0.25N 50N"),
+            deck(".TRAN 0.5N 50N", ""),
+            deck(".TRAN 0.25N 50N 1N", ""),
+            deck(".TRAN 0.25N 50N 0 0.1N", ""),
+            deck(".TRAN 0.25N 50N UIC", ""),
+            deck(".TRAN 0.25N 50N", "").replace(".PRINT TRAN V(2) V(3)", ".PRINT TRAN V(2) V(1)"),
+        ];
+        for drifted in drifted_decks {
+            let drifted = Netlist::parse(&drifted).expect("drifted restart deck parses");
+            let error = checkpoint
+                .validate_for_restart(&drifted)
+                .expect_err("physical or transient-control drift must fail closed");
+            assert!(
+                error.contains("restart-incompatible netlist"),
+                "unexpected restart incompatibility diagnostic: {error}"
+            );
+        }
+
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 13))
+            .expect("pre-restart-identity checkpoint remains parseable");
+        let error = legacy
+            .validate_for_restart(&first)
+            .expect_err("legacy checkpoint must not authorize a changed restart deck");
+        assert!(
+            error.contains("collision-resistant restart identity"),
+            "unexpected legacy restart diagnostic: {error}"
+        );
+    }
+
+    #[test]
     fn netlist_identity_parser_requires_lowercase_blake3_hex() {
         let text = sample().to_text();
         let valid = "fedcba9876543210".repeat(4);
@@ -3070,6 +3909,20 @@ mod tests {
                 .expect_err("malformed netlist identity must fail during parsing");
             assert!(
                 err.contains("malformed netlist identity"),
+                "unexpected error for identity {invalid}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn restart_identity_parser_requires_lowercase_blake3_hex() {
+        let text = sample().to_text();
+        let valid = "1234567890abcdef".repeat(4);
+        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
+            let err = TransientCheckpoint::from_text(&text.replacen(&valid, &invalid, 1))
+                .expect_err("malformed restart identity must fail during parsing");
+            assert!(
+                err.contains("malformed restart identity"),
                 "unexpected error for identity {invalid}: {err}"
             );
         }

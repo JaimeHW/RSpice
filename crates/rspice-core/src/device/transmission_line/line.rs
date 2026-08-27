@@ -9,6 +9,26 @@ struct TlineStateSample {
     i2: Value,
 }
 
+/// Accepted delay history required to continue one scalar transmission line.
+///
+/// Physical port samples preserve the line equation and breakpoint state. The
+/// two delay windows additionally retain their accepted Hermite slopes: the
+/// oldest slope can depend on a predecessor that has already aged out, so
+/// recomputing it would not be a bit-exact continuation.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TransmissionLineCheckpoint {
+    pub(crate) name: String,
+    pub(crate) impedance: Value,
+    pub(crate) initial_state: Option<[Value; 5]>,
+    pub(crate) state_history: Vec<[Value; 5]>,
+    pub(crate) forward_history: Vec<[Value; 3]>,
+    pub(crate) backward_history: Vec<[Value; 3]>,
+    pub(crate) launched_forward: Value,
+    pub(crate) launched_backward: Value,
+    pub(crate) history_initialized: bool,
+    pub(crate) current_time: Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DelayedInterpolationMode {
     Linear,
@@ -111,6 +131,243 @@ pub struct TransmissionLine {
 }
 
 impl TransmissionLine {
+    #[inline]
+    fn checkpoint_sample(sample: TlineStateSample) -> [Value; 5] {
+        [sample.time, sample.v1, sample.i1, sample.v2, sample.i2]
+    }
+
+    #[inline]
+    fn sample_from_checkpoint(sample: [Value; 5]) -> TlineStateSample {
+        TlineStateSample {
+            time: sample[0],
+            v1: sample[1],
+            i1: sample[2],
+            v2: sample[3],
+            i2: sample[4],
+        }
+    }
+
+    /// Capture the accepted history of an ordinary lossless scalar line.
+    ///
+    /// Distributed LTRA/TXL kernels own additional convolution state and must
+    /// not silently resume from an incomplete snapshot.  They fail closed
+    /// until their complete native state has a versioned checkpoint contract.
+    pub(crate) fn checkpoint_state(&self) -> Result<TransmissionLineCheckpoint, String> {
+        if self.txl.is_some() || self.distributed_rlc.is_some() || self.distributed_rc.is_some() {
+            return Err(format!(
+                "transmission line '{}': distributed LTRA/TXL convolution state is not checkpointable",
+                self.name
+            ));
+        }
+        let checkpoint = TransmissionLineCheckpoint {
+            name: self.name.clone(),
+            impedance: self.z0,
+            initial_state: self.initial_state.map(Self::checkpoint_sample),
+            state_history: self
+                .state_history
+                .iter()
+                .copied()
+                .map(Self::checkpoint_sample)
+                .collect(),
+            forward_history: self.history_forward.checkpoint_samples(),
+            backward_history: self.history_backward.checkpoint_samples(),
+            launched_forward: self.launched_forward,
+            launched_backward: self.launched_backward,
+            history_initialized: self.history_initialized,
+            current_time: self.current_time,
+        };
+        Self::validate_checkpoint_state(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    pub(crate) fn validate_checkpoint_state(
+        checkpoint: &TransmissionLineCheckpoint,
+    ) -> Result<(), String> {
+        if checkpoint.name.is_empty() || checkpoint.name.chars().any(char::is_whitespace) {
+            return Err("transmission-line checkpoint has an invalid instance name".to_string());
+        }
+        if !checkpoint.impedance.is_finite() || checkpoint.impedance <= 0.0 {
+            return Err(format!(
+                "transmission line '{}': checkpoint impedance must be finite and positive",
+                checkpoint.name
+            ));
+        }
+        if !checkpoint.current_time.is_finite() || checkpoint.current_time < 0.0 {
+            return Err(format!(
+                "transmission line '{}': checkpoint time must be finite and non-negative",
+                checkpoint.name
+            ));
+        }
+        if !checkpoint.launched_forward.is_finite() || !checkpoint.launched_backward.is_finite() {
+            return Err(format!(
+                "transmission line '{}': checkpoint waves must be finite",
+                checkpoint.name
+            ));
+        }
+        let validate_sample =
+            |sample: &[Value; 5]| sample.iter().all(|value| value.is_finite()) && sample[0] >= 0.0;
+        if checkpoint
+            .initial_state
+            .as_ref()
+            .is_some_and(|sample| !validate_sample(sample))
+            || checkpoint
+                .state_history
+                .iter()
+                .any(|sample| !validate_sample(sample))
+        {
+            return Err(format!(
+                "transmission line '{}': checkpoint history must be finite with non-negative times",
+                checkpoint.name
+            ));
+        }
+        let validate_delay_history = |history: &[[Value; 3]]| {
+            history
+                .iter()
+                .all(|sample| sample.iter().all(|value| value.is_finite()) && sample[0] >= 0.0)
+                && !history
+                    .windows(2)
+                    .any(|window| window[1][0] <= window[0][0])
+        };
+        if !validate_delay_history(&checkpoint.forward_history)
+            || !validate_delay_history(&checkpoint.backward_history)
+        {
+            return Err(format!(
+                "transmission line '{}': checkpoint delay windows must be finite with strictly increasing non-negative times",
+                checkpoint.name
+            ));
+        }
+        if checkpoint.forward_history.len() != checkpoint.state_history.len()
+            || checkpoint.backward_history.len() != checkpoint.state_history.len()
+            || checkpoint
+                .state_history
+                .iter()
+                .zip(&checkpoint.forward_history)
+                .zip(&checkpoint.backward_history)
+                .any(|((state, forward), backward)| {
+                    state[0].to_bits() != forward[0].to_bits()
+                        || state[0].to_bits() != backward[0].to_bits()
+                        || (state[1] + checkpoint.impedance * state[2]).to_bits()
+                            != forward[1].to_bits()
+                        || (state[3] + checkpoint.impedance * state[4]).to_bits()
+                            != backward[1].to_bits()
+                })
+        {
+            return Err(format!(
+                "transmission line '{}': checkpoint physical and delay histories disagree",
+                checkpoint.name
+            ));
+        }
+        if checkpoint
+            .state_history
+            .windows(2)
+            .any(|window| window[1][0] <= window[0][0])
+        {
+            return Err(format!(
+                "transmission line '{}': checkpoint history times must be strictly increasing",
+                checkpoint.name
+            ));
+        }
+        if checkpoint
+            .state_history
+            .last()
+            .is_some_and(|sample| sample[0] > checkpoint.current_time)
+            || checkpoint
+                .initial_state
+                .as_ref()
+                .is_some_and(|sample| sample[0] > checkpoint.current_time)
+            || checkpoint.initial_state.as_ref().is_some_and(|initial| {
+                checkpoint
+                    .state_history
+                    .first()
+                    .is_some_and(|first| initial[0] > first[0])
+            })
+        {
+            return Err(format!(
+                "transmission line '{}': checkpoint history has an invalid time extent",
+                checkpoint.name
+            ));
+        }
+        if checkpoint.history_initialized
+            != (checkpoint.initial_state.is_some() && !checkpoint.state_history.is_empty())
+        {
+            return Err(format!(
+                "transmission line '{}': checkpoint initialization flag disagrees with its history",
+                checkpoint.name
+            ));
+        }
+        if !checkpoint.history_initialized
+            && (checkpoint.initial_state.is_some()
+                || !checkpoint.state_history.is_empty()
+                || !checkpoint.forward_history.is_empty()
+                || !checkpoint.backward_history.is_empty()
+                || checkpoint.launched_forward.to_bits() != 0.0f64.to_bits()
+                || checkpoint.launched_backward.to_bits() != 0.0f64.to_bits()
+                || checkpoint.current_time.to_bits() != 0.0f64.to_bits())
+        {
+            return Err(format!(
+                "transmission line '{}': an uninitialized checkpoint must contain canonical empty state",
+                checkpoint.name
+            ));
+        }
+        if let Some(state) = checkpoint.state_history.last() {
+            let forward = state[1] + checkpoint.impedance * state[2];
+            let backward = state[3] + checkpoint.impedance * state[4];
+            if forward.to_bits() != checkpoint.launched_forward.to_bits()
+                || backward.to_bits() != checkpoint.launched_backward.to_bits()
+                || state[0].to_bits() != checkpoint.current_time.to_bits()
+            {
+                return Err(format!(
+                    "transmission line '{}': checkpoint terminal state disagrees with its launched waves or time",
+                    checkpoint.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore an ordinary lossless scalar line from accepted delay history.
+    pub(crate) fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &TransmissionLineCheckpoint,
+    ) -> Result<(), String> {
+        Self::validate_checkpoint_state(checkpoint)?;
+        if self.name != checkpoint.name {
+            return Err(format!(
+                "transmission-line checkpoint instance '{}' does not match '{}'",
+                checkpoint.name, self.name
+            ));
+        }
+        if self.z0.to_bits() != checkpoint.impedance.to_bits() {
+            return Err(format!(
+                "transmission-line checkpoint impedance {} does not match {} for '{}'",
+                checkpoint.impedance, self.z0, self.name
+            ));
+        }
+        if self.txl.is_some() || self.distributed_rlc.is_some() || self.distributed_rc.is_some() {
+            return Err(format!(
+                "transmission line '{}': refusing to inject lossless history into a distributed LTRA/TXL runtime",
+                self.name
+            ));
+        }
+
+        self.reset();
+        self.initial_state = checkpoint.initial_state.map(Self::sample_from_checkpoint);
+        self.history_initialized = checkpoint.history_initialized;
+        for sample in checkpoint.state_history.iter().copied() {
+            let sample = Self::sample_from_checkpoint(sample);
+            self.state_history.push_back(sample);
+        }
+        self.history_forward
+            .restore_checkpoint_samples(&checkpoint.forward_history)?;
+        self.history_backward
+            .restore_checkpoint_samples(&checkpoint.backward_history)?;
+        self.launched_forward = checkpoint.launched_forward;
+        self.launched_backward = checkpoint.launched_backward;
+        self.current_time = checkpoint.current_time;
+        self.distributed_rlc_cache.set(None);
+        Ok(())
+    }
+
     #[inline]
     fn quadratic_interp_coefficients(
         t: Value,
@@ -1479,6 +1736,71 @@ mod tests {
             (actual - expected).abs() < 1.0e-12,
             "expected {expected}, got {actual}"
         );
+    }
+
+    #[test]
+    fn lossless_checkpoint_round_trip_preserves_delayed_wave_history() {
+        let mut original = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 10.0);
+        for sample in [
+            (0.0, 0.0, 0.0, 0.0, 0.0),
+            (4.0, 2.0, 0.03, -1.0, 0.02),
+            (8.0, -0.5, -0.01, 1.5, -0.02),
+            (12.0, 3.0, 0.04, -2.0, 0.01),
+            (16.0, -1.0, 0.02, 0.5, -0.03),
+            (20.0, 1.25, -0.02, 2.0, 0.01),
+        ] {
+            original.update_history(sample.0, sample.1, sample.2, sample.3, sample.4);
+        }
+        let checkpoint = original
+            .checkpoint_state()
+            .expect("ordinary lossless line is checkpointable");
+        let expected_snapshot = checkpoint.clone();
+        assert!(
+            checkpoint.state_history[0][0] > 0.0,
+            "the fixture must age out a predecessor so the oldest retained Hermite slope is not reconstructible"
+        );
+        let expected_response = original.transient_port_response(24.0);
+        let expected_buffer_response = original.delayed_forward_at(14.5);
+
+        let mut restored = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 10.0);
+        restored
+            .restore_checkpoint_state(&checkpoint)
+            .expect("validated lossless history restores");
+
+        assert_eq!(
+            restored.checkpoint_state().unwrap(),
+            expected_snapshot,
+            "restored physical history must be bit-exact"
+        );
+        let actual_response = restored.transient_port_response(24.0);
+        assert_eq!(
+            actual_response.i_eq_port1().to_bits(),
+            expected_response.i_eq_port1().to_bits()
+        );
+        assert_eq!(
+            actual_response.i_eq_port2().to_bits(),
+            expected_response.i_eq_port2().to_bits()
+        );
+        assert_eq!(
+            restored.delayed_forward_at(14.5).to_bits(),
+            expected_buffer_response.to_bits(),
+            "the oldest retained Hermite slope must survive the round trip"
+        );
+    }
+
+    #[test]
+    fn transmission_line_checkpoint_rejects_incomplete_or_wrong_runtime_state() {
+        let mut lossless = lossless_line(&[(0.0, 0.0), (1.0, 1.0)]);
+        let mut checkpoint = lossless.checkpoint_state().unwrap();
+        checkpoint.state_history[1][0] = checkpoint.state_history[0][0];
+        assert!(lossless.restore_checkpoint_state(&checkpoint).is_err());
+
+        let distributed = distributed_line(&[(0.0, 0.0), (1.0, 1.0)]);
+        assert!(distributed.checkpoint_state().is_err());
+
+        let valid = lossless.checkpoint_state().unwrap();
+        lossless.name = "T2".to_string();
+        assert!(lossless.restore_checkpoint_state(&valid).is_err());
     }
 
     #[test]

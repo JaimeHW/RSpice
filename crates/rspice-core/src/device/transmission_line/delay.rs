@@ -60,6 +60,55 @@ impl DelayBuffer {
         }
     }
 
+    /// Capture the interpolation state retained by this delay buffer.
+    ///
+    /// The slope on the oldest retained sample can depend on a predecessor
+    /// that has already aged out of `data`, so it cannot be reconstructed from
+    /// the remaining time/value pairs. Persisting that slope is necessary for
+    /// a bit-exact continuation at targets near the front of the window.
+    pub(in crate::device::transmission_line) fn checkpoint_samples(&self) -> Vec<[Value; 3]> {
+        self.data
+            .iter()
+            .map(|sample| [sample.time, sample.value, sample.slope])
+            .collect()
+    }
+
+    /// Restore a previously validated interpolation window.
+    pub(in crate::device::transmission_line) fn restore_checkpoint_samples(
+        &mut self,
+        samples: &[[Value; 3]],
+    ) -> Result<(), String> {
+        if samples
+            .iter()
+            .any(|sample| !sample.iter().all(|value| value.is_finite()) || sample[0] < 0.0)
+        {
+            return Err(
+                "transmission-line delay checkpoint samples must be finite with non-negative times"
+                    .to_string(),
+            );
+        }
+        if samples
+            .windows(2)
+            .any(|window| window[1][0] <= window[0][0])
+        {
+            return Err(
+                "transmission-line delay checkpoint times must be strictly increasing".to_string(),
+            );
+        }
+
+        self.clear();
+        self.data.extend(samples.iter().map(|sample| Sample {
+            time: sample[0],
+            value: sample[1],
+            slope: sample[2],
+        }));
+        if let Some(last) = self.data.back() {
+            self.prev_time = last.time;
+            self.prev_value = last.value;
+        }
+        Ok(())
+    }
+
     /// Get interpolated value at time (time - delay) using cubic Hermite spline
     ///
     /// Cubic Hermite provides C1 continuity and better preserves:

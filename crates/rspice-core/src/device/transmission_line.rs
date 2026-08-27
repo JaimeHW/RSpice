@@ -55,6 +55,7 @@ use distributed::{
     distributed_rlc_coefficients, distributed_rlc_max_safe_step,
 };
 pub use line::TransmissionLine;
+pub(crate) use line::TransmissionLineCheckpoint;
 pub use lossy::LossyTransmissionLine;
 pub(crate) use response::TlineTransientResponse;
 pub(crate) use txl::TxlTransientStamp;

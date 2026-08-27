@@ -898,6 +898,7 @@ impl Engine {
         abstol: Value,
         dynamic_breakpoints_added: &mut usize,
         warned_dynamic_breakpoint_cap: &mut bool,
+        pending_dynamic_breakpoints: &mut Vec<Value>,
     ) {
         if !Self::wave_event_exceeds_tolerance(previous_wave, current_wave, reltol, abstol) {
             return;
@@ -925,6 +926,7 @@ impl Engine {
 
         if breakpoints.add(arrival) {
             *dynamic_breakpoints_added += 1;
+            pending_dynamic_breakpoints.push(arrival);
             if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS
                 && !*warned_dynamic_breakpoint_cap
             {
@@ -945,6 +947,7 @@ impl Engine {
         tstop: Value,
         dynamic_breakpoints_added: &mut usize,
         warned_dynamic_breakpoint_cap: &mut bool,
+        pending_dynamic_breakpoints: &mut Vec<Value>,
     ) {
         if !(arrival.is_finite() && arrival >= 0.0 && arrival <= tstop) {
             return;
@@ -964,6 +967,7 @@ impl Engine {
 
         if breakpoints.add(arrival) {
             *dynamic_breakpoints_added += 1;
+            pending_dynamic_breakpoints.push(arrival);
             if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS
                 && !*warned_dynamic_breakpoint_cap
             {
