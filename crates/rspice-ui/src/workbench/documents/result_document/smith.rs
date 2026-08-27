@@ -238,17 +238,47 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 
     // Γ-plane component arrays per trace, cached per data version.
+    //
+    // The cache and the traces live in disjoint halves of the session, so the
+    // arrays are built by reference. Copying the loci out first — to release
+    // the borrow — meant every frame paid for a full copy of every visible
+    // trace's points before finding out the cache already held them.
+    //
+    // The key carries the cache's owning result as well as the trace ordinal:
+    // selecting another analysis of the same run reloads the loci without
+    // moving the data version, and a bare ordinal would hand the new
+    // selection the previous one's coefficients.
+    let owner = state
+        .active_specialized_viewer_cache_provenance()
+        .map_or(0, |provenance| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            provenance.dataset_id.hash(&mut hasher);
+            match provenance.analysis_identity {
+                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::Prepared(id) => {
+                    id.hash(&mut hasher);
+                }
+                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::LegacyResultId(
+                    id,
+                ) => id.hash(&mut hasher),
+            }
+            hasher.finish()
+        });
     let mut arrays = Vec::new();
-    for &index in &visible {
-        let points = smith.traces[index].points.clone();
+    {
+        let smith = &state.analysis.smith_chart_state;
         let derived = &mut state.ui.results.derived;
-        let re = derived.get_or(0x501_0000 | (index as u64) << 8, || {
-            std::sync::Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
-        });
-        let im = derived.get_or(0x501_0001 | (index as u64) << 8, || {
-            std::sync::Arc::new(points.iter().map(|p| p.s.im).collect::<Vec<_>>())
-        });
-        arrays.push((index, re, im));
+        for &index in &visible {
+            let points = &smith.traces[index].points;
+            let key = owner ^ ((index as u64) << 8);
+            let re = derived.get_or(key ^ 0x501_0000, || {
+                std::sync::Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
+            });
+            let im = derived.get_or(key ^ 0x501_0001, || {
+                std::sync::Arc::new(points.iter().map(|p| p.s.im).collect::<Vec<_>>())
+            });
+            arrays.push((index, re, im));
+        }
     }
 
     let smith = &state.analysis.smith_chart_state;
@@ -689,5 +719,108 @@ mod tests {
         assert!(change.reset);
         assert!(change.x.is_none());
         assert!(change.y.is_none());
+    }
+
+    /// A retained S-parameter analysis whose S11 locus is `values`.
+    fn sparam_analysis(
+        id: u64,
+        label: &str,
+        values: &[(f64, f64)],
+    ) -> crate::state::AnalysisResult {
+        let x: Vec<f64> = (0..values.len())
+            .map(|index| 1.0e9 * (index as f64 + 1.0))
+            .collect();
+        let waveform = crate::state::WaveformData::new(
+            "S11",
+            x.clone(),
+            values.iter().map(|(re, _)| *re).collect::<Vec<_>>(),
+            "#0af",
+        )
+        .with_complex_components(
+            "S11",
+            values.iter().map(|(re, _)| *re).collect::<Vec<_>>(),
+            values.iter().map(|(_, im)| *im).collect::<Vec<_>>(),
+        );
+        crate::state::AnalysisResult::new(id, crate::state::AnalysisType::SParameter, label)
+            .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::SParameter {
+                reference_impedances_ohm: vec![50.0, 50.0],
+            })
+            .with_waveforms(vec![waveform])
+    }
+
+    fn draw(state: &mut AppState) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 700.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, state));
+            },
+        );
+    }
+
+    /// The Γ-component arrays are cached, and the cache belongs to the result
+    /// that filled it. Selecting another analysis of the same run reloads the
+    /// loci without moving the data version, so a cache keyed only by trace
+    /// ordinal would draw the previous analysis' coefficients under the new
+    /// one's name.
+    #[test]
+    fn the_gamma_arrays_belong_to_the_analysis_that_filled_them() {
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(sparam_analysis(1, "SP low", &[(0.1, 0.0), (0.2, 0.1)]));
+        run.add_analysis(sparam_analysis(2, "SP high", &[(-0.6, 0.3), (-0.5, 0.4)]));
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        assert!(state.simulation.select_analysis(0));
+
+        assert!(synchronize_active_analysis(&mut state));
+        draw(&mut state);
+        let first = state.analysis.smith_chart_state.traces[0].points[0].s.re;
+        assert!((first - 0.1).abs() < 1.0e-12, "{first}");
+
+        assert!(state.simulation.select_analysis(1));
+        assert!(synchronize_active_analysis(&mut state));
+        draw(&mut state);
+        let second = state.analysis.smith_chart_state.traces[0].points[0].s.re;
+        assert!((second + 0.6).abs() < 1.0e-12, "{second}");
+
+        // The cached component array has to have moved with the selection.
+        let owner = state
+            .active_specialized_viewer_cache_provenance()
+            .expect("the reloaded cache names its owner");
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        {
+            use std::hash::Hash as _;
+            owner.dataset_id.hash(&mut hasher);
+            match owner.analysis_identity {
+                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::Prepared(id) => {
+                    id.hash(&mut hasher);
+                }
+                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::LegacyResultId(
+                    id,
+                ) => id.hash(&mut hasher),
+            }
+        }
+        let key = {
+            use std::hash::Hasher as _;
+            hasher.finish()
+        };
+        let cached = state
+            .ui
+            .results
+            .derived
+            .get_or(key ^ 0x501_0000, || std::sync::Arc::new(Vec::new()));
+        assert_eq!(
+            cached.first().copied(),
+            Some(-0.6),
+            "the sheet drew the previous analysis' coefficients"
+        );
     }
 }
