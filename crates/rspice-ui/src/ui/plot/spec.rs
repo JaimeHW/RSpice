@@ -110,8 +110,11 @@ impl Axis {
                 for (value, label) in &mut self.ticks {
                     *label = tick_offset_label((*value - anchor) * scale, display_step);
                 }
-                self.offset_anchor =
-                    Some(offset_anchor_label(display(anchor), &self.unit, display_step));
+                self.offset_anchor = Some(offset_anchor_label(
+                    display(anchor),
+                    &self.unit,
+                    display_step,
+                ));
             }
             None => {
                 for (value, label) in &mut self.ticks {

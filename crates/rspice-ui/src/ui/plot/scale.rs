@@ -237,10 +237,7 @@ pub fn minor_grid_values(scale: XScale, ticks: &[(f64, String)], min: f64, max: 
                 let base = 10f64.powi(decade);
                 for mantissa in 2..=9 {
                     let value = f64::from(mantissa) * base;
-                    if value > min
-                        && value < max
-                        && !ticks.iter().any(|(tick, _)| *tick == value)
-                    {
+                    if value > min && value < max && !ticks.iter().any(|(tick, _)| *tick == value) {
                         values.push(value);
                     }
                 }
@@ -350,10 +347,7 @@ mod tests {
                 let (min, max) = (center - span * 0.5, center + span * 0.5);
                 let rendered = labels(min, max, 6);
                 for pair in rendered.windows(2) {
-                    assert_ne!(
-                        pair[0], pair[1],
-                        "[{min:e}, {max:e}] rendered {rendered:?}"
-                    );
+                    assert_ne!(pair[0], pair[1], "[{min:e}, {max:e}] rendered {rendered:?}");
                 }
             }
         }
@@ -380,7 +374,10 @@ mod tests {
         assert!(!log_labels(1.0e6, 1.9e6).is_empty());
         assert_eq!(log_labels(2.0e3, 9.0e3).len(), 8);
         // Between one and two decades the mantissa ladder thins to 1–2–5.
-        assert_eq!(log_labels(1.0e3, 2.0e4), vec!["1k", "2k", "5k", "10k", "20k"]);
+        assert_eq!(
+            log_labels(1.0e3, 2.0e4),
+            vec!["1k", "2k", "5k", "10k", "20k"]
+        );
     }
 
     /// The property behind it: a log axis is never tickless for a finite,

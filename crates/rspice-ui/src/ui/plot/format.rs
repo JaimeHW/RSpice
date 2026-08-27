@@ -43,7 +43,11 @@ fn si_prefix(index: i32) -> &'static str {
 /// rounding the value did not already have.
 fn si_scaled(value: f64, index: i32) -> f64 {
     let factor = 10f64.powi(3 * index.abs());
-    if index >= 0 { value / factor } else { value * factor }
+    if index >= 0 {
+        value / factor
+    } else {
+        value * factor
+    }
 }
 
 /// Engineering ladder index: mantissa in 1‥1000.

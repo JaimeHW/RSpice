@@ -495,10 +495,7 @@ pub fn show(
         let (left, right) = (mx(band.x0), mx(band.x1));
         let band_rect = Rect::from_min_max(
             pos2(left.min(right).max(plot_rect.left()), plot_rect.top()),
-            pos2(
-                left.max(right).min(plot_rect.right()),
-                plot_rect.bottom(),
-            ),
+            pos2(left.max(right).min(plot_rect.right()), plot_rect.bottom()),
         );
         if band_rect.width() > 0.0 && band_rect.is_finite() {
             inside.rect_filled(band_rect, 0.0, c.accent_dim.gamma_multiply(0.4));
@@ -545,9 +542,9 @@ pub fn show(
         .unwrap_or_else(|| spec.y.unit.clone());
     let y_chrome = (!y_chrome.is_empty())
         .then(|| painter.layout_no_wrap(y_chrome, tick_font.clone(), c.text_dim));
-    let y_chrome_bottom = y_chrome
-        .as_ref()
-        .map_or(f32::NEG_INFINITY, |galley| rect.top() + 8.0 + galley.size().y * 0.5);
+    let y_chrome_bottom = y_chrome.as_ref().map_or(f32::NEG_INFINITY, |galley| {
+        rect.top() + 8.0 + galley.size().y * 0.5
+    });
     let mut last_label_right = f32::NEG_INFINITY;
     if spec.x_axis_chrome
         && let Some(anchor) = &spec.x.offset_anchor
@@ -624,7 +621,10 @@ pub fn show(
             4.0,
         ));
         inside.text(
-            pos2(plot_rect.right() - 4.0, (py - 3.0).max(plot_rect.top() + 11.0)),
+            pos2(
+                plot_rect.right() - 4.0,
+                (py - 3.0).max(plot_rect.top() + 11.0),
+            ),
             Align2::RIGHT_BOTTOM,
             &line.label,
             theme::mono(9.0, FontWeight::Medium),
@@ -1420,7 +1420,8 @@ mod tests {
             XScale::Linear,
             Axis::linear(min, max, "V"),
         );
-        spec.traces.push(Trace::new(x, y, egui::Color32::WHITE).cache_key(1));
+        spec.traces
+            .push(Trace::new(x, y, egui::Color32::WHITE).cache_key(1));
         spec
     }
 
@@ -1461,8 +1462,12 @@ mod tests {
         for (x, y, min, max) in cases {
             let spec = degenerate_spec(&x, &y, min, max);
             let (shapes, _) = plot_frames(&spec, vec2(320.0, 200.0), &[Vec::new()]);
-            assert!(shapes.iter().all(|clipped| clipped.shape.visual_bounding_rect().is_finite()
-                || clipped.shape.visual_bounding_rect().is_negative()));
+            assert!(
+                shapes
+                    .iter()
+                    .all(|clipped| clipped.shape.visual_bounding_rect().is_finite()
+                        || clipped.shape.visual_bounding_rect().is_negative())
+            );
         }
     }
 
@@ -1512,8 +1517,10 @@ mod tests {
             Axis::linear(0.0, 1.0, "V"),
         );
         spec.traces.push(Trace::new(&x, &y, egui::Color32::WHITE));
-        spec.bands.push(super::super::spec::Band { x0: -4.0, x1: -2.0 });
-        spec.bands.push(super::super::spec::Band { x0: 0.4, x1: 3.0 });
+        spec.bands
+            .push(super::super::spec::Band { x0: -4.0, x1: -2.0 });
+        spec.bands
+            .push(super::super::spec::Band { x0: 0.4, x1: 3.0 });
         let size = vec2(420.0, 260.0);
         let plot = inner_rect(Rect::from_min_size(pos2(0.0, 0.0), size), &spec);
         let (shapes, _) = plot_frames(&spec, size, &[Vec::new()]);
@@ -1608,7 +1615,10 @@ mod tests {
             "the gesture never reached the zoom box: {zoomed:?}"
         );
         let selected = outcome(InteractionMode::Select);
-        assert!(!selected.any(), "Select mode changed the view: {selected:?}");
+        assert!(
+            !selected.any(),
+            "Select mode changed the view: {selected:?}"
+        );
     }
 
     /// Markers follow the curve, not the abscissa. On a locus the X walk
@@ -1657,10 +1667,7 @@ mod tests {
         assert_eq!(floored_span((-1.0, 2.0), XScale::Log10), None);
         assert_eq!(floored_span((f64::NAN, 1.0), XScale::Linear), None);
         // An ordinary range passes through untouched.
-        assert_eq!(
-            floored_span((0.0, 1.0), XScale::Linear),
-            Some((0.0, 1.0))
-        );
+        assert_eq!(floored_span((0.0, 1.0), XScale::Linear), Some((0.0, 1.0)));
     }
 
     #[test]

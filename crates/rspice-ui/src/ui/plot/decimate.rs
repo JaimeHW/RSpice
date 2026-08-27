@@ -694,7 +694,15 @@ mod tests {
     fn small_data_passes_through() {
         let x: Vec<f64> = (0..10).map(|i| i as f64).collect();
         let y: Vec<f64> = (0..10).map(|i| (i * i) as f64).collect();
-        let env = decimate_minmax(&x, &y, 0.0, 9.0, XScale::Linear, 100, XOrientation::Ascending);
+        let env = decimate_minmax(
+            &x,
+            &y,
+            0.0,
+            9.0,
+            XScale::Linear,
+            100,
+            XOrientation::Ascending,
+        );
         assert_eq!(env.len(), 10);
     }
 
@@ -703,7 +711,15 @@ mod tests {
         let n = 100_000;
         let x: Vec<f64> = (0..n).map(|i| i as f64 / n as f64).collect();
         let y: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
-        let env = decimate_minmax(&x, &y, 0.0, 1.0, XScale::Linear, 800, XOrientation::Ascending);
+        let env = decimate_minmax(
+            &x,
+            &y,
+            0.0,
+            1.0,
+            XScale::Linear,
+            800,
+            XOrientation::Ascending,
+        );
         assert!(env.len() <= 800 * 2 + 4, "len = {}", env.len());
         // Envelope must preserve the global extremes.
         let max = env.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
@@ -830,9 +846,18 @@ mod tests {
     fn a_descending_sweep_samples_the_mirror_of_its_ascending_twin() {
         let x = [2.0, 1.0, 0.0];
         let y = [20.0, 10.0, 0.0];
-        assert_eq!(sample_at_with(&x, &y, 0.5, SampleInterpolation::Linear), 5.0);
-        assert_eq!(sample_at_with(&x, &y, 2.5, SampleInterpolation::Linear), 20.0);
-        assert_eq!(sample_at_with(&x, &y, -1.0, SampleInterpolation::Linear), 0.0);
+        assert_eq!(
+            sample_at_with(&x, &y, 0.5, SampleInterpolation::Linear),
+            5.0
+        );
+        assert_eq!(
+            sample_at_with(&x, &y, 2.5, SampleInterpolation::Linear),
+            20.0
+        );
+        assert_eq!(
+            sample_at_with(&x, &y, -1.0, SampleInterpolation::Linear),
+            0.0
+        );
         assert_eq!(
             sample_at_with(&x, &y, 0.4, SampleInterpolation::Nearest),
             0.0
@@ -909,7 +934,15 @@ mod tests {
         let x: Vec<f64> = (0..n).map(|i| i as f64 / n as f64).collect();
         let mut y: Vec<f64> = x.iter().map(|v| (v * 30.0).sin()).collect();
         y[2_500] = f64::NAN;
-        let drawn = decimate_minmax(&x, &y, 0.0, 1.0, XScale::Linear, 100, XOrientation::Ascending);
+        let drawn = decimate_minmax(
+            &x,
+            &y,
+            0.0,
+            1.0,
+            XScale::Linear,
+            100,
+            XOrientation::Ascending,
+        );
         assert_eq!(
             drawn
                 .iter()
@@ -1016,9 +1049,7 @@ mod tests {
         );
         assert!(drawn.len() <= view.columns * 2 + 4);
         assert!(
-            drawn
-                .iter()
-                .all(|point| (0.24..=0.36).contains(&point[0])),
+            drawn.iter().all(|point| (0.24..=0.36).contains(&point[0])),
             "reduction left the window"
         );
         // The same data read as ascending is a different reduction, so it
