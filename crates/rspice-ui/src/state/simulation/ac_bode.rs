@@ -7,15 +7,38 @@ use crate::product::AnalysisInstanceId;
 
 use super::{AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, WaveformData};
 
+/// Stability numbers derived from one magnitude/phase pair.
+///
+/// # Conventions
+///
+/// Phase is unwrapped before any margin is measured — see
+/// [`unwrap_retained_phase_deg`] — and the unwrapped branch is anchored at the
+/// lowest swept frequency. Both crossing searches and both reads of a curve at
+/// a located crossing interpolate in log-frequency, so a margin never depends
+/// on which measure the reader happens to think in.
+///
+/// The instability phases are `-180° - 360k` for `k >= 0`: the lag-sense
+/// inversions a loop transmission reaches as it rolls off. Phase margin is the
+/// textbook `180° + ∠L(f_ugf)` against the first of them.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct AcBodeMetrics {
+    /// Gain at the lowest swept frequency. It is the DC gain only when
+    /// [`AcBodeMetrics::adc_is_dc`] is set.
     pub adc_db: Option<f64>,
+    /// Whether the sweep provably starts below every pole, so `adc_db` may be
+    /// presented as the DC gain rather than as `A(f_min)`.
+    pub adc_is_dc: bool,
     pub ugf: Option<f64>,
     pub pm_deg: Option<f64>,
+    /// Frequency of the phase inversion the gain margin was measured at.
     pub f180: Option<f64>,
+    /// Worst-case gain margin over every phase inversion in the swept band.
     pub gm_db: Option<f64>,
     pub f3db: Option<f64>,
     pub gain_extremes: (f64, f64),
+    /// Extremes of the *retained* phase trace, which is what the plot paints
+    /// unless the reader asks for the continuous branch. Margins do not read
+    /// this.
     pub phase_extremes: Option<(f64, f64)>,
 }
 
@@ -153,12 +176,200 @@ pub fn log_frequency_crossing(frequency: &[f64], series: &[f64], level: f64) -> 
             return Some(f1);
         }
         if y0 * y1 < 0.0 {
-            let t = y0 / (y0 - y1);
-            let (l0, l1) = (f0.log10(), f1.log10());
-            return Some(10f64.powf(l0 + t * (l1 - l0)));
+            return Some(interpolate_log_frequency(f0, f1, y0 / (y0 - y1)));
         }
     }
     None
+}
+
+/// The frequency a fraction `t` of the way from `f0` to `f1` measured in
+/// decades. Exact at both ends, so a crossing that lands on a retained sample
+/// reports that sample's own frequency rather than a re-exponentiated copy.
+fn interpolate_log_frequency(f0: f64, f1: f64, t: f64) -> f64 {
+    if t <= 0.0 {
+        return f0;
+    }
+    if t >= 1.0 {
+        return f1;
+    }
+    let (l0, l1) = (f0.log10(), f1.log10());
+    10f64.powf(l0 + t * (l1 - l0))
+}
+
+/// Continuous phase from a retained `(-180°, 180°]` trace.
+///
+/// Retained AC phase is `imag.atan2(real)`, which folds every branch into a
+/// single turn: a response passing -180° does not cross it, it jumps to
+/// +180°. A margin is an angle, not a position relative to that fold, so every
+/// margin in this module is measured on the unwrapped series.
+///
+/// The branch is anchored at the lowest swept frequency, whose sample is
+/// carried through exactly as retained. A response whose true phase has
+/// already passed -180° before its first sample cannot be anchored from the
+/// swept data alone; sweeping from below the dominant pole resolves it.
+///
+/// Non-finite samples pass through and are skipped when measuring jumps, so a
+/// gap in the trace does not poison the running branch offset.
+fn unwrap_retained_phase_deg(phase: &[f64]) -> Vec<f64> {
+    let mut out = Vec::with_capacity(phase.len());
+    let mut offset = 0.0_f64;
+    let mut previous: Option<f64> = None;
+    for &sample in phase {
+        if !sample.is_finite() {
+            out.push(sample);
+            continue;
+        }
+        if let Some(previous) = previous {
+            let jump = sample - previous;
+            if jump.abs() > 180.0 {
+                offset -= 360.0 * (jump / 360.0).round();
+            }
+        }
+        previous = Some(sample);
+        out.push(sample + offset);
+    }
+    out
+}
+
+/// `log10` of the frequency axis, which is the abscissa every interpolation
+/// here works in. A non-positive frequency — never produced by an AC sweep —
+/// maps below every real sample so it can never bracket a query, and the
+/// crossing searches skip its segments outright.
+fn log_frequency_axis(frequency: &[f64]) -> Vec<f64> {
+    frequency
+        .iter()
+        .map(|&f| {
+            if f > 0.0 {
+                f.log10()
+            } else {
+                f64::NEG_INFINITY
+            }
+        })
+        .collect()
+}
+
+/// Read `series` at `frequency` interpolating in log-frequency — the same
+/// measure the crossing searches use to locate that frequency.
+///
+/// Sampling a decade-swept curve linearly in frequency is a large error at
+/// realistic sweep densities: on a `-50°/decade` phase read at a crossing
+/// three-tenths of a decade into a decade-wide interval it is nearly 13°.
+fn sample_at_log_frequency(log_frequency: &[f64], series: &[f64], frequency: f64) -> f64 {
+    crate::ui::plot::sample_at(log_frequency, series, frequency.log10())
+}
+
+/// Phases at which a loop transmission inverts, in the lag sense a rolling-off
+/// response reaches them: -180°, -540°, -900°, …
+fn instability_phases_between(p0: f64, p1: f64) -> impl Iterator<Item = f64> {
+    let (lo, hi) = if p0 <= p1 { (p0, p1) } else { (p1, p0) };
+    // `-180 - 360k` lies in `[lo, hi]` exactly when `k` does. Only `k >= 0`
+    // is reachable by a response anchored inside one turn and rolling off.
+    let k_first = ((-hi - 180.0) / 360.0).ceil().max(0.0);
+    let k_last = ((-lo - 180.0) / 360.0).floor();
+    let count = if k_last >= k_first {
+        (k_last - k_first) as usize + 1
+    } else {
+        0
+    };
+    (0..count).map(move |i| -180.0 - 360.0 * (k_first + i as f64))
+}
+
+/// Every frequency in the swept band at which the unwrapped phase reaches an
+/// instability phase.
+///
+/// A level touched exactly at a retained sample is reported once: each segment
+/// owns its leading endpoint, and the final segment additionally owns its
+/// trailing one.
+fn phase_inversion_frequencies(frequency: &[f64], phase_unwrapped: &[f64]) -> Vec<f64> {
+    let n = frequency.len().min(phase_unwrapped.len());
+    let mut out = Vec::new();
+    for i in 1..n {
+        let (f0, f1) = (frequency[i - 1], frequency[i]);
+        if f0 <= 0.0 || f1 <= 0.0 {
+            continue;
+        }
+        let (p0, p1) = (phase_unwrapped[i - 1], phase_unwrapped[i]);
+        if !p0.is_finite() || !p1.is_finite() {
+            continue;
+        }
+        let owns_trailing_endpoint = i == n - 1;
+        for level in instability_phases_between(p0, p1) {
+            if level == p1 && !owns_trailing_endpoint {
+                continue;
+            }
+            out.push(if p0 == p1 {
+                f0
+            } else {
+                interpolate_log_frequency(f0, f1, (level - p0) / (p1 - p0))
+            });
+        }
+    }
+    out
+}
+
+/// The gain margin the reader has to act on, and the phase inversion it was
+/// measured at.
+///
+/// A response can invert more than once — every conditionally stable loop dips
+/// through -180° above 0 dB and comes back. Reporting the first inversion
+/// would hide the one that matters, so the worst margin wins; ties go to the
+/// inversion nearest unity gain, which is the one the reader is looking at.
+fn worst_case_gain_margin(
+    frequency: &[f64],
+    log_frequency: &[f64],
+    gain_db: &[f64],
+    phase_unwrapped: &[f64],
+    ugf: Option<f64>,
+) -> Option<(f64, f64)> {
+    let reference = ugf.filter(|f| *f > 0.0).map(f64::log10);
+    phase_inversion_frequencies(frequency, phase_unwrapped)
+        .into_iter()
+        .map(|f180| (f180, -sample_at_log_frequency(log_frequency, gain_db, f180)))
+        .min_by(|a, b| {
+            let distance =
+                |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
+            a.1.total_cmp(&b.1)
+                .then_with(|| distance(a.0).total_cmp(&distance(b.0)))
+        })
+}
+
+/// How flat the first swept decade must be for the gain there to be presented
+/// as the DC gain. A single pole held this far out contributes under 0.004 dB
+/// at the lowest swept frequency.
+const DC_FLATNESS_TOLERANCE_DB: f64 = 0.1;
+
+/// Whether the sweep provably starts below every pole.
+///
+/// `gain_db.first()` is the gain at `f_min` and nothing more: a sweep opened
+/// at 1 kHz on a loop with a 10 Hz dominant pole would otherwise report
+/// mid-rolloff gain as the DC gain, and put `f₋₃dB` 3 dB below a number that
+/// was never the DC gain either. The sweep has to span its first decade for
+/// the question to be answerable at all.
+fn low_frequency_gain_is_dc(frequency: &[f64], gain_db: &[f64]) -> bool {
+    let n = frequency.len().min(gain_db.len());
+    if n < 2 {
+        return false;
+    }
+    let f_min = frequency[0];
+    if !(f_min > 0.0) {
+        return false;
+    }
+    let decade_top = f_min * 10.0;
+    if !(frequency[n - 1] >= decade_top) {
+        return false;
+    }
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for i in 0..n {
+        if frequency[i] > decade_top {
+            break;
+        }
+        if !gain_db[i].is_finite() {
+            return false;
+        }
+        lo = lo.min(gain_db[i]);
+        hi = hi.max(gain_db[i]);
+    }
+    hi - lo <= DC_FLATNESS_TOLERANCE_DB
 }
 
 fn select_magnitude_trace(waveforms: &[WaveformData]) -> Option<(usize, &WaveformData)> {
@@ -188,6 +399,7 @@ fn metrics_from_curves(
     let f3db = adc_db.and_then(|adc| log_frequency_crossing(frequency, gain_db, adc - 3.0));
     let mut metrics = AcBodeMetrics {
         adc_db,
+        adc_is_dc: low_frequency_gain_is_dc(frequency, gain_db),
         ugf,
         pm_deg: None,
         f180: None,
@@ -198,12 +410,16 @@ fn metrics_from_curves(
     };
 
     if let Some(phase) = phase_deg {
+        let log_frequency = log_frequency_axis(frequency);
+        let unwrapped = unwrap_retained_phase_deg(phase);
         if let Some(ugf) = metrics.ugf {
-            metrics.pm_deg = Some(180.0 + sample_at(frequency, phase, ugf));
+            metrics.pm_deg = Some(180.0 + sample_at_log_frequency(&log_frequency, &unwrapped, ugf));
         }
-        metrics.f180 = log_frequency_crossing(frequency, phase, -180.0);
-        if let Some(f180) = metrics.f180 {
-            metrics.gm_db = Some(-sample_at(frequency, gain_db, f180));
+        if let Some((f180, gm_db)) =
+            worst_case_gain_margin(frequency, &log_frequency, gain_db, &unwrapped, metrics.ugf)
+        {
+            metrics.f180 = Some(f180);
+            metrics.gm_db = Some(gm_db);
         }
     }
 
@@ -220,27 +436,6 @@ fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
         }
     }
     (lo <= hi).then_some((lo, hi))
-}
-
-fn sample_at(x: &[f64], y: &[f64], xq: f64) -> f64 {
-    let n = x.len().min(y.len());
-    if n == 0 {
-        return 0.0;
-    }
-    if xq <= x[0] {
-        return y[0];
-    }
-    if xq >= x[n - 1] {
-        return y[n - 1];
-    }
-    let hi = x[..n].partition_point(|&value| value < xq).max(1);
-    let lo = hi - 1;
-    let span = x[hi] - x[lo];
-    if span <= 0.0 {
-        return y[lo];
-    }
-    let t = (xq - x[lo]) / span;
-    y[lo] + t * (y[hi] - y[lo])
 }
 
 #[cfg(test)]
@@ -270,6 +465,288 @@ mod tests {
         assert!(
             (actual - expected).abs() < 1.0e-9,
             "expected {expected}, got {actual}"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // Analytic oracles
+    //
+    // Margins are checked against closed-form loop transmissions and against
+    // exactly log-affine synthetic curves, never against a recorded output of
+    // this module. The closed-form crossings are located by bisection on the
+    // analytic response itself, which shares no code with the extraction
+    // under test.
+    // -------------------------------------------------------------------
+
+    /// `L(s) = 10^(k_db/20) / Π(1 + s/pᵢ)` — a real multi-pole loop
+    /// transmission with closed-form magnitude and phase.
+    struct PoleLoop {
+        k_db: f64,
+        poles: &'static [f64],
+    }
+
+    impl PoleLoop {
+        fn gain_db(&self, f: f64) -> f64 {
+            self.k_db
+                - self
+                    .poles
+                    .iter()
+                    .map(|p| 10.0 * (1.0 + (f / p).powi(2)).log10())
+                    .sum::<f64>()
+        }
+
+        fn phase_deg(&self, f: f64) -> f64 {
+            -self
+                .poles
+                .iter()
+                .map(|p| (f / p).atan().to_degrees())
+                .sum::<f64>()
+        }
+
+        /// Bisect in log-frequency for the root of `probe`, which must change
+        /// sign exactly once over `[lo, hi]`.
+        fn bisect(&self, lo: f64, hi: f64, probe: impl Fn(&Self, f64) -> f64) -> f64 {
+            let (mut l, mut h) = (lo.log10(), hi.log10());
+            assert!(
+                probe(self, 10f64.powf(l)) * probe(self, 10f64.powf(h)) < 0.0,
+                "oracle bracket does not straddle the root"
+            );
+            for _ in 0..200 {
+                let m = 0.5 * (l + h);
+                if probe(self, 10f64.powf(l)) * probe(self, 10f64.powf(m)) <= 0.0 {
+                    h = m;
+                } else {
+                    l = m;
+                }
+            }
+            10f64.powf(0.5 * (l + h))
+        }
+
+        fn unity_gain(&self, lo: f64, hi: f64) -> f64 {
+            self.bisect(lo, hi, |loop_, f| loop_.gain_db(f))
+        }
+
+        fn phase_crossing(&self, level: f64, lo: f64, hi: f64) -> f64 {
+            self.bisect(lo, hi, move |loop_, f| loop_.phase_deg(f) - level)
+        }
+    }
+
+    fn decade_sweep(f0: f64, f1: f64, per_decade: usize) -> Vec<f64> {
+        let (l0, l1) = (f0.log10(), f1.log10());
+        let steps = ((l1 - l0) * per_decade as f64).round() as usize;
+        (0..=steps)
+            .map(|i| 10f64.powf(l0 + (l1 - l0) * i as f64 / steps as f64))
+            .collect()
+    }
+
+    /// The exact range `imag.atan2(real).to_degrees()` produces: `(-180, 180]`.
+    fn wrap_deg(phase: f64) -> f64 {
+        let wrapped = (phase + 180.0).rem_euclid(360.0) - 180.0;
+        if wrapped == -180.0 { 180.0 } else { wrapped }
+    }
+
+    /// Build the retained trace pair exactly as `results_convert` does: linear
+    /// magnitude under `|…|`, and a `(-180, 180]`-wrapped phase.
+    fn wrapped_response(frequency: &[f64], gain_db: &[f64], phase_deg: &[f64]) -> AnalysisResult {
+        let magnitude = gain_db
+            .iter()
+            .map(|db| 10f64.powf(db / 20.0))
+            .collect::<Vec<_>>();
+        let wrapped = phase_deg.iter().copied().map(wrap_deg).collect::<Vec<_>>();
+        ac_analysis(vec![
+            wave("|V(out)|", frequency, &magnitude, true),
+            wave("phase(V(out))", frequency, &wrapped, true),
+        ])
+    }
+
+    fn loop_response(loop_: &PoleLoop, frequency: &[f64]) -> AnalysisResult {
+        let gain = frequency
+            .iter()
+            .map(|&f| loop_.gain_db(f))
+            .collect::<Vec<_>>();
+        let phase = frequency
+            .iter()
+            .map(|&f| loop_.phase_deg(f))
+            .collect::<Vec<_>>();
+        wrapped_response(frequency, &gain, &phase)
+    }
+
+    #[track_caller]
+    fn assert_within(actual: Option<f64>, expected: f64, tolerance: f64, what: &str) {
+        let actual = actual.unwrap_or_else(|| panic!("{what} was not reported at all"));
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{what}: expected {expected}, got {actual} (tolerance {tolerance})"
+        );
+    }
+
+    #[track_caller]
+    fn assert_relative(actual: Option<f64>, expected: f64, tolerance: f64, what: &str) {
+        let actual = actual.unwrap_or_else(|| panic!("{what} was not reported at all"));
+        let error = (actual - expected).abs() / expected.abs();
+        assert!(
+            error <= tolerance,
+            "{what}: expected {expected}, got {actual} (relative error {error:e})"
+        );
+    }
+
+    /// A two-pole loop can never reach -180°, so it has no gain margin at all.
+    /// Reporting one would be an invention; the unity-gain frequency and phase
+    /// margin still have to match the closed form.
+    #[test]
+    fn two_pole_loop_matches_closed_form_and_reports_no_gain_margin() {
+        let loop_ = PoleLoop {
+            k_db: 80.0,
+            poles: &[10.0, 2.0e4],
+        };
+        let frequency = decade_sweep(1.0, 1.0e7, 10);
+        let analysis = loop_response(&loop_, &frequency);
+
+        let ugf = loop_.unity_gain(1.0, 1.0e7);
+        let pm = 180.0 + loop_.phase_deg(ugf);
+
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+
+        assert_relative(metrics.ugf, ugf, 5.0e-3, "unity-gain frequency");
+        assert_within(metrics.pm_deg, pm, 0.5, "phase margin");
+        assert_eq!(metrics.f180, None, "a two-pole loop never reaches -180°");
+        assert_eq!(
+            metrics.gm_db, None,
+            "no -180° crossing means no gain margin"
+        );
+    }
+
+    /// The headline case. A three-pole loop's phase passes -180° between two
+    /// samples, so the retained wrapped trace jumps from ≈-180° to ≈+180°.
+    /// f₁₈₀ and the gain margin exist and must be found.
+    #[test]
+    fn three_pole_loop_recovers_margins_across_the_wrapped_phase_jump() {
+        let loop_ = PoleLoop {
+            k_db: 60.0,
+            poles: &[10.0, 1.0e4, 1.0e5],
+        };
+        let frequency = decade_sweep(1.0, 1.0e7, 10);
+        let analysis = loop_response(&loop_, &frequency);
+
+        let ugf = loop_.unity_gain(1.0, 1.0e7);
+        let pm = 180.0 + loop_.phase_deg(ugf);
+        let f180 = loop_.phase_crossing(-180.0, 1.0e3, 1.0e6);
+        let gm = -loop_.gain_db(f180);
+
+        let summary = ac_bode_summary_for_analysis(&analysis, 0).expect("AC summary");
+        // The retained trace really does wrap: this is what the extraction has
+        // to see through.
+        let phase = summary.phase_deg.as_ref().expect("phase trace");
+        assert!(
+            phase.windows(2).any(|w| (w[1] - w[0]).abs() > 180.0),
+            "the oracle trace must contain a wrapped jump"
+        );
+        let metrics = summary.metrics;
+
+        assert_relative(metrics.ugf, ugf, 5.0e-3, "unity-gain frequency");
+        assert_within(metrics.pm_deg, pm, 0.5, "phase margin");
+        assert_relative(metrics.f180, f180, 5.0e-3, "f180");
+        assert_within(metrics.gm_db, gm, 0.1, "gain margin");
+    }
+
+    /// The same defect with every interpolation error removed: both curves are
+    /// exactly affine in log-frequency, so log-consistent extraction is exact
+    /// to machine precision. The wrap sits between the second and third
+    /// samples, and the true response is unstable — a reading of "stable"
+    /// here is the failure this pins.
+    #[test]
+    fn wrapped_jump_between_samples_yields_the_exact_unstable_margins() {
+        // slope -80°/decade, -15 dB/decade
+        let frequency = [1.0e2, 1.0e3, 1.0e4, 1.0e5];
+        let gain_db = [20.0, 5.0, -10.0, -25.0];
+        let phase_deg = [-90.0, -170.0, -250.0, -330.0];
+        let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+
+        // gain = 0 dB at log10 f = 3 + 5/15
+        assert_relative(metrics.ugf, 10f64.powf(3.0 + 1.0 / 3.0), 1.0e-12, "UGF");
+        // phase at UGF = -170 - 80/3, so the loop is unstable by 16.7°.
+        assert_within(metrics.pm_deg, 180.0 - 170.0 - 80.0 / 3.0, 1.0e-9, "PM");
+        // phase = -180° at log10 f = 3 + 10/80
+        assert_relative(metrics.f180, 10f64.powf(3.125), 1.0e-12, "f180");
+        // gain at f180 = 5 - 15/8
+        assert_within(metrics.gm_db, -(5.0 - 15.0 / 8.0), 1.0e-9, "GM");
+    }
+
+    /// Phase and gain are read at the located crossings the same way the
+    /// crossings themselves are located: log-in-frequency. A linear-in-
+    /// frequency read of a log-affine curve is wrong by a fixed, large amount.
+    #[test]
+    fn crossing_samples_are_read_log_consistently_with_the_crossing_search() {
+        // -20 dB/decade, -50°/decade, no wrap anywhere in range.
+        let frequency = [1.0e2, 1.0e3, 1.0e4, 1.0e5];
+        let gain_db = [30.0, 10.0, -10.0, -30.0];
+        let phase_deg = [-20.0, -70.0, -120.0, -170.0];
+        let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+
+        // gain = 0 dB at log10 f = 3.5, where the phase is exactly -95°.
+        assert_relative(metrics.ugf, 10f64.powf(3.5), 1.0e-12, "UGF");
+        assert_within(metrics.pm_deg, 85.0, 1.0e-9, "PM");
+        assert_eq!(metrics.f180, None, "the phase never reaches -180°");
+    }
+
+    /// A conditionally stable loop dips below -180° while the gain is still
+    /// above 0 dB and comes back. Every -180° crossing is a real one; the card
+    /// reports the worst case, and f₁₈₀ names that same crossing.
+    #[test]
+    fn conditionally_stable_loop_reports_the_worst_case_gain_margin() {
+        let frequency = [1.0, 1.0e1, 1.0e2, 1.0e3, 1.0e4, 1.0e5];
+        let gain_db = [40.0, 30.0, 20.0, 10.0, 0.0, -10.0];
+        let phase_deg = [-100.0, -160.0, -220.0, -220.0, -160.0, -260.0];
+        let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+
+        // Three -180° crossings: 10^(4/3) (gain +26.67 dB), 10^(11/3)
+        // (+3.33 dB) and 10^4.2 (-2 dB). The worst margin is the first.
+        assert_relative(metrics.ugf, 1.0e4, 1.0e-12, "UGF");
+        assert_within(metrics.pm_deg, 20.0, 1.0e-9, "PM");
+        assert_relative(metrics.f180, 10f64.powf(4.0 / 3.0), 1.0e-12, "f180");
+        assert_within(metrics.gm_db, -(30.0 - 10.0 / 3.0), 1.0e-9, "GM");
+    }
+
+    /// `gain_db.first()` is the gain at the first swept frequency. It is only
+    /// the DC gain when the sweep provably starts flat.
+    #[test]
+    fn low_frequency_gain_claims_dc_only_when_the_first_decade_is_flat() {
+        let loop_ = PoleLoop {
+            k_db: 60.0,
+            poles: &[10.0],
+        };
+
+        let below_pole = decade_sweep(1.0e-2, 1.0e4, 10);
+        let flat = ac_bode_summary_for_analysis(&loop_response(&loop_, &below_pole), 0)
+            .expect("AC summary")
+            .metrics;
+        assert!(
+            flat.adc_is_dc,
+            "a sweep starting two decades below the pole is flat over its first decade"
+        );
+        assert_within(flat.adc_db, 60.0, 1.0e-3, "A_dc");
+
+        let above_pole = decade_sweep(1.0e3, 1.0e6, 10);
+        let rolled_off = ac_bode_summary_for_analysis(&loop_response(&loop_, &above_pole), 0)
+            .expect("AC summary")
+            .metrics;
+        assert!(
+            !rolled_off.adc_is_dc,
+            "a sweep starting two decades above the pole is mid-rolloff, not DC"
         );
     }
 
