@@ -480,6 +480,11 @@ fn histogram_bins_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
 /// A measurement that could not be made exports as an empty cell, not as a
 /// zero: a spreadsheet that averages a column of rise times must not be handed
 /// a `0 s` that no acquisition contains.
+///
+/// An *unbounded* measurement keeps its value and exports as `inf`. The Q and
+/// SNR of a noiseless eye are unbounded, which is an answer — the sheet prints
+/// `∞` for them — and blanking it here would tell a reader the eye had no Q at
+/// all, which is the one thing an empty cell in this column means.
 fn csv_measurement(value: Option<f64>) -> String {
     value.map_or_else(String::new, |value| format!("{value:.17e}"))
 }
