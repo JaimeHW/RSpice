@@ -411,12 +411,18 @@ impl<'a> Parser<'a> {
             return Ok(CalculatorExpr::wave(&signal_name));
         }
 
-        // 2. Constants
-        if upper_name == "TIME" {
-            return Ok(CalculatorExpr::Constant(CalculatorConstant::Time));
-        }
-        if upper_name == "FREQ" {
-            return Ok(CalculatorExpr::Constant(CalculatorConstant::Frequency));
+        // 2. Constants — but only where the name stands alone. `freq` is the
+        //    AC sweep's own axis; `freq(V(out))` is the measurement function
+        //    that reports a signal's repetition rate, and the parenthesis
+        //    that follows is what tells the two apart. Claiming the constant
+        //    first made every `freq(...)` call a syntax error.
+        if !matches!(self.current.token, Token::LParen) {
+            if upper_name == "TIME" {
+                return Ok(CalculatorExpr::Constant(CalculatorConstant::Time));
+            }
+            if upper_name == "FREQ" {
+                return Ok(CalculatorExpr::Constant(CalculatorConstant::Frequency));
+            }
         }
 
         // 3. Function Calls
@@ -544,6 +550,33 @@ mod tests {
                 "{text} still divides"
             );
         }
+    }
+
+    #[test]
+    fn a_domain_name_followed_by_a_parenthesis_is_a_function_call() {
+        // Bare, these name the sweep's own axis.
+        assert_eq!(
+            try_parse("freq").unwrap(),
+            CalculatorExpr::Constant(CalculatorConstant::Frequency)
+        );
+        assert_eq!(
+            try_parse("TIME").unwrap(),
+            CalculatorExpr::Constant(CalculatorConstant::Time)
+        );
+
+        // Called, they are the measurement functions of the same name.
+        assert_eq!(
+            try_parse("freq(V(out))").unwrap(),
+            CalculatorExpr::func("freq", vec![CalculatorExpr::wave("V(out)")])
+        );
+        assert_eq!(
+            try_parse("2 * freq(V(out))").unwrap(),
+            CalculatorExpr::binary(
+                BinaryOp::Mul,
+                CalculatorExpr::Number(2.0),
+                CalculatorExpr::func("freq", vec![CalculatorExpr::wave("V(out)")]),
+            )
+        );
     }
 
     #[test]
