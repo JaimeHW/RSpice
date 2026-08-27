@@ -346,6 +346,13 @@ const DC_FLATNESS_TOLERANCE_DB: f64 = 0.1;
 /// was never the DC gain either. The sweep has to span its first decade for
 /// the question to be answerable at all.
 ///
+/// Spanning the decade is not the same as sampling it. A `lin` sweep — what
+/// the STB, PAC, PNOISE and PXF dialogs emit — is spaced evenly in frequency,
+/// so 100 points from 1 kHz to 1 MHz put a single sample in `[1 kHz, 10 kHz]`
+/// and the rest above it. A window holding one sample compares that gain
+/// against itself and finds it flat, which is the false DC claim the span
+/// check exists to stop. Flatness needs two gains to be flat *between*.
+///
 /// The first decade is read in source order, which an AC sweep always emits
 /// ascending. A descending axis simply fails the span check and reports `A`
 /// as measured — the conservative answer, never a false claim of DC.
@@ -363,6 +370,7 @@ fn low_frequency_gain_is_dc(frequency: &[f64], gain_db: &[f64]) -> bool {
         return false;
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut sampled = 0usize;
     for i in 0..n {
         if frequency[i] > decade_top {
             break;
@@ -370,10 +378,11 @@ fn low_frequency_gain_is_dc(frequency: &[f64], gain_db: &[f64]) -> bool {
         if !gain_db[i].is_finite() {
             return false;
         }
+        sampled += 1;
         lo = lo.min(gain_db[i]);
         hi = hi.max(gain_db[i]);
     }
-    hi - lo <= DC_FLATNESS_TOLERANCE_DB
+    sampled >= 2 && hi - lo <= DC_FLATNESS_TOLERANCE_DB
 }
 
 fn select_magnitude_trace(waveforms: &[WaveformData]) -> Option<(usize, &WaveformData)> {
@@ -540,6 +549,14 @@ mod tests {
         let steps = ((l1 - l0) * per_decade as f64).round() as usize;
         (0..=steps)
             .map(|i| 10f64.powf(l0 + (l1 - l0) * i as f64 / steps as f64))
+            .collect()
+    }
+
+    /// A `lin` sweep: `points` samples spaced evenly *in frequency*, which is
+    /// what the STB, PAC, PNOISE and PXF dialogs emit.
+    fn linear_sweep(f0: f64, f1: f64, points: usize) -> Vec<f64> {
+        (0..points)
+            .map(|i| f0 + (f1 - f0) * i as f64 / (points - 1) as f64)
             .collect()
     }
 
@@ -752,6 +769,77 @@ mod tests {
             !rolled_off.adc_is_dc,
             "a sweep starting two decades above the pole is mid-rolloff, not DC"
         );
+    }
+
+    /// A `lin` sweep spans its first decade while placing exactly one sample
+    /// inside it, and one sample is not evidence of anything: the flatness
+    /// window would be comparing that gain against itself.
+    ///
+    /// This is the same false DC claim the span check exists to stop, reached
+    /// through the sweep kind the STB/PAC/PNOISE/PXF dialogs emit rather than
+    /// through a short sweep.
+    #[test]
+    fn a_lone_first_decade_sample_never_proves_flatness() {
+        let loop_ = PoleLoop {
+            k_db: 60.0,
+            poles: &[10.0],
+        };
+        // 100 points from 1 kHz to 1 MHz: ~10.09 kHz apart, so the second
+        // sample already sits above 10 kHz and only f_min lands in the first
+        // decade. The sweep opens two decades above the pole, where the gain
+        // is ≈20 dB — 40 dB below the DC gain it would be labelled as.
+        let frequency = linear_sweep(1.0e3, 1.0e6, 100);
+        assert_eq!(
+            frequency.iter().filter(|&&f| f <= 1.0e4).count(),
+            1,
+            "the fixture must place exactly one sample in the first decade"
+        );
+
+        let metrics = ac_bode_summary_for_analysis(&loop_response(&loop_, &frequency), 0)
+            .expect("AC summary")
+            .metrics;
+
+        assert_within(metrics.adc_db, 20.0, 1.0e-3, "A(f_min)");
+        assert!(
+            !metrics.adc_is_dc,
+            "a single first-decade sample proves no flatness, so A(f_min) is \
+             not the DC gain"
+        );
+    }
+
+    /// The minimal shape of the same defect, with the sweep reduced to the two
+    /// samples the span check needs: the first decade holds one of them, and
+    /// the gain is visibly falling.
+    #[test]
+    fn one_sample_in_the_first_decade_is_not_a_flat_first_decade() {
+        let frequency = [1.0, 100.0];
+        let gain_db = [60.0, 40.0];
+
+        assert!(!low_frequency_gain_is_dc(&frequency, &gain_db));
+
+        let analysis = wrapped_response(&frequency, &gain_db, &[0.0, -90.0]);
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+        assert!(!metrics.adc_is_dc);
+    }
+
+    /// The other side of the threshold: two samples in the first decade are a
+    /// real comparison, so a genuinely flat one still reports DC. Requiring a
+    /// second sample must not cost the sweeps that always had one.
+    #[test]
+    fn two_flat_first_decade_samples_still_report_dc() {
+        let frequency = [1.0, 10.0, 100.0];
+        let gain_db = [60.0, 59.95, 40.0];
+
+        assert!(low_frequency_gain_is_dc(&frequency, &gain_db));
+
+        let analysis = wrapped_response(&frequency, &gain_db, &[0.0, -5.0, -90.0]);
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+        assert!(metrics.adc_is_dc);
+        assert_within(metrics.adc_db, 60.0, 1.0e-9, "A_dc");
     }
 
     #[test]
