@@ -1113,11 +1113,27 @@ fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultView
         })
 }
 
+/// Bind the global simulation projection to one pane's immutable dataset.
+///
+/// Re-selecting the binding that is already active must be inert.
+/// `select_run` resynchronizes the displayed waveform set, which advances the
+/// simulation data version, and every version change retires cursors, the
+/// selected trace, the active pane, pinned readouts and the renderer caches.
+/// Every pane of every frame runs this path — several times, since painting
+/// inactive panes temporarily selects their bindings and then restores the
+/// active one — so an unguarded re-selection made all of those states
+/// impossible to hold at all while a project-owned document was open. The
+/// document bar's dataset activation carries the identical guard.
 fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> {
     let binding = pane
         .binding
         .ok_or_else(|| "This result pane has no immutable dataset binding.".to_owned())?;
     let (run_index, analysis_index) = resolve_binding(state, binding)?;
+    if state.simulation.active_run_idx == Some(run_index)
+        && state.simulation.active_analysis_idx == Some(analysis_index)
+    {
+        return Ok(());
+    }
     if !state.simulation.select_run(run_index) {
         return Err("The retained dataset could not be selected.".to_owned());
     }
@@ -1280,6 +1296,74 @@ mod tests {
         let document_id =
             super::super::create_document::commit(&mut app).expect("persistent document commits");
         (app, document_id)
+    }
+
+    /// Drive one whole frame of a surface, with the product theme applied so
+    /// token lookups and font metrics resolve exactly as they do on screen.
+    fn drive_frame(body: impl FnMut(&mut Ui)) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut body = body;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| body(ui));
+    }
+
+    /// Re-selecting the binding a persistent pane already holds must be inert.
+    ///
+    /// `select_run` resynchronizes the displayed waveform set and advances the
+    /// simulation data version; every version change retires cursors, the
+    /// selected trace, the active pane, pinned readouts and the renderer
+    /// caches. This path runs on every frame the document draws, so an
+    /// unguarded re-selection made all of those states impossible to hold.
+    #[test]
+    fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
+        let (mut app, document_id) = persistent_transient_fixture();
+        drive_frame(|ui| show(ui, &mut app, document_id));
+        let settled = app.state.simulation.data_version;
+
+        for frame in 0..4 {
+            drive_frame(|ui| show(ui, &mut app, document_id));
+            assert_eq!(
+                app.state.simulation.data_version, settled,
+                "idle frame {frame} of an open persistent document advanced the data version"
+            );
+        }
+    }
+
+    /// The state an advancing data version retires has to survive an idle
+    /// frame, or a reader can never hold a cursor, a trace selection or a
+    /// pinned readout inside a project-owned document at all.
+    #[test]
+    fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection() {
+        let (mut app, document_id) = persistent_transient_fixture();
+        drive_frame(|ui| show(ui, &mut app, document_id));
+        let analysis = super::super::AnalysisPresentationKey::new(
+            app.state.simulation.runs[0].dataset_id,
+            &app.state.simulation.runs[0].analyses[0],
+        );
+        app.state.ui.results.selected_trace = Some(
+            super::super::SelectedResultTrace::from_identity(analysis, "V(out)"),
+        );
+        app.state
+            .ui
+            .results
+            .rf_pin
+            .insert(ResultViewer::Smith, (0, 3));
+
+        for frame in 0..3 {
+            drive_frame(|ui| show(ui, &mut app, document_id));
+            assert!(
+                app.state.ui.results.selected_trace.is_some(),
+                "idle frame {frame} cleared the selected trace"
+            );
+            assert!(
+                app.state
+                    .ui
+                    .results
+                    .rf_pin
+                    .contains_key(&ResultViewer::Smith),
+                "idle frame {frame} cleared the pinned readout"
+            );
+        }
     }
 
     #[test]
