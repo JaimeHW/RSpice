@@ -1307,9 +1307,7 @@ fn preflight_real_output_requests(
         .map(|request| request.operands.len())
         .try_fold(0usize, usize::checked_add)
         .unwrap_or(usize::MAX);
-    let requested_values = point_count
-        .checked_mul(column_count.saturating_add(1))
-        .unwrap_or(usize::MAX);
+    let requested_values = point_count.saturating_mul(column_count.saturating_add(1));
     ResourceLimitError::ensure(
         ResourceKind::ResultValues,
         requested_values,
@@ -1891,9 +1889,7 @@ impl DcOutputSeries {
                 }
                 let canonical = canonical_measure_signal_name(&name);
                 if !slots.contains_key(&canonical) {
-                    let retained_values = point_count
-                        .checked_mul(slots.len().saturating_add(2))
-                        .unwrap_or(usize::MAX);
+                    let retained_values = point_count.saturating_mul(slots.len().saturating_add(2));
                     ResourceLimitError::ensure(
                         ResourceKind::ResultValues,
                         retained_values,

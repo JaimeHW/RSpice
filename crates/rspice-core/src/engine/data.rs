@@ -142,13 +142,13 @@ impl FrequencyDataOverridePlan {
             .overrides
             .iter()
             .zip(&self.targets)
-            .filter_map(|((_, value), target)| match target {
-                FrequencyDataTarget::Frequency(name) => Some((name.clone(), *value)),
-                FrequencyDataTarget::Parameter(name) => Some((name.clone(), *value)),
+            .map(|((_, value), target)| match target {
+                FrequencyDataTarget::Frequency(name) => (name.clone(), *value),
+                FrequencyDataTarget::Parameter(name) => (name.clone(), *value),
                 FrequencyDataTarget::DeviceParameter {
                     device_name,
                     parameter_name,
-                } => Some((format!("{device_name}:{parameter_name}"), *value)),
+                } => (format!("{device_name}:{parameter_name}"), *value),
             })
             .collect())
     }

@@ -452,7 +452,7 @@ impl DefinitionRow {
     fn effective_provider(&self) -> Option<&str> {
         self.resolved_provider
             .as_deref()
-            .or_else(|| match self.providers.as_slice() {
+            .or(match self.providers.as_slice() {
                 [only] => Some(only.as_str()),
                 _ => None,
             })

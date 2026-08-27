@@ -252,7 +252,8 @@ fn the_pin_card_and_the_save_path_agree_on_every_mutation() {
     // The mutations are the whole vocabulary of that comparison: a renamed
     // terminal, a re-directed one, a provider with a terminal the symbol does
     // not declare, and a symbol with one the provider does not.
-    let mutations: [(&str, fn(&mut ModelBoundSymbolDefinition)); 5] = [
+    type Mutation = fn(&mut ModelBoundSymbolDefinition);
+    let mutations: [(&str, Mutation); 5] = [
         ("untouched", |_| {}),
         ("provider terminal renamed", |definition| {
             ports_mut(definition)[2].name = "VEE".to_owned();

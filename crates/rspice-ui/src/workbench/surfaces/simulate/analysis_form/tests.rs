@@ -910,7 +910,7 @@ fn a_placed_roster_that_cannot_run_says_so_on_the_form() {
             &placed,
         );
         assert!(
-            painted.iter().any(|line| *line == reason),
+            painted.contains(&reason),
             "the form must state the refusal dispatch will give: {painted:?}"
         );
     }
@@ -938,7 +938,7 @@ fn ad_hoc_mode_beside_placed_ports_states_that_the_table_is_not_what_runs() {
         &bench,
         1200.0,
     );
-    assert!(painted.iter().any(|line| *line == reason), "{painted:?}");
+    assert!(painted.contains(&reason), "{painted:?}");
     assert!(
         painted.iter().any(|line| line == "Node +"),
         "the table stays visible, because switching back to it is a real answer: {painted:?}"

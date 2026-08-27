@@ -423,7 +423,7 @@ fn every_closure_segment_announces_its_ratio_and_the_fact_behind_it() {
         "parity 0/1, desktop · WebAssembly",
     ] {
         assert!(
-            announcements.iter().any(|value| *value == announced),
+            announcements.contains(&announced),
             "no closure segment announced {announced:?}"
         );
     }
@@ -431,9 +431,7 @@ fn every_closure_segment_announces_its_ratio_and_the_fact_behind_it() {
     // announces the population it does govern; the exempt phrasing is pinned
     // by `the_closure_inputs_count_gate_subjects_...` on the fresh project.
     assert!(
-        announcements
-            .iter()
-            .any(|value| *value == "qualified 0/1, source-owned release gates"),
+        announcements.contains(&"qualified 0/1, source-owned release gates"),
         "the qualified segment does not state the population the gate governs"
     );
 }

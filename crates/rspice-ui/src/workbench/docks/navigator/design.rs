@@ -2768,7 +2768,7 @@ fn pinned_keys(app: &RSpiceApp) -> Vec<String> {
 
 fn is_pinned(app: &RSpiceApp, entry: &ShelfEntry) -> bool {
     let key = entry.storage_key();
-    pinned_keys(app).iter().any(|held| *held == key)
+    pinned_keys(app).contains(&key)
 }
 
 /// Pin an unpinned entry, or unpin a pinned one.

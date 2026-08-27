@@ -86,6 +86,10 @@ use crate::state::{
     CellViewRef, Component, ComponentType, InstancePath, LibraryManager, SchematicState,
 };
 
+/// Net names keyed by (component id, terminal name), as
+/// [`net_names_by_terminal`] resolves them for one schematic.
+type TerminalNets = HashMap<(u64, String), String>;
+
 /// One analysis that reads a source, and what it reads it as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceConsumer {
@@ -331,7 +335,7 @@ pub fn placed_sources(
             Some(with_source_consumers(source, drive, plan))
         })
         .collect();
-    sources.sort_by(|left, right| source_order(left).cmp(&source_order(right)));
+    sources.sort_by_key(source_order);
     sources
 }
 
@@ -467,7 +471,7 @@ fn walk_design(
 ) -> DesignExcitations {
     #[cfg(test)]
     crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
-    let mut terminals: HashMap<String, Arc<HashMap<(u64, String), String>>> = HashMap::new();
+    let mut terminals: HashMap<String, Arc<TerminalNets>> = HashMap::new();
     let mut sources = Vec::new();
     let mut ports = Vec::new();
     for binding in projection.plan().bindings() {
@@ -514,7 +518,7 @@ fn walk_design(
                 source_order(right),
             ))
     });
-    ports.sort_by(|left, right| port_order(left).cmp(&port_order(right)));
+    ports.sort_by_key(port_order);
     DesignExcitations { sources, ports }
 }
 
@@ -665,7 +669,7 @@ pub fn placed_rf_ports(
             ..placed_rf_port(component, &nets)
         })
         .collect();
-    ports.sort_by(|left, right| port_order(left).cmp(&port_order(right)));
+    ports.sort_by_key(port_order);
     ports
 }
 
