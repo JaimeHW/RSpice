@@ -394,7 +394,7 @@ struct SurfacePlan {
     /// Every pressable control the surface publishes — including the ones an
     /// earlier surface published first — with what it announced and the
     /// rectangle it announced it at.
-    published: Vec<(NodeId, String, egui::accesskit::Rect)>,
+    published: Vec<(String, egui::accesskit::Rect)>,
     /// The controls this surface is the first to publish, which are the ones
     /// its case presses.
     targets: Vec<Target>,
@@ -426,9 +426,8 @@ fn studio_enumeration() -> &'static [SurfacePlan] {
             let published = nodes
                 .iter()
                 .filter(|(_, node)| is_pressable(node))
-                .map(|(id, node)| {
+                .map(|(_, node)| {
                     (
-                        *id,
                         describe(node),
                         node.bounds().expect("a pressable node carries bounds"),
                     )
@@ -1251,7 +1250,7 @@ fn the_sweep_viewport_reaches_every_control() {
     let mut outside = Vec::new();
     let mut measured = 0usize;
     for plan in studio_enumeration() {
-        for (_, described, bounds) in &plan.published {
+        for (described, bounds) in &plan.published {
             measured += 1;
             if bounds.x1 > f64::from(SWEEP_SIZE.0) + TOLERANCE
                 || bounds.x0 < -TOLERANCE
