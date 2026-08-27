@@ -181,6 +181,15 @@ fn trapezoid_xy(x: &[f64], y: &[f64], f: impl Fn(f64, f64) -> f64) -> f64 {
 /// A degenerate window — every sample at the same x, or a single sample —
 /// has no width to divide by, so it falls back to the arithmetic mean, which
 /// is the limit of the window mean as the window closes.
+///
+/// A **hole refuses the whole measurement**. The domain policy above leaves
+/// `NaN` where a sample fell outside a function's domain, and an integral
+/// across a missing region is not the mean it would be printed as: the panel
+/// has nowhere to show "…except between 1.2 s and 1.4 s". Skipping the holes
+/// would answer a different question — the mean of what survived — and
+/// letting the `NaN` through reads as a value, so the honest answer is the
+/// error. Both `avg` and `rms` go through here, which is why the check lives
+/// here and not in either of them.
 fn window_mean(
     name: &str,
     x: &[f64],
@@ -190,6 +199,19 @@ fn window_mean(
     if x.is_empty() || x.len() != y.len() {
         return Err(EvaluationError::MathError(format!(
             "{name} needs a waveform with samples"
+        )));
+    }
+    if let Some(index) = y.iter().position(|v| !v.is_finite()) {
+        return Err(EvaluationError::MathError(format!(
+            "{name}: the series has undefined samples in the window (holes left where the \
+             math went out of domain), the first at x = {}",
+            x[index]
+        )));
+    }
+    if x.iter().any(|v| !v.is_finite()) {
+        return Err(EvaluationError::MathError(format!(
+            "{name}: the series has a non-finite position on its x-axis, so the window it \
+             would be averaged over has no width"
         )));
     }
     let span = x[x.len() - 1] - x[0];
@@ -213,6 +235,11 @@ fn rms(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     match &args[0] {
         // The RMS of a DC value is its magnitude, not the signed value.
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(s.abs())),
+        // The mean of squares is non-negative by construction; the clamp
+        // catches a rounding excursion just below zero on a near-degenerate
+        // window and nothing else. It is deliberately *not* a NaN guard —
+        // `f64::max` ignores a NaN, so using it that way would turn a hole
+        // into a confident "0". `window_mean` refuses holes instead.
         CalcValue::Waveform(x, y) => Ok(CalcValue::Scalar(
             window_mean("rms", x, y, |v| v * v)?.max(0.0).sqrt(),
         )),
@@ -1142,6 +1169,27 @@ mod tests {
             call("rms", vec![wave(vec![], vec![])]).is_err(),
             "rms of nothing is an error"
         );
+    }
+
+    #[test]
+    fn avg_and_rms_refuse_a_series_with_holes() {
+        // `sqrt` of a series that dips negative leaves exactly the hole this
+        // module's domain policy promises. An integral over a window with a
+        // missing region is not the mean it claims to be, so both aggregates
+        // must refuse — the failure mode being guarded is silent, not loud:
+        // `avg` used to print "= NaN" in the success colour, and `rms`, whose
+        // `.max(0.0)` swallowed the NaN, used to print a confident "= 0".
+        let x = vec![0.0, 1.0, 2.0, 3.0];
+        let (hx, hy) = series_of("sqrt", vec![wave(x, vec![4.0, -1.0, 9.0, 16.0])]);
+        assert!(hy[1].is_nan(), "the fixture must actually carry a hole");
+        let holed = wave(hx, hy);
+        for name in ["avg", "rms"] {
+            let outcome = call(name, vec![holed.clone()]);
+            assert!(
+                outcome.is_err(),
+                "{name} of a holed series must refuse, got {outcome:?}"
+            );
+        }
     }
 
     // -- defect 4: one domain policy --------------------------------------
