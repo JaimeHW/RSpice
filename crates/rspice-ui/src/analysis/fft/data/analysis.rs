@@ -131,14 +131,22 @@ impl SpectrumAnalysis {
             analysis.noise_floor_db = Some(noise_floor);
         }
 
-        if noise_power_sum > 0.0 {
-            let snr = 10.0 * (fund_power / noise_power_sum).log10();
+        // The window spreads each noise bin's power over its equivalent noise
+        // bandwidth, so summing the bins counts broadband noise ENBW times
+        // over. Without this division the SNR of the same record depends on
+        // the window it was viewed through — 3 dB apart between a rectangular
+        // and a Blackman-Harris window on identical data. Harmonics are
+        // coherent tones concentrated in their own bins and are not divided.
+        let noise_power = noise_power_sum / fft.equivalent_noise_bandwidth_bins().max(1.0);
+
+        if noise_power > 0.0 {
+            let snr = 10.0 * (fund_power / noise_power).log10();
             if snr.is_finite() {
                 analysis.snr_db = Some(snr);
             }
         }
 
-        let noise_and_distortion = noise_power_sum + harmonic_power_sum;
+        let noise_and_distortion = noise_power + harmonic_power_sum;
         if noise_and_distortion > 0.0 {
             let sinad = 10.0 * (fund_power / noise_and_distortion).log10();
             if sinad.is_finite() {
@@ -232,5 +240,113 @@ impl SpectrumAnalysis {
         for value in mask.iter_mut().take(end + 1).skip(start) {
             *value = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::fft::data::SpectrumNormalization;
+
+    /// Deterministic noise. A seeded generator written here rather than
+    /// pulled in keeps the oracle's numbers fixed across dependency bumps.
+    struct Xorshift(u64);
+
+    impl Xorshift {
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn next_unit(&mut self) -> f64 {
+            (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+        }
+
+        fn next_gaussian(&mut self) -> f64 {
+            let u1 = self.next_unit().max(1e-12);
+            let u2 = self.next_unit();
+            (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+        }
+    }
+
+    /// A tone on an exact bin centre plus white noise.
+    ///
+    /// Returns the record and the noise's own mean-square power, so the
+    /// oracle is `10·log10(signal power / noise power)` for the record that
+    /// was actually generated rather than for the distribution it was drawn
+    /// from — the sampling error of one 8192-point draw is a tenth of a
+    /// decibel, and the effect under test is a whole one.
+    fn tone_with_noise(length: usize, bin: usize, amplitude: f64, sigma: f64) -> (Vec<f64>, f64) {
+        let mut rng = Xorshift(0x5eed_1234_9abc_def1);
+        let noise: Vec<f64> = (0..length).map(|_| sigma * rng.next_gaussian()).collect();
+        let noise_power = noise.iter().map(|v| v * v).sum::<f64>() / length as f64;
+        let samples = noise
+            .iter()
+            .enumerate()
+            .map(|(n, value)| {
+                let phase = std::f64::consts::TAU * bin as f64 * n as f64 / length as f64;
+                amplitude * phase.sin() + value
+            })
+            .collect();
+        (samples, noise_power)
+    }
+
+    /// The window spreads each noise bin's power over its equivalent noise
+    /// bandwidth, so a bare sum of noise-bin powers over-counts by exactly
+    /// that factor — and the reported SNR of one record then depends on the
+    /// window it happens to be displayed with. Three windows with ENBWs from
+    /// 1.00 to 2.00 bins must agree on the same record.
+    #[test]
+    fn signal_to_noise_is_the_same_measurement_through_every_window() {
+        const LENGTH: usize = 8192;
+        const AMPLITUDE: f64 = 1.0;
+        const SIGMA: f64 = 0.01;
+        let (samples, noise_power) = tone_with_noise(LENGTH, 517, AMPLITUDE, SIGMA);
+        let expected = 10.0 * (0.5 * AMPLITUDE.powi(2) / noise_power).log10();
+
+        for window in [
+            WindowFunction::Rectangular,
+            WindowFunction::Hanning,
+            WindowFunction::BlackmanHarris,
+        ] {
+            let fft = FftData::from_time_domain_with_normalization(
+                "v(out)",
+                &samples,
+                1e6,
+                window,
+                SpectrumNormalization::Peak,
+            );
+            let analysis = SpectrumAnalysis::analyze(&fft, 1);
+            let snr = analysis.snr_db.expect("a noisy tone has an SNR");
+            assert!(
+                (snr - expected).abs() <= 0.3,
+                "{window:?} reported {snr:.3} dB, expected {expected:.3} dB"
+            );
+        }
+    }
+
+    /// SINAD degenerates to SNR when there is nothing but noise beside the
+    /// tone, so it has to carry the same correction.
+    #[test]
+    fn distortion_free_sinad_agrees_with_signal_to_noise() {
+        let (samples, _) = tone_with_noise(8192, 517, 1.0, 0.01);
+        let fft = FftData::from_time_domain_with_normalization(
+            "v(out)",
+            &samples,
+            1e6,
+            WindowFunction::BlackmanHarris,
+            SpectrumNormalization::Peak,
+        );
+        let analysis = SpectrumAnalysis::analyze(&fft, 1);
+        let snr = analysis.snr_db.expect("SNR");
+        let sinad = analysis.sinad_db.expect("SINAD");
+        assert!(
+            (snr - sinad).abs() <= 1e-9,
+            "SNR {snr} and SINAD {sinad} diverge with no distortion present"
+        );
     }
 }

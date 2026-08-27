@@ -192,17 +192,33 @@ impl FftData {
         self.sample_rate / self.fft_size as f64
     }
 
+    /// Equivalent noise bandwidth of the applied window, in FFT bins.
+    ///
+    /// The exact finite-length figure for the cached coefficients rather than
+    /// a nominal table value. One bin for a rectangular window; more for
+    /// every window that tapers, which is how much broadband noise each bin
+    /// collects beyond its own width.
+    pub fn equivalent_noise_bandwidth_bins(&self) -> f64 {
+        if self.fft_size == 0 {
+            return 1.0;
+        }
+        let bins = cached_window(self.window, self.fft_size).equivalent_noise_bandwidth_bins;
+        if bins.is_finite() && bins > 0.0 {
+            bins
+        } else {
+            1.0
+        }
+    }
+
     /// Equivalent-noise resolution bandwidth for the applied window.
     ///
-    /// This is the FFT bin width multiplied by the exact finite-length ENBW
-    /// of the cached window coefficients, rather than a nominal table value.
+    /// The FFT bin width multiplied by [`Self::equivalent_noise_bandwidth_bins`].
     pub fn resolution_bandwidth(&self) -> f64 {
         let bin_width = self.frequency_resolution();
         if !bin_width.is_finite() || bin_width <= 0.0 {
             return 0.0;
         }
-        let window = cached_window(self.window, self.fft_size);
-        let bandwidth = bin_width * window.equivalent_noise_bandwidth_bins;
+        let bandwidth = bin_width * self.equivalent_noise_bandwidth_bins();
         if bandwidth.is_finite() && bandwidth > 0.0 {
             bandwidth
         } else {

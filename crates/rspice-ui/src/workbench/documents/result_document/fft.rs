@@ -119,8 +119,11 @@ fn spectrum_level_unit(
     match (quantity, normalization) {
         ("V", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dBV pk",
         ("V", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dBV rms",
-        ("A", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dBA pk",
-        ("A", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dBA rms",
+        // Not "dBA": in every other instrument that prints it, dBA is an
+        // A-weighted sound level. A current spectrum referenced to one ampere
+        // has to say so.
+        ("A", crate::analysis::fft::data::SpectrumNormalization::Peak) => "dB re 1 A pk",
+        ("A", crate::analysis::fft::data::SpectrumNormalization::Rms) => "dB re 1 A rms",
         (_, crate::analysis::fft::data::SpectrumNormalization::Peak) => "dB pk",
         (_, crate::analysis::fft::data::SpectrumNormalization::Rms) => "dB rms",
     }
@@ -449,7 +452,7 @@ mod tests {
         );
         assert_eq!(
             spectrum_level_unit("i(VSENSE)", SpectrumNormalization::Rms),
-            "dBA rms"
+            "dB re 1 A rms"
         );
         assert_eq!(
             spectrum_level_unit("derived_expression", SpectrumNormalization::Peak),
