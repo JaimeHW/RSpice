@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use egui::Ui;
 
+use crate::quantity::QuantityPresentationPolicy;
 use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, ac_bode_summary_for_selection,
 };
@@ -18,11 +19,16 @@ use super::BodeDerived;
 
 /// The selected frequency-response signal pair's computed stability numbers.
 struct BodeModel {
-    /// The phase trace as displayed: raw ±180°-wrapped samples, or the
-    /// unwrapped series when the continuous toggle is on. The margins are
-    /// always computed from the raw arrays.
+    /// The phase trace as *displayed*: the retained ±180°-wrapped samples, or
+    /// the unwrapped series when the continuous toggle is on. This is a
+    /// presentation choice only — the margins are always measured on the
+    /// unwrapped branch, whichever trace is painted.
     phase_deg: Option<SharedWaveformValues>,
     margins: BodeDerived,
+    /// Whether the sweep proves its lowest-frequency gain is the DC gain.
+    /// The card's labels depend on it: an unproven claim of DC gain is a
+    /// wrong reading of a right number.
+    adc_is_dc: bool,
 }
 
 /// Summary facts of the selected retained ordinary-noise spectrum for the
@@ -103,6 +109,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
         return Err(NoMargins::AnalysisFailed(analysis.error_message.clone()));
     }
 
+    let adc_is_dc = summary.metrics.adc_is_dc;
     let phase = summary
         .phase_index
         .zip(summary.phase_deg.as_ref())
@@ -138,9 +145,9 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
         }
     };
 
-    // Displayed phase: optionally unwrapped into a continuous curve. The
-    // margin computation above reads the raw wrapped arrays on purpose —
-    // only the displayed trace changes.
+    // Displayed phase: optionally unwrapped into a continuous curve. This
+    // toggle moves the painted trace and nothing else — the margins above
+    // are measured on the unwrapped branch either way.
     let phase_deg = match &phase {
         Some((phase_index, raw)) if state.ui.results.phase_continuous => {
             let key = (summary.analysis_index as u64) << 32 | *phase_index as u64;
@@ -150,7 +157,11 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
         None => None,
     };
 
-    Ok(BodeModel { phase_deg, margins })
+    Ok(BodeModel {
+        phase_deg,
+        margins,
+        adc_is_dc,
+    })
 }
 
 fn normalized_noise_name(name: &str) -> String {
@@ -299,11 +310,43 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             return;
         }
     };
-    let m = model.margins;
+    let rows = margin_rows(model.margins, model.adc_is_dc, &quantity_policy);
+    super::stat_table(ui, &rows);
 
+    if model.phase_deg.is_none() {
+        super::panel_note(
+            ui,
+            "Phase data unavailable for this response — re-run the analysis to compute margins.",
+        );
+    } else if model.adc_is_dc {
+        super::panel_note(
+            ui,
+            "Margins measured on the simulated curves; the plot markers show the same values.",
+        );
+    } else {
+        super::panel_note(
+            ui,
+            "Margins measured on the simulated curves; the plot markers show the same values. The sweep does not open flat, so the gain shown is the one at its lowest frequency — not the DC gain — and f₋₃dB is referenced to that.",
+        );
+    }
+}
+
+/// The stability card's rows.
+///
+/// Split out because the low-frequency labels are a claim about the sweep,
+/// not decoration: `gain_db.first()` is the gain at `f_min`, and calling it
+/// `A_dc` on a sweep opened above the dominant pole reports mid-rolloff gain
+/// as DC gain — and puts `f₋₃dB` 3 dB below a figure that was never the DC
+/// gain either. The label says which quantity it is, and `f₋₃dB` names the
+/// same reference.
+fn margin_rows(
+    m: BodeDerived,
+    adc_is_dc: bool,
+    quantity_policy: &QuantityPresentationPolicy,
+) -> [(&'static str, String, bool); 6] {
     let fmt_opt =
         |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
-    let rows = [
+    [
         (
             "Phase margin",
             fmt_opt(m.pm_deg, &|v| {
@@ -326,26 +369,21 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             fmt_opt(m.f180, &|v| quantity_policy.format_frequency(v, 0)),
             false,
         ),
-        ("A_dc", fmt_opt(m.adc_db, &|v| format!("{v:.1} dB")), false),
         (
-            "f₋₃dB",
+            if adc_is_dc { "A_dc" } else { "A(f_min)" },
+            fmt_opt(m.adc_db, &|v| format!("{v:.1} dB")),
+            false,
+        ),
+        (
+            if adc_is_dc {
+                "f₋₃dB"
+            } else {
+                "f₋₃dB re A(f_min)"
+            },
             fmt_opt(m.f3db, &|v| quantity_policy.format_frequency(v, 0)),
             false,
         ),
-    ];
-    super::stat_table(ui, &rows);
-
-    if model.phase_deg.is_none() {
-        super::panel_note(
-            ui,
-            "Phase data unavailable for this response — re-run the analysis to compute margins.",
-        );
-    } else {
-        super::panel_note(
-            ui,
-            "Margins measured on the simulated curves; the plot markers show the same values.",
-        );
-    }
+    ]
 }
 
 pub(super) fn noise_spectrum_right_panel(ui: &mut Ui, state: &mut AppState) {
@@ -455,6 +493,66 @@ mod tests {
             vec![1.0e-18, 1.0e-16],
             "#fff",
         )])
+    }
+
+    /// A sweep that opens above the dominant pole has no DC gain in it. The
+    /// card must not label mid-rolloff gain `A_dc`, and `f₋₃dB` has to name
+    /// the reference it was actually measured from.
+    #[test]
+    fn the_low_frequency_gain_is_labelled_by_what_the_sweep_proves() {
+        let margins = BodeDerived {
+            version: 0,
+            analysis_index: 0,
+            mag_index: 0,
+            adc_db: Some(20.0),
+            ugf: Some(1.0e4),
+            pm_deg: Some(45.0),
+            f180: Some(3.0e4),
+            gm_db: Some(12.0),
+            f3db: Some(1.0e2),
+        };
+        let policy = QuantityPresentationPolicy::default();
+
+        let labels =
+            |adc_is_dc| margin_rows(margins, adc_is_dc, &policy).map(|(label, _, _)| label);
+
+        assert_eq!(labels(true)[4], "A_dc");
+        assert_eq!(labels(true)[5], "f₋₃dB");
+        assert_eq!(labels(false)[4], "A(f_min)");
+        assert_eq!(labels(false)[5], "f₋₃dB re A(f_min)");
+    }
+
+    /// The whole sheet, end to end: a sweep opened two decades above the
+    /// dominant pole reaches the card labelled for what it is.
+    #[test]
+    fn a_sweep_that_starts_mid_rolloff_reaches_the_card_as_a_f_min() {
+        // A single pole at 10 Hz, swept from 1 kHz: the gain has already
+        // fallen 40 dB by the first sample.
+        let frequency = (0..=30)
+            .map(|i| 10f64.powf(3.0 + i as f64 / 10.0))
+            .collect::<Vec<_>>();
+        let magnitude = frequency
+            .iter()
+            .map(|f| 1000.0 / (1.0 + (f / 10.0).powi(2)).sqrt())
+            .collect::<Vec<_>>();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![WaveformData::new(
+                "|V(out)|", frequency, magnitude, "#fff",
+            )]),
+        );
+
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        let model = build_model(&mut state).expect("Bode model");
+
+        assert!(!model.adc_is_dc);
+        let policy = QuantityPresentationPolicy::default();
+        assert_eq!(
+            margin_rows(model.margins, model.adc_is_dc, &policy)[4].0,
+            "A(f_min)"
+        );
     }
 
     /// A diverged AC run still carries whatever partial vectors the engine
