@@ -289,7 +289,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             // same abscissa on the way out and on the way back.
             Trace::new(re, im, c.traces[slot % c.traces.len()])
                 .parametric()
-                .cache_key(0x501_00F0 | *index as u64),
+                .cache_key(plot::trace_cache_key(0x501_00F0, *index)),
         );
     }
 
