@@ -62,6 +62,23 @@
 //! identity, so the plan toolbar drawn on all nine routes is one control, not
 //! nine — and a per-surface tally counts a control on the first surface that
 //! publishes it.
+//!
+//! # One case per surface
+//!
+//! The presses are independent of one another — each opens its own fixture —
+//! so putting all of them in one case bought nothing and cost the whole crate's
+//! test run: the studio's surfaces were swept end to end on one thread while
+//! every other core stood idle. There is a case per surface instead. Each holds
+//! that surface's share of the frozen tallies, [`SWEPT_SURFACES`] records which
+//! surface each case covers, and
+//! [`every_swept_surface_has_a_case_that_presses_it`] is what keeps a surface
+//! the studio grows from having no case at all.
+//!
+//! What the cases share is the enumeration — thirty-five surfaces built and
+//! settled — and that is run once for the whole binary by
+//! [`studio_enumeration`]. What it caches is identities, names and rectangles.
+//! No `egui::Context` and no application outlive the pass that made them, and
+//! every press still starts from a fixture nothing else has touched.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -368,27 +385,70 @@ fn surface_count() -> usize {
 /// One control the sweep will press: its identity, and the name it announced.
 type Target = (NodeId, String);
 
+/// One surface's controls, as it publishes them at rest.
+struct SurfacePlan {
+    /// Where the surface sits in sweep order, which is how a case rebuilds it.
+    index: usize,
+    /// What the surface calls itself.
+    surface: String,
+    /// Every pressable control the surface publishes — including the ones an
+    /// earlier surface published first — with what it announced and the
+    /// rectangle it announced it at.
+    published: Vec<(NodeId, String, egui::accesskit::Rect)>,
+    /// The controls this surface is the first to publish, which are the ones
+    /// its case presses.
+    targets: Vec<Target>,
+}
+
 /// Every distinct control the studio publishes, grouped by the surface that
-/// first publishes it.
+/// first publishes it, enumerated once for the whole test binary.
 ///
-/// Enumeration only — nothing is pressed here, so the ratchet can read the
-/// tally without paying for the sweep.
-fn sweep_plan() -> Vec<(usize, String, Vec<Target>)> {
-    let mut seen: BTreeSet<u64> = BTreeSet::new();
-    let mut plan = Vec::new();
-    for index in 0..surface_count() {
-        let (name, app) = sweep_surface(index);
-        let mut sweep = Sweep::open(app);
-        let (_, nodes) = sweep.settle(&name);
-        let targets = nodes
-            .iter()
-            .filter(|(_, node)| is_pressable(node))
-            .filter(|(id, _)| seen.insert(id.0))
-            .map(|(id, node)| (*id, announced(node)))
-            .collect();
-        plan.push((index, name, targets));
-    }
-    plan
+/// Enumeration only — nothing is pressed here, so the gates that read the tally
+/// do not pay for the sweep. It is also the one thing every case in this module
+/// needs and none of them can narrow: a control is counted on the first surface
+/// that publishes it, so learning which controls one surface owns means
+/// settling every surface before it. Thirty-five cases each doing that would
+/// cost several times what the presses do.
+///
+/// Caching it shares no fixture. What survives the enumeration is a list of
+/// identities, names and rectangles; every `egui::Context` and every
+/// application it opened is dropped with the pass that made it, and each press
+/// still builds its own.
+fn studio_enumeration() -> &'static [SurfacePlan] {
+    static ENUMERATION: std::sync::OnceLock<Vec<SurfacePlan>> = std::sync::OnceLock::new();
+    ENUMERATION.get_or_init(|| {
+        let mut seen: BTreeSet<u64> = BTreeSet::new();
+        let mut plan = Vec::new();
+        for index in 0..surface_count() {
+            let (surface, app) = sweep_surface(index);
+            let mut sweep = Sweep::open(app);
+            let (_, nodes) = sweep.settle(&surface);
+            let published = nodes
+                .iter()
+                .filter(|(_, node)| is_pressable(node))
+                .map(|(id, node)| {
+                    (
+                        *id,
+                        describe(node),
+                        node.bounds().expect("a pressable node carries bounds"),
+                    )
+                })
+                .collect();
+            let targets = nodes
+                .iter()
+                .filter(|(_, node)| is_pressable(node))
+                .filter(|(id, _)| seen.insert(id.0))
+                .map(|(id, node)| (*id, announced(node)))
+                .collect();
+            plan.push(SurfacePlan {
+                index,
+                surface,
+                published,
+                targets,
+            });
+        }
+        plan
+    })
 }
 
 /// The name a node announces, which is what a reader reaches it by.
@@ -522,6 +582,25 @@ const PRESSES_THIS_HARNESS_CANNOT_SEE: &[&str] = &["Variables: Button \"Import�
 /// How many sweep presses open a modal.
 const MODAL_OPENERS_FLOOR: usize = 7;
 
+/// The two whole-sweep numbers above, split by the surface that produced them:
+/// segments excused for holding their selection, and presses that opened a
+/// modal.
+///
+/// A surface absent from this table excuses nothing and opens nothing, which is
+/// what makes the split stronger than the totals it replaced rather than weaker
+/// — an excused press that migrates to another surface now fails on both
+/// surfaces instead of cancelling out.
+/// [`every_swept_surface_has_a_case_that_presses_it`] holds the two columns to
+/// summing to [`HELD_SELECTION_CEILING`] and [`MODAL_OPENERS_FLOOR`], so
+/// neither total can be quietly re-cut.
+const SEGMENTS_AND_MODALS_PER_SURFACE: &[(&str, usize, usize)] = &[
+    ("Analyses/Transient", 1, 4),
+    ("Analyses/Stb", 0, 1),
+    ("Variables", 0, 1),
+    ("Save", 0, 1),
+    ("plan manager", 1, 0),
+];
+
 /// Modals a sweep press opened that Escape does not close here.
 ///
 /// One, and it is this harness's limit rather than the studio's: "Validate
@@ -629,8 +708,42 @@ fn press_one(index: usize, surface: &str, target: NodeId) -> Press {
 
 // -------------------------------------------------------------------- sweeps
 
-/// Every control the studio publishes answers the press it advertises, and
-/// every modal a press raises can be escaped again.
+/// The frozen tallies one surface's case holds itself to: the controls it
+/// pressed when the sweep was measured, how many of those it may excuse as a
+/// segment holding its selection, and how many of them opened a modal.
+fn frozen_tallies_for(surface: &str) -> (usize, usize, usize) {
+    let pressed = PRESSED_PER_SURFACE
+        .iter()
+        .find(|&&(name, _)| name == surface)
+        .map_or_else(
+            || panic!("{surface} is swept and is not in PRESSED_PER_SURFACE"),
+            |&(_, count)| count,
+        );
+    let (held, modals) = SEGMENTS_AND_MODALS_PER_SURFACE
+        .iter()
+        .find(|&&(name, _, _)| name == surface)
+        .map_or((0, 0), |&(_, held, modals)| (held, modals));
+    (pressed, held, modals)
+}
+
+/// The entries of one frozen list that name this surface.
+///
+/// Every entry leads with the surface that produced it and the lists are sorted
+/// whole, so one surface's entries are contiguous and already in order: a case
+/// comparing its own sorted findings against this slice is making exactly the
+/// claim the undivided list made. An entry naming a surface nothing sweeps
+/// would go unchecked, which is what
+/// [`every_swept_surface_has_a_case_that_presses_it`] refuses.
+fn frozen_entries_for(list: &[&'static str], surface: &str) -> Vec<&'static str> {
+    let prefix = format!("{surface}: ");
+    list.iter()
+        .copied()
+        .filter(|entry| entry.starts_with(&prefix))
+        .collect()
+}
+
+/// Every control one surface publishes answers the press it advertises, and
+/// every modal one of those presses raises can be escaped again.
 ///
 /// This is the gate SS-20 exists for. Around a hundred and fifty of the
 /// studio's controls had never been pressed by anything: they were rendered,
@@ -642,8 +755,20 @@ fn press_one(index: usize, surface: &str, target: NodeId) -> Press {
 /// raises a modal has to be pressed to find out, and pressing it again on a
 /// second fixture to ask the second question would double a sweep that already
 /// knows the answer.
-#[test]
-fn every_pressable_control_in_the_studio_answers_its_press() {
+///
+/// The body one case per surface runs. A case names its own surface as well as
+/// its index so that a reordered sweep fails here rather than pressing another
+/// route's controls under this one's tallies.
+fn press_every_control_on(index: usize, surface: &str) {
+    let plan = studio_enumeration()
+        .get(index)
+        .unwrap_or_else(|| panic!("the sweep no longer reaches surface {index}, {surface}"));
+    assert_eq!(
+        plan.surface, surface,
+        "the surface order must be stable across the binary, or this case is pressing another \
+         route's controls"
+    );
+
     let mut dead = Vec::new();
     let mut misdirected = Vec::new();
     let mut unseeable = Vec::new();
@@ -651,32 +776,30 @@ fn every_pressable_control_in_the_studio_answers_its_press() {
     let mut held = 0usize;
     let mut opened = 0usize;
     let mut pressed = 0usize;
-    for (index, surface, targets) in sweep_plan() {
-        for (target, _) in targets {
-            let press = press_one(index, &surface, target);
-            let entry = format!("{surface}: {}", press.described);
-            pressed += 1;
-            match press.answer {
-                Answer::Handled => {}
-                Answer::HeldItsSelection => held += 1,
-                Answer::Dead => {
-                    if PRESSES_THIS_HARNESS_CANNOT_SEE.contains(&entry.as_str()) {
-                        unseeable.push(entry.clone());
-                    } else {
-                        dead.push(entry.clone());
-                    }
-                }
-                Answer::Misdirected(landed) => {
-                    misdirected.push(format!(
-                        "{entry} was pressed and focus landed on {landed:?}"
-                    ));
+    for (target, _) in &plan.targets {
+        let press = press_one(index, surface, *target);
+        let entry = format!("{surface}: {}", press.described);
+        pressed += 1;
+        match press.answer {
+            Answer::Handled => {}
+            Answer::HeldItsSelection => held += 1,
+            Answer::Dead => {
+                if PRESSES_THIS_HARNESS_CANNOT_SEE.contains(&entry.as_str()) {
+                    unseeable.push(entry.clone());
+                } else {
+                    dead.push(entry.clone());
                 }
             }
-            if press.opened_a_modal {
-                opened += 1;
-                if !press.escaped {
-                    stuck.push(entry);
-                }
+            Answer::Misdirected(landed) => {
+                misdirected.push(format!(
+                    "{entry} was pressed and focus landed on {landed:?}"
+                ));
+            }
+        }
+        if press.opened_a_modal {
+            opened += 1;
+            if !press.escaped {
+                stuck.push(entry);
             }
         }
     }
@@ -691,17 +814,19 @@ fn every_pressable_control_in_the_studio_answers_its_press() {
     dead.sort();
     let dead: Vec<&str> = dead.iter().map(String::as_str).collect();
     assert_eq!(
-        dead, DEAD_CONTROLS,
-        "the studio's dead controls changed.\nA control listed here is wired to nothing: \
-         pressing it moves no state, opens nothing, stages no receipt, moves no focus and asks \
-         the platform for nothing. A control that has left the list has been repaired — delete \
-         its line."
+        dead,
+        frozen_entries_for(DEAD_CONTROLS, surface),
+        "{surface}'s dead controls changed.\nA control listed in DEAD_CONTROLS is wired to \
+         nothing: pressing it moves no state, opens nothing, stages no receipt, moves no focus \
+         and asks the platform for nothing. A control that has left the list has been repaired \
+         — delete its line."
     );
 
     unseeable.sort();
     let unseeable: Vec<&str> = unseeable.iter().map(String::as_str).collect();
     assert_eq!(
-        unseeable, PRESSES_THIS_HARNESS_CANNOT_SEE,
+        unseeable,
+        frozen_entries_for(PRESSES_THIS_HARNESS_CANNOT_SEE, surface),
         "a press this harness declared it could not see is now visible to it, or has stopped \
          being reachable; either way the exemption has to go"
     );
@@ -709,26 +834,177 @@ fn every_pressable_control_in_the_studio_answers_its_press() {
     stuck.sort();
     let stuck: Vec<&str> = stuck.iter().map(String::as_str).collect();
     assert_eq!(
-        stuck, MODALS_ESCAPE_DOES_NOT_CLOSE,
+        stuck,
+        frozen_entries_for(MODALS_ESCAPE_DOES_NOT_CLOSE, surface),
         "modals a sweep press opened and Escape did not close"
     );
 
+    let (pressed_floor, held_ceiling, modal_floor) = frozen_tallies_for(surface);
     assert!(
-        pressed >= PRESSED_FLOOR,
-        "the sweep pressed {pressed} controls, against {PRESSED_FLOOR} when it was measured; it \
-         has stopped reaching surfaces it claims to cover"
+        pressed >= pressed_floor,
+        "{surface} pressed {pressed} controls, against {pressed_floor} when it was measured; it \
+         has stopped reaching controls it claims to cover"
     );
     assert!(
-        held <= HELD_SELECTION_CEILING,
-        "{held} presses were excused as a live segment holding its selection, against a measured \
-         {HELD_SELECTION_CEILING}; that arm is a carve-out for segmented controls, not a place \
-         for dead ones to hide"
+        held <= held_ceiling,
+        "{held} of {surface}'s presses were excused as a live segment holding its selection, \
+         against a measured {held_ceiling}; that arm is a carve-out for segmented controls, not \
+         a place for dead ones to hide"
     );
     assert!(
-        opened >= MODAL_OPENERS_FLOOR,
-        "only {opened} presses opened a modal, against a measured {MODAL_OPENERS_FLOOR}; this \
-         gate is no longer reaching the controls that raise one"
+        opened >= modal_floor,
+        "only {opened} of {surface}'s presses opened a modal, against a measured {modal_floor}; \
+         this gate is no longer reaching the controls that raise one"
     );
+}
+
+/// One case per surface, and the record of which surface each case covers.
+///
+/// Spelled out rather than generated, because a test function has to exist at
+/// compile time and nothing here can read the enumeration before the binary is
+/// built. A surface the studio grows and this list does not is a surface
+/// nothing presses, which is the hole
+/// [`every_swept_surface_has_a_case_that_presses_it`] stands in.
+macro_rules! surface_press_cases {
+    ($(($index:expr, $surface:expr, $case:ident),)*) => {
+        /// Every surface a case presses, in sweep order.
+        const SWEPT_SURFACES: &[(usize, &str)] = &[$(($index, $surface),)*];
+
+        $(
+            #[test]
+            fn $case() {
+                press_every_control_on($index, $surface);
+            }
+        )*
+    };
+}
+
+surface_press_cases! {
+    (0, "Analyses/Transient", every_control_on_the_transient_form_answers_its_press),
+    (1, "Analyses/Ac", every_control_on_the_ac_form_answers_its_press),
+    (2, "Analyses/DcSweep", every_control_on_the_dc_sweep_form_answers_its_press),
+    (3, "Analyses/Noise", every_control_on_the_noise_form_answers_its_press),
+    (4, "Analyses/Stb", every_control_on_the_stability_form_answers_its_press),
+    (5, "Analyses/Pss", every_control_on_the_pss_form_answers_its_press),
+    (6, "Analyses/Temperature", every_control_on_the_temperature_form_answers_its_press),
+    (7, "Analyses/Corner", every_control_on_the_corner_form_answers_its_press),
+    (8, "Excitations", every_control_on_the_excitations_route_answers_its_press),
+    (9, "Variables", every_control_on_the_variables_route_answers_its_press),
+    (10, "Outputs", every_control_on_the_outputs_route_answers_its_press),
+    (11, "Specifications", every_control_on_the_specifications_route_answers_its_press),
+    (12, "RunSet", every_control_on_the_run_set_route_answers_its_press),
+    (13, "Models", every_control_on_the_models_route_answers_its_press),
+    (14, "Solver", every_control_on_the_solver_route_answers_its_press),
+    (15, "Save", every_control_on_the_save_route_answers_its_press),
+    (16, "analysis catalogue · Analyses",
+        every_control_on_the_catalogue_over_analyses_answers_its_press),
+    (17, "analysis catalogue · Excitations",
+        every_control_on_the_catalogue_over_excitations_answers_its_press),
+    (18, "analysis catalogue · Variables",
+        every_control_on_the_catalogue_over_variables_answers_its_press),
+    (19, "analysis catalogue · Outputs",
+        every_control_on_the_catalogue_over_outputs_answers_its_press),
+    (20, "analysis catalogue · Specifications",
+        every_control_on_the_catalogue_over_specifications_answers_its_press),
+    (21, "analysis catalogue · RunSet",
+        every_control_on_the_catalogue_over_the_run_set_answers_its_press),
+    (22, "analysis catalogue · Models",
+        every_control_on_the_catalogue_over_models_answers_its_press),
+    (23, "analysis catalogue · Solver",
+        every_control_on_the_catalogue_over_the_solver_answers_its_press),
+    (24, "analysis catalogue · Save",
+        every_control_on_the_catalogue_over_save_answers_its_press),
+    (25, "analysis catalogue · Results workspace",
+        every_control_on_the_catalogue_over_the_results_workspace_answers_its_press),
+    (26, "advanced options", every_control_on_the_advanced_options_panel_answers_its_press),
+    (27, "plan manager", every_control_on_the_plan_manager_answers_its_press),
+    (28, "rename analysis", every_control_on_the_rename_analysis_dialog_answers_its_press),
+    (29, "run points", every_control_on_the_run_points_picker_answers_its_press),
+    (30, "design variable", every_control_on_the_design_variable_dialog_answers_its_press),
+    (31, "saved output", every_control_on_the_saved_output_dialog_answers_its_press),
+    (32, "clone plan", every_control_on_the_clone_plan_dialog_answers_its_press),
+    (33, "capture group", every_control_on_the_capture_group_dialog_answers_its_press),
+    (34, "design variable import",
+        every_control_on_the_design_variable_import_dialog_answers_its_press),
+}
+
+/// The sweep is divided into cases and nothing falls between them.
+///
+/// Splitting one case into thirty-five moved three things that used to be
+/// checked once into places that are only checked if something reaches them, so
+/// each is re-made here as a claim about the division itself:
+///
+/// 1. Every surface the studio enumerates has a case, at the index and under
+///    the name that case declares. A surface with no case would be swept by
+///    nothing at all, and the frozen coverage tally would go on passing.
+/// 2. Every entry of every frozen list of names belongs to a surface some case
+///    presses. An entry naming a surface nothing sweeps is an exemption no
+///    case can ever refuse.
+/// 3. The per-surface numbers still add up to the whole-sweep numbers they were
+///    cut from, so the division cannot quietly relax a total.
+///
+/// Enumeration only, and it shares the enumeration every case shares, so it is
+/// the cheap gate a newly added surface trips first.
+#[test]
+fn every_swept_surface_has_a_case_that_presses_it() {
+    let enumerated: Vec<(usize, &str)> = studio_enumeration()
+        .iter()
+        .map(|plan| (plan.index, plan.surface.as_str()))
+        .collect();
+    assert_eq!(
+        enumerated, SWEPT_SURFACES,
+        "the studio's surfaces and the cases that press them have come apart. A surface listed \
+         here and not enumerated no longer exists; a surface enumerated and not listed is swept \
+         by nothing."
+    );
+
+    let swept: Vec<&str> = SWEPT_SURFACES.iter().map(|&(_, name)| name).collect();
+    for (list, name) in [
+        (DEAD_CONTROLS, "DEAD_CONTROLS"),
+        (
+            PRESSES_THIS_HARNESS_CANNOT_SEE,
+            "PRESSES_THIS_HARNESS_CANNOT_SEE",
+        ),
+        (MODALS_ESCAPE_DOES_NOT_CLOSE, "MODALS_ESCAPE_DOES_NOT_CLOSE"),
+    ] {
+        let partitioned: usize = swept
+            .iter()
+            .map(|surface| frozen_entries_for(list, surface).len())
+            .sum();
+        assert_eq!(
+            partitioned,
+            list.len(),
+            "an entry of {name} names a surface no case presses, so no case can ever refuse it"
+        );
+    }
+
+    let pressed: usize = PRESSED_PER_SURFACE.iter().map(|&(_, count)| count).sum();
+    assert_eq!(
+        pressed, PRESSED_FLOOR,
+        "the per-surface press tally no longer adds up to the whole sweep's floor"
+    );
+    let held: usize = SEGMENTS_AND_MODALS_PER_SURFACE
+        .iter()
+        .map(|&(_, held, _)| held)
+        .sum();
+    assert_eq!(
+        held, HELD_SELECTION_CEILING,
+        "the per-surface segment ceilings no longer add up to the whole sweep's ceiling"
+    );
+    let modals: usize = SEGMENTS_AND_MODALS_PER_SURFACE
+        .iter()
+        .map(|&(_, _, modals)| modals)
+        .sum();
+    assert_eq!(
+        modals, MODAL_OPENERS_FLOOR,
+        "the per-surface modal floors no longer add up to the whole sweep's floor"
+    );
+    for &(surface, _, _) in SEGMENTS_AND_MODALS_PER_SURFACE {
+        assert!(
+            swept.contains(&surface),
+            "{surface} carries a segment or modal tally and no case presses it"
+        );
+    }
 }
 
 /// Nothing in the studio removes a record without saying so.
@@ -744,22 +1020,22 @@ fn every_destructive_press_is_reviewed_or_receipted() {
     let mut silent = Vec::new();
     let mut cost = Vec::new();
     let mut destructive = 0usize;
-    for (index, surface, targets) in sweep_plan() {
-        for (target, label) in targets {
-            if !is_destructive(&label) {
+    for plan in studio_enumeration() {
+        for (target, label) in &plan.targets {
+            if !is_destructive(label) {
                 continue;
             }
-            let (name, app) = sweep_surface(index);
+            let (name, app) = sweep_surface(plan.index);
             let mut sweep = Sweep::open(app);
             let (_, nodes) = sweep.settle(&name);
-            let Some((_, node)) = nodes.iter().find(|(id, _)| *id == target) else {
+            let Some((_, node)) = nodes.iter().find(|(id, _)| id == target) else {
                 continue;
             };
-            let entry = format!("{surface}: {}", describe(node));
+            let entry = format!("{}: {}", plan.surface, describe(node));
             destructive += 1;
             let plan_before = sweep.plan_records();
             let receipt_before = sweep.receipt();
-            sweep.press(target);
+            sweep.press(*target);
             let staged = sweep.review_open();
             if !staged && sweep.receipt() == receipt_before {
                 silent.push(entry.clone());
@@ -893,11 +1169,11 @@ fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
 /// identity the studio publishes has to answer to exactly one name.
 #[test]
 fn the_press_sweep_covers_every_control_it_covered_before() {
-    let plan = sweep_plan();
+    let plan = studio_enumeration();
     let mut names: std::collections::BTreeMap<u64, BTreeSet<String>> =
         std::collections::BTreeMap::new();
-    for (_, _, targets) in &plan {
-        for (id, label) in targets {
+    for surface in plan {
+        for (id, label) in &surface.targets {
             names.entry(id.0).or_default().insert(label.clone());
         }
     }
@@ -913,16 +1189,16 @@ fn the_press_sweep_covers_every_control_it_covered_before() {
         shared.join("\n")
     );
 
-    let measured: Vec<(String, usize)> = plan
-        .into_iter()
-        .map(|(_, surface, targets)| (surface, targets.len()))
+    let measured: Vec<(&str, usize)> = plan
+        .iter()
+        .map(|surface| (surface.surface.as_str(), surface.targets.len()))
         .collect();
     let mut shortfalls = Vec::new();
     for &(surface, floor) in PRESSED_PER_SURFACE {
         match measured
             .iter()
-            .find(|(name, _)| name.as_str() == surface)
-            .map(|(_, count)| *count)
+            .find(|&&(name, _)| name == surface)
+            .map(|&(_, count)| count)
         {
             None => shortfalls.push(format!(
                 "{surface} is in the tally and the studio no longer publishes it"
@@ -934,11 +1210,8 @@ fn the_press_sweep_covers_every_control_it_covered_before() {
             Some(_) => {}
         }
     }
-    for (surface, count) in &measured {
-        if !PRESSED_PER_SURFACE
-            .iter()
-            .any(|&(name, _)| name == surface.as_str())
-        {
+    for &(surface, count) in &measured {
+        if !PRESSED_PER_SURFACE.iter().any(|&(name, _)| name == surface) {
             shortfalls.push(format!(
                 "{surface} publishes {count} controls and is not in the tally at all"
             ));
@@ -965,6 +1238,11 @@ fn the_press_sweep_covers_every_control_it_covered_before() {
 /// fails here rather than quietly narrowing what the sweep can see. A clipped
 /// control is one the sweep would go on pressing by identity while no reader
 /// could reach it at all, which is a worse answer than a red gate.
+///
+/// Measured from the rectangles [`studio_enumeration`] already recorded, which
+/// are the ones the presses are aimed at: re-rendering the studio to measure
+/// them again would cost a second full enumeration to answer a question the
+/// first one has the answer to.
 #[test]
 fn the_sweep_viewport_reaches_every_control() {
     // Sub-pixel: a control resting exactly on the edge is inside it.
@@ -972,27 +1250,16 @@ fn the_sweep_viewport_reaches_every_control() {
 
     let mut outside = Vec::new();
     let mut measured = 0usize;
-    for index in 0..surface_count() {
-        let (name, app) = sweep_surface(index);
-        let mut sweep = Sweep::open(app);
-        let (_, nodes) = sweep.settle(&name);
-        for (_, node) in &nodes {
-            if !is_pressable(node) {
-                continue;
-            }
+    for plan in studio_enumeration() {
+        for (_, described, bounds) in &plan.published {
             measured += 1;
-            let bounds = node.bounds().expect("a pressable node carries bounds");
             if bounds.x1 > f64::from(SWEEP_SIZE.0) + TOLERANCE
                 || bounds.x0 < -TOLERANCE
                 || bounds.y1 > f64::from(SWEEP_SIZE.1) + TOLERANCE
             {
                 outside.push(format!(
-                    "{name}: {} spans {:.1}..{:.1} x {:.1}..{:.1}",
-                    describe(node),
-                    bounds.x0,
-                    bounds.x1,
-                    bounds.y0,
-                    bounds.y1
+                    "{}: {described} spans {:.1}..{:.1} x {:.1}..{:.1}",
+                    plan.surface, bounds.x0, bounds.x1, bounds.y0, bounds.y1
                 ));
             }
         }
