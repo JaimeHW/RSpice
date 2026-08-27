@@ -48,6 +48,7 @@ pub(crate) use manifest::export_csv as export_manifest_csv;
 pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
+pub(crate) use specs::active_run_specifications as run_specifications;
 pub(crate) use specs::export_csv as export_specs_csv;
 pub(crate) use specs::hardcopy_table as specs_hardcopy_table;
 

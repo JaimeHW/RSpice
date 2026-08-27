@@ -1770,6 +1770,146 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
     assert_eq!(summary.tables[0].rows[1][8], "pass");
 }
 
+/// A workspace on the Specs sheet of one completed run whose receipt froze
+/// `gain >= 10 dB`, with one attributed analysis that measured 12 dB.
+fn signed_off_specification_workspace() -> (AppState, String) {
+    use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision, SimulationPlanId};
+    use crate::state::{
+        AnalysisResultProvenance, AnalysisResultSourceDomain, PreparedRunReceipt,
+        PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecification, SpecEntry,
+        SpecPointScope,
+    };
+
+    let task_id = AnalysisInstanceId::new();
+    let snapshot = ContentDigest::from_bytes([0x71; 32]);
+    let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        snapshot,
+        ContentDigest::from_bytes([0x73; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x74; 32])),
+        Vec::new(),
+        vec![
+            PreparedSpecification::new(SpecEntry {
+                measurement: "gain".to_owned(),
+                expression: "max gain".to_owned(),
+                min: Some(10.0),
+                max: None,
+                unit: "dB".to_owned(),
+                scope: SpecPointScope::AllPoints,
+            })
+            .expect("prepared requirement"),
+        ],
+        vec![
+            PreparedRunTaskReceipt::new(
+                task_id,
+                ObjectRevision::INITIAL,
+                Vec::new(),
+                2,
+                ContentDigest::from_bytes([0x72; 32]),
+            )
+            .expect("task receipt"),
+        ],
+    )
+    .expect("prepared receipt");
+    let mut run = SimulationRun::new_prepared(1, receipt);
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Ac, "AC")
+            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 12.0)])
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    task_id,
+                    ObjectRevision::INITIAL,
+                    snapshot,
+                    Vec::new(),
+                )
+                .expect("prepared provenance"),
+            ),
+    );
+    run.mark_running().expect("the engine accepted the run");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("the controller seals the run");
+
+    let dataset_id = run.dataset_id;
+    let mut state = AppState::default();
+    state.simulation.runs = vec![run];
+    state.simulation.active_run_idx = Some(0);
+    state.simulation.active_analysis_idx = Some(0);
+    state.ui.results.viewer = ResultViewer::Specs;
+    state.workbench.workspace = Workspace::Results;
+    state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::ResultDataset(dataset_id));
+    let source_key = format!(
+        "project:{}:result-dataset:{}",
+        state.workspace.project.id().as_uuid(),
+        dataset_id
+    );
+    (state, source_key)
+}
+
+/// What a print of the Specs sheet says, and the identity it says it under.
+fn printed_specification_bounds(
+    state: &AppState,
+    source_key: &str,
+) -> (String, HardcopyDocumentId) {
+    let resolved =
+        prepare_retained_hardcopy_resolution(state, source_key, HardcopyScope::ActivePlotDocument)
+            .expect("Specs prepares")
+            .into_worker_snapshot_json()
+            .and_then(|bytes| PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&bytes))
+            .expect("Specs round-trips through the worker snapshot")
+            .resolve_owned()
+            .expect("Specs resolves");
+    let HardcopySemanticDocument::ResultSummary(summary) = resolved.semantic_document() else {
+        panic!("expected Specs result summary")
+    };
+    (
+        summary.tables[0].rows[0][3].clone(),
+        resolved.authority().document_id(),
+    )
+}
+
+/// The print states the bound the run was judged against, whatever the
+/// workspace's contract has become since.
+///
+/// The capture read `state.workspace.specs` — the live, editable contract —
+/// so editing a limit after a completed run both restated that limit on the
+/// printed page beside the verdict the run had actually earned, and moved the
+/// printed document's identity, which is derived from the captured
+/// requirements. Neither is a thing an immutable result may do.
+#[test]
+fn printed_specifications_are_the_ones_the_run_froze_not_the_ones_now_authored() {
+    let (mut state, source_key) = signed_off_specification_workspace();
+    state.workspace.specs = vec![crate::state::SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: "max gain".to_owned(),
+        min: Some(10.0),
+        max: None,
+        unit: "dB".to_owned(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    }];
+    let (before, identity_before) = printed_specification_bounds(&state, &source_key);
+
+    // The reader raises the limit after the run. The retained dataset was
+    // never judged against 20 dB.
+    state.workspace.specs[0].min = Some(20.0);
+    let (after, identity_after) = printed_specification_bounds(&state, &source_key);
+
+    assert_eq!(
+        after,
+        format!("value >= {:.17e}", 10.0),
+        "the printed page states the frozen bound, not the one the workspace now holds"
+    );
+    assert_eq!(before, after);
+    assert_eq!(
+        identity_before, identity_after,
+        "an immutable result's printed identity does not move when the plan is edited"
+    );
+}
+
 #[test]
 fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
     let mut state = AppState::default();

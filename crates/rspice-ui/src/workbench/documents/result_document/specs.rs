@@ -7,14 +7,15 @@
 //! expressions persist with the workspace ([`SpecEntry`]), while the docbar
 //! opens their inline editor.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use egui::Ui;
 
 use crate::quantity::engineering::parse_engineering_value;
 use crate::state::{
-    AnalysisResultFamilyMetadata, AnalysisType, SimulationRun, SimulationRunLifecycle, SpecEntry,
-    SpecPointScope, SpecificationComparison, SpecificationDefinition, SpecificationRole,
+    AnalysisResultFamilyMetadata, SimulationRun, SimulationRunLifecycle, SpecEntry, SpecPointScope,
+    SpecificationComparison, SpecificationDefinition, SpecificationRole, SpecificationVerdict,
     SpecificationVerdictStatus,
 };
 use crate::ui::plot::fmt_si;
@@ -554,6 +555,91 @@ fn result_row(run: &SimulationRun, measurement: String, spec: Option<&SpecEntry>
     }
 }
 
+/// The requirement set one retained run is judged against.
+///
+/// A dispatched run freezes the specifications it was prepared with into its
+/// receipt, and that set — never the workspace's currently authored one — is
+/// the contract every surface reading the run must present. Only a legacy
+/// dataset from before prepared-run receipts has no frozen set, and only for
+/// those is the workspace's live contract an honest fallback.
+///
+/// One function, because the sheet resolved this and the CSV export and the
+/// hardcopy capture did not: they re-resolved against the live workspace, so a
+/// limit edited after a completed run put a bound the run had never been
+/// judged against onto the exported and printed row, beside the verdict the
+/// run had actually earned.
+fn resolved_specifications<'a>(
+    run: &'a SimulationRun,
+    workspace_specs: &'a [SpecEntry],
+) -> Cow<'a, [SpecEntry]> {
+    run.prepared_receipt().map_or_else(
+        || Cow::Borrowed(workspace_specs),
+        |receipt| {
+            Cow::Owned(
+                receipt
+                    .specifications()
+                    .iter()
+                    .map(|specification| specification.entry().clone())
+                    .collect(),
+            )
+        },
+    )
+}
+
+/// The requirements the workspace's active retained dataset was judged
+/// against, owned.
+///
+/// The whole-state spelling of [`resolved_specifications`], for the hardcopy
+/// capture, which takes a presentation of the Results workspace rather than
+/// drawing one. It captured `workspace.specs` directly, and both the printed
+/// table and the printed document's identity derive from what it captured —
+/// so a limit edited after a completed run restated itself on the page beside
+/// the verdict the run had actually earned, and moved the identity of an
+/// immutable result.
+pub(crate) fn active_run_specifications(state: &AppState) -> Vec<SpecEntry> {
+    state.simulation.active_run().map_or_else(
+        || state.workspace.specs.clone(),
+        |run| resolved_specifications(run, &state.workspace.specs).into_owned(),
+    )
+}
+
+/// The verdicts one retained run presents, and whether they are final.
+struct RunSpecificationJudgment<'a> {
+    verdicts: Cow<'a, [SpecificationVerdict]>,
+    provisional: bool,
+}
+
+/// The verdicts for a run at any point in its life, from the one judge.
+///
+/// A terminal run carries the verdicts it sealed. A run still streaming is
+/// judged by the same function the seal will use, over the evidence retained
+/// so far, and its rows say that they are provisional. Before this, the
+/// streaming rows came from [`result_row`]'s projection, which knows nothing
+/// of guard bands, point scope or producing-analysis binding and refuses any
+/// measurement more than one prepared task published — so rows flipped the
+/// instant a run completed, and an ordinary corner sweep read `invalid` until
+/// it did. [`result_row`] now answers only for legacy datasets, which have no
+/// frozen requirement to judge and never had a sealed verdict either.
+fn run_judgment(run: &SimulationRun) -> Option<RunSpecificationJudgment<'_>> {
+    if let Some(sealed) = run.specification_verdicts() {
+        return Some(RunSpecificationJudgment {
+            verdicts: Cow::Borrowed(sealed),
+            provisional: false,
+        });
+    }
+    let receipt = run.prepared_receipt()?;
+    if receipt.specifications().is_empty() {
+        return None;
+    }
+    Some(RunSpecificationJudgment {
+        verdicts: Cow::Owned(SpecificationVerdict::evaluate(
+            receipt.specifications(),
+            &run.analyses,
+        )),
+        provisional: true,
+    })
+}
+
 fn result_rows(run: &SimulationRun, specs: &[SpecEntry]) -> Vec<SpecResultRow> {
     let mut rows = Vec::new();
     let mut seen = HashSet::new();
@@ -569,8 +655,8 @@ fn result_rows(run: &SimulationRun, specs: &[SpecEntry]) -> Vec<SpecResultRow> {
             }
         }
     }
-    if let Some(verdicts) = run.specification_verdicts() {
-        for verdict in verdicts {
+    if let Some(judgment) = run_judgment(run) {
+        for verdict in judgment.verdicts.iter() {
             let Some(row) = rows
                 .iter_mut()
                 .find(|row| row.measurement.eq_ignore_ascii_case(verdict.measurement()))
@@ -612,8 +698,16 @@ fn result_rows(run: &SimulationRun, specs: &[SpecEntry]) -> Vec<SpecResultRow> {
                     verdict.passing_evidence_count()
                 )
             });
+            // A judgment made while the run is still producing evidence is
+            // the same judgment, over less of it. It says so rather than
+            // presenting itself as the sealed one.
+            let standing = if judgment.provisional {
+                "Provisional verdict, not yet sealed,"
+            } else {
+                "Immutable terminal verdict"
+            };
             row.detail = format!(
-                "Immutable terminal verdict for {requirement_identity} over {} attributed measurement{}{} from the frozen run specification.",
+                "{standing} for {requirement_identity} over {} attributed measurement{}{} from the frozen run specification.",
                 verdict.evidence_count(),
                 if verdict.evidence_count() == 1 {
                     ""
@@ -628,9 +722,17 @@ fn result_rows(run: &SimulationRun, specs: &[SpecEntry]) -> Vec<SpecResultRow> {
 }
 
 /// Serialize the same worst-case projection rendered by the Specs sheet,
-/// while retaining the separately authored bounds and point scope.
-pub(crate) fn export_csv(run: &SimulationRun, specs: &[SpecEntry]) -> super::ResultSheetCsv {
-    let rows = result_rows(run, specs);
+/// against the same requirements it was rendered against.
+///
+/// `workspace_specs` is the legacy fallback only: the run's own frozen
+/// contract is resolved here rather than by the caller, so an export arm
+/// holding the live workspace cannot write a bound the sheet never showed.
+pub(crate) fn export_csv(
+    run: &SimulationRun,
+    workspace_specs: &[SpecEntry],
+) -> super::ResultSheetCsv {
+    let specs = resolved_specifications(run, workspace_specs);
+    let rows = result_rows(run, &specs);
     let mut contents = String::from(
         "measurement,expression,value,minimum,maximum,limit,margin,unit,scope,worst_corner,status,detail\n",
     );
@@ -675,8 +777,15 @@ pub(crate) fn export_csv(run: &SimulationRun, specs: &[SpecEntry]) -> super::Res
 /// Renderer-neutral table projection shared with semantic hardcopy. This is
 /// deliberately run-level: the sheet judges every retained source, not only
 /// whichever analysis happens to be selected globally.
-pub(crate) fn hardcopy_table(run: &SimulationRun, specs: &[SpecEntry]) -> super::ResultSheetTable {
-    let result_rows = result_rows(run, specs);
+///
+/// `workspace_specs` is the legacy fallback only, exactly as in
+/// [`export_csv`]: what is printed is the contract the run froze.
+pub(crate) fn hardcopy_table(
+    run: &SimulationRun,
+    workspace_specs: &[SpecEntry],
+) -> super::ResultSheetTable {
+    let specs = resolved_specifications(run, workspace_specs);
+    let result_rows = result_rows(run, &specs);
     let rows = result_rows
         .iter()
         .map(|row| {
@@ -1373,15 +1482,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let run_id = run.id;
     let dataset_id = run.dataset_id;
     let lifecycle = run.lifecycle;
-    let frozen_specs = run.prepared_receipt().map(|receipt| {
-        receipt
-            .specifications()
-            .iter()
-            .map(|specification| specification.entry().clone())
-            .collect::<Vec<_>>()
-    });
-    let specs = frozen_specs.as_deref().unwrap_or(&state.workspace.specs);
-    let rows = result_rows(run, specs);
+    let specs = resolved_specifications(run, &state.workspace.specs);
+    let rows = result_rows(run, &specs);
     let summary = summarize_rows(&rows);
     let passing = summary.passing;
     let bounded = summary.bounded;
@@ -1428,7 +1530,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-fn source_viewer(state: &AppState, analysis_type: AnalysisType) -> ResultViewer {
+fn source_viewer(state: &AppState, analysis_type: crate::state::AnalysisType) -> ResultViewer {
+    use crate::state::AnalysisType;
+
     let candidate = match analysis_type {
         AnalysisType::DcOp => ResultViewer::Op,
         AnalysisType::DcSweep => ResultViewer::DcSweep,
@@ -1887,16 +1991,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
     // Results are immutable evidence. The side inspector must therefore use
     // the same frozen receipt requirements as the document, even after the
-    // active plan is edited or switched. Falling back is reserved for legacy
-    // datasets that predate prepared-run receipts.
-    let frozen_specs = run.prepared_receipt().map(|receipt| {
-        receipt
-            .specifications()
-            .iter()
-            .map(|specification| specification.entry().clone())
-            .collect::<Vec<_>>()
-    });
-    let specs = frozen_specs.as_deref().unwrap_or(&state.workspace.specs);
+    // active plan is edited or switched.
+    let specs = resolved_specifications(run, &state.workspace.specs);
     if specs.is_empty() {
         section_header(ui, "Specs · active dataset", None);
         measurement_table(
@@ -1905,7 +2001,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     }
-    let rows = result_rows(run, specs);
+    let rows = result_rows(run, &specs);
     let summary = summarize_rows(&rows);
     let bounded = summary.bounded;
     let passing = summary.passing;

@@ -354,6 +354,10 @@ fn prepare_active_sheet_csv(
         ResultViewer::Op => {
             result_document::export_operating_point_csv(displayed.primary_analysis(state)?)
         }
+        // The workspace contract is handed over as the legacy fallback only:
+        // the sheet judges the run against the requirements the run froze, and
+        // `export_specs_csv` resolves that itself so this arm cannot write a
+        // bound the sheet never showed.
         ResultViewer::Specs => Some(result_document::export_specs_csv(
             displayed.run(state)?,
             &state.workspace.specs,

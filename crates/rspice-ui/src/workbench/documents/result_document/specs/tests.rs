@@ -713,3 +713,293 @@ fn every_column_is_inside_the_pane_the_document_is_drawn_in() {
     let ample = super::spec_columns(super::table_width() + 200.0);
     assert_eq!(ample, super::SPEC_COLUMNS.map(|(want, _)| want));
 }
+
+// ------------------------------------------- one judge, one resolved contract
+
+use crate::product::SimulationPlanId;
+use crate::state::{
+    AnalysisResultPvtPoint, AnalysisResultSourceDomain, PreparedRunReceipt, PreparedRunTaskReceipt,
+    PreparedSourceCheckReceipt, PreparedSpecification, SimulationRunLifecycle, SpecPointScope,
+    SpecificationComparison, SpecificationDefinition,
+};
+
+/// A governed requirement, spelled the way the studio's editor spells one.
+fn requirement(
+    measurement: &str,
+    comparison: SpecificationComparison,
+    guard_band: Option<f64>,
+    producing_analysis: Option<AnalysisInstanceId>,
+    scope: SpecPointScope,
+) -> SpecificationDefinition {
+    let projection = SpecEntry {
+        measurement: measurement.to_owned(),
+        expression: format!("param={measurement}"),
+        min: None,
+        max: None,
+        unit: "dB".to_owned(),
+        scope: scope.clone(),
+    };
+    let mut definition =
+        SpecificationDefinition::from_legacy(SimulationPlanId::new(), 0, &projection);
+    definition.requirement_key = "REQ-GAIN-1".to_owned();
+    definition.comparison = comparison;
+    definition.guard_band = guard_band;
+    definition.producing_analysis = producing_analysis;
+    definition.scope = scope;
+    definition
+}
+
+/// A dispatched run whose receipt froze `definitions`, plus the producing task
+/// identity every attributed analysis in it is authored by.
+fn prepared_run(definitions: Vec<SpecificationDefinition>) -> (SimulationRun, AnalysisInstanceId) {
+    let task_id = AnalysisInstanceId::new();
+    let task = PreparedRunTaskReceipt::new(
+        task_id,
+        ObjectRevision::INITIAL,
+        Vec::new(),
+        2,
+        ContentDigest::from_bytes([0x72; 32]),
+    )
+    .expect("task receipt");
+    let receipt = PreparedRunReceipt::new_with_project_model_sources_and_specifications(
+        AnalysisResultSourceDomain::SimulationPlan,
+        Some(SimulationPlanId::new()),
+        ObjectRevision::INITIAL,
+        ContentDigest::from_bytes([0x71; 32]),
+        ContentDigest::from_bytes([0x73; 32]),
+        PreparedSourceCheckReceipt::SchematicDrc(ContentDigest::from_bytes([0x74; 32])),
+        Vec::new(),
+        definitions
+            .into_iter()
+            .map(|definition| {
+                PreparedSpecification::from_definition(definition).expect("prepared requirement")
+            })
+            .collect(),
+        vec![task],
+    )
+    .expect("prepared receipt");
+    (SimulationRun::new_prepared(1, receipt), task_id)
+}
+
+/// One measured analysis attributed to `producer` at the named PVT point.
+fn attributed(
+    run: &SimulationRun,
+    id: u64,
+    producer: AnalysisInstanceId,
+    process: &str,
+    nominal: bool,
+    value: f64,
+) -> AnalysisResult {
+    let snapshot = run
+        .prepared_receipt()
+        .expect("prepared receipt")
+        .prepared_snapshot_digest();
+    AnalysisResult::new(id, AnalysisType::Ac, format!("AC {process}"))
+        .with_measurements(vec![rspice_core::MeasureResult::success("gain", value)])
+        .with_provenance(
+            AnalysisResultProvenance::new(producer, ObjectRevision::INITIAL, snapshot, Vec::new())
+                .expect("prepared provenance")
+                .with_pvt_point(Some(
+                    AnalysisResultPvtPoint::new(process, None, 27.0, None, nominal)
+                        .expect("attributed point"),
+                )),
+        )
+}
+
+/// The specifications the run froze, which is what every surface reading it
+/// presents. Spelled from the receipt so the fixture states the contract
+/// rather than trusting the code under test to resolve it.
+fn frozen_specs(run: &SimulationRun) -> Vec<SpecEntry> {
+    run.prepared_receipt()
+        .expect("prepared receipt")
+        .specifications()
+        .iter()
+        .map(|specification| specification.entry().clone())
+        .collect()
+}
+
+/// A verdict does not change at the moment the run reaches its terminal state.
+///
+/// The sheet judged a streaming run with a projection of its own — no guard
+/// band, no point scope, no producing-analysis binding — and then replaced
+/// every row with the sealed verdict the instant the run completed. On this
+/// dataset the two disagree in all three ways at once, so the row visibly
+/// flipped under a reader who had changed nothing.
+#[test]
+fn a_streaming_verdict_is_the_verdict_the_seal_will_state() {
+    let producer = AnalysisInstanceId::new();
+    let (mut run, _task_id) = prepared_run(vec![requirement(
+        "gain",
+        SpecificationComparison::Maximum { limit: 10.0 },
+        Some(1.0),
+        Some(producer),
+        SpecPointScope::Nominal,
+    )]);
+    let unrelated = AnalysisInstanceId::new();
+    // 20 dB from a producer the requirement is not bound to, 15 dB from the
+    // bound producer at a corner the scope does not admit, and 9.5 dB from the
+    // bound producer at nominal — the only candidate the requirement admits,
+    // and one the 1 dB guard band puts out of bound.
+    for (id, producer, process, nominal, value) in [
+        (1_u64, unrelated, "TT", true, 20.0),
+        (2, producer, "SS", false, 15.0),
+        (3, producer, "TT", true, 9.5),
+    ] {
+        let analysis = attributed(&run, id, producer, process, nominal, value);
+        run.add_analysis(analysis);
+    }
+    run.mark_running().expect("the engine accepted the run");
+    let specs = frozen_specs(&run);
+
+    let live = result_rows(&run, &specs);
+
+    assert_eq!(live.len(), 1);
+    assert_eq!(
+        live[0].status,
+        SpecResultStatus::Fail,
+        "the guard-banded 10 dB maximum is broken by the one admitted candidate: {:?}",
+        live[0]
+    );
+    assert_eq!(live[0].value, Some(9.5), "{:?}", live[0]);
+    assert_eq!(live[0].margin, Some(-0.5), "{:?}", live[0]);
+    assert!(
+        live[0].detail.contains("Provisional"),
+        "a streaming judgment is not a sealed one and has to say so: {:?}",
+        live[0].detail
+    );
+
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("the controller seals the run");
+    let sealed = result_rows(&run, &specs);
+
+    assert_eq!(
+        sealed[0].status, live[0].status,
+        "the verdict changed at the terminality boundary although the evidence did not"
+    );
+    assert_eq!(sealed[0].value, live[0].value);
+    assert_eq!(sealed[0].margin, live[0].margin);
+    assert_eq!(
+        sealed[0].source_analysis_index,
+        live[0].source_analysis_index
+    );
+    assert!(
+        sealed[0].detail.contains("Immutable terminal verdict"),
+        "{:?}",
+        sealed[0].detail
+    );
+}
+
+/// Two attributed producers are not an ambiguous lineage.
+///
+/// The streaming projection refused any measurement published by more than one
+/// source instance, so an ordinary corner sweep — every point a separate
+/// prepared task — read `invalid`, with no value and no margin, until the run
+/// completed. The sealed judge takes the worst of the admitted evidence, and
+/// that is the only judgment either surface may show.
+#[test]
+fn attributed_evidence_from_several_producers_is_judged_not_refused() {
+    let (mut run, task_id) = prepared_run(vec![requirement(
+        "gain",
+        SpecificationComparison::Minimum { limit: 10.0 },
+        None,
+        None,
+        SpecPointScope::AllPoints,
+    )]);
+    let second_task = AnalysisInstanceId::new();
+    for (id, producer, process, value) in
+        [(1_u64, task_id, "TT", 12.0), (2, second_task, "SS", 8.0)]
+    {
+        let analysis = attributed(&run, id, producer, process, process == "TT", value);
+        run.add_analysis(analysis);
+    }
+    run.mark_running().expect("the engine accepted the run");
+
+    let rows = result_rows(&run, &frozen_specs(&run));
+
+    assert_eq!(
+        rows[0].status,
+        SpecResultStatus::Fail,
+        "the worst admitted corner is 8 dB against a 10 dB floor: {:?}",
+        rows[0]
+    );
+    assert_eq!(rows[0].value, Some(8.0));
+    assert!(
+        !rows[0]
+            .detail
+            .contains("different or unproven source lineages"),
+        "two attributed prepared tasks are two proven lineages, not an ambiguity: {:?}",
+        rows[0].detail
+    );
+}
+
+/// The sheet, the CSV export and the print capture state one bound.
+///
+/// The run seals the requirement it was dispatched with. The export arm and
+/// the hardcopy capture re-resolved theirs against the workspace's live
+/// contract instead, so editing a limit after the run left the exported row
+/// carrying a bound the run was never judged against beside the verdict it
+/// actually earned.
+#[test]
+fn the_sheet_the_export_and_the_print_state_the_bound_the_run_was_judged_against() {
+    let (mut run, task_id) = prepared_run(vec![requirement(
+        "gain",
+        SpecificationComparison::Minimum { limit: 10.0 },
+        None,
+        None,
+        SpecPointScope::AllPoints,
+    )]);
+    let analysis = attributed(&run, 1, task_id, "TT", true, 12.0);
+    run.add_analysis(analysis);
+    run.mark_running().expect("the engine accepted the run");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("the controller seals the run");
+
+    // The reader edits the limit after the run: the workspace now asks for
+    // 20 dB, and the retained run was never judged against it.
+    let workspace_specs = vec![SpecEntry {
+        measurement: "gain".to_owned(),
+        expression: "param=gain".to_owned(),
+        min: Some(20.0),
+        max: None,
+        unit: "dB".to_owned(),
+        scope: SpecPointScope::AllPoints,
+    }];
+    let frozen = frozen_specs(&run);
+    assert_eq!(
+        frozen[0].min,
+        Some(10.0),
+        "the receipt froze the 10 dB floor"
+    );
+
+    let sheet = result_rows(&run, &frozen);
+    assert_eq!(sheet[0].status, SpecResultStatus::Pass);
+    assert_eq!(sheet[0].limit, frozen[0].limit_text());
+
+    let csv = super::export_csv(&run, &workspace_specs);
+    let exported = csv
+        .contents
+        .lines()
+        .find(|line| line.starts_with("gain,"))
+        .expect("the export carries the requirement row")
+        .to_owned();
+    let fields: Vec<&str> = exported.split(',').collect();
+    assert_eq!(
+        fields[3],
+        format!("{:.17e}", 10.0),
+        "the export states the bound the run was judged against, not the one \
+         the workspace now holds: {exported}"
+    );
+    assert!(
+        exported.contains(&frozen[0].limit_text()),
+        "and spells it the way the sheet does: {exported}"
+    );
+
+    let printed = super::hardcopy_table(&run, &workspace_specs);
+    assert_eq!(
+        printed.rows[0][3],
+        format!("value >= {:.17e}", 10.0),
+        "the printed document states the same bound the sheet showed: {:?}",
+        printed.rows[0]
+    );
+    assert_eq!(printed.rows[0][8], sheet[0].status.label());
+}

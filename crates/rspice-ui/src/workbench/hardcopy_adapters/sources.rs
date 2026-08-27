@@ -210,7 +210,7 @@ impl ResultsQuickViewPresentation {
         fft.sample_count = state.analysis.fft_state.sample_count;
         Self {
             viewer: state.ui.results.viewer,
-            specs: state.workspace.specs.clone(),
+            specs: crate::workbench::documents::result_document::run_specifications(state),
             fft,
             histogram_selected: state.analysis.histogram_state.selected,
             histogram_bin_count: state.analysis.histogram_state.bin_count,
