@@ -5644,8 +5644,14 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }) {
                 ViewerAvailability::available("Operating-point evidence is available")
             } else {
+                // The gate reads the *active analysis*, and accepts any of
+                // three kinds of evidence. Naming only the device report, and
+                // naming the dataset as its scope, sent a reader who had a
+                // node DC solution under a different analysis looking for a
+                // report they did not need and could not have produced.
                 ViewerAvailability::unavailable(
-                    "Requires a device operating-point report in the active dataset",
+                    "Requires the active analysis to carry a node DC solution, a device \
+                     operating-point report, or a retained operating-point payload",
                 )
             }
         }

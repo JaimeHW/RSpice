@@ -679,6 +679,51 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+/// Why the event inspector has nothing to show for a selection that exists.
+const EVENT_SELECTION_NO_DATASET: &str = "No dataset is open, so the selected event has nothing to resolve against. \
+     Open the dataset it was taken from, or select an event row here.";
+const EVENT_SELECTION_UNRETAINED_ANALYSIS: &str = "The analysis this event was selected from is no longer retained in the \
+     active dataset. Select an event row again.";
+const EVENT_SELECTION_OTHER_ANALYSIS: &str = "Select an event row in the active analysis.";
+const EVENT_SELECTION_UNRETAINED_ROW: &str = "The retained trace or sample this event named is no longer present in the \
+     analysis. Select an event row again.";
+
+/// Why the inspector cannot show the event a selection names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EventSelectionBlock {
+    note: &'static str,
+    /// Whether the selection itself is unrecoverable and should be dropped.
+    /// A dataset that is merely not open right now is not: it can come back,
+    /// and dropping the selection would lose the reader's place for a
+    /// condition that is about the workspace rather than about the evidence.
+    stale: bool,
+}
+
+/// A selection outlives the evidence it names: closing the dataset, or
+/// re-running the analysis into a different retained shape, leaves the panel
+/// holding an identity nothing resolves. Three of those four outcomes drew an
+/// empty panel — no heading, no reason — which reads as a broken pane rather
+/// than as a selection that has expired.
+fn event_selection_block(
+    state: &AppState,
+    selection: &DigitalEventSelection,
+) -> Option<EventSelectionBlock> {
+    let block = |note, stale| Some(EventSelectionBlock { note, stale });
+    let Some(run) = state.simulation.active_run() else {
+        return block(EVENT_SELECTION_NO_DATASET, false);
+    };
+    let Some((analysis_index, analysis)) = selection.analysis.resolve(run) else {
+        return block(EVENT_SELECTION_UNRETAINED_ANALYSIS, true);
+    };
+    if state.simulation.active_analysis_idx != Some(analysis_index) {
+        return block(EVENT_SELECTION_OTHER_ANALYSIS, true);
+    }
+    if event_row_for_selection(analysis, selection).is_none() {
+        return block(EVENT_SELECTION_UNRETAINED_ROW, true);
+    }
+    None
+}
+
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(selection) = state.ui.results.selected_digital_event.clone() else {
         section_header(ui, "Event selection", None);
@@ -688,19 +733,25 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         );
         return;
     };
-    let Some(run) = state.simulation.active_run() else {
-        return;
-    };
-    let Some((analysis_index, analysis)) = selection.analysis.resolve(run) else {
-        return;
-    };
-    if state.simulation.active_analysis_idx != Some(analysis_index) {
-        state.ui.results.selected_digital_event = None;
+    if let Some(block) = event_selection_block(state, &selection) {
+        if block.stale {
+            state.ui.results.selected_digital_event = None;
+        }
         section_header(ui, "Event selection", None);
-        panel_note(ui, "Select an event row in the active analysis.");
+        panel_note(ui, block.note);
         return;
     }
-    let Some(event) = event_row_for_selection(analysis, &selection) else {
+    let Some(event) = state
+        .simulation
+        .active_run()
+        .and_then(|run| selection.analysis.resolve(run))
+        .and_then(|(_, analysis)| event_row_for_selection(analysis, &selection))
+    else {
+        // Unreachable: the block above resolved this exact row over the same
+        // unchanged state. Stated rather than asserted, because a panel that
+        // says nothing is the defect this function is fixing.
+        section_header(ui, "Event selection", None);
+        panel_note(ui, EVENT_SELECTION_UNRETAINED_ROW);
         return;
     };
 
@@ -916,6 +967,92 @@ mod tests {
                 .expect("changed projected sample")
                 .point_index,
             2
+        );
+    }
+
+    /// Every way the inspector can fail to resolve a selection says which one
+    /// it was, and drops the selection only when the evidence is gone for
+    /// good. Three of these four returned silently, drawing a panel with no
+    /// heading and no text at all.
+    #[test]
+    fn an_unresolvable_event_selection_is_explained_rather_than_drawn_empty() {
+        use crate::state::SimulationRun;
+        use crate::workbench::app_state::AppState;
+
+        let analysis =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
+            ]);
+        let other = AnalysisResult::new(2, AnalysisType::Transient, "TRAN2").with_waveforms(vec![
+            WaveformData::new("D(clk)", vec![0.0, 1.0, 2.0], vec![0.0, 0.0, 1.0], "#fff"),
+        ]);
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis.clone());
+        run.add_analysis(other);
+        let dataset_id = run.dataset_id;
+
+        let mut state = AppState::default();
+
+        // No dataset at all: explained, and the selection is kept because the
+        // dataset can come back.
+        let selection = DigitalEventSelection {
+            analysis: AnalysisPresentationKey::new(dataset_id, &analysis),
+            source: EventSelectionSource::ProjectedDigital,
+            trace_name: "D(clk)".to_owned(),
+            point_index: 2,
+        };
+        assert_eq!(
+            event_selection_block(&state, &selection),
+            Some(EventSelectionBlock {
+                note: EVENT_SELECTION_NO_DATASET,
+                stale: false,
+            })
+        );
+
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        assert!(state.simulation.select_analysis(0));
+
+        // The row resolves: nothing blocks the inspector.
+        assert_eq!(event_selection_block(&state, &selection), None);
+
+        // A selection naming an analysis this dataset never retained.
+        let unretained = DigitalEventSelection {
+            analysis: AnalysisPresentationKey::new(
+                dataset_id,
+                &AnalysisResult::new(99, AnalysisType::Transient, "GONE"),
+            ),
+            ..selection.clone()
+        };
+        assert_eq!(
+            event_selection_block(&state, &unretained),
+            Some(EventSelectionBlock {
+                note: EVENT_SELECTION_UNRETAINED_ANALYSIS,
+                stale: true,
+            })
+        );
+
+        // A selection whose trace no longer carries that sample index.
+        let past_the_end = DigitalEventSelection {
+            point_index: 97,
+            ..selection.clone()
+        };
+        assert_eq!(
+            event_selection_block(&state, &past_the_end),
+            Some(EventSelectionBlock {
+                note: EVENT_SELECTION_UNRETAINED_ROW,
+                stale: true,
+            })
+        );
+
+        // A selection on a retained analysis that is not the active one.
+        assert!(state.simulation.select_analysis(1));
+        assert_eq!(
+            event_selection_block(&state, &selection),
+            Some(EventSelectionBlock {
+                note: EVENT_SELECTION_OTHER_ANALYSIS,
+                stale: true,
+            })
         );
     }
 }
