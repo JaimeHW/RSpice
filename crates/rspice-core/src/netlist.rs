@@ -580,9 +580,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub(crate) enum NetlistReplayContext {
     InMemory,
-    Path,
     PathWithExecutionDir(PathBuf),
-    SearchPaths(Vec<PathBuf>),
+    SearchPaths {
+        paths: Vec<PathBuf>,
+        execution_dir: PathBuf,
+    },
     Sealed(SealedSourceBundle),
 }
 
@@ -1130,7 +1132,9 @@ impl Netlist {
     /// Parse a netlist from a string with include resolution
     ///
     /// This method preprocesses .include and .lib directives using the specified
-    /// file path to resolve relative paths.
+    /// file path to resolve relative paths. The process working directory is
+    /// captured once as Xyce's final execution-directory fallback and is
+    /// retained for deterministic source replay.
     pub fn parse_with_path(input: &str, file_path: &std::path::Path) -> Result<Self, ParseError> {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
@@ -1296,22 +1300,23 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
-        let include_processor = IncludeProcessor::new_with_execution_dir(file_path, execution_dir)
-            .with_resource_limits(options.resource_limits);
         let default_execution_dir = if execution_dir.is_none() {
             Some(std::env::current_dir().map_err(ParseError::Io)?)
         } else {
             None
         };
-        let initcond_execution_dir = execution_dir
+        let execution_dir = execution_dir
             .or(default_execution_dir.as_deref())
             .expect("explicit or process execution directory is available");
+        let include_processor =
+            IncludeProcessor::new_with_execution_dir(file_path, Some(execution_dir))
+                .with_resource_limits(options.resource_limits);
         let mut initcond_resource_limits = options.resource_limits;
         initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
             .max_dependency_source_bytes
             .min(MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES);
         let initcond_source_provider =
-            IncludeProcessor::new_with_execution_dir(file_path, Some(initcond_execution_dir))
+            IncludeProcessor::new_with_execution_dir(file_path, Some(execution_dir))
                 .with_resource_limits(initcond_resource_limits);
         Self::parse_with_source_providers_and_abort(
             input,
@@ -1321,9 +1326,7 @@ impl Netlist {
             include_processor,
             initcond_source_provider,
             true,
-            execution_dir.map_or(NetlistReplayContext::Path, |directory| {
-                NetlistReplayContext::PathWithExecutionDir(directory.to_path_buf())
-            }),
+            NetlistReplayContext::PathWithExecutionDir(execution_dir.to_path_buf()),
         )
     }
 
@@ -1408,16 +1411,21 @@ impl Netlist {
                     abort,
                 )
             }
-            (Some(NetlistReplayContext::SearchPaths(search_paths)), Some(path)) => {
-                Self::parse_with_search_paths_and_options_and_abort(
-                    input,
-                    path,
-                    search_paths,
-                    options,
-                    abort,
-                )
-            }
-            (Some(NetlistReplayContext::Path), Some(path)) | (None, Some(path)) => {
+            (
+                Some(NetlistReplayContext::SearchPaths {
+                    paths: search_paths,
+                    execution_dir,
+                }),
+                Some(path),
+            ) => Self::parse_with_search_paths_execution_dir_options_and_abort(
+                input,
+                path,
+                search_paths,
+                execution_dir,
+                options,
+                abort,
+            ),
+            (None, Some(path)) => {
                 Self::parse_with_path_and_options_and_abort(input, path, options, abort)
             }
             (Some(context), None) => Err(ParseError::Syntax {
@@ -1606,6 +1614,9 @@ impl Netlist {
     }
 
     /// Parse source text with search paths and explicit parsing options.
+    ///
+    /// The process working directory is captured once as Xyce's execution-
+    /// directory fallback and retained alongside the search paths for replay.
     pub fn parse_with_search_paths_and_options(
         input: &str,
         path: &std::path::Path,
@@ -1629,9 +1640,28 @@ impl Netlist {
         options: NetlistParseOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self, ParseWithAbortError> {
+        let execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
+        Self::parse_with_search_paths_execution_dir_options_and_abort(
+            input,
+            path,
+            search_paths,
+            &execution_dir,
+            options,
+            abort,
+        )
+    }
+
+    fn parse_with_search_paths_execution_dir_options_and_abort(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+        execution_dir: &std::path::Path,
+        options: NetlistParseOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self, ParseWithAbortError> {
         Self::enforce_root_source_limits_with_abort(input, options.resource_limits, abort)?;
-        let mut processor =
-            IncludeProcessor::new(path).with_resource_limits(options.resource_limits);
+        let mut processor = IncludeProcessor::new_with_execution_dir(path, Some(execution_dir))
+            .with_resource_limits(options.resource_limits);
         for (index, dir) in search_paths.iter().enumerate() {
             poll_parse_abort(abort, index)?;
             processor.add_lib_path(dir.clone());
@@ -1649,19 +1679,21 @@ impl Netlist {
         Self::normalize_measure_file_paths_with_abort(&mut netlist, path, abort)?;
         Self::apply_spef_includes_with_abort(&mut netlist, path, options.resource_limits, abort)?;
         netlist.source_path = Some(path.to_path_buf());
-        let execution_dir = std::env::current_dir().map_err(ParseError::Io)?;
         let mut initcond_resource_limits = options.resource_limits;
         initcond_resource_limits.max_dependency_source_bytes = initcond_resource_limits
             .max_dependency_source_bytes
             .min(MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES);
         let initcond_source_provider =
-            IncludeProcessor::new_with_execution_dir(path, Some(&execution_dir))
+            IncludeProcessor::new_with_execution_dir(path, Some(execution_dir))
                 .with_resource_limits(initcond_resource_limits);
         netlist
             .resolve_device_initial_condition_source_with_abort(&initcond_source_provider, abort)?;
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
-        netlist.replay_context = Some(NetlistReplayContext::SearchPaths(search_paths.to_vec()));
+        netlist.replay_context = Some(NetlistReplayContext::SearchPaths {
+            paths: search_paths.to_vec(),
+            execution_dir: execution_dir.to_path_buf(),
+        });
         ensure_parse_not_aborted(abort)?;
         Ok(netlist)
     }
@@ -1669,7 +1701,8 @@ impl Netlist {
     /// Preprocess netlist content to expand .include and .lib directives
     ///
     /// This method expands all .include and .lib directives in the content,
-    /// resolving paths relative to the given file_path.
+    /// resolving paths relative to the given file path and falling back to the
+    /// process working directory after the including-file and top-level paths.
     pub fn preprocess_includes(
         content: &str,
         file_path: &std::path::Path,
@@ -1709,7 +1742,16 @@ impl Netlist {
         execution_dir: Option<&std::path::Path>,
         abort: &dyn AbortSignal,
     ) -> Result<include::ExpandedSource, ParseWithAbortError> {
-        let mut processor = IncludeProcessor::new_with_execution_dir(file_path, execution_dir);
+        let default_execution_dir = if execution_dir.is_none() {
+            Some(std::env::current_dir().map_err(ParseError::Io)?)
+        } else {
+            None
+        };
+        let execution_dir = execution_dir
+            .or(default_execution_dir.as_deref())
+            .expect("explicit or process execution directory is available");
+        let mut processor =
+            IncludeProcessor::new_with_execution_dir(file_path, Some(execution_dir));
         processor.expand_content_mapped_with_abort(content, file_path, abort)
     }
 
@@ -3166,6 +3208,24 @@ mod tests {
         ))
     }
 
+    struct IncludeFixtureCleanup {
+        root: PathBuf,
+        execution_files: Vec<PathBuf>,
+    }
+
+    impl Drop for IncludeFixtureCleanup {
+        fn drop(&mut self) {
+            for path in &self.execution_files {
+                let _ = std::fs::remove_file(path);
+            }
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn resistor_value(netlist: &Netlist, name: &str) -> Value {
+        passive_test_state(&netlist.elements, name).0
+    }
+
     fn passive_test_state<'a>(
         elements: &'a [Element],
         name: &str,
@@ -3209,6 +3269,162 @@ mod tests {
             "{name}={}, expected {expected}; params={params:?}",
             matches[0].1
         );
+    }
+
+    #[test]
+    fn ordinary_file_parse_uses_xyce_include_precedence_and_retains_execution_dir_for_replay() {
+        let root = cancellation_fixture_path("xyce-include-precedence");
+        let top_level = root.join("top-level");
+        let including_dir = top_level.join("sub");
+        std::fs::create_dir_all(&including_dir).expect("create include precedence fixture");
+        let execution_dir = std::env::current_dir().expect("read process execution directory");
+        let token = root
+            .file_name()
+            .expect("fixture has a name")
+            .to_string_lossy();
+        let local_name = format!("{token}-local.inc");
+        let top_name = format!("{token}-top.inc");
+        let execution_name = format!("{token}-execution.inc");
+        let execution_files =
+            [&local_name, &top_name, &execution_name].map(|name| execution_dir.join(name));
+        let _cleanup = IncludeFixtureCleanup {
+            root: root.clone(),
+            execution_files: execution_files.to_vec(),
+        };
+
+        std::fs::write(&execution_files[0], "RLOCAL 1 0 101\n")
+            .expect("write shadowed execution-directory local include");
+        std::fs::write(&execution_files[1], "RTOP 1 0 202\n")
+            .expect("write shadowed execution-directory top-level include");
+        std::fs::write(&execution_files[2], "REXEC 1 0 3\n")
+            .expect("write execution-directory fallback include");
+        std::fs::write(top_level.join(&local_name), "RLOCAL 1 0 11\n")
+            .expect("write shadowed top-level local include");
+        std::fs::write(top_level.join(&top_name), "RTOP 1 0 2\n")
+            .expect("write top-level fallback include");
+        std::fs::write(including_dir.join(&local_name), "RLOCAL 1 0 1\n")
+            .expect("write including-file-local include");
+        let nested_source = format!(
+            ".include \"{local_name}\"\n.include \"{top_name}\"\n.include \"{execution_name}\"\n"
+        );
+        std::fs::write(including_dir.join("nested.inc"), nested_source)
+            .expect("write nested include owner");
+        let source = "Xyce include precedence\n.include sub/nested.inc\n.end\n";
+        let deck_path = top_level.join("deck.cir");
+        std::fs::write(&deck_path, source).expect("write top-level deck");
+
+        let parsed = Netlist::parse_file(&deck_path)
+            .expect("ordinary file parse resolves every Xyce include stage");
+        assert_eq!(resistor_value(&parsed, "RLOCAL"), 1.0);
+        assert_eq!(resistor_value(&parsed, "RTOP"), 2.0);
+        assert_eq!(resistor_value(&parsed, "REXEC"), 3.0);
+        match parsed.replay_context.as_ref() {
+            Some(NetlistReplayContext::PathWithExecutionDir(captured)) => {
+                assert_eq!(captured, &execution_dir)
+            }
+            other => {
+                panic!("ordinary file parse did not retain its execution directory: {other:?}")
+            }
+        }
+
+        let replayed = parsed
+            .replay_root_source_with_options_and_abort(
+                "Xyce include precedence replay\n.include sub/nested.inc\nRROOT 2 0 4\n.end\n",
+                NetlistParseOptions::default(),
+                &NoAbort,
+            )
+            .expect("replay uses the captured include resolver contract");
+        assert_eq!(resistor_value(&replayed, "RLOCAL"), 1.0);
+        assert_eq!(resistor_value(&replayed, "RTOP"), 2.0);
+        assert_eq!(resistor_value(&replayed, "REXEC"), 3.0);
+        assert_eq!(resistor_value(&replayed, "RROOT"), 4.0);
+    }
+
+    #[test]
+    fn ordinary_search_path_parse_retains_execution_dir_for_replay() {
+        let root = cancellation_fixture_path("xyce-search-path-replay");
+        let top_level = root.join("top-level");
+        let search_dir = root.join("configured-search");
+        std::fs::create_dir_all(&top_level).expect("create top-level fixture directory");
+        std::fs::create_dir_all(&search_dir).expect("create configured search directory");
+        let execution_dir = std::env::current_dir().expect("read process execution directory");
+        let token = root
+            .file_name()
+            .expect("fixture has a name")
+            .to_string_lossy();
+        let execution_name = format!("{token}-execution.inc");
+        let search_name = format!("{token}-search.inc");
+        let execution_file = execution_dir.join(&execution_name);
+        let _cleanup = IncludeFixtureCleanup {
+            root: root.clone(),
+            execution_files: vec![execution_file.clone()],
+        };
+        std::fs::write(&execution_file, "REXEC 1 0 3\n")
+            .expect("write execution-directory include");
+        std::fs::write(search_dir.join(&search_name), "RSEARCH 2 0 5\n")
+            .expect("write configured-search include");
+        let source = format!(
+            "search-path replay\n.include \"{execution_name}\"\n.include \"{search_name}\"\n.end\n"
+        );
+        let deck_path = top_level.join("deck.cir");
+        std::fs::write(&deck_path, &source).expect("write search-path deck");
+        let search_paths = vec![search_dir];
+
+        let parsed = Netlist::parse_with_search_paths_and_options(
+            &source,
+            &deck_path,
+            &search_paths,
+            NetlistParseOptions::default(),
+        )
+        .expect("search-path parse resolves execution and configured fallbacks");
+        assert_eq!(resistor_value(&parsed, "REXEC"), 3.0);
+        assert_eq!(resistor_value(&parsed, "RSEARCH"), 5.0);
+        match parsed.replay_context.as_ref() {
+            Some(NetlistReplayContext::SearchPaths {
+                paths,
+                execution_dir: captured,
+            }) => {
+                assert_eq!(paths, &search_paths);
+                assert_eq!(captured, &execution_dir);
+            }
+            other => panic!("search-path parse did not retain its resolver context: {other:?}"),
+        }
+
+        let replayed = parsed
+            .replay_root_source_with_options_and_abort(
+                &source,
+                NetlistParseOptions::default(),
+                &NoAbort,
+            )
+            .expect("search-path replay uses the captured resolver contract");
+        assert_eq!(resistor_value(&replayed, "REXEC"), 3.0);
+        assert_eq!(resistor_value(&replayed, "RSEARCH"), 5.0);
+    }
+
+    #[test]
+    fn ordinary_include_preprocessing_uses_process_execution_dir_fallback() {
+        let root = cancellation_fixture_path("xyce-preprocess-execution-dir");
+        std::fs::create_dir_all(&root).expect("create preprocessing fixture");
+        let execution_dir = std::env::current_dir().expect("read process execution directory");
+        let token = root
+            .file_name()
+            .expect("fixture has a name")
+            .to_string_lossy();
+        let include_name = format!("{token}-preprocess.inc");
+        let execution_file = execution_dir.join(&include_name);
+        let _cleanup = IncludeFixtureCleanup {
+            root: root.clone(),
+            execution_files: vec![execution_file.clone()],
+        };
+        std::fs::write(&execution_file, "RPRE 1 0 7\n")
+            .expect("write execution-directory preprocessing include");
+        let source = format!("preprocess execution fallback\n.include \"{include_name}\"\n.end\n");
+        let deck_path = root.join("deck.cir");
+        std::fs::write(&deck_path, &source).expect("write preprocessing deck");
+
+        let expanded = Netlist::preprocess_includes(&source, &deck_path)
+            .expect("ordinary preprocessing resolves against process execution directory");
+        assert!(expanded.contains("RPRE 1 0 7"), "{expanded}");
     }
 
     #[test]
