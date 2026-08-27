@@ -51,10 +51,14 @@ pub(crate) fn read_touchstone_bytes(
     };
     let mut version = 1_u32;
     let mut matrix_format = MatrixFormat::Full;
-    let mut two_port_order = TwoPortOrder::TwentyOneTwelve;
+    let mut declared_two_port_order = None;
     let mut declared_ports = ports_from_extension(source_name);
     let mut declared_frequencies = None;
     let mut reference_values = None;
+    // `[Reference]` arguments may span several lines, so the values collected
+    // so far are held here until one per port has been read.
+    let mut pending_reference: Option<Vec<f64>> = None;
+    let mut expected_reference_len = 0usize;
     let mut numeric_tokens = Vec::new();
     let mut saw_network_data = false;
     let mut saw_end = false;
@@ -79,6 +83,24 @@ pub(crate) fn read_touchstone_bytes(
                 in_information = false;
             }
             continue;
+        }
+        // `[Reference]` arguments may begin on the line following the keyword
+        // and may span multiple lines, so plain numeric lines belong to it
+        // until every port has an impedance. Anything else closes the list and
+        // is parsed as the keyword or option line it is.
+        if pending_reference.is_some() {
+            if trimmed.starts_with('[') || trimmed.starts_with('#') {
+                reference_values = pending_reference.take();
+            } else {
+                let mut values = pending_reference.take().unwrap_or_default();
+                values.extend(parse_numeric_values(trimmed, line_number)?);
+                if values.len() >= expected_reference_len {
+                    reference_values = Some(values);
+                } else {
+                    pending_reference = Some(values);
+                }
+                continue;
+            }
         }
         if trimmed.starts_with('#') {
             options = parse_option_line(trimmed, line_number)?;
@@ -125,7 +147,12 @@ pub(crate) fn read_touchstone_bytes(
                     };
                 }
                 "two-port data order" => {
-                    two_port_order = match value.to_ascii_lowercase().as_str() {
+                    if declared_two_port_order.is_some() {
+                        return Err(format!(
+                            "Touchstone line {line_number}: [Two-Port Data Order] may appear only once"
+                        ));
+                    }
+                    declared_two_port_order = Some(match value.to_ascii_lowercase().as_str() {
                         "21_12" => TwoPortOrder::TwentyOneTwelve,
                         "12_21" => TwoPortOrder::TwelveTwentyOne,
                         _ => {
@@ -133,10 +160,32 @@ pub(crate) fn read_touchstone_bytes(
                                 "Touchstone line {line_number}: unsupported [Two-Port Data Order] '{value}'"
                             ));
                         }
-                    };
+                    });
                 }
                 "reference" => {
-                    reference_values = Some(parse_numeric_values(value, line_number)?);
+                    if reference_values.is_some() {
+                        return Err(format!(
+                            "Touchstone line {line_number}: [Reference] may appear only once"
+                        ));
+                    }
+                    // The specification places [Reference] after [Number of
+                    // Ports] precisely so the argument count is known here.
+                    let ports = declared_ports.ok_or_else(|| {
+                        format!(
+                            "Touchstone line {line_number}: [Reference] requires a declared port count"
+                        )
+                    })?;
+                    expected_reference_len = ports;
+                    let values = if value.is_empty() {
+                        Vec::new()
+                    } else {
+                        parse_numeric_values(value, line_number)?
+                    };
+                    if values.len() >= ports {
+                        reference_values = Some(values);
+                    } else {
+                        pending_reference = Some(values);
+                    }
                 }
                 "network data" => saw_network_data = true,
                 "begin information" => in_information = true,
@@ -185,6 +234,10 @@ pub(crate) fn read_touchstone_bytes(
             })?);
         }
     }
+    if let Some(values) = pending_reference.take() {
+        // The file ended mid-list; the per-port count check below reports it.
+        reference_values = Some(values);
+    }
     if in_information {
         return Err("Touchstone [Begin Information] block is not terminated".to_owned());
     }
@@ -202,10 +255,18 @@ pub(crate) fn read_touchstone_bytes(
             "Touchstone port count {num_ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"
         ));
     }
+    // The keyword is required of a two-port file and permitted of no other
+    // (Touchstone 2.0 specification, "[Two-Port Data Order]").
+    if declared_two_port_order.is_some() && num_ports != 2 {
+        return Err(format!(
+            "[Two-Port Data Order] is permitted only where the file declares two ports, not {num_ports}"
+        ));
+    }
+    let two_port_order = declared_two_port_order.unwrap_or(TwoPortOrder::TwentyOneTwelve);
     if !matches!(two_port_order, TwoPortOrder::TwentyOneTwelve)
-        && (num_ports != 2 || matrix_format != MatrixFormat::Full)
+        && matrix_format != MatrixFormat::Full
     {
-        return Err("[Two-Port Data Order] requires a full two-port matrix".to_owned());
+        return Err("[Two-Port Data Order] 12_21 requires a full two-port matrix".to_owned());
     }
 
     let record_width = values_per_frequency(num_ports, matrix_format)
@@ -713,6 +774,121 @@ mod tests {
                 "S{column}{row}"
             );
         }
+    }
+
+    /// Examples 5 and 6 of the Touchstone 2.0 specification describe the same
+    /// 4-port network twice: once as a Full matrix, once as a Lower one with
+    /// the `[Reference]` arguments split across two lines. Reproduced here
+    /// verbatim apart from the `[End]` line the specification's abridged
+    /// examples omit, they must import to the same matrix.
+    #[test]
+    fn the_spec_full_and_lower_examples_describe_one_network() {
+        let full = read_touchstone_bytes(
+            "example5.ts",
+            b"! 4-port S-parameter data\n\
+              ! Default impedance is overridden by the [Reference] keyword arguments\n\
+              ! Data cannot be represented using 1.0 syntax\n\
+              [Version] 2.0\n\
+              # GHz S MA R 50\n\
+              [Number of Ports] 4\n\
+              [Number of Frequencies] 1\n\
+              [Reference] 50 75 0.01 0.01\n\
+              [Matrix Format] Full\n\
+              [Network Data]\n\
+              5.00000 0.60 161.24 0.40 -42.20 0.42 -66.58 0.53 -79.34 !row 1\n\
+              0.40 -42.20 0.60 161.20 0.53 -79.34 0.42 -66.58 !row 2\n\
+              0.42 -66.58 0.53 -79.34 0.60 161.24 0.40 -42.20 !row 3\n\
+              0.53 -79.34 0.42 -66.58 0.40 -42.20 0.60 161.24 !row 4\n\
+              [End]\n",
+        )
+        .expect("specification example 5 parses");
+        let lower = read_touchstone_bytes(
+            "example6.ts",
+            b"! 4-port S-parameter data\n\
+              ! Note that [Reference] arguments are split across two lines\n\
+              [Version] 2.0\n\
+              # GHz S MA R 50\n\
+              [Number of Ports] 4\n\
+              [Number of Frequencies] 1\n\
+              [Reference] 50 75\n\
+              0.01 0.01\n\
+              [Matrix Format] Lower\n\
+              [Network Data]\n\
+              5.00000 0.60 161.24 !row 1\n\
+              0.40 -42.20 0.60 161.20 !row 2\n\
+              0.42 -66.58 0.53 -79.34 0.60 161.24 !row 3\n\
+              0.53 -79.34 0.42 -66.58 0.40 -42.20 0.60 161.24 !row 4\n\
+              [End]\n",
+        )
+        .expect("specification example 6 parses");
+
+        assert_eq!(full.metadata["z0_ports"], lower.metadata["z0_ports"]);
+        assert_eq!(lower.metadata["z0_ports"], "50,75,0.01,0.01");
+        for row in 1..=4 {
+            for column in 1..=4 {
+                let (full_re, full_im) = entry(&full, row, column, 0);
+                let (lower_re, lower_im) = entry(&lower, row, column, 0);
+                assert!(
+                    (full_re - lower_re).abs() < 1e-12 && (full_im - lower_im).abs() < 1e-12,
+                    "S{row}{column}: Full ({full_re}, {full_im}) vs Lower ({lower_re}, {lower_im})"
+                );
+            }
+        }
+        // Spot-check one off-diagonal entry against the specification text:
+        // row 1 column 4 is 0.53 at -79.34 degrees.
+        let (real, imag) = entry(&full, 1, 4, 0);
+        let expected_angle: f64 = -79.34_f64.to_radians();
+        assert!((real - 0.53 * expected_angle.cos()).abs() < 1e-12, "{real}");
+        assert!((imag - 0.53 * expected_angle.sin()).abs() < 1e-12, "{imag}");
+    }
+
+    /// `[Reference]` arguments may begin on the line after the keyword
+    /// (Touchstone 2.0 specification, "[Reference]", and its Example 4).
+    #[test]
+    fn reference_arguments_may_start_on_the_following_line() {
+        let dataset = read_touchstone_bytes(
+            "example4.ts",
+            b"! Note that the [Reference] keyword arguments appear on a separate line\n\
+              [Version] 2.0\n\
+              # GHz S MA R 50\n\
+              [Number of Ports] 4\n\
+              [Reference]\n\
+              50 75 0.01 0.01\n\
+              [Number of Frequencies] 1\n\
+              [Network Data]\n\
+              5.00000 0.60 161.24 0.40 -42.20 0.42 -66.58 0.53 -79.34\n\
+              0.40 -42.20 0.60 161.20 0.53 -79.34 0.42 -66.58\n\
+              0.42 -66.58 0.53 -79.34 0.60 161.24 0.40 -42.20\n\
+              0.53 -79.34 0.42 -66.58 0.40 -42.20 0.60 161.24\n\
+              [End]\n",
+        )
+        .expect("specification example 4 parses");
+
+        assert_eq!(dataset.metadata["z0_ports"], "50,75,0.01,0.01");
+        assert_eq!(dataset.point_count(), 1);
+    }
+
+    /// The keyword is permitted only when the file declares two ports
+    /// (Touchstone 2.0 specification, "[Two-Port Data Order]"). Accepting it
+    /// elsewhere would let a file assert an ordering the reader then ignores.
+    #[test]
+    fn two_port_data_order_is_refused_outside_two_port_files() {
+        let error = read_touchstone_bytes(
+            "three.ts",
+            b"[Version] 2.0\n\
+              # Hz S RI R 50\n\
+              [Number of Ports] 3\n\
+              [Two-Port Data Order] 21_12\n\
+              [Number of Frequencies] 1\n\
+              [Network Data]\n\
+              1.0 0.11 0 0.12 0 0.13 0\n\
+              0.21 0 0.22 0 0.23 0\n\
+              0.31 0 0.32 0 0.33 0\n\
+              [End]\n",
+        )
+        .expect_err("[Two-Port Data Order] is not permitted on a 3-port file");
+
+        assert!(error.contains("Two-Port Data Order"), "{error}");
     }
 
     /// A passive reciprocal 3-port measures the same power from port *i* to
