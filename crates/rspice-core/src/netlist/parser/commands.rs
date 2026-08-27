@@ -1414,6 +1414,23 @@ pub(super) fn parse_options_command(
             break;
         }
 
+        // Xyce's RESTART package uses a deliberately irregular tail grammar:
+        // after the ordinary NAME=VALUE fields, bare values occur in
+        // `<time> <interval>` pairs. Detect that tail before asking for an
+        // option key, since its first token is normally numeric.
+        if option_package.as_deref() == Some("RESTART")
+            && restart_interval_schedule_starts(stream, params)
+        {
+            parse_restart_interval_schedule(
+                stream,
+                line_num,
+                params,
+                options,
+                max_analysis_points,
+            )?;
+            break;
+        }
+
         let (key, key_end) = expect_option_key(stream, line_num)?;
         let key_upper = key.to_uppercase();
         let has_equals = stream.consume(&TokenKind::Equals);
@@ -1452,6 +1469,9 @@ pub(super) fn parse_options_command(
                 if next.eq_ignore_ascii_case("TR_PARTITION")
                     || next.eq_ignore_ascii_case("TRPARTITION"));
         if !has_equals && (option_package_key_is_known(&key_upper) || is_supported_linsol_package) {
+            if key_upper == "RESTART" {
+                options.restart.get_or_insert_default();
+            }
             option_package = Some(key_upper);
             continue;
         }
@@ -1769,7 +1789,8 @@ pub(super) fn parse_options_command(
                     options
                         .timeint_breakpoints
                         .len()
-                        .saturating_add(options.output_time_points.len()),
+                        .saturating_add(options.output_time_points.len())
+                        .saturating_add(restart_interval_count(options)),
                     max_analysis_points,
                 )?;
                 append_canonical_time_points(
@@ -1808,6 +1829,60 @@ pub(super) fn parse_options_command(
                 options.method = Some(parse_method_option(stream, line_num, params)?);
             }
             (Some("TIMEINT"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
+            }
+            (Some("RESTART"), "PACK") => {
+                let value = parse_restart_boolean_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    "RESTART.PACK",
+                )?;
+                options.restart.get_or_insert_default().pack = Some(value);
+            }
+            (Some("RESTART"), "PRINT_TIMEINT_OPTIONS" | "PRINTTIMEINTOPTIONS") => {
+                let value = parse_restart_boolean_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    "RESTART.PRINT_TIMEINT_OPTIONS",
+                )?;
+                options
+                    .restart
+                    .get_or_insert_default()
+                    .print_timeint_options = Some(value);
+            }
+            (Some("RESTART"), "JOB") => {
+                let value = parse_restart_string_option(stream, line_num, "RESTART.JOB")?;
+                options.restart.get_or_insert_default().job = Some(value);
+            }
+            (Some("RESTART"), "START_TIME" | "STARTTIME") => {
+                let value = expect_value(stream, line_num, params)?;
+                let value = parse_non_negative_real_option("RESTART.START_TIME", value, line_num)?;
+                options.restart.get_or_insert_default().start_time = Some(value);
+            }
+            (Some("RESTART"), "FILE") => {
+                let value = parse_restart_string_option(stream, line_num, "RESTART.FILE")?;
+                options.restart.get_or_insert_default().file = Some(value);
+            }
+            (Some("RESTART"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => {
+                let value = expect_value(stream, line_num, params)?;
+                let value =
+                    parse_positive_real_option("RESTART.INITIAL_INTERVAL", value, line_num)?;
+                options.restart.get_or_insert_default().initial_interval = Some(value);
+            }
+            (Some("RESTART"), _) => {
                 let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
                 ignore_unknown_option(
                     stream,
@@ -2015,7 +2090,8 @@ pub(super) fn parse_options_command(
                     options
                         .output_time_points
                         .len()
-                        .saturating_add(options.timeint_breakpoints.len()),
+                        .saturating_add(options.timeint_breakpoints.len())
+                        .saturating_add(restart_interval_count(options)),
                     max_analysis_points,
                 )?;
                 append_canonical_time_points(
@@ -2140,8 +2216,264 @@ pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
             | "NONLIN-CONTINUATION"
             | "LOCA"
             | "OUTPUT"
+            | "RESTART"
             | "HBINT"
     )
+}
+
+fn restart_interval_schedule_starts(stream: &TokenStream, params: &ParamContext) -> bool {
+    if let TokenKind::Ident(key) = &stream.peek().kind
+        && matches!(
+            key.to_ascii_uppercase().as_str(),
+            "PACK"
+                | "PRINT_TIMEINT_OPTIONS"
+                | "PRINTTIMEINTOPTIONS"
+                | "JOB"
+                | "START_TIME"
+                | "STARTTIME"
+                | "FILE"
+                | "INITIAL_INTERVAL"
+                | "INITIALINTERVAL"
+        )
+    {
+        return false;
+    }
+
+    // Digit-leading SPICE values such as `10n` are intentionally lexed as
+    // identifiers because the same spelling is legal as a node or model name.
+    // Probe with the value parser instead of relying on the token variant.
+    let mut probe = stream.clone();
+    try_value(&mut probe, params).is_some()
+}
+
+fn restart_interval_count(options: &super::SimulationOptions) -> usize {
+    options
+        .restart
+        .as_ref()
+        .map_or(0, |restart| restart.intervals.len())
+}
+
+fn parse_restart_boolean_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    has_equals: bool,
+    option_name: &str,
+) -> Result<bool, ParseError> {
+    if !has_equals {
+        return Ok(true);
+    }
+
+    if let TokenKind::Ident(word) = &stream.peek().kind {
+        let enabled = match word.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" => Some(true),
+            "false" | "no" | "off" => Some(false),
+            _ => None,
+        };
+        if let Some(enabled) = enabled {
+            stream.advance();
+            return Ok(enabled);
+        }
+    }
+
+    let authored = stream.peek().lexeme.clone();
+    let value = expect_value(stream, line_num, params).map_err(|_| ParseError::Syntax {
+        line: line_num,
+        message: format!("{option_name} expects 0 or 1, found '{authored}'"),
+    })?;
+    if !value.is_finite() || value.fract() != 0.0 || !(0.0..=1.0).contains(&value) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{option_name} expects 0 or 1, found {value}"),
+        });
+    }
+    Ok(value == 1.0)
+}
+
+/// Parse one logical Xyce restart file/job name.
+///
+/// The lexer intentionally splits punctuation that has meaning elsewhere, so
+/// an unquoted name such as `trans_test2e-08` arrives as several tokens. Only
+/// source-contiguous fragments are rejoined: whitespace remains the reliable
+/// boundary between this value and the next option. Quoted values are decoded
+/// by the lexer and may contain whitespace.
+pub(super) fn parse_restart_string_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    option_name: &str,
+) -> Result<String, ParseError> {
+    let first = stream.peek().clone();
+    match &first.kind {
+        TokenKind::StringLit(value) => {
+            if value.trim().is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("{option_name} requires a non-empty value"),
+                });
+            }
+            let value = value.clone();
+            stream.advance();
+            reject_restart_quoted_value_suffix(stream, line_num, option_name, first.span.end)?;
+            return Ok(value);
+        }
+        TokenKind::Expression(value)
+            if first.lexeme.starts_with('\'') && first.lexeme.ends_with('\'') =>
+        {
+            if value.trim().is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("{option_name} requires a non-empty value"),
+                });
+            }
+            let value = value.clone();
+            stream.advance();
+            reject_restart_quoted_value_suffix(stream, line_num, option_name, first.span.end)?;
+            return Ok(value);
+        }
+        TokenKind::Newline | TokenKind::Eof | TokenKind::Comma | TokenKind::Equals => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("{option_name} requires a non-empty value"),
+            });
+        }
+        _ => {}
+    }
+
+    let mut value = String::new();
+    let mut previous_end = None;
+    loop {
+        let token = stream.peek();
+        if matches!(
+            token.kind,
+            TokenKind::Newline
+                | TokenKind::Eof
+                | TokenKind::Comma
+                | TokenKind::Equals
+                | TokenKind::StringLit(_)
+                | TokenKind::Expression(_)
+        ) || previous_end.is_some_and(|end| token.span.start != end)
+        {
+            break;
+        }
+        if token.lexeme.is_empty() {
+            break;
+        }
+        value.push_str(&token.lexeme);
+        previous_end = Some(token.span.end);
+        stream.advance();
+    }
+
+    if value.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{option_name} requires a non-empty value"),
+        });
+    }
+    Ok(value)
+}
+
+fn reject_restart_quoted_value_suffix(
+    stream: &TokenStream,
+    line_num: usize,
+    option_name: &str,
+    quoted_end: usize,
+) -> Result<(), ParseError> {
+    if stream.peek().span.start == quoted_end
+        && !matches!(
+            stream.peek().kind,
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Comma
+        )
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{option_name} quoted value must be separated from the following option"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn parse_restart_interval_schedule(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    options: &mut super::SimulationOptions,
+    max_analysis_points: usize,
+) -> Result<(), ParseError> {
+    let retained_points = options
+        .output_time_points
+        .len()
+        .saturating_add(options.timeint_breakpoints.len())
+        .saturating_add(
+            options
+                .restart
+                .as_ref()
+                .map_or(0, |restart| restart.intervals.len()),
+        );
+    let mut intervals = Vec::new();
+    let mut previous_time = options
+        .restart
+        .as_ref()
+        .and_then(|restart| restart.intervals.last())
+        .map(|interval| interval.time);
+
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let time = expect_value(stream, line_num, params).map_err(|_| ParseError::Syntax {
+            line: line_num,
+            message: "RESTART interval schedule expects <time> <interval> pairs".to_string(),
+        })?;
+        let time = parse_non_negative_real_option("RESTART.TIME", time, line_num)?;
+
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "RESTART interval schedule is missing the interval paired with time {time}"
+                ),
+            });
+        }
+        let interval = expect_value(stream, line_num, params).map_err(|_| ParseError::Syntax {
+            line: line_num,
+            message: "RESTART interval schedule expects <time> <interval> pairs".to_string(),
+        })?;
+        let interval = parse_positive_real_option("RESTART.INTERVAL", interval, line_num)?;
+
+        if previous_time.is_some_and(|previous| time <= previous) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "RESTART.TIME values must be strictly increasing; found {time} after {}",
+                    previous_time.expect("checked above")
+                ),
+            });
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            retained_points
+                .saturating_add(intervals.len())
+                .saturating_add(1),
+            max_analysis_points,
+        )
+        .map_err(ParseError::from)?;
+
+        let time = if time == 0.0 { 0.0 } else { time };
+        previous_time = Some(time);
+        intervals.push(crate::netlist::XyceRestartInterval { time, interval });
+    }
+
+    options
+        .restart
+        .get_or_insert_default()
+        .intervals
+        .extend(intervals);
+    Ok(())
 }
 
 fn consume_output_initial_interval_schedule(
@@ -6143,6 +6475,259 @@ mod tests {
             ".options output initial_interval=.001ms .5ms .01ms",
         ))
         .expect("Xyce OUTPUT INITIAL_INTERVAL schedule syntax parses");
+    }
+
+    #[test]
+    fn options_parse_the_exact_bug_1284_restart_controls() {
+        let checkpoint_writer = Netlist::parse(&deck_with_options(
+            ".options restart job=trans_test initial_interval=5n",
+        ))
+        .expect("BUG_1284 checkpoint-writer options parse");
+        let writer = checkpoint_writer
+            .options
+            .restart
+            .as_ref()
+            .expect("RESTART package is typed");
+        assert_eq!(writer.job.as_deref(), Some("trans_test"));
+        assert_eq!(writer.initial_interval, Some(5.0e-9));
+        assert_eq!(writer.file, None);
+
+        let resumed = Netlist::parse(&deck_with_options(".options restart file=trans_test2e-08"))
+            .expect("BUG_1284 resume-file options parse");
+        let restart = resumed
+            .options
+            .restart
+            .as_ref()
+            .expect("RESTART package is typed");
+        assert_eq!(restart.file.as_deref(), Some("trans_test2e-08"));
+        assert!(
+            resumed
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option")
+        );
+    }
+
+    #[test]
+    fn xyce_restart_full_metadata_and_interval_schedule_are_typed() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options restart pack=0 print_timeint_options=yes job=\"Nightly Run\" \
+             start_time=20n file=\"checkpoints/run 20n.chk\" initial_interval=5n \
+             10n 2n 20n 4n",
+        ))
+        .expect("complete Xyce 7.10 RESTART metadata parses");
+        let restart = netlist
+            .options
+            .restart
+            .as_ref()
+            .expect("RESTART package is typed");
+
+        assert_eq!(restart.pack, Some(false));
+        assert_eq!(restart.print_timeint_options, Some(true));
+        assert_eq!(restart.job.as_deref(), Some("Nightly Run"));
+        assert_eq!(restart.start_time, Some(20.0e-9));
+        assert_eq!(restart.file.as_deref(), Some("checkpoints/run 20n.chk"));
+        assert_eq!(restart.initial_interval, Some(5.0e-9));
+        assert_eq!(
+            restart.intervals,
+            vec![
+                crate::netlist::XyceRestartInterval {
+                    time: 10.0e-9,
+                    interval: 2.0e-9,
+                },
+                crate::netlist::XyceRestartInterval {
+                    time: 20.0e-9,
+                    interval: 4.0e-9,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn xyce_restart_unquoted_names_preserve_contiguous_source_spelling() {
+        let netlist = Netlist::parse(&deck_with_options(
+            r#".options restart job=Mixed_Case-Job file=C:\checkpoints\Mixed_Case-Job2e-08.bin"#,
+        ))
+        .expect("punctuation-rich restart names parse");
+        let restart = netlist.options.restart.as_ref().expect("typed RESTART");
+
+        assert_eq!(restart.job.as_deref(), Some("Mixed_Case-Job"));
+        assert_eq!(
+            restart.file.as_deref(),
+            Some(r"C:\checkpoints\Mixed_Case-Job2e-08.bin")
+        );
+    }
+
+    #[test]
+    fn restart_names_cannot_leak_into_the_temperature_prescan() {
+        let netlist = Netlist::parse(&deck_with_options(
+            r#".options restart file=C:\temp\runs\checkpoint2e-08"#,
+        ))
+        .expect("a restart path containing a TEMP component parses");
+        let restart = netlist.options.restart.as_ref().expect("typed RESTART");
+
+        assert_eq!(
+            restart.file.as_deref(),
+            Some(r"C:\temp\runs\checkpoint2e-08")
+        );
+        assert_eq!(netlist.options.temp, None);
+    }
+
+    #[test]
+    fn unknown_restart_keys_do_not_escape_into_global_options() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options restart reltol=1e-6 method=gear",
+        ))
+        .expect("unknown RESTART keys are warnings like other option packages");
+
+        assert_eq!(netlist.options.reltol, None);
+        assert_eq!(netlist.options.method, None);
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unknown-option" && diagnostic.message.contains("RESTART.RELTOL")
+        }));
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unknown-option" && diagnostic.message.contains("RESTART.METHOD")
+        }));
+    }
+
+    #[test]
+    fn repeated_xyce_restart_cards_merge_scalars_and_append_ordered_pairs() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options restart job=first pack=1 initial_interval=5n 10n 2n\n\
+             .options restart job=second print_timeint_options=1 20n 4n",
+        ))
+        .expect("repeated restart cards merge");
+        let restart = netlist.options.restart.as_ref().expect("typed RESTART");
+
+        assert_eq!(restart.job.as_deref(), Some("second"));
+        assert_eq!(restart.pack, Some(true));
+        assert_eq!(restart.print_timeint_options, Some(true));
+        assert_eq!(restart.initial_interval, Some(5.0e-9));
+        assert_eq!(restart.intervals.len(), 2);
+        assert_eq!(restart.intervals[0].time, 10.0e-9);
+        assert_eq!(restart.intervals[1].time, 20.0e-9);
+    }
+
+    #[test]
+    fn simulation_option_merge_overrides_a_restart_schedule_as_one_unit() {
+        let mut merged = crate::netlist::SimulationOptions {
+            restart: Some(crate::netlist::XyceRestartOptions {
+                pack: Some(true),
+                job: Some("base".to_string()),
+                initial_interval: Some(1.0e-9),
+                intervals: vec![crate::netlist::XyceRestartInterval {
+                    time: 10.0e-9,
+                    interval: 2.0e-9,
+                }],
+                ..crate::netlist::XyceRestartOptions::default()
+            }),
+            ..crate::netlist::SimulationOptions::default()
+        };
+        merged.merge(&crate::netlist::SimulationOptions {
+            restart: Some(crate::netlist::XyceRestartOptions {
+                pack: Some(false),
+                file: Some("resume.chk".to_string()),
+                intervals: vec![crate::netlist::XyceRestartInterval {
+                    time: 20.0e-9,
+                    interval: 4.0e-9,
+                }],
+                ..crate::netlist::XyceRestartOptions::default()
+            }),
+            ..crate::netlist::SimulationOptions::default()
+        });
+        let restart = merged.restart.as_ref().expect("merged RESTART");
+
+        assert_eq!(restart.pack, Some(false));
+        assert_eq!(restart.job.as_deref(), Some("base"));
+        assert_eq!(restart.file.as_deref(), Some("resume.chk"));
+        assert_eq!(restart.initial_interval, Some(1.0e-9));
+        assert_eq!(restart.intervals.len(), 1);
+        assert_eq!(restart.intervals[0].time, 20.0e-9);
+    }
+
+    #[test]
+    fn xyce_restart_rejects_malformed_or_nonphysical_metadata() {
+        for options in [
+            ".options restart pack=2",
+            ".options restart pack=maybe",
+            ".options restart print_timeint_options=.5",
+            ".options restart job=\"\"",
+            ".options restart job=\"   \"",
+            ".options restart file=\"resume.chk\"pack=1",
+            ".options restart file=",
+            ".options restart start_time=-1n",
+            ".options restart start_time=1e309",
+            ".options restart initial_interval=0",
+            ".options restart initial_interval=1e309",
+            ".options restart -1n 2n",
+            ".options restart 1e309 2n",
+            ".options restart 1n 0",
+            ".options restart 1n 1e309",
+            ".options restart 1n",
+            ".options restart 2n 1n 1n 1n",
+            ".options restart 1n 1n 1n 2n",
+        ] {
+            let error = Netlist::parse(&deck_with_options(options))
+                .expect_err("invalid RESTART metadata must fail parsing");
+            assert!(
+                error.to_string().contains("RESTART"),
+                "unexpected error for {options:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_restart_interval_pairs_obey_the_analysis_point_limit() {
+        let error = Netlist::parse_with_options(
+            &deck_with_options(".options restart initial_interval=1n 10n 2n 20n 4n"),
+            crate::netlist::NetlistParseOptions {
+                resource_limits: crate::resource::ResourceLimits {
+                    max_analysis_points: 1,
+                    ..crate::resource::ResourceLimits::default()
+                },
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect_err("restart schedules must honor the parser resource limit");
+        assert!(matches!(
+            error,
+            ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                resource: crate::resource::ResourceKind::AnalysisPoints,
+                requested: 2,
+                limit: 1,
+            })
+        ));
+    }
+
+    #[test]
+    fn restart_and_transient_point_schedules_share_one_order_independent_limit() {
+        for options in [
+            ".options restart 10n 2n\n.options output outputtimepoints=20n",
+            ".options output outputtimepoints=20n\n.options restart 10n 2n",
+        ] {
+            let error = Netlist::parse_with_options(
+                &deck_with_options(options),
+                crate::netlist::NetlistParseOptions {
+                    resource_limits: crate::resource::ResourceLimits {
+                        max_analysis_points: 1,
+                        ..crate::resource::ResourceLimits::default()
+                    },
+                    ..crate::netlist::NetlistParseOptions::default()
+                },
+            )
+            .expect_err("all retained transient schedules share the point limit");
+            assert!(
+                matches!(
+                    error,
+                    ParseError::ResourceLimit(crate::resource::ResourceLimitError {
+                        resource: crate::resource::ResourceKind::AnalysisPoints,
+                        requested: 2,
+                        limit: 1,
+                    })
+                ),
+                "unexpected limit error for {options:?}: {error}"
+            );
+        }
     }
 
     #[test]

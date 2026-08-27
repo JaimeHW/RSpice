@@ -3786,6 +3786,20 @@ fn scan_temperature_option_line(
             option_package = Some(key_upper);
             continue;
         }
+        if option_package.as_deref() == Some("RESTART") {
+            if has_equals && matches!(key_upper.as_str(), "FILE" | "JOB") {
+                let _ = parse_restart_string_option(
+                    &mut stream,
+                    line_num,
+                    &format!("RESTART.{key_upper}"),
+                )?;
+            } else if has_equals
+                && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+            {
+                stream.advance();
+            }
+            continue;
+        }
         if !matches!(key_upper.as_str(), "TEMP" | "TNOM") {
             if has_equals && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
                 stream.advance();

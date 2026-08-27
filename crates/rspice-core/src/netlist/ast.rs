@@ -2980,6 +2980,75 @@ pub struct XspiceAutoBridgeParamName {
     pub param_name: String,
 }
 
+/// One Xyce `.OPTIONS RESTART` checkpoint-interval transition.
+///
+/// `time` is the simulation time at which `interval` becomes the checkpoint
+/// cadence. Both values are stored in seconds. The parser requires transition
+/// times to be finite, nonnegative, and strictly increasing, and intervals to
+/// be finite and positive.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XyceRestartInterval {
+    /// Simulation time at which this checkpoint cadence takes effect.
+    pub time: Value,
+    /// Positive checkpoint cadence from `time` until the next transition.
+    pub interval: Value,
+}
+
+/// Typed Xyce 7.10 `.OPTIONS RESTART` configuration.
+///
+/// Optional scalar fields distinguish an authored value from Xyce's package
+/// default. This matters when option sets are layered: an override changes
+/// only the fields it actually states. `intervals` preserves the authored
+/// order of Xyce's untagged `<time> <interval>` pairs.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct XyceRestartOptions {
+    /// Whether serialized restart data should use Xyce's packed form.
+    pub pack: Option<bool>,
+    /// Whether restored time-integration options should be printed.
+    pub print_timeint_options: Option<bool>,
+    /// Prefix used when naming newly written checkpoint files.
+    pub job: Option<String>,
+    /// Time represented by an inferred restart filename.
+    pub start_time: Option<Value>,
+    /// Explicit checkpoint file to restore.
+    pub file: Option<String>,
+    /// Positive checkpoint cadence before the first interval transition.
+    pub initial_interval: Option<Value>,
+    /// Ordered checkpoint-cadence transitions.
+    pub intervals: Vec<XyceRestartInterval>,
+}
+
+impl XyceRestartOptions {
+    /// Merge another restart configuration, preferring its authored scalars.
+    ///
+    /// A non-empty schedule replaces the previous schedule as one coherent
+    /// unit. Replacing rather than splicing avoids creating an order-dependent
+    /// transition table when a caller layers a complete run configuration.
+    pub fn merge(&mut self, other: &Self) {
+        if other.pack.is_some() {
+            self.pack = other.pack;
+        }
+        if other.print_timeint_options.is_some() {
+            self.print_timeint_options = other.print_timeint_options;
+        }
+        if other.job.is_some() {
+            self.job = other.job.clone();
+        }
+        if other.start_time.is_some() {
+            self.start_time = other.start_time;
+        }
+        if other.file.is_some() {
+            self.file = other.file.clone();
+        }
+        if other.initial_interval.is_some() {
+            self.initial_interval = other.initial_interval;
+        }
+        if !other.intervals.is_empty() {
+            self.intervals = other.intervals.clone();
+        }
+    }
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -3021,6 +3090,12 @@ pub struct SimulationOptions {
     /// contract parsing, while the transient engine retains the complete
     /// solution-variable set needed by Xyce's snapshot writer.
     pub output_snapshots: Option<bool>,
+    /// Xyce 7.10 `.OPTIONS RESTART` checkpoint and restore metadata.
+    ///
+    /// The core parser owns syntax, validation, and bounded schedule storage;
+    /// a platform frontend decides how the retained logical file names map to
+    /// desktop, browser, or mobile storage.
+    pub restart: Option<XyceRestartOptions>,
     /// Xyce `.OPTIONS OUTPUT OUTPUTTIMEPOINTS` output schedule.
     ///
     /// These times are also transient solver breakpoints. The accepted-step
@@ -3281,6 +3356,12 @@ impl SimulationOptions {
         }
         if other.output_snapshots.is_some() {
             self.output_snapshots = other.output_snapshots;
+        }
+        if let Some(other_restart) = &other.restart {
+            match &mut self.restart {
+                Some(restart) => restart.merge(other_restart),
+                None => self.restart = Some(other_restart.clone()),
+            }
         }
         if !other.output_time_points.is_empty() {
             self.output_time_points = other.output_time_points.clone();
