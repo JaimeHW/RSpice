@@ -261,6 +261,26 @@ enum DesignNavigatorSection {
     NamedSignals,
 }
 
+impl DesignNavigatorSection {
+    /// The band's title, in the one spelling the section has.
+    ///
+    /// [`navigator_section_header`] derives the persisted disclosure id from
+    /// this string, so a respelled title is not a copy edit — it orphans the
+    /// flag every reader's fold state is filed under and reopens the section
+    /// on them.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Masters => "Masters",
+            Self::Occurrences => "Occurrences",
+            Self::Ports => "Ports",
+            Self::RfPorts => "RF ports",
+            Self::Nets => "Nets",
+            Self::Excitations => "Excitations",
+            Self::NamedSignals => "Named signals",
+        }
+    }
+}
+
 const DESIGN_NAVIGATOR_SECTION_ORDER: [DesignNavigatorSection; 7] = [
     DesignNavigatorSection::Masters,
     DesignNavigatorSection::Occurrences,
@@ -590,7 +610,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     ) {
         Ok(projection) => projection,
         Err(error) => {
-            if navigator_section_header(ui, "Nets", "\u{2014}") {
+            if navigator_section_header(ui, DesignNavigatorSection::Nets, "\u{2014}") {
                 empty_navigator_row(ui, &error.to_string());
             }
             return;
@@ -606,7 +626,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     .filter(|net| matches_query(&query, &[net.name.as_str(), net.class.keyword(), "net"]))
     .cloned()
     .collect::<Vec<_>>();
-    if !navigator_section_header(ui, "Nets", &nets.len().to_string()) {
+    if !navigator_section_header(ui, DesignNavigatorSection::Nets, &nets.len().to_string()) {
         return;
     }
     if nets.is_empty() {
@@ -827,7 +847,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let query = normalized(app.state.workbench.navigator_filter());
     let ports = port_rows(&app.state, scope, &query);
-    if !navigator_section_header(ui, "Ports", &ports.len().to_string()) {
+    if !navigator_section_header(ui, DesignNavigatorSection::Ports, &ports.len().to_string()) {
         return;
     }
     if ports.is_empty() {
@@ -942,7 +962,11 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
 
-    if !navigator_section_header(ui, "RF ports", &listed.len().to_string()) {
+    if !navigator_section_header(
+        ui,
+        DesignNavigatorSection::RfPorts,
+        &listed.len().to_string(),
+    ) {
         return;
     }
     if listed.is_empty() {
@@ -1115,7 +1139,11 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
     })
     .collect::<Vec<_>>();
 
-    if !navigator_section_header(ui, "Excitations", &sources.len().to_string()) {
+    if !navigator_section_header(
+        ui,
+        DesignNavigatorSection::Excitations,
+        &sources.len().to_string(),
+    ) {
         return;
     }
     if sources.is_empty() {
@@ -1275,7 +1303,11 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .unwrap_or_default();
 
-    if !navigator_section_header(ui, "Named signals", &probes.len().to_string()) {
+    if !navigator_section_header(
+        ui,
+        DesignNavigatorSection::NamedSignals,
+        &probes.len().to_string(),
+    ) {
         return;
     }
     if probes.is_empty() {
@@ -2095,7 +2127,8 @@ fn shelf_search(ui: &mut Ui, app: &mut RSpiceApp) {
 ///
 /// `egui::CollapsingHeader` is refused here for the same reason
 /// [`catalog_group_row`] refuses it — its stock geometry is not this band.
-fn navigator_section_header(ui: &mut Ui, title: &str, count: &str) -> bool {
+fn navigator_section_header(ui: &mut Ui, section: DesignNavigatorSection, count: &str) -> bool {
+    let title = section.title();
     let t = Tokens::get(ui.ctx());
     let id = ui.make_persistent_id(("navigator-section", title));
     let mut open = ui.data_mut(|data| data.get_persisted::<bool>(id).unwrap_or(true));

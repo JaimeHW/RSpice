@@ -35,7 +35,7 @@ use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState};
 
 use super::super::{SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT};
 use super::{
-    NavigatorObject, WorkbenchIcon, empty_navigator_row, matches_query,
+    DesignNavigatorSection, NavigatorObject, WorkbenchIcon, empty_navigator_row, matches_query,
     navigator_object_context_menu, navigator_section_header, normalized,
 };
 
@@ -613,7 +613,7 @@ pub(super) fn tree_row(ui: &mut Ui, row: TreeRow<'_>) -> TreeRowResponse {
 /// then view, with the number of occurrences that reach each one.
 pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) {
     let query = normalized(state.workbench.navigator_filter());
-    let Some(projection) = resolved_projection(ui, state, "Masters") else {
+    let Some(projection) = resolved_projection(ui, state, DesignNavigatorSection::Masters) else {
         return;
     };
     let masters = declared_masters(&projection, &query);
@@ -622,7 +622,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
         .flat_map(|cells| cells.values())
         .map(|views| views.len())
         .sum::<usize>();
-    if !navigator_section_header(ui, "Masters", &total.to_string()) {
+    if !navigator_section_header(ui, DesignNavigatorSection::Masters, &total.to_string()) {
         return;
     }
     if masters.is_empty() {
@@ -729,7 +729,8 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
 /// The Occurrences group: the design root and everything unfolded below it.
 pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = normalized(app.state.workbench.navigator_filter());
-    let Some(projection) = resolved_projection(ui, &app.state, "Occurrences") else {
+    let Some(projection) = resolved_projection(ui, &app.state, DesignNavigatorSection::Occurrences)
+    else {
         return;
     };
     let workspace = app.state.workbench.workspace;
@@ -748,7 +749,11 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|row| matches!(row, DesignTreeRow::Occurrence(_)))
         .count();
 
-    if !navigator_section_header(ui, "Occurrences", &occurrences.to_string()) {
+    if !navigator_section_header(
+        ui,
+        DesignNavigatorSection::Occurrences,
+        &occurrences.to_string(),
+    ) {
         *app.state.workbench.navigator_trees.for_workspace(workspace) = tree;
         return;
     }
@@ -865,7 +870,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
 fn resolved_projection(
     ui: &mut Ui,
     state: &crate::workbench::app_state::AppState,
-    section: &str,
+    section: DesignNavigatorSection,
 ) -> Option<Arc<DesignProjection>> {
     match state.workspace.design_projection(
         &state.library_manager,

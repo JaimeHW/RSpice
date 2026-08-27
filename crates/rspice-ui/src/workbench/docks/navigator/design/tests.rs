@@ -1088,22 +1088,6 @@ fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
     ]
 }
 
-/// The titles the navigator's bands carry, in the order it stacks them.
-///
-/// Not all of them are unconditional — "RF ports" is drawn only by a design
-/// that places one — so this is the set of titles a band may carry rather than
-/// the set every frame paints.
-#[cfg(not(target_arch = "wasm32"))]
-const SECTION_TITLES: [&str; 7] = [
-    "Masters",
-    "Occurrences",
-    "Ports",
-    "RF ports",
-    "Nets",
-    "Excitations",
-    "Named signals",
-];
-
 /// The navigator held open across frames, so a press and the frame that reads
 /// it belong to one session.
 ///
@@ -1263,9 +1247,10 @@ impl NavigatorPanel {
     /// section open on the strength of its neighbour.
     fn rows_under(&self, title: &str) -> Vec<String> {
         let band = self.band(title).0;
-        let next = SECTION_TITLES
+        let next = DESIGN_NAVIGATOR_SECTION_ORDER
             .iter()
-            .filter(|other| **other != title)
+            .map(|section| section.title())
+            .filter(|other| *other != title)
             .filter_map(|other| self.band_if_present(other))
             .map(|(rect, _)| rect.top())
             .filter(|top| *top > band.top())
