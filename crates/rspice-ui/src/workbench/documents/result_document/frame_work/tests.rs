@@ -15,7 +15,10 @@ use super::{DatasetWalk, WorkCounts};
 // Through the module under measurement rather than around it: this drives the
 // Results workspace's own surfaces with the session type that workspace
 // already holds, and does not reach for the session aggregate on its own.
-use super::super::{AppState, ResultViewer, eye, manifest, op_inspector, soa, table, waves};
+use super::super::{
+    AppState, ResultViewer, eye, manifest, op_inspector, optimization, sensitivity, soa, table,
+    waves,
+};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, DcOpResult,
     OperatingPointValue, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
@@ -38,6 +41,11 @@ const SOA_SAMPLES: usize = 2_500;
 const EYE_TRACES: usize = 500;
 /// Samples per folded acquisition.
 const EYE_SAMPLES: usize = 400;
+
+/// Ranked sensitivity parameters.
+const SENSITIVITY_PARAMETERS: usize = 5_000;
+/// Retained optimizer candidates.
+const OPTIMIZATION_ITERATIONS: usize = 5_000;
 
 /// Frames measured after the first. Ten is enough that a per-frame walk
 /// cannot hide behind an every-other-frame schedule.
@@ -143,6 +151,48 @@ fn soa_analysis() -> AnalysisResult {
         })
 }
 
+fn sensitivity_analysis() -> AnalysisResult {
+    AnalysisResult::new(4, AnalysisType::Sensitivity, "SENS").with_result_payload(
+        AnalysisResultPayload::Sensitivity {
+            output: "V(out)".to_owned(),
+            result_mode: crate::state::SensitivityResultMode::Dc,
+            rows: (0..SENSITIVITY_PARAMETERS)
+                .map(|index| crate::state::SensitivityResultRow {
+                    parameter: format!("p{index:06}"),
+                    raw: index as f64,
+                    normalized: (index as f64).sin(),
+                })
+                .collect(),
+        },
+    )
+}
+
+fn optimization_analysis() -> AnalysisResult {
+    let axis: Vec<f64> = (0..OPTIMIZATION_ITERATIONS)
+        .map(|index| index as f64)
+        .collect();
+    let cost: Vec<f64> = (0..OPTIMIZATION_ITERATIONS)
+        .map(|index| 1.0 / (index as f64 + 1.0))
+        .collect();
+    let gain: Vec<f64> = (0..OPTIMIZATION_ITERATIONS)
+        .map(|index| index as f64 * 0.5)
+        .collect();
+    AnalysisResult::new(5, AnalysisType::Optimization, "OPT")
+        .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+            iterations: axis.clone(),
+            best_cost: cost[OPTIMIZATION_ITERATIONS - 1],
+            best_variables: std::collections::BTreeMap::from([(
+                "GAIN".to_owned(),
+                gain[OPTIMIZATION_ITERATIONS - 1],
+            )]),
+            converged: true,
+        })
+        .with_waveforms(vec![
+            WaveformData::new("OPT_COST", axis.clone(), cost, "#0af"),
+            WaveformData::new("OPT_GAIN", axis, gain, "#fa0"),
+        ])
+}
+
 /// One run carrying every dataset the measured surfaces read.
 fn large_state() -> AppState {
     let mut state = AppState::default();
@@ -150,6 +200,8 @@ fn large_state() -> AppState {
     run.add_analysis(transient_analysis());
     run.add_analysis(operating_point_analysis());
     run.add_analysis(soa_analysis());
+    run.add_analysis(sensitivity_analysis());
+    run.add_analysis(optimization_analysis());
     state.simulation.runs = vec![run];
     assert!(state.simulation.select_run(0));
 
@@ -225,14 +277,24 @@ fn surfaces() -> Vec<(&'static str, ResultViewer)> {
         ("SOA", ResultViewer::Soa),
         ("Waves", ResultViewer::Waves),
         ("Eye", ResultViewer::Eye),
+        ("Sensitivity", ResultViewer::Contribution),
+        ("Optimization", ResultViewer::Optimization),
     ]
 }
 
 fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
     state.ui.results.viewer = viewer;
     // The document bar states the sheet's purpose on every frame, including
-    // whether the retained evidence validated. It is part of the frame.
+    // whether the retained evidence validated, and the tab strip decides on
+    // every frame which sheets to offer. Both are part of the frame, and both
+    // used to be where the dataset walks were.
     let _ = super::super::sheet_purpose(state);
+    for candidate in ResultViewer::PRIMARY
+        .into_iter()
+        .chain(ResultViewer::DATASET_NATIVE)
+    {
+        let _ = super::super::viewer_availability(state, candidate);
+    }
     match viewer {
         ResultViewer::Manifest => manifest::show(ui, state),
         ResultViewer::Op => op_inspector::show(ui, state),
@@ -240,6 +302,14 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
         ResultViewer::Soa => soa::show(ui, state),
         ResultViewer::Waves => waves::show(ui, state),
         ResultViewer::Eye => eye::show(ui, state),
+        ResultViewer::Contribution => {
+            sensitivity::show(ui, state);
+            sensitivity::right_panel(ui, state);
+        }
+        ResultViewer::Optimization => {
+            optimization::show(ui, state);
+            optimization::right_panel(ui, state);
+        }
         other => panic!("{other:?} is not a measured surface"),
     }
 }
@@ -249,9 +319,35 @@ fn state_for(viewer: ResultViewer) -> AppState {
     match viewer {
         ResultViewer::Op => select_analysis(&mut state, AnalysisType::DcOp),
         ResultViewer::Soa => select_analysis(&mut state, AnalysisType::Soa),
+        ResultViewer::Contribution => select_analysis(&mut state, AnalysisType::Sensitivity),
+        ResultViewer::Optimization => select_analysis(&mut state, AnalysisType::Optimization),
         _ => select_analysis(&mut state, AnalysisType::Transient),
     }
     state
+}
+
+/// The permanent gate.
+///
+/// Ten consecutive frames with identical input and no state change between
+/// them, on a dataset large enough that any whole-dataset work would be
+/// unmissable. A surface that recomputes anything dataset-sized on an idle
+/// frame fails here, named, with the class of work it repeated and how many
+/// times it repeated it.
+#[test]
+fn idle_frames_do_no_whole_dataset_work_on_any_results_surface() {
+    let mut offenders = BTreeMap::new();
+    for (name, viewer) in surfaces() {
+        let mut state = state_for(viewer);
+        let work = steady_state_work(&mut state, |ui, state| show_surface(viewer, ui, state));
+        if work.total() > 0 {
+            offenders.insert(name, work.nonzero());
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these Results surfaces repeated whole-dataset work across {IDLE_FRAMES} idle frames \
+         (surface -> [(work, times)]):\n{offenders:#?}"
+    );
 }
 
 /// The measurement is only meaningful if the counters can see the work

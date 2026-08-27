@@ -10,7 +10,9 @@ use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
-use crate::workbench::app_state::{ActiveViewer, SpecializedViewerCacheProvenance};
+use crate::workbench::app_state::{
+    ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
+};
 
 use super::frame_work::{self, DatasetWalk};
 use super::strip::{self, LegendChip};
@@ -255,12 +257,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             provenance.dataset_id.hash(&mut hasher);
             match provenance.analysis_identity {
-                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::Prepared(id) => {
+                SpecializedViewerAnalysisIdentity::Prepared(id) => {
                     id.hash(&mut hasher);
                 }
-                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::LegacyResultId(
-                    id,
-                ) => id.hash(&mut hasher),
+                SpecializedViewerAnalysisIdentity::LegacyResultId(id) => id.hash(&mut hasher),
             }
             hasher.finish()
         });
@@ -800,12 +800,10 @@ mod tests {
             use std::hash::Hash as _;
             owner.dataset_id.hash(&mut hasher);
             match owner.analysis_identity {
-                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::Prepared(id) => {
+                SpecializedViewerAnalysisIdentity::Prepared(id) => {
                     id.hash(&mut hasher);
                 }
-                crate::workbench::app_state::SpecializedViewerAnalysisIdentity::LegacyResultId(
-                    id,
-                ) => id.hash(&mut hasher),
+                SpecializedViewerAnalysisIdentity::LegacyResultId(id) => id.hash(&mut hasher),
             }
         }
         let key = {
