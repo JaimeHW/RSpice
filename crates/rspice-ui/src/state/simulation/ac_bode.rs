@@ -345,6 +345,10 @@ const DC_FLATNESS_TOLERANCE_DB: f64 = 0.1;
 /// mid-rolloff gain as the DC gain, and put `f₋₃dB` 3 dB below a number that
 /// was never the DC gain either. The sweep has to span its first decade for
 /// the question to be answerable at all.
+///
+/// The first decade is read in source order, which an AC sweep always emits
+/// ascending. A descending axis simply fails the span check and reports `A`
+/// as measured — the conservative answer, never a false claim of DC.
 fn low_frequency_gain_is_dc(frequency: &[f64], gain_db: &[f64]) -> bool {
     let n = frequency.len().min(gain_db.len());
     if n < 2 {
