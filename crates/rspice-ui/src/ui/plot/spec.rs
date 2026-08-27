@@ -149,6 +149,9 @@ impl Axis {
     /// this beside that row: without it a row of offsets reads as a row of
     /// absolute values, which is a different number.
     #[must_use]
+    // The one surface that draws its own tick row — the waveform stack's
+    // shared axis strip — is owned by another module and has yet to read it.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn offset_anchor(&self) -> Option<&str> {
         self.offset_anchor.as_deref()
     }
@@ -284,6 +287,9 @@ impl<'a> Trace<'a> {
     /// Declare the monotone structure of this trace's X column, so the
     /// renderer picks a reduction that can describe it.
     #[must_use]
+    // Classifying costs one pass over the data, so the declaration belongs to
+    // whoever caches the trace — and that owner is another module's to change.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn shape(mut self, shape: &'a SweepShape) -> Self {
         self.shape = Some(shape);
         self

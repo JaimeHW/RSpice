@@ -23,18 +23,21 @@ mod cursor;
 mod decimate;
 mod format;
 mod render;
-mod sample;
 mod scale;
 mod spec;
+
+/// Sweep-shape classification and branch-aware sampling.
+///
+/// Namespaced rather than flattened into this module's surface: a caller
+/// reading `sample::SweepShape` is told where the answer comes from, and the
+/// branch queries beside it read as one contract rather than as loose
+/// functions among the plot's own types.
+pub(crate) mod sample;
 
 pub use cursor::CursorPair;
 pub use decimate::{
     DEFAULT_DISPLAY_CACHE_MIB, DecimationCache, DisplayDecimation, SampleInterpolation, sample_at,
     sample_at_with,
-};
-pub use sample::{
-    BranchSample, MonotoneRun, SHAPE_RUN_CAP, SweepClass, SweepShape, XOrientation, nearest_sample,
-    sample_at_with_shape, sample_branches_into,
 };
 pub use format::{fmt_si, fmt_si_significant, fmt_significant};
 pub use render::{
