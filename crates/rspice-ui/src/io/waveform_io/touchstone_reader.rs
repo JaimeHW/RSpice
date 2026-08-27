@@ -383,23 +383,33 @@ fn infer_ports(tokens: &[f64], matrix: MatrixFormat) -> Result<Option<usize>, St
     }
 }
 
+/// Where each network-data pair of one frequency record belongs in the matrix.
+///
+/// Touchstone arranges network data row-wise: a Full matrix lists every
+/// element of matrix row *r* before any element of row *r+1*, a Lower matrix
+/// gives row *r* its columns 1..=*r*, and an Upper matrix gives row *r* its
+/// columns *r*..=*n* (Touchstone 2.0 specification, "3-port and 4-port
+/// Networks" and "5-port and Above Networks").
+///
+/// A full two-port matrix is the format's one documented exception: it carries
+/// S11 S21 S12 S22 unless `[Two-Port Data Order] 12_21` says otherwise.
 fn matrix_positions(
     ports: usize,
     matrix: MatrixFormat,
     two_port_order: TwoPortOrder,
 ) -> Vec<(usize, usize)> {
-    if ports == 2
-        && matrix == MatrixFormat::Full
-        && matches!(two_port_order, TwoPortOrder::TwelveTwentyOne)
-    {
-        return vec![(0, 0), (0, 1), (1, 0), (1, 1)];
+    if ports == 2 && matrix == MatrixFormat::Full {
+        return match two_port_order {
+            TwoPortOrder::TwentyOneTwelve => vec![(0, 0), (1, 0), (0, 1), (1, 1)],
+            TwoPortOrder::TwelveTwentyOne => vec![(0, 0), (0, 1), (1, 0), (1, 1)],
+        };
     }
     let mut positions = Vec::new();
-    for column in 0..ports {
+    for row in 0..ports {
         match matrix {
-            MatrixFormat::Full => positions.extend((0..ports).map(|row| (row, column))),
-            MatrixFormat::Lower => positions.extend((column..ports).map(|row| (row, column))),
-            MatrixFormat::Upper => positions.extend((0..=column).map(|row| (row, column))),
+            MatrixFormat::Full => positions.extend((0..ports).map(|column| (row, column))),
+            MatrixFormat::Lower => positions.extend((0..=row).map(|column| (row, column))),
+            MatrixFormat::Upper => positions.extend((row..ports).map(|column| (row, column))),
         }
     }
     positions
@@ -553,6 +563,191 @@ fn pair_to_complex(first: f64, second: f64, format: DataFormat) -> Result<(f64, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One matrix entry, as the reader materialized it.
+    fn entry(dataset: &WaveformDataset, row: usize, column: usize, index: usize) -> (f64, f64) {
+        let name = format!("S{row}{column}");
+        let component = |suffix: &str| {
+            dataset
+                .get_signal(&format!("{name}_{suffix}"))
+                .unwrap_or_else(|| panic!("{name}_{suffix} is missing"))
+                .data[index]
+        };
+        (component("RE"), component("IM"))
+    }
+
+    /// Touchstone lays a Full matrix out row-wise for every network of three
+    /// ports and above: `<freq> <N11> <N12> <N13>`, then `<N21> <N22> <N23>`,
+    /// then `<N31> <N32> <N33>` (Touchstone 2.0 specification, "3-port and
+    /// 4-port Networks"). Every entry in this fixture names its own position,
+    /// so a column-wise reading returns S21 where S12 was written.
+    #[test]
+    fn a_three_port_full_matrix_is_read_row_wise() {
+        let dataset = read_touchstone_bytes(
+            "network.s3p",
+            b"!3-port S-parameter data, one matrix row per line\n\
+              # Hz S RI R 50\n\
+              1.0 0.11 0.01 0.12 0.02 0.13 0.03\n\
+              0.21 0.04 0.22 0.05 0.23 0.06\n\
+              0.31 0.07 0.32 0.08 0.33 0.09\n",
+        )
+        .expect("a spec-shaped 3-port file parses");
+
+        assert_eq!(dataset.point_count(), 1);
+        for (row, column, real, imag) in [
+            (1, 1, 0.11, 0.01),
+            (1, 2, 0.12, 0.02),
+            (1, 3, 0.13, 0.03),
+            (2, 1, 0.21, 0.04),
+            (2, 2, 0.22, 0.05),
+            (2, 3, 0.23, 0.06),
+            (3, 1, 0.31, 0.07),
+            (3, 2, 0.32, 0.08),
+            (3, 3, 0.33, 0.09),
+        ] {
+            assert_eq!(
+                entry(&dataset, row, column, 0),
+                (real, imag),
+                "S{row}{column}"
+            );
+        }
+    }
+
+    /// A 4-port file carries four pairs per matrix row, in the same row-wise
+    /// order. The reader must not care how the rows are broken into lines.
+    #[test]
+    fn a_four_port_full_matrix_is_read_row_wise() {
+        let dataset = read_touchstone_bytes(
+            "network.s4p",
+            b"# Hz S RI R 50\n\
+              1.0 0.11 0 0.12 0 0.13 0 0.14 0\n\
+              0.21 0 0.22 0 0.23 0 0.24 0\n\
+              0.31 0 0.32 0 0.33 0 0.34 0\n\
+              0.41 0 0.42 0 0.43 0 0.44 0\n",
+        )
+        .expect("a spec-shaped 4-port file parses");
+
+        for row in 1..=4 {
+            for column in 1..=4 {
+                let expected = (row as f64 * 10.0 + column as f64) / 100.0;
+                assert_eq!(
+                    entry(&dataset, row, column, 0).0,
+                    expected,
+                    "S{row}{column}"
+                );
+            }
+        }
+    }
+
+    /// `[Matrix Format] Lower` and `Upper` are still row-wise: Lower gives
+    /// row *r* its columns 1..=*r*, Upper gives row *r* its columns *r*..=*n*
+    /// (Touchstone 2.0 specification, "3-port and 4-port Networks"). The
+    /// absent half is the reciprocal mirror of the half that is present.
+    #[test]
+    fn triangular_matrix_formats_are_read_row_wise() {
+        let lower = read_touchstone_bytes(
+            "lower.ts",
+            b"[Version] 2.0\n\
+              # Hz S RI R 50\n\
+              [Number of Ports] 3\n\
+              [Number of Frequencies] 1\n\
+              [Matrix Format] Lower\n\
+              [Network Data]\n\
+              1.0 0.11 0.01\n\
+              0.21 0.04 0.22 0.05\n\
+              0.31 0.07 0.32 0.08 0.33 0.09\n\
+              [End]\n",
+        )
+        .expect("a spec-shaped Lower file parses");
+        let upper = read_touchstone_bytes(
+            "upper.ts",
+            b"[Version] 2.0\n\
+              # Hz S RI R 50\n\
+              [Number of Ports] 3\n\
+              [Number of Frequencies] 1\n\
+              [Matrix Format] Upper\n\
+              [Network Data]\n\
+              1.0 0.11 0.01 0.12 0.02 0.13 0.03\n\
+              0.22 0.05 0.23 0.06\n\
+              0.33 0.09\n\
+              [End]\n",
+        )
+        .expect("a spec-shaped Upper file parses");
+
+        for (row, column, real, imag) in [
+            (1, 1, 0.11, 0.01),
+            (2, 1, 0.21, 0.04),
+            (2, 2, 0.22, 0.05),
+            (3, 1, 0.31, 0.07),
+            (3, 2, 0.32, 0.08),
+            (3, 3, 0.33, 0.09),
+        ] {
+            assert_eq!(
+                entry(&lower, row, column, 0),
+                (real, imag),
+                "S{row}{column}"
+            );
+            // The Lower half is mirrored into the Upper half.
+            assert_eq!(
+                entry(&lower, column, row, 0),
+                (real, imag),
+                "S{column}{row}"
+            );
+        }
+        for (row, column, real, imag) in [
+            (1, 1, 0.11, 0.01),
+            (1, 2, 0.12, 0.02),
+            (1, 3, 0.13, 0.03),
+            (2, 2, 0.22, 0.05),
+            (2, 3, 0.23, 0.06),
+            (3, 3, 0.33, 0.09),
+        ] {
+            assert_eq!(
+                entry(&upper, row, column, 0),
+                (real, imag),
+                "S{row}{column}"
+            );
+            assert_eq!(
+                entry(&upper, column, row, 0),
+                (real, imag),
+                "S{column}{row}"
+            );
+        }
+    }
+
+    /// A passive reciprocal 3-port measures the same power from port *i* to
+    /// port *j* as from *j* to *i*, so the imported matrix must be symmetric.
+    /// A transposing reader keeps that property, which is exactly why this
+    /// guard is paired with the position-naming fixtures above rather than
+    /// standing in for them.
+    #[test]
+    fn a_reciprocal_three_port_imports_symmetrically() {
+        let dataset = read_touchstone_bytes(
+            "divider.s3p",
+            b"!Passive reciprocal 3-port divider\n\
+              # GHz S RI R 50\n\
+              1.0 0.10 0.00 0.55 -0.05 0.45 -0.04\n\
+              0.55 -0.05 0.20 0.00 0.35 -0.03\n\
+              0.45 -0.04 0.35 -0.03 0.30 0.00\n",
+        )
+        .expect("a reciprocal 3-port file parses");
+
+        for row in 1..=3 {
+            for column in 1..=3 {
+                let forward = entry(&dataset, row, column, 0);
+                let reverse = entry(&dataset, column, row, 0);
+                assert!(
+                    (forward.0 - reverse.0).abs() < 1e-12 && (forward.1 - reverse.1).abs() < 1e-12,
+                    "S{row}{column} {forward:?} != S{column}{row} {reverse:?}"
+                );
+                // Passive: no entry delivers more than the incident wave.
+                assert!(forward.0.hypot(forward.1) <= 1.0, "S{row}{column}");
+            }
+        }
+        assert_eq!(entry(&dataset, 1, 2, 0), (0.55, -0.05));
+        assert_eq!(entry(&dataset, 1, 3, 0), (0.45, -0.04));
+        assert_eq!(entry(&dataset, 2, 3, 0), (0.35, -0.03));
+    }
 
     #[test]
     fn reads_v2_per_port_references_and_alternate_two_port_order() {

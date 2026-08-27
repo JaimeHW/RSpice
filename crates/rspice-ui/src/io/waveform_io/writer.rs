@@ -85,15 +85,7 @@ impl WaveformWriter {
         }
 
         for idx in 0..frequencies.len() {
-            contents.push_str(&format!("{:e}", frequencies[idx]));
-            // Touchstone matrix order: S11 S21 ... SN1 S12 S22 ... SN2 ... SNN.
-            for col in 0..num_ports {
-                for row in 0..num_ports {
-                    let (re, im) = matrix[row][col][idx];
-                    contents.push_str(&format!(" {re:e} {im:e}"));
-                }
-            }
-            contents.push('\n');
+            Self::push_touchstone_record(&mut contents, frequencies[idx], &matrix, idx);
         }
 
         if version >= 2 {
@@ -101,6 +93,63 @@ impl WaveformWriter {
         }
 
         Ok(contents)
+    }
+
+    /// Touchstone v1 permits at most four complex pairs on one data line.
+    const TOUCHSTONE_PAIRS_PER_LINE: usize = 4;
+
+    /// Write one frequency's network data in the element order the format
+    /// fixes.
+    ///
+    /// A full two-port matrix is the format's one documented exception, and
+    /// carries S11 S21 S12 S22 on a single line. Every other port count is
+    /// written row-wise — every element of matrix row *r* before any element
+    /// of row *r+1* — with each row starting a new line and continuing on the
+    /// next once four pairs are on the current one (Touchstone 2.0
+    /// specification, "3-port and 4-port Networks" and "5-port and Above
+    /// Networks"). The frequency leads the first line of the record only.
+    fn push_touchstone_record(
+        contents: &mut String,
+        frequency: f64,
+        matrix: &[Vec<Vec<(f64, f64)>>],
+        idx: usize,
+    ) {
+        let num_ports = matrix.len();
+        contents.push_str(&format!("{frequency:e}"));
+        if num_ports == 2 {
+            for (row, column) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (re, im) = matrix[row][column][idx];
+                contents.push_str(&format!(" {re:e} {im:e}"));
+            }
+            contents.push('\n');
+            return;
+        }
+
+        // The frequency already occupies the first line of the record.
+        let mut line_has_content = true;
+        let mut pairs_on_line = 0usize;
+        for (row_index, row) in matrix.iter().enumerate() {
+            if row_index > 0 {
+                contents.push('\n');
+                line_has_content = false;
+                pairs_on_line = 0;
+            }
+            for series in row {
+                if pairs_on_line == Self::TOUCHSTONE_PAIRS_PER_LINE {
+                    contents.push('\n');
+                    line_has_content = false;
+                    pairs_on_line = 0;
+                }
+                let (re, im) = series[idx];
+                if line_has_content {
+                    contents.push(' ');
+                }
+                contents.push_str(&format!("{re:e} {im:e}"));
+                line_has_content = true;
+                pairs_on_line += 1;
+            }
+        }
+        contents.push('\n');
     }
 
     fn touchstone_reference_values_for_write(
@@ -405,6 +454,132 @@ mod tests {
         }
 
         dataset
+    }
+
+    /// An N-port export whose every entry names its own position: `S<row><col>`
+    /// carries `0.<row><col>` as its real part and zero imaginary part, so the
+    /// written element order is readable straight off the file.
+    fn positional_touchstone_dataset(num_ports: usize, version: u32) -> WaveformDataset {
+        let mut dataset = WaveformDataset::new("S-Parameters");
+        dataset.analysis = "S-Parameter".to_string();
+        dataset
+            .metadata
+            .insert("touchstone_version".to_string(), version.to_string());
+        dataset.metadata.insert("z0".to_string(), "50".to_string());
+
+        let mut frequency = WaveformSignal::new("frequency", SignalType::Frequency);
+        frequency.data = vec![1.0e6];
+        dataset.set_x(frequency);
+
+        for row in 1..=num_ports {
+            for column in 1..=num_ports {
+                let value = (row * 10 + column) as f64 / 100.0;
+                let mut real =
+                    WaveformSignal::new(format!("S{row}_{column}_RE"), SignalType::SParameter);
+                real.data = vec![value];
+                dataset.add_signal(real);
+                let mut imag =
+                    WaveformSignal::new(format!("S{row}_{column}_IM"), SignalType::SParameter);
+                imag.data = vec![0.0];
+                dataset.add_signal(imag);
+            }
+        }
+
+        dataset
+    }
+
+    /// Touchstone writes every network of three ports and above row-wise, one
+    /// matrix row per line group (Touchstone 2.0 specification, "3-port and
+    /// 4-port Networks"). Column-major output transposes the network for every
+    /// tool that reads it.
+    #[test]
+    fn touchstone_text_export_writes_three_port_rows_row_wise() {
+        let text = WaveformWriter::new(WaveformFormat::Touchstone)
+            .write_text(&positional_touchstone_dataset(3, 1))
+            .expect("touchstone text serializes");
+
+        assert_eq!(
+            text,
+            concat!(
+                "! Generated by rspice-ui\n",
+                "# Hz S RI R 50\n",
+                "1e6 1.1e-1 0e0 1.2e-1 0e0 1.3e-1 0e0\n",
+                "2.1e-1 0e0 2.2e-1 0e0 2.3e-1 0e0\n",
+                "3.1e-1 0e0 3.2e-1 0e0 3.3e-1 0e0\n",
+            )
+        );
+    }
+
+    /// Touchstone v1 allows at most four parameter pairs on a data line, and a
+    /// matrix row that overruns that continues on the following line while the
+    /// next row still starts one of its own (Touchstone 2.0 specification,
+    /// "5-port and Above Networks").
+    #[test]
+    fn touchstone_text_export_wraps_wide_rows_at_four_pairs() {
+        let text = WaveformWriter::new(WaveformFormat::Touchstone)
+            .write_text(&positional_touchstone_dataset(5, 1))
+            .expect("touchstone text serializes");
+
+        let data_lines = text
+            .lines()
+            .filter(|line| !line.starts_with('!') && !line.starts_with('#'))
+            .collect::<Vec<_>>();
+        let pairs_per_line = data_lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                let tokens = line.split_whitespace().count();
+                // The frequency leads the first line of the record.
+                if index == 0 {
+                    (tokens - 1) / 2
+                } else {
+                    tokens / 2
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // Five rows of five pairs, each split four then one.
+        assert_eq!(pairs_per_line, vec![4, 1, 4, 1, 4, 1, 4, 1, 4, 1], "{text}");
+
+        let reopened =
+            crate::io::waveform_io::read_touchstone_bytes("wrapped.s5p", text.as_bytes())
+                .expect("the wrapped export reopens");
+        for row in 1..=5 {
+            for column in 1..=5 {
+                assert_eq!(
+                    reopened
+                        .get_signal(&format!("S{row}{column}_RE"))
+                        .unwrap_or_else(|| panic!("S{row}{column}_RE is missing"))
+                        .data[0],
+                    (row * 10 + column) as f64 / 100.0,
+                    "S{row}{column}"
+                );
+            }
+        }
+    }
+
+    /// What is written comes back unchanged, element for element.
+    #[test]
+    fn touchstone_text_export_round_trips_a_three_port_matrix() {
+        let text = WaveformWriter::new(WaveformFormat::Touchstone)
+            .write_text(&positional_touchstone_dataset(3, 2))
+            .expect("touchstone text serializes");
+        let reopened =
+            crate::io::waveform_io::read_touchstone_bytes("roundtrip.ts", text.as_bytes())
+                .expect("the export reopens");
+
+        for row in 1..=3 {
+            for column in 1..=3 {
+                assert_eq!(
+                    reopened
+                        .get_signal(&format!("S{row}{column}_RE"))
+                        .unwrap_or_else(|| panic!("S{row}{column}_RE is missing"))
+                        .data[0],
+                    (row * 10 + column) as f64 / 100.0,
+                    "S{row}{column}"
+                );
+            }
+        }
     }
 
     #[test]
