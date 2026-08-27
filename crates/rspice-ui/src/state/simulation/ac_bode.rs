@@ -20,6 +20,14 @@ use super::{AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, W
 /// The instability phases are `-180° - 360k` for `k >= 0`: the lag-sense
 /// inversions a loop transmission reaches as it rolls off. Phase margin is the
 /// textbook `180° + ∠L(f_ugf)` against the first of them.
+///
+/// Either curve can reach its level more than once. Both margins then name the
+/// crossing that *binds* — the one a perturbation reaches first, `min |GM_dB|`
+/// for the gain margin and `min |PM|` for the phase margin — and both report
+/// that crossing's signed value, so a margin already crossed still reads
+/// negative. `ugf` and `f180` name the crossings their own margins were read
+/// at. This is the one convention both stability cards are ratified to report
+/// under, so the Bode and Nyquist rows can never name different crossings.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct AcBodeMetrics {
     /// Gain at the lowest swept frequency. It is the DC gain only when
@@ -28,11 +36,15 @@ pub struct AcBodeMetrics {
     /// Whether the sweep provably starts below every pole, so `adc_db` may be
     /// presented as the DC gain rather than as `A(f_min)`.
     pub adc_is_dc: bool,
+    /// Frequency of the unity-gain crossing the phase margin was measured at.
     pub ugf: Option<f64>,
+    /// Binding phase margin: the smallest `|PM|` over every unity-gain
+    /// crossing in the swept band, reported signed.
     pub pm_deg: Option<f64>,
     /// Frequency of the phase inversion the gain margin was measured at.
     pub f180: Option<f64>,
-    /// Worst-case gain margin over every phase inversion in the swept band.
+    /// Binding gain margin: the smallest `|GM_dB|` over every phase inversion
+    /// in the swept band, reported signed.
     pub gm_db: Option<f64>,
     pub f3db: Option<f64>,
     pub gain_extremes: (f64, f64),
@@ -161,8 +173,25 @@ pub fn ac_bode_summary_for_analysis(
     })
 }
 
+/// The first frequency at which `series` reaches `level`.
+///
+/// Bandwidth edges are the first crossing by definition, and a curve with no
+/// phase to weigh the later ones against has nothing better to name.
 pub fn log_frequency_crossing(frequency: &[f64], series: &[f64], level: f64) -> Option<f64> {
+    log_frequency_crossings(frequency, series, level)
+        .into_iter()
+        .next()
+}
+
+/// Every frequency in the swept band at which `series` reaches `level`, in
+/// sweep order.
+///
+/// A level touched exactly at a retained sample is reported once, under the
+/// same ownership rule the phase inversions use: each segment owns its leading
+/// endpoint, and the final segment additionally owns its trailing one.
+fn log_frequency_crossings(frequency: &[f64], series: &[f64], level: f64) -> Vec<f64> {
     let n = frequency.len().min(series.len());
+    let mut out = Vec::new();
     for i in 1..n {
         let (f0, f1) = (frequency[i - 1], frequency[i]);
         if f0 <= 0.0 || f1 <= 0.0 {
@@ -170,16 +199,16 @@ pub fn log_frequency_crossing(frequency: &[f64], series: &[f64], level: f64) -> 
         }
         let (y0, y1) = (series[i - 1] - level, series[i] - level);
         if y0 == 0.0 {
-            return Some(f0);
-        }
-        if y1 == 0.0 {
-            return Some(f1);
-        }
-        if y0 * y1 < 0.0 {
-            return Some(interpolate_log_frequency(f0, f1, y0 / (y0 - y1)));
+            out.push(f0);
+        } else if y1 == 0.0 {
+            if i == n - 1 {
+                out.push(f1);
+            }
+        } else if y0 * y1 < 0.0 {
+            out.push(interpolate_log_frequency(f0, f1, y0 / (y0 - y1)));
         }
     }
-    None
+    out
 }
 
 /// The frequency a fraction `t` of the way from `f0` to `f1` measured in
@@ -311,10 +340,17 @@ fn phase_inversion_frequencies(frequency: &[f64], phase_unwrapped: &[f64]) -> Ve
 /// measured at.
 ///
 /// A response can invert more than once — every conditionally stable loop dips
-/// through -180° above 0 dB and comes back. Reporting the first inversion
-/// would hide the one that matters, so the worst margin wins; ties go to the
-/// inversion nearest unity gain, which is the one the reader is looking at.
-fn worst_case_gain_margin(
+/// through -180° above 0 dB and comes back. Reporting the first inversion would
+/// hide the one that matters, and reporting the deepest one over-warns by the
+/// whole conditionally stable hump: a healthy loop with 2 dB in hand reads as
+/// 26.7 dB past the margin. The inversion that *binds* is the one nearest unity
+/// gain in log magnitude — `min |GM_dB|`, the smallest gain change that reaches
+/// instability, which is the perturbation a gain error actually applies, and
+/// the crossing MATLAB's `margin` names. The reported value keeps its sign, so
+/// a negative gain margin still says the loop is already past that crossing.
+/// Ties go to the inversion nearest unity gain, which is the one the reader is
+/// looking at.
+fn binding_gain_margin(
     frequency: &[f64],
     log_frequency: &[f64],
     gain_db: &[f64],
@@ -328,9 +364,37 @@ fn worst_case_gain_margin(
         .min_by(|a, b| {
             let distance =
                 |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
-            a.1.total_cmp(&b.1)
+            a.1.abs()
+                .total_cmp(&b.1.abs())
                 .then_with(|| distance(a.0).total_cmp(&distance(b.0)))
         })
+}
+
+/// The phase margin the reader has to act on, and the unity-gain crossing it
+/// was measured at.
+///
+/// Gain reaches 0 dB more than once whenever the response has a resonance to
+/// climb back over, so the same question the gain margin answers arises here:
+/// which crossing binds. It is the one with the smallest `|PM|` — the same
+/// distance-to-instability rule as the gain margin, measured in phase instead
+/// of in log magnitude — and the reported sign is retained. Ties go to the
+/// lowest crossing. `ugf` names the crossing the margin was read at, so the
+/// card's two rows always describe the same point on the curve.
+fn binding_phase_margin(
+    frequency: &[f64],
+    log_frequency: &[f64],
+    gain_db: &[f64],
+    phase_unwrapped: &[f64],
+) -> Option<(f64, f64)> {
+    log_frequency_crossings(frequency, gain_db, 0.0)
+        .into_iter()
+        .map(|ugf| {
+            (
+                ugf,
+                180.0 + sample_at_log_frequency(log_frequency, phase_unwrapped, ugf),
+            )
+        })
+        .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
 }
 
 /// How flat the first swept decade must be for the gain there to be presented
@@ -408,6 +472,8 @@ fn metrics_from_curves(
     phase_deg: Option<&[f64]>,
 ) -> AcBodeMetrics {
     let adc_db = gain_db.first().copied();
+    // Without a phase trace no unity-gain crossing can be shown to bind, so the
+    // first one is all that can be named.
     let ugf = log_frequency_crossing(frequency, gain_db, 0.0);
     let f3db = adc_db.and_then(|adc| log_frequency_crossing(frequency, gain_db, adc - 3.0));
     let mut metrics = AcBodeMetrics {
@@ -425,11 +491,14 @@ fn metrics_from_curves(
     if let Some(phase) = phase_deg {
         let log_frequency = log_frequency_axis(frequency);
         let unwrapped = unwrap_retained_phase_deg(phase);
-        if let Some(ugf) = metrics.ugf {
-            metrics.pm_deg = Some(180.0 + sample_at_log_frequency(&log_frequency, &unwrapped, ugf));
+        if let Some((ugf, pm_deg)) =
+            binding_phase_margin(frequency, &log_frequency, gain_db, &unwrapped)
+        {
+            metrics.ugf = Some(ugf);
+            metrics.pm_deg = Some(pm_deg);
         }
         if let Some((f180, gm_db)) =
-            worst_case_gain_margin(frequency, &log_frequency, gain_db, &unwrapped, metrics.ugf)
+            binding_gain_margin(frequency, &log_frequency, gain_db, &unwrapped, metrics.ugf)
         {
             metrics.f180 = Some(f180);
             metrics.gm_db = Some(gm_db);
@@ -720,26 +789,158 @@ mod tests {
         assert_eq!(metrics.f180, None, "the phase never reaches -180°");
     }
 
+    /// Every -180° crossing of an affine phase trace, paired with the signed
+    /// gain margin there, computed from the closed forms the fixture is built
+    /// from rather than from anything this module produces.
+    fn closed_form_margins(phase_deg: &[f64], gain_at: impl Fn(f64) -> f64) -> Vec<(f64, f64)> {
+        phase_deg
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| (w[0] + 180.0) * (w[1] + 180.0) < 0.0)
+            .map(|(i, w)| {
+                let log_f = i as f64 + (-180.0 - w[0]) / (w[1] - w[0]);
+                (log_f, -gain_at(log_f))
+            })
+            .collect()
+    }
+
     /// A conditionally stable loop dips below -180° while the gain is still
     /// above 0 dB and comes back. Every -180° crossing is a real one; the card
-    /// reports the worst case, and f₁₈₀ names that same crossing.
+    /// reports the crossing that *binds* — the smallest gain change that
+    /// reaches instability, `min |GM|` — and f₁₈₀ names that same crossing.
+    ///
+    /// This loop is healthy with 2 dB in hand. Reporting the deepest crossing
+    /// instead reads -26.7 dB, which is the whole conditionally stable hump
+    /// mistaken for a defect.
     #[test]
-    fn conditionally_stable_loop_reports_the_worst_case_gain_margin() {
-        let frequency = [1.0, 1.0e1, 1.0e2, 1.0e3, 1.0e4, 1.0e5];
-        let gain_db = [40.0, 30.0, 20.0, 10.0, 0.0, -10.0];
+    fn conditionally_stable_loop_reports_the_binding_gain_margin() {
+        // Both curves are exactly affine in log-frequency: gain falls
+        // -10 dB/decade from 40 dB, and the phase is affine per decade.
+        let gain_at = |log_f: f64| 40.0 - 10.0 * log_f;
         let phase_deg = [-100.0, -160.0, -220.0, -220.0, -160.0, -260.0];
+        let frequency = (0..phase_deg.len())
+            .map(|i| 10f64.powi(i as i32))
+            .collect::<Vec<_>>();
+        let gain_db = (0..phase_deg.len())
+            .map(|i| gain_at(i as f64))
+            .collect::<Vec<_>>();
         let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+
+        let margins = closed_form_margins(&phase_deg, gain_at);
+        assert_eq!(margins.len(), 3, "the fixture must invert three times");
+        let binding = margins
+            .iter()
+            .copied()
+            .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .expect("a binding crossing");
+        let deepest = margins
+            .iter()
+            .copied()
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("a deepest crossing");
+        assert_ne!(
+            binding.0, deepest.0,
+            "the fixture must separate the binding crossing from the deepest one"
+        );
 
         let metrics = ac_bode_summary_for_analysis(&analysis, 0)
             .expect("AC summary")
             .metrics;
 
-        // Three -180° crossings: 10^(4/3) (gain +26.67 dB), 10^(11/3)
-        // (+3.33 dB) and 10^4.2 (-2 dB). The worst margin is the first.
+        // One 0 dB crossing, landing exactly on the 10 kHz sample.
         assert_relative(metrics.ugf, 1.0e4, 1.0e-12, "UGF");
-        assert_within(metrics.pm_deg, 20.0, 1.0e-9, "PM");
-        assert_relative(metrics.f180, 10f64.powf(4.0 / 3.0), 1.0e-12, "f180");
-        assert_within(metrics.gm_db, -(30.0 - 10.0 / 3.0), 1.0e-9, "GM");
+        assert_within(metrics.pm_deg, 180.0 + phase_deg[4], 1.0e-9, "PM");
+        assert_within(metrics.gm_db, binding.1, 1.0e-9, "GM");
+        assert_relative(metrics.f180, 10f64.powf(binding.0), 1.0e-12, "f180");
+    }
+
+    /// The binding crossing is the one nearest unity gain, not the one with the
+    /// friendlier sign. Both -180° crossings here are already past the margin,
+    /// and the shallower one is still the number to act on: it takes 13.3 dB of
+    /// gain reduction to clear it and 23.3 dB to clear the other.
+    #[test]
+    fn the_binding_gain_margin_is_the_shallowest_when_every_crossing_is_negative() {
+        let gain_at = |log_f: f64| 30.0 - 10.0 * log_f;
+        let phase_deg = [-100.0, -220.0, -160.0, -170.0];
+        let frequency = (0..phase_deg.len())
+            .map(|i| 10f64.powi(i as i32))
+            .collect::<Vec<_>>();
+        let gain_db = (0..phase_deg.len())
+            .map(|i| gain_at(i as f64))
+            .collect::<Vec<_>>();
+        let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+
+        let margins = closed_form_margins(&phase_deg, gain_at);
+        assert_eq!(margins.len(), 2, "the fixture must invert twice");
+        assert!(
+            margins.iter().all(|&(_, gm)| gm < 0.0),
+            "both crossings must be past the margin, so sign cannot select one"
+        );
+        let binding = margins
+            .iter()
+            .copied()
+            .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .expect("a binding crossing");
+        assert_ne!(
+            binding.0, margins[0].0,
+            "the binding crossing must not be the deepest one"
+        );
+
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+
+        assert_relative(metrics.f180, 10f64.powf(binding.0), 1.0e-12, "f180");
+        assert_within(metrics.gm_db, binding.1, 1.0e-9, "GM");
+    }
+
+    /// Gain can pass through 0 dB more than once. The phase margin is measured
+    /// at the crossing that binds — the smallest `|PM|` — and the unity-gain
+    /// frequency names that same crossing, so the two rows never describe
+    /// different points on the curve.
+    #[test]
+    fn multiple_unity_gain_crossings_report_the_binding_phase_margin() {
+        // Gain dips through 0 dB, comes back up, and falls through again.
+        let gain_db = [20.0, 10.0, -10.0, 10.0, -20.0];
+        let phase_deg = [-20.0, -60.0, -100.0, -140.0, -190.0];
+        let frequency = (0..gain_db.len())
+            .map(|i| 10f64.powi(i as i32))
+            .collect::<Vec<_>>();
+        let analysis = wrapped_response(&frequency, &gain_db, &phase_deg);
+
+        // Every 0 dB crossing of the affine gain, with the phase there.
+        let crossings = gain_db
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| w[0] * w[1] < 0.0)
+            .map(|(i, w)| {
+                let t = w[0] / (w[0] - w[1]);
+                let log_f = i as f64 + t;
+                let phase = phase_deg[i] + t * (phase_deg[i + 1] - phase_deg[i]);
+                (log_f, 180.0 + phase)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            crossings.len(),
+            3,
+            "the fixture must cross unity three times"
+        );
+        let binding = crossings
+            .iter()
+            .copied()
+            .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .expect("a binding crossing");
+        assert_ne!(
+            binding.0, crossings[0].0,
+            "the fixture must separate the binding crossing from the first one"
+        );
+
+        let metrics = ac_bode_summary_for_analysis(&analysis, 0)
+            .expect("AC summary")
+            .metrics;
+
+        assert_relative(metrics.ugf, 10f64.powf(binding.0), 1.0e-12, "UGF");
+        assert_within(metrics.pm_deg, binding.1, 1.0e-9, "PM");
     }
 
     /// `gain_db.first()` is the gain at the first swept frequency. It is only
