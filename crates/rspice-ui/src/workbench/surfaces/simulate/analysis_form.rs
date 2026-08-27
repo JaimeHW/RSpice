@@ -1270,11 +1270,11 @@ fn sp_port_fields(
         for (idx, port) in setup.ports.iter_mut().enumerate() {
             sub_header(ui, &format!("Port {}", idx + 1));
             input_row(ui, "Node +", &mut port.node_pos);
-            check_row(ui, "Differential", &mut port.differential);
+            switch_row(ui, "Differential", &mut port.differential);
             if port.differential {
                 input_row(ui, "Node −", &mut port.node_neg);
             }
-            check_row(ui, "Z0 override", &mut port.z0_override);
+            switch_row(ui, "Z0 override", &mut port.z0_override);
             if port.z0_override {
                 input_row(ui, "Port Z0", &mut port.z0);
             }
