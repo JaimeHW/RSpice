@@ -2079,10 +2079,13 @@ fn raw_probe_target(expression: &str) -> Option<RawProbeTarget<'_>> {
 }
 
 fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
+    observe_placements(ui, app);
     shelf_search(ui, app);
     let query = normalized(&app.state.workbench.placement_query);
     let library_parts = library_part_rows(app, &query);
+    let cells = cell_candidates(app);
     let visible_matches = component_shelf_match_count(app, &query) + library_parts.len();
+    let mut band = None;
     let mut primitive = None;
     let mut builtin = None;
     let mut generated = None;
@@ -2091,16 +2094,20 @@ fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()
         .id_salt("workbench.design.component_shelf")
         .show(ui, |ui| {
-            primitive = pinned(ui, app).or_else(|| primitive_catalog(ui, app));
+            let pinned = pinned_band(ui, app, &library_parts, &cells);
+            band = recent_band(ui, app, &library_parts, &cells).or(pinned);
+            primitive = primitive_catalog(ui, app);
             builtin = builtin_xspice_catalog(ui, app);
             generated = generated_veriloga_catalog(ui, app);
             requested_part = library_parts_section(ui, app, &library_parts);
-            cell = project_library(ui, app);
+            cell = project_library(ui, app, &cells);
             if !query.is_empty() && visible_matches == 0 {
                 empty_navigator_row(ui, "No component or cell matches this filter");
             }
         });
-    if let Some(kind) = primitive {
+    if let Some(arm) = band {
+        apply_shelf_arm(app, arm, ui.ctx());
+    } else if let Some(kind) = primitive {
         arm_primitive(app, kind, ui.ctx());
     } else if let Some(binding) = builtin {
         arm_cell(&mut app.state, binding, ui.ctx());
@@ -2303,7 +2310,7 @@ fn holding_library<'a>(
 /// The shelf section for the parts the unified model index lists.
 fn library_parts_section(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    app: &mut RSpiceApp,
     rows: &[LibraryPartRow],
 ) -> Option<LibraryPartRow> {
     if rows.is_empty() {
@@ -2330,7 +2337,7 @@ fn library_parts_section(
     let mut requested = None;
     for row in rows {
         let placeable = !matches!(row.action, LibraryPartAction::Refused(_));
-        let clicked = ui
+        let offered = ui
             .add_enabled_ui(placeable, |ui| {
                 let response = nav_row_indented_response(
                     ui,
@@ -2345,27 +2352,33 @@ fn library_parts_section(
                     // action is refused, and the refusal says why.
                     LibraryPartAction::Refused(reason) => {
                         response.on_disabled_hover_text(reason.as_str());
-                        false
+                        None
                     }
-                    LibraryPartAction::Arm(_) => response
-                        .clone()
-                        .on_hover_text(format!("Click to arm {}", row.part_id))
-                        .clicked(),
+                    LibraryPartAction::Arm(_) => {
+                        Some(response.on_hover_text(format!("Click to arm {}", row.part_id)))
+                    }
                     LibraryPartAction::Review {
                         pack_name, version, ..
-                    } => response
-                        .clone()
-                        .on_hover_text(format!(
-                            "Review and add {} from {} {}",
-                            row.part_id, pack_name, version
-                        ))
-                        .clicked(),
+                    } => Some(response.on_hover_text(format!(
+                        "Review and add {} from {} {}",
+                        row.part_id, pack_name, version
+                    ))),
                 }
             })
             .inner;
-        if clicked {
+        // A refused part has no placement to pin, so it carries no pin menu
+        // either: the rail must not fill with doors that lead nowhere.
+        let Some(response) = offered else {
+            continue;
+        };
+        if response.clicked() {
             requested = Some(row.clone());
         }
+        shelf_pin_context_menu(
+            &response,
+            app,
+            &ShelfEntry::LibraryPart(row.part_id.clone()),
+        );
     }
     requested
 }
@@ -2572,9 +2585,444 @@ fn navigator_section_header(ui: &mut Ui, section: DesignNavigatorSection, count:
     open
 }
 
-fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
-    let query = normalized(&app.state.workbench.placement_query);
-    if !query.is_empty() {
+/// The Pinned band a profile that has never pinned anything sees.
+///
+/// It is a shipped default and nothing more: the first pin or unpin
+/// materializes this list into the reader's own set, after which the shipped
+/// list never merges back in. Emptying the set leaves the band absent rather
+/// than restoring these three.
+const DEFAULT_PINNED: [ComponentType; 3] = [
+    ComponentType::Resistor,
+    ComponentType::Capacitor,
+    ComponentType::Ground,
+];
+
+/// Recent rows painted at once.
+///
+/// Six is the working set of one placement session — two or three passives, a
+/// source, ground, and the active device under study — and at the 24 px row
+/// contract it costs 144 px, which keeps the Pinned and Recent bands together
+/// under a quarter of a full-height dock and leaves the catalog's first band
+/// on screen without scrolling. A longer history is not more useful here: the
+/// catalog underneath is already searchable.
+const RECENT_SHOWN: usize = 6;
+
+/// Recent entries kept.
+///
+/// More than are painted, because a pinned entry is filtered out of the band
+/// rather than dropped from the history: unpinning must restore a full band,
+/// not a short one.
+const RECENT_STORED: usize = 16;
+
+/// Field separator inside one stored shelf-entry key.
+///
+/// ASCII unit separator: the same mark the model index uses inside a
+/// section-scoped part key, and one no library, cell, view, or model name may
+/// carry — so a key round-trips whatever the names hold.
+const SHELF_ENTRY_FIELD: char = '\u{1f}';
+
+/// One placeable identity the Component shelf can pin, or list as recently
+/// placed.
+///
+/// The variants are the shelf's row families. Each is stored as an opaque
+/// stable key ([`ShelfEntry::storage_key`]) rather than as a resolved row, so
+/// a personal pin outlives the session, the project, and — for a part whose
+/// library is currently detached — this build's ability to draw it at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ShelfEntry {
+    Primitive(ComponentType),
+    /// A model-library part, by the id the unified index publishes.
+    LibraryPart(String),
+    /// A built-in XSPICE code model, by its registry stable id.
+    BuiltinXspice(String),
+    /// A build-time generated Verilog-A model, by its model name.
+    GeneratedVerilogA(String),
+    /// A project-library cell view.
+    Cell {
+        library: String,
+        cell: String,
+        view: String,
+    },
+}
+
+impl ShelfEntry {
+    /// The shelf identity of one bound library-cell instance.
+    ///
+    /// The executable bindings are checked first: an XSPICE or generated
+    /// Verilog-A placement also carries a library/cell pair, but that pair
+    /// names a synthesized master, not a row a reader can find again.
+    fn from_binding(binding: &LibraryCellInstance) -> Self {
+        if let Some(xspice) = binding.builtin_xspice.as_ref() {
+            return Self::BuiltinXspice(xspice.stable_id.clone());
+        }
+        if let Some(veriloga) = binding.generated_veriloga.as_ref() {
+            return Self::GeneratedVerilogA(veriloga.model_name.clone());
+        }
+        Self::Cell {
+            library: binding.library.clone(),
+            cell: binding.cell.clone(),
+            view: binding.view.clone(),
+        }
+    }
+
+    /// The durable key this entry is stored under.
+    ///
+    /// A primitive is spelled with its own serde name — the same spelling
+    /// every saved project already uses for that type — so the pin set and
+    /// the document agree on one vocabulary.
+    fn storage_key(&self) -> String {
+        match self {
+            Self::Primitive(kind) => {
+                let name = match serde_json::to_value(kind) {
+                    Ok(serde_json::Value::String(name)) => name,
+                    _ => return String::new(),
+                };
+                format!("primitive{SHELF_ENTRY_FIELD}{name}")
+            }
+            Self::LibraryPart(part) => format!("part{SHELF_ENTRY_FIELD}{part}"),
+            Self::BuiltinXspice(id) => format!("xspice{SHELF_ENTRY_FIELD}{id}"),
+            Self::GeneratedVerilogA(model) => format!("veriloga{SHELF_ENTRY_FIELD}{model}"),
+            Self::Cell {
+                library,
+                cell,
+                view,
+            } => format!(
+                "cell{SHELF_ENTRY_FIELD}{library}{SHELF_ENTRY_FIELD}{cell}{SHELF_ENTRY_FIELD}{view}"
+            ),
+        }
+    }
+
+    /// The entry one stored key names, or `None` when this build does not
+    /// understand the key. The stored list keeps it either way.
+    fn from_storage_key(key: &str) -> Option<Self> {
+        let mut fields = key.split(SHELF_ENTRY_FIELD);
+        let entry = match fields.next()? {
+            "primitive" => Self::Primitive(
+                serde_json::from_value(serde_json::Value::String(fields.next()?.to_owned()))
+                    .ok()?,
+            ),
+            "part" => Self::LibraryPart(fields.next()?.to_owned()),
+            "xspice" => Self::BuiltinXspice(fields.next()?.to_owned()),
+            "veriloga" => Self::GeneratedVerilogA(fields.next()?.to_owned()),
+            "cell" => Self::Cell {
+                library: fields.next()?.to_owned(),
+                cell: fields.next()?.to_owned(),
+                view: fields.next()?.to_owned(),
+            },
+            _ => return None,
+        };
+        fields.next().is_none().then_some(entry)
+    }
+}
+
+/// The pin set's stored keys, with the shipped default standing in for a
+/// profile that has never pinned anything.
+fn pinned_keys(app: &RSpiceApp) -> Vec<String> {
+    app.state
+        .ui
+        .preferences
+        .component_shelf()
+        .pinned
+        .unwrap_or_else(|| {
+            DEFAULT_PINNED
+                .iter()
+                .copied()
+                .map(|kind| ShelfEntry::Primitive(kind).storage_key())
+                .collect()
+        })
+}
+
+fn is_pinned(app: &RSpiceApp, entry: &ShelfEntry) -> bool {
+    let key = entry.storage_key();
+    pinned_keys(app).iter().any(|held| *held == key)
+}
+
+/// Pin an unpinned entry, or unpin a pinned one.
+///
+/// A pin is appended rather than inserted at the front: the band is a rail the
+/// reader builds, and one that reordered itself on every pin would defeat the
+/// muscle memory that is the whole reason to have it. The first call also
+/// materializes the shipped default into the reader's own set, which is what
+/// makes that default stop applying.
+fn toggle_pin(app: &mut RSpiceApp, entry: &ShelfEntry) {
+    let key = entry.storage_key();
+    let mut keys = pinned_keys(app);
+    if let Some(at) = keys.iter().position(|held| *held == key) {
+        keys.remove(at);
+    } else {
+        keys.push(key);
+    }
+    let mut shelf = app.state.ui.preferences.component_shelf();
+    shelf.pinned = Some(keys);
+    app.state.ui.preferences.set_component_shelf(shelf);
+}
+
+/// Record one placement at the front of the history, deduplicated.
+fn record_placement(app: &mut RSpiceApp, entry: &ShelfEntry) {
+    let key = entry.storage_key();
+    let mut shelf = app.state.ui.preferences.component_shelf();
+    shelf.recent.retain(|held| *held != key);
+    shelf.recent.insert(0, key);
+    shelf.recent.truncate(RECENT_STORED);
+    app.state.ui.preferences.set_component_shelf(shelf);
+}
+
+/// What the shelf last offered the canvas, and how much of the design was
+/// standing when it looked.
+///
+/// The shelf hands the canvas an identity — an armed tool or a live drag — and
+/// the canvas commits the placement somewhere the shelf does not see. Watching
+/// the design grow while one identity is on offer is what connects the two.
+#[derive(Clone)]
+struct ShelfPlacementWatch {
+    /// The design these counts belong to. A different one is adopted in
+    /// silence: its objects were placed before this shelf ever looked.
+    authority: (u64, u64, String),
+    components: usize,
+    /// What the shelf had on offer when it last looked.
+    offered: Option<ShelfEntry>,
+    /// Whether that offer has been used up — by the placement it explained, or
+    /// by outliving the frame it was live in. See [`observe_placements`].
+    spent: bool,
+}
+
+/// The identity the schematic currently has armed, as a shelf row names it.
+fn armed_shelf_entry(app: &RSpiceApp) -> Option<ShelfEntry> {
+    let Tool::Place(kind) = app.state.schematic.tool else {
+        return None;
+    };
+    if kind == ComponentType::CellInstance {
+        return app
+            .state
+            .schematic
+            .pending_library_cell
+            .as_ref()
+            .map(ShelfEntry::from_binding);
+    }
+    // A native device armed from the model library carries that part's card,
+    // and the card name is the part's own id in the unified index — so the
+    // history names the part the reader picked, not its device family.
+    if let Some(armed) = app.state.schematic.pending_part_model.as_ref()
+        && armed.tool == Tool::Place(kind)
+    {
+        return Some(ShelfEntry::LibraryPart(armed.model.clone()));
+    }
+    Some(ShelfEntry::Primitive(kind))
+}
+
+/// The identity of a shelf row being dragged over the canvas right now.
+fn dragged_shelf_entry(ctx: &egui::Context) -> Option<ShelfEntry> {
+    let payload = egui::DragAndDrop::payload::<SchematicShelfDragPayload>(ctx)?;
+    Some(match payload.as_ref() {
+        SchematicShelfDragPayload::Primitive(kind) => ShelfEntry::Primitive(*kind),
+        SchematicShelfDragPayload::LibraryCell(binding) => ShelfEntry::from_binding(binding),
+    })
+}
+
+/// Credit the shelf identity on offer when the design grows.
+///
+/// Both placement routes end here: click-to-arm holds the tool across the
+/// canvas click, and a drag holds the payload across every frame up to the
+/// drop. Nothing the shelf did not offer is credited, so a paste, an import,
+/// or a script never writes the reader's placement history.
+///
+/// An offer that has gone away is honoured for exactly one more frame and for
+/// exactly one placement, because the act that ends the offer is the same act
+/// that grows the design: the drop consumes the drag payload, the canvas click
+/// retires the place tool, and the shelf sees the new object only afterwards.
+/// Beyond that one frame the offer is spent — which is what keeps a paste made
+/// a minute later from being read as another placement of the last part.
+///
+/// This runs while the Component shelf is on screen. A placement made with the
+/// Navigator tab in front is credited on the reader's next visit, in the order
+/// the design grew.
+fn observe_placements(ui: &Ui, app: &mut RSpiceApp) {
+    let id = egui::Id::new("workbench.design.component-shelf.placements");
+    let authority = (
+        app.state.design_execution_epoch,
+        app.state.active_schematic_epoch,
+        app.state.workspace.active_view.display_path(),
+    );
+    let components = app.state.schematic.components.len();
+    let live = armed_shelf_entry(app).or_else(|| dragged_shelf_entry(ui.ctx()));
+    // A watch belonging to another design is no watch at all: its objects were
+    // placed before this shelf ever looked at them.
+    let watched = ui
+        .data(|data| data.get_temp::<ShelfPlacementWatch>(id))
+        .filter(|watched| watched.authority == authority);
+    let (offered, mut spent) = match (live, watched.as_ref()) {
+        // A live offer stands on its own and is good for as many placements as
+        // the reader makes while it lasts.
+        (Some(entry), _) => (Some(entry), false),
+        (None, Some(watched)) if !watched.spent => (watched.offered.clone(), true),
+        (None, _) => (None, true),
+    };
+    if let Some(watched) = watched.as_ref()
+        && components > watched.components
+        && let Some(entry) = offered.as_ref()
+    {
+        record_placement(app, entry);
+        spent = true;
+    }
+    ui.data_mut(|data| {
+        data.insert_temp(
+            id,
+            ShelfPlacementWatch {
+                authority,
+                components,
+                offered,
+                spent,
+            },
+        );
+    });
+}
+
+/// One pinned or recent entry, resolved against what this build and this
+/// project can offer right now.
+struct ShelfEntryRow {
+    entry: ShelfEntry,
+    glyph: ShelfGlyph,
+    label: String,
+    meta: Option<String>,
+    selected: bool,
+    arm: ShelfArm,
+}
+
+/// What clicking a resolved pinned or recent row does.
+#[derive(Clone)]
+enum ShelfArm {
+    Primitive(ComponentType),
+    /// Held by stable id rather than by binding: a vector-port code model
+    /// opens the placement dialog instead of arming, and that fork belongs
+    /// with the catalog row's, not duplicated here.
+    BuiltinXspice(String),
+    Cell(Box<LibraryCellInstance>),
+    Part(Box<LibraryPartRow>),
+}
+
+/// Resolve one stored entry into the row the band would paint.
+///
+/// `None` means the entry names nothing this session can place — a detached
+/// library, an uninstalled pack, a code model this build does not carry. The
+/// stored key is untouched: the band simply does not paint a door that leads
+/// nowhere.
+fn resolve_shelf_entry(
+    app: &RSpiceApp,
+    library_parts: &[LibraryPartRow],
+    cells: &[CellCandidate],
+    entry: &ShelfEntry,
+) -> Option<ShelfEntryRow> {
+    let placing_cell = app.state.schematic.tool == Tool::Place(ComponentType::CellInstance);
+    let pending = app.state.schematic.pending_library_cell.as_ref();
+    match entry {
+        ShelfEntry::Primitive(kind) => Some(ShelfEntryRow {
+            entry: entry.clone(),
+            glyph: primitive_shelf_glyph(*kind),
+            label: kind.display_name().to_owned(),
+            meta: primitive_shelf_meta(*kind),
+            selected: app.state.schematic.tool == Tool::Place(*kind),
+            arm: ShelfArm::Primitive(*kind),
+        }),
+        ShelfEntry::LibraryPart(part) => {
+            let row = library_parts.iter().find(|row| row.part_id == *part)?;
+            // A refused part has no placement to offer, so it is absent here
+            // rather than pinned as a permanently disabled row.
+            if matches!(row.action, LibraryPartAction::Refused(_)) {
+                return None;
+            }
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: ShelfGlyph::Icon(WorkbenchIcon::Models),
+                label: row.part_id.clone(),
+                meta: Some(row.meta.clone()),
+                selected: false,
+                arm: ShelfArm::Part(Box::new(row.clone())),
+            })
+        }
+        ShelfEntry::BuiltinXspice(id) => {
+            let descriptor = engine_only_xspice_devices()
+                .iter()
+                .find(|descriptor| descriptor.stable_id == *id)?;
+            builtin_xspice_library_binding(descriptor).ok()?;
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: ShelfGlyph::Event,
+                label: descriptor.display_name.to_owned(),
+                meta: Some(descriptor.model_type.to_owned()),
+                selected: placing_cell
+                    && pending
+                        .and_then(|binding| binding.builtin_xspice.as_ref())
+                        .is_some_and(|binding| binding.stable_id == *id),
+                arm: ShelfArm::BuiltinXspice(id.clone()),
+            })
+        }
+        ShelfEntry::GeneratedVerilogA(model) => {
+            let descriptor = generated_veriloga_devices()
+                .iter()
+                .find(|descriptor| descriptor.model_name == *model)?;
+            let binding = generated_veriloga_library_binding(descriptor).ok()?;
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: ShelfGlyph::Text("VA"),
+                label: descriptor.model_name.to_owned(),
+                meta: Some(format!(
+                    "{} pin \u{00b7} {}",
+                    descriptor.terminals.len(),
+                    descriptor.module_name
+                )),
+                selected: placing_cell
+                    && pending
+                        .and_then(|binding| binding.generated_veriloga.as_ref())
+                        .is_some_and(|binding| binding.model_name == *model),
+                arm: ShelfArm::Cell(Box::new(binding)),
+            })
+        }
+        ShelfEntry::Cell {
+            library,
+            cell,
+            view,
+        } => {
+            let candidate = cells.iter().find(|candidate| {
+                candidate.library == *library && candidate.cell == *cell && candidate.view == *view
+            })?;
+            if !candidate.ready {
+                return None;
+            }
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: ShelfGlyph::Icon(WorkbenchIcon::Models),
+                label: candidate.cell.clone(),
+                meta: Some(candidate.view.clone()),
+                selected: placing_cell
+                    && pending.is_some_and(|binding| binding == &candidate.binding),
+                arm: ShelfArm::Cell(Box::new(candidate.binding.clone())),
+            })
+        }
+    }
+}
+
+/// The Pinned band: the reader's own rail of parts, above the catalog.
+///
+/// Absent — header and all — when nothing in the set resolves, which is what
+/// unpinning the last entry leaves behind. An empty band with a heading would
+/// claim the reader still holds a set they just emptied.
+fn pinned_band(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    library_parts: &[LibraryPartRow],
+    cells: &[CellCandidate],
+) -> Option<ShelfArm> {
+    // Search asks the catalog a question; the personal rail is not an answer
+    // to it.
+    if !normalized(&app.state.workbench.placement_query).is_empty() {
+        return None;
+    }
+    let rows = pinned_keys(app)
+        .iter()
+        .filter_map(|key| ShelfEntry::from_storage_key(key))
+        .filter_map(|entry| resolve_shelf_entry(app, library_parts, cells, &entry))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
         return None;
     }
     let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
@@ -2587,125 +3035,137 @@ fn pinned(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
         "Pinned",
         (!shortcut.is_empty()).then_some(shortcut.as_str()),
     );
-    let mut selected = None;
-    egui::Frame::new()
-        .inner_margin(egui::Margin {
-            left: 8,
-            right: 8,
-            top: 7,
-            bottom: 8,
-        })
-        .show(ui, |ui| {
-            egui::ScrollArea::horizontal()
-                .id_salt("workbench.design.pinned.scroll")
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 5.0;
-                        for (kind, glyph) in [
-                            (ComponentType::Resistor, "R"),
-                            (ComponentType::Capacitor, "C"),
-                            (ComponentType::Ground, "⏚"),
-                        ] {
-                            let response = place_chip(
-                                ui,
-                                kind,
-                                glyph,
-                                app.state.schematic.tool == Tool::Place(kind),
-                            );
-                            if let Some(payload) = SchematicShelfDragPayload::primitive(kind) {
-                                response.dnd_set_drag_payload(payload);
-                            }
-                            if response.clicked() {
-                                selected = Some(kind);
-                            }
-                        }
-                    });
-                });
-        });
-    selected
+    shelf_entry_rows(ui, app, &rows)
 }
 
-fn place_chip(ui: &mut Ui, kind: ComponentType, glyph: &str, selected: bool) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let label = kind.display_name();
-    let label_galley = ui.painter().layout_no_wrap(
-        label.to_owned(),
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    let touch = t.metrics.ctl_h >= 44.0;
-    let width = (14.0 + 17.0 + 5.0 + label_galley.size().x).max(if touch { 44.0 } else { 0.0 });
-    let height = if touch { 44.0 } else { 23.0 };
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click_and_drag());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            selected,
-            format!("Arm {label} placement"),
-        )
-    });
-    let fill = if selected {
-        t.color.bg_active
-    } else if response.hovered() {
-        t.color.bg_hover
-    } else {
-        t.color.bg_inset
-    };
-    ui.painter().rect(
-        rect,
-        3.0,
-        fill,
-        egui::Stroke::new(
-            1.0,
-            if selected || response.hovered() {
-                t.color.border_strong
-            } else {
-                t.color.border
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let glyph_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 7.0 + 8.5, rect.center().y),
-        egui::vec2(15.0, 15.0),
-    );
-    if kind == ComponentType::Ground {
-        // The bundled engineering faces are not required to carry the
-        // Unicode earth-ground glyph. Paint the same three-bar mark as vector
-        // geometry so the pinned shelf never degrades to a tofu box.
-        WorkbenchIcon::Supply.paint(ui.painter(), glyph_rect, t.color.symbol);
-    } else {
-        ui.painter().text(
-            glyph_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            glyph,
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.symbol,
-        );
+/// The Recent band: what this reader last put on a sheet, newest first.
+///
+/// A pinned entry is filtered out rather than listed twice — it is already one
+/// band above, and six rows are too few to spend on a part the reader has
+/// already given a permanent seat.
+fn recent_band(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    library_parts: &[LibraryPartRow],
+    cells: &[CellCandidate],
+) -> Option<ShelfArm> {
+    if !normalized(&app.state.workbench.placement_query).is_empty() {
+        return None;
     }
-    ui.painter().galley(
-        egui::pos2(
-            rect.left() + 7.0 + 17.0 + 5.0,
-            rect.center().y - label_galley.size().y * 0.5,
-        ),
-        label_galley,
-        if selected {
-            t.color.text
-        } else {
-            t.color.text_dim
-        },
-    );
-    theme::paint_focus_ring_outset(ui, &response, rect);
-    response.on_hover_text(format!(
-        "Click to arm {} placement or drag it onto the sheet",
-        kind.display_name()
-    ))
+    let pinned = pinned_keys(app);
+    let rows = app
+        .state
+        .ui
+        .preferences
+        .component_shelf()
+        .recent
+        .iter()
+        .filter(|key| !pinned.contains(key))
+        .filter_map(|key| ShelfEntry::from_storage_key(key))
+        .filter_map(|entry| resolve_shelf_entry(app, library_parts, cells, &entry))
+        .take(RECENT_SHOWN)
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return None;
+    }
+    shelf_section_header(ui, "Recent", Some(&rows.len().to_string()));
+    shelf_entry_rows(ui, app, &rows)
 }
 
-fn primitive_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<ComponentType> {
+/// Paint one band's resolved rows on the shelf's own row contract.
+fn shelf_entry_rows(ui: &mut Ui, app: &mut RSpiceApp, rows: &[ShelfEntryRow]) -> Option<ShelfArm> {
+    let mut armed = None;
+    for row in rows {
+        let response = shelf_part_row(
+            ui,
+            row.glyph,
+            &row.label,
+            row.selected,
+            row.meta.as_deref(),
+            0,
+        );
+        if let Some(payload) = shelf_drag_payload(&row.arm) {
+            response.dnd_set_drag_payload(payload);
+        }
+        if response.clicked() {
+            armed = Some(row.arm.clone());
+        }
+        shelf_pin_context_menu(&response, app, &row.entry);
+    }
+    armed
+}
+
+/// The drag payload one armed identity travels to the canvas as.
+///
+/// A library part has none: its click may have to review and add a pack
+/// first, and a drag that could end in a dialog is not a drag.
+fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
+    match arm {
+        ShelfArm::Primitive(kind) => SchematicShelfDragPayload::primitive(*kind),
+        ShelfArm::Cell(binding) => {
+            Some(SchematicShelfDragPayload::library_cell((**binding).clone()))
+        }
+        ShelfArm::BuiltinXspice(id) => engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.stable_id == *id)
+            .and_then(|descriptor| builtin_xspice_library_binding(descriptor).ok())
+            .map(SchematicShelfDragPayload::library_cell),
+        ShelfArm::Part(_) => None,
+    }
+}
+
+/// Offer the row's pin state on its own context menu.
+///
+/// Every placeable row in the shelf carries this, so the rail is built from
+/// the catalog where the reader finds the part rather than from a separate
+/// editor. Shift+F10 opens it from the keyboard, as the navigator's object
+/// menu does.
+fn shelf_pin_context_menu(response: &Response, app: &mut RSpiceApp, entry: &ShelfEntry) {
+    let keyboard_open = response.has_focus()
+        && response
+            .ctx
+            .input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::F10));
+    let popup_id = egui::Popup::default_response_id(response);
+    let mut popup = egui::Popup::context_menu(response).id(popup_id);
+    if keyboard_open {
+        popup = popup.open_memory(Some(egui::SetOpenCommand::Bool(true)));
+    }
+    // A context menu sits at the pointer position it was opened at. A menu
+    // raised from the keyboard has no such position, and a popup anchored to a
+    // position it does not have draws nothing at all — so anchor that one to
+    // the row instead, on every frame it stays open rather than only on the
+    // frame that opened it.
+    if egui::Popup::position_of_id(&response.ctx, popup_id).is_none() {
+        popup = popup.anchor(response);
+    }
+    let pinned = is_pinned(app, entry);
+    popup.show(|ui| {
+        if ui
+            .button(if pinned { "Unpin" } else { "Pin to shelf" })
+            .clicked()
+        {
+            toggle_pin(app, entry);
+            ui.close();
+        }
+    });
+}
+
+/// Complete one click on a pinned or recent row through the same door its
+/// catalog row uses.
+fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
+    match arm {
+        ShelfArm::Primitive(kind) => arm_primitive(app, kind, ctx),
+        ShelfArm::BuiltinXspice(id) => {
+            if let Some(binding) = place_builtin_xspice(app, &id) {
+                arm_cell(&mut app.state, binding, ctx);
+            }
+        }
+        ShelfArm::Cell(binding) => arm_cell(&mut app.state, *binding, ctx),
+        ShelfArm::Part(row) => apply_library_part_row(app, *row, ctx),
+    }
+}
+
+fn primitive_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<ComponentType> {
     let query = normalized(&app.state.workbench.placement_query);
     let mut armed = None;
     let visible_count = PRIMITIVE_GROUPS
@@ -2854,7 +3314,7 @@ fn shelf_part_row(
 
 fn primitive_rows(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    app: &mut RSpiceApp,
     entries: &[ComponentPaletteEntry],
     level: usize,
 ) -> Option<ComponentType> {
@@ -2874,6 +3334,7 @@ fn primitive_rows(
         if response.clicked() {
             armed = Some(entry.kind);
         }
+        shelf_pin_context_menu(&response, app, &ShelfEntry::Primitive(entry.kind));
     }
     armed
 }
@@ -2937,7 +3398,13 @@ fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCel
             Ok(binding) => {
                 response
                     .dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
-                if response.clicked() {
+                let clicked = response.clicked();
+                shelf_pin_context_menu(
+                    &response,
+                    app,
+                    &ShelfEntry::BuiltinXspice(stable_id.to_owned()),
+                );
+                if clicked {
                     armed = place_builtin_xspice(app, stable_id).or(armed);
                 }
             }
@@ -2953,8 +3420,8 @@ fn builtin_xspice_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCel
 ///
 /// A code model whose vector ports are not fixed cannot be armed until their
 /// widths are chosen, so the click raises the placement dialog and arms
-/// nothing. Held as one decision, by stable id, so every row that offers the
-/// model asks the same question.
+/// nothing. Shared by the catalog row and the pinned/recent rows so both forks
+/// stay one decision.
 fn place_builtin_xspice(app: &mut RSpiceApp, stable_id: &str) -> Option<LibraryCellInstance> {
     let descriptor = engine_only_xspice_devices()
         .iter()
@@ -2984,7 +3451,7 @@ fn place_builtin_xspice(app: &mut RSpiceApp, stable_id: &str) -> Option<LibraryC
     }
 }
 
-fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> {
+fn generated_veriloga_catalog(ui: &mut Ui, app: &mut RSpiceApp) -> Option<LibraryCellInstance> {
     let query = normalized(&app.state.workbench.placement_query);
     let descriptors = generated_veriloga_devices()
         .iter()
@@ -3052,6 +3519,11 @@ fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCel
                 if response.clicked() {
                     armed = Some(binding);
                 }
+                shelf_pin_context_menu(
+                    &response,
+                    app,
+                    &ShelfEntry::GeneratedVerilogA(descriptor.model_name.to_owned()),
+                );
             }
             Err(error) => log::error!(
                 "Cannot expose generated Verilog-A model '{}': {error}",
@@ -3062,10 +3534,14 @@ fn generated_veriloga_catalog(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCel
     armed
 }
 
-fn project_library(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> {
+fn project_library(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    cells: &[CellCandidate],
+) -> Option<LibraryCellInstance> {
     let query = normalized(&app.state.workbench.placement_query);
     let mut grouped = BTreeMap::<String, Vec<CellCandidate>>::new();
-    for candidate in cell_candidates(app) {
+    for candidate in cells.iter().cloned() {
         if matches_query(
             &query,
             &[&candidate.library, &candidate.cell, &candidate.view],
@@ -3081,27 +3557,32 @@ fn project_library(ui: &mut Ui, app: &RSpiceApp) -> Option<LibraryCellInstance> 
     }
     shelf_section_header(ui, "Project library", None);
     let mut armed = None;
-    for (library, cells) in grouped {
+    for (library, grouped_cells) in grouped {
         if query.is_empty() {
             if catalog_group_row(
                 ui,
                 ("component-shelf-library", library.as_str()),
                 ShelfGlyph::Icon(WorkbenchIcon::Models),
                 &library,
-                cells.len(),
+                grouped_cells.len(),
                 false,
             ) {
-                armed = cell_rows(ui, &cells, 2).or_else(|| armed.take());
+                armed = cell_rows(ui, app, &grouped_cells, 2).or_else(|| armed.take());
             }
         } else {
-            shelf_section_header(ui, &library, Some(&cells.len().to_string()));
-            armed = cell_rows(ui, &cells, 0).or(armed);
+            shelf_section_header(ui, &library, Some(&grouped_cells.len().to_string()));
+            armed = cell_rows(ui, app, &grouped_cells, 0).or(armed);
         }
     }
     armed
 }
 
-fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<LibraryCellInstance> {
+fn cell_rows(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    cells: &[CellCandidate],
+    level: usize,
+) -> Option<LibraryCellInstance> {
     let mut armed = None;
     for candidate in cells {
         let meta = if candidate.ready {
@@ -3109,7 +3590,7 @@ fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<Libra
         } else {
             candidate.unavailable_reason.as_str()
         };
-        let clicked = ui
+        let offered = ui
             .add_enabled_ui(candidate.ready, |ui| {
                 if candidate.ready {
                     let payload =
@@ -3126,11 +3607,10 @@ fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<Libra
                         false,
                     );
                     response.dnd_set_drag_payload(payload);
-                    response.clone().on_hover_text(format!(
+                    Some(response.on_hover_text(format!(
                         "Click to arm {}/{} or drag it onto the sheet",
                         candidate.library, candidate.cell
-                    ));
-                    response.clicked()
+                    )))
                 } else {
                     nav_row_indented(
                         ui,
@@ -3139,13 +3619,27 @@ fn cell_rows(ui: &mut Ui, cells: &[CellCandidate], level: usize) -> Option<Libra
                         false,
                         Some(meta),
                         level,
-                    )
+                    );
+                    None
                 }
             })
             .inner;
-        if clicked {
+        // A cell whose view cannot be drawn has no placement to pin.
+        let Some(response) = offered else {
+            continue;
+        };
+        if response.clicked() {
             armed = Some(candidate.binding.clone());
         }
+        shelf_pin_context_menu(
+            &response,
+            app,
+            &ShelfEntry::Cell {
+                library: candidate.library.clone(),
+                cell: candidate.cell.clone(),
+                view: candidate.view.clone(),
+            },
+        );
     }
     armed
 }

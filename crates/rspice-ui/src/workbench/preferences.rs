@@ -1284,6 +1284,61 @@ impl UserPreferences {
     pub fn interface_scale(&self) -> f32 {
         [1.0, 1.1, 1.25, 1.5][self.choice(ChoicePreference::InterfaceScale)]
     }
+
+    /// The Component shelf's personal pin set and placement history.
+    ///
+    /// A domain written by an incompatible future build reads as the default,
+    /// and is retained on the wire rather than overwritten, exactly as the
+    /// other typed domains here behave.
+    #[must_use]
+    pub(crate) fn component_shelf(&self) -> ComponentShelfPreferences {
+        self.unknown_domains
+            .get(COMPONENT_SHELF_STORAGE_KEY)
+            .cloned()
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default()
+    }
+
+    /// Atomically replace the Component-shelf domain.
+    ///
+    /// A set equal to the default is removed rather than written, so a reader
+    /// who pins and then unpins back to the shipped state leaves no residue —
+    /// and, because the default is `pinned: None`, gets the shipped pin set
+    /// back. An explicitly emptied set is not the default and is kept.
+    pub(crate) fn set_component_shelf(&mut self, shelf: ComponentShelfPreferences) {
+        if shelf == ComponentShelfPreferences::default() {
+            self.unknown_domains.remove(COMPONENT_SHELF_STORAGE_KEY);
+            return;
+        }
+        let Ok(value) = serde_json::to_value(shelf) else {
+            // Both fields are string lists; encoding cannot fail. Dropping the
+            // write is still better than poisoning the domain.
+            log::error!("Could not encode Component-shelf preferences");
+            return;
+        };
+        self.unknown_domains
+            .insert(COMPONENT_SHELF_STORAGE_KEY.to_owned(), value);
+    }
+}
+
+const COMPONENT_SHELF_STORAGE_KEY: &str = "component-shelf";
+
+/// The Component shelf's personal pin set and placement history.
+///
+/// The entries are the shelf's own stable keys: the navigator owns that
+/// vocabulary and this domain owns only its durability, so a shelf row family
+/// added later needs no change here. An entry this build cannot resolve is
+/// retained rather than dropped — a pin must survive the library that holds
+/// its part being detached and reattached.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct ComponentShelfPreferences {
+    /// `None` until the reader pins or unpins something: a fresh profile takes
+    /// the shelf's shipped default set, and one emptied on purpose stays
+    /// empty rather than reverting to it.
+    pub(crate) pinned: Option<Vec<String>>,
+    /// Placement history, most recent first.
+    pub(crate) recent: Vec<String>,
 }
 
 const UNIT_CHOICE_KEYS: [ChoicePreference; 9] = [
