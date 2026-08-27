@@ -30,11 +30,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
     // and resolving one walks the design's nets — so a frame showing that page
     // paid for the walk twice to print one count above the table it counts.
     let (excitations, rf_ports) = if page == SimulationPage::Excitations {
-        let plan = app.state.sim_setup.analysis_plan.as_ref();
-        (
-            crate::simulation::placed_sources::placed_sources(&app.state.schematic, plan),
-            crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, plan),
-        )
+        design_excitations(app)
     } else {
         (Vec::new(), Vec::new())
     };
@@ -54,6 +50,51 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
         SimulationPage::Solver => super::page_solver::show(ui, app),
         SimulationPage::Save => super::page_save::show(ui, app),
     });
+}
+
+/// What the run is driven by: every excitation the configured design places,
+/// at every occurrence the run reaches one through.
+///
+/// The whole design rather than the open sheet, because that is the question
+/// this page asks. A source drawn inside a child master is netlisted, biases
+/// the circuit and is read by the analyses exactly as one drawn at the root is
+/// — and while this page read the editor's own buffer, the root of every
+/// hierarchical design was told it places no sources at all.
+///
+/// A design whose configuration does not resolve falls back to that buffer.
+/// The alternative is a page that answers "nothing" to "what drives this
+/// circuit" because a binding elsewhere is unresolved, which is the wrong
+/// answer to a different question; the rows say which reading they came from
+/// by carrying no occurrence.
+fn design_excitations(
+    app: &RSpiceApp,
+) -> (
+    Vec<crate::simulation::placed_sources::PlacedSource>,
+    Vec<crate::simulation::placed_sources::PlacedRfPort>,
+) {
+    let plan = app.state.sim_setup.analysis_plan.as_ref();
+    match app.state.workspace.design_projection(
+        &app.state.library_manager,
+        &app.state.workspace.active_view,
+        &app.state.schematic,
+    ) {
+        Ok(projection) => (
+            crate::simulation::placed_sources::design_sources(
+                &app.state.library_manager,
+                &projection,
+                plan,
+            ),
+            crate::simulation::placed_sources::design_rf_ports(
+                &app.state.library_manager,
+                &projection,
+                plan,
+            ),
+        ),
+        Err(_) => (
+            crate::simulation::placed_sources::placed_sources(&app.state.schematic, plan),
+            crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, plan),
+        ),
+    }
 }
 
 /// The plan's own configuration receipts, as the registry pages show them.
@@ -347,16 +388,14 @@ fn counted(count: usize, singular: &str, plural: &str) -> String {
 /// and stay there.
 ///
 /// The exception is Excitations, whose eyebrow counts the placed-source and
-/// placed-port lists. Resolving either walks the design's nets, so each is
-/// resolved once by [`show`] and lent to the heading and the page body together
-/// rather than resolved by each. The Design navigator's rail resolves them
-/// again on the same frame and is left that way deliberately: it is a different
-/// dock rendered from a different borrow, and the only thing that could join
-/// them is a cache keyed on the frame — which reports the count from before a
-/// structural edit for one frame after it, a wrong number in a heading whose
-/// whole job is to be a right one. Both derivations return early on a design
-/// that places none of what they list, so a sheet being drawn pays nothing at
-/// all and a design with no RF port pays nothing for the second.
+/// placed-port lists over the whole design. Resolving either walks the nets of
+/// every master that places one, so each is resolved once by [`show`] and lent
+/// to the heading and the page body together rather than resolved by each. The
+/// Design navigator's rail asks for the same two lists on the same frame and
+/// costs nothing for it: the walk is retained against the design projection it
+/// was derived from, so the second caller of a frame pays a pointer comparison.
+/// The walk itself skips every master that places none of what it lists, so a
+/// sheet being drawn pays nothing at all.
 fn eyebrow(
     app: &RSpiceApp,
     page: SimulationPage,

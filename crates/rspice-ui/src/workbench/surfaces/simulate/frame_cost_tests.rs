@@ -152,3 +152,24 @@ fn the_outputs_and_save_routes_derive_the_space_once_a_frame() {
         );
     }
 }
+
+/// The Excitations route walks the whole design once a frame.
+///
+/// The walk resolves the nets of every master that places an excitation, and
+/// the route asks for two lists off it — the sources and the RF ports — above a
+/// heading that counts both. Each of the three asking for itself would walk the
+/// design three times to paint one table, so the walk is retained against the
+/// design projection it was derived from and every later reader of that
+/// projection pays a pointer comparison.
+///
+/// Counted rather than read, because a route that walks three times paints
+/// exactly the table one that walks once does.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_excitations_route_walks_the_whole_design_once_a_frame() {
+    let (_, _, walks) = derivations_for_route(crate::workbench::state::SimulationPage::Excitations);
+    assert_eq!(
+        walks, 1,
+        "the route walked the design {walks} times to paint one ledger"
+    );
+}

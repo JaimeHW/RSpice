@@ -7,27 +7,38 @@
 //! the instance rather than pretending to edit it here.
 //!
 //! Both this page and the Design navigator's rail render
-//! [`crate::simulation::placed_sources::placed_sources`] and
-//! [`crate::simulation::placed_sources::placed_rf_ports`] and nothing else, so
+//! [`crate::simulation::placed_sources::design_sources`] and
+//! [`crate::simulation::placed_sources::design_rf_ports`] and nothing else, so
 //! the two can never disagree about which analysis reads which excitation.
 //!
 //! The two lists share one table under two heads rather than sitting in two
 //! cards. A reader asking what drives this circuit is asking one question, and
 //! a port is an answer to it — but the third column means a different thing for
 //! each, so each block names its own columns.
+//!
+//! Both are whole-design lists. A run flattens the hierarchy, so a source drawn
+//! inside a child master drives this circuit exactly as one drawn at the root
+//! does, and the Occurrence column is what tells the two apart — including the
+//! two rows one drawn source becomes when two instances reach its master.
 
 use egui::Ui;
 
 use crate::simulation::placed_sources::{
     PlacedRfPort, PlacedSource, SourceConsumer, duplicate_port_numbers,
 };
+use crate::state::InstancePath;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
 use super::page_kit::{Tone, card, card_note, ledger_head, ledger_row};
 
-/// Reference, quantity, waveform, terminals, and what reads it.
-const EXCITATION_COLUMNS: [f32; 5] = [0.14, 0.06, 0.26, 0.24, 0.30];
+/// Reference, quantity, the occurrence it is reached through, waveform,
+/// terminals, and what reads it.
+///
+/// The occurrence sits beside the reference because it qualifies it: `V1` is
+/// not a name in a hierarchical design until the path in front of it is read,
+/// and two rows can carry one reference.
+const EXCITATION_COLUMNS: [f32; 6] = [0.13, 0.05, 0.14, 0.22, 0.20, 0.26];
 
 /// The page renders the lists its own heading counted.
 ///
@@ -63,12 +74,19 @@ pub(super) fn show(
                 ledger_head(
                     ui,
                     &EXCITATION_COLUMNS,
-                    &["Reference", "", "Waveform", "Terminals", "Read by"],
+                    &[
+                        "Reference",
+                        "",
+                        "Occurrence",
+                        "Waveform",
+                        "Terminals",
+                        "Read by",
+                    ],
                 );
                 for source in sources {
                     let row = excitation_row(ui, state, source);
                     if row.clicked() {
-                        reveal(state, source.component_id);
+                        reveal(state, source.occurrence.as_ref(), source.component_id);
                     }
                 }
             }
@@ -80,12 +98,19 @@ pub(super) fn show(
                 ledger_head(
                     ui,
                     &EXCITATION_COLUMNS,
-                    &["Reference", "", "Port", "Terminals", "Read by"],
+                    &[
+                        "Reference",
+                        "",
+                        "Occurrence",
+                        "Port",
+                        "Terminals",
+                        "Read by",
+                    ],
                 );
                 for port in ports {
                     let row = port_row(ui, state, port);
                     if row.clicked() {
-                        reveal(state, port.component_id);
+                        reveal(state, port.occurrence.as_ref(), port.component_id);
                     }
                 }
             }
@@ -203,14 +228,16 @@ fn duplicate_port_note(collisions: &[u32]) -> String {
 fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui::Response {
     let (readers, tone) = readers_cell(&source.consumers, ("no reader", Tone::Warn));
     let terminals = source.nets.join(" \u{2192} ");
-    let selected = state.schematic.selection.has_component(source.component_id);
+    let selected = reveals(state, source.occurrence.as_ref(), source.component_id);
     let summary = source.summary();
+    let occurrence = source.occurrence_label();
     ledger_row(
         ui,
         &EXCITATION_COLUMNS,
         &[
             (source.reference.as_str(), Tone::Neutral),
             (source.quantity(), Tone::Accent),
+            (occurrence.as_str(), Tone::Neutral),
             (summary.as_str(), Tone::Neutral),
             (terminals.as_str(), Tone::Neutral),
             (readers.as_str(), tone),
@@ -218,9 +245,13 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
         selected,
     )
     .on_hover_text(row_tooltip(
-        &format!("{} \u{00b7} {summary}", source.reference),
+        &format!(
+            "{occurrence} \u{00b7} {} \u{00b7} {summary}",
+            source.reference
+        ),
         &source.consumers,
         "No analysis in this plan names this source, and none reads every source",
+        elsewhere(state, source.occurrence.as_ref()),
     ))
 }
 
@@ -233,14 +264,16 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
 fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Response {
     let (readers, tone) = readers_cell(&port.consumers, ("no S-parameter run", Tone::Neutral));
     let terminals = port.nets.join(" \u{2192} ");
-    let selected = state.schematic.selection.has_component(port.component_id);
+    let selected = reveals(state, port.occurrence.as_ref(), port.component_id);
     let summary = port.summary();
+    let occurrence = port.occurrence_label();
     ledger_row(
         ui,
         &EXCITATION_COLUMNS,
         &[
             (port.reference.as_str(), Tone::Neutral),
             (port.quantity(), Tone::Accent),
+            (occurrence.as_str(), Tone::Neutral),
             (summary.as_str(), Tone::Neutral),
             (terminals.as_str(), Tone::Neutral),
             (readers.as_str(), tone),
@@ -249,12 +282,34 @@ fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Respons
     )
     .on_hover_text(row_tooltip(
         &format!(
-            "{} \u{00b7} port {} \u{00b7} {summary}",
+            "{occurrence} \u{00b7} {} \u{00b7} port {} \u{00b7} {summary}",
             port.reference, port.port_number
         ),
         &port.consumers,
         "No S-parameter analysis in this plan reads this port",
+        elsewhere(state, port.occurrence.as_ref()),
     ))
+}
+
+/// The occurrence a row is drawn in when that is not the one on screen.
+///
+/// `None` means the row's instance is in the buffer in front of the reader, so
+/// the page's own select-and-centre transaction reaches it.
+fn elsewhere<'a>(
+    state: &AppState,
+    occurrence: Option<&'a InstancePath>,
+) -> Option<&'a InstancePath> {
+    occurrence.filter(|occurrence| **occurrence != state.workspace.occurrence_path())
+}
+
+/// Whether the drawing on screen is showing this row's instance selected.
+///
+/// The occurrence is part of the question now that the list crosses masters: a
+/// component id is unique inside one buffer and repeats across them, so a row
+/// naming an instance of a child master would otherwise paint itself selected
+/// whenever the sheet on screen happened to hold that id.
+fn reveals(state: &AppState, occurrence: Option<&InstancePath>, component_id: u64) -> bool {
+    elsewhere(state, occurrence).is_none() && state.schematic.selection.has_component(component_id)
 }
 
 /// The `Read by` cell: who reads this row, and whether that is a finding.
@@ -304,8 +359,20 @@ fn readers_cell(
     }
 }
 
-/// Everything the row had to shorten: every reader, and the part it plays.
-fn row_tooltip(identity: &str, consumers: &[SourceConsumer], nothing_reads: &str) -> String {
+/// Everything the row had to shorten: every reader, the part it plays, and
+/// what the click does.
+///
+/// The closing line follows the occurrence. A row on the sheet in front of the
+/// reader is selected by clicking it; a row inside a child master is reached by
+/// descending to that occurrence first, which the Design navigator's excitation
+/// rail does — so the line names the occurrence rather than promising a
+/// selection this page cannot make.
+fn row_tooltip(
+    identity: &str,
+    consumers: &[SourceConsumer],
+    nothing_reads: &str,
+    elsewhere: Option<&InstancePath>,
+) -> String {
     let mut lines = vec![identity.to_owned()];
     if consumers.is_empty() {
         lines.push(nothing_reads.to_owned());
@@ -323,7 +390,15 @@ fn row_tooltip(identity: &str, consumers: &[SourceConsumer], nothing_reads: &str
             ));
         }
     }
-    lines.push("Click to select it on the schematic".to_owned());
+    lines.push(elsewhere.map_or_else(
+        || "Click to select it on the schematic".to_owned(),
+        |occurrence| {
+            format!(
+                "Drawn inside {occurrence} \u{2014} open that occurrence from the design \
+                 navigator's Excitations rail to select it"
+            )
+        },
+    ));
     lines.join("\n")
 }
 
@@ -332,7 +407,19 @@ fn row_tooltip(identity: &str, consumers: &[SourceConsumer], nothing_reads: &str
 /// The same select-and-centre transaction the result viewers use to reach a
 /// device, because arriving at a selected-but-offscreen instance is the one
 /// outcome that reads as a broken link.
-fn reveal(state: &mut AppState, component_id: u64) {
+///
+/// A row naming an instance of another occurrence shows the drawing and stops
+/// there. Selecting is a transaction against the buffer on screen, and a
+/// component id is unique only inside one — running it for a row of a child
+/// master would select whatever instance of the sheet in front of the reader
+/// happened to carry that id. Descending to the owning occurrence first is the
+/// Design navigator's own excitation rail, which lists the same row and lands
+/// on it; the tooltip here says which occurrence to look in.
+fn reveal(state: &mut AppState, occurrence: Option<&InstancePath>, component_id: u64) {
+    state.workbench.activate(Workspace::Design);
+    if occurrence.is_some_and(|occurrence| *occurrence != state.workspace.occurrence_path()) {
+        return;
+    }
     let position = state
         .schematic
         .components
@@ -345,7 +432,6 @@ fn reveal(state: &mut AppState, component_id: u64) {
         .select_only_component(component_id);
     state.schematic.net_highlight.clear();
     state.schematic.center_request = position;
-    state.workbench.activate(Workspace::Design);
 }
 
 #[cfg(test)]
