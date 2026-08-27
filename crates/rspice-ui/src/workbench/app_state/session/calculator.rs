@@ -162,7 +162,10 @@ mod tests {
             panel.expression = text.to_owned();
             panel.evaluate(&simulation);
 
-            let outcome = panel.outcome.as_ref().expect("evaluation reports something");
+            let outcome = panel
+                .outcome
+                .as_ref()
+                .expect("evaluation reports something");
             let message = match outcome {
                 Ok(value) => panic!(
                     "{text:?} produced a result instead of an error: {}",
@@ -203,7 +206,12 @@ mod tests {
         let mut panel = CalculatorPanel::new();
         panel.expression = "1/3".to_owned();
         panel.evaluate(&simulation);
-        let result = panel.outcome.as_ref().expect("evaluated").clone().expect("1/3");
+        let result = panel
+            .outcome
+            .as_ref()
+            .expect("evaluated")
+            .clone()
+            .expect("1/3");
         assert!(!result.exact_is_last_sample);
         assert_eq!(result.exact, 1.0 / 3.0);
         assert_eq!(
@@ -228,7 +236,11 @@ mod tests {
             .clone()
             .expect("V(out) / 3");
         assert!(result.exact_is_last_sample);
-        assert_eq!(result.exact, 2.0 / 3.0, "last sample of the ramp over three");
+        assert_eq!(
+            result.exact,
+            2.0 / 3.0,
+            "last sample of the ramp over three"
+        );
         assert_eq!(
             result.exact_text().parse::<f64>().expect("parses back"),
             2.0 / 3.0
