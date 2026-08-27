@@ -52,12 +52,39 @@
 //! excitation is a placed port, report that the design places nothing at all.
 //! So a port gets the same two answers a source gets, off the same walk of the
 //! plan, in a list of its own.
+//!
+//! Each list is answered from two different questions, and the difference is
+//! which design is being asked about.
+//!
+//! - **One buffer.** [`placed_sources`] and [`placed_rf_ports`] read the
+//!   schematic handed to them: the sheet in front of the reader, live, with
+//!   uncommitted edits included. That is what the Design navigator's rails
+//!   list first, because the rail's first duty is the drawing on screen.
+//! - **The whole design.** [`design_sources`] and [`design_rf_ports`] read the
+//!   frozen [`DesignProjection`]: every occurrence the execution plan binds,
+//!   each master's own placed excitations tagged with the occurrence path the
+//!   run reaches them through. A source drawn inside a child master is driven
+//!   by the run and was in neither list, so the root of a hierarchical design
+//!   reported that it places no sources at all — on the studio page whose one
+//!   job is to say what drives the circuit.
+//!
+//! Multiplicity is per occurrence rather than per drawing, because that is
+//! what the run has. A run flattens the hierarchy, so one source drawn in a
+//! master two instances reach is two cards in the deck: `XA.V1` and `XB.V1`
+//! sit across different nodes, bias different devices, and are separately
+//! selectable. Listing the drawing once would state a number no run ever has,
+//! and would leave the reader no row to click through to the second instance.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 
-use crate::simulation::netlist_gen::design_nets;
+use crate::simulation::netlist_gen::{design_nets, projection_nets};
 use crate::simulation::plan::{AnalysisDraft, SimulationPlan};
-use crate::state::{Component, ComponentType, SchematicState};
+use crate::state::workspace::DesignProjection;
+use crate::state::{
+    CellViewRef, Component, ComponentType, InstancePath, LibraryManager, SchematicState,
+};
 
 /// One analysis that reads a source, and what it reads it as.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +127,16 @@ pub struct PlacedSource {
     /// Terminal nets in pin order.
     pub nets: Vec<String>,
     pub consumers: Vec<SourceConsumer>,
+    /// The occurrence the run reaches this instance through, or `None` when
+    /// the list was derived from one schematic buffer and therefore has no
+    /// hierarchy to place it in.
+    ///
+    /// `None` is not the root. A buffer read on its own is its own root as far
+    /// as that reading goes, and saying so is what keeps a rail listing the
+    /// sheet in front of the reader when the configured design does not
+    /// resolve — but it is not a claim about where the run reaches it, which
+    /// is what [`design_sources`] answers.
+    pub occurrence: Option<InstancePath>,
 }
 
 impl PlacedSource {
@@ -130,6 +167,12 @@ impl PlacedSource {
         } else {
             format!("{} · {}", self.family, self.key_figure)
         }
+    }
+
+    /// What an Occurrence column states for this row.
+    #[must_use]
+    pub fn occurrence_label(&self) -> String {
+        occurrence_label(self.occurrence.as_ref())
     }
 }
 
@@ -182,6 +225,9 @@ pub struct PlacedRfPort {
     /// Terminal nets in pin order.
     pub nets: Vec<String>,
     pub consumers: Vec<SourceConsumer>,
+    /// The occurrence the run reaches this port through, read exactly as
+    /// [`PlacedSource::occurrence`] is.
+    pub occurrence: Option<InstancePath>,
 }
 
 impl PlacedRfPort {
@@ -213,6 +259,24 @@ impl PlacedRfPort {
             format!("{} \u{00b7} Z0 {}", self.mode.label(), self.z0)
         }
     }
+
+    /// What an Occurrence column states for this row.
+    #[must_use]
+    pub fn occurrence_label(&self) -> String {
+        occurrence_label(self.occurrence.as_ref())
+    }
+}
+
+/// The Occurrence column's one spelling, for both row kinds.
+///
+/// `/` for an instance the design root places directly, and for a row derived
+/// from one buffer — a sheet read on its own is its own root, so `/` is what
+/// it is being read as. Blank was the other candidate and says less: an empty
+/// cell in a ledger reads as a value the page failed to find, and `/` is the
+/// spelling the rest of the product already renders the design root in
+/// (`InstancePath`'s own `Display`, the breadcrumb, every stored path).
+fn occurrence_label(occurrence: Option<&InstancePath>) -> String {
+    occurrence.map_or_else(|| InstancePath::root().to_string(), InstancePath::to_string)
 }
 
 /// How many independent sources this sheet places.
@@ -263,29 +327,293 @@ pub fn placed_sources(
         .components
         .iter()
         .filter_map(|component| {
-            let family = source_family(component.kind)?;
-            let reference = component.spice_instance_name();
-            let params = crate::state::parse_params_string(&component.params);
-            let consumers = plan
-                .map(|plan| consumers_for(plan, &reference, &params, component.kind))
-                .unwrap_or_default();
-            Some(PlacedSource {
-                component_id: component.id,
-                is_voltage: is_voltage_source(component.kind),
-                family,
-                key_figure: key_figure(component, &params),
-                nets: terminal_nets(component, &nets),
-                consumers,
-                reference,
-            })
+            let (source, carries_ac) = placed_source(component, &nets)?;
+            Some(with_source_consumers(source, carries_ac, plan))
         })
         .collect();
-    sources.sort_by(|left, right| {
-        left.reference
-            .to_ascii_uppercase()
-            .cmp(&right.reference.to_ascii_uppercase())
-    });
+    sources.sort_by(|left, right| source_order(left).cmp(&source_order(right)));
     sources
+}
+
+/// Every independent source the whole design places, with the occurrence each
+/// one is reached through and what the plan reads it as.
+///
+/// This is the list the run has. The plan the projection carries is the one
+/// authority on which occurrences exist, so the walk is over its bindings
+/// rather than over the library: a cell view nothing instantiates places no
+/// source in this design, and a master two instances reach places its sources
+/// twice.
+///
+/// Sources come back by occurrence and then by reference, which puts the
+/// design root's own first and keeps each occurrence's sources in the order
+/// [`placed_sources`] lists a sheet's.
+pub fn design_sources(
+    libraries: &LibraryManager,
+    projection: &Arc<DesignProjection>,
+    plan: Option<&SimulationPlan>,
+) -> Vec<PlacedSource> {
+    design_excitations(libraries, projection)
+        .sources
+        .iter()
+        .map(|(source, carries_ac)| with_source_consumers(source.clone(), *carries_ac, plan))
+        .collect()
+}
+
+/// Every RF port the whole design places, read exactly as [`design_sources`]
+/// reads its sources.
+///
+/// Ports stay in port-number order across the whole design rather than being
+/// grouped by occurrence, because the number is what an S-parameter run
+/// addresses them by and the run has one index for the flattened design. That
+/// is also why [`duplicate_port_numbers`] over this list is a real finding: two
+/// occurrences each carrying `P1` claim one index of one matrix.
+pub fn design_rf_ports(
+    libraries: &LibraryManager,
+    projection: &Arc<DesignProjection>,
+    plan: Option<&SimulationPlan>,
+) -> Vec<PlacedRfPort> {
+    let consumers = plan.map(port_consumers_for).unwrap_or_default();
+    design_excitations(libraries, projection)
+        .ports
+        .iter()
+        .map(|port| PlacedRfPort {
+            consumers: consumers.clone(),
+            ..port.clone()
+        })
+        .collect()
+}
+
+/// Every excitation the whole design places, before any plan is read against
+/// it — the half the design projection decides.
+///
+/// The consumer lists are deliberately not part of it. A consumer is decided
+/// by the simulation plan, which is not an input to the projection and carries
+/// no revision this module may key a memo on: the plan is edited through
+/// several paths, and a memo trusting a counter would serve a role from before
+/// the edit that changed it. The plan-side walk therefore runs per call, which
+/// is a walk of the plan's instances per row over two small collections — what
+/// [`placed_sources`] already paid on every frame, beside the net resolution
+/// that is now paid once.
+struct DesignExcitations {
+    /// Each placed source with an empty consumer list, paired with whether an
+    /// `.ac` run would drive it. The parameter string that answer was read
+    /// from is not retained; that one bit is all the plan-side walk needs.
+    sources: Vec<(PlacedSource, bool)>,
+    /// Each placed port with an empty consumer list. Nothing about which port
+    /// it is decides its readership, so there is no second half to keep.
+    ports: Vec<PlacedRfPort>,
+}
+
+thread_local! {
+    /// The whole-design half of both lists, against the projection that
+    /// decided it.
+    ///
+    /// Keyed on the projection's identity rather than on a digest of its
+    /// contents, because identity *is* the epoch here.
+    /// `ProjectWorkspace::design_projection` digests every authority and every
+    /// cell view on each call and mints a new `Arc` whenever one of them moved,
+    /// so two calls that see one `Arc` saw one design — the same discipline
+    /// `netlist_gen::projection_nets` gets by retaining its extraction inside
+    /// the projection. A projection the workspace could not key, because its
+    /// authorities do not serialize, is a fresh `Arc` every frame and therefore
+    /// misses every frame, which is exactly the answer the projection itself
+    /// gives for that design.
+    ///
+    /// The key is a `Weak` rather than a bare pointer: a weak reference keeps
+    /// the allocation alive after the projection is dropped, so no later
+    /// projection can be minted at that address while it is still the key, and
+    /// equal pointers therefore mean one projection rather than two that
+    /// happened to reuse an address. It holds nothing else alive.
+    ///
+    /// Per thread, because that is where a frame is painted and because two
+    /// threads deriving against two projections would otherwise evict each
+    /// other on every call.
+    static DESIGN_EXCITATIONS: RefCell<Option<(Weak<DesignProjection>, Arc<DesignExcitations>)>> =
+        const { RefCell::new(None) };
+}
+
+/// The retained whole-design half, rebuilt only for a projection this thread
+/// has not already answered about.
+fn design_excitations(
+    libraries: &LibraryManager,
+    projection: &Arc<DesignProjection>,
+) -> Arc<DesignExcitations> {
+    let key: *const DesignProjection = Arc::as_ptr(projection);
+    let retained = DESIGN_EXCITATIONS.with_borrow(|slot| {
+        slot.as_ref()
+            .filter(|(against, _)| std::ptr::eq(against.as_ptr(), key))
+            .map(|(_, excitations)| Arc::clone(excitations))
+    });
+    if let Some(excitations) = retained {
+        return excitations;
+    }
+    let excitations = Arc::new(walk_design(libraries, projection));
+    DESIGN_EXCITATIONS.with_borrow_mut(|slot| {
+        *slot = Some((Arc::downgrade(projection), Arc::clone(&excitations)));
+    });
+    excitations
+}
+
+/// One walk of every occurrence the execution plan binds.
+///
+/// Masters are resolved once each and shared by their occurrences: the net
+/// summary comes from `projection_nets`, which the projection itself retains,
+/// and the terminal map built over it is kept for the length of this walk. A
+/// design instantiating one master a hundred times therefore resolves its nets
+/// once, not a hundred times.
+fn walk_design(
+    libraries: &LibraryManager,
+    projection: &Arc<DesignProjection>,
+) -> DesignExcitations {
+    #[cfg(test)]
+    crate::simulation::cost_probe::record(crate::simulation::cost_probe::Derivation::PlacedSources);
+    let mut terminals: HashMap<String, Arc<HashMap<(u64, String), String>>> = HashMap::new();
+    let mut sources = Vec::new();
+    let mut ports = Vec::new();
+    for binding in projection.plan().bindings() {
+        let master = binding.resolved_reference();
+        // A binding whose resolved view is not a schematic — a stop boundary,
+        // a SPICE or Verilog-A view — has no drawing to place an excitation
+        // in, and the projection is the authority on which buffers exist.
+        let Some(schematic) = materialized(projection, master) else {
+            continue;
+        };
+        if !places_excitation(schematic) {
+            continue;
+        }
+        let nets = Arc::clone(
+            terminals
+                .entry(master.key().to_ascii_lowercase())
+                .or_insert_with(|| {
+                    Arc::new(projection_terminal_nets(
+                        libraries,
+                        projection,
+                        &master.key(),
+                    ))
+                }),
+        );
+        let occurrence = binding.instance_path().clone();
+        for component in &schematic.components {
+            if let Some((mut source, carries_ac)) = placed_source(component, &nets) {
+                source.occurrence = Some(occurrence.clone());
+                sources.push((source, carries_ac));
+            } else if component.kind == ComponentType::RfPort {
+                let mut port = placed_rf_port(component, &nets);
+                port.occurrence = Some(occurrence.clone());
+                ports.push(port);
+            }
+        }
+    }
+    sources.sort_by(|(left, _), (right, _)| {
+        (
+            occurrence_order(left.occurrence.as_ref()),
+            source_order(left),
+        )
+            .cmp(&(
+                occurrence_order(right.occurrence.as_ref()),
+                source_order(right),
+            ))
+    });
+    ports.sort_by(|left, right| port_order(left).cmp(&port_order(right)));
+    DesignExcitations { sources, ports }
+}
+
+/// Whether a master places anything either list would carry. Asked before the
+/// net summary is resolved, because resolving it is the expensive half and a
+/// master that places no excitation has no use for it.
+fn places_excitation(schematic: &SchematicState) -> bool {
+    schematic.components.iter().any(|component| {
+        source_family(component.kind).is_some() || component.kind == ComponentType::RfPort
+    })
+}
+
+/// The projection's materialized buffer for one cell view.
+///
+/// The projection keys its buffers in the design's own spelling, so the lookup
+/// folds case rather than assuming one — the same rule the hierarchy tree
+/// reads its masters by.
+fn materialized<'a>(
+    projection: &'a DesignProjection,
+    reference: &CellViewRef,
+) -> Option<&'a SchematicState> {
+    let key = reference.key();
+    projection
+        .schematic_buffers()
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
+        .map(|(_, schematic)| schematic)
+}
+
+/// The row order within one occurrence: reference, case-folded.
+fn source_order(source: &PlacedSource) -> String {
+    source.reference.to_ascii_uppercase()
+}
+
+/// The row order across occurrences: the folded path, which sorts the design
+/// root first because `/` is a prefix of every path below it.
+fn occurrence_order(occurrence: Option<&InstancePath>) -> String {
+    occurrence.map(InstancePath::fold_key).unwrap_or_default()
+}
+
+/// The row order of a port: its matrix index first, then where it is, then its
+/// reference.
+fn port_order(port: &PlacedRfPort) -> (u32, String, String) {
+    (
+        port.port_number,
+        occurrence_order(port.occurrence.as_ref()),
+        port.reference.to_ascii_uppercase(),
+    )
+}
+
+/// One component read as a source, with whether an `.ac` run would drive it,
+/// or `None` for anything that is not an independent source.
+fn placed_source(
+    component: &Component,
+    nets: &HashMap<(u64, String), String>,
+) -> Option<(PlacedSource, bool)> {
+    let family = source_family(component.kind)?;
+    let params = crate::state::parse_params_string(&component.params);
+    Some((
+        PlacedSource {
+            component_id: component.id,
+            reference: component.spice_instance_name(),
+            is_voltage: is_voltage_source(component.kind),
+            family,
+            key_figure: key_figure(component, &params),
+            nets: terminal_nets(component, nets),
+            consumers: Vec::new(),
+            occurrence: None,
+        },
+        carries_ac_excitation(&params, component.kind),
+    ))
+}
+
+/// One component read as an RF port. The caller has already established that
+/// it is one.
+fn placed_rf_port(component: &Component, nets: &HashMap<(u64, String), String>) -> PlacedRfPort {
+    let params = crate::state::parse_params_string(&component.params);
+    PlacedRfPort {
+        component_id: component.id,
+        reference: component.spice_instance_name(),
+        port_number: port_number(&params),
+        z0: reference_impedance(&params),
+        mode: rf_port_mode(component, &params),
+        nets: terminal_nets(component, nets),
+        consumers: Vec::new(),
+        occurrence: None,
+    }
+}
+
+/// The one place a resolved source is paired with what a plan reads it as.
+fn with_source_consumers(
+    mut source: PlacedSource,
+    carries_ac: bool,
+    plan: Option<&SimulationPlan>,
+) -> PlacedSource {
+    source.consumers = plan
+        .map(|plan| consumers_for(plan, &source.reference, carries_ac))
+        .unwrap_or_default();
+    source
 }
 
 /// Every RF port on this sheet, with what the plan reads it as.
@@ -318,26 +646,12 @@ pub fn placed_rf_ports(
         .components
         .iter()
         .filter(|component| component.kind == ComponentType::RfPort)
-        .map(|component| {
-            let params = crate::state::parse_params_string(&component.params);
-            PlacedRfPort {
-                component_id: component.id,
-                reference: component.spice_instance_name(),
-                port_number: port_number(&params),
-                z0: reference_impedance(&params),
-                mode: rf_port_mode(component, &params),
-                nets: terminal_nets(component, &nets),
-                consumers: consumers.clone(),
-            }
+        .map(|component| PlacedRfPort {
+            consumers: consumers.clone(),
+            ..placed_rf_port(component, &nets)
         })
         .collect();
-    ports.sort_by(|left, right| {
-        left.port_number.cmp(&right.port_number).then_with(|| {
-            left.reference
-                .to_ascii_uppercase()
-                .cmp(&right.reference.to_ascii_uppercase())
-        })
-    });
+    ports.sort_by(|left, right| port_order(left).cmp(&port_order(right)));
     ports
 }
 
@@ -415,17 +729,12 @@ fn port_consumers_for(plan: &SimulationPlan) -> Vec<SourceConsumer> {
 ///
 /// Every arm names a field that exists on the draft; a draft whose analysis
 /// takes no source contributes nothing rather than an empty row.
-fn consumers_for(
-    plan: &SimulationPlan,
-    reference: &str,
-    params: &HashMap<String, String>,
-    kind: ComponentType,
-) -> Vec<SourceConsumer> {
+fn consumers_for(plan: &SimulationPlan, reference: &str, carries_ac: bool) -> Vec<SourceConsumer> {
     attribute_plan(plan, |draft, record| {
         match draft {
             AnalysisDraft::Ac(_) => {
                 // The analysis names nothing; the instance carries the drive.
-                if carries_ac_excitation(params, kind) {
+                if carries_ac {
                     record("AC excitation");
                 }
             }
@@ -784,8 +1093,31 @@ fn key_figure(component: &Component, params: &HashMap<String, String>) -> String
 
 /// Net name for every terminal in the design, keyed by instance and pin.
 fn net_names_by_terminal(schematic: &SchematicState) -> HashMap<(u64, String), String> {
-    design_nets(schematic)
-        .into_iter()
+    keyed_by_terminal(design_nets(schematic))
+}
+
+/// The same map for one cell view of a frozen projection.
+///
+/// Built on `projection_nets`, which resolves the hierarchy the way the run
+/// does and is itself retained by the projection — so the terminals a source
+/// inside a child master reports are the nets of that master, named as the
+/// deck names them, rather than whatever the editor's own buffer would say.
+fn projection_terminal_nets(
+    libraries: &LibraryManager,
+    projection: &DesignProjection,
+    cell_view_key: &str,
+) -> HashMap<(u64, String), String> {
+    keyed_by_terminal(
+        projection_nets(libraries, projection, cell_view_key)
+            .iter()
+            .cloned(),
+    )
+}
+
+fn keyed_by_terminal(
+    nets: impl IntoIterator<Item = crate::simulation::netlist_gen::DesignNet>,
+) -> HashMap<(u64, String), String> {
+    nets.into_iter()
         .flat_map(|net| {
             let name = net.name.clone();
             net.terminals
@@ -1418,5 +1750,276 @@ mod tests {
         let listed = placed_sources(&schematic, None);
         assert_eq!(listed[0].reference, "V1");
         assert_eq!(listed[1].reference, "V2");
+    }
+
+    /// A list derived from one buffer states no occurrence, because it has no
+    /// hierarchy to place the buffer in. That is not the root: the root is a
+    /// claim about where the run reaches an instance, and this reading never
+    /// asked.
+    #[test]
+    fn a_single_buffer_reading_claims_no_occurrence() {
+        let schematic = schematic_with(vec![
+            source(1, ComponentType::VoltageSourceSin, "V1", "freq=1k"),
+            port(2, "P1", "port=1"),
+        ]);
+        assert_eq!(placed_sources(&schematic, None)[0].occurrence, None);
+        assert_eq!(placed_rf_ports(&schematic, None)[0].occurrence, None);
+        // The column still states something, because a sheet read on its own
+        // is being read as its own root.
+        assert_eq!(placed_sources(&schematic, None)[0].occurrence_label(), "/");
+        assert_eq!(placed_rf_ports(&schematic, None)[0].occurrence_label(), "/");
+    }
+
+    /// What the whole design places, as opposed to what one sheet does.
+    mod whole_design {
+        use super::*;
+        use crate::simulation::cost_probe::{Derivation, count, reset};
+        use crate::state::{
+            Cell, Library, LibraryCellInstance, LibraryManager, Point, ProjectWorkspace, View,
+            ViewType,
+        };
+
+        /// One placed hierarchical instance, under the name the design gives
+        /// it — which is the segment the occurrence path is spelled with.
+        fn instance(id: u64, name: &str, cell: &str) -> Component {
+            let mut component = Component::new(id, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(LibraryCellInstance::new("work", cell, "schematic"));
+            component.name = name.to_owned();
+            component
+        }
+
+        /// A workspace whose root drawing is `root` and whose `work` library
+        /// holds one schematic master per entry of `masters`.
+        struct Design {
+            libraries: LibraryManager,
+            workspace: ProjectWorkspace,
+            active: CellViewRef,
+            root: SchematicState,
+        }
+
+        impl Design {
+            fn new(root: SchematicState, masters: &[(&str, SchematicState)]) -> Self {
+                let mut libraries = LibraryManager::new();
+                let mut work = Library::new("work");
+                let mut workspace = ProjectWorkspace::default();
+                for (cell, schematic) in masters {
+                    let mut master = Cell::new(*cell);
+                    master.add_view(View::new("schematic", ViewType::Schematic));
+                    work.add_cell(master);
+                    workspace.schematic_buffers.insert(
+                        CellViewRef::new("work", *cell, "schematic").key(),
+                        schematic.clone(),
+                    );
+                }
+                libraries.add_library(work);
+                let active = workspace.active_view.clone();
+                let mut top = Library::new(&active.library);
+                let mut top_cell = Cell::new(&active.cell);
+                top_cell.add_view(View::new(&active.view, ViewType::Schematic));
+                top.add_cell(top_cell);
+                libraries.add_library(top);
+                workspace
+                    .schematic_buffers
+                    .insert(active.key(), root.clone());
+                Self {
+                    libraries,
+                    workspace,
+                    active,
+                    root,
+                }
+            }
+
+            fn projection(&self) -> Arc<DesignProjection> {
+                self.workspace
+                    .configuration_execution_projection(&self.libraries, &self.active, &self.root)
+                    .expect("the fixture design projects")
+            }
+
+            fn sources(&self, plan: Option<&SimulationPlan>) -> Vec<PlacedSource> {
+                design_sources(&self.libraries, &self.projection(), plan)
+            }
+
+            fn ports(&self, plan: Option<&SimulationPlan>) -> Vec<PlacedRfPort> {
+                design_rf_ports(&self.libraries, &self.projection(), plan)
+            }
+        }
+
+        /// Every row's occurrence path and reference, in listed order.
+        fn placements(sources: &[PlacedSource]) -> Vec<(String, &str)> {
+            sources
+                .iter()
+                .map(|source| (source.occurrence_label(), source.reference.as_str()))
+                .collect()
+        }
+
+        /// The finding this lane exists for: a source drawn inside a child
+        /// master is netlisted, biases the circuit and is read by the
+        /// analyses, and neither surface could see it.
+        #[test]
+        fn a_source_inside_a_child_master_is_listed_under_the_occurrence_that_reaches_it() {
+            let mut root = SchematicState::default();
+            root.components
+                .push(source(1, ComponentType::VoltageSource, "VDD", ""));
+            root.components.push(instance(2, "XAFE", "afe"));
+            let mut child = SchematicState::default();
+            child
+                .components
+                .push(source(10, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+
+            let design = Design::new(root, &[("afe", child)]);
+
+            assert_eq!(
+                placements(&design.sources(None)),
+                vec![("/".to_owned(), "VDD"), ("/XAFE".to_owned(), "V1")],
+                "the design root's own source leads, and the child's states where it is"
+            );
+        }
+
+        /// Per occurrence, not per drawing.
+        ///
+        /// A run flattens the hierarchy: one source drawn in a master two
+        /// instances reach becomes `XA.V1` and `XB.V1`, across different
+        /// nodes, biasing different devices, separately selectable. Listing
+        /// the drawing once would state a number no run has, and would leave
+        /// the reader no row to reach the second instance through.
+        #[test]
+        fn one_drawn_source_reached_twice_is_two_rows() {
+            let mut root = SchematicState::default();
+            root.components.push(instance(1, "XA", "afe"));
+            root.components.push(instance(2, "XB", "afe"));
+            let mut child = SchematicState::default();
+            child
+                .components
+                .push(source(10, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+            child.components.push(port(11, "P1", "port=1"));
+
+            let design = Design::new(root, &[("afe", child)]);
+
+            assert_eq!(
+                placements(&design.sources(None)),
+                vec![("/XA".to_owned(), "V1"), ("/XB".to_owned(), "V1")],
+                "the deck carries one card per occurrence, so the page states one row per card"
+            );
+            let ports = design.ports(None);
+            assert_eq!(
+                ports
+                    .iter()
+                    .map(|port| (port.occurrence_label(), port.reference.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![("/XA".to_owned(), "P1"), ("/XB".to_owned(), "P1")]
+            );
+            assert_eq!(
+                duplicate_port_numbers(&ports),
+                vec![1],
+                "two occurrences claiming port 1 claim one index of one S-parameter matrix"
+            );
+        }
+
+        /// The whole-design reading is what a plan is read against, so a
+        /// source only a child master places is read by the plan's
+        /// whole-design analyses exactly as a root-placed one is.
+        #[test]
+        fn a_child_master_source_is_read_by_the_plans_whole_design_analyses() {
+            let mut root = SchematicState::default();
+            root.components.push(instance(1, "XAFE", "afe"));
+            let mut child = SchematicState::default();
+            child.components.push(source(
+                10,
+                ComponentType::VoltageSourcePulse,
+                "V1",
+                "per=1m",
+            ));
+
+            let design = Design::new(root, &[("afe", child)]);
+            let listed = design.sources(Some(&SimulationPlan::new()));
+
+            assert_eq!(
+                listed[0]
+                    .consumers
+                    .iter()
+                    .map(|consumer| consumer.role)
+                    .collect::<Vec<_>>(),
+                vec!["transient drive"]
+            );
+            assert!(listed[0].is_read());
+        }
+
+        /// A master that places no excitation is skipped before its nets are
+        /// resolved, and a binding with no schematic behind it — a stop
+        /// boundary, a SPICE or Verilog-A view — contributes nothing rather
+        /// than an error.
+        #[test]
+        fn a_master_that_places_nothing_contributes_nothing() {
+            let mut root = SchematicState::default();
+            root.components.push(instance(1, "XEMPTY", "empty"));
+            root.components.push(instance(2, "XGONE", "absent"));
+            root.components
+                .push(source(3, ComponentType::VoltageSource, "V1", ""));
+
+            let design = Design::new(root, &[("empty", SchematicState::default())]);
+
+            assert_eq!(
+                placements(&design.sources(None)),
+                vec![("/".to_owned(), "V1")]
+            );
+        }
+
+        /// The walk is retained against the projection that decided it.
+        ///
+        /// Counted rather than read, because a rail that resolves the whole
+        /// design twice a frame paints exactly the same pixels as one that
+        /// resolves it once — the failure this probe exists for. The count is
+        /// per build of the whole-design half, so an unchanged frame advances
+        /// it not at all.
+        #[test]
+        fn the_whole_design_walk_is_not_repeated_for_one_projection() {
+            let mut root = SchematicState::default();
+            root.components.push(instance(1, "XA", "afe"));
+            root.components.push(instance(2, "XB", "afe"));
+            let mut child = SchematicState::default();
+            child
+                .components
+                .push(source(10, ComponentType::VoltageSourceSin, "V1", "freq=1k"));
+            let design = Design::new(root, &[("afe", child)]);
+            let projection = design.projection();
+
+            reset();
+            let first = design_sources(&design.libraries, &projection, None);
+            assert_eq!(count(Derivation::PlacedSources), 1, "the first call walks");
+
+            let again = design_sources(&design.libraries, &projection, None);
+            let ports = design_rf_ports(&design.libraries, &projection, None);
+            assert_eq!(
+                count(Derivation::PlacedSources),
+                1,
+                "a second reading of one projection re-walks nothing, and neither does the \
+                 other list"
+            );
+            assert_eq!(placements(&first), placements(&again));
+            assert!(ports.is_empty());
+
+            // The one thing that must invalidate it: a design the workspace
+            // digests differently is a different projection, and a different
+            // projection is a different answer.
+            let mut edited = design;
+            edited
+                .root
+                .components
+                .push(source(4, ComponentType::VoltageSource, "VDD", ""));
+            let moved = edited.projection();
+            assert!(
+                !Arc::ptr_eq(&projection, &moved),
+                "an edit mints a new projection"
+            );
+            assert_eq!(
+                placements(&design_sources(&edited.libraries, &moved, None)),
+                vec![
+                    ("/".to_owned(), "VDD"),
+                    ("/XA".to_owned(), "V1"),
+                    ("/XB".to_owned(), "V1"),
+                ]
+            );
+            assert_eq!(count(Derivation::PlacedSources), 2, "and it is walked once");
+        }
     }
 }
