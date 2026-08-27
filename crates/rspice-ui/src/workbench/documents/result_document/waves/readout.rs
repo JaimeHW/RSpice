@@ -45,6 +45,27 @@ pub(super) fn readout_trace_count(state: &AppState) -> usize {
 /// Height of one marker row.
 pub(super) const MARKER_ROW_H: f32 = 22.0;
 
+/// Kind owns the marker's colour: a spec limit reads as a bound to meet,
+/// a peak as a called-out feature, a note as neutral annotation.
+pub(super) fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
+    match kind {
+        MarkerKind::Note => t.color.text,
+        MarkerKind::Peak => t.color.accent,
+        MarkerKind::Spec => t.color.warn,
+    }
+}
+
+/// Tag text: the id always, the note only when the user wrote one.
+pub(super) fn marker_label(marker: MarkerView<'_>) -> String {
+    let id = marker.display_id();
+    let note = marker.note().trim();
+    if note.is_empty() {
+        id
+    } else {
+        format!("{id} · {note}")
+    }
+}
+
 /// Analysis indices whose strips are on screen right now.
 ///
 /// A marker on a closed or un-maximized strip has nothing to point at, so

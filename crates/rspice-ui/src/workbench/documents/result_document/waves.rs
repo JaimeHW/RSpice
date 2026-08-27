@@ -1877,8 +1877,8 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
     else {
         return;
     };
-    // Same ownership rule as a plot click: the pane the cursor is on decides
-    // which store retains the marker.
+    // Same ownership rule as a plot click, and the same dialog: the pane the
+    // cursor is on decides which store retains the marker.
     let placement = super::MarkerPlacement {
         analysis,
         anchor,
@@ -1887,8 +1887,6 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
         samples: samples.as_slice(),
     };
     if let Some(selector) = super::place_marker(state, placement) {
-        // Placing a marker is normally the first half of saying what it means,
-        // so the purpose dialog opens on the one just placed.
         marker_dialog::open(state, selector);
     }
 }
@@ -2377,27 +2375,6 @@ fn append_copied_cursor(
     }
     while target.ends_with('\n') {
         target.pop();
-    }
-}
-
-/// Kind owns the marker's colour: a spec limit reads as a bound to meet,
-/// a peak as a called-out feature, a note as neutral annotation.
-fn marker_color(kind: MarkerKind, t: &Tokens) -> egui::Color32 {
-    match kind {
-        MarkerKind::Note => t.color.text,
-        MarkerKind::Peak => t.color.accent,
-        MarkerKind::Spec => t.color.warn,
-    }
-}
-
-/// Tag text: the id always, the note only when the user wrote one.
-fn marker_label(marker: MarkerView<'_>) -> String {
-    let id = marker.display_id();
-    let note = marker.note().trim();
-    if note.is_empty() {
-        id
-    } else {
-        format!("{id} · {note}")
     }
 }
 
@@ -4184,6 +4161,8 @@ fn show_unit_pane(
             })
             .min_by(|(_, a), (_, b)| a.total_cmp(b));
         if let Some((trace, _)) = nearest {
+            // The pane being drawn owns the marker, and placing one is the
+            // first half of saying what it means, so the dialog opens on it.
             let placement = super::MarkerPlacement {
                 analysis: model.analysis_key,
                 anchor: anchor_key(model, trace),
@@ -4191,11 +4170,7 @@ fn show_unit_pane(
                 x: clicked_x,
                 samples: trace.x.as_slice(),
             };
-            // The pane being drawn owns the marker: on a persistent pane it
-            // is retained by the document, otherwise by the dataset.
             if let Some(selector) = super::place_marker(state, placement) {
-                // Placing one is normally the first half of saying what it
-                // means.
                 marker_dialog::open(state, selector);
             }
         }
