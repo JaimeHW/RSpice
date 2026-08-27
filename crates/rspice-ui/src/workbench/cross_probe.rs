@@ -239,12 +239,22 @@ fn conductor_selection(selection: &crate::state::Selection) -> bool {
         && selection.probes.is_empty()
 }
 
+/// The instance name generation would emit for this placement.
+///
+/// The prefix test is taken over bytes rather than over a string slice.
+/// `base` is authored text: an instance named `Ω1` makes `base[..1]` a slice
+/// through the middle of a two-byte character, and slicing there panics. The
+/// SPICE prefixes are all ASCII, so comparing the leading bytes answers the
+/// same question and answers it for every name a reader can type.
 fn emitted_instance_name(component: &crate::state::Component) -> String {
     let base = component.spice_instance_name();
     let prefix = component.kind.spice_prefix();
     if prefix.is_empty()
         || base.is_empty()
-        || (base.len() >= prefix.len() && base[..prefix.len()].eq_ignore_ascii_case(prefix))
+        || base
+            .as_bytes()
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
     {
         base
     } else {
@@ -479,20 +489,31 @@ fn source_line_has_net_token(line: &str, net: &str) -> bool {
         return false;
     }
 
+    // Cards whose terminal count is not fixed by the device letter. A
+    // Gummel-Poon `Q` carries three nodes, a substrate `Q` four and a thermal
+    // `Q` five; a bulk `M` carries four and an SOI `M` five. RSpice emits all
+    // of those. What is fixed is the shape: the last positional token names
+    // the model, and everything between the instance name and it is a node.
+    let positional_end = || {
+        tokens
+            .iter()
+            .position(|token| token.contains('=') || token.eq_ignore_ascii_case("params:"))
+            .unwrap_or(tokens.len())
+    };
     let node_count = match head.as_bytes().first().map(u8::to_ascii_uppercase) {
         Some(b'R' | b'C' | b'L' | b'V' | b'I' | b'D' | b'B') => 2,
-        Some(b'Q' | b'J' | b'W') => 3,
-        Some(b'M' | b'E' | b'G' | b'S' | b'T' | b'O') => 4,
+        Some(b'J') => 3,
+        // `Wxxx n+ n- vnam model`: the third positional token names the
+        // controlling voltage source, which is an instance and never a net.
+        // Counting it as a node made every source name look like a node here.
+        Some(b'W') => 2,
+        Some(b'E' | b'G' | b'S' | b'T' | b'O') => 4,
         Some(b'F' | b'H') => 2,
-        Some(b'X') => {
-            let end = tokens
-                .iter()
-                .position(|token| token.contains('=') || token.eq_ignore_ascii_case("params:"))
-                .unwrap_or(tokens.len());
+        Some(b'Q' | b'M' | b'X') => {
             // The last positional token is the subcircuit/model identity,
             // never an electrical node.
             return tokens
-                .get(1..end.saturating_sub(1))
+                .get(1..positional_end().saturating_sub(1))
                 .is_some_and(|nodes| nodes.iter().any(normalize));
         }
         _ => return false,
@@ -795,5 +816,77 @@ mod tests {
         assert!(!source_line_has_net_token("R1 IN 0 OUT", "OUT"));
         assert!(source_line_has_net_token(".subckt amp IN OUT", "OUT"));
         assert!(!source_line_has_net_token("X1 IN 0 OUT", "OUT"));
+    }
+
+    /// Cross-probing a substrate or thermal BJT.
+    ///
+    /// `ComponentType::NpnBjt4` and `PnpBjt5` emit four- and five-node `Q`
+    /// cards — `netlist_gen` asserts exactly that — so a net that reaches a
+    /// BJT only through its substrate or thermal terminal has to be found on
+    /// the card. A fixed three-node count stopped at the emitter, and the
+    /// model name that follows the nodes must still not be mistaken for one.
+    #[test]
+    fn substrate_and_thermal_bjt_terminals_are_cross_probe_nodes() {
+        assert!(source_line_has_net_token("Q1 C B E RSPICE_NPN", "E"));
+        assert!(source_line_has_net_token("Q1 C B E SUB RSPICE_NPN", "SUB"));
+        assert!(source_line_has_net_token(
+            "Q2 C B E SUB TJ RSPICE_PNP_THERMAL",
+            "TJ"
+        ));
+        assert!(!source_line_has_net_token(
+            "Q1 C B E RSPICE_NPN",
+            "RSPICE_NPN"
+        ));
+        assert!(!source_line_has_net_token(
+            "Q2 C B E SUB TJ RSPICE_PNP_THERMAL",
+            "RSPICE_PNP_THERMAL"
+        ));
+    }
+
+    /// The five-node SOI MOSFET reaches its body terminal for the same
+    /// reason, and a bulk MOSFET's model name is still not a node.
+    #[test]
+    fn soi_mosfet_body_terminal_is_a_cross_probe_node() {
+        assert!(source_line_has_net_token(
+            "M1 D G S B E RSPICE_NMOS_SOI w=1u l=180n",
+            "E"
+        ));
+        assert!(source_line_has_net_token(
+            "M1 D G S B RSPICE_NMOS w=1u",
+            "B"
+        ));
+        assert!(!source_line_has_net_token(
+            "M1 D G S B RSPICE_NMOS w=1u",
+            "RSPICE_NMOS"
+        ));
+    }
+
+    /// `Wxxx n+ n- vnam model` names a controlling *source*, not a third
+    /// node. Counting it as one made a net that shares a name with a source
+    /// resolve to the switch card it never touches.
+    #[test]
+    fn a_current_controlled_switch_has_two_nodes_and_a_controlling_source() {
+        assert!(source_line_has_net_token("W1 OUT 0 VSENSE SWMOD", "OUT"));
+        assert!(!source_line_has_net_token(
+            "W1 OUT 0 VSENSE SWMOD",
+            "VSENSE"
+        ));
+        assert!(!source_line_has_net_token("W1 OUT 0 VSENSE SWMOD", "SWMOD"));
+    }
+
+    /// A non-ASCII instance name must not panic the prefix test.
+    ///
+    /// `spice_prefix` is ASCII, so `base[..prefix.len()]` used to slice one
+    /// byte into a two-byte character and abort the frame that resolved the
+    /// selection.
+    #[test]
+    fn a_non_ascii_instance_name_resolves_without_slicing_a_character() {
+        let component = crate::state::Component::new(
+            1,
+            crate::state::ComponentType::Resistor,
+            crate::state::Point::origin(),
+        )
+        .with_name_value("Ω1", "1k");
+        assert_eq!(emitted_instance_name(&component), "RΩ1");
     }
 }
