@@ -2439,6 +2439,7 @@ impl XyceTestRunner {
             bypass,
             bypass_reltol,
             bypass_abstol,
+            restart,
             scale: _,
         } = options;
         reltol.is_none()
@@ -2509,6 +2510,7 @@ impl XyceTestRunner {
             && bypass.is_none()
             && bypass_reltol.is_none()
             && bypass_abstol.is_none()
+            && restart.is_none()
             && hb_num_frequencies.is_empty()
     }
 

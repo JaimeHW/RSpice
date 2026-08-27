@@ -22,7 +22,8 @@ use rspice_core::analysis::{AcResult, AcSensitivityOutput};
 use rspice_core::config::ExpressionDialect;
 use rspice_core::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
-    StepPlanLimits, TransientResult, XyceTraInterpolation, extract_ac_value, extract_dc_value,
+    StepPlanLimits, TransientCheckpoint, TransientResult, TransientStartupMode,
+    XyceTraInterpolation, extract_ac_value, extract_dc_value,
 };
 use rspice_core::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
@@ -62,15 +63,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 254;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 257;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "9faa80eba75bf5d071460035182e6f43127a2bd75d88ef10205ebf3dc8201f23";
+    "c375f386b918f6b2505c781f5b9b741c89d00be22119f0fa9e1d37fd4d9e4dc7";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "12c36ac0f8413ac2ccd3fd383cab90d6dc077dcec294a136ff3d30a73b3194ba";
+    "d15773520765811e9252b8e9acc5a445965bad4af035bc54700d3f0511f187ab";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "b1c41d5404e327da0ad45da58fec7c63ce45f81b27d251173fedff0466311db8";
+    "af13cb4ac273f26fabe5fcf9b638f32b5c8a59c9523c9b68bfd4ea34ee1f3466";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -8724,7 +8725,8 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
                             | XyceStaticTranPlanPurpose::Bug805RelationalFamily
                             | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
-                            | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily,
+                            | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily
+                            | XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily,
                         false,
                         XyceStaticTranContract::PlainStatic
                             | XyceStaticTranContract::PlainCsv
@@ -9209,6 +9211,9 @@ enum XyceStaticTranPlanPurpose {
     /// owners with their direct model-parameter controls. Admission is scoped
     /// to the dedicated provenance-bound diode family contract.
     Bug1190SonProcessParameterRelationalFamily,
+    /// Reproduce the exact BUG 1284 save/resume wrapper using independently
+    /// simulated worker decks and no checked-in numerical gold.
+    Bug1284TransientRestartRelationalFamily,
     /// Compare scoped-model and explicitly expanded representations under an
     /// exact qualified-topology, model-parameter, and waveform-parity
     /// contract. This purpose has a separately qualified native BJT envelope
@@ -12420,6 +12425,7 @@ mod contracts_bug113;
 mod contracts_bug1152;
 mod contracts_bug1162;
 mod contracts_bug1190_son;
+mod contracts_bug1284;
 mod contracts_bug1398;
 mod contracts_bug1455;
 mod contracts_bug159;

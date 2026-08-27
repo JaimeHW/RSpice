@@ -240,7 +240,8 @@ impl XyceTestRunner {
             purpose == XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily;
         let fileless_relational_family = generated_reference_wrapper
             || purpose == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
-            || purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily;
+            || purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily
+            || purpose == XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily;
         if analytic_wrapper && !requires_wrapper {
             return Err(
                 "analytic transient oracle purpose requires wrapper provenance".to_string(),
@@ -532,6 +533,7 @@ impl XyceTestRunner {
                     | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                     | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
                     | XyceStaticTranPlanPurpose::Bug805RelationalFamily
+                    | XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily
                     | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             )
         {

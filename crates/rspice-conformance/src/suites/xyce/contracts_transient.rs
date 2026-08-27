@@ -4200,7 +4200,8 @@ impl XyceTestRunner {
                         XyceStaticTranPlanPurpose::RelationalFamily
                         | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                         | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
-                        | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily => format!(
+                        | XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily
+                        | XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily => format!(
                             "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3, Level=2 TBV, and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
                         ),

@@ -11062,6 +11062,54 @@ fn test_xyce_bug1190_process_parameter_alias_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_bug1284_transient_restart_relational_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1284/bug_1284.cir",
+            "bug1284_transient_restart_relational_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1284/bug_1284_baseline.cir",
+            "bug1284_transient_restart_relational_worker",
+            Some("Netlists/Certification_Tests/BUG_1284/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1284/bug_1284_first.cir",
+            "bug1284_transient_restart_relational_worker",
+            Some("Netlists/Certification_Tests/BUG_1284/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1284/bug_1284_restarted.cir",
+            "bug1284_transient_restart_relational_worker",
+            Some("Netlists/Certification_Tests/BUG_1284/exclude"),
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            expected_exclusion.is_none(),
+            "only the zero-byte BUG1284 deck owns the removed wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact historical 20 ns and strengthened nonquiescent 5 ns restart relations, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_classic_level1_mos_dtemp_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
