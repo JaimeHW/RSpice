@@ -148,10 +148,14 @@ const ARRAY_SEEDS: &[(AnalysisKind, &str, &str)] = &[
 
 /// Object-valued fields that default to absent.
 ///
-/// Empty, and legitimately so: the only entries were the Corner draft's
-/// adaptive-policy composition, which is now the plan's. The list stays because
-/// the shape it declares is how the next such field is seeded.
-const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[];
+/// `null` is also how an `Option` field spells "never told", so an entry here
+/// is what lets the ratchet ask such a field its question at all.
+const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
+    // `Some(0)` is `SpPortSource::Placed`. Against the fixture's port-less
+    // design that resolves to an empty roster where the unchosen default reads
+    // the ad-hoc table, so the spec's port list moves.
+    (AnalysisKind::SParameter, "port_source_idx", "0"),
+];
 
 /// The engine-facing projection of one draft.
 ///
