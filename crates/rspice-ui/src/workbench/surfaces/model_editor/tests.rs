@@ -423,10 +423,7 @@ fn a_rejected_schema_tones_every_count_read_off_it() {
     let app = app_with_open_candidate();
     let mut records = persisted_records(&app);
     records.metadata_error = Some("parameters[0]: out of declared bounds".to_owned());
-    for section in [
-        ModelEditorSection::Parameters,
-        ModelEditorSection::Sections,
-    ] {
+    for section in [ModelEditorSection::Parameters, ModelEditorSection::Sections] {
         let (_, tone) = navigation_meta(&app, &records, section).expect("count");
         assert_eq!(tone, MetricTone::Error);
     }

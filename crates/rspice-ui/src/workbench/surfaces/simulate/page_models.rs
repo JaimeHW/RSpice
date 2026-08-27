@@ -709,7 +709,11 @@ fn gate_status(reading: &GateReading) -> (String, Tone) {
         return (
             format!(
                 "{} · nothing under the release gate",
-                counted(reading.engine_owned, "engine-owned model", "engine-owned models")
+                counted(
+                    reading.engine_owned,
+                    "engine-owned model",
+                    "engine-owned models"
+                )
             ),
             Tone::Neutral,
         );

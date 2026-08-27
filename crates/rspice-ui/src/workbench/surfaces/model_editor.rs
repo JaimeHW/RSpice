@@ -619,17 +619,18 @@ fn candidate_status(app: &RSpiceApp, records: &PersistedModelRecords) -> (String
 /// an inherited typed value; the split is over the persisted schema, not the
 /// draft, so an unsaved edit never moves a parameter between the three.
 fn parameter_source_split(metadata: &ModelDefinitionMetadata) -> (usize, usize, usize) {
-    let (declared, inherited, model_overrides) = metadata
-        .parameters
-        .iter()
-        .fold((0, 0, 0), |mut counts, parameter| {
-            match parameter.source {
-                ParameterSource::Declared { .. } => counts.0 += 1,
-                ParameterSource::Inherited { .. } => counts.1 += 1,
-                ParameterSource::Overridden { .. } => counts.2 += 1,
-            }
-            counts
-        });
+    let (declared, inherited, model_overrides) =
+        metadata
+            .parameters
+            .iter()
+            .fold((0, 0, 0), |mut counts, parameter| {
+                match parameter.source {
+                    ParameterSource::Declared { .. } => counts.0 += 1,
+                    ParameterSource::Inherited { .. } => counts.1 += 1,
+                    ParameterSource::Overridden { .. } => counts.2 += 1,
+                }
+                counts
+            });
     let section_overrides = metadata
         .sections
         .iter()
@@ -1094,7 +1095,10 @@ fn section_header(
     );
     if let Some(galley) = fact_galley {
         ui.painter().with_clip_rect(copy_rect).galley(
-            Pos2::new(copy_rect.right() - galley.rect.width(), copy_rect.top() + 9.0),
+            Pos2::new(
+                copy_rect.right() - galley.rect.width(),
+                copy_rect.top() + 9.0,
+            ),
             galley,
             t.color.text_dim,
         );

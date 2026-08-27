@@ -343,7 +343,11 @@ fn closure_ledger(
     let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
     let title_w = ui
         .painter()
-        .layout_no_wrap("Release closure".to_owned(), title_font.clone(), t.color.text)
+        .layout_no_wrap(
+            "Release closure".to_owned(),
+            title_font.clone(),
+            t.color.text,
+        )
         .size()
         .x;
     ui.painter().text(
@@ -419,7 +423,10 @@ fn closure_ledger(
     for (index, (input, (label_w, value_w))) in inputs.iter().zip(measured).enumerate() {
         let segment = egui::Rect::from_min_max(
             egui::pos2(x, rect.top() + 1.0),
-            egui::pos2(x + label_w + SEGMENT_LABEL_GAP + value_w, rect.bottom() - 1.0),
+            egui::pos2(
+                x + label_w + SEGMENT_LABEL_GAP + value_w,
+                rect.bottom() - 1.0,
+            ),
         );
         x = segment.right() + SEGMENT_GAP;
         painter.text(
@@ -430,7 +437,10 @@ fn closure_ledger(
             t.color.text_faint,
         );
         painter.text(
-            egui::pos2(segment.left() + label_w + SEGMENT_LABEL_GAP, rect.center().y),
+            egui::pos2(
+                segment.left() + label_w + SEGMENT_LABEL_GAP,
+                rect.center().y,
+            ),
             egui::Align2::LEFT_CENTER,
             &input.value,
             value_font.clone(),
