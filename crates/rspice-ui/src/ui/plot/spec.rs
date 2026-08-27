@@ -4,9 +4,9 @@
 use egui::Color32;
 
 use super::decimate::DisplayDecimation;
-use super::format::tick_label;
+use super::format::{offset_anchor_label, tick_label, tick_label_with_step, tick_offset_label};
 use super::sample::SweepShape;
-use super::scale::{XScale, decade_ticks, linear_ticks};
+use super::scale::{TickSeries, XScale, anchor_label, decade_ticks, linear_ticks};
 
 /// One axis: range, tick positions/labels, and the unit shown at its end.
 #[derive(Debug, Clone)]
@@ -28,59 +28,62 @@ pub struct Axis {
     /// Geometry and stored samples remain in the axis' canonical data space.
     pub display_scale: f64,
     pub display_offset: f64,
+    /// Even tick spacing in canonical data space; zero when the ticks are
+    /// explicit or logarithmic. Kept so a presentation transform can relabel
+    /// at the precision the spacing calls for.
+    pub(super) tick_step: f64,
+    /// Canonical value the tick labels are stated as offsets from.
+    pub(super) anchor: Option<f64>,
+    /// The anchor as chrome: rendered once beside the axis, so the ticks can
+    /// carry only what differs between them.
+    pub(super) offset_anchor: Option<String>,
 }
 
 impl Axis {
-    /// Linear axis with nice 1–2–5 ticks.
-    pub fn linear(min: f64, max: f64, unit: impl Into<String>) -> Self {
+    fn from_series(min: f64, max: f64, unit: impl Into<String>, series: TickSeries) -> Self {
+        let unit = unit.into();
+        let offset_anchor = anchor_label(&series, &unit);
         Self {
             min,
             max,
-            ticks: linear_ticks(min, max, 6),
-            unit: unit.into(),
+            ticks: series.ticks,
+            unit,
             label: None,
             display_scale: 1.0,
             display_offset: 0.0,
+            tick_step: series.step,
+            anchor: series.anchor,
+            offset_anchor,
         }
+    }
+
+    /// Linear axis with nice 1–2–5 ticks.
+    pub fn linear(min: f64, max: f64, unit: impl Into<String>) -> Self {
+        Self::from_series(min, max, unit, linear_ticks(min, max, 6))
     }
 
     /// Linear axis with a target tick count.
     pub fn linear_with(min: f64, max: f64, unit: impl Into<String>, target: usize) -> Self {
-        Self {
-            min,
-            max,
-            ticks: linear_ticks(min, max, target),
-            unit: unit.into(),
-            label: None,
-            display_scale: 1.0,
-            display_offset: 0.0,
-        }
+        Self::from_series(min, max, unit, linear_ticks(min, max, target))
     }
 
     /// Log-frequency axis with decade ticks.
     pub fn log_decades(min: f64, max: f64, unit: impl Into<String>) -> Self {
-        Self {
-            min,
-            max,
-            ticks: decade_ticks(min, max),
-            unit: unit.into(),
-            label: None,
-            display_scale: 1.0,
-            display_offset: 0.0,
-        }
+        Self::from_series(min, max, unit, decade_ticks(min, max))
     }
 
     /// Axis with explicit tick positions (labels generated).
     pub fn with_ticks(min: f64, max: f64, unit: impl Into<String>, ticks: &[f64]) -> Self {
-        Self {
+        Self::from_series(
             min,
             max,
-            ticks: ticks.iter().map(|&v| (v, tick_label(v))).collect(),
-            unit: unit.into(),
-            label: None,
-            display_scale: 1.0,
-            display_offset: 0.0,
-        }
+            unit,
+            TickSeries {
+                ticks: ticks.iter().map(|&v| (v, tick_label(v))).collect(),
+                anchor: None,
+                step: 0.0,
+            },
+        )
     }
 
     /// Present canonical data through an affine conversion without changing
@@ -99,8 +102,22 @@ impl Axis {
         self.display_offset = offset;
         self.unit = unit.into();
         let display = |value: f64| value.mul_add(scale, offset);
-        for (value, label) in &mut self.ticks {
-            *label = tick_label(display(*value));
+        let display_step = self.tick_step * scale.abs();
+        match self.anchor {
+            // Offsets are differences, so the transform's offset cancels out
+            // of every tick and appears only in the anchor.
+            Some(anchor) => {
+                for (value, label) in &mut self.ticks {
+                    *label = tick_offset_label((*value - anchor) * scale, display_step);
+                }
+                self.offset_anchor =
+                    Some(offset_anchor_label(display(anchor), &self.unit, display_step));
+            }
+            None => {
+                for (value, label) in &mut self.ticks {
+                    *label = tick_label_with_step(display(*value), display_step);
+                }
+            }
         }
         self
     }
@@ -121,6 +138,19 @@ impl Axis {
             (Some(label), unit) => format!("{label} · {unit}"),
             (None, unit) => unit.to_owned(),
         }
+    }
+
+    /// The value this axis' tick labels are stated as offsets from, already
+    /// formatted with its unit. `None` — the ordinary case — means the labels
+    /// are absolute.
+    ///
+    /// A surface that renders its own tick row instead of letting the plot
+    /// draw one (a shared axis strip beneath a stack of panes) has to draw
+    /// this beside that row: without it a row of offsets reads as a row of
+    /// absolute values, which is a different number.
+    #[must_use]
+    pub fn offset_anchor(&self) -> Option<&str> {
+        self.offset_anchor.as_deref()
     }
 
     #[must_use]
