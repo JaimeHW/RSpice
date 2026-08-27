@@ -1098,24 +1098,75 @@ fn click_events(at: egui::Pos2) -> Vec<egui::Event> {
 struct NavigatorPanel {
     ctx: egui::Context,
     app: RSpiceApp,
+    /// The dock's height, which is what decides whether the rail scrolls.
+    height: f32,
     /// Every control the frame announced: what it says, where it is, and the
     /// disclosure position it publishes.
     controls: Vec<(String, egui::Rect, Option<bool>)>,
     /// Every run of text the frame painted.
     runs: Vec<(String, egui::Rect, egui::Color32)>,
+    /// What the keyboard is on, as the accessibility tree reports it.
+    focus: Option<String>,
+    /// Which traversal keys were still in the input once the panel had run:
+    /// the whole of the panel's consumption contract, read from the outside.
+    survived: Vec<egui::Key>,
+}
+
+/// The keys a rail may claim, and the one it must not.
+#[cfg(not(target_arch = "wasm32"))]
+const TRAVERSAL_KEYS: [egui::Key; 7] = [
+    egui::Key::ArrowUp,
+    egui::Key::ArrowDown,
+    egui::Key::ArrowLeft,
+    egui::Key::ArrowRight,
+    egui::Key::Home,
+    egui::Key::End,
+    egui::Key::Escape,
+];
+
+/// One unmodified press.
+#[cfg(not(target_arch = "wasm32"))]
+fn key_event(key: egui::Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+/// What one accessibility node says it is called.
+///
+/// `label` for a control and `value` for a `Label`-role node, because egui
+/// files a label's text under the second of those and a reader asking only the
+/// first would find the panel's plain rows nameless.
+#[cfg(not(target_arch = "wasm32"))]
+fn announced_name(node: &egui::accesskit::Node) -> Option<String> {
+    node.label().or_else(|| node.value()).map(str::to_owned)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl NavigatorPanel {
+    /// The panel at a height every rail fits in, so a case that is not about
+    /// scrolling never has to think about it.
     fn open(app: RSpiceApp) -> Self {
+        Self::open_within(app, 1600.0)
+    }
+
+    /// The panel in a dock of `height`, for the cases that are.
+    fn open_within(app: RSpiceApp, height: f32) -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut panel = Self {
             ctx,
             app,
+            height,
             controls: Vec::new(),
             runs: Vec::new(),
+            focus: None,
+            survived: Vec::new(),
         };
         // Twice: the first pass builds the font set and the second lays out
         // against it, and a band measured before the fonts exist is not the
@@ -1128,11 +1179,13 @@ impl NavigatorPanel {
     /// One rendered pass, and what it published.
     fn pass(&mut self, events: Vec<egui::Event>) {
         let app = &mut self.app;
+        let height = self.height;
+        let mut survived = Vec::new();
         let output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(260.0, 1600.0),
+                    egui::vec2(260.0, height),
                 )),
                 events,
                 ..egui::RawInput::default()
@@ -1144,12 +1197,28 @@ impl NavigatorPanel {
                         ui.set_width(260.0);
                         navigator(ui, app);
                     });
+                // Read once the panel has had the press: what is still in the
+                // input is what the panel left for the canvas behind it.
+                survived = TRAVERSAL_KEYS
+                    .into_iter()
+                    .filter(|key| {
+                        ctx.ctx()
+                            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, *key))
+                    })
+                    .collect();
             },
         );
+        self.survived = survived;
         self.runs = painted_runs(&output);
-        self.controls = output
-            .platform_output
-            .accesskit_update
+        let update = output.platform_output.accesskit_update;
+        self.focus = update.as_ref().and_then(|update| {
+            update
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == update.focus)
+                .and_then(|(_, node)| announced_name(node))
+        });
+        self.controls = update
             .map(|update| {
                 update
                     .nodes
@@ -1169,6 +1238,60 @@ impl NavigatorPanel {
                     .collect()
             })
             .unwrap_or_default();
+    }
+
+    /// One press, and the frame that settles what it moved.
+    ///
+    /// Two passes, because a fold moved from the keyboard is applied once the
+    /// rail is painted — exactly as a press on the caret is — so the rows it
+    /// discloses belong to the frame after. What the press left behind is
+    /// carried across from the pass that carried the press.
+    fn press(&mut self, key: egui::Key) {
+        self.pass(vec![key_event(key)]);
+        let survived = std::mem::take(&mut self.survived);
+        self.pass(Vec::new());
+        self.survived = survived;
+    }
+
+    /// Run the panel until whatever it set in motion has stopped moving.
+    ///
+    /// egui animates a scroll over the frames after the one that asked for it,
+    /// so a case reading where a row ended up has to let those frames run.
+    fn settle(&mut self) {
+        for _ in 0..60 {
+            self.pass(Vec::new());
+        }
+    }
+
+    /// What the keyboard is on.
+    fn focused(&self) -> Option<&str> {
+        self.focus.as_deref()
+    }
+
+    /// Whether the panel left `key` for whatever stands behind it.
+    fn survived(&self, key: egui::Key) -> bool {
+        self.survived.contains(&key)
+    }
+
+    /// Put the keyboard in the filter field, through the route the Find
+    /// command uses.
+    fn focus_filter(&mut self) {
+        self.app.state.workbench.focus_navigator_search = true;
+        self.pass(Vec::new());
+    }
+
+    /// Fold every rail this design draws.
+    ///
+    /// What is left is the panel's own bands, so the order a traversal has to
+    /// produce is the order [`DESIGN_NAVIGATOR_SECTION_ORDER`] declares rather
+    /// than whatever the fixture happens to place inside them.
+    fn fold_every_section(&mut self) {
+        for section in DESIGN_NAVIGATOR_SECTION_ORDER {
+            let title = section.title();
+            if self.band_if_present(title).is_some() {
+                self.click(title);
+            }
+        }
     }
 
     /// The one band announcing `title`, or nothing when this design draws no
@@ -1357,6 +1480,391 @@ fn folding_one_navigator_section_leaves_the_others_open() {
             "{title} was not the section that was pressed"
         );
     }
+}
+
+// ------------------------------------------------------ rails from the keys
+
+/// The filter hands the keyboard to the rows it narrowed, and the vertical
+/// keys walk them from there.
+///
+/// The rail was a Tab ring before this: reaching the last band of a long
+/// navigator meant pressing Tab past every row and every disclosure caret
+/// above it, and Home and End did nothing at all. Ends that hold rather than
+/// wrap are the half worth stating — a tree that wraps takes a reader who
+/// meant to stop at the bottom back to the top without saying so.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn down_from_the_filter_steps_into_the_rail_and_the_vertical_keys_walk_it() {
+    let mut panel = NavigatorPanel::open(interface_design());
+    panel.fold_every_section();
+
+    panel.focus_filter();
+    assert_eq!(
+        panel.focused(),
+        Some("Find instance, net or port…"),
+        "the filter takes the keyboard it was asked for"
+    );
+
+    panel.press(egui::Key::ArrowDown);
+    assert_eq!(
+        panel.focused(),
+        Some("Masters"),
+        "and Down steps out of the query onto the rail's first row"
+    );
+
+    for title in [
+        "Occurrences",
+        "Ports",
+        "Nets",
+        "Excitations",
+        "Named signals",
+    ] {
+        panel.press(egui::Key::ArrowDown);
+        assert_eq!(
+            panel.focused(),
+            Some(title),
+            "Down walks the rail in the order it is painted"
+        );
+    }
+
+    panel.press(egui::Key::ArrowDown);
+    assert_eq!(
+        panel.focused(),
+        Some("Named signals"),
+        "the last row is the last row: the rail holds rather than wraps"
+    );
+
+    panel.press(egui::Key::ArrowUp);
+    assert_eq!(panel.focused(), Some("Excitations"), "and Up walks back");
+
+    panel.press(egui::Key::Home);
+    assert_eq!(panel.focused(), Some("Masters"), "Home reaches the top");
+    panel.press(egui::Key::ArrowUp);
+    assert_eq!(
+        panel.focused(),
+        Some("Masters"),
+        "which is where Up stops too"
+    );
+
+    panel.press(egui::Key::End);
+    assert_eq!(
+        panel.focused(),
+        Some("Named signals"),
+        "and End reaches the bottom"
+    );
+}
+
+/// Right and Left carry the caret's own semantics: they disclose the row the
+/// keyboard is on, and climb out of one that has nothing left to disclose.
+///
+/// Both halves of each key matter. Right on an open row steps onto its first
+/// child rather than doing nothing, and Left on a leaf climbs to the row that
+/// holds it rather than doing nothing — which is what makes a deep hierarchy
+/// walkable without a pointer at all.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_horizontal_keys_disclose_a_hierarchy_row_and_climb_out_of_it() {
+    let mut panel = NavigatorPanel::open(interface_design());
+    // Every rail but the hierarchy folded, so the row below the Masters band
+    // is the one master group this design declares.
+    for section in DESIGN_NAVIGATOR_SECTION_ORDER
+        .into_iter()
+        .filter(|section| *section != DesignNavigatorSection::Masters)
+    {
+        let title = section.title();
+        if panel.band_if_present(title).is_some() {
+            panel.click(title);
+        }
+    }
+
+    panel.focus_filter();
+    panel.press(egui::Key::ArrowDown);
+    panel.press(egui::Key::ArrowDown);
+    let group = panel
+        .focused()
+        .expect("the row under the Masters band")
+        .to_owned();
+    assert_eq!(
+        panel.expanded(&group),
+        Some(false),
+        "a master group starts folded"
+    );
+
+    panel.press(egui::Key::ArrowRight);
+    assert_eq!(
+        panel.expanded(&group),
+        Some(true),
+        "Right unfolds the row the keyboard is on"
+    );
+    assert_eq!(
+        panel.focused(),
+        Some(group.as_str()),
+        "and leaves the keyboard on it, because unfolding a node is reading \
+         it rather than moving to it"
+    );
+
+    panel.press(egui::Key::ArrowRight);
+    let child = panel
+        .focused()
+        .expect("a row below the unfolded group")
+        .to_owned();
+    assert_ne!(
+        child, group,
+        "a second Right steps onto the first of the children it disclosed"
+    );
+
+    // A disclosed row carries its caret as a hit target of its own, sitting in
+    // the Tab ring beside the row. A step is between rows, so the caret is
+    // never a stop of its own — and never the thing a step lands on.
+    panel.press(egui::Key::ArrowUp);
+    assert_eq!(
+        panel.focused(),
+        Some(group.as_str()),
+        "Up steps to the row above, not to a disclosure control between them"
+    );
+    panel.press(egui::Key::ArrowDown);
+    assert_eq!(
+        panel.focused(),
+        Some(child.as_str()),
+        "and Down steps back to the row below"
+    );
+
+    panel.press(egui::Key::ArrowLeft);
+    assert_eq!(
+        panel.focused(),
+        Some(group.as_str()),
+        "Left climbs out of a folded row to the row that holds it"
+    );
+    panel.press(egui::Key::ArrowLeft);
+    assert_eq!(
+        panel.expanded(&group),
+        Some(false),
+        "and folds an unfolded one instead of climbing past it"
+    );
+    panel.press(egui::Key::ArrowLeft);
+    assert_eq!(
+        panel.focused(),
+        Some("Masters"),
+        "which leaves the band above it as the next step out"
+    );
+    panel.press(egui::Key::ArrowLeft);
+    assert_eq!(
+        panel.expanded("Masters"),
+        Some(false),
+        "and the band folds like any other row that discloses children"
+    );
+}
+
+/// A step past the fold brings the row it lands on into view.
+///
+/// Without this the keys move a focus ring the reader cannot see, which is
+/// worse than no traversal at all: the panel would answer, and answer
+/// somewhere off screen.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_step_past_the_fold_scrolls_the_row_it_lands_on_into_view() {
+    // A dock too short for the rails this design draws, which is the ordinary
+    // case: the navigator shares its column with the canvas.
+    let height = 220.0;
+    let mut panel = NavigatorPanel::open_within(interface_design(), height);
+    let last = "Named signals";
+    assert!(
+        panel.band(last).0.bottom() > height,
+        "the fixture must overflow the dock for this case to mean anything"
+    );
+
+    panel.focus_filter();
+    panel.press(egui::Key::ArrowDown);
+    panel.press(egui::Key::End);
+    assert_eq!(
+        panel.focused(),
+        Some(last),
+        "End reached the rail's last row"
+    );
+    // The scroll is animated, so it lands over the frames after the press
+    // rather than inside it.
+    panel.settle();
+
+    let bounds = panel.band(last).0;
+    assert!(
+        bounds.top() >= 0.0 && bounds.bottom() <= height,
+        "and the rail scrolled it into the dock: {bounds:?} in a {height} px \
+         column"
+    );
+}
+
+/// The rail claims a key only while one of its rows holds the keyboard.
+///
+/// This is the whole of its scoping contract, and it is load-bearing: the
+/// canvas nudges a selection and traverses objects with the same four arrows,
+/// and a panel that ate them from the side would take the canvas's own keys
+/// away from it. Escape is never the rail's at all.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_rail_claims_the_arrows_only_while_it_holds_the_keyboard() {
+    let mut panel = NavigatorPanel::open(interface_design());
+    panel.fold_every_section();
+
+    assert_eq!(
+        panel.focused(),
+        None,
+        "nothing in the panel holds the keyboard"
+    );
+    panel.press(egui::Key::ArrowDown);
+    assert_eq!(
+        panel.focused(),
+        None,
+        "so the press was never the panel's to answer"
+    );
+    assert!(
+        panel.survived(egui::Key::ArrowDown),
+        "and it is still there for the canvas behind it"
+    );
+
+    panel.focus_filter();
+    panel.press(egui::Key::ArrowDown);
+    assert_eq!(panel.focused(), Some("Masters"));
+    assert!(
+        !panel.survived(egui::Key::ArrowDown),
+        "the filter's own Down is spent stepping into the rail"
+    );
+
+    panel.press(egui::Key::ArrowDown);
+    assert_eq!(panel.focused(), Some("Occurrences"));
+    assert!(
+        !panel.survived(egui::Key::ArrowDown),
+        "a row on the keyboard owns the vertical arrows"
+    );
+    panel.press(egui::Key::ArrowRight);
+    assert!(
+        !panel.survived(egui::Key::ArrowRight),
+        "and the horizontal ones"
+    );
+
+    panel.press(egui::Key::Escape);
+    assert!(
+        panel.survived(egui::Key::Escape),
+        "and nothing else: Escape goes on meaning put the tool away"
+    );
+}
+
+// -------------------------------------------------------- the filter's field
+
+/// The filter offers the control that empties it exactly while there is
+/// something to empty, and Escape does the same from the keyboard — leaving
+/// the field, so one press both clears the query and gives the keyboard back.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_filter_is_emptied_by_its_own_control_and_by_escape() {
+    let mut panel = NavigatorPanel::open(interface_design());
+    panel.focus_filter();
+    assert!(
+        panel.band_if_present("Clear the filter").is_none(),
+        "an empty filter has nothing to offer to empty"
+    );
+
+    panel
+        .app
+        .state
+        .workbench
+        .navigator_trees
+        .filter_mut(Workspace::Design)
+        .push_str("ALPHA");
+    panel.pass(Vec::new());
+    let clear = panel
+        .band_if_present("Clear the filter")
+        .expect("a filter holding a query offers the control that empties it")
+        .0;
+    assert!(
+        clear.center().x > panel.band("Masters").0.center().x,
+        "which sits in the field's own right inset"
+    );
+
+    panel.pass(click_events(clear.center()));
+    panel.pass(Vec::new());
+    assert_eq!(
+        panel.app.state.workbench.navigator_filter(),
+        "",
+        "a press on it empties the query"
+    );
+    assert_eq!(
+        panel.focused(),
+        Some("Find instance, net or port…"),
+        "and leaves the reader in the field they were typing in"
+    );
+
+    panel
+        .app
+        .state
+        .workbench
+        .navigator_trees
+        .filter_mut(Workspace::Design)
+        .push_str("ALPHA");
+    panel.pass(Vec::new());
+    panel.press(egui::Key::Escape);
+    assert_eq!(
+        panel.app.state.workbench.navigator_filter(),
+        "",
+        "Escape empties it too"
+    );
+    assert_eq!(
+        panel.focused(),
+        None,
+        "and hands the keyboard back rather than holding it in an empty field"
+    );
+    assert!(
+        panel.band_if_present("Clear the filter").is_none(),
+        "so the control goes with the query"
+    );
+}
+
+/// The clear control's mark is painted, not set in a face that lacks it.
+///
+/// The mockup draws a `✕` and the bundled IBM Plex cuts are Latin subsets that
+/// do not hold one, so an authored character would have shipped as the
+/// layouter's replacement box while every test that reads announced controls
+/// went on passing. The first assertion is the trap itself, stated so a future
+/// reader cannot mistake the vector mark for decoration.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_filter_clear_mark_is_painted_because_the_bundled_faces_lack_the_glyph() {
+    let pixels = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
+        canvas
+            .pixels_in(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(24.0, 24.0),
+            ))
+            .collect()
+    };
+    let tofu = pixels(&glyph_canvas(ShelfGlyph::Text("\u{2603}")));
+    assert_eq!(
+        pixels(&glyph_canvas(ShelfGlyph::Text("\u{2715}"))),
+        tofu,
+        "the mockup's ✕ is not in the bundled faces, which is why the control \
+         paints its own mark"
+    );
+
+    let mark = crate::ui::raster::render(egui::vec2(24.0, 24.0), |ui, background| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(background))
+            .show(ui, |ui| {
+                WorkbenchIcon::Close.paint(
+                    ui.painter(),
+                    egui::Rect::from_center_size(egui::pos2(12.0, 12.0), egui::vec2(13.0, 13.0)),
+                    egui::Color32::WHITE,
+                );
+            });
+    });
+    let background = mark.background();
+    let painted = pixels(&mark);
+    assert!(
+        painted.iter().any(|pixel| *pixel != background),
+        "the clear control paints no ink at all"
+    );
+    assert_ne!(
+        painted, tofu,
+        "and what it paints is not the replacement box"
+    );
 }
 
 /// The ports rail lists the interface in the order the deck has it, and numbers
@@ -3037,6 +3545,111 @@ fn the_history_outlasts_the_band_and_stops_at_its_own_cap() {
     assert!(
         !recent.contains(&part(0).storage_key()),
         "while the oldest falls off"
+    );
+}
+
+/// The Component shelf answers the traversal its sibling navigator does.
+///
+/// One panel, one grammar: the shelf's bands are rows of the same rail, its
+/// catalog groups fold from Right and Left, and its parts are reached by
+/// stepping rather than by tabbing past every row above them. A shelf that
+/// only answered Tab would have made the four-hundred-odd rows of the
+/// primitive catalog unreachable in practice.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
+    /// What the keyboard is on.
+    fn focus(output: &egui::FullOutput) -> Option<String> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .and_then(|(_, node)| announced_name(node))
+    }
+    /// The disclosure position one named control publishes.
+    fn expanded(output: &egui::FullOutput, label: &str) -> Option<bool> {
+        let update = output.platform_output.accesskit_update.as_ref()?;
+        update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .and_then(|(_, node)| node.is_expanded())
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let _ = component_shelf_output(&ctx, &mut app, Vec::new());
+    let _ = component_shelf_output(&ctx, &mut app, Vec::new());
+
+    app.state.workbench.focus_placement_search = true;
+    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        focus(&output).as_deref(),
+        Some("Place component or cell…"),
+        "the shelf's filter takes the keyboard it was asked for"
+    );
+
+    // Step down to a folded catalog group the way a reader without a pointer
+    // reaches it. The rail is finite, so a group that never takes the keyboard
+    // is one such a reader could never open.
+    let mut output = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowDown)]);
+    assert!(
+        focus(&output).is_some_and(|row| row != "Place component or cell…"),
+        "and Down steps out of the query onto the rail"
+    );
+    let mut landed = false;
+    for _ in 0..24 {
+        if focus(&output).as_deref() == Some("Sources") {
+            landed = true;
+            break;
+        }
+        output = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowDown)]);
+    }
+    assert!(landed, "the Sources group must be reachable by stepping");
+    assert_eq!(
+        expanded(&output, "Sources"),
+        Some(false),
+        "which a fresh shelf shows folded"
+    );
+
+    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowRight)]);
+    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        expanded(&output, "Sources"),
+        Some(true),
+        "Right unfolds the group the keyboard is on"
+    );
+    assert_eq!(
+        focus(&output).as_deref(),
+        Some("Sources"),
+        "and leaves the keyboard on it"
+    );
+
+    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowRight)]);
+    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        focus(&output).as_deref(),
+        Some("Voltage Source"),
+        "a second Right steps onto the first part it disclosed"
+    );
+
+    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowLeft)]);
+    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        focus(&output).as_deref(),
+        Some("Sources"),
+        "and Left climbs out of a part to the group that holds it"
+    );
+
+    let _ = component_shelf_output(&ctx, &mut app, vec![key_event(egui::Key::ArrowLeft)]);
+    let output = component_shelf_output(&ctx, &mut app, Vec::new());
+    assert_eq!(
+        expanded(&output, "Sources"),
+        Some(false),
+        "which a second Left folds again"
     );
 }
 
