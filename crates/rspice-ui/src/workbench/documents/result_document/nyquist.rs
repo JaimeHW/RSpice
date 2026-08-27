@@ -82,6 +82,11 @@ fn encirclement_row(count: EncirclementCount) -> String {
 /// stated rather than resolved, with the one case the reader can settle from
 /// the schematic (P = 0, an open loop with no unstable poles of its own)
 /// spelled out.
+///
+/// A negative N is the exception, and it is the criterion that supplies it:
+/// Z counts poles, so it cannot be negative, and a counter-clockwise winding
+/// is therefore a *proof* that P is at least −N. Reading P = 0 into it the way
+/// the positive case does prints Z < 0, which is not a number of poles.
 fn criterion_note(count: EncirclementCount) -> String {
     let Some(n) = count.counted() else {
         return match count {
@@ -97,13 +102,22 @@ fn criterion_note(count: EncirclementCount) -> String {
                 .to_owned(),
         };
     };
-    let z = crate::analysis::nyquist::closed_loop_rhp_poles(n, 0);
-    let verdict = if z == 0 { "stable" } else { "unstable" };
-    format!(
+    let criterion = format!(
         "Nyquist criterion: Z = N + P = {n:+} + P closed-loop right-half-plane poles, where P counts \
          the open-loop ones. P has to come from a pole-zero analysis of the loop-broken deck — a \
-         pole-zero run on this deck returns closed-loop poles. With P = 0 the loop is {verdict} (Z = {z})."
-    )
+         pole-zero run on this deck returns closed-loop poles."
+    );
+    if n < 0 {
+        let p = -n;
+        return format!(
+            "{criterion} A counter-clockwise winding proves P ≥ {p}, since Z cannot be negative: \
+             with P = {p} the loop is stable (Z = 0), and each open-loop pole beyond that is one \
+             the loop does not close."
+        );
+    }
+    let z = crate::analysis::nyquist::closed_loop_rhp_poles(n, 0);
+    let verdict = if z == 0 { "stable" } else { "unstable" };
+    format!("{criterion} With P = 0 the loop is {verdict} (Z = {z}).")
 }
 
 /// Viewer-scoped base for this sheet's entries in the workspace-wide derived
@@ -441,6 +455,24 @@ mod tests {
             encirclement_row(EncirclementCount::Unresolved { turns: 0.37 }),
             "unresolved (+0.37 turns)"
         );
+    }
+
+    /// A negative winding is not an unstable loop — it is a *proof* that the
+    /// open loop has right-half-plane poles, since Z = N + P can never be
+    /// negative. The note has to say that instead of subtracting from zero.
+    #[test]
+    fn a_negative_winding_states_the_open_loop_poles_it_proves() {
+        let note = criterion_note(EncirclementCount::Counted(-1));
+
+        assert!(note.contains("P ≥ 1"), "{note}");
+        assert!(
+            note.contains("with P = 1 the loop is stable (Z = 0)"),
+            "{note}"
+        );
+        // The one thing it must never print is a negative pole count.
+        assert!(!note.contains("(Z = -"), "{note}");
+        assert!(!note.contains("With P = 0"), "{note}");
+        assert!(!note.contains("unstable"), "{note}");
     }
 
     /// A winding the closure guard would not certify gets the reason, not a
