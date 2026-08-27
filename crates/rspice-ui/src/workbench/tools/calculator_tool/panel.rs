@@ -98,6 +98,18 @@ const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
         insert: "clip(, , )",
         caret_back: 5,
     },
+    FunctionEntry {
+        label: "unwrap(x)",
+        hint: "continuous phase",
+        insert: "unwrap()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "xval(x)",
+        hint: "domain as a trace",
+        insert: "xval()",
+        caret_back: 1,
+    },
 ];
 
 const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
@@ -113,7 +125,98 @@ const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
         insert: "rms()",
         caret_back: 1,
     },
+    FunctionEntry {
+        label: "min(x)",
+        hint: "lowest sample",
+        insert: "min()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "max(x)",
+        hint: "highest sample",
+        insert: "max()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "pp(x)",
+        hint: "peak to peak",
+        insert: "pp()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "yval(x, at)",
+        hint: "value at an x",
+        insert: "yval(, )",
+        caret_back: 3,
+    },
+    FunctionEntry {
+        label: "cross(x, lvl, n)",
+        hint: "x of the nth crossing",
+        insert: "cross(, , )",
+        caret_back: 5,
+    },
+    FunctionEntry {
+        label: "freq(x)",
+        hint: "repetition rate",
+        insert: "freq()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "period(x)",
+        hint: "1 / freq",
+        insert: "period()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "duty(x)",
+        hint: "% above mid level",
+        insert: "duty()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "rise(x)",
+        hint: "10–90 % rising edge",
+        insert: "rise()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "fall(x)",
+        hint: "90–10 % falling edge",
+        insert: "fall()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "overshoot(x)",
+        hint: "% past the final value",
+        insert: "overshoot()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "settling(x, %)",
+        hint: "time into the band",
+        insert: "settling(, )",
+        caret_back: 3,
+    },
+    FunctionEntry {
+        label: "delay(a, b)",
+        hint: "between mid crossings",
+        insert: "delay(, )",
+        caret_back: 3,
+    },
+    FunctionEntry {
+        label: "thd(x)",
+        hint: "% harmonic distortion",
+        insert: "thd()",
+        caret_back: 1,
+    },
 ];
+
+/// Stated where the functions are listed, because its absence is otherwise
+/// read as an oversight. The calculator's value model carries a real
+/// `(x, y)` pair, so there is no complex datum for `mag`/`phase`/`re`/`im`
+/// to operate on; AC magnitude and phase are read from the strip that
+/// retains them.
+const REAL_ONLY_NOTICE: &str = "real series only — no mag/phase/re/im yet";
 
 impl FunctionCategory {
     fn entries(self) -> &'static [FunctionEntry] {
@@ -348,7 +451,7 @@ impl CalculatorPanel {
 
         egui::ScrollArea::vertical()
             .id_salt("rspice.calc.functions")
-            .max_height(PANE_HEIGHT - PANE_HEADER_H)
+            .max_height(PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -358,6 +461,8 @@ impl CalculatorPanel {
                     }
                 }
             });
+
+        pane_footer(ui, REAL_ONLY_NOTICE);
     }
 
     // -----------------------------------------------------------------
@@ -554,4 +659,79 @@ fn char_to_byte(text: &str, at: usize) -> usize {
         .nth(at)
         .map(|(byte, _)| byte)
         .unwrap_or(text.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::calculator::EvaluationError;
+    use crate::analysis::calculator::functions::FunctionRegistry;
+
+    /// Every function this pane advertises must be one the evaluator can
+    /// actually run.
+    ///
+    /// This pane listed `dB(x)` for as long as there was no `db` arm in the
+    /// dispatch table, so clicking the row inserted a call that came back
+    /// "Unknown function: dB". A reference that lies is worse than no
+    /// reference, and nothing but this test connects the two lists.
+    #[test]
+    fn every_advertised_function_is_one_the_evaluator_knows() {
+        let mut checked = 0;
+        for category in FunctionCategory::ALL {
+            for entry in category.entries() {
+                // Operator rows (`x ^ n`) name no function.
+                let Some(open) = entry.insert.find('(') else {
+                    continue;
+                };
+                let name = &entry.insert[..open];
+                // Arity is the row's business; existence is this test's. A
+                // deliberately wrong argument list still proves the name
+                // resolves, because only an unknown name reports itself as
+                // unknown.
+                let outcome = FunctionRegistry::dispatch(name, Vec::new());
+                assert!(
+                    !matches!(outcome, Err(EvaluationError::UnknownFunction(_))),
+                    "the {} pane offers {} but the evaluator has no {name}",
+                    category.label(),
+                    entry.label
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 20,
+            "only {checked} function rows were checked; the reference lists more than that"
+        );
+    }
+
+    /// The insert templates must land the caret where the row promises: in
+    /// the parentheses, at the first empty argument slot.
+    #[test]
+    fn every_insert_template_parks_the_caret_inside_its_parentheses() {
+        for category in FunctionCategory::ALL {
+            for entry in category.entries() {
+                let characters = entry.insert.chars().count();
+                assert!(
+                    entry.caret_back <= characters,
+                    "{}: caret_back {} exceeds the {characters}-character template",
+                    entry.label,
+                    entry.caret_back
+                );
+                if entry.insert.ends_with(')') {
+                    assert!(
+                        entry.caret_back >= 1,
+                        "{}: the caret must land inside the parentheses",
+                        entry.label
+                    );
+                    let commas = entry.insert.matches(',').count();
+                    assert_eq!(
+                        entry.caret_back,
+                        1 + 2 * commas,
+                        "{}: the caret must land at the first argument slot",
+                        entry.label
+                    );
+                }
+            }
+        }
+    }
 }
