@@ -621,6 +621,24 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
     assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
 }
 
+/// No View-menu row is drawn twice.
+///
+/// `Visibility options…` was listed in the viewport group and then emitted a
+/// second time immediately after the loop, so the menu showed the same row
+/// twice in a row with the same shortcut and the same enablement.
+#[test]
+fn the_view_menu_lists_each_viewport_row_exactly_once() {
+    let mut seen = std::collections::BTreeSet::new();
+    for command in VIEW_VIEWPORT_COMMANDS {
+        assert!(
+            seen.insert(command.spec().id),
+            "{command:?} appears twice in the View menu's viewport group"
+        );
+    }
+    assert_eq!(seen.len(), VIEW_VIEWPORT_COMMANDS.len());
+    assert!(VIEW_VIEWPORT_COMMANDS.contains(&Command::VisibilityOptions));
+}
+
 #[test]
 fn design_placement_menu_matches_the_mockup_order() {
     assert_eq!(

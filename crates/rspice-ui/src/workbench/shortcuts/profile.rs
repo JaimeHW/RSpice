@@ -624,7 +624,11 @@ const fn context_workspace_mask(context: ShortcutContext) -> u8 {
         ShortcutContext::Global
         | ShortcutContext::ApplicationChrome
         | ShortcutContext::RunnableProject => 0b1_1111,
-        ShortcutContext::EditContext => 0b1_0001,
+        // Design, Models and Results: the edit context follows the surfaces
+        // its commands can act on, and collision detection has to see the
+        // Results bit or a Results chord and an edit chord could be declared
+        // non-overlapping while both are live on the same sheet.
+        ShortcutContext::EditContext => 0b1_0101,
         ShortcutContext::EngineeringCanvas => 0b0_0001,
         ShortcutContext::DesignWorkspace => 0b0_0001,
         ShortcutContext::SymbolCanvas => 0b1_0001,

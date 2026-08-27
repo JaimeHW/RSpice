@@ -30,6 +30,22 @@ const SEARCH_KEYCAP_BORDER_WIDTH: f32 = 1.0;
 const MENU_RENDER_STATE_ID: &str = "workbench.title_menu.render_state";
 const MENU_RETURN_FOCUS_ID: &str = "workbench.title_menu.return_focus";
 const MENU_TYPEAHEAD_ID: &str = "workbench.title_menu.typeahead";
+/// The View menu's viewport group, in the order it is drawn.
+///
+/// Named rather than written inline so the menu's rows are a value a test can
+/// look at: `VisibilityOptions` was drawn once inside the loop and once again
+/// straight after it, which no reader of a `for` body would see.
+const VIEW_VIEWPORT_COMMANDS: [Command; 9] = [
+    Command::ZoomIn,
+    Command::ZoomOut,
+    Command::ZoomFit,
+    Command::FitSchematicContent,
+    Command::ZoomOneToOne,
+    Command::CycleGrid,
+    Command::GridSnapRouting,
+    Command::DrawingSheetLayers,
+    Command::VisibilityOptions,
+];
 const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceInstance,
     Command::PlaceWire,
@@ -1468,20 +1484,9 @@ fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
-    for command in [
-        Command::ZoomIn,
-        Command::ZoomOut,
-        Command::ZoomFit,
-        Command::FitSchematicContent,
-        Command::ZoomOneToOne,
-        Command::CycleGrid,
-        Command::GridSnapRouting,
-        Command::DrawingSheetLayers,
-        Command::VisibilityOptions,
-    ] {
+    for command in VIEW_VIEWPORT_COMMANDS {
         command_item(ui, app, command);
     }
-    command_item(ui, app, Command::VisibilityOptions);
     menu_separator(ui);
     command_item_as(
         ui,

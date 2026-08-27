@@ -364,7 +364,7 @@ fn analyze_prefix(
                 || !single_key_canvas_binding_allowed(
                     context,
                     binding.sequence(),
-                    environment.canvas_focus,
+                    environment,
                     single_key_policy,
                 )
             {
@@ -402,10 +402,25 @@ fn analyze_prefix(
     analysis
 }
 
+/// Whether a bare single-key binding may fire on the surface in front of the
+/// reader.
+///
+/// The requirement is about the *drawing canvases*: a bare letter must not
+/// place a wire or arm a tool while the reader is working in a side panel,
+/// so those bindings wait for the canvas to hold focus. `+`, `−` and `F` are
+/// bare keys of exactly that kind, and they are also how a result sheet is
+/// magnified and fitted.
+///
+/// Results has no drawing canvas. `engineering_canvas_has_focus` answers
+/// `false` for that workspace by construction, so requiring canvas focus
+/// there requires a condition that can never hold — which is why the
+/// magnification chords the View menu prints did nothing on a result sheet.
+/// Typing is still covered: this context is suppressed by text focus, so a
+/// bare `F` typed into a filter field never reaches here.
 fn single_key_canvas_binding_allowed(
     context: ShortcutContext,
     sequence: &crate::workbench::ShortcutSequence,
-    canvas_focus: bool,
+    environment: ShortcutEnvironment,
     policy: SingleKeyCanvasPolicy,
 ) -> bool {
     if !matches!(
@@ -413,7 +428,8 @@ fn single_key_canvas_binding_allowed(
         ShortcutContext::EditContext
             | ShortcutContext::EngineeringCanvas
             | ShortcutContext::SymbolCanvas
-    ) || sequence.strokes().len() != 1
+    ) || environment.workspace == Workspace::Results
+        || sequence.strokes().len() != 1
         || sequence.strokes()[0].primary()
         || sequence.strokes()[0].alt()
         || sequence.strokes()[0].shift()
@@ -421,7 +437,7 @@ fn single_key_canvas_binding_allowed(
         return true;
     }
     match policy {
-        SingleKeyCanvasPolicy::CanvasFocusOnly => canvas_focus,
+        SingleKeyCanvasPolicy::CanvasFocusOnly => environment.canvas_focus,
         // RequireAlt is transformed in ShortcutPreferences::effective_bindings
         // so execution and every display projection share the exact sequence.
         SingleKeyCanvasPolicy::RequireAlt => false,
@@ -433,13 +449,22 @@ fn single_key_canvas_binding_allowed(
 fn context_is_active(context: ShortcutContext, environment: ShortcutEnvironment) -> bool {
     match context {
         ShortcutContext::Global | ShortcutContext::ApplicationChrome => true,
-        ShortcutContext::EditContext => match environment.active_view {
-            ViewType::Schematic | ViewType::Testbench => environment.workspace == Workspace::Design,
-            ViewType::Symbol => {
-                matches!(environment.workspace, Workspace::Design | Workspace::Models)
-            }
-            _ => false,
-        },
+        // Must agree with `ShortcutContext::matches`, which the menus and the
+        // palette ask the same question of. Results carries the magnification
+        // and copy commands; the schematic-editing family that shares this
+        // context is filtered out there by `is_available`.
+        ShortcutContext::EditContext => {
+            environment.workspace == Workspace::Results
+                || match environment.active_view {
+                    ViewType::Schematic | ViewType::Testbench => {
+                        environment.workspace == Workspace::Design
+                    }
+                    ViewType::Symbol => {
+                        matches!(environment.workspace, Workspace::Design | Workspace::Models)
+                    }
+                    _ => false,
+                }
+        }
         ShortcutContext::EngineeringCanvas => {
             environment.workspace == Workspace::Design
                 && matches!(
@@ -1028,6 +1053,96 @@ mod tests {
             |_| true,
         );
         assert_eq!(result.command, Some(Command::WaveformCalculator));
+    }
+
+    /// The magnification and copy chords reach the Results workspace.
+    ///
+    /// Their handlers have carried a Results branch all along —
+    /// `Command::ZoomFit` queues a view gesture and `Command::Copy` writes the
+    /// cursor readout — but the resolver filtered them out before dispatch
+    /// because their context was active on the design canvases only. Pressing
+    /// the chord the View menu prints beside the row did nothing.
+    #[test]
+    fn magnification_and_copy_chords_dispatch_on_a_result_sheet() {
+        let profile = ShortcutPreferences::default();
+        for command in [
+            Command::ZoomIn,
+            Command::ZoomOut,
+            Command::ZoomFit,
+            Command::Copy,
+        ] {
+            let sequence = profile
+                .effective_bindings(command)
+                .into_iter()
+                .find(|binding| binding.supports(CommandPlatform::Desktop))
+                .map(|binding| binding.sequence().clone())
+                .unwrap_or_else(|| panic!("{command:?} has no desktop binding to press"));
+            let strokes = sequence.strokes();
+            assert_eq!(
+                strokes.len(),
+                1,
+                "{command:?} is expected to be a single-stroke chord"
+            );
+            let stroke = strokes[0];
+            let modifiers = Modifiers {
+                command: stroke.primary(),
+                ctrl: stroke.primary(),
+                alt: stroke.alt(),
+                shift: stroke.shift(),
+                ..Modifiers::NONE
+            };
+            let mut state = ShortcutResolverState::default();
+            let resolution = state.resolve(
+                &snapshot(&[event(stroke.key(), modifiers, false)], false),
+                &profile,
+                CommandPlatform::Desktop,
+                results(),
+                Duration::ZERO,
+                |candidate| candidate == command,
+            );
+            assert_eq!(
+                resolution.command,
+                Some(command),
+                "{command:?} must dispatch on the Results workspace"
+            );
+        }
+    }
+
+    /// Widening the edit context does not hand Results the schematic-editing
+    /// family: those commands are `is_enabled`-false on a result sheet, and
+    /// the resolver consults availability before precedence.
+    #[test]
+    fn a_result_sheet_does_not_dispatch_schematic_editing_chords() {
+        let profile = ShortcutPreferences::default();
+        for command in [Command::Cut, Command::Paste, Command::Delete] {
+            let sequence = profile
+                .effective_bindings(command)
+                .into_iter()
+                .find(|binding| binding.supports(CommandPlatform::Desktop))
+                .map(|binding| binding.sequence().clone())
+                .unwrap_or_else(|| panic!("{command:?} has no desktop binding to press"));
+            let stroke = sequence.strokes()[0];
+            let modifiers = Modifiers {
+                command: stroke.primary(),
+                ctrl: stroke.primary(),
+                alt: stroke.alt(),
+                shift: stroke.shift(),
+                ..Modifiers::NONE
+            };
+            let mut state = ShortcutResolverState::default();
+            let resolution = state.resolve(
+                &snapshot(&[event(stroke.key(), modifiers, false)], false),
+                &profile,
+                CommandPlatform::Desktop,
+                results(),
+                Duration::ZERO,
+                |_| false,
+            );
+            assert_eq!(
+                resolution.command, None,
+                "{command:?} must not dispatch on the Results workspace"
+            );
+        }
     }
 
     #[test]

@@ -64,16 +64,26 @@ impl ShortcutContext {
     pub fn matches(self, app: &RSpiceApp) -> bool {
         match self {
             Self::Global | Self::ApplicationChrome | Self::RunnableProject => true,
-            Self::EditContext => match app.state.workspace.active_view_type() {
-                crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
-                    app.state.workbench.workspace == Workspace::Design
-                }
-                crate::state::ViewType::Symbol => matches!(
-                    app.state.workbench.workspace,
-                    Workspace::Design | Workspace::Models
-                ),
-                _ => false,
-            },
+            // Results is here for the same reason the design canvases are:
+            // the magnification and copy commands are carried out on whatever
+            // the reader is looking at, and a result sheet is one of those
+            // surfaces. Membership is not permission — every command in this
+            // context still answers `is_enabled` for the surface in front of
+            // it, and the schematic-editing family answers `false` on a
+            // result sheet.
+            Self::EditContext => {
+                app.state.workbench.workspace == Workspace::Results
+                    || match app.state.workspace.active_view_type() {
+                        crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
+                            app.state.workbench.workspace == Workspace::Design
+                        }
+                        crate::state::ViewType::Symbol => matches!(
+                            app.state.workbench.workspace,
+                            Workspace::Design | Workspace::Models
+                        ),
+                        _ => false,
+                    }
+            }
             Self::EngineeringCanvas => {
                 app.state.workbench.workspace == Workspace::Design
                     && matches!(
