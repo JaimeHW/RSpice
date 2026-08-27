@@ -7,6 +7,8 @@
 //! measurements render in the right panel.
 
 mod expressions;
+mod extent;
+pub(super) use extent::FamilyEnvelopePlan;
 pub(super) mod marker_dialog;
 mod readout;
 
@@ -40,7 +42,6 @@ use crate::workbench::{
     ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
 };
 
-use super::frame_work::{self, DatasetWalk};
 use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
@@ -196,6 +197,12 @@ pub(super) struct StripModel {
     /// hue — one chip per signal, all runs).
     signal_trace_count: usize,
     traces: Vec<StripTrace>,
+    /// The strip's shared X extent over its visible traces.
+    ///
+    /// Resolved while the model is built rather than on demand: the axis,
+    /// the overview lane, the viewport gestures and the fit control all ask
+    /// for it, and each answer walked every visible sample.
+    x_range: Option<(f64, f64)>,
 }
 
 impl StripModel {
@@ -220,6 +227,15 @@ struct CursorDomain {
 /// read, so the rebuild only happens when an input actually changes.
 #[derive(Default, Clone)]
 pub(super) struct ModelsCache(Option<(u64, Arc<Vec<StripModel>>)>);
+
+impl ModelsCache {
+    /// Which generation of strip models is currently held. Anything derived
+    /// from the models keys on this rather than on the data version alone:
+    /// hiding a trace changes the models without changing the dataset.
+    pub(super) fn generation(&self) -> u64 {
+        self.0.as_ref().map_or(0, |(fingerprint, _)| *fingerprint)
+    }
+}
 
 impl std::fmt::Debug for ModelsCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1232,7 +1248,7 @@ pub(super) fn build_models(
             );
         }
 
-        models.push(StripModel {
+        let mut model = StripModel {
             analysis_index,
             analysis_key,
             analysis_type: analysis.analysis_type,
@@ -1247,7 +1263,10 @@ pub(super) fn build_models(
             phase_continuous,
             signal_trace_count,
             traces,
-        });
+            x_range: None,
+        };
+        model.x_range = extent::x_range(&model);
+        models.push(model);
     }
     models
 }
@@ -1513,39 +1532,6 @@ fn pane_y_range(
     Some((min - pad, max + pad))
 }
 
-/// X range of a strip. Ordinary traces share one X series; family policies
-/// intentionally project disjoint exact-row groups, so the range must cover
-/// every visible group rather than assuming the first trace is authoritative.
-fn x_range(model: &StripModel) -> Option<(f64, f64)> {
-    frame_work::note(DatasetWalk::WaveXRange);
-    let mut x0 = f64::INFINITY;
-    let mut x1 = f64::NEG_INFINITY;
-    for x in model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible)
-        .flat_map(|trace| trace.x.iter().copied())
-        .filter(|value| value.is_finite())
-    {
-        if model.x_scale == XScale::Log10 && x <= 0.0 {
-            continue;
-        }
-        x0 = x0.min(x);
-        x1 = x1.max(x);
-    }
-    if !x0.is_finite() || !x1.is_finite() {
-        return None;
-    }
-    if x1 > x0 {
-        return Some((x0, x1));
-    }
-    if model.x_scale == XScale::Log10 {
-        Some((x0 / 10.0, x1 * 10.0))
-    } else {
-        Some((x0 - 1.0, x1 + 1.0))
-    }
-}
-
 fn model_is_visible(model: &StripModel, models: &[StripModel], results: &ResultsState) -> bool {
     match results.maximized_strip {
         Some(maximized) if models.iter().any(|item| item.analysis_key == maximized) => {
@@ -1695,83 +1681,6 @@ pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
         .is_some_and(|(model, _, pane)| !matching_spec_limits(state, model, &pane, t).is_empty())
 }
 
-#[derive(Debug)]
-struct FamilyEnvelopeSeries {
-    x: Vec<f64>,
-    minimum: Vec<f64>,
-    maximum: Vec<f64>,
-    color: egui::Color32,
-    minimum_cache_key: u64,
-    maximum_cache_key: u64,
-}
-
-fn family_envelope_series(model: &StripModel, pane: &UnitPane) -> Vec<FamilyEnvelopeSeries> {
-    frame_work::note(DatasetWalk::WaveEnvelope);
-    let mut groups = HashMap::<(String, u8), Vec<&StripTrace>>::new();
-    for trace in pane
-        .traces
-        .iter()
-        .filter_map(|index| model.traces.get(*index))
-        .filter(|trace| trace.visible && !trace.overlay && trace.family_group_ordinal.is_some())
-    {
-        groups
-            .entry((trace.source_waveform_name.clone(), trace.kind as u8))
-            .or_default()
-            .push(trace);
-    }
-
-    let mut envelopes = Vec::new();
-    for ((source_name, kind), traces) in groups {
-        let family_groups = traces
-            .iter()
-            .map(|trace| trace.presentation_key)
-            .collect::<HashSet<_>>();
-        if family_groups.len() < 2 {
-            continue;
-        }
-
-        let mut points = HashMap::<u64, (f64, f64, f64, usize)>::new();
-        for trace in &traces {
-            for (&x, &y) in trace.x.iter().zip(trace.y.iter()) {
-                if !x.is_finite() || !y.is_finite() {
-                    continue;
-                }
-                points
-                    .entry(x.to_bits())
-                    .and_modify(|(_, minimum, maximum, count)| {
-                        *minimum = minimum.min(y);
-                        *maximum = maximum.max(y);
-                        *count += 1;
-                    })
-                    .or_insert((x, y, y, 1));
-            }
-        }
-        let mut points = points
-            .into_values()
-            .filter(|(_, _, _, count)| *count >= 2)
-            .collect::<Vec<_>>();
-        points.sort_by(|left, right| left.0.total_cmp(&right.0));
-        if points.is_empty() {
-            continue;
-        }
-
-        let presentation_keys = traces
-            .iter()
-            .map(|trace| trace.presentation_key)
-            .collect::<Vec<_>>();
-        let identity = stable_hash(&(model.analysis_key, source_name, kind, presentation_keys));
-        envelopes.push(FamilyEnvelopeSeries {
-            x: points.iter().map(|point| point.0).collect(),
-            minimum: points.iter().map(|point| point.1).collect(),
-            maximum: points.iter().map(|point| point.2).collect(),
-            color: traces[0].signal_color.gamma_multiply(0.78),
-            minimum_cache_key: identity ^ 0x1357_9BDF_2468_ACE0,
-            maximum_cache_key: identity ^ 0x0246_8ACE_1357_9BDF,
-        });
-    }
-    envelopes
-}
-
 pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> bool {
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
@@ -1780,8 +1689,13 @@ pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> boo
         presentation.complex_number_display(),
         t,
     );
-    active_pane(&models, &state.ui.results)
-        .is_some_and(|(model, _, pane)| !family_envelope_series(model, &pane).is_empty())
+    let generation = state.ui.results.models.generation();
+    let Some((model, _, pane)) = active_pane(&models, &state.ui.results) else {
+        return false;
+    };
+    !extent::family_envelopes(&mut state.ui.results, generation, model, &pane)
+        .series()
+        .is_empty()
 }
 
 fn cursor_marker_target(
@@ -1937,7 +1851,7 @@ pub(super) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     );
     let x = current
         .x
-        .or_else(|| x_range(model))
+        .or_else(|| model.x_range)
         .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
     let y = current
         .y
@@ -2044,7 +1958,7 @@ pub(super) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
     let Some(model) = models.iter().find(|model| model.analysis_index == strip) else {
         return;
     };
-    let Some(full) = x_range(model) else {
+    let Some(full) = model.x_range else {
         return;
     };
     let panes = model.unit_panes().len();
@@ -2733,7 +2647,7 @@ pub(crate) fn active_shared_x_status(
         Some(key) => models.iter().find(|model| model.analysis_key == key),
         None => models.first(),
     }?;
-    let full = x_range(model)?;
+    let full = model.x_range?;
     let panes = model.unit_panes().len();
     let view = shared_x_view(&state.ui.results, model.analysis_key, panes).unwrap_or(full);
     let (start, end) = shared_axis_viewport_fraction(model.x_scale, full, view);
@@ -2832,7 +2746,8 @@ fn active_pane_extents(
     else {
         return (None, None);
     };
-    let x = x_range(model)
+    let x = model
+        .x_range
         .map(|full| shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full));
     let y = state
         .ui
@@ -2932,7 +2847,7 @@ fn active_pane_viewports(
     else {
         return (None, None);
     };
-    let x = x_range(model).map(|full| {
+    let x = model.x_range.map(|full| {
         let (x0, x1) = shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full);
         format!(
             "{} … {}",
@@ -3779,7 +3694,7 @@ fn show_strip_plot(
     linked_cursor_domain: Option<&CursorDomain>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let Some(x_domain) = x_range(model) else {
+    let Some(x_domain) = model.x_range else {
         well_hint(ui, "No data");
         return;
     };
@@ -3941,11 +3856,13 @@ fn show_unit_pane(
         .unwrap_or((auto_y0, auto_y1));
 
     let x_axis = model_x_axis(model, x0, x1, quantity_policy);
-    let family_envelopes = if state.ui.results.show_family_envelope {
-        family_envelope_series(model, pane)
-    } else {
-        Vec::new()
-    };
+    let family_envelopes = state.ui.results.show_family_envelope.then(|| {
+        let generation = state.ui.results.models.generation();
+        extent::family_envelopes(&mut state.ui.results, generation, model, pane)
+    });
+    let family_envelopes: &[extent::FamilyEnvelopeSeries] = family_envelopes
+        .as_deref()
+        .map_or(&[], FamilyEnvelopePlan::series);
     let y_axis = if log_y {
         Axis::log_decades(y0, y1, pane.unit)
     } else if pane.unit == "°" && pane_view.y.is_none() {
@@ -4012,7 +3929,7 @@ fn show_unit_pane(
     // Family envelopes are derived only from exact shared X coordinates.
     // They draw behind source curves and never interpolate missing family
     // samples into evidence that was not retained.
-    for envelope in &family_envelopes {
+    for envelope in family_envelopes {
         let mut minimum = Trace::new(&envelope.x, &envelope.minimum, envelope.color)
             .thin()
             .dashed()

@@ -2021,7 +2021,9 @@ fn the_instrument_survives_a_degenerate_run() {
         &Tokens::default(),
     );
     let model = &models[0];
-    let (x0, x1) = x_range(model).expect("a finite domain survives the degenerate traces");
+    let (x0, x1) = model
+        .x_range
+        .expect("a finite domain survives the degenerate traces");
     assert!(x0.is_finite() && x1.is_finite() && x1 > x0, "{x0}..{x1}");
 
     // Every pane needs a non-zero height as well: a flat trace and an
@@ -2244,4 +2246,126 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
     assert!(models[0].traces[0].kind == TraceKind::Value);
     assert_eq!(models[0].traces[0].unit.as_deref(), Some("dBc"));
     assert_eq!(models[0].traces[0].y.as_slice(), &[-80.0, -60.0]);
+}
+
+/// The extent is resolved while the model is built now, so it has to be the
+/// same answer the per-frame walk gave: the axis, the overview lane and every
+/// viewport gesture are derived from it.
+#[test]
+fn the_strip_extent_matches_the_walk_it_replaced() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(a)", vec![0.0, 1.0, 2.5], vec![0.0, 1.0, 2.0], "#fff"),
+            WaveformData::new("V(b)", vec![-3.0, 0.5], vec![1.0, 2.0], "#0af"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+
+    let model = &models[0];
+    let expected = model
+        .traces
+        .iter()
+        .filter(|trace| trace.visible)
+        .flat_map(|trace| trace.x.iter().copied())
+        .filter(|value| value.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), x| {
+            (low.min(x), high.max(x))
+        });
+    assert_eq!(model.x_range, Some(expected));
+}
+
+/// The extent is a memo of the visible traces, so hiding one has to move it.
+/// A strip that kept an extent covering a trace it no longer draws would
+/// scale every pane against data the reader cannot see.
+#[test]
+fn hiding_a_trace_moves_the_strip_extent() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let before = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(before[0].x_range, Some((0.0, 40.0)));
+
+    state.simulation.runs[0].analyses[0].waveforms[1].visible = false;
+    let after = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(
+        after[0].x_range,
+        Some((0.0, 1.0)),
+        "the strip kept an extent covering a trace it no longer draws"
+    );
+}
+
+/// The envelope walks every sample of every family member, so it is memoized
+/// against the generation of models that produced it — and must rebuild when
+/// that generation moves.
+#[test]
+fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
+    let mut active = SimulationRun::new(2);
+    active.add_analysis(family_analysis(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0]));
+    let active_dataset = active.dataset_id;
+    let manifest = FamilyManifest::from_analysis(&active.analyses[0])
+        .unwrap()
+        .unwrap();
+    let selection = SourceSampleSelection::new(active_dataset, 41, vec![0, 1, 2, 3, 4, 5])
+        .unwrap()
+        .with_family_presentation(&manifest, &family_policy())
+        .unwrap();
+    let simulation = SimulationState {
+        runs: vec![active],
+        active_run_idx: Some(0),
+        active_analysis_idx: Some(0),
+        ..SimulationState::default()
+    };
+    let mut derived = DerivedSeries::default();
+    let models = build_models(
+        &simulation,
+        &mut derived,
+        &Tokens::default(),
+        false,
+        ComplexNumberDisplay::MagnitudePhaseDegrees,
+        Some(&selection),
+        &HashSet::new(),
+    );
+    let model = &models[0];
+    let pane = model.unit_panes().into_iter().next().expect("one pane");
+
+    let mut results = ResultsState::default();
+    let first = extent::family_envelopes(&mut results, 7, model, &pane);
+    let again = extent::family_envelopes(&mut results, 7, model, &pane);
+    assert!(
+        std::sync::Arc::ptr_eq(&first, &again),
+        "the same generation rebuilt the envelope"
+    );
+
+    let next = extent::family_envelopes(&mut results, 8, model, &pane);
+    assert!(
+        !std::sync::Arc::ptr_eq(&first, &next),
+        "a new generation of models served the previous envelope"
+    );
+    assert_eq!(
+        next.series().len(),
+        first.series().len(),
+        "the rebuild is the same projection, not a different one"
+    );
 }
