@@ -918,43 +918,175 @@ mod tests {
         assert!(m.eye_height >= 0.98, "eye height {} V", m.eye_height);
     }
 
+    /// Start time shared by every oracle in this module.
+    const T_START: f64 = 0.137e-9;
+    /// Peak displacement of the sinusoidal-jitter oracle's crossings.
+    const JITTER_AMPLITUDE: f64 = 0.05 * UI;
+
+    /// The shift that parks the crossings on the centre of the folded window
+    /// when the fold is left unanchored.
+    ///
+    /// Every oracle starts at 0.137 UI and the settling skip is a whole
+    /// number of unit intervals from t = 0, so an unanchored window opens at
+    /// the skip and its crossings sit 0.137 UI in. Adding 0.85 UI moves them
+    /// to 0.987 UI — 13 ps from the centre of a two-UI window, inside the
+    /// edge's own ramp — which is precisely where the height, the noise
+    /// statistics, the Q and every compliance mask are read. Anchored, it is
+    /// one more record phase like any other; unanchored, it reads the eye off
+    /// the transition.
+    const UNANCHORED_CENTRE_SHIFT: f64 = 0.85 * UI;
+
     /// The headline invariant: where the record happens to start is not a
     /// property of the signal, so no measurement may depend on it.
+    ///
+    /// Reproducing the baseline is necessary but not sufficient — a metric
+    /// broken to a constant reproduces its own constant perfectly — so each
+    /// oracle is first pinned to the closed form it exists to check, and that
+    /// pin is then required to hold at every record phase. Three oracles are
+    /// needed rather than one: the ideal clock's opening is insensitive to
+    /// where the crossings land in the window, while duty-cycle distortion
+    /// pins the width against a number the fold cannot fake and sinusoidal
+    /// jitter pins the peak-to-peak.
     #[test]
     fn eye_metrics_are_invariant_to_the_record_phase() {
-        let reference = ideal_clock_eye(200, 0.137e-9);
-        let baseline = calculate_eye_measurements(&reference);
+        /// An ideal clock opens the whole unit interval, in both axes.
+        fn assert_ideal_clock_closed_form(m: &EyeMeasurements) {
+            assert!(m.eye_width >= 0.98, "eye width {} UI", m.eye_width);
+            assert!(m.eye_height >= 0.98, "eye height {} V", m.eye_height);
+        }
 
-        for shift in [0.37 * UI, 0.5 * UI] {
-            let data = ideal_clock_eye(200, 0.137e-9 + shift);
-            let m = calculate_eye_measurements(&data);
-            for (name, expected, actual) in [
-                ("unit_interval", baseline.unit_interval, m.unit_interval),
-                ("eye_width", baseline.eye_width, m.eye_width),
-                ("eye_height", baseline.eye_height, m.eye_height),
-                ("eye_area", baseline.eye_area, m.eye_area),
-                (
-                    "crossing_percentage",
-                    baseline.crossing_percentage.expect("baseline crossing"),
-                    m.crossing_percentage.expect("shifted crossing"),
-                ),
-                (
-                    "rise_time",
-                    baseline.rise_time.expect("baseline rise"),
-                    m.rise_time.expect("shifted rise"),
-                ),
-                (
-                    "fall_time",
-                    baseline.fall_time.expect("baseline fall"),
-                    m.fall_time.expect("shifted fall"),
-                ),
-                ("jitter_pp", baseline.jitter_pp, m.jitter_pp),
-            ] {
-                let scale = expected.abs().max(1e-12);
-                assert!(
-                    (actual - expected).abs() <= 1e-3 * scale,
-                    "{name} moved from {expected} to {actual} under a {shift:e} s shift"
-                );
+        /// 60/40 duty-cycle distortion puts the two crossing families 0.2 UI
+        /// apart, so the eye is 0.80 UI wide and vertically wide open.
+        fn assert_dcd_closed_form(m: &EyeMeasurements) {
+            assert!(
+                (m.eye_width - 0.80).abs() <= 0.02,
+                "eye width {} UI, expected 0.80",
+                m.eye_width
+            );
+            assert!(m.eye_height >= 0.98, "eye height {} V", m.eye_height);
+        }
+
+        /// Sinusoidal jitter of amplitude A shows 2A peak-to-peak and closes
+        /// the eye by the same 2A.
+        fn assert_sinusoidal_jitter_closed_form(m: &EyeMeasurements) {
+            let expected_pp = 2.0 * JITTER_AMPLITUDE;
+            assert!(
+                (m.jitter_pp - expected_pp).abs() <= 0.1 * expected_pp,
+                "jitter p-p {:e} s, expected {expected_pp:e}",
+                m.jitter_pp
+            );
+            let expected_width = 1.0 - 2.0 * JITTER_AMPLITUDE / UI;
+            assert!(
+                (m.eye_width - expected_width).abs() <= 0.02,
+                "eye width {} UI, expected {expected_width}",
+                m.eye_width
+            );
+        }
+
+        fn ideal_clock_at(t_start: f64) -> EyeData {
+            ideal_clock_eye(200, t_start)
+        }
+
+        fn dcd_clock_at(t_start: f64) -> EyeData {
+            dcd_clock_eye(60, t_start)
+        }
+
+        fn jittered_clock_at(t_start: f64) -> EyeData {
+            jittered_clock_eye(400, t_start, JITTER_AMPLITUDE, 3.7e6)
+        }
+
+        /// Every figure that must survive a change of record phase, with the
+        /// relative budget it has to reproduce within. `None` is itself a
+        /// claim — a crossing that splits has no single level — so it has to
+        /// reproduce as exactly as a number does.
+        ///
+        /// A part in a thousand for everything the fold pins. `jitter_rms` is
+        /// the one exception, and the reason is the record's ends rather than
+        /// its phase: the recovered period carries a residual of a few parts
+        /// in 100 000, which walks each polarity's crossings a few parts in a
+        /// thousand of a unit interval across the record, and whether one
+        /// polarity's walk reaches the cycle at the boundary depends on where
+        /// the first anchored window opens. One cycle in 116 is 0.9 % of that
+        /// family's spread, and the pooled RMS moves with it. Two per cent
+        /// leaves that alone while still catching an unanchored fold, which
+        /// moves the same figure by orders of magnitude.
+        fn phase_invariant_metrics(m: &EyeMeasurements) -> [(&'static str, Option<f64>, f64); 11] {
+            [
+                ("unit_interval", Some(m.unit_interval), 1e-3),
+                ("eye_width", Some(m.eye_width), 1e-3),
+                ("eye_height", Some(m.eye_height), 1e-3),
+                ("eye_area", Some(m.eye_area), 1e-3),
+                ("crossing_percentage", m.crossing_percentage, 1e-3),
+                ("rise_time", m.rise_time, 1e-3),
+                ("fall_time", m.fall_time, 1e-3),
+                ("jitter_pp", Some(m.jitter_pp), 1e-3),
+                ("jitter_rms", Some(m.jitter_rms), 2e-2),
+                ("q_factor", m.q_factor, 1e-3),
+                ("snr_db", m.snr_db, 1e-3),
+            ]
+        }
+
+        /// A noiseless eye's Q and SNR are unbounded, which is an answer and
+        /// not a number to subtract; it has to reproduce as itself. Anything
+        /// finite compares relatively.
+        fn assert_reproduces(
+            name: &str,
+            expected: Option<f64>,
+            actual: Option<f64>,
+            budget: f64,
+            context: &str,
+        ) {
+            match (expected, actual) {
+                (None, None) => {}
+                (Some(expected), Some(actual))
+                    if expected.is_infinite() || actual.is_infinite() =>
+                {
+                    assert_eq!(expected, actual, "{name} moved {context}");
+                }
+                (Some(expected), Some(actual)) => {
+                    let scale = expected.abs().max(1e-12);
+                    assert!(
+                        (actual - expected).abs() <= budget * scale,
+                        "{name} moved from {expected} to {actual} {context}"
+                    );
+                }
+                _ => panic!("{name} moved from {expected:?} to {actual:?} {context}"),
+            }
+        }
+
+        type Oracle = (&'static str, fn(f64) -> EyeData, fn(&EyeMeasurements));
+        let oracles: [Oracle; 3] = [
+            (
+                "ideal clock",
+                ideal_clock_at,
+                assert_ideal_clock_closed_form,
+            ),
+            (
+                "60/40 duty-cycle distortion",
+                dcd_clock_at,
+                assert_dcd_closed_form,
+            ),
+            (
+                "sinusoidal jitter",
+                jittered_clock_at,
+                assert_sinusoidal_jitter_closed_form,
+            ),
+        ];
+
+        for (oracle, build, assert_closed_form) in oracles {
+            let baseline = calculate_eye_measurements(&build(T_START));
+            assert_closed_form(&baseline);
+
+            for shift in [0.37 * UI, 0.5 * UI, UNANCHORED_CENTRE_SHIFT] {
+                let m = calculate_eye_measurements(&build(T_START + shift));
+                let context = format!("on the {oracle} oracle under a {shift:e} s shift");
+                assert_closed_form(&m);
+                for ((name, expected, budget), (_, actual, _)) in phase_invariant_metrics(&baseline)
+                    .into_iter()
+                    .zip(phase_invariant_metrics(&m))
+                {
+                    assert_reproduces(name, expected, actual, budget, &context);
+                }
             }
         }
     }
