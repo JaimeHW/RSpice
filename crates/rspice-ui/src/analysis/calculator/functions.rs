@@ -888,6 +888,13 @@ fn window(x: &[f64], y: &[f64], from: f64, to: f64) -> (Vec<f64>, Vec<f64>) {
 /// fundamental. Integrating rather than transforming is what makes this
 /// correct on a non-uniform grid: an FFT would first have to resample, and
 /// the resampling — not the signal — would set the noise floor.
+///
+/// **The fundamental is counted, not fitted**, so this assumes a single
+/// dominant one: the rate comes from how many times `w` rises through its
+/// mean level, and a heavily distorted signal that rises through that level
+/// more than once per cycle is read as a higher fundamental than it has,
+/// which puts every harmonic on the wrong bin. Naming the fundamental
+/// explicitly — `thd(w, n, f0)` — is the fix, and is not implemented yet.
 fn thd(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     check_arg_range("thd", &args, 1, 2)?;
     let (x, y) = series_arg("thd", &args[0])?;
