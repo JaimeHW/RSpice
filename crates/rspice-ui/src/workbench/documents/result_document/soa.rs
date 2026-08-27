@@ -21,8 +21,14 @@ use super::{
 
 const ROW_HEIGHT: f32 = 29.0;
 
+/// The active SOA analysis, if it is one and its evidence validated.
+///
+/// The validation goes through the workspace memo rather than the validator:
+/// the tab strip asks this on every frame to decide whether to offer the
+/// sheet, and the validator walks every retained stress sample in the run.
 fn active_soa(
     simulation: &crate::state::SimulationState,
+    evidence_is_valid: bool,
 ) -> Option<(&AnalysisResult, &[SoaEvaluationEvidence], usize)> {
     let analysis = simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
@@ -33,17 +39,25 @@ fn active_soa(
     else {
         return None;
     };
-    if !analysis.success || analysis.analysis_type != AnalysisType::Soa || {
-        frame_work::note(DatasetWalk::EvidenceValidation);
-        analysis.validate_retained_evidence().is_err()
-    } {
+    if !analysis.success || analysis.analysis_type != AnalysisType::Soa || !evidence_is_valid {
         return None;
     }
     Some((analysis, evaluations, violations.len()))
 }
 
+/// The memoized retained-evidence verdict for whichever analysis is active.
+fn active_evidence_is_valid(state: &AppState) -> bool {
+    let Some(run) = state.simulation.active_run() else {
+        return false;
+    };
+    state
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| super::analysis_evidence_is_valid(state, run.dataset_id, analysis))
+}
+
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
-    active_soa(&state.simulation).is_some()
+    active_soa(&state.simulation, active_evidence_is_valid(state)).is_some()
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -51,7 +65,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Select a dataset with retained SOA evidence");
         return;
     };
-    let Some((analysis, evaluations, violation_count)) = active_soa(&state.simulation) else {
+    let evidence_is_valid = active_evidence_is_valid(state);
+    let Some((analysis, evaluations, violation_count)) =
+        active_soa(&state.simulation, evidence_is_valid)
+    else {
         well_hint(ui, "Select a validated safe-operating-area analysis");
         return;
     };

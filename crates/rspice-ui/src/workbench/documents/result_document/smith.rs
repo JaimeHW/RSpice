@@ -76,6 +76,16 @@ fn trace_is_well_formed(waveform: &crate::state::WaveformData) -> bool {
 }
 
 pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
+    frame_work::note(DatasetWalk::EvidenceValidation);
+    analysis.validate_retained_evidence().is_ok() && structure_is_renderable(analysis)
+}
+
+/// The same question with the retained-evidence verdict left to the caller.
+///
+/// Split out because the per-frame callers — the tab strip's availability
+/// gate and the cache synchronizer — take that verdict from the workspace
+/// memo instead of walking every retained complex sample again.
+pub(super) fn structure_is_renderable(analysis: &crate::state::AnalysisResult) -> bool {
     if !analysis.success
         || !matches!(
             analysis.analysis_type,
@@ -92,10 +102,6 @@ pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) ->
     else {
         return false;
     };
-    frame_work::note(DatasetWalk::EvidenceValidation);
-    if analysis.validate_retained_evidence().is_err() {
-        return false;
-    }
     analysis.waveforms.iter().any(|waveform| {
         let Some(identity) = trace_identity(&waveform.name) else {
             return false;
@@ -130,7 +136,9 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
-    if !analysis_is_renderable(analysis) {
+    if !structure_is_renderable(analysis)
+        || !super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+    {
         state.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;

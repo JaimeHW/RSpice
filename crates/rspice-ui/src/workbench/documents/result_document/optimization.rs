@@ -28,11 +28,34 @@ struct OptimizationView<'a> {
     converged: bool,
 }
 
-fn active_optimization(simulation: &SimulationState) -> Option<OptimizationView<'_>> {
-    optimization_for_analysis(simulation.active_analysis()?)
+fn active_optimization(
+    simulation: &SimulationState,
+    evidence_is_valid: bool,
+) -> Option<OptimizationView<'_>> {
+    optimization_for_analysis(simulation.active_analysis()?, evidence_is_valid)
 }
 
-fn optimization_for_analysis(analysis: &AnalysisResult) -> Option<OptimizationView<'_>> {
+/// The memoized retained-evidence verdict for whichever analysis is active.
+fn active_evidence_is_valid(state: &AppState) -> bool {
+    let Some(run) = state.simulation.active_run() else {
+        return false;
+    };
+    state
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| super::analysis_evidence_is_valid(state, run.dataset_id, analysis))
+}
+
+/// Project the retained optimizer history, given the workspace's memoized
+/// verdict on whether that history's evidence validated.
+///
+/// The verdict is passed in rather than taken here because the tab strip
+/// calls this on every frame to decide whether to offer the sheet, and
+/// `validate_retained_evidence` walks every retained sample.
+fn optimization_for_analysis(
+    analysis: &AnalysisResult,
+    evidence_is_valid: bool,
+) -> Option<OptimizationView<'_>> {
     frame_work::note(DatasetWalk::OptimizationView);
     let Some(AnalysisResultFamilyMetadata::Optimization {
         iterations,
@@ -46,10 +69,7 @@ fn optimization_for_analysis(analysis: &AnalysisResult) -> Option<OptimizationVi
     if !analysis.success
         || analysis.analysis_type != AnalysisType::Optimization
         || iterations.is_empty()
-        || {
-            frame_work::note(DatasetWalk::EvidenceValidation);
-            analysis.validate_retained_evidence().is_err()
-        }
+        || !evidence_is_valid
     {
         return None;
     }
@@ -105,7 +125,9 @@ fn optimization_for_analysis(analysis: &AnalysisResult) -> Option<OptimizationVi
 /// Serialize the validated candidate history that the optimization sheet
 /// draws, including the terminal optimum metadata.
 pub(crate) fn export_csv(analysis: &AnalysisResult) -> Option<super::ResultSheetCsv> {
-    let view = optimization_for_analysis(analysis)?;
+    // Export is not a frame: it revalidates rather than trusting a memo
+    // whose dataset it was not handed.
+    let view = optimization_for_analysis(analysis, analysis.validate_retained_evidence().is_ok())?;
     let mut contents = String::from("field,value\n");
     contents.push_str(&format!("converged,{}\n", view.converged));
     contents.push_str(&format!("best_cost,{:.17e}\n", view.best_cost));
@@ -150,7 +172,7 @@ fn nearest_candidate_index(iterations: &[f64], requested: f64) -> Option<usize> 
 }
 
 pub(super) fn active_metadata_is_valid(state: &AppState) -> bool {
-    active_optimization(&state.simulation).is_some()
+    active_optimization(&state.simulation, active_evidence_is_valid(state)).is_some()
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -158,7 +180,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Select a dataset with retained optimization evidence");
         return;
     };
-    let Some(view) = active_optimization(&state.simulation) else {
+    let evidence_is_valid = active_evidence_is_valid(state);
+    let Some(view) = active_optimization(&state.simulation, evidence_is_valid) else {
         well_hint(
             ui,
             "Select a validated optimization analysis with a retained cost history",

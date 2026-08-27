@@ -166,6 +166,7 @@ pub(crate) use waves::{
 
 pub(crate) use waves::toggle_visibility;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
@@ -2104,14 +2105,31 @@ pub(crate) struct DigitalEventSelection {
 
 /// Whether one analysis' retained evidence passes its own validator.
 ///
-/// Memoized per analysis because the answer walks the whole payload and only
-/// changes when the datasets do; `prepare_viewer_state` clears the memo on a
-/// new data version.
+/// This is the workspace's single owner of that question. The validator walks
+/// every retained sample of every waveform, and the sheet bar, the tab strip's
+/// availability gates and the typed-evidence viewers all asked it on every
+/// frame — so the same million-sample walk happened several times a frame for
+/// a reader who was not touching anything.
+///
+/// Memoized rather than threaded through because the answer is a property of
+/// an immutable dataset: it can only change when the datasets do, and
+/// `prepare_viewer_state` clears the memo on a new data version. The cell is
+/// what lets the gates keep their `&AppState` signatures — a memo whose price
+/// of admission was `&mut` everywhere would not have been adopted by them.
 pub(crate) fn retained_evidence_is_valid(
-    state: &mut AppState,
+    state: &AppState,
     analysis: AnalysisPresentationKey,
 ) -> bool {
-    if let Some(known) = state.ui.results.retained_evidence_validity.get(&analysis) {
+    // The data version is part of the key, so a generation the memo has not
+    // seen misses by construction rather than by remembering to be cleared.
+    let key = (state.simulation.data_version, analysis);
+    if let Some(known) = state
+        .ui
+        .results
+        .retained_evidence_validity
+        .borrow()
+        .get(&key)
+    {
         return *known;
     }
     let valid = state
@@ -2127,8 +2145,18 @@ pub(crate) fn retained_evidence_is_valid(
         .ui
         .results
         .retained_evidence_validity
-        .insert(analysis, valid);
+        .borrow_mut()
+        .insert(key, valid);
     valid
+}
+
+/// The same question for an analysis already in hand, resolved to its key.
+pub(super) fn analysis_evidence_is_valid(
+    state: &AppState,
+    dataset_id: DatasetId,
+    analysis: &AnalysisResult,
+) -> bool {
+    retained_evidence_is_valid(state, AnalysisPresentationKey::new(dataset_id, analysis))
 }
 
 /// The marker tool: armed, a plot click drops a marker on the nearest
@@ -2404,9 +2432,9 @@ pub struct ResultsState {
     pub(super) selected_digital_event: Option<DigitalEventSelection>,
     /// Merged event order for the analysis the EVENTS sheet last drew.
     pub(super) event_order_cache: Option<EventOrderCache>,
-    /// Memoized retained-evidence verdict per analysis; see
+    /// Memoized retained-evidence verdict per (data version, analysis); see
     /// [`retained_evidence_is_valid`].
-    pub(super) retained_evidence_validity: HashMap<AnalysisPresentationKey, bool>,
+    pub(super) retained_evidence_validity: RefCell<HashMap<(u64, AnalysisPresentationKey), bool>>,
     /// Row/column selection for the TABLE viewer.
     pub table: table::TableView,
     /// Last row count the table rendered, as its footer states it. Written
@@ -4387,7 +4415,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         results.rf_pin.clear();
         // Both are derived from the retained datasets, so a new version makes
         // them answers to an old question.
-        results.retained_evidence_validity.clear();
+        results.retained_evidence_validity.get_mut().clear();
         results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
@@ -5320,6 +5348,23 @@ pub(crate) fn incomplete_evidence_reason(analysis: &AnalysisResult) -> Option<&'
     None
 }
 
+/// The same question, answered from the memo instead of the validator.
+///
+/// Identical verdict to [`incomplete_evidence_reason`]; the sheet bar asks it
+/// every frame, and on the wave stack it asks for every analysis of the run,
+/// so this is the caller that must not walk the samples.
+fn memoized_incomplete_evidence_reason(
+    state: &AppState,
+    dataset_id: DatasetId,
+    analysis: &AnalysisResult,
+) -> Option<&'static str> {
+    if !analysis.success {
+        return Some("the run did not complete — these samples stop where it failed");
+    }
+    (!analysis_evidence_is_valid(state, dataset_id, analysis))
+        .then_some("the retained evidence failed validation")
+}
+
 /// The same question for whichever analysis the active sheet is speaking for.
 fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
     let run = state.simulation.active_run()?;
@@ -5327,9 +5372,11 @@ fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
         // The stack draws every analysis of the run at once, so the bar
         // speaks for the run: one failed strip makes the sheet's evidence
         // incomplete even when the strip beside it converged.
-        return run.analyses.iter().find_map(incomplete_evidence_reason);
+        return run.analyses.iter().find_map(|analysis| {
+            memoized_incomplete_evidence_reason(state, run.dataset_id, analysis)
+        });
     }
-    incomplete_evidence_reason(state.simulation.active_analysis()?)
+    memoized_incomplete_evidence_reason(state, run.dataset_id, state.simulation.active_analysis()?)
 }
 
 fn sheet_purpose(state: &AppState) -> String {
@@ -5722,11 +5769,12 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         }
         ResultViewer::Nyquist => specialized_availability(state, ActiveViewer::Nyquist),
         ResultViewer::Smith => {
-            if state
-                .simulation
-                .active_analysis()
-                .is_some_and(smith::analysis_is_renderable)
-            {
+            if active_run.is_some_and(|run| {
+                state.simulation.active_analysis().is_some_and(|analysis| {
+                    smith::structure_is_renderable(analysis)
+                        && analysis_evidence_is_valid(state, run.dataset_id, analysis)
+                })
+            }) {
                 ViewerAvailability::available(
                     "Retained S-parameter coefficients and per-port reference impedances are available",
                 )

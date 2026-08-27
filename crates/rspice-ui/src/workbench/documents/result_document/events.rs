@@ -227,7 +227,8 @@ pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
             .ui
             .results
             .retained_evidence_validity
-            .get(&key)
+            .borrow()
+            .get(&(state.simulation.data_version, key))
             .copied()
             .unwrap_or(true)
 }

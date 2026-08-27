@@ -303,6 +303,45 @@ fn a_new_data_version_rebuilds_every_memo() {
     }
 }
 
+/// The retained-evidence verdict is a memo, not a snapshot.
+///
+/// Corrupting the evidence and declaring a new dataset generation has to
+/// close every gate that reads it — the sheet bar's caution and the SOA
+/// availability gate both come from the one memo, so both must move.
+#[test]
+fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
+    let mut state = state_for(ResultViewer::Soa);
+    state.ui.results.viewer = ResultViewer::Soa;
+    assert!(soa::active_payload_is_valid(&state));
+    let purpose = super::super::sheet_purpose(&state);
+    assert!(
+        !purpose.contains("failed validation"),
+        "the fixture starts out valid, but the bar says: {purpose}"
+    );
+
+    // A retained waveform with more coordinates than values is exactly what
+    // `validate_retained_evidence` exists to refuse.
+    let analysis = state.simulation.runs[0]
+        .analyses
+        .iter_mut()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Soa)
+        .expect("the fixture retains an SOA analysis");
+    let mut shortened = analysis.waveforms[0].y.as_ref().clone();
+    shortened.pop();
+    analysis.waveforms[0].y = std::sync::Arc::new(shortened);
+    state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+    assert!(
+        !soa::active_payload_is_valid(&state),
+        "the SOA gate served a verdict from the previous dataset generation"
+    );
+    let purpose = super::super::sheet_purpose(&state);
+    assert!(
+        purpose.contains("the retained evidence failed validation"),
+        "the sheet bar kept the old verdict: {purpose}"
+    );
+}
+
 /// Report the counts rather than asserting on them, for tuning the fixes.
 /// Not a gate: `--ignored` keeps it out of the ordinary run.
 #[test]
