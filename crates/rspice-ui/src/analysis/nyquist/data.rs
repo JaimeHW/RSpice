@@ -7,7 +7,7 @@
 //! and winds that. Counting the measured branch alone drops the mirror's
 //! contribution and never closes, which is not a winding number at all.
 //!
-//! Two conventions the rest of the viewer depends on:
+//! Three conventions the rest of the viewer depends on:
 //!
 //! - Encirclements are **clockwise-positive**, the sign the criterion
 //!   Z = N + P is written in.
