@@ -1039,9 +1039,18 @@ pub(super) fn parse_save_command(
                             message: format!(".PRINT {upper}= requires a value"),
                         });
                     }
+                    let value_start = value.span.start;
+                    let mut value_end = value.span.end;
                     stream.advance();
+                    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+                        && stream.peek().span.start == value_end
+                    {
+                        value_end = stream.advance().span.end;
+                    }
+                    let authored_value =
+                        authored_slice(value_start, value_end, value.lexeme.as_str());
                     if upper == "DELIMITER" {
-                        match xyce_print_delimiter_from_token(&value.kind) {
+                        match xyce_print_delimiter_from_value(&value.kind, &authored_value) {
                             Some(parsed) => delimiter = parsed,
                             None => {
                                 delimiter = PrintDelimiter::Whitespace;
@@ -1316,18 +1325,25 @@ fn is_xyce_print_option_name(name: &str) -> bool {
     )
 }
 
-fn xyce_print_delimiter_from_token(token: &TokenKind) -> Option<PrintDelimiter> {
-    match token {
-        TokenKind::Ident(value) if value.eq_ignore_ascii_case("TAB") => Some(PrintDelimiter::Tab),
-        TokenKind::Ident(value) if value.eq_ignore_ascii_case("COMMA") => {
-            Some(PrintDelimiter::Comma)
-        }
-        TokenKind::Ident(value) if value.eq_ignore_ascii_case("COLON") => {
-            Some(PrintDelimiter::Colon)
-        }
-        TokenKind::Ident(value) if value.eq_ignore_ascii_case("SEMICOLON") => {
-            Some(PrintDelimiter::Semicolon)
-        }
+fn xyce_print_delimiter_from_value(
+    first_token: &TokenKind,
+    authored_value: &str,
+) -> Option<PrintDelimiter> {
+    let keyword = authored_value.trim_matches('"');
+    if keyword.eq_ignore_ascii_case("TAB") {
+        return Some(PrintDelimiter::Tab);
+    }
+    if keyword.eq_ignore_ascii_case("COMMA") || keyword == "," {
+        return Some(PrintDelimiter::Comma);
+    }
+    if keyword.eq_ignore_ascii_case("COLON") || keyword == ":" {
+        return Some(PrintDelimiter::Colon);
+    }
+    if keyword.eq_ignore_ascii_case("SEMICOLON") || keyword == ";" {
+        return Some(PrintDelimiter::Semicolon);
+    }
+
+    match first_token {
         TokenKind::StringLit(value) if !value.is_empty() => {
             Some(PrintDelimiter::Custom(value.clone()))
         }
@@ -5696,6 +5712,29 @@ mod tests {
         assert_eq!(request.dependencies.len(), 1);
         assert!(!format!("{:?}", request.dependencies).contains("MISSING"));
         assert!(!format!("{:?}", request.dependencies).contains("NOSUCH"));
+    }
+
+    #[test]
+    fn unquoted_punctuated_print_metadata_is_consumed_as_one_authored_field() {
+        let netlist = Netlist::parse_validated(
+            "punctuated print metadata\n\
+             V1 b 0 1\n\
+             .PRINT AC FILE=ac-sens-step-gnuplot.cir.FD.SENS.splot.prn FORMAT=SPLOT VR(b)\n\
+             .AC DEC 2 1 10\n\
+             .END\n",
+        )
+        .expect("an unquoted Xyce FILE value may contain punctuation without becoming probes");
+
+        let [request] = netlist.output_requests.as_slice() else {
+            panic!("expected one typed output request");
+        };
+        assert_eq!(request.operands.len(), 1);
+        assert_eq!(request.operands[0], "VR(b)");
+        assert_eq!(request.dependencies.len(), 1);
+        assert_eq!(
+            netlist.saves.signals,
+            vec![SaveSignal::Raw("VR(b)".to_string())]
+        );
     }
 
     #[test]

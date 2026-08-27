@@ -384,11 +384,15 @@ impl OutputRequest {
         analysis: Option<OutputAnalysisKind>,
         operands: Vec<OutputOperand>,
     ) -> Self {
-        let source = operands
+        let dependencies = operands
             .iter()
-            .map(|operand| operand.authored.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+            .flat_map(|operand| match &operand.kind {
+                OutputOperandKind::Probe(_) => extract_output_dependencies(&operand.authored),
+                OutputOperandKind::Expression { body } => {
+                    extract_output_dependencies_with_context(body, true)
+                }
+            })
+            .collect();
         let expressions = operands
             .iter()
             .filter_map(|operand| match &operand.kind {
@@ -410,7 +414,7 @@ impl OutputRequest {
             operands,
             operand_kinds,
             expressions,
-            dependencies: extract_output_dependencies(&source),
+            dependencies,
         }
     }
 }
@@ -3239,6 +3243,44 @@ R1 1 0 1k\n\
             request.operand_kinds[3],
             OutputOperandKind::Expression { .. }
         ));
+    }
+
+    #[test]
+    fn derived_print_accessor_dependencies_are_validated_once_in_expression_context() {
+        let source = "derived accessor dependencies\n\
+V1 A 0 AC 1\n\
+R1 A B 1\n\
+R2 B 0 2\n\
+.AC DEC 10 1 1e5\n\
+.PRINT AC V(A,C) VM(D,A)\n\
+.END\n";
+        let netlist = Netlist::parse(source).expect("derived accessor PRINT parses");
+        let request = netlist
+            .output_requests
+            .iter()
+            .find(|request| request.directive == OutputDirectiveKind::Print)
+            .expect("PRINT request retained");
+        let missing_d = request
+            .dependencies
+            .iter()
+            .filter(|dependency| dependency.symbol.eq_ignore_ascii_case("D"))
+            .collect::<Vec<_>>();
+        assert_eq!(missing_d.len(), 1);
+        assert!(missing_d[0].expression);
+
+        let error =
+            validate_output_symbols(&netlist).expect_err("missing C and D must fail validation");
+        let ParseError::OutputSymbolValidation(error) = error else {
+            panic!("wrong validation error: {error:?}");
+        };
+        assert_eq!(
+            error
+                .unresolved
+                .iter()
+                .map(|dependency| dependency.symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["C", "D"]
+        );
     }
 
     #[test]
