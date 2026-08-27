@@ -197,6 +197,9 @@ pub(super) struct StripModel {
     /// hue — one chip per signal, all runs).
     signal_trace_count: usize,
     traces: Vec<StripTrace>,
+    /// Whether the sample grid is finite and non-decreasing, which is what
+    /// lets a cursor be mapped to a retained sample by bisection.
+    grid_ascending: bool,
     /// The strip's shared X extent over its visible traces.
     ///
     /// Resolved while the model is built rather than on demand: the axis,
@@ -586,6 +589,12 @@ impl StripModel {
     /// strip was solved against.
     pub(super) fn sample_grid(&self) -> Option<&[f64]> {
         self.traces.first().map(|trace| trace.x.as_slice())
+    }
+
+    /// Whether [`Self::sample_grid`] can be bisected; see
+    /// [`extent::grid_is_ascending`].
+    pub(super) const fn grid_is_ascending(&self) -> bool {
+        self.grid_ascending
     }
 
     /// Column heading for the X axis ("t · s").
@@ -1263,8 +1272,10 @@ pub(super) fn build_models(
             phase_continuous,
             signal_trace_count,
             traces,
+            grid_ascending: false,
             x_range: None,
         };
+        model.grid_ascending = extent::grid_is_ascending(&model);
         model.x_range = extent::x_range(&model);
         models.push(model);
     }

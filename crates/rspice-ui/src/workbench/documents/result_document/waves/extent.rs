@@ -54,6 +54,23 @@ pub(super) fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     }
 }
 
+/// Whether a strip's sample grid is finite and non-decreasing.
+///
+/// Resolved with the model because it is the precondition for answering
+/// "which retained sample is this cursor on" by bisection instead of by
+/// reading every coordinate. A grid that fails it keeps the linear scan;
+/// a parametric sweep is under no obligation to be monotonic.
+pub(super) fn grid_is_ascending(model: &StripModel) -> bool {
+    model.sample_grid().is_some_and(|grid| {
+        let mut previous = f64::NEG_INFINITY;
+        grid.iter().all(|value| {
+            let ordered = value.is_finite() && *value >= previous;
+            previous = *value;
+            ordered
+        })
+    })
+}
+
 #[derive(Debug)]
 pub(super) struct FamilyEnvelopeSeries {
     pub(super) x: Vec<f64>,

@@ -18,6 +18,9 @@ use std::sync::Arc;
 pub(super) struct ViewPlans {
     /// The dataset manifest projection; see [`super::manifest`].
     pub(super) manifest: Option<Arc<super::manifest::ManifestPlan>>,
+    /// Serialized exact evidence for the selected typed artifact; see
+    /// [`super::table`].
+    pub(super) artifact: Option<Arc<super::table::ArtifactTextPlan>>,
     /// Family envelopes for the drawn wave pane; see [`super::waves`].
     pub(super) envelope: Option<Arc<super::waves::FamilyEnvelopePlan>>,
     /// The operating-point sheet's row plan; see [`super::op_inspector`].

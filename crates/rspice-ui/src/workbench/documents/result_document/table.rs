@@ -273,21 +273,74 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
     true
 }
 
+/// The exact serialized evidence behind one selected typed artifact, with
+/// the byte range of each of its lines.
+///
+/// Serializing it walks the whole retained payload and validates it first;
+/// splitting the result into lines allocates one slice per record. The sheet
+/// did both on every frame to draw the twenty lines a viewport holds.
+#[derive(Debug)]
+pub(super) struct ArtifactTextPlan {
+    version: u64,
+    key: super::ResultArtifactPresentationKey,
+    text: Result<String, String>,
+    lines: Vec<(usize, usize)>,
+}
+
+/// Serialize the selected artifact once per (dataset generation, selection).
+fn artifact_text(
+    state: &mut AppState,
+    key: &super::ResultArtifactPresentationKey,
+) -> Option<std::sync::Arc<ArtifactTextPlan>> {
+    let version = state.simulation.data_version;
+    if let Some(plan) = state.ui.results.plans.artifact.as_ref()
+        && plan.version == version
+        && &plan.key == key
+    {
+        return Some(std::sync::Arc::clone(plan));
+    }
+    let text = exact_result_artifact_text(key, &state.simulation.runs);
+    let lines = text.as_ref().map_or_else(
+        |_| Vec::new(),
+        |text| {
+            text.lines()
+                .map(|line| {
+                    // `lines` yields slices of `text`, so their offsets are
+                    // exactly where each record starts and ends.
+                    let start = line.as_ptr() as usize - text.as_ptr() as usize;
+                    (start, start + line.len())
+                })
+                .collect()
+        },
+    );
+    let built = std::sync::Arc::new(ArtifactTextPlan {
+        version,
+        key: key.clone(),
+        text,
+        lines,
+    });
+    state.ui.results.plans.artifact = Some(std::sync::Arc::clone(&built));
+    Some(built)
+}
+
 /// Render the exact shared adapter used by clipboard and file export for a
 /// selected typed Data Browser artifact. The evidence is line-virtualized and
 /// intentionally not coerced into waveform samples or silently resampled.
-fn show_selected_result_artifact_table(ui: &mut Ui, state: &AppState) -> bool {
+fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut AppState) -> bool {
     let Some(key) = state.ui.results.selected_result_artifact.clone() else {
         return false;
     };
-    let exact = match exact_result_artifact_text(&key, &state.simulation.runs) {
+    let Some(plan) = artifact_text(state, &key) else {
+        return false;
+    };
+    let exact = match plan.text.as_ref() {
         Ok(exact) => exact,
         Err(message) => {
-            well_hint(ui, &message);
+            well_hint(ui, message);
             return true;
         }
     };
-    let lines = exact.lines().collect::<Vec<_>>();
+    let lines = plan.lines.as_slice();
     let t = Tokens::get(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         ui.label(
@@ -312,7 +365,8 @@ fn show_selected_result_artifact_table(ui: &mut Ui, state: &AppState) -> bool {
         .body(|body| {
             body.rows(ROW_H, lines.len(), |mut row| {
                 let line_number = row.index() + 1;
-                let line = lines[row.index()];
+                let (start, end) = lines[row.index()];
+                let line = &exact[start..end];
                 for (heading, text, color) in [
                     ("Line", line_number.to_string(), t.color.text_faint),
                     ("Exact retained evidence", line.to_owned(), t.color.text),
@@ -484,7 +538,7 @@ fn selected_rows(model: &StripModel, view: &TableView, cursor: Option<f64>) -> R
     // run decimated and then cropped.
     let (start, end) = match cursor.filter(|_| view.around_cursor) {
         Some(x) => {
-            let centre = nearest_sample_index(grid, x).unwrap_or(0);
+            let centre = nearest_sample_index(grid, x, model.grid_is_ascending()).unwrap_or(0);
             (
                 centre.saturating_sub(CURSOR_SPAN),
                 (centre + CURSOR_SPAN + 1).min(retained),
@@ -520,13 +574,48 @@ fn resolved_columns(
     }
 }
 
-fn nearest_sample_index(grid: &[f64], x: f64) -> Option<usize> {
-    frame_work::note(DatasetWalk::TableCursorScan);
-    grid.iter()
-        .enumerate()
-        .filter(|(_, value)| value.is_finite())
-        .min_by(|(_, left), (_, right)| (**left - x).abs().total_cmp(&(**right - x).abs()))
-        .map(|(index, _)| index)
+/// The retained sample a cursor sits on.
+///
+/// A million-point transient makes this the difference between a bisection
+/// and a million comparisons, three times a frame, for a cursor that has not
+/// moved. `ascending` is the strip's own verdict on its grid, resolved when
+/// the model was built; a grid it cannot vouch for keeps the scan, because a
+/// parametric sweep is under no obligation to be monotonic.
+fn nearest_sample_index(grid: &[f64], x: f64, ascending: bool) -> Option<usize> {
+    if !ascending {
+        frame_work::note(DatasetWalk::TableCursorScan);
+        return grid
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| value.is_finite())
+            .min_by(|(_, left), (_, right)| (**left - x).abs().total_cmp(&(**right - x).abs()))
+            .map(|(index, _)| index);
+    }
+    if grid.is_empty() {
+        return None;
+    }
+    // The first sample at or past the cursor, and the last one before it:
+    // the nearest retained sample is one of the two. An event history
+    // retains repeated coordinates, so each candidate is resolved to the
+    // *first* index carrying its value — the scan reported the first of
+    // several equally near samples, and so must this.
+    let at_or_after = grid.partition_point(|value| *value < x);
+    let before = at_or_after
+        .checked_sub(1)
+        .map(|last| grid.partition_point(|value| *value < grid[last]));
+    match (before, grid.get(at_or_after)) {
+        (None, Some(_)) => Some(at_or_after),
+        (Some(before), None) => Some(before),
+        (Some(before), Some(after)) => {
+            // Ties go to the lower index, as the scan's `min_by` did.
+            Some(if (x - grid[before]).abs() <= (*after - x).abs() {
+                before
+            } else {
+                at_or_after
+            })
+        }
+        (None, None) => None,
+    }
 }
 
 const fn table_width(column_count: usize) -> f32 {
@@ -631,14 +720,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let viewport_width = ui.available_width().max(1.0);
     let viewport_height = ui.available_height().max(HEADER_H + ROW_H);
     let grid = model.sample_grid().unwrap_or_default();
-    let cursor_a_row = cursor.and_then(|x| nearest_sample_index(grid, x));
+    let ascending = model.grid_is_ascending();
+    let cursor_a_row = cursor.and_then(|x| nearest_sample_index(grid, x, ascending));
     let cursor_b_row = if state.ui.results.cursor_strip == Some(model.analysis_index()) {
         state
             .ui
             .results
             .cursors
             .b
-            .and_then(|x| nearest_sample_index(grid, x))
+            .and_then(|x| nearest_sample_index(grid, x, ascending))
     } else {
         None
     };
@@ -1181,9 +1271,53 @@ mod tests {
     #[test]
     fn nearest_sample_uses_the_exact_retained_grid() {
         let grid = [0.0, 1.0e-6, 2.5e-6, 9.0e-6];
-        assert_eq!(nearest_sample_index(&grid, 2.4e-6), Some(2));
-        assert_eq!(nearest_sample_index(&grid, 8.0e-6), Some(3));
-        assert_eq!(nearest_sample_index(&[], 1.0), None);
+        for ascending in [false, true] {
+            assert_eq!(nearest_sample_index(&grid, 2.4e-6, ascending), Some(2));
+            assert_eq!(nearest_sample_index(&grid, 8.0e-6, ascending), Some(3));
+            assert_eq!(nearest_sample_index(&[], 1.0, ascending), None);
+        }
+    }
+
+    /// Bisection replaced a scan, so it has to answer identically — for every
+    /// cursor position, including the ties and the ends where an off-by-one
+    /// would silently move the reader's row.
+    #[test]
+    fn bisecting_the_grid_names_the_same_sample_the_scan_did() {
+        let grids: [&[f64]; 5] = [
+            &[0.0, 1.0e-6, 2.5e-6, 9.0e-6],
+            // Ties either side: the scan kept the first minimum.
+            &[0.0, 2.0, 4.0, 6.0],
+            // Repeated coordinates, which an event history retains.
+            &[0.0, 1.0, 1.0, 1.0, 3.0],
+            &[5.0],
+            &[],
+        ];
+        for grid in grids {
+            let mut probes = vec![f64::NEG_INFINITY, -1.0, 0.5, 1.0, 3.0, 1.0e9];
+            probes.extend(grid.iter().flat_map(|value| {
+                [
+                    *value - 1.0,
+                    *value,
+                    *value + 1.0,
+                    value.midpoint(*value + 2.0),
+                ]
+            }));
+            for probe in probes {
+                assert_eq!(
+                    nearest_sample_index(grid, probe, true),
+                    nearest_sample_index(grid, probe, false),
+                    "grid {grid:?} at {probe}"
+                );
+            }
+        }
+    }
+
+    /// A grid the strip cannot vouch for keeps the scan. Bisecting a
+    /// non-monotonic sweep would name a sample that is not the nearest one.
+    #[test]
+    fn a_non_monotonic_grid_is_not_bisected() {
+        let grid = [0.0, 9.0, 1.0, 8.0];
+        assert_eq!(nearest_sample_index(&grid, 1.1, false), Some(2));
     }
 
     #[test]

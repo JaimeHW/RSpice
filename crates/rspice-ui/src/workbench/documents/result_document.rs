@@ -546,6 +546,7 @@ fn validate_result_waveform_vectors(waveform: &WaveformData) -> Result<(), Strin
 }
 
 fn validate_exact_analysis_evidence(analysis: &AnalysisResult) -> Result<(), String> {
+    frame_work::note(frame_work::DatasetWalk::EvidenceValidation);
     analysis.validate_retained_evidence().map_err(|error| {
         format!(
             "The selected analysis failed retained-evidence verification; exact numeric access is quarantined: {error}"

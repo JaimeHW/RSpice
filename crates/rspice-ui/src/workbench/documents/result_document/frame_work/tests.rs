@@ -303,6 +303,27 @@ fn a_new_data_version_rebuilds_every_memo() {
     }
 }
 
+/// Around-cursor mode maps two cursors and a window centre onto the retained
+/// grid on every frame. On a million-sample transient that was three scans of
+/// the whole grid per frame, for a cursor the reader had already placed.
+#[test]
+fn the_table_maps_a_cursor_without_scanning_the_grid() {
+    let mut state = state_for(ResultViewer::Table);
+    state.ui.results.table.around_cursor = true;
+    state.ui.results.cursors.place(1.0e-4);
+    state.ui.results.cursors.place(2.0e-4);
+    state.ui.results.cursor_strip = Some(0);
+
+    let work = steady_state_work(&mut state, |ui, state| {
+        show_surface(ResultViewer::Table, ui, state);
+    });
+    assert_eq!(
+        work.get(DatasetWalk::TableCursorScan),
+        0,
+        "the table scanned the retained grid to place a cursor that had not moved"
+    );
+}
+
 /// The retained-evidence verdict is a memo, not a snapshot.
 ///
 /// Corrupting the evidence and declaring a new dataset generation has to
