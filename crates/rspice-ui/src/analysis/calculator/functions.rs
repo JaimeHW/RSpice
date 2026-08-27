@@ -819,7 +819,11 @@ fn settling(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     // toward the wrong edge and reports the entry late.
     let departure = y[before] - settled;
     let arrival = y[after] - settled;
-    let band_edge = if departure > 0.0 { tolerance } else { -tolerance };
+    let band_edge = if departure > 0.0 {
+        tolerance
+    } else {
+        -tolerance
+    };
     let travel = arrival - departure;
     // |departure| > tolerance >= |arrival|, so the two deviations differ and
     // this cannot divide by zero; a duplicated timepoint gives x[before].
