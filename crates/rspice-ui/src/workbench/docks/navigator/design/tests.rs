@@ -1268,6 +1268,15 @@ impl NavigatorPanel {
         self.focus.as_deref()
     }
 
+    /// Every run the last pass painted, one to a line.
+    fn painted(&self) -> String {
+        self.runs
+            .iter()
+            .map(|(run, _, _)| run.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Whether the panel left `key` for whatever stands behind it.
     fn survived(&self, key: egui::Key) -> bool {
         self.survived.contains(&key)
@@ -1787,6 +1796,62 @@ fn the_rail_claims_the_arrows_only_while_it_holds_the_keyboard() {
     assert!(
         panel.survived(egui::Key::Escape),
         "and nothing else: Escape goes on meaning put the tool away"
+    );
+}
+
+/// The rail stands down while a row's menu is open.
+///
+/// The object menu is raised from the same rows this traversal walks, and a
+/// keyboard-raised one is anchored to the row it came from — on every frame it
+/// stays open, not only the frame that opened it. A rail that went on
+/// answering the arrows would scroll that row, and the menu pinned to it, out
+/// from under the reader looking at it. So the press is left alone, which is
+/// the guard the canvas already keeps over its own object traversal.
+///
+/// Where the keyboard ends up is then egui's to decide, and this says nothing
+/// about it: standing down means standing down.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_open_row_menu_takes_the_arrows_back_from_the_rail() {
+    let mut panel = NavigatorPanel::open(interface_design());
+    panel.focus_filter();
+
+    // Down to a row that carries an object menu.
+    let mut landed = false;
+    for _ in 0..40 {
+        panel.press(egui::Key::ArrowDown);
+        if panel.focused() == Some("ALPHA") {
+            landed = true;
+            break;
+        }
+    }
+    assert!(landed, "a port row is reachable by stepping");
+    assert!(
+        !panel.survived(egui::Key::ArrowDown),
+        "and the rail was answering the arrows on the way there"
+    );
+
+    panel.pass(vec![egui::Event::Key {
+        key: egui::Key::F10,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::SHIFT,
+    }]);
+    panel.pass(Vec::new());
+    assert!(
+        panel
+            .painted()
+            .lines()
+            .any(|line| line == "NAVIGATOR OBJECT"),
+        "Shift+F10 raised the focused row's menu: {}",
+        panel.painted()
+    );
+
+    panel.press(egui::Key::ArrowDown);
+    assert!(
+        panel.survived(egui::Key::ArrowDown),
+        "and with the menu up it leaves the press alone"
     );
 }
 

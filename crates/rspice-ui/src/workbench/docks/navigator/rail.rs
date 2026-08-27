@@ -187,6 +187,17 @@ pub(super) fn traverse(ui: &mut Ui, enter_rows: bool) -> Option<NavigatorTreeNod
     if rows.is_empty() {
         return None;
     }
+    // A row's context menu is raised from these same rows and anchored to the
+    // one it was raised from, so while one is open the reader is in the menu
+    // and the arrows are the menu's — walking the rail behind it would move
+    // the anchor out from under the thing on screen. The canvas guards its own
+    // object traversal the same way.
+    //
+    // Tooltips are not this: egui files them outside the popup registry, so a
+    // row merely being hovered goes on answering the keys.
+    if egui::Popup::is_any_open(ui.ctx()) {
+        return None;
+    }
     let last = rows.len() - 1;
 
     // The filter field consumed the press already; what is left is to land on
