@@ -1655,6 +1655,48 @@ fn the_horizontal_keys_disclose_a_hierarchy_row_and_climb_out_of_it() {
     );
 }
 
+/// Right on an open rail that holds nothing stays where it is.
+///
+/// An open band with no rows under it is ordinary — a design that places no
+/// source has one — and stepping to the band after it would be Down wearing
+/// the other key's name, which is how a reader loses their place.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn right_on_an_open_rail_that_holds_nothing_is_not_a_step_down() {
+    let mut panel = NavigatorPanel::open(interface_design());
+    assert_eq!(
+        panel.expanded("Excitations"),
+        Some(true),
+        "the rail is open"
+    );
+    assert!(
+        panel
+            .rows_under("Excitations")
+            .iter()
+            .all(|run| run.to_lowercase().contains("no sources placed")),
+        "and this design placed nothing in it: {:?}",
+        panel.rows_under("Excitations")
+    );
+
+    panel.focus_filter();
+    let mut landed = false;
+    for _ in 0..40 {
+        panel.press(egui::Key::ArrowDown);
+        if panel.focused() == Some("Excitations") {
+            landed = true;
+            break;
+        }
+    }
+    assert!(landed, "the band is reachable by stepping");
+
+    panel.press(egui::Key::ArrowRight);
+    assert_eq!(
+        panel.focused(),
+        Some("Excitations"),
+        "and Right leaves the keyboard on it rather than walking past it"
+    );
+}
+
 /// A step past the fold brings the row it lands on into view.
 ///
 /// Without this the keys move a focus ring the reader cannot see, which is

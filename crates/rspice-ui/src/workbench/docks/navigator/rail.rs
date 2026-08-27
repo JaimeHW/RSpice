@@ -225,11 +225,15 @@ pub(super) fn traverse(ui: &mut Ui, enter_rows: bool) -> Option<NavigatorTreeNod
         // The caret's own semantics, reached from the keyboard: a folded row
         // unfolds, an unfolded one is already showing its children and the
         // press steps onto the first of them, and a leaf answers nothing.
+        //
+        // An unfolded row can still have nothing under it — a rail whose whole
+        // contents were filtered away is open and empty — and stepping to the
+        // row after it there would be a Down wearing the other key's name.
         RailStep::Into => match &rows[current].disclosure {
             Some(disclosure) if !disclosure.unfolded => {
                 return finish(ui, fold(ui, disclosure));
             }
-            Some(_) => Some((current + 1).min(last)),
+            Some(_) => child_of(&rows, current),
             None => None,
         },
         // And its mirror: an unfolded row folds, and anything else climbs to
@@ -295,4 +299,13 @@ fn finish(ui: &Ui, folded: Option<NavigatorTreeNode>) -> Option<NavigatorTreeNod
 fn parent_of(rows: &[RailRow], current: usize) -> Option<usize> {
     let level = rows[current].level;
     rows[..current].iter().rposition(|row| row.level < level)
+}
+
+/// The first row `current` holds, which is the row after it exactly when that
+/// row sits deeper.
+fn child_of(rows: &[RailRow], current: usize) -> Option<usize> {
+    let child = current + 1;
+    rows.get(child)
+        .is_some_and(|row| row.level > rows[current].level)
+        .then_some(child)
 }
