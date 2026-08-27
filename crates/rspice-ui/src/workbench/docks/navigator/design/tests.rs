@@ -3126,11 +3126,13 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
             .and_then(|(_, node)| node.label().map(str::to_owned))
     }
 
-    fn navigator_output(
-        ctx: &egui::Context,
-        app: &mut RSpiceApp,
-        events: Vec<egui::Event>,
-    ) -> egui::FullOutput {
+    let mut app = interface_design();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    // A closure over the app rather than a helper handed it, so the frame
+    // harness costs the whole-application-access ratchet nothing.
+    let mut navigator_output = |events: Vec<egui::Event>| {
         ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -3145,18 +3147,13 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         ui.set_width(260.0);
-                        navigator(ui, app);
+                        navigator(ui, &mut app);
                     });
             },
         )
-    }
-
-    let mut app = interface_design();
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let _ = navigator_output(&ctx, &mut app, Vec::new());
-    let _ = navigator_output(&ctx, &mut app, Vec::new());
+    };
+    let _ = navigator_output(Vec::new());
+    let _ = navigator_output(Vec::new());
 
     let key = |key, modifiers| egui::Event::Key {
         key,
@@ -3169,11 +3166,7 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
     // reaches it.
     let mut landed = false;
     for _ in 0..80 {
-        let output = navigator_output(
-            &ctx,
-            &mut app,
-            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
-        );
+        let output = navigator_output(vec![key(egui::Key::Tab, egui::Modifiers::NONE)]);
         if focused_label(&output).as_deref() == Some("ALPHA") {
             landed = true;
             break;
@@ -3184,14 +3177,10 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
         "a navigator object row must be reachable from the keyboard"
     );
 
-    let _ = navigator_output(
-        &ctx,
-        &mut app,
-        vec![key(egui::Key::F10, egui::Modifiers::SHIFT)],
-    );
+    let _ = navigator_output(vec![key(egui::Key::F10, egui::Modifiers::SHIFT)]);
     // The frame after the opening one is the load-bearing frame: a menu whose
     // anchor only lives on the opening frame is gone by now.
-    let output = navigator_output(&ctx, &mut app, Vec::new());
+    let output = navigator_output(Vec::new());
     let runs = painted_runs(&output);
     let find = run_rect(&runs, "Find references and consumers…").unwrap_or_else(|| {
         panic!(
@@ -3200,7 +3189,7 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
         )
     });
 
-    let _ = navigator_output(&ctx, &mut app, click_events(find.center()));
+    let _ = navigator_output(click_events(find.center()));
     assert_eq!(
         app.state.workbench.navigator_filter(),
         "ALPHA",

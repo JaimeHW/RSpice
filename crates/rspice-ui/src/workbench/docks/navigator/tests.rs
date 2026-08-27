@@ -1256,11 +1256,19 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
         runs
     }
 
-    fn browser_output(
-        ctx: &egui::Context,
-        app: &mut RSpiceApp,
-        events: Vec<egui::Event>,
-    ) -> egui::FullOutput {
+    let mut app = result_navigator_app();
+    let mut values = std::collections::BTreeMap::new();
+    values.insert("settling_time".to_owned(), 0.5);
+    app.state.simulation.runs[0].analyses[0].result_payload =
+        Some(AnalysisResultPayload::ScalarMeasurements { values });
+    assert!(select_result_dataset(&mut app, 0));
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    // A closure over the app rather than a helper handed it, so the frame
+    // harness costs the whole-application-access ratchet nothing.
+    let mut browser_output = |events: Vec<egui::Event>| {
         ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1275,24 +1283,13 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| {
                         ui.set_width(260.0);
-                        super::show(ui, app);
+                        super::show(ui, &mut app);
                     });
             },
         )
-    }
-
-    let mut app = result_navigator_app();
-    let mut values = std::collections::BTreeMap::new();
-    values.insert("settling_time".to_owned(), 0.5);
-    app.state.simulation.runs[0].analyses[0].result_payload =
-        Some(AnalysisResultPayload::ScalarMeasurements { values });
-    assert!(select_result_dataset(&mut app, 0));
-
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let _ = browser_output(&ctx, &mut app, Vec::new());
-    let _ = browser_output(&ctx, &mut app, Vec::new());
+    };
+    let _ = browser_output(Vec::new());
+    let _ = browser_output(Vec::new());
 
     let key = |key, modifiers| egui::Event::Key {
         key,
@@ -1306,11 +1303,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
     // selection half of the row carries the artifact's own name.
     let mut landed = false;
     for _ in 0..80 {
-        let output = browser_output(
-            &ctx,
-            &mut app,
-            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
-        );
+        let output = browser_output(vec![key(egui::Key::Tab, egui::Modifiers::NONE)]);
         if focused_label(&output)
             .as_deref()
             .is_some_and(|label| label.starts_with("Scalar result values"))
@@ -1324,14 +1317,10 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
         "an artifact row must be reachable from the keyboard"
     );
 
-    let _ = browser_output(
-        &ctx,
-        &mut app,
-        vec![key(egui::Key::F10, egui::Modifiers::SHIFT)],
-    );
+    let _ = browser_output(vec![key(egui::Key::F10, egui::Modifiers::SHIFT)]);
     // The frame after the opening one is the load-bearing frame: a menu whose
     // anchor only lives on the opening frame is gone by now.
-    let output = browser_output(&ctx, &mut app, Vec::new());
+    let output = browser_output(Vec::new());
     let runs = painted_runs(&output);
     let copy = runs
         .iter()
@@ -1361,7 +1350,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
             },
         ]
     };
-    let output = browser_output(&ctx, &mut app, click(copy.center()));
+    let output = browser_output(click(copy.center()));
     assert!(
         output.platform_output.commands.iter().any(|command| matches!(
             command,
