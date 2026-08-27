@@ -14,6 +14,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
 
+use std::sync::Arc;
+
 use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
 use super::{AnalysisPresentationKey, OptimizationSelection, panel_note, stat_table, well_hint};
@@ -28,22 +30,99 @@ struct OptimizationView<'a> {
     converged: bool,
 }
 
-fn active_optimization(
-    simulation: &SimulationState,
-    evidence_is_valid: bool,
-) -> Option<OptimizationView<'_>> {
-    optimization_for_analysis(simulation.active_analysis()?, evidence_is_valid)
+/// Where in the retained waveforms the optimizer history actually is.
+///
+/// Finding it verifies every candidate series against the iteration axis and
+/// checks every sample is finite, then searches the history for the exact
+/// retained optimum. That is a walk of the whole payload, and the tab strip
+/// asked for it on every frame to decide whether to offer the sheet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OptimizationIndices {
+    cost: usize,
+    variables: Vec<(String, usize)>,
+    best_index: usize,
 }
 
-/// The memoized retained-evidence verdict for whichever analysis is active.
-fn active_evidence_is_valid(state: &AppState) -> bool {
-    let Some(run) = state.simulation.active_run() else {
-        return false;
+/// The located history for one analysis, or the verdict that there is none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct OptimizationPlan {
+    version: u64,
+    analysis: AnalysisPresentationKey,
+    located: Option<OptimizationIndices>,
+}
+
+/// Locate the active analysis' optimizer history, once per generation.
+///
+/// Behind a cell because the availability gate that calls this every frame
+/// holds only `&AppState`; the answer is a property of immutable evidence, so
+/// the cell hands back the same verdict rather than recomputing it.
+fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
+    let version = state.simulation.data_version;
+    let run = state.simulation.active_run()?;
+    let analysis = state.simulation.active_analysis()?;
+    let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
+    if let Some(plan) = state.ui.results.plans.optimization.borrow().as_ref()
+        && plan.version == version
+        && plan.analysis == analysis_key
+    {
+        return Some(Arc::clone(plan));
+    }
+    let evidence_is_valid = super::analysis_evidence_is_valid(state, run.dataset_id, analysis);
+    let built = Arc::new(OptimizationPlan {
+        version,
+        analysis: analysis_key,
+        located: locate_optimization(analysis, evidence_is_valid),
+    });
+    *state.ui.results.plans.optimization.borrow_mut() = Some(Arc::clone(&built));
+    Some(built)
+}
+
+fn active_optimization<'a>(
+    simulation: &'a SimulationState,
+    plan: Option<&OptimizationPlan>,
+) -> Option<OptimizationView<'a>> {
+    let analysis = simulation.active_analysis()?;
+    view_from(analysis, plan?.located.as_ref()?)
+}
+
+/// Rebuild the borrowed view from a located history. Cheap: one lookup per
+/// design variable, and no walk of any sample.
+fn view_from<'a>(
+    analysis: &'a AnalysisResult,
+    located: &OptimizationIndices,
+) -> Option<OptimizationView<'a>> {
+    let AnalysisResultFamilyMetadata::Optimization {
+        iterations,
+        best_cost,
+        converged,
+        ..
+    } = analysis.family_metadata.as_ref()?
+    else {
+        return None;
     };
-    state
-        .simulation
-        .active_analysis()
-        .is_some_and(|analysis| super::analysis_evidence_is_valid(state, run.dataset_id, analysis))
+    let variables = located
+        .variables
+        .iter()
+        .map(|(name, index)| {
+            let waveform = analysis.waveforms.get(*index)?;
+            Some((
+                waveform
+                    .name
+                    .strip_prefix("OPT_")
+                    .filter(|found| *found == name)?,
+                waveform,
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(OptimizationView {
+        analysis,
+        iterations,
+        cost: analysis.waveforms.get(located.cost)?,
+        variables,
+        best_cost: *best_cost,
+        best_index: located.best_index,
+        converged: *converged,
+    })
 }
 
 /// Project the retained optimizer history, given the workspace's memoized
@@ -56,12 +135,19 @@ fn optimization_for_analysis(
     analysis: &AnalysisResult,
     evidence_is_valid: bool,
 ) -> Option<OptimizationView<'_>> {
+    view_from(analysis, &locate_optimization(analysis, evidence_is_valid)?)
+}
+
+fn locate_optimization(
+    analysis: &AnalysisResult,
+    evidence_is_valid: bool,
+) -> Option<OptimizationIndices> {
     frame_work::note(DatasetWalk::OptimizationView);
     let Some(AnalysisResultFamilyMetadata::Optimization {
         iterations,
         best_cost,
         best_variables,
-        converged,
+        ..
     }) = analysis.family_metadata.as_ref()
     else {
         return None;
@@ -73,22 +159,27 @@ fn optimization_for_analysis(
     {
         return None;
     }
-    let cost = analysis.waveforms.iter().find(|waveform| {
-        waveform.name == "OPT_COST"
-            && waveform.x.as_slice() == iterations
-            && waveform.y.len() == iterations.len()
-            && waveform.y.iter().all(|value| value.is_finite())
-    })?;
+    let (cost_index, cost) = analysis
+        .waveforms
+        .iter()
+        .enumerate()
+        .find(|(_, waveform)| {
+            waveform.name == "OPT_COST"
+                && waveform.x.as_slice() == iterations
+                && waveform.y.len() == iterations.len()
+                && waveform.y.iter().all(|value| value.is_finite())
+        })?;
     let mut variables: Vec<_> = analysis
         .waveforms
         .iter()
-        .filter_map(|waveform| {
+        .enumerate()
+        .filter_map(|(index, waveform)| {
             let name = waveform.name.strip_prefix("OPT_")?;
             (name != "COST"
                 && waveform.x.as_slice() == iterations
                 && waveform.y.len() == iterations.len()
                 && waveform.y.iter().all(|value| value.is_finite()))
-            .then_some((name, waveform))
+            .then_some((name, index, waveform))
         })
         .collect();
     variables.sort_by(|left, right| left.0.cmp(right.0));
@@ -98,27 +189,26 @@ fn optimization_for_analysis(
         || best_variables.keys().any(|name| {
             !variables
                 .iter()
-                .any(|(candidate, _)| *candidate == name.as_str())
+                .any(|(candidate, _, _)| *candidate == name.as_str())
         })
     {
         return None;
     }
     let best_index = (0..iterations.len()).find(|&index| {
         cost.y[index].to_bits() == best_cost.to_bits()
-            && variables.iter().all(|(name, waveform)| {
+            && variables.iter().all(|(name, _, waveform)| {
                 best_variables
                     .get(*name)
                     .is_some_and(|best| waveform.y[index].to_bits() == best.to_bits())
             })
     })?;
-    Some(OptimizationView {
-        analysis,
-        iterations,
-        cost,
-        variables,
-        best_cost: *best_cost,
+    Some(OptimizationIndices {
+        cost: cost_index,
+        variables: variables
+            .into_iter()
+            .map(|(name, index, _)| ((*name).to_owned(), index))
+            .collect(),
         best_index,
-        converged: *converged,
     })
 }
 
@@ -172,7 +262,7 @@ fn nearest_candidate_index(iterations: &[f64], requested: f64) -> Option<usize> 
 }
 
 pub(super) fn active_metadata_is_valid(state: &AppState) -> bool {
-    active_optimization(&state.simulation, active_evidence_is_valid(state)).is_some()
+    active_optimization(&state.simulation, optimization_plan(state).as_deref()).is_some()
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -180,8 +270,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Select a dataset with retained optimization evidence");
         return;
     };
-    let evidence_is_valid = active_evidence_is_valid(state);
-    let Some(view) = active_optimization(&state.simulation, evidence_is_valid) else {
+    let plan = optimization_plan(state);
+    let Some(view) = active_optimization(&state.simulation, plan.as_deref()) else {
         well_hint(
             ui,
             "Select a validated optimization analysis with a retained cost history",
@@ -359,56 +449,59 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     }
                     header.col(|ui| table_header(ui, "DISPOSITION"));
                 })
-                .body(|mut body| {
-                    for (index, iteration) in view.iterations.iter().copied().enumerate() {
+                // Only the candidates the viewport can show. An optimizer run
+                // is thousands of iterations long, and every row here formats
+                // three quantities plus one per design variable.
+                .body(|body| {
+                    body.rows(29.0, view.iterations.len(), |mut row| {
+                        let index = row.index();
+                        let iteration = view.iterations[index];
                         let is_selected = selected.is_some_and(|selection| {
                             selection.analysis == analysis_key && selection.iteration_index == index
                         });
-                        body.row(29.0, |mut row| {
-                            row.set_selected(is_selected);
-                            row.col(|ui| {
-                                if ui
-                                    .selectable_label(
-                                        is_selected,
-                                        RichText::new(format!("{iteration:.9e}")).monospace(),
-                                    )
-                                    .clicked()
-                                {
-                                    requested = Some(OptimizationSelection {
-                                        analysis: analysis_key,
-                                        iteration_index: index,
-                                    });
-                                }
-                            });
-                            row.col(|ui| mono(ui, &format!("{:.17e}", view.cost.y[index])));
-                            row.col(|ui| {
-                                mono(
-                                    ui,
-                                    &format!("{:+.17e}", view.cost.y[index] - view.best_cost),
+                        row.set_selected(is_selected);
+                        row.col(|ui| {
+                            if ui
+                                .selectable_label(
+                                    is_selected,
+                                    RichText::new(format!("{iteration:.9e}")).monospace(),
                                 )
-                            });
-                            for (_, waveform) in &visible_variables {
-                                row.col(|ui| mono(ui, &format!("{:.17e}", waveform.y[index])));
+                                .clicked()
+                            {
+                                requested = Some(OptimizationSelection {
+                                    analysis: analysis_key,
+                                    iteration_index: index,
+                                });
                             }
-                            row.col(|ui| {
-                                if best_index == index {
-                                    outcome_badge(
-                                        ui,
-                                        if index + 1 == view.iterations.len() && view.converged {
-                                            "best · converged"
-                                        } else {
-                                            "best"
-                                        },
-                                        true,
-                                    );
-                                } else if index + 1 == view.iterations.len() {
-                                    outcome_badge(ui, outcome, view.converged);
-                                } else {
-                                    ui.label("evaluated");
-                                }
-                            });
                         });
-                    }
+                        row.col(|ui| mono(ui, &format!("{:.17e}", view.cost.y[index])));
+                        row.col(|ui| {
+                            mono(
+                                ui,
+                                &format!("{:+.17e}", view.cost.y[index] - view.best_cost),
+                            )
+                        });
+                        for (_, waveform) in &visible_variables {
+                            row.col(|ui| mono(ui, &format!("{:.17e}", waveform.y[index])));
+                        }
+                        row.col(|ui| {
+                            if best_index == index {
+                                outcome_badge(
+                                    ui,
+                                    if index + 1 == view.iterations.len() && view.converged {
+                                        "best · converged"
+                                    } else {
+                                        "best"
+                                    },
+                                    true,
+                                );
+                            } else if index + 1 == view.iterations.len() {
+                                outcome_badge(ui, outcome, view.converged);
+                            } else {
+                                ui.label("evaluated");
+                            }
+                        });
+                    });
                 });
         });
     if let Some(selection) = requested {
@@ -600,5 +693,118 @@ mod tests {
     #[test]
     fn convergence_selection_rejects_non_finite_history() {
         assert_eq!(nearest_candidate_index(&[f64::NAN], 1.0), None);
+    }
+
+    /// A retained optimizer run of `iterations` candidates over one variable.
+    fn optimization_state(iterations: usize) -> AppState {
+        use crate::state::SimulationRun;
+
+        let axis: Vec<f64> = (0..iterations).map(|index| index as f64).collect();
+        let cost: Vec<f64> = (0..iterations)
+            .map(|index| 1.0 / (index as f64 + 1.0))
+            .collect();
+        let gain: Vec<f64> = (0..iterations).map(|index| index as f64 * 0.5).collect();
+        let best_cost = cost[iterations - 1];
+        let best_gain = gain[iterations - 1];
+        let analysis = AnalysisResult::new(1, AnalysisType::Optimization, "OPT")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                iterations: axis.clone(),
+                best_cost,
+                best_variables: BTreeMap::from([("GAIN".to_owned(), best_gain)]),
+                converged: true,
+            })
+            .with_waveforms(vec![
+                WaveformData::new("OPT_COST", axis.clone(), cost, "#0af"),
+                WaveformData::new("OPT_GAIN", axis, gain, "#fa0"),
+            ]);
+        let mut run = SimulationRun::new(5);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state.simulation.active_analysis_idx = Some(0);
+        state
+    }
+
+    /// Locating the history verifies every candidate series against the
+    /// iteration axis, so it happens once per dataset generation — and has to
+    /// happen again when that generation moves.
+    #[test]
+    fn the_history_is_located_once_per_dataset_generation() {
+        let state = optimization_state(64);
+        let first = optimization_plan(&state).expect("a located optimizer history");
+        assert!(first.located.is_some());
+        let again = optimization_plan(&state).expect("a located optimizer history");
+        assert!(Arc::ptr_eq(&first, &again));
+
+        // The projection through the memo is the projection it replaced.
+        let analysis = &state.simulation.runs[0].analyses[0];
+        let direct = optimization_for_analysis(analysis, true).expect("a direct projection");
+        let memoized =
+            active_optimization(&state.simulation, Some(&first)).expect("a memoized projection");
+        assert_eq!(memoized.best_index, direct.best_index);
+        assert_eq!(memoized.best_cost, direct.best_cost);
+        assert_eq!(
+            memoized
+                .variables
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            direct
+                .variables
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>()
+        );
+
+        let mut state = state;
+        state.simulation.runs[0].analyses[0]
+            .waveforms
+            .retain(|waveform| waveform.name != "OPT_GAIN");
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        let after = optimization_plan(&state).expect("a plan for the new generation");
+        assert!(
+            after.located.is_none(),
+            "the sheet offered a history the new dataset generation no longer retains"
+        );
+        assert!(!active_metadata_is_valid(&state));
+    }
+
+    /// The candidate table lays out what its viewport shows, not one row per
+    /// retained iteration.
+    #[test]
+    fn the_candidate_table_lays_out_only_the_rows_the_viewport_shows() {
+        let mut state = optimization_state(2_000);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut state));
+            },
+        );
+        let drawn = output
+            .platform_output
+            .accesskit_update
+            .expect("the optimization sheet publishes an accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| {
+                // A Label-role node carries its text in `value`, not `label`.
+                node.value() == Some("evaluated") || node.label() == Some("evaluated")
+            })
+            .count();
+        assert!(drawn > 0, "the sheet drew no candidates at all");
+        assert!(
+            drawn < 200,
+            "the sheet laid out {drawn} of 2000 retained candidates for a 1020 px viewport"
+        );
     }
 }

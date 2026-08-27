@@ -11,6 +11,7 @@
 //! away from serving last run's answer. Handles are `Arc` so a viewer can
 //! hold its plan while still writing the reader's controls back to state.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 /// Every memoized viewer projection the Results workspace holds.
@@ -25,6 +26,13 @@ pub(super) struct ViewPlans {
     pub(super) envelope: Option<Arc<super::waves::FamilyEnvelopePlan>>,
     /// The operating-point sheet's row plan; see [`super::op_inspector`].
     pub(super) op: Option<Arc<super::op_inspector::OpPlan>>,
+    /// Where the retained optimizer history is; see
+    /// [`super::optimization`]. Behind a cell because the tab strip's
+    /// availability gate holds only `&AppState` and asks every frame.
+    pub(super) optimization: RefCell<Option<Arc<super::optimization::OptimizationPlan>>>,
+    /// The ranked order of the retained sensitivity result; see
+    /// [`super::sensitivity`].
+    pub(super) sensitivity: Option<Arc<super::sensitivity::SensitivityPlan>>,
     /// Safe-operating-area per-rule stress facts; see [`super::soa`].
     pub(super) soa: Option<Arc<super::soa::SoaPlan>>,
 }

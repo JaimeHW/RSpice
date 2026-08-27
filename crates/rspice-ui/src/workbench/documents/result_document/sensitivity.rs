@@ -15,6 +15,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{measurement_table, section_header};
 use crate::workbench::AppState;
 
+use std::sync::Arc;
+
+use super::AnalysisPresentationKey;
 use super::frame_work::{self, DatasetWalk};
 use super::strip::StripHeader;
 use super::virtual_rows::RowOffsets;
@@ -28,6 +31,8 @@ const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + SENSITIVITY_WIDTH + 
 const ROW_HEIGHT: f32 = 30.0;
 const HEADER_HEIGHT: f32 = 34.0;
 const CELL_INSET: f32 = 10.0;
+/// Height of one row of the panel's ranked table, spacing included.
+const PANEL_ROW_HEIGHT: f32 = 20.0;
 const NOT_RETAINED: &str = "Not retained by sensitivity result";
 
 #[derive(Debug, Clone, Copy)]
@@ -82,10 +87,11 @@ pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
 
 /// Rank by normalized-sensitivity magnitude. Equal magnitudes are ordered by the
 /// retained parameter identity, giving identical results across platforms.
-fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<&SensitivityResultRow> {
+fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<usize> {
     frame_work::note(DatasetWalk::SensitivityRank);
-    let mut ranked: Vec<_> = rows.iter().collect();
+    let mut ranked: Vec<usize> = (0..rows.len()).collect();
     ranked.sort_by(|left, right| {
+        let (left, right) = (&rows[*left], &rows[*right]);
         right
             .normalized
             .abs()
@@ -95,6 +101,54 @@ fn ranked_rows(rows: &[SensitivityResultRow]) -> Vec<&SensitivityResultRow> {
             .then_with(|| right.raw.total_cmp(&left.raw))
     });
     ranked
+}
+
+/// The ranked order of one retained sensitivity result.
+///
+/// A real design ranks thousands of parameters, and the sort ran on every
+/// frame — twice, because the panel ranked them again beside the chart.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct SensitivityPlan {
+    version: u64,
+    analysis: AnalysisPresentationKey,
+    order: Vec<usize>,
+    max_magnitude: f64,
+}
+
+impl SensitivityPlan {
+    pub(super) fn order(&self) -> &[usize] {
+        &self.order
+    }
+}
+
+/// The ranking for the active analysis, sorted once per dataset generation.
+fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
+    let version = state.simulation.data_version;
+    let run = state.simulation.active_run()?;
+    let analysis_key =
+        AnalysisPresentationKey::new(run.dataset_id, state.simulation.active_analysis()?);
+    if let Some(plan) = state.ui.results.plans.sensitivity.as_ref()
+        && plan.version == version
+        && plan.analysis == analysis_key
+    {
+        return Some(Arc::clone(plan));
+    }
+    let ActiveSensitivity::Ready(view) = active_sensitivity(state) else {
+        return None;
+    };
+    let order = ranked_rows(view.rows);
+    let max_magnitude = order
+        .iter()
+        .map(|index| view.rows[*index].normalized.abs())
+        .fold(0.0_f64, f64::max);
+    let built = Arc::new(SensitivityPlan {
+        version,
+        analysis: analysis_key,
+        order,
+        max_magnitude,
+    });
+    state.ui.results.plans.sensitivity = Some(Arc::clone(&built));
+    Some(built)
 }
 
 fn basis_label(result_mode: SensitivityResultMode) -> String {
@@ -128,10 +182,11 @@ fn chart_value(value: f64) -> String {
     }
 }
 
-fn highest_magnitude_sensitivity_label(rows: &[SensitivityResultRow]) -> String {
-    ranked_rows(rows).first().map_or_else(
+fn highest_magnitude_sensitivity_label(rows: &[SensitivityResultRow], ranked: &[usize]) -> String {
+    ranked.first().map_or_else(
         || "Not retained".to_owned(),
-        |row| {
+        |index| {
+            let row = &rows[*index];
             format!(
                 "{} · {} normalized sensitivity",
                 row.parameter,
@@ -168,6 +223,9 @@ fn paint_cell(
 
 /// Render the retained normalized-sensitivity chart.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    // Ranked before the payload is borrowed, so the sort happens once per
+    // dataset generation rather than once per frame per surface.
+    let plan = sensitivity_plan(state);
     let view = match active_sensitivity(state) {
         ActiveSensitivity::Ready(view) => view,
         ActiveSensitivity::Missing => {
@@ -190,11 +248,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let ranked = ranked_rows(view.rows);
-    let max_magnitude = ranked
-        .iter()
-        .map(|row| row.normalized.abs())
-        .fold(0.0_f64, f64::max);
+    let Some(plan) = plan else {
+        well_hint(
+            ui,
+            "The retained sensitivity result is invalid and cannot be displayed",
+        );
+        return;
+    };
+    let ranked = plan.order();
+    let max_magnitude = plan.max_magnitude;
     if !max_magnitude.is_finite() {
         well_hint(
             ui,
@@ -295,16 +357,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             // One row per swept parameter: a real design ranks thousands, and
             // only the ones on screen are worth laying out.
             let offsets = RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, ranked.len()));
-            let plan = offsets.plan(egui::Rangef::new(
+            let rows = offsets.plan(egui::Rangef::new(
                 viewport.min.y - HEADER_HEIGHT,
                 viewport.max.y - HEADER_HEIGHT,
             ));
-            ui.allocate_space(egui::vec2(width, plan.leading));
+            ui.allocate_space(egui::vec2(width, rows.leading));
             for (rank, row) in ranked
                 .iter()
+                .map(|index| &view.rows[*index])
                 .enumerate()
-                .skip(plan.first)
-                .take(plan.end - plan.first)
+                .skip(rows.first)
+                .take(rows.end - rows.first)
             {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(width, ROW_HEIGHT), Sense::hover());
@@ -414,12 +477,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
                 theme::paint_focus_ring(ui, &response, rect);
             }
-            ui.allocate_space(egui::vec2(width, plan.trailing));
+            ui.allocate_space(egui::vec2(width, rows.trailing));
         });
 }
 
 /// Render output/basis context and the exact ranked sensitivity table.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    let plan = sensitivity_plan(state);
     let view = match active_sensitivity(state) {
         ActiveSensitivity::Ready(view) => view,
         ActiveSensitivity::Missing => {
@@ -437,7 +501,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Sensitivity", None);
     let basis = exact_basis_label(view.result_mode);
     let count = view.rows.len().to_string();
-    let highest_magnitude = highest_magnitude_sensitivity_label(view.rows);
+    let ranked = plan.as_deref().map_or(&[][..], SensitivityPlan::order);
+    let highest_magnitude = highest_magnitude_sensitivity_label(view.rows, ranked);
     measurement_table(
         ui,
         &[
@@ -458,11 +523,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let ranked = ranked_rows(view.rows);
-    egui::ScrollArea::horizontal()
+    // The panel ranks the same thousands of parameters the chart does, so it
+    // lays out only the rows its own viewport can show.
+    let header_color = Tokens::get(ui.ctx()).color.text_faint;
+    egui::ScrollArea::both()
         .id_salt("rspice.results.sensitivity-ranked-table")
         .auto_shrink([false, true])
-        .show(ui, |ui| {
+        .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
             ui.set_min_width(470.0);
             egui::Grid::new("rspice.results.sensitivity-ranked-grid")
                 .num_columns(4)
@@ -470,19 +537,28 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 .min_col_width(48.0)
                 .spacing(egui::vec2(12.0, 6.0))
                 .show(ui, |ui| {
-                    let header_color = Tokens::get(ui.ctx()).color.text_faint;
                     let heading = |text: &str| {
                         egui::RichText::new(text)
                             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                             .color(header_color)
                     };
-                    ui.label(heading("RANK"));
-                    ui.label(heading("PARAMETER"));
-                    ui.label(heading("NORMALIZED"));
-                    ui.label(heading("RAW"));
-                    ui.end_row();
-
-                    for (rank, row) in ranked.iter().enumerate() {
+                    if visible.start == 0 {
+                        ui.label(heading("RANK"));
+                        ui.label(heading("PARAMETER"));
+                        ui.label(heading("NORMALIZED"));
+                        ui.label(heading("RAW"));
+                        ui.end_row();
+                    }
+                    // Row 0 of the virtual list is the heading, so the data
+                    // rows start one behind it.
+                    let first = visible.start.saturating_sub(1);
+                    let last = visible.end.saturating_sub(1).min(ranked.len());
+                    for (rank, row) in ranked[first..last]
+                        .iter()
+                        .map(|index| &view.rows[*index])
+                        .enumerate()
+                        .map(|(offset, row)| (first + offset, row))
+                    {
                         ui.label(
                             egui::RichText::new((rank + 1).to_string())
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
@@ -553,7 +629,7 @@ mod tests {
 
         let names: Vec<_> = ranked_rows(&rows)
             .into_iter()
-            .map(|row| row.parameter.as_str())
+            .map(|index| rows[index].parameter.as_str())
             .collect();
 
         assert_eq!(names, ["alpha", "zeta", "middle"]);
@@ -629,15 +705,107 @@ mod tests {
             },
         ];
 
-        let label = highest_magnitude_sensitivity_label(&rows);
+        let label = highest_magnitude_sensitivity_label(&rows, &ranked_rows(&rows));
 
         assert!(label.starts_with("largest · "));
         assert!(label.contains(&exact_value(-0.75)));
-        assert_eq!(highest_magnitude_sensitivity_label(&[]), "Not retained");
+        assert_eq!(
+            highest_magnitude_sensitivity_label(&[], &[]),
+            "Not retained"
+        );
     }
 
     #[test]
     fn unavailable_solver_contracts_are_explicit() {
         assert_eq!(NOT_RETAINED, "Not retained by sensitivity result");
+    }
+
+    fn ranked_state(parameters: usize) -> AppState {
+        let rows = (0..parameters)
+            .map(|index| SensitivityResultRow {
+                parameter: format!("p{index:05}"),
+                raw: index as f64,
+                normalized: (index as f64).sin(),
+            })
+            .collect();
+        let mut state = state_with_analyses(vec![sensitivity_result(1, "SENS", rows)]);
+        assert!(state.simulation.select_analysis(0));
+        state
+    }
+
+    /// The ranking is the sort it replaced, done once. Both the chart and the
+    /// panel read it, and neither may see a ranking of a dataset that moved.
+    #[test]
+    fn the_ranking_is_sorted_once_per_dataset_generation() {
+        let mut state = ranked_state(64);
+        let first = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
+        let again = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
+        assert!(Arc::ptr_eq(&first, &again));
+
+        let ActiveSensitivity::Ready(view) = active_sensitivity(&state) else {
+            panic!("the fixture retains a sensitivity payload");
+        };
+        assert_eq!(first.order(), ranked_rows(view.rows).as_slice());
+        assert_eq!(
+            first.max_magnitude,
+            view.rows
+                .iter()
+                .map(|row| row.normalized.abs())
+                .fold(0.0_f64, f64::max)
+        );
+
+        state.simulation.runs[0].analyses[0].result_payload =
+            Some(AnalysisResultPayload::Sensitivity {
+                output: "V(out)".to_owned(),
+                result_mode: SensitivityResultMode::Dc,
+                rows: vec![SensitivityResultRow {
+                    parameter: "only".to_owned(),
+                    raw: 1.0,
+                    normalized: 2.0,
+                }],
+            });
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+        let after = sensitivity_plan(&mut state).expect("a ranked sensitivity plan");
+        assert_eq!(after.order(), [0]);
+        assert_eq!(after.max_magnitude, 2.0);
+    }
+
+    /// The panel ranks the same thousands of parameters the chart does; it
+    /// must lay out only the rows its own viewport can show.
+    #[test]
+    fn the_panel_lists_only_the_rows_its_viewport_shows() {
+        let mut state = ranked_state(4_000);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(520.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
+            },
+        );
+        let drawn = output
+            .platform_output
+            .accesskit_update
+            .expect("the sensitivity panel publishes an accessibility tree")
+            .nodes
+            .iter()
+            .filter(|(_, node)| {
+                // A Label-role node carries its text in `value`, not `label`.
+                node.value().is_some_and(|text| text.starts_with("p0"))
+            })
+            .count();
+        assert!(drawn > 0, "the panel listed no parameters at all");
+        assert!(
+            drawn < 400,
+            "the panel listed {drawn} of 4000 ranked parameters for a 900 px viewport"
+        );
     }
 }
