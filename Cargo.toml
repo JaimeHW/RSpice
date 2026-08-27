@@ -144,6 +144,29 @@ unimplemented = "deny"
 [profile.dev]
 incremental = true
 
+# Every dependency is optimized in debug builds; the workspace's own crates are
+# not, because `"*"` does not match a workspace member.
+#
+# The GUI suite renders real surfaces. A single case opens an `egui::Context`,
+# lays out a 1400x2600 page and rasterizes every glyph on it, and the workbench
+# tests do that thousands of times over — the studio's press sweep alone builds
+# three hundred of them. Unoptimized, egui's layout and its text stack
+# (harfrust shaping, skrifa outlines, vello_cpu rasterization) is where most of
+# `cargo test -p rspice-ui --lib` goes.
+#
+# Measured on a 28-core Windows box: the press-sweep module falls from 23s to
+# 7.6s and the whole rspice-ui library suite from 74s to 49s, for one dependency
+# rebuild of about fifteen minutes. Restricting this to the render and text
+# crates by name was measured too: it bought the same 7.6s on the sweep but only
+# 60s on the suite, and it is a list that goes stale the next time egui changes
+# which shaper it uses.
+#
+# Only `opt-level` is set. Debug info is untouched on both sides — the Windows
+# link already runs with `/DEBUG:NONE` and the backtrace story is delicate — and
+# `profile.release` is not involved.
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.release]
 # Keep full per-function LLVM optimization while compiling independent solver
 # and generated-device units in parallel. Whole-program fat LTO plus one
