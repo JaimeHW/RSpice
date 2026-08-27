@@ -1108,6 +1108,118 @@ fn a_content_height_dialog_settles_in_one_pass_and_stops_moving() {
     }
 }
 
+/// A dialog that arrives at a surface one row short of its content paints its
+/// final row — rendered and read back as pixels, the way the defect was
+/// originally seen on a design-review render.
+///
+/// A body that overflows its surface spends exactly the room the surface
+/// offers, so the measured stack always equalled the height that was offered:
+/// every too-short height was a fixed point of the re-measure loop. A
+/// content-height dialog that arrived at one — an authored seed a row short of
+/// the content, or content grown a row after the surface had settled — kept
+/// its final row below the fold for good, and the footer, painted after the
+/// body, covered what still showed of it. The measurement now adds back what
+/// the body could not show, so a too-short surface resolves to its content's
+/// height instead of resting wherever it happened to be.
+///
+/// The bad fixed point is entered deliberately here: the dialog is seeded one
+/// row short through `initial_height` and rendered through the offscreen
+/// rasterizer at its default pass count. The pixels then assert both halves —
+/// the loop leaves the seeded height, and it has done so by the pass a review
+/// render reads.
+///
+/// The modal fades in, and the rasterizer's few passes leave that fade
+/// unfinished, so the authored colour is not what lands on the canvas. The
+/// ink is therefore asserted as identity: the final row must read back
+/// pixel-for-pixel as the first row does, and both must be the red the rows
+/// were painted in — dominant in its red channel however far the fade has
+/// come — rather than the grey of the surface or footer fill that covers a
+/// clipped row.
+#[test]
+fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
+    const ROWS: usize = 8;
+    const ROW_HEIGHT: f32 = 24.0;
+    const ROW_INK: egui::Color32 = egui::Color32::from_rgb(220, 40, 40);
+
+    // Every row is a filled rect rather than text: the rasterizer's own
+    // header warns that glyph ink is sampled, while a solid rect reads back
+    // uniformly. Returns the first and final row rects.
+    let paint_rows = |ui: &mut Ui| -> (Rect, Rect) {
+        let mut first = Rect::NOTHING;
+        let mut last = Rect::NOTHING;
+        for row in 0..ROWS {
+            let (rect, _) = ui.allocate_exact_size(vec2(200.0, ROW_HEIGHT), Sense::hover());
+            ui.painter().rect_filled(rect, 0.0, ROW_INK);
+            if row == 0 {
+                first = rect;
+            }
+            last = rect;
+        }
+        (first, last)
+    };
+
+    // Settle the same dialog once without a seed to learn the height its
+    // content actually asks for; the regression is rendered from one row
+    // less than that.
+    let settled = {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        for _ in 0..3 {
+            let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
+                let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                    .description(TEST_DESCRIPTION)
+                    .show(ctx, |ui| {
+                        paint_rows(ui);
+                    });
+            });
+        }
+        ctx.data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))))
+            .expect("a content-height dialog measures the surface it resolved")
+    };
+    assert!(
+        settled > ROW_HEIGHT + 1.0,
+        "the settled surface ({settled}) leaves no room to seed a row short"
+    );
+
+    let mut first_row = Rect::NOTHING;
+    let mut final_row = Rect::NOTHING;
+    let canvas = crate::ui::raster::render(vec2(1_000.0, 800.0), |ui, _| {
+        let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+            .description(TEST_DESCRIPTION)
+            .initial_height(settled - ROW_HEIGHT)
+            .show(ui, |ui| {
+                (first_row, final_row) = paint_rows(ui);
+            });
+    });
+
+    // Inset past the tessellator's one-pixel feathering, and past the half
+    // pixel a centred surface can sit off the pixel grid by.
+    let first_pixels: Vec<egui::Color32> = canvas.pixels_in(first_row.shrink(2.0)).collect();
+    let ink = *first_pixels
+        .first()
+        .expect("the first row lies off the canvas");
+    assert!(
+        ink.r() > ink.g() + 40 && ink.r() > ink.b() + 40,
+        "the first row did not read back as the red it was painted in: {ink:?}"
+    );
+    assert!(
+        first_pixels.iter().all(|pixel| *pixel == ink),
+        "the first row is not uniform ink"
+    );
+
+    let final_region = final_row.shrink(2.0);
+    let final_pixels: Vec<egui::Color32> = canvas.pixels_in(final_region).collect();
+    assert!(
+        !final_pixels.is_empty(),
+        "the final row lies off the canvas"
+    );
+    assert!(
+        final_pixels.iter().all(|pixel| *pixel == ink),
+        "a dialog seeded a row short of its content clipped its final row: \
+         the surface settled on the seed instead of the content"
+    );
+}
+
 /// The pass that measures a dialog for the first time measures the dialog the
 /// reader is about to be shown.
 ///
