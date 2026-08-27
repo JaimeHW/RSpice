@@ -3816,7 +3816,7 @@ mod integrity_scan_tests {
             app.state.simulation.active_run().map(|run| run.dataset_id)
         );
         assert_eq!(analysis_sequence, 17);
-        assert!((value - (7.9375_f64).sqrt()).abs() < 1.0e-14);
+        assert!((value - (7.515625_f64).sqrt()).abs() < 1.0e-14); // ∫y²dt, time-weighted
         assert_eq!(
             evaluate_scalar_measurement(&app.state, "V(out)").unwrap_err(),
             "The expression produces a trace; reduce it with avg(), rms(), or another scalar function"
