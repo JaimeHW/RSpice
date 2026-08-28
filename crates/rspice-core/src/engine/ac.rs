@@ -2769,7 +2769,7 @@ impl Engine {
     }
 
     /// Cancellable variant of [`Engine::run_ac_data`].
-    pub(crate) fn run_ac_data_with_abort(
+    pub fn run_ac_data_with_abort(
         &self,
         netlist: &Netlist,
         table_name: &str,

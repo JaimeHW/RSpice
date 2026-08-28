@@ -10332,6 +10332,46 @@ fn test_xyce_bug907_nested_library_exact_release_relation() {
 }
 
 #[test]
+fn test_xyce_bug1035_simple_rc_ac_data_release_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1035_SON/RC_simple_data.cir",
+            "bug1035_simple_rc_ac_data_relational_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1035_SON/RC_simple_baseline.cir",
+            "bug1035_simple_rc_ac_data_baseline_reference",
+            false,
+            Some("Netlists/Certification_Tests/BUG_1035_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce baseline-first exact/fallback AC relation: {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+    let sibling =
+        runner.run_test(root.join("Netlists/Certification_Tests/BUG_1035_SON/RC_simple.cir"));
+    assert!(
+        sibling.passed
+            && sibling.contract == "wrapper_static_fd_prn_ac"
+            && sibling.contract != "bug1035_simple_rc_ac_data_relational_wrapper_owner"
+            && sibling.contract != "bug1035_simple_rc_ac_data_baseline_reference",
+        "BUG1035 checked-gold sibling must retain its pre-existing independent contract: {sibling:?}"
+    );
+}
+
+#[test]
 fn test_xyce_issue202_redefined_parameter_mode_matrix() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
