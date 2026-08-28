@@ -2316,6 +2316,141 @@ fn hiding_a_trace_moves_the_strip_extent() {
     );
 }
 
+/// Nobody hides a trace by rewriting the retained dataset. The legend, the
+/// design navigator and the inspector all call `toggle_visibility`, which
+/// writes the session's override map and leaves the solver's data flag alone.
+/// The extent is a memo of what the strip draws, so it has to move for the
+/// path the product actually uses.
+#[test]
+fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let before = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(before[0].x_range, Some((0.0, 40.0)));
+
+    toggle_visibility(&mut state, 0, 1);
+    assert!(
+        state.simulation.runs[0].analyses[0].waveforms[1].visible,
+        "the override path must not rewrite the retained data flag"
+    );
+
+    let after = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert!(
+        !after[0]
+            .traces
+            .iter()
+            .find(|trace| !trace.overlay && trace.waveform_index == 1)
+            .expect("the overridden source still has a projected trace")
+            .visible,
+        "the override did not reach the projected trace at all"
+    );
+    assert_eq!(
+        after[0].x_range,
+        Some((0.0, 1.0)),
+        "the strip kept an extent covering a trace the reader hid"
+    );
+}
+
+/// Hiding the last trace leaves the strip with nothing to scale against, and
+/// every caption, axis and viewport gesture reads that as "No data". An extent
+/// baked before the overrides were applied reports a span instead.
+#[test]
+fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+        ]),
+    );
+    toggle_visibility(&mut state, 0, 0);
+    toggle_visibility(&mut state, 0, 1);
+
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(models.len(), 1, "the strip itself stays available");
+    assert!(
+        models[0].traces.iter().all(|trace| !trace.visible),
+        "the overrides did not reach the projected traces"
+    );
+    assert_eq!(
+        models[0].x_range, None,
+        "a strip drawing nothing still reported a domain"
+    );
+}
+
+/// The extent walk belongs to the cache build, not to the frame. Resolving it
+/// after the visibility overrides rather than during the projection must stay
+/// exactly one walk per strip per rebuild — not two, and never one per frame.
+#[test]
+fn the_extent_is_walked_once_per_strip_per_cache_build() {
+    use super::super::frame_work::{DatasetWalk, WorkCounts};
+
+    let mut state = AppState::default();
+    let run = state.simulation.start_run();
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran A").with_waveforms(vec![
+            WaveformData::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
+        ]),
+    );
+    run.add_analysis(
+        AnalysisResult::new(2, AnalysisType::Transient, "Tran B").with_waveforms(vec![
+            WaveformData::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+
+    let baseline = WorkCounts::reset();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    assert_eq!(models.len(), 2);
+    assert_eq!(
+        baseline.since().get(DatasetWalk::WaveXRange),
+        2,
+        "the cache build resolved the extent other than once per strip"
+    );
+
+    let baseline = WorkCounts::reset();
+    for _ in 0..5 {
+        let _ = cached_models(
+            &state.simulation,
+            &mut state.ui.results,
+            presentation.complex_number_display(),
+            &Tokens::default(),
+        );
+    }
+    assert_eq!(
+        baseline.since().get(DatasetWalk::WaveXRange),
+        0,
+        "a memo hit walked the dataset for an extent it already holds"
+    );
+}
+
 /// The envelope walks every sample of every family member, so it is memoized
 /// against the generation of models that produced it — and must rebuild when
 /// that generation moves.

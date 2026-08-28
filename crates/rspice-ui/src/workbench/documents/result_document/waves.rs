@@ -205,6 +205,10 @@ pub(super) struct StripModel {
     /// Resolved while the model is built rather than on demand: the axis,
     /// the overview lane, the viewport gestures and the fit control all ask
     /// for it, and each answer walked every visible sample.
+    ///
+    /// Left `None` by [`build_models`] and filled in by
+    /// `extent::resolve_x_ranges` once the reader's visibility overrides have
+    /// been applied — which traces are visible is not known until then.
     x_range: Option<(f64, f64)>,
 }
 
@@ -338,6 +342,9 @@ pub(super) fn cached_models(
         &results.waveform_visibility,
         &results.hidden_family_traces,
     );
+    // Only now is it settled which traces the strip draws, so only now can
+    // its shared X extent be resolved.
+    extent::resolve_x_ranges(&mut built);
     built.retain(|model| match results.viewer {
         super::ResultViewer::DcSweep => model.analysis_type == AnalysisType::DcSweep,
         super::ResultViewer::Waves => model.analysis_type.is_time_domain(),
@@ -906,6 +913,10 @@ fn append_projected_traces(
 
 /// Build strip models for every plottable analysis of the active run.
 /// `phase_continuous` swaps phase traces to their unwrapped series.
+///
+/// This is the raw dataset projection: `visible` carries only the retained
+/// data flag, so `x_range` is left unresolved. Callers pair this with
+/// [`apply_waveform_visibility`] and then `extent::resolve_x_ranges`.
 pub(super) fn build_models(
     simulation: &SimulationState,
     derived: &mut DerivedSeries,
@@ -1276,7 +1287,6 @@ pub(super) fn build_models(
             x_range: None,
         };
         model.grid_ascending = extent::grid_is_ascending(&model);
-        model.x_range = extent::x_range(&model);
         models.push(model);
     }
     models

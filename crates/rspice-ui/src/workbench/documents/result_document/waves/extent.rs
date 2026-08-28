@@ -5,8 +5,9 @@
 //! every frame — the shared X extent several times a frame, because the
 //! overview lane, the axis and each pane all asked for it separately. Neither
 //! can change without the strip models being rebuilt, so the extent is now
-//! resolved once while the model is built, and the envelope is memoized
-//! against the same generation of models the pane is drawing.
+//! resolved once per rebuild — after the reader's visibility overrides have
+//! been folded in — and the envelope is memoized against the same generation
+//! of models the pane is drawing.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -17,6 +18,19 @@ use super::super::ResultsState;
 use super::super::frame_work::{self, DatasetWalk};
 use super::{StripModel, StripTrace, UnitPane, stable_hash};
 
+/// Resolve every strip's X extent, once, against the traces it will draw.
+///
+/// This runs after the reader's presentation overrides have been folded into
+/// `trace.visible`, never before: hiding a trace from the legend, the design
+/// navigator or the inspector writes only the override map, so an extent
+/// baked out of the raw data flags would keep the span of a trace nobody can
+/// see — and would report a domain for a strip whose last trace was hidden.
+pub(super) fn resolve_x_ranges(models: &mut [StripModel]) {
+    for model in models {
+        model.x_range = x_range(model);
+    }
+}
+
 /// X range of a strip. Ordinary traces share one X series; family policies
 /// intentionally project disjoint exact-row groups, so the range must cover
 /// every visible group rather than assuming the first trace is authoritative.
@@ -24,7 +38,7 @@ use super::{StripModel, StripTrace, UnitPane, stable_hash};
 /// Resolved once per strip model. The models are rebuilt whenever anything
 /// this reads changes — the retained data, which traces are visible, the
 /// phase projection — so the answer cannot outlive its inputs.
-pub(super) fn x_range(model: &StripModel) -> Option<(f64, f64)> {
+fn x_range(model: &StripModel) -> Option<(f64, f64)> {
     frame_work::note(DatasetWalk::WaveXRange);
     let mut x0 = f64::INFINITY;
     let mut x1 = f64::NEG_INFINITY;

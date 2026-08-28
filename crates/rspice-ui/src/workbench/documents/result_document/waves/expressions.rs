@@ -653,6 +653,9 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
         &waveform_visibility,
         &hidden_family_traces,
     );
+    // Same order as the cached path: the extent is a memo of the traces the
+    // strip draws, and the overrides above decide which those are.
+    super::extent::resolve_x_ranges(&mut models);
     let model = state
         .ui
         .results
