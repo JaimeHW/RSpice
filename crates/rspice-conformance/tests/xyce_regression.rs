@@ -11355,6 +11355,83 @@ fn test_xyce_bug141_native_solver_backend_completion_family() {
     }
 }
 
+#[test]
+fn test_xyce_bug1692_expression_equivalence_family() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_1692/bug_1692.cir",
+            "bug1692_expression_equivalence_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1692/bug_1692_0.cir",
+            "bug1692_expression_equivalence_worker",
+            Some("Netlists/Certification_Tests/BUG_1692/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1692/bug_1692_1.cir",
+            "bug1692_expression_equivalence_worker",
+            Some("Netlists/Certification_Tests/BUG_1692/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1692/bug_1692_2.cir",
+            "bug1692_expression_equivalence_worker",
+            Some("Netlists/Certification_Tests/BUG_1692/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1692/bug_1692_3.cir",
+            "bug1692_expression_equivalence_worker",
+            Some("Netlists/Certification_Tests/BUG_1692/exclude"),
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            expected_exclusion.is_none(),
+            "only the zero-byte BUG1692 deck owns the historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact BUG1692 expression-equivalence contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
+fn test_xyce_bug1692_noworkee_remains_upstream_excluded() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let noworkee =
+        runner.run_test(root.join("Netlists/Certification_Tests/BUG_1692/bug_1692_noworkee.cir"));
+    assert!(
+        noworkee.upstream_excluded && noworkee.passed,
+        "the historical noworkee control must remain ordinarily upstream-excluded: {noworkee:?}"
+    );
+    assert_eq!(noworkee.contract, "upstream_excluded");
+    assert!(
+        noworkee
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("UPSTREAM_EXCLUDED:"))
+    );
+    assert_eq!(
+        noworkee.upstream_exclusion_source.as_deref(),
+        Some("Netlists/Certification_Tests/BUG_1692/exclude")
+    );
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
