@@ -537,6 +537,11 @@ fn source_line_has_net_token(line: &str, net: &str) -> bool {
     // positional token as the model regardless, so a tail put the model name
     // inside the node range and a net spelled like the model resolved to a
     // card it never touches.
+    //
+    // Only those two letters have a tail. `parse_subcircuit_instance` reads
+    // the last positional field as the subcircuit name and stops, so an `X`
+    // card's positional end *is* its reference: popping an `OFF` off one takes
+    // the name from the field in front of it, which is a node.
     let model_position = |head_letter: Option<u8>| {
         let mut end = positional_end();
         loop {
@@ -547,7 +552,7 @@ fn source_line_has_net_token(line: &str, net: &str) -> bool {
             if end <= 3 {
                 break;
             }
-            if last.eq_ignore_ascii_case("off")
+            if (matches!(head_letter, Some(b'Q' | b'M')) && last.eq_ignore_ascii_case("off"))
                 || (head_letter == Some(b'Q') && last.parse::<f64>().is_ok())
             {
                 end -= 1;
@@ -950,6 +955,16 @@ mod tests {
         // `Mname nd ng ns nb mname [OFF]`
         assert!(!source_line_has_net_token("M1 D G S B MMOD OFF", "MMOD"));
         assert!(source_line_has_net_token("M1 D G S B MMOD OFF", "B"));
+
+        // `Xname n1 n2 … subckt` has no tail at all. `parse_subcircuit_instance`
+        // reads the last positional field as the subcircuit name and stops, so
+        // popping an `OFF` off an `X` card takes the reference from the wrong
+        // field: the real subcircuit name stops being a node, and a subcircuit
+        // *named* `OFF` costs the card its last node outright.
+        assert!(source_line_has_net_token("X1 A B SUB OFF", "SUB"));
+        assert!(source_line_has_net_token("X1 A B OFF", "B"));
+        // The name in the reference position is still not a node.
+        assert!(!source_line_has_net_token("X1 A B SUB OFF", "OFF"));
     }
 
     /// A subcircuit instance's parameters need not be written contracted.
