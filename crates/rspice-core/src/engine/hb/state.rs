@@ -661,9 +661,17 @@ impl Engine {
                     .to_string(),
             ));
         }
+        state
+            .checkpoint
+            .validate_for_with_config(netlist, &engine.config)
+            .map_err(SimulationError::Circuit)?;
+        let checkpoint = state
+            .checkpoint
+            .bind_authenticated_synthetic_origin_max_step(max_step)
+            .map_err(SimulationError::Circuit)?;
         engine.run_tran_resume_with_abort(
             netlist,
-            &state.checkpoint,
+            &checkpoint,
             state.time_origin() + duration,
             max_step,
             abort,

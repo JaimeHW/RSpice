@@ -1080,7 +1080,16 @@ impl Engine {
                 state.time_origin()
             )));
         }
-        self.run_tran_resume_with_abort(netlist, &state.checkpoint, tstop, max_step, abort)
+        let engine = self.resolved_for_netlist(netlist);
+        state
+            .checkpoint
+            .validate_for_with_config(netlist, &engine.config)
+            .map_err(SimulationError::Circuit)?;
+        let checkpoint = state
+            .checkpoint
+            .bind_authenticated_synthetic_origin_max_step(max_step)
+            .map_err(SimulationError::Circuit)?;
+        engine.run_tran_resume_with_abort(netlist, &checkpoint, tstop, max_step, abort)
     }
 
     fn ensure_pss_continuation_state_supported(

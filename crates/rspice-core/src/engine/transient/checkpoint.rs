@@ -1968,6 +1968,44 @@ impl TransientCheckpoint {
         Ok(())
     }
 
+    /// Clone an already-authenticated synthetic time-zero state and bind it to
+    /// the maximum-step contract of its first real transient segment.
+    ///
+    /// HB and PSS construct phase-equivalent transient state before that
+    /// future segment has a step bound, so their checkpoints intentionally
+    /// carry no `integration_max_step`. Callers must first authenticate the
+    /// higher-level continuation artifact and this checkpoint's exact
+    /// netlist/configuration identity. Ordinary resume validation is still
+    /// required after binding; this helper only makes that exact validation
+    /// possible and cannot upgrade an accepted transient checkpoint.
+    pub(in crate::engine) fn bind_authenticated_synthetic_origin_max_step(
+        &self,
+        requested_max_step: Value,
+    ) -> Result<Self, String> {
+        if self.time.to_bits() != 0.0_f64.to_bits() {
+            return Err(format!(
+                "synthetic transient-origin checkpoint must be captured at exact t=0, found {:.17e}s",
+                self.time
+            ));
+        }
+        if self.integration_max_step.is_some() {
+            return Err(
+                "synthetic transient-origin checkpoint already records an integration maximum step"
+                    .to_string(),
+            );
+        }
+        if !requested_max_step.is_finite() || requested_max_step <= 0.0 {
+            return Err(format!(
+                "synthetic transient-origin maximum step must be finite and positive, got {requested_max_step:.17e}s"
+            ));
+        }
+
+        let mut bound = self.clone();
+        bound.integration_max_step = Some(requested_max_step);
+        bound.validate_integration_max_step(requested_max_step)?;
+        Ok(bound)
+    }
+
     /// Future dynamically discovered transmission-line arrivals that must be
     /// reinstated in the breakpoint manager before resumed integration.
     pub(crate) fn pending_tline_arrivals(&self) -> &[Value] {
@@ -3061,6 +3099,70 @@ mod tests {
             output.push('\n');
         }
         output
+    }
+
+    #[test]
+    fn authenticated_synthetic_origin_max_step_binding_is_exact_and_fails_closed() {
+        let mut synthetic = sample();
+        synthetic.time = 0.0;
+        synthetic.integration_max_step = None;
+        let requested = 7.5e-10;
+
+        let bound = synthetic
+            .bind_authenticated_synthetic_origin_max_step(requested)
+            .expect("an authenticated unbound synthetic t=0 state can select its first cap");
+        assert_eq!(synthetic.integration_max_step, None, "binding clones state");
+        assert_eq!(
+            bound.integration_max_step.map(Value::to_bits),
+            Some(requested.to_bits())
+        );
+        bound
+            .validate_integration_max_step(requested)
+            .expect("ordinary exact maximum-step validation accepts the bound clone");
+        let adjacent = Value::from_bits(requested.to_bits() + 1);
+        assert!(
+            bound
+                .validate_integration_max_step(adjacent)
+                .expect_err("ordinary resume remains bit-exact")
+                .contains("does not match")
+        );
+
+        for invalid in [0.0, -1.0e-9, Value::NAN, Value::INFINITY] {
+            let error = synthetic
+                .bind_authenticated_synthetic_origin_max_step(invalid)
+                .expect_err("invalid first-segment cap must fail closed");
+            assert!(
+                error.contains("finite and positive"),
+                "unexpected invalid-cap error for {invalid:?}: {error}"
+            );
+        }
+
+        let mut accepted_transient = synthetic.clone();
+        accepted_transient.time = 1.0e-12;
+        assert!(
+            accepted_transient
+                .bind_authenticated_synthetic_origin_max_step(requested)
+                .expect_err("an accepted transient point is not a synthetic origin")
+                .contains("exact t=0")
+        );
+
+        let mut negative_zero = synthetic.clone();
+        negative_zero.time = -0.0;
+        assert!(
+            negative_zero
+                .bind_authenticated_synthetic_origin_max_step(requested)
+                .expect_err("only the canonical synthetic origin is accepted")
+                .contains("exact t=0")
+        );
+
+        let mut already_bound = synthetic;
+        already_bound.integration_max_step = Some(requested);
+        assert!(
+            already_bound
+                .bind_authenticated_synthetic_origin_max_step(requested)
+                .expect_err("an existing trajectory cap cannot be rebound")
+                .contains("already records")
+        );
     }
 
     #[test]
