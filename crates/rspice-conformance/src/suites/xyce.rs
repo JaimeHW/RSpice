@@ -11398,6 +11398,16 @@ struct XyceNestedIncludeSubcircuitFingerprint {
     nested_names: Vec<String>,
 }
 
+// One variant per AC family the strict suite qualifies, and the families
+// really do differ in payload size — the ABM one is already boxed for that
+// reason. Each snapshot is built once, compared once, and never collected, so
+// the spread costs a qualification run nothing; equalizing it would mean
+// boxing a payload across nine construction and match sites in three modules
+// to move bytes that are never copied in bulk.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "each snapshot is built once and compared once; the variant spread is never collected"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictAcFamilySnapshot {
     AcAnalysisExpression(XyceAcAnalysisExpressionSnapshot),

@@ -76,9 +76,7 @@ impl XyceBreakpointSpanCeiling {
         next_breakpoint: Option<Value>,
         final_time: Value,
     ) -> Option<Value> {
-        let Some(min_steps) = self.min_steps else {
-            return None;
-        };
+        let min_steps = self.min_steps?;
         let span_end = next_breakpoint
             .filter(|time| time.is_finite() && *time > current_time)
             .map_or(final_time, |time| time.min(final_time));

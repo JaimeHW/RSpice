@@ -972,11 +972,7 @@ impl XyceTestRunner {
             "c1:c",
             "v(1)",
         ];
-        if normalized
-            .iter()
-            .map(String::as_str)
-            .ne(expected.into_iter())
-        {
+        if normalized.iter().map(String::as_str).ne(expected) {
             return Err(format!(
                 "{LABEL} ordered .PRINT AC probe schema is not the exact seven-column parameter/device/voltage schema"
             ));

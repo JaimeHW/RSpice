@@ -1118,62 +1118,6 @@ fn map_restart_simulation_error(
     }
 }
 
-#[cfg(test)]
-mod restart_tests {
-    use super::*;
-
-    #[test]
-    fn restart_schedule_applies_each_interval_at_its_transition() {
-        let intervals = [
-            rspice_core::netlist::XyceRestartInterval {
-                time: 10.0,
-                interval: 4.0,
-            },
-            rspice_core::netlist::XyceRestartInterval {
-                time: 17.0,
-                interval: 1.0,
-            },
-        ];
-        assert_eq!(
-            build_restart_schedule(3.0, &intervals, 19.0, 32).unwrap(),
-            vec![0.0, 3.0, 6.0, 9.0, 10.0, 14.0, 17.0, 18.0, 19.0]
-        );
-    }
-
-    #[test]
-    fn restart_schedule_is_resource_bounded() {
-        let error = build_restart_schedule(1.0, &[], 4.0, 4)
-            .expect_err("five requested checkpoints exceed a four-point limit");
-        assert!(error.to_string().contains("analysis-point limit of 4"));
-    }
-
-    #[test]
-    fn restart_suffix_matches_xyce_compact_default_float_spelling() {
-        assert_eq!(xyce_restart_time_suffix(0.0), "0");
-        assert_eq!(xyce_restart_time_suffix(5e-9), "5e-09");
-        assert_eq!(xyce_restart_time_suffix(20e-9), "2e-08");
-        assert_eq!(xyce_restart_time_suffix(15e-9), "1.5e-08");
-        assert_eq!(xyce_restart_time_suffix(0.0001), "0.0001");
-        assert_eq!(xyce_restart_time_suffix(1e6), "1e+06");
-    }
-
-    #[test]
-    fn restart_logical_names_are_single_portable_components() {
-        validate_restart_logical_name("trans_test2e-08", "FILE").unwrap();
-        for unsafe_name in [
-            "",
-            ".",
-            "..",
-            "../state",
-            "sub/state",
-            "sub\\state",
-            "C:state",
-        ] {
-            assert!(validate_restart_logical_name(unsafe_name, "FILE").is_err());
-        }
-    }
-}
-
 pub(super) fn run_fourier(
     ctx: &RunContext<'_>,
     fundamental: f64,
@@ -1558,5 +1502,61 @@ fn default_transient_max_step(tstep: f64, tstop: f64, tstart: f64) -> f64 {
         tstep
     } else {
         window_limit
+    }
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::*;
+
+    #[test]
+    fn restart_schedule_applies_each_interval_at_its_transition() {
+        let intervals = [
+            rspice_core::netlist::XyceRestartInterval {
+                time: 10.0,
+                interval: 4.0,
+            },
+            rspice_core::netlist::XyceRestartInterval {
+                time: 17.0,
+                interval: 1.0,
+            },
+        ];
+        assert_eq!(
+            build_restart_schedule(3.0, &intervals, 19.0, 32).unwrap(),
+            vec![0.0, 3.0, 6.0, 9.0, 10.0, 14.0, 17.0, 18.0, 19.0]
+        );
+    }
+
+    #[test]
+    fn restart_schedule_is_resource_bounded() {
+        let error = build_restart_schedule(1.0, &[], 4.0, 4)
+            .expect_err("five requested checkpoints exceed a four-point limit");
+        assert!(error.to_string().contains("analysis-point limit of 4"));
+    }
+
+    #[test]
+    fn restart_suffix_matches_xyce_compact_default_float_spelling() {
+        assert_eq!(xyce_restart_time_suffix(0.0), "0");
+        assert_eq!(xyce_restart_time_suffix(5e-9), "5e-09");
+        assert_eq!(xyce_restart_time_suffix(20e-9), "2e-08");
+        assert_eq!(xyce_restart_time_suffix(15e-9), "1.5e-08");
+        assert_eq!(xyce_restart_time_suffix(0.0001), "0.0001");
+        assert_eq!(xyce_restart_time_suffix(1e6), "1e+06");
+    }
+
+    #[test]
+    fn restart_logical_names_are_single_portable_components() {
+        validate_restart_logical_name("trans_test2e-08", "FILE").unwrap();
+        for unsafe_name in [
+            "",
+            ".",
+            "..",
+            "../state",
+            "sub/state",
+            "sub\\state",
+            "C:state",
+        ] {
+            assert!(validate_restart_logical_name(unsafe_name, "FILE").is_err());
+        }
     }
 }

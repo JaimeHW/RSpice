@@ -1606,6 +1606,15 @@ fn run_deck(
     }
     let mut reports = Vec::with_capacity(plan.total_runs());
     let mut outputs = Vec::new();
+    // The loop's subject is the run ordinal, not the signature list: it also
+    // materializes run `run_index` from the plan, labels the run, and numbers
+    // the diagnostics. Iterating `coordinate_signatures` instead would move
+    // the bound off `plan.total_runs()`, which is a claim about the preflight
+    // that belongs to the code that wrote it, not to a lint cleanup.
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "the index is the run ordinal the plan is materialized by, not just a subscript"
+    )]
     for run_index in 0..plan.total_runs() {
         if crate::abort::reason().is_some() {
             break;

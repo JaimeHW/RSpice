@@ -63,6 +63,11 @@ pub(super) enum Bug1190SonRole {
     DiodeControl,
 }
 
+/// What a BUG 1190 SON role is qualified against: the exact ordered `.PRINT`
+/// probe schema, then the primary and secondary DC sweeps as
+/// `(start, stop, step)`.
+type Bug1190SonExpectation<'a> = (&'a [&'a str], (Value, Value, Value), (Value, Value, Value));
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bug1190SonPair {
     Bsim3,
@@ -438,23 +443,20 @@ impl XyceTestRunner {
             ExpressionDialect::Xyce,
             None,
         )?;
-        let (expected_probes, expected_primary, expected_secondary): (
-            &[&str],
-            (Value, Value, Value),
-            (Value, Value, Value),
-        ) = match role.pair() {
-            Bug1190SonPair::Bsim3 => (
-                ["v(2)", "v(1)", "i(vds)", "M1:L", "M1:W"].as_slice(),
-                (0.0, 3.5, 0.5),
-                (0.0, 3.5, 0.5),
-            ),
-            Bug1190SonPair::Bsim4 => (
-                ["v(2)", "v(1)", "i(vds)", "M1:RBDB", "M1:RBSB", "M1:RBPS"].as_slice(),
-                (0.0, 1.2, 0.2),
-                (0.2, 1.2, 0.2),
-            ),
-            Bug1190SonPair::Diode => return Err(format!("{LABEL} diode role is not DC")),
-        };
+        let (expected_probes, expected_primary, expected_secondary): Bug1190SonExpectation<'_> =
+            match role.pair() {
+                Bug1190SonPair::Bsim3 => (
+                    ["v(2)", "v(1)", "i(vds)", "M1:L", "M1:W"].as_slice(),
+                    (0.0, 3.5, 0.5),
+                    (0.0, 3.5, 0.5),
+                ),
+                Bug1190SonPair::Bsim4 => (
+                    ["v(2)", "v(1)", "i(vds)", "M1:RBDB", "M1:RBSB", "M1:RBPS"].as_slice(),
+                    (0.0, 1.2, 0.2),
+                    (0.2, 1.2, 0.2),
+                ),
+                Bug1190SonPair::Diode => return Err(format!("{LABEL} diode role is not DC")),
+            };
         let Some(secondary) = plan.dc.sweep2.as_ref() else {
             return Err(format!("{LABEL} {role:?} lost its secondary DC sweep"));
         };
