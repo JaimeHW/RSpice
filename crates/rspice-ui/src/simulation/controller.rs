@@ -672,21 +672,33 @@ impl SimulationController {
             return;
         }
 
-        let interrupted = self.current_run_id.and_then(|run_sequence| {
+        let interrupted = self.current_run_id.filter(|run_sequence| {
             state
                 .simulation
-                .run_by_sequence_mut(run_sequence)
-                .filter(|run| !run.lifecycle.is_terminal())
+                .run_by_sequence(*run_sequence)
+                .is_some_and(|run| !run.lifecycle.is_terminal())
         });
-        if let Some(run) = interrupted {
-            run.success = false;
-            if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Interrupted) {
-                log::error!("Failed to seal interrupted simulation run lifecycle: {error}");
-            } else {
+        if let Some(run_sequence) = interrupted {
+            // An interruption is a run failure like any other: the verdict
+            // flips, a terminal lifecycle is sealed, and the generation moves
+            // once, after both. The reader is told only when the seal took —
+            // a lifecycle this run could not enter is an internal fault, not
+            // news about their simulation.
+            let errors = self.seal_failed_run(
+                state,
+                Some(run_sequence),
+                None,
+                Some(SimulationRunLifecycle::Interrupted),
+            );
+            if errors.is_empty() {
                 state.push_sim_message(ConsoleMessage::warning(
                     "Simulation execution was interrupted because its design context changed"
                         .to_owned(),
                 ));
+            } else {
+                for error in errors {
+                    log::error!("Failed to seal interrupted simulation run lifecycle: {error}");
+                }
             }
         }
         self.reset_for_design_replacement();
@@ -808,7 +820,8 @@ impl SimulationController {
                     // carried is what failed — but the verdict still flips,
                     // and that is a new generation of the run all the same.
                     let target_run_id = self.target_run_id(state);
-                    let _ = self.seal_failed_analysis(state, target_run_id, None);
+                    let errors = self.seal_failed_run(state, target_run_id, None, None);
+                    Self::report_seal_errors(state, errors);
                     self.pending_analyses.clear();
                     self.finish_simulation_batch(state);
                     return;
@@ -823,11 +836,8 @@ impl SimulationController {
             .with_provenance(provenance);
             retain_plan_saved_outputs(&mut failed, candidate.saved_output_contracts());
             let target_run_id = self.target_run_id(state);
-            let retention_error = self.seal_failed_analysis(state, target_run_id, Some(failed));
-            if let Some(error) = retention_error {
-                log::error!("{error}");
-                state.push_sim_message(ConsoleMessage::error(error));
-            }
+            let errors = self.seal_failed_run(state, target_run_id, Some(failed), None);
+            Self::report_seal_errors(state, errors);
             state.push_sim_message(ConsoleMessage::warning(message));
         };
         log::info!(
@@ -862,11 +872,12 @@ impl SimulationController {
                 );
                 log::error!("{message}");
                 state.push_sim_message(ConsoleMessage::error(message));
-                if let Some(run_id) = self.target_run_id(state)
-                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
-                {
-                    run.success = false;
-                }
+                // Nothing to retain — the provenance the result would have
+                // carried is what failed — but the verdict still flips, and
+                // that is a new generation of the run all the same.
+                let target_run_id = self.target_run_id(state);
+                let errors = self.seal_failed_run(state, target_run_id, None, None);
+                Self::report_seal_errors(state, errors);
                 self.pending_analyses.clear();
                 self.finish_simulation_batch(state);
                 return;
@@ -959,11 +970,8 @@ impl SimulationController {
                 self.materialize_current_saved_outputs(&mut analysis);
                 analysis
             });
-            let retention_error = self.seal_failed_analysis(state, target_run_id, failed_analysis);
-            if let Some(error) = retention_error {
-                log::error!("{error}");
-                state.push_sim_message(ConsoleMessage::error(error));
-            }
+            let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
+            Self::report_seal_errors(state, errors);
             self.pending_analyses.clear();
             self.finish_simulation_batch(state);
             state.simulation.status = "Error".to_string();
@@ -1022,12 +1030,8 @@ impl SimulationController {
                     self.materialize_current_saved_outputs(&mut analysis);
                     analysis
                 });
-                let retention_error =
-                    self.seal_failed_analysis(state, target_run_id, failed_analysis);
-                if let Some(error) = retention_error {
-                    log::error!("{error}");
-                    state.push_sim_message(ConsoleMessage::error(error));
-                }
+                let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
+                Self::report_seal_errors(state, errors);
                 // Try to start next analysis if any remain
                 if !self.pending_analyses.is_empty() {
                     self.start_next_analysis(state);
@@ -1077,11 +1081,8 @@ impl SimulationController {
         {
             log::error!("{error}");
             state.push_sim_message(ConsoleMessage::error(error));
-            if let Some(run_id) = target_run_id
-                && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
-            {
-                run.success = false;
-            }
+            let errors = self.seal_failed_run(state, target_run_id, None, None);
+            Self::report_seal_errors(state, errors);
         }
         if let Some(run_id) = target_run_id {
             state
@@ -1159,66 +1160,77 @@ impl SimulationController {
     ///
     /// The run the reader may already be looking at is mutated three ways
     /// here: a partial analysis is appended to it, its verdict flips to
-    /// failed, and its lifecycle is sealed as `Aborted`. That is a new
-    /// generation of the retained evidence, and every workspace memo over it
-    /// is keyed on the generation — the manifest's dataset digest, the
-    /// operating-point row plan, the retained-evidence validity. Sealing at a
-    /// constant version left all of them describing the run as it stood
-    /// before the abort.
+    /// failed, and its lifecycle is sealed as `Aborted`. That is one new
+    /// generation of the retained evidence, which is exactly what
+    /// [`Self::seal_failed_run`] is for.
     fn seal_aborted_run(&mut self, state: &mut AppState, partial: Option<AnalysisResult>) {
-        let mut retention_error = None;
-        let mut sealed = false;
-        if let Some(run_sequence) = self.current_run_id
-            && let Some(run) = state.simulation.run_by_sequence_mut(run_sequence)
-        {
-            if let Some(partial) = partial {
-                retention_error = self
-                    .retain_analysis_under_current_policy(run, partial)
-                    .err();
-            }
-            run.success = false;
-            sealed = true;
-            if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Aborted) {
-                log::error!("Failed to seal aborted run lifecycle: {error}");
-                state.push_sim_message(ConsoleMessage::error(error));
-            }
-        }
-        if sealed {
-            state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
-        }
-        if let Some(error) = retention_error {
-            log::error!("{error}");
-            state.push_sim_message(ConsoleMessage::error(error));
-        }
+        let errors = self.seal_failed_run(
+            state,
+            self.current_run_id,
+            partial,
+            Some(SimulationRunLifecycle::Aborted),
+        );
+        Self::report_seal_errors(state, errors);
     }
 
-    /// Seal one analysis failure into the retained run.
+    /// Seal a run's failure, as one event.
     ///
-    /// Three mutations, one event: whatever prefix the save policy admits is
-    /// appended, the run's verdict flips to failed, and the dataset's
-    /// generation moves. The four failure paths that used to spell this out
-    /// separately each did the first two and none did the third, and the
-    /// generation is what every Results memo over the run is keyed on — the
-    /// dataset digest the inspector's tamper check reads, the
-    /// operating-point row plan, the retained-evidence verdict. Sealing a
-    /// failure at a constant version left all of them describing the run as
-    /// it stood before it failed.
+    /// Whatever prefix the save policy admits is retained, the run's verdict
+    /// flips to failed, a terminal lifecycle is sealed when the caller names
+    /// one, and only then does the dataset's generation move. Every Results
+    /// memo over the run is keyed on that generation — the dataset digest the
+    /// inspector's tamper check reads, the operating-point row plan, the
+    /// retained-evidence verdict — so it has to be declared after the last
+    /// mutation rather than between them, and ten paths that each performed
+    /// some of these mutations declared it between none of them.
     ///
-    /// Returns the retention error, if the policy refused the analysis. A
-    /// target run that no longer exists is not an error here: the batch is
-    /// already unwinding and has nothing to seal.
-    fn seal_failed_analysis(
+    /// The order inside is not arbitrary. Retention precedes the lifecycle
+    /// seal because `finish_lifecycle` evaluates the run's specification
+    /// verdicts against its retained analyses; a partial sealed the other way
+    /// round would be judged against a run it is not part of.
+    ///
+    /// This is the only place a shipped path flips `success`, which
+    /// [`tests::no_shipped_path_fails_a_run_outside_the_sealing_helper`]
+    /// holds it to. Errors come back in the order they happened, for the
+    /// caller to report the way it reports every other console error; a
+    /// target run that no longer exists is not one of them, because a batch
+    /// that is already unwinding has nothing to seal.
+    fn seal_failed_run(
         &self,
         state: &mut AppState,
         target_run_id: Option<u64>,
         failed: Option<AnalysisResult>,
-    ) -> Option<String> {
-        let run = state.simulation.run_by_sequence_mut(target_run_id?)?;
-        let retention_error =
-            failed.and_then(|failed| self.retain_analysis_under_current_policy(run, failed).err());
+        terminal: Option<SimulationRunLifecycle>,
+    ) -> Vec<String> {
+        let mut errors = Vec::new();
+        let Some(run_id) = target_run_id else {
+            return errors;
+        };
+        let Some(run) = state.simulation.run_by_sequence_mut(run_id) else {
+            return errors;
+        };
+        if let Some(failed) = failed
+            && let Err(error) = self.retain_analysis_under_current_policy(run, failed)
+        {
+            errors.push(error);
+        }
         run.success = false;
+        if let Some(terminal) = terminal
+            && let Err(error) = run.finish_lifecycle(terminal)
+        {
+            errors.push(error);
+        }
         state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
-        retention_error
+        errors
+    }
+
+    /// Report every error [`Self::seal_failed_run`] returned, the way the
+    /// console reports any other failure.
+    fn report_seal_errors(state: &mut AppState, errors: Vec<String>) {
+        for error in errors {
+            log::error!("{error}");
+            state.push_sim_message(ConsoleMessage::error(error));
+        }
     }
 
     /// Adopt one terminal result only when the complete retained run remains
@@ -2057,11 +2069,8 @@ impl SimulationController {
                             Err(error) => {
                                 log::error!("{error}");
                                 state.push_sim_message(ConsoleMessage::error(error));
-                                if let Some(run_id) = target_run_id
-                                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
-                                {
-                                    run.success = false;
-                                }
+                                let errors = self.seal_failed_run(state, target_run_id, None, None);
+                                Self::report_seal_errors(state, errors);
                                 self.pending_analyses.clear();
                             }
                         }
@@ -2072,11 +2081,8 @@ impl SimulationController {
                         );
                         log::error!("{message}");
                         state.push_sim_message(ConsoleMessage::error(message));
-                        if let Some(run_id) = target_run_id
-                            && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
-                        {
-                            run.success = false;
-                        }
+                        let errors = self.seal_failed_run(state, target_run_id, None, None);
+                        Self::report_seal_errors(state, errors);
                     }
 
                     // Display the just-completed analysis without rebuilding waveform buffers.
@@ -2228,12 +2234,8 @@ impl SimulationController {
                         state.push_sim_message(ConsoleMessage::error(message.to_owned()));
                         None
                     };
-                    let retention_error =
-                        self.seal_failed_analysis(state, target_run_id, failed_analysis);
-                    if let Some(error) = retention_error {
-                        log::error!("{error}");
-                        state.push_sim_message(ConsoleMessage::error(error));
-                    }
+                    let errors = self.seal_failed_run(state, target_run_id, failed_analysis, None);
+                    Self::report_seal_errors(state, errors);
 
                     // Continue with remaining analyses (commercial behavior: don't abort batch)
                     if !self.pending_analyses.is_empty() {

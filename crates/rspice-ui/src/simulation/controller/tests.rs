@@ -275,8 +275,8 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
     let failed = AnalysisResult::failed(1, AnalysisType::DcOp, "OP", "solver gave up")
         .with_provenance(synthetic_result_provenance());
     assert_eq!(
-        controller.seal_failed_analysis(&mut state, Some(run_sequence), Some(failed)),
-        None,
+        controller.seal_failed_run(&mut state, Some(run_sequence), Some(failed), None),
+        Vec::<String>::new(),
         "the default save policy admits a failure record"
     );
 
@@ -291,28 +291,61 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
         "the retained run changed under memos that key on the data version"
     );
 
-    // The verdict alone is enough: a path with nothing to retain still
-    // mutated the run and must still declare it.
+    // A terminal lifecycle is part of the same event, and the generation is
+    // declared after it rather than between the two mutations. Nothing to
+    // retain is not nothing to declare: the verdict alone moved the run.
     let before = state.simulation.data_version;
-    assert_eq!(
-        controller.seal_failed_analysis(&mut state, Some(run_sequence), None),
-        None
+    let terminal = Some(SimulationRunLifecycle::Aborted);
+    assert!(
+        controller
+            .seal_failed_run(&mut state, Some(run_sequence), None, terminal)
+            .is_empty()
     );
     assert_ne!(state.simulation.data_version, before);
+    assert_eq!(
+        state
+            .simulation
+            .run_by_sequence(run_sequence)
+            .expect("target run remains")
+            .lifecycle,
+        SimulationRunLifecycle::Aborted
+    );
 
     // A target run that no longer exists has nothing to seal and nothing to
     // declare.
     let before = state.simulation.data_version;
+    for absent in [Some(run_sequence + 4_096), None] {
+        assert!(
+            controller
+                .seal_failed_run(&mut state, absent, None, None)
+                .is_empty()
+        );
+        assert_eq!(state.simulation.data_version, before);
+    }
+}
+
+/// The verdict flip, the lifecycle seal and the generation bump are one
+/// event, and one function performs it.
+///
+/// Ten shipped paths used to flip `run.success` on their own, at a constant
+/// data version, under memos keyed on that version. A guard on the source is
+/// what keeps the eleventh from being written: nothing about
+/// `run.success = false` at a call site fails a test by itself.
+#[test]
+fn no_shipped_path_fails_a_run_outside_the_sealing_helper() {
+    let offenders = crate::source_guard::production_half(include_str!("../controller.rs"))
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| line.contains("run.success = false"))
+        .map(|(index, line)| format!("{}: {}", index + 1, line.trim()))
+        .collect::<Vec<_>>();
     assert_eq!(
-        controller.seal_failed_analysis(&mut state, Some(run_sequence + 4_096), None),
-        None
+        offenders.len(),
+        1,
+        "every shipped path that fails a run must go through `seal_failed_run`, which is the \
+         one place that declares the new dataset generation the flip creates:\n{}",
+        offenders.join("\n")
     );
-    assert_eq!(state.simulation.data_version, before);
-    assert_eq!(
-        controller.seal_failed_analysis(&mut state, None, None),
-        None
-    );
-    assert_eq!(state.simulation.data_version, before);
 }
 
 #[test]
