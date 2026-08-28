@@ -1317,7 +1317,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let analysis_integrity = analysis_keys
         .into_iter()
         .map(|key| {
-            let valid = retained_evidence_is_valid(&mut app.state, key);
+            let valid = retained_evidence_is_valid(&app.state, key);
             (key, valid)
         })
         .collect::<std::collections::HashMap<_, _>>();

@@ -951,7 +951,7 @@ fn every_campaign_analysis_reaches_a_sheet_that_can_draw_it() {
             analysis.validate_retained_evidence().is_ok(),
             "{viewer:?} fixture is not valid evidence"
         );
-        let mut state = state_with_analysis(analysis);
+        let state = state_with_analysis(analysis);
         assert!(
             viewer_availability(&state, viewer).available,
             "{viewer:?} is unreachable"
@@ -959,7 +959,7 @@ fn every_campaign_analysis_reaches_a_sheet_that_can_draw_it() {
         // The sheet's own evidence gate must agree with the tab that
         // offered it, or the tab opens onto a refusal.
         let key = active_analysis_key(&state);
-        assert!(retained_evidence_is_valid(&mut state, key), "{viewer:?}");
+        assert!(retained_evidence_is_valid(&state, key), "{viewer:?}");
     }
 }
 
