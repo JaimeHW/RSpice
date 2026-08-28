@@ -87,7 +87,22 @@ __pycache__/
 /.qualification-worktrees/
 /_codex_perf_tmp/
 # Scratch directories an agent lane opens at the repository root for one task.
+# Each family is one lane's working area — model-audit evidence, an oracle or
+# source cache, a replay, a nested worktree set — and none of it is product.
+# Untracked and unignored, they put 80-odd phantom entries in front of every
+# `git status`, which is how real uncommitted work gets lost in the noise.
 /.tmp-*/
+/.agent-*/
+/.audit-*/
+/.root-replay-*/
+/.oracle-cache-*/
+/.scratch-*/
+/.source-cache-*/
+/.models-worktrees/
+# A junction to the sibling RSpice-Cloud checkout, so the cloud sources can be
+# reached from inside this tree. It is a link, not a copy: never delete it
+# recursively, which follows it into the real repository.
+/RSpice-Cloud/
 *.pdb
 
 # Claude Code session state. Previously carried only in .git/info/exclude, which
