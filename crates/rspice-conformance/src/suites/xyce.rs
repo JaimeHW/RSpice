@@ -63,15 +63,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 266;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 268;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "d63a2a4edf677c9de6b604dc421e06061194471f75564633a7249707e1918cdc";
+    "156d063527e47ae9e3e202cba0ecffbf5359b358c34128714a12de85e69548d0";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "3af9de8fec7be836fb6760d3edf6ec8e54fc5482e7723dae97e8ef8d75f9ebf0";
+    "c00efc8c5e00e8d4ff5654c711a385e4dc7e6543ae91748ca025e94a70a63b84";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "fc04779e48bc0d1bc3e157724d1b6b1b916eefaece1064565dd6e8920e691242";
+    "a62062b22e65f3f812a45c48796b24cbd3fb9301456a8b1332314362ebbb9a2e";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -2091,6 +2091,104 @@ const XYCE_BUG981_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
         84,
         "11a3883c1c30a398347fe4f28735842f0ebf912cf074c268ddd137257ad0b469",
         "81a1d12cfce1ba83ca9aa3bc678a568daea1e910b50d04a69cbdf2008aaf76d4",
+    ),
+];
+
+// BUG_986_SON's blank owner delegates to two transient workers. The
+// Release wrapper requires both simulations and their default PRN files to
+// succeed, then byte-compares the complete files. Worker A authors TIMEINT
+// BREAKPOINTS while worker B obtains the same schedule from a disconnected,
+// zero-valued PWL source. Both select ERROPTION=1, so this qualification also
+// binds the implicit ten-step-per-breakpoint-span policy.
+const XYCE_BUG986_OWNER_CONTRACT: &str =
+    "bug986_erroption_breakpoint_source_relational_wrapper_owner";
+const XYCE_BUG986_BREAKPOINT_CONTRACT: &str =
+    "bug986_erroption_explicit_breakpoints_relational_worker";
+const XYCE_BUG986_PWL_CONTRACT: &str =
+    "bug986_erroption_disconnected_pwl_breakpoints_relational_worker";
+const XYCE_BUG986_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_986_SON/bug986.cir";
+const XYCE_BUG986_BREAKPOINT_PATH: &str = "Netlists/Certification_Tests/BUG_986_SON/bug986A.cir";
+const XYCE_BUG986_PWL_PATH: &str = "Netlists/Certification_Tests/BUG_986_SON/bug986B.cir";
+const XYCE_BUG986_OWNER_RECORD: &str = "netlists/certification_tests/bug_986_son/bug986.cir";
+const XYCE_BUG986_BREAKPOINT_RECORD: &str = "netlists/certification_tests/bug_986_son/bug986a.cir";
+const XYCE_BUG986_PWL_RECORD: &str = "netlists/certification_tests/bug_986_son/bug986b.cir";
+const XYCE_BUG986_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_986_SON/exclude";
+const XYCE_BUG986_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
+const XYCE_BUG986_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
+const XYCE_BUG986_HISTORICAL_RECORD_COUNT: usize = 8;
+const XYCE_BUG986_HISTORICAL_RECORD_BYTES: usize = 1_934;
+const XYCE_BUG986_HISTORICAL_RECORDS_SHA256: &str =
+    "ab17281bd2abb81d4861f1c1086ba804ccd062f84ac08f7cc7bd422b2afcd8d2";
+const XYCE_BUG986_HISTORICAL_RECORDS_BLAKE3: &str =
+    "ab55ef2edc8d8c970acbc3e5f19d01608b525c108e7576ce4b87eea8f5017a2a";
+const XYCE_BUG986_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
+    (
+        "Netlists/Certification_Tests/BUG_986_SON/CMakeLists.txt",
+        1_470,
+        "777743a645d21c33259fbee1d63c97397ad56fa95412d4e4ce0eb7a90fafc889",
+        "7332ae97bab0830c9d178355a37b744b6ce886679d1dda0211951f297ed325e9",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_986_SON/Manifest.txt",
+        62,
+        "6457a2bfb84b67da4b9be2ff4f935affaa404159351193f08fc1ca2248d450ba",
+        "2b909c87a0eb2ef3b32a538b8e314ec93d6ad0e77159a139ece253216d9d945f",
+    ),
+    (
+        XYCE_BUG986_OWNER_PATH,
+        2,
+        "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+        "5896d7c81fa3a2eee0aa6139c752d40a1408b7e083aa940d1ece11d61d6c0e3e",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_986_SON/bug986.cir.sh",
+        1_375,
+        "503e4da47628c5b25677c49def72b487487730790206809e8dc0626c87ed797f",
+        "a6cbeb117bb424779f60d587142138a74c338db7c1a830552dd1b7cc6e5a6579",
+    ),
+    (
+        XYCE_BUG986_BREAKPOINT_PATH,
+        181,
+        "512d5da724c868f0b9b0053174bee474bbb0b32386c04dc282e358d05d888a0e",
+        "03d778c9aff2d1c160f28db66703e9071f79932f6d45a5a58392715c8a170b0f",
+    ),
+    (
+        XYCE_BUG986_PWL_PATH,
+        287,
+        "b48abba94661edc6bd4d2e8f986cbd4c012537dd1abe7284bda1924cb7f06f99",
+        "ca2a2eaf2071ce84b529f425115383ac67f932de263f1be20be664e627f94b6c",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_986_SON/exclude",
+        24,
+        "4b29d39d098fcb124047124f11f03a03c266a550d4cffd326048983daefa7c6d",
+        "ff428e04828eca85fce217ddda5c580b3e55d135af9a7ef3dcf0b97c5d997ba6",
+    ),
+    (
+        "Netlists/Certification_Tests/BUG_986_SON/tags",
+        46,
+        "c5cb611c2e3e599f90395aef50b7d59f3aa05f125fea8c02bf1f313854a3abaa",
+        "0d83e34418c364531bc0a371b85d66ddcb977725f8be28ca90d2946c2e77661f",
+    ),
+];
+const XYCE_BUG986_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
+    (
+        "bug986.cir",
+        2,
+        "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+        "5896d7c81fa3a2eee0aa6139c752d40a1408b7e083aa940d1ece11d61d6c0e3e",
+    ),
+    (
+        "bug986A.cir",
+        181,
+        "512d5da724c868f0b9b0053174bee474bbb0b32386c04dc282e358d05d888a0e",
+        "03d778c9aff2d1c160f28db66703e9071f79932f6d45a5a58392715c8a170b0f",
+    ),
+    (
+        "bug986B.cir",
+        287,
+        "b48abba94661edc6bd4d2e8f986cbd4c012537dd1abe7284bda1924cb7f06f99",
+        "ca2a2eaf2071ce84b529f425115383ac67f932de263f1be20be664e627f94b6c",
     ),
 ];
 
@@ -12464,6 +12562,7 @@ mod contracts_bug805_son;
 mod contracts_bug806;
 mod contracts_bug864;
 mod contracts_bug981;
+mod contracts_bug986;
 mod contracts_dc;
 mod contracts_diode_analytic;
 mod contracts_frequency;

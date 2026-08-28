@@ -10194,6 +10194,44 @@ fn test_xyce_bug981_output_schedule_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_bug986_erroption_breakpoint_source_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_986_SON/bug986.cir",
+            "bug986_erroption_breakpoint_source_relational_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_986_SON/bug986A.cir",
+            "bug986_erroption_explicit_breakpoints_relational_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_986_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_986_SON/bug986B.cir",
+            "bug986_erroption_disconnected_pwl_breakpoints_relational_worker",
+            false,
+            Some("Netlists/Certification_Tests/BUG_986_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the strict ERROPTION breakpoint/PWL default-PRN relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_issue202_redefined_parameter_mode_matrix() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

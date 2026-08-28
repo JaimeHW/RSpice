@@ -2405,6 +2405,13 @@ impl XyceTestRunner {
             timeint_abstol,
             timeint_delmax,
             timeint_use_device_max_timestep,
+            timeint_error_control,
+            timeint_min_steps_between_breakpoints,
+            timeint_nlmin,
+            timeint_nlmax,
+            timeint_min_order,
+            timeint_max_order,
+            timeint_timesteps_reversal,
             nonlin_transient_reltol,
             nonlin_transient_abstol,
             nonlin_transient_deltaxtol,
@@ -2466,6 +2473,13 @@ impl XyceTestRunner {
             && timeint_abstol.map(Value::to_bits) == abstol_bits
             && timeint_delmax.is_none()
             && timeint_use_device_max_timestep.is_none()
+            && timeint_error_control.is_none()
+            && timeint_min_steps_between_breakpoints.is_none()
+            && timeint_nlmin.is_none()
+            && timeint_nlmax.is_none()
+            && timeint_min_order.is_none()
+            && timeint_max_order.is_none()
+            && timeint_timesteps_reversal.is_none()
             && device_voltage_limiting.is_none()
             && device_debug_level.is_none()
             && linsol_tr_partition.is_none()
