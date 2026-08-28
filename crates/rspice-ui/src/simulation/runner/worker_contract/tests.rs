@@ -44,7 +44,7 @@ fn pole_zero_worker_result_accepts_numeric_and_missing_gain_with_explicit_eviden
             r#"{"PoleZero":{"poles":[],"zeros":[],"gain":1.0}}"#
         )
         .is_err(),
-        "protocol-v9 worker results must never invent missing root evidence"
+        "protocol-v10 worker results must never invent missing root evidence"
     );
 }
 
@@ -77,6 +77,12 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
         .iter()
         .map(|time| (2.0 * std::f64::consts::PI * time).sin())
         .collect();
+    let certificate = rspice_core::analysis::FloquetSpectrumCertificate::new(
+        1,
+        0.0,
+        rspice_core::analysis::FloquetSpectrumCertificate::canonical_qualification_tolerance(1),
+    )
+    .unwrap();
     let result = rspice_core::analysis::pss::PssResult {
         period: 1.0,
         frequency: 1.0,
@@ -89,6 +95,9 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
         node_names: vec!["out".to_owned()],
         period_detected: false,
         floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate },
+        floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind::Driven,
+        trivial_floquet_multiplier_index: None,
     };
     rspice_core::engine::PssOperatingPoint::try_from_parts(
         config,
@@ -173,6 +182,8 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 10);
+    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"

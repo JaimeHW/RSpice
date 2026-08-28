@@ -61,6 +61,12 @@ fn periodic_result() -> SimulationResult {
         .iter()
         .map(|time| (2.0 * std::f64::consts::PI * time).sin())
         .collect::<Vec<_>>();
+    let certificate = rspice_core::analysis::FloquetSpectrumCertificate::new(
+        1,
+        0.0,
+        rspice_core::analysis::FloquetSpectrumCertificate::canonical_qualification_tolerance(1),
+    )
+    .unwrap();
     let result = rspice_core::analysis::pss::PssResult {
         period: 1.0,
         frequency: 1.0,
@@ -73,6 +79,9 @@ fn periodic_result() -> SimulationResult {
         node_names: vec!["out".to_owned()],
         period_detected: false,
         floquet_multipliers: vec![num_complex::Complex64::new(0.9, 0.0)],
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate },
+        floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind::Driven,
+        trivial_floquet_multiplier_index: None,
     };
     let analysis = rspice_core::engine::PssAnalysisResult {
         result,
@@ -716,6 +725,113 @@ fn periodic_state_transfer_round_trips_and_rejects_tamper_or_config_drift() {
         ResolvedExecutionDependencies::decode_transfer(&metadata, tampered),
         Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
     ));
+}
+
+#[test]
+fn periodic_state_artifact_rejects_floquet_contract_and_compatibility_tamper() {
+    let producer = AnalysisInstanceId::new();
+    let revision = ObjectRevision::new(12).unwrap();
+    let envelope = ExecutionArtifactEnvelope::from_periodic_result(
+        digest(51),
+        producer,
+        revision,
+        digest(52),
+        &pss_spec(PssMethod::Shooting),
+        &periodic_result(),
+    )
+    .unwrap()
+    .unwrap();
+    let ExecutionArtifactPayload::PeriodicState(periodic) = envelope.payload else {
+        panic!("fixture must publish a periodic-state artifact")
+    };
+    let periodic = Arc::unwrap_or_clone(periodic);
+    periodic.validate().unwrap();
+
+    let mut legacy = periodic.clone();
+    legacy.floquet_evidence = rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown;
+    legacy.floquet_verdict = rspice_core::analysis::FloquetStabilityVerdict::Indeterminate;
+    legacy.floquet_authenticated = false;
+    assert!(legacy.validate().is_err());
+
+    let mut inflated = periodic.clone();
+    let rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } =
+        &mut inflated.floquet_evidence
+    else {
+        panic!("fixture must carry qualified evidence")
+    };
+    certificate.qualification_tolerance = 1.0;
+    assert!(inflated.validate().is_err());
+
+    let mut roots = periodic.clone();
+    roots.analysis_floquet_real[0] = 0.8;
+    assert!(roots.validate().is_err());
+
+    let mut stable = periodic.clone();
+    stable.analysis_is_stable = false;
+    assert!(stable.validate().is_err());
+
+    let mut orbit = periodic.clone();
+    orbit.floquet_orbit_kind = rspice_core::analysis::FloquetOrbitKind::Autonomous;
+    assert!(orbit.validate().is_err());
+
+    let mut trivial = periodic;
+    trivial.trivial_floquet_multiplier_index = Some(usize::MAX);
+    assert!(trivial.validate().is_err());
+}
+
+#[test]
+fn dependency_transfer_missing_floquet_metadata_never_becomes_qualified() {
+    let producer = AnalysisInstanceId::new();
+    let revision = ObjectRevision::new(13).unwrap();
+    let snapshot = digest(61);
+    let config_digest = digest(62);
+    let binding = PreparedDependencyBinding::periodic_state(producer, revision, config_digest);
+    let artifact = ExecutionArtifactEnvelope::from_periodic_result(
+        snapshot,
+        producer,
+        revision,
+        config_digest,
+        &pss_spec(PssMethod::Shooting),
+        &periodic_result(),
+    )
+    .unwrap()
+    .unwrap();
+    let resolved = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding],
+        &HashMap::from([(producer, artifact)]),
+    )
+    .unwrap();
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    let mut metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+
+    fn strip_contract(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                if object.contains_key("floquet_evidence") {
+                    object.remove("floquet_evidence");
+                    object.remove("floquet_orbit_kind");
+                    object.remove("trivial_floquet_multiplier_index");
+                    object.remove("floquet_verdict");
+                    object.remove("floquet_authenticated");
+                    return true;
+                }
+                object.values_mut().any(strip_contract)
+            }
+            serde_json::Value::Array(values) => values.iter_mut().any(strip_contract),
+            _ => false,
+        }
+    }
+
+    assert!(strip_contract(&mut metadata));
+    let metadata = serde_json::to_string(&metadata).unwrap();
+    let error = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers)
+        .expect_err("missing Floquet evidence must fail closed");
+    assert!(
+        error.to_string().contains("authenticated Floquet")
+            || error.to_string().contains("complete Floquet evidence"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -142,6 +142,12 @@ pub(super) fn validate_worker_response_before_transport(
         return Ok(());
     };
     let analysis = operating_point.analysis();
+    rspice_core::engine::PssOperatingPoint::try_from_parts(
+        operating_point.config().clone(),
+        analysis.clone(),
+        operating_point.shooting_state().to_vec(),
+    )
+    .map_err(|error| format!("invalid retained PSS worker response: {error}"))?;
     let transfer_buffer_count = analysis
         .result
         .waveforms
@@ -597,6 +603,12 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     result_period_detected: bool,
     result_floquet_real: WorkerF64Series,
     result_floquet_imag: WorkerF64Series,
+    #[serde(default)]
+    result_floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+    #[serde(default)]
+    result_floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+    #[serde(default)]
+    result_trivial_floquet_multiplier_index: Option<usize>,
     analysis_iterations: usize,
     analysis_final_residual: f64,
     analysis_period: f64,
@@ -604,7 +616,38 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     analysis_floquet_real: WorkerF64Series,
     analysis_floquet_imag: WorkerF64Series,
     analysis_is_stable: bool,
+    #[serde(default = "indeterminate_floquet_verdict")]
+    analysis_floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+    #[serde(default)]
+    analysis_floquet_authenticated: bool,
     shooting_state: WorkerF64Series,
+}
+
+fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVerdict {
+    rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
+}
+
+fn pss_floquet_contract_is_authenticated(
+    result: &rspice_core::analysis::pss::PssResult,
+    monodromy_order: usize,
+) -> bool {
+    if !result.has_consistent_floquet_contract() {
+        return false;
+    }
+    match &result.floquet_evidence {
+        rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } => {
+            certificate.is_valid()
+                && monodromy_order > 0
+                && certificate.problem_order == monodromy_order
+                && certificate.problem_order == result.floquet_multipliers.len()
+        }
+        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes => {
+            monodromy_order == 0
+                && result.floquet_multipliers.is_empty()
+                && result.floquet_orbit_kind == rspice_core::analysis::FloquetOrbitKind::Driven
+        }
+        _ => false,
+    }
 }
 
 impl WorkerPssOperatingPointTransport {
@@ -615,6 +658,9 @@ impl WorkerPssOperatingPointTransport {
         let config = operating_point.config().clone();
         let analysis = operating_point.analysis();
         let result = &analysis.result;
+        let analysis_floquet_verdict = result.stability_verdict();
+        let analysis_floquet_authenticated =
+            pss_floquet_contract_is_authenticated(result, analysis.monodromy.len());
         let result_waveforms = result
             .node_names
             .iter()
@@ -646,6 +692,9 @@ impl WorkerPssOperatingPointTransport {
             result_period_detected: result.period_detected,
             result_floquet_real: WorkerF64Series::from_vec(result_floquet_real, buffers),
             result_floquet_imag: WorkerF64Series::from_vec(result_floquet_imag, buffers),
+            result_floquet_evidence: result.floquet_evidence.clone(),
+            result_floquet_orbit_kind: result.floquet_orbit_kind,
+            result_trivial_floquet_multiplier_index: result.trivial_floquet_multiplier_index,
             analysis_iterations: analysis.iterations,
             analysis_final_residual: analysis.final_residual,
             analysis_period: analysis.period,
@@ -658,6 +707,8 @@ impl WorkerPssOperatingPointTransport {
             analysis_floquet_real: WorkerF64Series::from_vec(analysis_floquet_real, buffers),
             analysis_floquet_imag: WorkerF64Series::from_vec(analysis_floquet_imag, buffers),
             analysis_is_stable: analysis.is_stable,
+            analysis_floquet_verdict,
+            analysis_floquet_authenticated,
             shooting_state: WorkerF64Series::from_vec(
                 operating_point.shooting_state().to_vec(),
                 buffers,
@@ -706,7 +757,25 @@ impl WorkerPssOperatingPointTransport {
             node_names,
             period_detected: self.result_period_detected,
             floquet_multipliers: result_floquet_multipliers,
+            floquet_evidence: self.result_floquet_evidence,
+            floquet_orbit_kind: self.result_floquet_orbit_kind,
+            trivial_floquet_multiplier_index: self.result_trivial_floquet_multiplier_index,
         };
+        let computed_verdict = result.stability_verdict();
+        let computed_authenticated =
+            pss_floquet_contract_is_authenticated(&result, monodromy.len());
+        if self.analysis_floquet_verdict != computed_verdict {
+            return Err(
+                "retained PSS worker compatibility verdict does not match its Floquet contract"
+                    .to_owned(),
+            );
+        }
+        if self.analysis_floquet_authenticated != computed_authenticated || !computed_authenticated
+        {
+            return Err(
+                "retained PSS worker payload lacks authenticated Floquet evidence".to_owned(),
+            );
+        }
         let analysis = rspice_core::engine::PssAnalysisResult {
             result,
             iterations: self.analysis_iterations,
@@ -1432,4 +1501,96 @@ pub(super) fn worker_waveforms_from_transport(
         .into_iter()
         .map(|waveform| waveform.into_waveform(buffers))
         .collect()
+}
+
+#[cfg(test)]
+mod pss_floquet_contract_tests {
+    use super::*;
+
+    fn transport() -> (WorkerPssOperatingPointTransport, Vec<Vec<f64>>) {
+        let mut buffers = Vec::new();
+        let transport = WorkerPssOperatingPointTransport::from_operating_point(
+            super::super::tests::retained_pss_operating_point(),
+            &mut buffers,
+        );
+        (transport, buffers)
+    }
+
+    #[test]
+    fn retained_pss_transport_round_trips_authenticated_floquet_contract() {
+        let (transport, buffers) = transport();
+        assert!(transport.analysis_floquet_authenticated);
+        assert_eq!(
+            transport.analysis_floquet_verdict,
+            rspice_core::analysis::FloquetStabilityVerdict::Stable
+        );
+
+        let restored = transport.into_operating_point(&buffers).unwrap();
+        assert_eq!(
+            restored,
+            super::super::tests::retained_pss_operating_point()
+        );
+    }
+
+    #[test]
+    fn retained_pss_transport_missing_evidence_stays_legacy_and_is_rejected() {
+        let (transport, buffers) = transport();
+        let mut encoded = serde_json::to_value(transport).unwrap();
+        let object = encoded.as_object_mut().unwrap();
+        object.remove("result_floquet_evidence");
+        object.remove("result_floquet_orbit_kind");
+        object.remove("result_trivial_floquet_multiplier_index");
+        object.remove("analysis_floquet_verdict");
+        object.remove("analysis_floquet_authenticated");
+        let restored: WorkerPssOperatingPointTransport = serde_json::from_value(encoded).unwrap();
+        assert_eq!(
+            restored.result_floquet_evidence,
+            rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown
+        );
+        assert!(!restored.analysis_floquet_authenticated);
+        assert_eq!(
+            restored.analysis_floquet_verdict,
+            rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
+        );
+        assert!(restored.into_operating_point(&buffers).is_err());
+    }
+
+    #[test]
+    fn retained_pss_transport_rejects_noncanonical_certificate_and_compatibility_drift() {
+        let (mut inflated, buffers) = transport();
+        let rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } =
+            &mut inflated.result_floquet_evidence
+        else {
+            panic!("fixture must carry qualified evidence")
+        };
+        certificate.qualification_tolerance = 1.0;
+        assert!(inflated.into_operating_point(&buffers).is_err());
+
+        let (mut roots, buffers) = transport();
+        roots.analysis_floquet_real = WorkerF64Series::Inline(vec![0.8]);
+        assert!(roots.into_operating_point(&buffers).is_err());
+
+        let (mut stable, buffers) = transport();
+        stable.analysis_is_stable = false;
+        assert!(stable.into_operating_point(&buffers).is_err());
+
+        let (mut orbit, buffers) = transport();
+        orbit.result_floquet_orbit_kind = rspice_core::analysis::FloquetOrbitKind::Autonomous;
+        assert!(orbit.into_operating_point(&buffers).is_err());
+
+        let (mut trivial, buffers) = transport();
+        trivial.result_trivial_floquet_multiplier_index = Some(usize::MAX);
+        assert!(trivial.into_operating_point(&buffers).is_err());
+    }
+
+    #[test]
+    fn zero_order_autonomous_contract_is_not_authenticated() {
+        let mut result = rspice_core::analysis::pss::PssResult::new(1.0, 0, 0);
+        result.set_floquet_spectrum(
+            Vec::new(),
+            rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes,
+            rspice_core::analysis::FloquetOrbitKind::Autonomous,
+        );
+        assert!(!pss_floquet_contract_is_authenticated(&result, 0));
+    }
 }

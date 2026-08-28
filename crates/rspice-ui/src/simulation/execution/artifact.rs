@@ -671,8 +671,47 @@ pub(in crate::simulation) struct PeriodicStateArtifact {
     operating_point: Arc<rspice_core::engine::PssOperatingPoint>,
     result_floquet_real: Vec<f64>,
     result_floquet_imag: Vec<f64>,
+    #[serde(default)]
+    floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+    #[serde(default)]
+    floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+    #[serde(default)]
+    trivial_floquet_multiplier_index: Option<usize>,
+    #[serde(default = "indeterminate_floquet_verdict")]
+    floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+    #[serde(default)]
+    floquet_authenticated: bool,
     analysis_floquet_real: Vec<f64>,
     analysis_floquet_imag: Vec<f64>,
+    #[serde(default)]
+    analysis_is_stable: bool,
+}
+
+fn indeterminate_floquet_verdict() -> rspice_core::analysis::FloquetStabilityVerdict {
+    rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
+}
+
+fn pss_floquet_contract_is_authenticated(
+    result: &rspice_core::analysis::pss::PssResult,
+    monodromy_order: usize,
+) -> bool {
+    if !result.has_consistent_floquet_contract() {
+        return false;
+    }
+    match &result.floquet_evidence {
+        rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } => {
+            certificate.is_valid()
+                && monodromy_order > 0
+                && certificate.problem_order == monodromy_order
+                && certificate.problem_order == result.floquet_multipliers.len()
+        }
+        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes => {
+            monodromy_order == 0
+                && result.floquet_multipliers.is_empty()
+                && result.floquet_orbit_kind == rspice_core::analysis::FloquetOrbitKind::Driven
+        }
+        _ => false,
+    }
 }
 
 impl PeriodicStateArtifact {
@@ -725,6 +764,40 @@ impl PeriodicStateArtifact {
             self.operating_point.shooting_state().to_vec(),
         )
         .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
+
+        if self.floquet_evidence != analysis.result.floquet_evidence
+            || self.floquet_orbit_kind != analysis.result.floquet_orbit_kind
+            || self.trivial_floquet_multiplier_index
+                != analysis.result.trivial_floquet_multiplier_index
+        {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "periodic-state Floquet evidence compatibility metadata does not match the canonical result"
+                    .to_owned(),
+            ));
+        }
+        let computed_verdict = analysis.result.stability_verdict();
+        let computed_authenticated =
+            pss_floquet_contract_is_authenticated(&analysis.result, analysis.monodromy.len());
+        if self.floquet_verdict != computed_verdict {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "periodic-state Floquet verdict compatibility metadata does not match the canonical result"
+                    .to_owned(),
+            ));
+        }
+        if self.floquet_authenticated != computed_authenticated || !computed_authenticated {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "periodic-state payload lacks authenticated Floquet evidence".to_owned(),
+            ));
+        }
+        if self.analysis_is_stable != analysis.is_stable
+            || analysis.is_stable
+                != (computed_verdict == rspice_core::analysis::FloquetStabilityVerdict::Stable)
+        {
+            return Err(ExecutionArtifactError::InvalidPayload(
+                "periodic-state stability compatibility flag does not match the canonical Floquet verdict"
+                    .to_owned(),
+            ));
+        }
 
         validate_complex_cache(
             "PSS result Floquet",
@@ -780,7 +853,7 @@ impl PeriodicStateArtifact {
         let analysis = self.operating_point.analysis();
         let config = self.operating_point.config();
         let result = &analysis.result;
-        let mut writer = CanonicalWriter::new("rspice.periodic-state-artifact/v1");
+        let mut writer = CanonicalWriter::new("rspice.periodic-state-artifact/v2");
         writer.f64(config.fundamental_freq);
         writer.usize(config.num_harmonics);
         writer.f64(config.tstab);
@@ -823,6 +896,14 @@ impl PeriodicStateArtifact {
         }
         writer.bool(result.period_detected);
         encode_complex_values(&mut writer, &result.floquet_multipliers);
+        encode_floquet_evidence(&mut writer, &self.floquet_evidence);
+        encode_floquet_orbit_kind(&mut writer, self.floquet_orbit_kind);
+        writer.option(
+            self.trivial_floquet_multiplier_index.as_ref(),
+            |writer, index| writer.usize(*index),
+        );
+        encode_floquet_verdict(&mut writer, self.floquet_verdict);
+        writer.bool(self.floquet_authenticated);
         writer.usize(analysis.iterations);
         writer.f64(analysis.final_residual);
         writer.f64(analysis.period);
@@ -835,12 +916,55 @@ impl PeriodicStateArtifact {
         }
         encode_complex_values(&mut writer, &analysis.floquet_multipliers);
         writer.bool(analysis.is_stable);
+        writer.bool(self.analysis_is_stable);
         writer.sequence(self.operating_point.shooting_state().len());
         for value in self.operating_point.shooting_state() {
             writer.f64(*value);
         }
         writer.finish()
     }
+}
+
+fn encode_floquet_evidence(
+    writer: &mut CanonicalWriter,
+    evidence: &rspice_core::analysis::FloquetSpectrumEvidence,
+) {
+    match evidence {
+        rspice_core::analysis::FloquetSpectrumEvidence::NotComputed => writer.u8(0),
+        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes => writer.u8(1),
+        rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } => {
+            writer.u8(2);
+            writer.usize(certificate.problem_order);
+            writer.f64(certificate.max_backward_error);
+            writer.f64(certificate.qualification_tolerance);
+        }
+        rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown => writer.u8(3),
+        _ => writer.u8(u8::MAX),
+    }
+}
+
+fn encode_floquet_orbit_kind(
+    writer: &mut CanonicalWriter,
+    orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+) {
+    writer.u8(match orbit_kind {
+        rspice_core::analysis::FloquetOrbitKind::Driven => 0,
+        rspice_core::analysis::FloquetOrbitKind::Autonomous => 1,
+        _ => u8::MAX,
+    });
+}
+
+fn encode_floquet_verdict(
+    writer: &mut CanonicalWriter,
+    verdict: rspice_core::analysis::FloquetStabilityVerdict,
+) {
+    writer.u8(match verdict {
+        rspice_core::analysis::FloquetStabilityVerdict::Stable => 0,
+        rspice_core::analysis::FloquetStabilityVerdict::Unstable => 1,
+        rspice_core::analysis::FloquetStabilityVerdict::Marginal => 2,
+        rspice_core::analysis::FloquetStabilityVerdict::Indeterminate => 3,
+        _ => u8::MAX,
+    });
 }
 
 fn validate_complex_cache(
@@ -1123,12 +1247,22 @@ impl ExecutionArtifactEnvelope {
             split_complex_values(&operating_point.analysis().result.floquet_multipliers);
         let (analysis_floquet_real, analysis_floquet_imag) =
             split_complex_values(&operating_point.analysis().floquet_multipliers);
+        let analysis = operating_point.analysis();
+        let floquet_verdict = analysis.result.stability_verdict();
+        let floquet_authenticated =
+            pss_floquet_contract_is_authenticated(&analysis.result, analysis.monodromy.len());
         let periodic_state = PeriodicStateArtifact {
             operating_point: Arc::clone(operating_point),
             result_floquet_real,
             result_floquet_imag,
+            floquet_evidence: analysis.result.floquet_evidence.clone(),
+            floquet_orbit_kind: analysis.result.floquet_orbit_kind,
+            trivial_floquet_multiplier_index: analysis.result.trivial_floquet_multiplier_index,
+            floquet_verdict,
+            floquet_authenticated,
             analysis_floquet_real,
             analysis_floquet_imag,
+            analysis_is_stable: analysis.is_stable,
         };
         periodic_state.validate()?;
         let payload_digest = periodic_state.digest();
@@ -1647,6 +1781,12 @@ impl ResolvedExecutionDependencies {
                                 period_detected: result.period_detected,
                                 result_floquet_real,
                                 result_floquet_imag,
+                                floquet_evidence: periodic.floquet_evidence.clone(),
+                                floquet_orbit_kind: periodic.floquet_orbit_kind,
+                                trivial_floquet_multiplier_index: periodic
+                                    .trivial_floquet_multiplier_index,
+                                floquet_verdict: periodic.floquet_verdict,
+                                floquet_authenticated: periodic.floquet_authenticated,
                                 analysis_iterations: analysis.iterations,
                                 analysis_final_residual: analysis.final_residual,
                                 analysis_period: analysis.period,
@@ -1654,6 +1794,7 @@ impl ResolvedExecutionDependencies {
                                 analysis_floquet_real,
                                 analysis_floquet_imag,
                                 is_stable: analysis.is_stable,
+                                analysis_is_stable: periodic.analysis_is_stable,
                                 shooting_state,
                             },
                         )
@@ -1842,7 +1983,28 @@ impl ResolvedExecutionDependencies {
                             node_names,
                             period_detected: metadata.period_detected,
                             floquet_multipliers: result_floquet_multipliers,
+                            floquet_evidence: metadata.floquet_evidence.clone(),
+                            floquet_orbit_kind: metadata.floquet_orbit_kind,
+                            trivial_floquet_multiplier_index: metadata
+                                .trivial_floquet_multiplier_index,
                         };
+                        let computed_verdict = result.stability_verdict();
+                        let computed_authenticated =
+                            pss_floquet_contract_is_authenticated(&result, monodromy.len());
+                        if metadata.floquet_verdict != computed_verdict {
+                            return Err(ExecutionArtifactError::InvalidPayload(
+                                "periodic-state transfer Floquet verdict does not match its evidence"
+                                    .to_owned(),
+                            ));
+                        }
+                        if metadata.floquet_authenticated != computed_authenticated
+                            || !computed_authenticated
+                        {
+                            return Err(ExecutionArtifactError::InvalidPayload(
+                                "periodic-state transfer lacks authenticated Floquet evidence"
+                                    .to_owned(),
+                            ));
+                        }
                         let analysis = rspice_core::engine::PssAnalysisResult {
                             result,
                             iterations: metadata.analysis_iterations,
@@ -1894,8 +2056,15 @@ impl ResolvedExecutionDependencies {
                             operating_point: Arc::new(operating_point),
                             result_floquet_real,
                             result_floquet_imag,
+                            floquet_evidence: metadata.floquet_evidence,
+                            floquet_orbit_kind: metadata.floquet_orbit_kind,
+                            trivial_floquet_multiplier_index: metadata
+                                .trivial_floquet_multiplier_index,
+                            floquet_verdict: metadata.floquet_verdict,
+                            floquet_authenticated: metadata.floquet_authenticated,
                             analysis_floquet_real,
                             analysis_floquet_imag,
+                            analysis_is_stable: metadata.analysis_is_stable,
                         };
                         periodic.validate()?;
                         ExecutionArtifactPayload::PeriodicState(Arc::new(periodic))
@@ -2039,6 +2208,16 @@ struct PeriodicStateTransferMetadata {
     period_detected: bool,
     result_floquet_real: TransferBufferRef,
     result_floquet_imag: TransferBufferRef,
+    #[serde(default)]
+    floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+    #[serde(default)]
+    floquet_orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+    #[serde(default)]
+    trivial_floquet_multiplier_index: Option<usize>,
+    #[serde(default = "indeterminate_floquet_verdict")]
+    floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+    #[serde(default)]
+    floquet_authenticated: bool,
     analysis_iterations: usize,
     analysis_final_residual: f64,
     analysis_period: f64,
@@ -2046,6 +2225,8 @@ struct PeriodicStateTransferMetadata {
     analysis_floquet_real: TransferBufferRef,
     analysis_floquet_imag: TransferBufferRef,
     is_stable: bool,
+    #[serde(default)]
+    analysis_is_stable: bool,
     shooting_state: TransferBufferRef,
 }
 

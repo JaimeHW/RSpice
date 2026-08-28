@@ -62,7 +62,7 @@ pub(crate) struct WorkerRequest {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 7;
+pub(crate) const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 8;
 
 /// Browser-worker request split into compact metadata and transferable
 /// floating-point buffers. The embedded request deliberately carries empty
@@ -1202,7 +1202,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 9;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 10;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
