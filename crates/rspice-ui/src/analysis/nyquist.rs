@@ -18,6 +18,13 @@
 pub(crate) mod data;
 pub(crate) mod state;
 
+/// The Bode card measures the same margins from the same samples. Nothing but
+/// this module reads both, so it is the only place their agreement can be
+/// stated — see its header for why that agreement is not implied by either
+/// card's own oracles.
+#[cfg(test)]
+mod agreement;
+
 pub use data::{EncirclementCount, NyquistData, NyquistMargin, closed_loop_rhp_poles};
 pub use state::NyquistState;
 
