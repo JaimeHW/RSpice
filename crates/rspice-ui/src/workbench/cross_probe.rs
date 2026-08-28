@@ -470,8 +470,31 @@ fn source_line_for_target(
     }
 }
 
+/// Join `name = value` back into the one field the netlist parser reads.
+///
+/// `coalesce_assignment_fields` does this before the parser looks for the
+/// first field containing `=`, because a bare `=` is otherwise that field and
+/// the subcircuit reference is read off the parameter name preceding it.
+fn coalesce_assignments(tokens: Vec<&str>) -> Vec<String> {
+    let mut fields: Vec<String> = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let joins_previous = token.starts_with('=')
+            || fields
+                .last()
+                .is_some_and(|previous| previous.ends_with('='));
+        if joins_previous && !fields.is_empty() {
+            let last = fields.len() - 1;
+            fields[last].push_str(token);
+        } else {
+            fields.push(token.to_owned());
+        }
+    }
+    fields
+}
+
 fn source_line_has_net_token(line: &str, net: &str) -> bool {
-    let tokens = line.split_whitespace().collect::<Vec<_>>();
+    let tokens = coalesce_assignments(line.split_whitespace().collect::<Vec<_>>());
+    let tokens = tokens.iter().map(String::as_str).collect::<Vec<_>>();
     let head = tokens.first().copied().unwrap_or_default();
     let normalize = |token: &&str| {
         token
@@ -494,11 +517,45 @@ fn source_line_has_net_token(line: &str, net: &str) -> bool {
     // `Q` five; a bulk `M` carries four and an SOI `M` five. RSpice emits all
     // of those. What is fixed is the shape: the last positional token names
     // the model, and everything between the instance name and it is a node.
+    // Where the positional fields stop. `PARAMS` is accepted with and without
+    // its colon, exactly as `parse_subcircuit_instance` accepts it: an
+    // uncoloned keyword left the reference one field to the right of where the
+    // scan stopped, and the subcircuit's own name was counted as a node.
     let positional_end = || {
         tokens
             .iter()
-            .position(|token| token.contains('=') || token.eq_ignore_ascii_case("params:"))
+            .position(|token| {
+                token.contains('=')
+                    || token.eq_ignore_ascii_case("params:")
+                    || token.eq_ignore_ascii_case("params")
+            })
             .unwrap_or(tokens.len())
+    };
+    // Tokens a device card may carry *after* its model name. The netlist
+    // parser pops a bare `OFF` from both the BJT and the MOSFET tail and reads
+    // a bare numeric as a bipolar area factor; cross-probe read the last
+    // positional token as the model regardless, so a tail put the model name
+    // inside the node range and a net spelled like the model resolved to a
+    // card it never touches.
+    let model_position = |head_letter: Option<u8>| {
+        let mut end = positional_end();
+        loop {
+            let Some(last) = end.checked_sub(1).and_then(|index| tokens.get(index)) else {
+                break;
+            };
+            // Never past the instance name and its first node.
+            if end <= 3 {
+                break;
+            }
+            if last.eq_ignore_ascii_case("off")
+                || (head_letter == Some(b'Q') && last.parse::<f64>().is_ok())
+            {
+                end -= 1;
+                continue;
+            }
+            break;
+        }
+        end
     };
     let node_count = match head.as_bytes().first().map(u8::to_ascii_uppercase) {
         Some(b'R' | b'C' | b'L' | b'V' | b'I' | b'D' | b'B') => 2,
@@ -509,11 +566,11 @@ fn source_line_has_net_token(line: &str, net: &str) -> bool {
         Some(b'W') => 2,
         Some(b'E' | b'G' | b'S' | b'T' | b'O') => 4,
         Some(b'F' | b'H') => 2,
-        Some(b'Q' | b'M' | b'X') => {
-            // The last positional token is the subcircuit/model identity,
-            // never an electrical node.
+        letter @ Some(b'Q' | b'M' | b'X') => {
+            // The last positional token, once any instance tail after it has
+            // been popped, is the subcircuit/model identity — never a node.
             return tokens
-                .get(1..positional_end().saturating_sub(1))
+                .get(1..model_position(letter).saturating_sub(1))
                 .is_some_and(|nodes| nodes.iter().any(normalize));
         }
         _ => return false,
@@ -872,6 +929,49 @@ mod tests {
             "VSENSE"
         ));
         assert!(!source_line_has_net_token("W1 OUT 0 VSENSE SWMOD", "SWMOD"));
+    }
+
+    /// The model name is the last *positional* token, and a card can carry
+    /// more than positions after it.
+    ///
+    /// A bipolar card takes a bare area factor and a bare `OFF` after its
+    /// model, and a MOSFET card takes a bare `OFF` — the netlist parser pops
+    /// both before it reads the model. Cross-probe did not, so the model name
+    /// fell inside the node range and a net sharing its spelling resolved to
+    /// a card it never touches.
+    #[test]
+    fn an_instance_tail_after_the_model_is_not_a_node() {
+        // `Qname nc nb ne mname [area] [OFF]`
+        assert!(!source_line_has_net_token("Q1 C B E QMOD 2.0", "QMOD"));
+        assert!(!source_line_has_net_token("Q1 C B E QMOD OFF", "QMOD"));
+        assert!(!source_line_has_net_token("Q1 C B E QMOD 2.0 OFF", "QMOD"));
+        assert!(source_line_has_net_token("Q1 C B E QMOD 2.0 OFF", "E"));
+
+        // `Mname nd ng ns nb mname [OFF]`
+        assert!(!source_line_has_net_token("M1 D G S B MMOD OFF", "MMOD"));
+        assert!(source_line_has_net_token("M1 D G S B MMOD OFF", "B"));
+    }
+
+    /// A subcircuit instance's parameters need not be written contracted.
+    ///
+    /// The parser coalesces `W = 10u` into one field and accepts a bare
+    /// `PARAMS` keyword before it reads the subcircuit name off the last
+    /// positional field. Cross-probe stopped at the first field containing
+    /// `=`, so a spaced assignment or an uncoloned `PARAMS` shifted the name
+    /// one field left and the subcircuit's own name became a node.
+    #[test]
+    fn an_uncontracted_subcircuit_parameter_does_not_shift_the_reference() {
+        assert!(!source_line_has_net_token("X1 A B SUB W = 10u", "SUB"));
+        assert!(source_line_has_net_token("X1 A B SUB W = 10u", "B"));
+        assert!(!source_line_has_net_token("X1 A B SUB PARAMS W=10u", "SUB"));
+        assert!(source_line_has_net_token("X1 A B SUB PARAMS W=10u", "A"));
+        // The contracted spellings keep working.
+        assert!(!source_line_has_net_token(
+            "X1 A B SUB PARAMS: W=10u",
+            "SUB"
+        ));
+        assert!(!source_line_has_net_token("X1 A B SUB W=10u", "SUB"));
+        assert!(source_line_has_net_token("X1 A B SUB", "B"));
     }
 
     /// A non-ASCII instance name must not panic the prefix test.
