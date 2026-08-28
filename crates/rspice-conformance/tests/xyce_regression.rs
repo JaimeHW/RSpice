@@ -11804,6 +11804,20 @@ fn bug325_vbic_multiplicity_wrapper_owner_is_publicly_qualified() {
 }
 
 #[test]
+fn bug340_stepped_hb_fd_wrapper_owner_is_publicly_qualified() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = root.join("Netlists/Certification_Tests/BUG_340/stepRC-hb.cir");
+    let result = runner.run_test(owner);
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG340 failed its public qualification: {:?}",
+        result.error
+    );
+    assert_eq!(result.contract, "bug340_stepped_hb_fd_wrapper_owner");
+}
+
+#[test]
 fn bug372_native_mos_multiplicity_wrapper_owners_are_publicly_qualified() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
