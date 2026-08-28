@@ -13,10 +13,19 @@
 //! Both are ratified to report the same convention: the gain margin is the
 //! −180° crossing with the **smallest |dB| distance to unity** — the smallest
 //! gain change that reaches instability, which is the crossing MATLAB's
-//! `margin` names — reported signed; the phase margin is the unity-gain
-//! crossing with the smallest `|PM|`, also signed. Each card was aligned to
-//! that convention separately. Nothing else pins them against *each other*,
-//! and a convention holds only where two independent readings of it agree.
+//! `margin` names — reported signed, ties inside
+//! [`crate::results::stability::GAIN_MARGIN_TIE_DECIBELS`] going to the
+//! crossing nearest the unity-gain frequency; the phase margin is the
+//! unity-gain crossing with the smallest `|PM|`, also signed, folded into one
+//! turn by [`crate::results::stability::phase_margin_deg`].
+//!
+//! Each card was aligned to that convention separately, and separately is how
+//! they drifted: both rules were implemented twice, and both pairs disagreed
+//! on loops neither module's own fixtures reached. Those two rules now live in
+//! `results::stability` and are called rather than restated — but a shared
+//! helper is a claim about the code, not about the readings, and a convention
+//! holds only where two independent readings of it agree. That is what this
+//! module measures.
 //!
 //! Every fixture here is one closed-form loop transmission `L(j2πf)`, sampled
 //! once. The samples become a magnitude/phase pair for the Bode card and a
@@ -54,9 +63,9 @@ use super::data::NyquistData;
 /// is the coarsest of those with room to spare, so the sweep density can be
 /// varied without re-tuning it.
 ///
-/// It is also three orders of magnitude below what this module exists to
-/// catch. The conditionally stable fixture's binding and worst-case crossings
-/// are 147 dB apart; a card that named the wrong one misses by 10⁵ budgets.
+/// It is also far below what this module exists to catch. The conditionally
+/// stable fixture's binding and worst-case crossings are 147 dB apart, so a
+/// card that named the wrong one misses by seven thousand budgets.
 const GAIN_MARGIN_AGREEMENT_DB: f64 = 0.02;
 
 /// How far apart two readings of one margin may sit, in degrees.
@@ -72,8 +81,8 @@ const PHASE_MARGIN_AGREEMENT_DEG: f64 = 0.05;
 /// A crossing frequency is only ever as well determined as the curve's slope
 /// there: a margin located on a shallow segment moves further for the same dB
 /// of interpolation error than one located on a steep one. The worst case
-/// measured here is 9.7e-5 — the phase margin of the conditionally stable loop
-/// swept at 40 points per decade, read off a phase turning 100° per decade.
+/// measured here is 9.7e-5 — the unity-gain crossing of the conditionally
+/// stable loop on the coarsest sweep in this module, 40 points per decade.
 const CROSSING_FREQUENCY_AGREEMENT: f64 = 1.0e-3;
 
 /// Points per decade the closed-form grid is scanned on.
@@ -316,7 +325,6 @@ impl<L: Fn(f64) -> Complex64> LoopFixture<L> {
             previous = continued;
         }
     }
-
 }
 
 // -----------------------------------------------------------------------
@@ -643,7 +651,7 @@ fn an_unwound_loop_is_not_reported_as_folded() {
 /// This is the fixture `a_tie_in_decibels_is_broken_at_the_unity_gain_frequency`
 /// uses: `L = g(1 + s/10ω_p)² / (1 + s/ω_p)³`, whose inversions sit at
 /// `(f/f_p)² = 8` and `35`, with `g` solved so the sub-unity one wins on
-/// `|GM|` by 0.005 dB — a fifth of what the interpolation carries.
+/// `|GM|` by 0.005 dB — half the band the interpolation carries.
 ///
 /// The two crossings are 8.06 dB either side of unity: one is that much
 /// headroom, the other that much past the critical point. Deciding between
@@ -673,7 +681,11 @@ fn a_dead_heat_between_two_inversions_binds_the_same_way_on_both_cards() {
     );
 
     let crossings = fixture.closed_form_axis_crossings();
-    assert_eq!(crossings.len(), 2, "the fixture inverts twice: {crossings:?}");
+    assert_eq!(
+        crossings.len(),
+        2,
+        "the fixture inverts twice: {crossings:?}"
+    );
     let separation = (crossings[0].value.abs() - crossings[1].value.abs()).abs();
     assert!(
         separation <= crate::results::stability::GAIN_MARGIN_TIE_DECIBELS,
@@ -690,9 +702,8 @@ fn a_dead_heat_between_two_inversions_binds_the_same_way_on_both_cards() {
     // nearer it in log-frequency is the one both cards must name.
     let unity = fixture.closed_form_unity_crossings();
     assert_eq!(unity.len(), 1, "one unity-gain crossing: {unity:?}");
-    let from_unity = |crossing: &Crossing| {
-        (crossing.frequency.log10() - unity[0].frequency.log10()).abs()
-    };
+    let from_unity =
+        |crossing: &Crossing| (crossing.frequency.log10() - unity[0].frequency.log10()).abs();
     let binding = if from_unity(&crossings[0]) < from_unity(&crossings[1]) {
         crossings[0]
     } else {
@@ -818,7 +829,10 @@ fn a_loop_with_no_gain_margin_reports_none_on_both_cards() {
     let (_, bode_gain) = fixture.bode_summary();
     let (_, nyquist_gain) = fixture.nyquist_margins();
     assert_eq!(bode_gain, None, "the Bode card invented a gain margin");
-    assert_eq!(nyquist_gain, None, "the Nyquist card invented a gain margin");
+    assert_eq!(
+        nyquist_gain, None,
+        "the Nyquist card invented a gain margin"
+    );
 
     assert_both_cards_agree(&fixture);
 }

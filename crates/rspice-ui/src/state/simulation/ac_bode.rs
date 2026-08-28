@@ -382,8 +382,7 @@ fn binding_gain_margin(
     ugf: Option<f64>,
 ) -> Option<(f64, f64)> {
     let reference = ugf.filter(|f| *f > 0.0).map(f64::log10);
-    let distance =
-        |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
+    let distance = |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
     phase_inversion_frequencies(frequency, phase_unwrapped)
         .into_iter()
         .map(|f180| (f180, -sample_at_log_frequency(log_frequency, gain_db, f180)))

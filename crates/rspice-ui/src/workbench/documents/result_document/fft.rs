@@ -464,18 +464,43 @@ mod tests {
         assert!((resolution_bandwidth(&data).unwrap() - 100.0).abs() < 1.0e-12);
     }
 
+    /// The resolution bandwidth a windowed spectrum reports is the bin width
+    /// times the window's equivalent noise bandwidth.
+    ///
+    /// The ENBW is derived here from Blackman-Harris's own defining cosine-sum
+    /// coefficients: for `w = a0 − a1·cos(2πx) + a2·cos(4πx) − a3·cos(6πx)`,
+    /// Parseval gives a mean square of `a0² + ½·Σ_{k≥1} aₖ²`, so
+    /// `ENBW = (a0² + ½·Σ aₖ²) / a0²` bins — 2.0044 for these coefficients.
+    ///
+    /// This assertion used to be `1 bin < bandwidth < 2.1 bins`, which is a
+    /// bracket rather than a value: every window in the viewer except the
+    /// flat-top satisfies it, so it could not tell Blackman-Harris from Hann,
+    /// and it passed at 1.01 bins — a spectrum with the ENBW correction
+    /// missing altogether.
     #[test]
     fn window_resolution_bandwidth_includes_equivalent_noise_bandwidth() {
+        // Long enough that the symmetric window's O(1/N) offset from the
+        // periodic closed form is two orders of magnitude inside the
+        // tolerance; the bin width stays 1 Hz either way.
         let data = FftData::from_time_domain_with_normalization(
             "V(out)",
-            &[0.0; 1024],
-            1024.0,
+            &[0.0; 8192],
+            8192.0,
             WindowFunction::BlackmanHarris,
             SpectrumNormalization::Rms,
         );
+        let a = [0.35875_f64, 0.48829, 0.14128, 0.01168];
+        let enbw_bins =
+            (a[0] * a[0] + 0.5 * a[1..].iter().map(|c| c * c).sum::<f64>()) / (a[0] * a[0]);
+
         let bandwidth = resolution_bandwidth(&data).unwrap();
-        assert!(bandwidth > data.frequency_resolution());
-        assert!(bandwidth < 2.1 * data.frequency_resolution());
+        let expected = enbw_bins * data.frequency_resolution();
+        assert!(
+            (bandwidth / expected - 1.0).abs() < 5.0e-3,
+            "resolution bandwidth {bandwidth} vs {expected} ({enbw_bins:.4} bins \
+             x {} Hz)",
+            data.frequency_resolution()
+        );
     }
 
     #[test]
