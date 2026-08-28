@@ -3086,7 +3086,8 @@ impl ResultsState {
         self.hidden_strips.retain(|analysis| live(*analysis));
         self.maximized_strip = self.maximized_strip.filter(|analysis| live(*analysis));
         self.retained_evidence_validity
-            .retain(|analysis, _| live(*analysis));
+            .get_mut()
+            .retain(|(_, analysis), _| live(*analysis));
         self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
         self.favorite_result_artifacts
