@@ -3277,6 +3277,55 @@ fn retained_result_artifacts(
                 )),
                 ResultViewer::PoleZero,
             ),
+            AnalysisResultPayload::PssFloquet {
+                multipliers,
+                floquet_evidence,
+                orbit_kind,
+                stability_verdict,
+                ..
+            } => (
+                "payload/pss-floquet",
+                "PSS Floquet spectrum evidence",
+                ResultArtifactKind::Array,
+                multipliers.len(),
+                Some(format!(
+                    "{} · {} · {} orbit · {}",
+                    floquet_count_navigator_label(
+                        multipliers.len(),
+                        floquet_evidence,
+                        "multipliers"
+                    ),
+                    floquet_evidence_navigator_label(floquet_evidence),
+                    floquet_orbit_navigator_label(*orbit_kind),
+                    floquet_verdict_navigator_label(*stability_verdict),
+                )),
+                ResultViewer::Table,
+            ),
+            AnalysisResultPayload::Pstb {
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                stability_verdict,
+                stability_classification,
+                num_unstable,
+                ..
+            } => (
+                "payload/pstb-floquet",
+                "PSTB Floquet mode evidence",
+                ResultArtifactKind::Array,
+                modes.len(),
+                Some(format!(
+                    "{} · {} unstable · {} · {} orbit · {} ({})",
+                    floquet_count_navigator_label(modes.len(), floquet_evidence, "modes"),
+                    num_unstable
+                        .map_or_else(|| "legacy unknown".to_owned(), |count| count.to_string()),
+                    floquet_evidence_navigator_label(floquet_evidence),
+                    floquet_orbit_navigator_label(*orbit_kind),
+                    floquet_verdict_navigator_label(*stability_verdict),
+                    pstb_classification_navigator_label(*stability_classification),
+                )),
+                ResultViewer::Table,
+            ),
             AnalysisResultPayload::Sensitivity { rows, .. } => (
                 "payload/sensitivity",
                 "Sensitivity coefficients",
@@ -3420,6 +3469,70 @@ fn retained_result_artifacts(
     }
     artifacts.retain(|artifact| counts.get(&artifact.identity) == Some(&1));
     artifacts
+}
+
+fn floquet_count_navigator_label(
+    count: usize,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+    noun: &str,
+) -> String {
+    if matches!(
+        evidence,
+        crate::state::FloquetSpectrumEvidence::Qualified { .. }
+            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
+    ) {
+        format!("{count} complete {noun}")
+    } else {
+        format!("{count} retained {noun}; completeness unavailable")
+    }
+}
+
+const fn floquet_evidence_navigator_label(
+    evidence: &crate::state::FloquetSpectrumEvidence,
+) -> &'static str {
+    match evidence {
+        crate::state::FloquetSpectrumEvidence::NotComputed => "not computed",
+        crate::state::FloquetSpectrumEvidence::NoDynamicModes => "no dynamic modes",
+        crate::state::FloquetSpectrumEvidence::Qualified { .. } => "strictly qualified",
+        crate::state::FloquetSpectrumEvidence::LegacyUnknown => "legacy evidence unknown",
+    }
+}
+
+const fn floquet_orbit_navigator_label(
+    orbit: crate::state::FloquetOrbitKindEvidence,
+) -> &'static str {
+    match orbit {
+        crate::state::FloquetOrbitKindEvidence::Driven => "driven",
+        crate::state::FloquetOrbitKindEvidence::Autonomous => "autonomous",
+        crate::state::FloquetOrbitKindEvidence::LegacyUnknown => "legacy-unknown",
+    }
+}
+
+const fn floquet_verdict_navigator_label(
+    verdict: crate::state::FloquetStabilityVerdictEvidence,
+) -> &'static str {
+    match verdict {
+        crate::state::FloquetStabilityVerdictEvidence::Stable => "stable",
+        crate::state::FloquetStabilityVerdictEvidence::Unstable => "unstable",
+        crate::state::FloquetStabilityVerdictEvidence::Marginal => "marginal",
+        crate::state::FloquetStabilityVerdictEvidence::Indeterminate => "indeterminate",
+    }
+}
+
+const fn pstb_classification_navigator_label(
+    classification: crate::state::PstbStabilityClassificationEvidence,
+) -> &'static str {
+    use crate::state::PstbStabilityClassificationEvidence as Classification;
+    match classification {
+        Classification::Stable => "stable",
+        Classification::UnstableReal => "unstable real",
+        Classification::UnstableComplex => "unstable complex",
+        Classification::PeriodDoubling => "period doubling",
+        Classification::NeimarkSacker => "Neimark-Sacker",
+        Classification::SaddleNode => "saddle-node",
+        Classification::Marginal => "marginal",
+        Classification::Indeterminate => "indeterminate",
+    }
 }
 
 fn show_virtualized_result_signals(

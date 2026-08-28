@@ -1016,6 +1016,44 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
     assert!(bundle.contains("settling_time"));
 }
 
+#[test]
+fn periodic_payload_artifacts_report_authoritative_complete_counts_and_verdicts() {
+    for (analysis_type, canonical, expected_name) in [
+        (
+            AnalysisType::Pss,
+            "payload/pss-floquet",
+            "PSS Floquet spectrum evidence",
+        ),
+        (
+            AnalysisType::Pstb,
+            "payload/pstb-floquet",
+            "PSTB Floquet mode evidence",
+        ),
+    ] {
+        let analysis = AnalysisResult::new(41, analysis_type, expected_name).with_result_payload(
+            AnalysisResultPayload::legacy_periodic_marker(analysis_type).unwrap(),
+        );
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        let presentation = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        let artifacts = super::retained_result_artifacts(&run.analyses[0], presentation);
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.identity.canonical_name() == canonical)
+            .expect("periodic payload is inventoried");
+
+        assert_eq!(artifact.name, expected_name);
+        assert_eq!(artifact.kind, super::ResultArtifactKind::Array);
+        assert!(artifact.meta.contains("array[0]"));
+        assert_eq!(artifact.viewer, crate::workbench::ResultViewer::Table);
+        let value = artifact.value.as_deref().unwrap();
+        assert!(value.contains("0 retained"), "{value}");
+        assert!(value.contains("completeness unavailable"), "{value}");
+        assert!(value.contains("indeterminate"), "{value}");
+        assert!(value.contains("legacy"), "{value}");
+    }
+}
+
 /// "Reveal producer log" has to reveal something.
 ///
 /// It used to push one info line naming the producer and open the console

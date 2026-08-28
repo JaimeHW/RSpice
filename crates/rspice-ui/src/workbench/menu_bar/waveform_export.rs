@@ -796,6 +796,217 @@ fn prepare_typed_result_csv(
                 ),
             })
         }
+        AnalysisResultPayload::PssFloquet {
+            period_s,
+            fundamental_frequency_hz,
+            iterations,
+            residual_norm,
+            multipliers,
+            floquet_evidence,
+            orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
+        } => {
+            let mut contents = periodic_csv_header();
+            for (field, value, unit) in [
+                ("period_s", optional_f64_csv(*period_s), "s"),
+                (
+                    "fundamental_frequency_hz",
+                    optional_f64_csv(*fundamental_frequency_hz),
+                    "Hz",
+                ),
+                ("iterations", optional_u64_csv(*iterations), "count"),
+                ("residual_norm", optional_f64_csv(*residual_norm), ""),
+                (
+                    "retained_multiplier_count",
+                    multipliers.len().to_string(),
+                    "count",
+                ),
+                (
+                    "authenticated_complete_multiplier_count",
+                    authenticated_floquet_count_csv(multipliers.len(), floquet_evidence),
+                    "count",
+                ),
+                (
+                    "floquet_evidence_json",
+                    serde_json::to_string(floquet_evidence)
+                        .expect("Floquet evidence is JSON-serializable"),
+                    "",
+                ),
+                ("orbit_kind", serialized_enum_name(orbit_kind), ""),
+                (
+                    "trivial_multiplier_index",
+                    optional_u64_csv(*trivial_multiplier_index),
+                    "zero_based",
+                ),
+                (
+                    "stability_verdict",
+                    serialized_enum_name(stability_verdict),
+                    "",
+                ),
+            ] {
+                append_periodic_metadata_csv(&mut contents, field, &value, unit);
+            }
+            append_floquet_certificate_csv(&mut contents, floquet_evidence);
+            for (index, multiplier) in multipliers.iter().enumerate() {
+                append_periodic_csv_row(
+                    &mut contents,
+                    [
+                        "multiplier".to_owned(),
+                        index.to_string(),
+                        format!("{:.17e}", multiplier.multiplier.real),
+                        format!("{:.17e}", multiplier.multiplier.imaginary),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    ],
+                );
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "pss-floquet-evidence.csv",
+                contents,
+                detail: format!(
+                    "{} with retained qualification evidence",
+                    floquet_export_count_label(
+                        multipliers.len(),
+                        floquet_evidence,
+                        "PSS Floquet multipliers"
+                    )
+                ),
+            })
+        }
+        AnalysisResultPayload::Pstb {
+            period_s,
+            fundamental_frequency_hz,
+            stability_threshold,
+            probe_instance,
+            detect_subharmonics,
+            modes,
+            floquet_evidence,
+            orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
+            stability_classification,
+            min_stability_margin_db,
+            max_multiplier_magnitude,
+            num_unstable,
+            subharmonics,
+            converged,
+            iterations,
+        } => {
+            let mut contents = periodic_csv_header();
+            for (field, value, unit) in [
+                ("period_s", optional_f64_csv(*period_s), "s"),
+                (
+                    "fundamental_frequency_hz",
+                    optional_f64_csv(*fundamental_frequency_hz),
+                    "Hz",
+                ),
+                (
+                    "stability_threshold",
+                    optional_f64_csv(*stability_threshold),
+                    "multiplier_magnitude",
+                ),
+                (
+                    "probe_instance",
+                    probe_instance.clone().unwrap_or_default(),
+                    "",
+                ),
+                (
+                    "detect_subharmonics",
+                    optional_bool_csv(*detect_subharmonics),
+                    "",
+                ),
+                ("retained_mode_count", modes.len().to_string(), "count"),
+                (
+                    "authenticated_complete_mode_count",
+                    authenticated_floquet_count_csv(modes.len(), floquet_evidence),
+                    "count",
+                ),
+                (
+                    "floquet_evidence_json",
+                    serde_json::to_string(floquet_evidence)
+                        .expect("Floquet evidence is JSON-serializable"),
+                    "",
+                ),
+                ("orbit_kind", serialized_enum_name(orbit_kind), ""),
+                (
+                    "trivial_multiplier_index",
+                    optional_u64_csv(*trivial_multiplier_index),
+                    "zero_based",
+                ),
+                (
+                    "stability_verdict",
+                    serialized_enum_name(stability_verdict),
+                    "",
+                ),
+                (
+                    "stability_classification",
+                    serialized_enum_name(stability_classification),
+                    "",
+                ),
+                (
+                    "min_stability_margin_db",
+                    optional_f64_csv(*min_stability_margin_db),
+                    "dB",
+                ),
+                (
+                    "max_multiplier_magnitude",
+                    optional_f64_csv(*max_multiplier_magnitude),
+                    "",
+                ),
+                ("num_unstable", optional_u64_csv(*num_unstable), "count"),
+                (
+                    "subharmonics",
+                    subharmonics
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                    "orders",
+                ),
+                ("converged", optional_bool_csv(*converged), ""),
+                ("iterations", optional_u64_csv(*iterations), "count"),
+            ] {
+                append_periodic_metadata_csv(&mut contents, field, &value, unit);
+            }
+            append_floquet_certificate_csv(&mut contents, floquet_evidence);
+            for (index, mode) in modes.iter().enumerate() {
+                append_periodic_csv_row(
+                    &mut contents,
+                    [
+                        "mode".to_owned(),
+                        index.to_string(),
+                        format!("{:.17e}", mode.multiplier.real),
+                        format!("{:.17e}", mode.multiplier.imaginary),
+                        format!("{:.17e}", mode.exponent.real),
+                        format!("{:.17e}", mode.exponent.imaginary),
+                        format!("{:.17e}", mode.probe_participation),
+                        mode.is_unstable.to_string(),
+                        mode.is_trivial.to_string(),
+                        mode.subharmonic_order
+                            .map_or_else(String::new, |order| order.to_string()),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    ],
+                );
+            }
+            Some(PreparedTypedResultCsv {
+                default_name: "pstb-floquet-evidence.csv",
+                contents,
+                detail: format!(
+                    "{} with retained qualification and stability evidence",
+                    floquet_export_count_label(modes.len(), floquet_evidence, "PSTB Floquet modes")
+                ),
+            })
+        }
         AnalysisResultPayload::Sensitivity {
             output,
             result_mode,
@@ -1063,6 +1274,107 @@ fn prepare_typed_result_csv(
             })
         }
     }
+}
+
+fn periodic_csv_header() -> String {
+    "record,index,multiplier_real,multiplier_imaginary,exponent_real_per_s,exponent_imaginary_per_s,probe_participation,is_unstable,is_trivial,subharmonic_order,field,value,unit\n".to_owned()
+}
+
+fn append_periodic_csv_row(contents: &mut String, fields: [String; 13]) {
+    contents.push_str(
+        &fields
+            .iter()
+            .map(|field| csv_text(field))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    contents.push('\n');
+}
+
+fn append_periodic_metadata_csv(contents: &mut String, field: &str, value: &str, unit: &str) {
+    append_periodic_csv_row(
+        contents,
+        [
+            "metadata".to_owned(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            field.to_owned(),
+            value.to_owned(),
+            unit.to_owned(),
+        ],
+    );
+}
+
+fn append_floquet_certificate_csv(
+    contents: &mut String,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+) {
+    if let Some(certificate) = evidence.certificate() {
+        for (field, value) in [
+            (
+                "certificate_problem_order",
+                certificate.problem_order.to_string(),
+            ),
+            (
+                "certificate_max_backward_error",
+                format!("{:.17e}", certificate.max_backward_error),
+            ),
+            (
+                "certificate_qualification_tolerance",
+                format!("{:.17e}", certificate.qualification_tolerance),
+            ),
+        ] {
+            append_periodic_metadata_csv(contents, field, &value, "");
+        }
+    }
+}
+
+fn authenticated_floquet_count_csv(
+    count: usize,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+) -> String {
+    matches!(
+        evidence,
+        crate::state::FloquetSpectrumEvidence::Qualified { .. }
+            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
+    )
+    .then(|| count.to_string())
+    .unwrap_or_default()
+}
+
+fn floquet_export_count_label(
+    count: usize,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+    noun: &str,
+) -> String {
+    if matches!(
+        evidence,
+        crate::state::FloquetSpectrumEvidence::Qualified { .. }
+            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
+    ) {
+        format!("{count} complete {noun}")
+    } else {
+        format!("{count} retained {noun}; completeness unavailable")
+    }
+}
+
+fn optional_f64_csv(value: Option<f64>) -> String {
+    value.map_or_else(String::new, |value| format!("{value:.17e}"))
+}
+
+fn optional_u64_csv(value: Option<u64>) -> String {
+    value.map_or_else(String::new, |value| value.to_string())
+}
+
+fn optional_bool_csv(value: Option<bool>) -> String {
+    value.map_or_else(String::new, |value| value.to_string())
 }
 
 fn soa_parameter_csv(parameter: crate::state::SoaParameterEvidence) -> &'static str {

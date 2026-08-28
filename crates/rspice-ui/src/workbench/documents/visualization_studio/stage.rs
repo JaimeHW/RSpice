@@ -487,6 +487,8 @@ pub(super) fn retained_pole_zero_payload(
             gain: *gain,
         }),
         AnalysisResultPayload::OperatingPoint { .. }
+        | AnalysisResultPayload::PssFloquet { .. }
+        | AnalysisResultPayload::Pstb { .. }
         | AnalysisResultPayload::Sensitivity { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
@@ -514,6 +516,8 @@ pub(super) fn retained_sensitivity_payload(
         } => Some((output.as_str(), *result_mode, rows.as_slice())),
         AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::PoleZero { .. }
+        | AnalysisResultPayload::PssFloquet { .. }
+        | AnalysisResultPayload::Pstb { .. }
         | AnalysisResultPayload::TransferFunction { .. }
         | AnalysisResultPayload::ScalarMeasurements { .. }
         | AnalysisResultPayload::Reliability { .. }

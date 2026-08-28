@@ -1251,6 +1251,16 @@ pub(super) fn semantic_result_summary(
                 ));
             }
         }
+        ResultViewer::Table => {
+            let Some(payload) = analysis.result_payload.as_ref() else {
+                return Err(HardcopySourceError::MissingViewerEvidence(
+                    "typed periodic result",
+                ));
+            };
+            tables.extend(periodic_result_tables(payload).ok_or(
+                HardcopySourceError::MissingViewerEvidence("typed periodic result"),
+            )?);
+        }
         ResultViewer::PoleZero => {
             let Some(AnalysisResultPayload::PoleZero {
                 poles,
@@ -1492,6 +1502,361 @@ pub(super) fn semantic_result_summary(
         tables,
         payload: analysis.result_payload.clone(),
     })
+}
+
+fn periodic_result_tables(payload: &AnalysisResultPayload) -> Option<Vec<SemanticTable>> {
+    match payload {
+        AnalysisResultPayload::PssFloquet {
+            period_s,
+            fundamental_frequency_hz,
+            iterations,
+            residual_norm,
+            multipliers,
+            floquet_evidence,
+            orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
+        } => {
+            let mut metadata = vec![
+                periodic_metadata_row("Period", optional_exact_number(*period_s), "s"),
+                periodic_metadata_row(
+                    "Fundamental frequency",
+                    optional_exact_number(*fundamental_frequency_hz),
+                    "Hz",
+                ),
+                periodic_metadata_row("Iterations", optional_u64(*iterations), "count"),
+                periodic_metadata_row("Residual norm", optional_exact_number(*residual_norm), ""),
+                periodic_metadata_row(
+                    "Authenticated complete multiplier count",
+                    authenticated_floquet_count(multipliers.len(), floquet_evidence),
+                    "count",
+                ),
+                periodic_metadata_row(
+                    "Floquet evidence",
+                    floquet_evidence_label(floquet_evidence).to_owned(),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Orbit policy",
+                    floquet_orbit_label(*orbit_kind).to_owned(),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Trivial multiplier index",
+                    optional_u64(*trivial_multiplier_index),
+                    "zero-based",
+                ),
+                periodic_metadata_row(
+                    "Stability verdict",
+                    floquet_verdict_label(*stability_verdict).to_owned(),
+                    "",
+                ),
+            ];
+            append_floquet_certificate_rows(&mut metadata, floquet_evidence);
+            Some(vec![
+                SemanticTable {
+                    title: "PSS Floquet evidence and global metrics".to_owned(),
+                    columns: vec!["Field".to_owned(), "Value".to_owned(), "Unit".to_owned()],
+                    rows: metadata,
+                },
+                SemanticTable {
+                    title: floquet_spectrum_table_title(
+                        "PSS",
+                        multipliers.len(),
+                        floquet_evidence,
+                        "multipliers",
+                    ),
+                    columns: vec![
+                        "Mode (zero-based)".to_owned(),
+                        "Multiplier real".to_owned(),
+                        "Multiplier imaginary".to_owned(),
+                    ],
+                    rows: multipliers
+                        .iter()
+                        .enumerate()
+                        .map(|(index, multiplier)| {
+                            vec![
+                                index.to_string(),
+                                exact_number(multiplier.multiplier.real),
+                                exact_number(multiplier.multiplier.imaginary),
+                            ]
+                        })
+                        .collect(),
+                },
+            ])
+        }
+        AnalysisResultPayload::Pstb {
+            period_s,
+            fundamental_frequency_hz,
+            stability_threshold,
+            probe_instance,
+            detect_subharmonics,
+            modes,
+            floquet_evidence,
+            orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
+            stability_classification,
+            min_stability_margin_db,
+            max_multiplier_magnitude,
+            num_unstable,
+            subharmonics,
+            converged,
+            iterations,
+        } => {
+            let mut metadata = vec![
+                periodic_metadata_row("Period", optional_exact_number(*period_s), "s"),
+                periodic_metadata_row(
+                    "Fundamental frequency",
+                    optional_exact_number(*fundamental_frequency_hz),
+                    "Hz",
+                ),
+                periodic_metadata_row(
+                    "Stability threshold",
+                    optional_exact_number(*stability_threshold),
+                    "|lambda|",
+                ),
+                periodic_metadata_row(
+                    "Probe instance",
+                    probe_instance
+                        .clone()
+                        .unwrap_or_else(|| "legacy unknown".to_owned()),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Subharmonic detection",
+                    optional_bool(*detect_subharmonics),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Authenticated complete mode count",
+                    authenticated_floquet_count(modes.len(), floquet_evidence),
+                    "count",
+                ),
+                periodic_metadata_row(
+                    "Floquet evidence",
+                    floquet_evidence_label(floquet_evidence).to_owned(),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Orbit policy",
+                    floquet_orbit_label(*orbit_kind).to_owned(),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Trivial multiplier index",
+                    optional_u64(*trivial_multiplier_index),
+                    "zero-based",
+                ),
+                periodic_metadata_row(
+                    "Stability verdict",
+                    floquet_verdict_label(*stability_verdict).to_owned(),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Stability classification",
+                    pstb_classification_label(*stability_classification).to_owned(),
+                    "",
+                ),
+                periodic_metadata_row(
+                    "Minimum stability margin",
+                    optional_exact_number(*min_stability_margin_db),
+                    "dB",
+                ),
+                periodic_metadata_row(
+                    "Maximum multiplier magnitude",
+                    optional_exact_number(*max_multiplier_magnitude),
+                    "",
+                ),
+                periodic_metadata_row("Unstable modes", optional_u64(*num_unstable), "count"),
+                periodic_metadata_row(
+                    "Subharmonic orders",
+                    if subharmonics.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        subharmonics
+                            .iter()
+                            .map(u64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    },
+                    "",
+                ),
+                periodic_metadata_row("Converged", optional_bool(*converged), ""),
+                periodic_metadata_row("Iterations", optional_u64(*iterations), "count"),
+            ];
+            append_floquet_certificate_rows(&mut metadata, floquet_evidence);
+            Some(vec![
+                SemanticTable {
+                    title: "PSTB Floquet evidence and global metrics".to_owned(),
+                    columns: vec!["Field".to_owned(), "Value".to_owned(), "Unit".to_owned()],
+                    rows: metadata,
+                },
+                SemanticTable {
+                    title: floquet_spectrum_table_title(
+                        "PSTB",
+                        modes.len(),
+                        floquet_evidence,
+                        "modes",
+                    ),
+                    columns: vec![
+                        "Mode (zero-based)".to_owned(),
+                        "Multiplier real".to_owned(),
+                        "Multiplier imaginary".to_owned(),
+                        "Exponent real (1/s)".to_owned(),
+                        "Exponent imaginary (1/s)".to_owned(),
+                        "Probe participation".to_owned(),
+                        "Unstable".to_owned(),
+                        "Trivial phase mode".to_owned(),
+                        "Subharmonic order".to_owned(),
+                    ],
+                    rows: modes
+                        .iter()
+                        .enumerate()
+                        .map(|(index, mode)| {
+                            vec![
+                                index.to_string(),
+                                exact_number(mode.multiplier.real),
+                                exact_number(mode.multiplier.imaginary),
+                                exact_number(mode.exponent.real),
+                                exact_number(mode.exponent.imaginary),
+                                exact_number(mode.probe_participation),
+                                mode.is_unstable.to_string(),
+                                mode.is_trivial.to_string(),
+                                mode.subharmonic_order
+                                    .map_or_else(|| "—".to_owned(), |order| order.to_string()),
+                            ]
+                        })
+                        .collect(),
+                },
+            ])
+        }
+        AnalysisResultPayload::OperatingPoint { .. }
+        | AnalysisResultPayload::PoleZero { .. }
+        | AnalysisResultPayload::Sensitivity { .. }
+        | AnalysisResultPayload::ScalarMeasurements { .. }
+        | AnalysisResultPayload::TransferFunction { .. }
+        | AnalysisResultPayload::Reliability { .. }
+        | AnalysisResultPayload::Soa { .. }
+        | AnalysisResultPayload::TransientEvents { .. } => None,
+    }
+}
+
+fn periodic_metadata_row(field: &str, value: String, unit: &str) -> Vec<String> {
+    vec![field.to_owned(), value, unit.to_owned()]
+}
+
+fn authenticated_floquet_count(
+    count: usize,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+) -> String {
+    if matches!(
+        evidence,
+        crate::state::FloquetSpectrumEvidence::Qualified { .. }
+            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
+    ) {
+        count.to_string()
+    } else {
+        "not authenticated".to_owned()
+    }
+}
+
+fn floquet_spectrum_table_title(
+    analysis: &str,
+    count: usize,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+    noun: &str,
+) -> String {
+    if matches!(
+        evidence,
+        crate::state::FloquetSpectrumEvidence::Qualified { .. }
+            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
+    ) {
+        format!("Complete {analysis} Floquet spectrum · {count} {noun}")
+    } else {
+        format!("Retained {analysis} Floquet data · {count} {noun} · completeness unavailable")
+    }
+}
+
+fn append_floquet_certificate_rows(
+    rows: &mut Vec<Vec<String>>,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+) {
+    if let Some(certificate) = evidence.certificate() {
+        rows.extend([
+            periodic_metadata_row(
+                "Certificate problem order",
+                certificate.problem_order.to_string(),
+                "count",
+            ),
+            periodic_metadata_row(
+                "Certificate maximum backward error",
+                exact_number(certificate.max_backward_error),
+                "",
+            ),
+            periodic_metadata_row(
+                "Certificate qualification tolerance",
+                exact_number(certificate.qualification_tolerance),
+                "",
+            ),
+        ]);
+    }
+}
+
+fn optional_exact_number(value: Option<f64>) -> String {
+    value.map_or_else(|| "legacy unknown".to_owned(), exact_number)
+}
+
+fn optional_u64(value: Option<u64>) -> String {
+    value.map_or_else(|| "legacy unknown".to_owned(), |value| value.to_string())
+}
+
+fn optional_bool(value: Option<bool>) -> String {
+    value.map_or_else(|| "legacy unknown".to_owned(), |value| value.to_string())
+}
+
+const fn floquet_evidence_label(evidence: &crate::state::FloquetSpectrumEvidence) -> &'static str {
+    match evidence {
+        crate::state::FloquetSpectrumEvidence::NotComputed => "not computed",
+        crate::state::FloquetSpectrumEvidence::NoDynamicModes => "no dynamic modes",
+        crate::state::FloquetSpectrumEvidence::Qualified { .. } => "strictly qualified",
+        crate::state::FloquetSpectrumEvidence::LegacyUnknown => "legacy evidence unknown",
+    }
+}
+
+const fn floquet_orbit_label(orbit: crate::state::FloquetOrbitKindEvidence) -> &'static str {
+    match orbit {
+        crate::state::FloquetOrbitKindEvidence::Driven => "driven",
+        crate::state::FloquetOrbitKindEvidence::Autonomous => "autonomous",
+        crate::state::FloquetOrbitKindEvidence::LegacyUnknown => "legacy unknown",
+    }
+}
+
+const fn floquet_verdict_label(
+    verdict: crate::state::FloquetStabilityVerdictEvidence,
+) -> &'static str {
+    match verdict {
+        crate::state::FloquetStabilityVerdictEvidence::Stable => "stable",
+        crate::state::FloquetStabilityVerdictEvidence::Unstable => "unstable",
+        crate::state::FloquetStabilityVerdictEvidence::Marginal => "marginal",
+        crate::state::FloquetStabilityVerdictEvidence::Indeterminate => "indeterminate",
+    }
+}
+
+const fn pstb_classification_label(
+    classification: crate::state::PstbStabilityClassificationEvidence,
+) -> &'static str {
+    use crate::state::PstbStabilityClassificationEvidence as Classification;
+    match classification {
+        Classification::Stable => "stable",
+        Classification::UnstableReal => "unstable real",
+        Classification::UnstableComplex => "unstable complex",
+        Classification::PeriodDoubling => "period doubling",
+        Classification::NeimarkSacker => "Neimark-Sacker",
+        Classification::SaddleNode => "saddle-node",
+        Classification::Marginal => "marginal",
+        Classification::Indeterminate => "indeterminate",
+    }
 }
 
 fn operating_point_parameter_unit(family: &str, name: &str) -> &'static str {

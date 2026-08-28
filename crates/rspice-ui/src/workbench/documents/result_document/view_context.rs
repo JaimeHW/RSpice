@@ -366,7 +366,15 @@ fn viewer_can_render(
                 )
         }
         ResultViewer::Table => {
-            !analysis.waveforms.is_empty() || operating_point_evidence_is_renderable(analysis)
+            !analysis.waveforms.is_empty()
+                || operating_point_evidence_is_renderable(analysis)
+                || matches!(
+                    analysis.result_payload,
+                    Some(
+                        AnalysisResultPayload::PssFloquet { .. }
+                            | AnalysisResultPayload::Pstb { .. }
+                    )
+                )
         }
         ResultViewer::Hist => matches!(
             analysis.family_metadata,
@@ -475,5 +483,16 @@ mod tests {
         let maximized = resolve_displayed_result_view(&state).expect("maximized stack context");
         assert_eq!(maximized.analysis_indices, vec![1]);
         assert_eq!(maximized.primary_analysis_index, Some(1));
+    }
+
+    #[test]
+    fn table_accepts_payload_only_and_zero_mode_periodic_results() {
+        for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
+            let analysis = AnalysisResult::new(1, analysis_type, "Periodic").with_result_payload(
+                AnalysisResultPayload::legacy_periodic_marker(analysis_type).unwrap(),
+            );
+            assert!(analysis_supports_viewer(ResultViewer::Table, &analysis));
+            assert!(!analysis_supports_viewer(ResultViewer::Waves, &analysis));
+        }
     }
 }

@@ -2790,8 +2790,18 @@ fn resolved_viewer_availability_for_binding(
         ResultViewer::Specs => {
             !analysis.measurements.is_empty() || !state.workspace.specs.is_empty()
         }
-        // The table lists whatever samples the analysis retained.
-        ResultViewer::Table => !analysis.waveforms.is_empty(),
+        // The table lists retained samples and payload-only periodic spectra,
+        // including zero-dynamic-mode results.
+        ResultViewer::Table => {
+            !analysis.waveforms.is_empty()
+                || matches!(
+                    analysis.result_payload,
+                    Some(
+                        AnalysisResultPayload::PssFloquet { .. }
+                            | AnalysisResultPayload::Pstb { .. }
+                    )
+                )
+        }
         ResultViewer::PoleZero => retained_pole_zero_payload(analysis).is_some(),
         ResultViewer::Contribution => retained_sensitivity_payload(analysis).is_some(),
         ResultViewer::TransferFunction => analysis.result_payload.as_ref().is_some_and(|payload| {
@@ -4374,6 +4384,36 @@ mod integrity_scan_tests {
         let dataset_id = run.dataset_id;
         app.state.simulation.runs.push(run);
         (dataset_id, analysis_sequence)
+    }
+
+    #[test]
+    fn table_binding_accepts_payload_only_and_zero_mode_periodic_results() {
+        let mut app = app_with_exact_source();
+        let definition = viewer_document("viewer-table").expect("registered table viewer");
+
+        for (run_sequence, analysis_type) in [(40, AnalysisType::Pss), (41, AnalysisType::Pstb)] {
+            let analysis_sequence = run_sequence + 100;
+            let analysis = AnalysisResult::new(analysis_sequence, analysis_type, "Periodic")
+                .with_result_payload(
+                    AnalysisResultPayload::legacy_periodic_marker(analysis_type)
+                        .expect("periodic payload marker"),
+                );
+            assert!(analysis.waveforms.is_empty());
+            let mut run = SimulationRun::new(run_sequence);
+            run.add_analysis(analysis);
+            let dataset_id = run.dataset_id;
+            app.state.simulation.runs.push(run);
+
+            assert_eq!(
+                resolved_viewer_availability_for_binding(
+                    &app.state,
+                    definition,
+                    Some(dataset_id),
+                    Some(analysis_sequence),
+                ),
+                Ok(ResultViewer::Table)
+            );
+        }
     }
 
     #[test]

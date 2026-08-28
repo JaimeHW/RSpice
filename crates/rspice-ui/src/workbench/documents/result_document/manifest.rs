@@ -776,8 +776,12 @@ const fn domain_meta(analysis: AnalysisType) -> DomainMeta {
             axis: "parameter vector",
             precision: "f64",
         },
-        A::Pac | A::Pxf | A::Pstb | A::Qpac | A::Qpxf => DomainMeta {
+        A::Pac | A::Pxf | A::Qpac | A::Qpxf => DomainMeta {
             axis: "translated frequency",
+            precision: "complex128",
+        },
+        A::Pstb => DomainMeta {
+            axis: "Floquet mode index",
             precision: "complex128",
         },
         A::Pnoise | A::Qpnoise | A::Hbnoise => DomainMeta {
@@ -834,7 +838,11 @@ fn precision_label(analysis: &AnalysisResult) -> String {
         .any(|waveform| waveform.complex.is_some())
         || matches!(
             analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::PoleZero { .. })
+            Some(
+                AnalysisResultPayload::PoleZero { .. }
+                    | AnalysisResultPayload::PssFloquet { .. }
+                    | AnalysisResultPayload::Pstb { .. }
+            )
         )
     {
         "complex128".to_owned()
@@ -1082,6 +1090,32 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
         AnalysisResultPayload::PoleZero { poles, zeros, .. } => {
             format!("{} poles / {} zeros", poles.len(), zeros.len())
         }
+        AnalysisResultPayload::PssFloquet {
+            multipliers,
+            floquet_evidence,
+            stability_verdict,
+            ..
+        } => format!(
+            "{} / {} / {}",
+            floquet_manifest_count_label(multipliers.len(), floquet_evidence, "PSS multipliers"),
+            floquet_manifest_evidence_label(floquet_evidence),
+            floquet_manifest_verdict_label(*stability_verdict),
+        ),
+        AnalysisResultPayload::Pstb {
+            modes,
+            floquet_evidence,
+            stability_verdict,
+            stability_classification,
+            num_unstable,
+            ..
+        } => format!(
+            "{} / {} unstable / {} / {} ({})",
+            floquet_manifest_count_label(modes.len(), floquet_evidence, "PSTB modes"),
+            num_unstable.map_or_else(|| "legacy unknown".to_owned(), |count| count.to_string()),
+            floquet_manifest_evidence_label(floquet_evidence),
+            floquet_manifest_verdict_label(*stability_verdict),
+            pstb_manifest_classification_label(*stability_classification),
+        ),
         AnalysisResultPayload::Sensitivity { rows, .. } => {
             format!("{} sensitivities", rows.len())
         }
@@ -1114,6 +1148,60 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
                 digital_traces.len() + real_traces.len()
             )
         }
+    }
+}
+
+fn floquet_manifest_count_label(
+    count: usize,
+    evidence: &crate::state::FloquetSpectrumEvidence,
+    noun: &str,
+) -> String {
+    if matches!(
+        evidence,
+        crate::state::FloquetSpectrumEvidence::Qualified { .. }
+            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
+    ) {
+        format!("{count} complete {noun}")
+    } else {
+        format!("{count} retained {noun}; completeness unavailable")
+    }
+}
+
+const fn floquet_manifest_evidence_label(
+    evidence: &crate::state::FloquetSpectrumEvidence,
+) -> &'static str {
+    match evidence {
+        crate::state::FloquetSpectrumEvidence::NotComputed => "not computed",
+        crate::state::FloquetSpectrumEvidence::NoDynamicModes => "no dynamic modes",
+        crate::state::FloquetSpectrumEvidence::Qualified { .. } => "strictly qualified",
+        crate::state::FloquetSpectrumEvidence::LegacyUnknown => "legacy evidence unknown",
+    }
+}
+
+const fn floquet_manifest_verdict_label(
+    verdict: crate::state::FloquetStabilityVerdictEvidence,
+) -> &'static str {
+    match verdict {
+        crate::state::FloquetStabilityVerdictEvidence::Stable => "stable",
+        crate::state::FloquetStabilityVerdictEvidence::Unstable => "unstable",
+        crate::state::FloquetStabilityVerdictEvidence::Marginal => "marginal",
+        crate::state::FloquetStabilityVerdictEvidence::Indeterminate => "indeterminate",
+    }
+}
+
+const fn pstb_manifest_classification_label(
+    classification: crate::state::PstbStabilityClassificationEvidence,
+) -> &'static str {
+    use crate::state::PstbStabilityClassificationEvidence as Classification;
+    match classification {
+        Classification::Stable => "stable",
+        Classification::UnstableReal => "unstable real",
+        Classification::UnstableComplex => "unstable complex",
+        Classification::PeriodDoubling => "period doubling",
+        Classification::NeimarkSacker => "Neimark-Sacker",
+        Classification::SaddleNode => "saddle-node",
+        Classification::Marginal => "marginal",
+        Classification::Indeterminate => "indeterminate",
     }
 }
 
@@ -1481,6 +1569,30 @@ mod tests {
             assert!(!meta.axis.is_empty(), "{kind:?}");
             assert!(!meta.precision.is_empty(), "{kind:?}");
         }
+    }
+
+    #[test]
+    fn periodic_payload_manifest_uses_complete_floquet_semantics() {
+        let pss = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(
+            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pss).unwrap(),
+        );
+        let pstb = AnalysisResult::new(2, AnalysisType::Pstb, "PSTB").with_result_payload(
+            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pstb).unwrap(),
+        );
+
+        assert_eq!(domain_meta(AnalysisType::Pstb).axis, "Floquet mode index");
+        assert_eq!(precision_label(&pss), "complex128");
+        assert_eq!(precision_label(&pstb), "complex128");
+        assert!(
+            stored_values_label(&pss).contains("retained PSS multipliers"),
+            "{}",
+            stored_values_label(&pss)
+        );
+        assert!(
+            stored_values_label(&pstb).contains("retained PSTB modes"),
+            "{}",
+            stored_values_label(&pstb)
+        );
     }
 
     fn state_with_run(label: &str) -> AppState {

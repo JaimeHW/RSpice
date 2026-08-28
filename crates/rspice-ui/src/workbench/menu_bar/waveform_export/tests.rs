@@ -12,10 +12,13 @@ use std::path::{Path, PathBuf};
 
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
-    ComplexResultValue, ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence,
-    ReliabilityShiftEvidence, ReliabilityStressEvidence, SensitivityResultMode,
-    SensitivityResultRow, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
+    ComplexResultValue, FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence,
+    FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, PssFloquetMultiplierEvidence,
+    PstbFloquetModeEvidence, PstbStabilityClassificationEvidence, ReliabilityCheckpointEvidence,
+    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
+    SensitivityResultMode, SensitivityResultRow, SimulationRun, SoaEvaluationEvidence,
+    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence, WaveformData,
 };
 
 #[derive(Debug)]
@@ -71,6 +74,16 @@ impl ExportWorkflowIo for MockExportWorkflowIo {
 
 fn waveform(name: &str, x: Vec<f64>, y: Vec<f64>) -> WaveformData {
     WaveformData::new(name.to_owned(), x, y, "#4f81bd")
+}
+
+fn floquet_certificate(problem_order: u64) -> FloquetSpectrumCertificateEvidence {
+    FloquetSpectrumCertificateEvidence {
+        problem_order,
+        max_backward_error: 0.0,
+        qualification_tolerance:
+            FloquetSpectrumCertificateEvidence::canonical_qualification_tolerance(problem_order)
+                .unwrap(),
+    }
 }
 
 fn dc_op_with_one_node() -> crate::state::DcOpResult {
@@ -539,6 +552,147 @@ fn csv_export_publishes_exact_reliability_device_and_shift_evidence() {
             .contains("M1,1.00000000000000000e1,1.19999999999999996e0")
     );
     assert!(files[0].1.contains("1.25000000000000007e-2"));
+}
+
+#[test]
+fn typed_csv_exports_every_pss_multiplier_and_its_certificate() {
+    let payload = AnalysisResultPayload::PssFloquet {
+        period_s: Some(2.0),
+        fundamental_frequency_hz: Some(0.5),
+        iterations: Some(4),
+        residual_norm: Some(1.0e-12),
+        multipliers: vec![
+            PssFloquetMultiplierEvidence {
+                multiplier: ComplexResultValue {
+                    real: 0.5,
+                    imaginary: 0.0,
+                },
+            },
+            PssFloquetMultiplierEvidence {
+                multiplier: ComplexResultValue {
+                    real: 0.25,
+                    imaginary: 0.0,
+                },
+            },
+        ],
+        floquet_evidence: FloquetSpectrumEvidence::Qualified {
+            certificate: floquet_certificate(2),
+        },
+        orbit_kind: FloquetOrbitKindEvidence::Driven,
+        trivial_multiplier_index: None,
+        stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+    };
+    let analysis = AnalysisResult::new(1, AnalysisType::Pss, "PSS")
+        .with_waveforms(vec![waveform("display-only", vec![0.0], vec![1.0])])
+        .with_result_payload(payload);
+
+    let csv = prepare_typed_result_csv(&analysis).unwrap();
+
+    assert_eq!(csv.default_name, "pss-floquet-evidence.csv");
+    assert_eq!(
+        csv.contents
+            .lines()
+            .filter(|line| line.starts_with("multiplier,"))
+            .count(),
+        2
+    );
+    assert!(
+        csv.contents
+            .contains("authenticated_complete_multiplier_count,2,count")
+    );
+    assert!(csv.contents.contains("certificate_problem_order,2,"));
+    assert!(csv.contents.contains("floquet_evidence_json"));
+    assert!(csv.contents.contains("qualified"));
+}
+
+#[test]
+fn typed_csv_exports_complete_pstb_modes_and_all_stability_provenance() {
+    let first = ComplexResultValue {
+        real: 0.5,
+        imaginary: 0.0,
+    };
+    let second = ComplexResultValue {
+        real: 0.25,
+        imaginary: 0.0,
+    };
+    let payload = AnalysisResultPayload::Pstb {
+        period_s: Some(2.0),
+        fundamental_frequency_hz: Some(0.5),
+        stability_threshold: Some(1.0 + 1.0e-6),
+        probe_instance: Some("LPROBE".to_owned()),
+        detect_subharmonics: Some(false),
+        modes: vec![
+            PstbFloquetModeEvidence {
+                multiplier: first,
+                exponent: ComplexResultValue {
+                    real: first.real.ln() / 2.0,
+                    imaginary: 0.0,
+                },
+                probe_participation: 0.25,
+                is_unstable: false,
+                is_trivial: false,
+                subharmonic_order: None,
+            },
+            PstbFloquetModeEvidence {
+                multiplier: second,
+                exponent: ComplexResultValue {
+                    real: second.real.ln() / 2.0,
+                    imaginary: 0.0,
+                },
+                probe_participation: 0.75,
+                is_unstable: false,
+                is_trivial: false,
+                subharmonic_order: None,
+            },
+        ],
+        floquet_evidence: FloquetSpectrumEvidence::Qualified {
+            certificate: floquet_certificate(2),
+        },
+        orbit_kind: FloquetOrbitKindEvidence::Driven,
+        trivial_multiplier_index: None,
+        stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+        stability_classification: PstbStabilityClassificationEvidence::Stable,
+        min_stability_margin_db: Some(-20.0 * first.real.log10()),
+        max_multiplier_magnitude: Some(first.real),
+        num_unstable: Some(0),
+        subharmonics: Vec::new(),
+        converged: Some(true),
+        iterations: Some(0),
+    };
+    let analysis = AnalysisResult::new(1, AnalysisType::Pstb, "PSTB")
+        .with_waveforms(vec![waveform("bounded-display", vec![1.0], vec![0.5])])
+        .with_result_payload(payload);
+
+    let csv = prepare_typed_result_csv(&analysis).unwrap();
+
+    assert_eq!(csv.default_name, "pstb-floquet-evidence.csv");
+    assert_eq!(
+        csv.contents
+            .lines()
+            .filter(|line| line.starts_with("mode,"))
+            .count(),
+        2,
+        "display truncation must not truncate the authoritative mode export"
+    );
+    for field in [
+        "stability_threshold",
+        "probe_instance",
+        "detect_subharmonics",
+        "stability_verdict",
+        "stability_classification",
+        "min_stability_margin_db",
+        "max_multiplier_magnitude",
+        "num_unstable",
+        "subharmonics",
+        "certificate_problem_order",
+    ] {
+        assert!(csv.contents.contains(field), "missing {field}");
+    }
+    assert!(csv.contents.contains("LPROBE"));
+    assert!(
+        csv.contents
+            .contains("authenticated_complete_mode_count,2,count")
+    );
 }
 
 #[test]
