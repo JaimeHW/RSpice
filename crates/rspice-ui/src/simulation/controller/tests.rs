@@ -257,6 +257,61 @@ fn failed_result_retention_never_satisfies_prepared_dependencies() {
     assert!(!run.analyses[0].success);
 }
 
+/// Sealing a failure into a retained run is a new generation of that run.
+///
+/// Every Results memo over a run is keyed on `data_version` — the dataset
+/// content digest the inspector's tamper check compares against, the
+/// operating-point row plan, the retained-evidence verdict. A failure sealed
+/// at a constant version leaves all of them describing the run as it stood
+/// before it failed, and the tamper check in particular then reads a digest
+/// memo that was never re-taken.
+#[test]
+fn sealing_a_failure_declares_a_new_dataset_generation() {
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    let controller = SimulationController::new();
+
+    let before = state.simulation.data_version;
+    let failed = AnalysisResult::failed(1, AnalysisType::DcOp, "OP", "solver gave up")
+        .with_provenance(synthetic_result_provenance());
+    assert_eq!(
+        controller.seal_failed_analysis(&mut state, Some(run_sequence), Some(failed)),
+        None,
+        "the default save policy admits a failure record"
+    );
+
+    let run = state
+        .simulation
+        .run_by_sequence(run_sequence)
+        .expect("target run remains");
+    assert!(!run.success, "the run's verdict must flip to failed");
+    assert_eq!(run.analyses.len(), 1);
+    assert_ne!(
+        state.simulation.data_version, before,
+        "the retained run changed under memos that key on the data version"
+    );
+
+    // The verdict alone is enough: a path with nothing to retain still
+    // mutated the run and must still declare it.
+    let before = state.simulation.data_version;
+    assert_eq!(
+        controller.seal_failed_analysis(&mut state, Some(run_sequence), None),
+        None
+    );
+    assert_ne!(state.simulation.data_version, before);
+
+    // A target run that no longer exists has nothing to seal and nothing to
+    // declare.
+    let before = state.simulation.data_version;
+    assert_eq!(
+        controller.seal_failed_analysis(&mut state, Some(run_sequence + 4_096), None),
+        None
+    );
+    assert_eq!(state.simulation.data_version, before);
+    assert_eq!(controller.seal_failed_analysis(&mut state, None, None), None);
+    assert_eq!(state.simulation.data_version, before);
+}
+
 #[test]
 fn plan_owned_runtime_retention_enforces_authenticated_storage_ceiling() {
     let mut state = AppState::default();
