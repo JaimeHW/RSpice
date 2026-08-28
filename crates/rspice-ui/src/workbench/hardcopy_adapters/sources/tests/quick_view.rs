@@ -837,3 +837,49 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
         RetainedHardcopySourceAvailability::Available
     );
 }
+
+/// The page is taken from the sheet as the reader left it.
+///
+/// Traces they hid, cursors they placed and markers they anchored all travel
+/// with the capture, because those are the reading. The window they zoomed
+/// into did not: the page re-derived its own extents from every retained
+/// sample, so printing a detail a reader had pinned handed back the whole
+/// sweep.
+#[test]
+fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
+    let analysis = AnalysisResult::new(4, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        WaveformData::new(
+            "V(out)",
+            vec![0.0, 0.25, 0.5, 0.75, 1.0],
+            vec![0.0, 1.0, 0.0, -1.0, 0.0],
+            "#00ffff",
+        ),
+    ]);
+    let mut state = quick_view_state(analysis, ResultViewer::Waves);
+
+    let point_count = |state: &AppState| {
+        let resolved = resolve_quick_view(state).expect("the retained transient resolves");
+        let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+            panic!("expected a semantic waveform plot")
+        };
+        plot.traces[0].paths.iter().map(Vec::len).sum::<usize>()
+    };
+
+    assert_eq!(point_count(&state), 5, "the whole sweep is five samples");
+
+    state
+        .ui
+        .results
+        .plot_view_mut(ResultViewer::Waves, 0)
+        .apply(&crate::ui::plot::ViewChange {
+            x: Some((0.4, 0.6)),
+            y: None,
+            reset: false,
+        });
+
+    assert_eq!(
+        point_count(&state),
+        3,
+        "the printed page ignored the window the reader had pinned on the sheet"
+    );
+}

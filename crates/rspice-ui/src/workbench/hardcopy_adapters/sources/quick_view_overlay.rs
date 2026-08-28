@@ -83,6 +83,21 @@ pub(super) struct RetainedQuickViewOverlay {
     pub markers: Vec<RetainedQuickMarker>,
     #[serde(default)]
     interpolation: RetainedCursorInterpolation,
+    /// The window the reader had pinned on the sheet, in the axes' source
+    /// space. `None` on either axis means that axis was showing the data's
+    /// own extents, which is what the page rules when nothing is captured.
+    #[serde(default)]
+    viewport: Option<RetainedQuickViewport>,
+}
+
+/// One captured zoom, in the source space of the axes it was pinned on.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetainedQuickViewport {
+    #[serde(default)]
+    x: Option<(f64, f64)>,
+    #[serde(default)]
+    y: Option<(f64, f64)>,
 }
 
 /// One strip's reading, keyed by the analysis it belongs to.
@@ -161,7 +176,37 @@ impl RetainedQuickViewOverlay {
             cursor_b,
             markers,
             interpolation: RetainedCursorInterpolation::default(),
+            viewport: None,
         }
+    }
+
+    /// The page's own bounds, narrowed to whatever the reader had pinned.
+    ///
+    /// The bounds arrive in the axes' projected space, and so does the
+    /// capture: both went through `project`, so a logarithmic abscissa is
+    /// compared in decades at both ends. A captured edge that the projection
+    /// cannot place — a non-positive frequency on a log axis — leaves that
+    /// axis showing the data, rather than pinning the page to a coordinate
+    /// the axis has no position for.
+    pub(super) fn framed_bounds(
+        &self,
+        x_scale: AxisScale,
+        y_scale: AxisScale,
+        bounds: (f64, f64, f64, f64),
+    ) -> (f64, f64, f64, f64) {
+        let (x_minimum, x_maximum, y_minimum, y_maximum) = bounds;
+        let Some(viewport) = self.viewport else {
+            return bounds;
+        };
+        let pinned = |scale, range: Option<(f64, f64)>, fallback: (f64, f64)| {
+            range
+                .and_then(|(low, high)| Some((project(scale, low)?, project(scale, high)?)))
+                .filter(|(low, high)| low < high)
+                .unwrap_or(fallback)
+        };
+        let (x_minimum, x_maximum) = pinned(x_scale, viewport.x, (x_minimum, x_maximum));
+        let (y_minimum, y_maximum) = pinned(y_scale, viewport.y, (y_minimum, y_maximum));
+        (x_minimum, x_maximum, y_minimum, y_maximum)
     }
 
     /// Freeze the reading state of the strip a quick-view page will show.
@@ -198,6 +243,11 @@ impl RetainedQuickViewOverlay {
             cursor_a: results.cursors.a,
             cursor_b: results.cursors.b,
             markers,
+            viewport: crate::workbench::documents::result_document::captured_viewport(
+                state,
+                analysis_key,
+            )
+            .map(|(x, y)| RetainedQuickViewport { x, y }),
             interpolation: match state
                 .ui
                 .preferences
@@ -232,6 +282,15 @@ impl RetainedQuickViewOverlay {
         for cursor in [self.cursor_a, self.cursor_b].into_iter().flatten() {
             if !cursor.is_finite() {
                 return invalid("prepared overlay cursor is not finite".to_owned());
+            }
+        }
+        if let Some(viewport) = self.viewport {
+            for (low, high) in [viewport.x, viewport.y].into_iter().flatten() {
+                if !low.is_finite() || !high.is_finite() || low >= high {
+                    return invalid(format!(
+                        "prepared overlay viewport bound {low} .. {high} is not an interval"
+                    ));
+                }
             }
         }
         for marker in &self.markers {

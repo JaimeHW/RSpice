@@ -2206,8 +2206,35 @@ pub(crate) fn retained_dataset_digest(
     digest
 }
 
+/// The window the reader has pinned on the active sheet, if any.
+///
+/// A sheet's zoom lives in one of two places: keyed to the analysis, which is
+/// how the waveform strips remember a pane per result, or globally per viewer
+/// for the single-pane instruments. Export/Print has to carry whichever one
+/// the active sheet is actually using — a page taken from a zoomed sheet that
+/// reverts to the data extents is not the view that was captured.
+///
+/// `None` means the reader pinned nothing and the page rules its own extents,
+/// which is what it has always done.
+pub(crate) fn captured_viewport(
+    state: &AppState,
+    analysis: AnalysisPresentationKey,
+) -> Option<(Option<(f64, f64)>, Option<(f64, f64)>)> {
+    let viewer = state.ui.results.viewer;
+    let analysis_pane = state
+        .ui
+        .results
+        .analysis_plot_view_pane(viewer, analysis, 0);
+    let view = if analysis_pane.is_zoomed() {
+        analysis_pane
+    } else {
+        state.ui.results.plot_view(viewer, 0)
+    };
+    view.is_zoomed().then_some((view.x, view.y))
+}
+
 /// The same question for an analysis already in hand, resolved to its key.
-pub(super) fn analysis_evidence_is_valid(
+pub(crate) fn analysis_evidence_is_valid(
     state: &AppState,
     dataset_id: DatasetId,
     analysis: &AnalysisResult,

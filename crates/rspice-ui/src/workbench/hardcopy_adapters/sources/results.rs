@@ -1856,6 +1856,12 @@ pub(super) fn quick_plot_from_scaled_series(
     let x_maximum = extreme(|point| point.0, |left, right| right.total_cmp(left))?;
     let y_minimum = extreme(|point| point.1, f64::total_cmp)?;
     let y_maximum = extreme(|point| point.1, |left, right| right.total_cmp(left))?;
+    // The window the reader had pinned is part of the sheet they captured,
+    // exactly as the hidden traces and the placed cursors are.
+    let data_bounds = (x_minimum, x_maximum, y_minimum, y_maximum);
+    let (x_minimum, x_maximum, y_minimum, y_maximum) = overlay.map_or(data_bounds, |overlay| {
+        overlay.framed_bounds(x_scale, y_scale, data_bounds)
+    });
     let (x_minimum, x_maximum) = nondegenerate_range(x_minimum, x_maximum);
     let (y_minimum, y_maximum) = nondegenerate_range(y_minimum, y_maximum);
     let plot_width = PLOT_WIDTH_UM - 2 * PLOT_INSET_UM;
