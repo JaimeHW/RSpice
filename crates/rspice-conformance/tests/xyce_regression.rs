@@ -10302,6 +10302,44 @@ fn test_xyce_issue451_hierarchical_node_operating_point_relation() {
 }
 
 #[test]
+fn test_xyce_issue565566_step_data_pwl_table_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/ISSUE_565_566/issue565_566.cir",
+            "issue565566_step_data_pwl_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_565_566/issue565_566ref.cir",
+            "issue565566_step_data_table_reference",
+            Some("Netlists/Certification_Tests/ISSUE_565_566/exclude"),
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            expected_exclusion.is_none(),
+            "only the PWL deck owns the historical ISSUE565566 wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy the exact three-row STEP DATA PWL/table relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug1455_model_parameter_punctuation_relation() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
