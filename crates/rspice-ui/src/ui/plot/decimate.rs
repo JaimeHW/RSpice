@@ -622,6 +622,15 @@ pub fn sample_at_with(x: &[f64], y: &[f64], xq: f64, interpolation: SampleInterp
     if span <= 0.0 {
         return view.y(lo);
     }
+    // An unrepresentable abscissa at one end of the bracket — `-inf`, which
+    // `log_frequency_axis` produces for `f <= 0` and an imported AC vector
+    // opening at `f = 0` reaches — makes the span infinite and the fraction
+    // `inf / inf`. Every finite query in that interval sits infinitely close
+    // to the finite endpoint, so that is what it reads; interpolating would
+    // return NaN and carry it into a margin or a readout unannounced.
+    if !span.is_finite() {
+        return view.y(hi);
+    }
     if matches!(interpolation, SampleInterpolation::Nearest) {
         return if xq - view.x(lo) <= view.x(hi) - xq {
             view.y(lo)
@@ -862,6 +871,44 @@ mod tests {
             sample_at_with(&x, &y, 0.4, SampleInterpolation::Nearest),
             0.0
         );
+    }
+
+    /// An axis whose head is `-inf` is reachable: `log_frequency_axis` maps
+    /// `f <= 0` there, and an imported Touchstone or CSV whose AC vector opens
+    /// at `f = 0` produces exactly that. The first interval then spans an
+    /// infinite width, and the interpolation fraction is `inf / inf` — NaN,
+    /// which propagates into a margin, a crossing read, or a cursor readout
+    /// with nothing to say it came from an unrepresentable abscissa.
+    #[test]
+    fn an_infinite_leading_interval_reads_the_finite_end_rather_than_nan() {
+        let x = [f64::NEG_INFINITY, 1.0, 2.0];
+        let y = [10.0, 20.0, 30.0];
+
+        for mode in [
+            SampleInterpolation::Linear,
+            SampleInterpolation::Nearest,
+            SampleInterpolation::MonotoneCubic,
+        ] {
+            let sampled = sample_at_with(&x, &y, 0.5, mode);
+            assert!(
+                sampled.is_finite(),
+                "{mode:?} sampled an infinite leading interval as {sampled}"
+            );
+            assert_eq!(
+                sampled, 20.0,
+                "{mode:?} did not read the only bracketing sample that exists"
+            );
+        }
+
+        // The mirror: a descending axis whose trailing sample is `-inf`.
+        let x = [2.0, 1.0, f64::NEG_INFINITY];
+        let y = [30.0, 20.0, 10.0];
+        let sampled = sample_at_with(&x, &y, 0.5, SampleInterpolation::Linear);
+        assert!(
+            sampled.is_finite(),
+            "a reversed infinite interval sampled as {sampled}"
+        );
+        assert_eq!(sampled, 20.0);
     }
 
     /// Oracle 1 (property): a reverse sweep is the mirror of its ascending
