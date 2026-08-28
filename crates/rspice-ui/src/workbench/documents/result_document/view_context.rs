@@ -52,7 +52,8 @@ impl ResolvedResultView {
     /// vector ordinal on its own.
     pub(crate) fn run<'a>(&self, state: &'a AppState) -> Option<&'a SimulationRun> {
         state.simulation.runs.get(self.run_index).filter(|run| {
-            run.dataset_id == self.dataset_id && run.dataset_content_digest() == self.dataset_digest
+            run.dataset_id == self.dataset_id
+                && super::retained_dataset_digest(state, run) == self.dataset_digest
         })
     }
 
@@ -105,7 +106,9 @@ fn resolve_dataset_view(
         .analyses
         .iter()
         .enumerate()
-        .filter_map(|(index, analysis)| analysis_supports_viewer(viewer, analysis).then_some(index))
+        .filter_map(|(index, analysis)| {
+            analysis_supports_viewer_memoized(state, dataset_id, viewer, analysis).then_some(index)
+        })
         .collect::<Vec<_>>();
 
     if viewer_uses_analysis_stack(viewer) {
@@ -131,7 +134,7 @@ fn resolve_dataset_view(
     Ok(ResolvedResultView {
         owner: ResultViewOwner::Dataset,
         dataset_id,
-        dataset_digest: run.dataset_content_digest(),
+        dataset_digest: super::retained_dataset_digest(state, run),
         run_index,
         viewer,
         analysis_indices,
@@ -205,7 +208,7 @@ fn resolve_visualization_pane(
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's immutable result dataset is no longer retained.".to_owned())?;
     let run = &state.simulation.runs[run_index];
-    if run.dataset_content_digest() != binding.dataset.content_digest {
+    if super::retained_dataset_digest(state, run) != binding.dataset.content_digest {
         return Err("The retained dataset does not match the pane's immutable binding.".to_owned());
     }
     let analysis_index = run
@@ -214,10 +217,11 @@ fn resolve_visualization_pane(
         .position(|analysis| analysis_instance_id(run, analysis) == binding.analysis_id)
         .ok_or_else(|| "The pane's bound analysis is no longer retained.".to_owned())?;
     let analysis = &run.analyses[analysis_index];
-    let viewer = analysis_supports_viewer(state.ui.results.viewer, analysis)
-        .then_some(state.ui.results.viewer)
-        .or_else(|| ResultViewer::from_viewer_document_id(&pane.viewer_id))
-        .ok_or_else(|| "The selected pane has no implemented viewer.".to_owned())?;
+    let viewer =
+        analysis_supports_viewer_memoized(state, run.dataset_id, state.ui.results.viewer, analysis)
+            .then_some(state.ui.results.viewer)
+            .or_else(|| ResultViewer::from_viewer_document_id(&pane.viewer_id))
+            .ok_or_else(|| "The selected pane has no implemented viewer.".to_owned())?;
 
     Ok(ResolvedResultView {
         owner: ResultViewOwner::VisualizationPane {
@@ -226,7 +230,7 @@ fn resolve_visualization_pane(
             pane_id: pane.id,
         },
         dataset_id: run.dataset_id,
-        dataset_digest: run.dataset_content_digest(),
+        dataset_digest: super::retained_dataset_digest(state, run),
         run_index,
         viewer,
         analysis_indices: vec![analysis_index],
@@ -267,6 +271,31 @@ pub(crate) fn analysis_supports_viewer(viewer: ResultViewer, analysis: &Analysis
     if !analysis.success || analysis.validate_retained_evidence().is_err() {
         return false;
     }
+    viewer_can_render(viewer, analysis)
+}
+
+/// The same predicate, with the retained-evidence verdict taken from the
+/// workspace's memo instead of walked here.
+///
+/// The validator reads every sample of every waveform in the analysis, and
+/// resolving the displayed view asks the question once per retained analysis
+/// — on every frame, for a reader who is not touching anything. The memo is
+/// keyed by dataset generation, so it answers the same question this walk
+/// would have.
+fn analysis_supports_viewer_memoized(
+    state: &AppState,
+    dataset_id: DatasetId,
+    viewer: ResultViewer,
+    analysis: &AnalysisResult,
+) -> bool {
+    analysis.success
+        && super::analysis_evidence_is_valid(state, dataset_id, analysis)
+        && viewer_can_render(viewer, analysis)
+}
+
+/// Whether this viewer has anything to draw from the shape of the retained
+/// result — the half of the compatibility question that costs nothing.
+fn viewer_can_render(viewer: ResultViewer, analysis: &AnalysisResult) -> bool {
     match viewer {
         ResultViewer::Waves => {
             analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()

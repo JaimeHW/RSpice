@@ -14,6 +14,18 @@ pub(super) fn expr_color(tokens: &Tokens, slot: usize) -> egui::Color32 {
     tokens.color.traces[slot % tokens.color.traces.len()]
 }
 
+/// The palette slot the strip's `slot`-th expression draws in.
+///
+/// Waveform traces take the leading slots and expressions the ones after —
+/// and "the ones after" has to be counted the same way wherever the colour is
+/// asked for. The legend counted only the active run's traces while the
+/// canvas counted every trace it held, overlays included, so the moment a
+/// strip carried a second run the chip beside an expression was a different
+/// colour from the curve it named.
+pub(super) fn expr_palette_slot(model: &StripModel, slot: usize) -> usize {
+    model.traces.len() + slot
+}
+
 pub(super) const EXPR_EDITOR_PADDING_X: f32 = 10.0;
 pub(super) const EXPR_EDITOR_PADDING_Y: f32 = 5.0;
 pub(super) const EXPR_EDITOR_GAP: f32 = 8.0;
@@ -431,6 +443,9 @@ pub(super) fn expression_version(
 pub(super) struct ResolvedExpr {
     pub(super) x: SharedWaveformValues,
     pub(super) y: SharedWaveformValues,
+    /// What the expression's abscissa is, on the same terms as a waveform
+    /// trace's: an expression over a reverse sweep is still a reverse sweep.
+    pub(super) shape: Arc<SweepShape>,
     pub(super) color: egui::Color32,
     pub(super) cache_key: u64,
     pub(super) label: String,
@@ -512,20 +527,34 @@ pub(super) fn resolve_strip_exprs(
             )));
             continue;
         };
-        let base_color = expr_color(tokens, model.traces.len() + slot);
+        let base_color = expr_color(tokens, expr_palette_slot(model, slot));
         let base_cache_key = expr_cache_key(model.analysis_key, &expr.text);
         let base_label = elide(&expr.text, 24);
         for projection in projections {
             let family_style = projection.group.map(|group| group.style);
+            let cache_key = base_cache_key
+                ^ projection
+                    .group
+                    .map_or(0, |group| group.stable_key.rotate_left(19));
+            // The evaluated version is folded into the memo key: an expression
+            // re-evaluated against a new family selection produces different
+            // coordinates at the same data version, and a shape held over from
+            // the previous selection would route the reduction by a sweep that
+            // is no longer there.
+            let shape = state
+                .ui
+                .results
+                .derived
+                .shape_or(cache_key ^ version.rotate_left(7), || {
+                    SweepShape::of(&projection.x)
+                });
             resolved.push(ResolvedExpr {
                 x: projection.x,
+                shape,
                 y_extremes: super::super::finite_extremes(&projection.y),
                 y: projection.y,
                 color: family_style.map_or(base_color, |style| family_color(style, base_color)),
-                cache_key: base_cache_key
-                    ^ projection
-                        .group
-                        .map_or(0, |group| group.stable_key.rotate_left(19)),
+                cache_key,
                 label: projection.group.map_or_else(
                     || base_label.clone(),
                     |group| format!("{base_label} · {}", group.label),

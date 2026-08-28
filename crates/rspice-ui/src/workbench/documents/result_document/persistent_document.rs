@@ -167,7 +167,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
 
     // Persistent pages own exactly one stage-level readout, just like quick
     // Results. Individual panes never reserve their own instrument chrome.
-    let strip_height = active_viewer.map_or(0.0, |_| super::readout_strip_height(&app.state));
+    let strip_height = active_viewer.map_or(0.0, |_| super::readout_strip_height(&mut app.state));
     let available = ui.available_rect_before_wrap();
     let well_height = (available.height() - strip_height).max(0.0);
     let activated_pane_id = ui

@@ -13,14 +13,6 @@
 //! where each one lives in the source arrays. It is pure — caching it is the
 //! caller's business, because only the caller knows when its data changed.
 
-// The renderer consumes the classification; the branch queries below it are
-// the readout's half of the same contract and are exercised here rather than
-// called yet. They are stated together because a shape that could be
-// classified but not evaluated would leave every caller to reinvent the
-// per-branch search, which is the failure this module exists to end. Drop
-// this once the readout calls them.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::ops::Range;
 
 use super::decimate::{SampleInterpolation, sample_at_with};
@@ -38,12 +30,6 @@ pub struct MonotoneRun {
     pub start: usize,
     pub end: usize,
     pub orientation: XOrientation,
-}
-
-impl MonotoneRun {
-    fn range(self) -> Range<usize> {
-        self.start..self.end
-    }
 }
 
 /// What the X column is, coarsely enough to route a reduction by.

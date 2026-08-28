@@ -24,26 +24,64 @@ const READOUT_COLUMN_SEAM: f32 = 1.0;
 const CURSOR_TABLE_MIN_W: f32 = 660.0;
 const MARKER_EMPTY_H: f32 = 32.0;
 
-/// Traces the readout strip will report for the cursor's strip.
-pub(super) fn readout_trace_count(state: &AppState) -> usize {
+/// Rows the readout strip will report for the cursor's strip.
+///
+/// The count comes from the projection the strip actually draws, not from the
+/// retained waveform list: a run overlay, a real/imaginary split, a corner
+/// family and a sweep that turns around each put more rows on the table than
+/// there are retained waveforms, and the band was sized for the smaller
+/// number and then scrolled. The same walk answers the opposite case — a
+/// viewer whose projection drops the cursor's strip entirely reserved rows
+/// nothing could fill.
+pub(super) fn readout_row_count(state: &mut AppState) -> usize {
     let Some(index) = state.ui.results.cursor_strip else {
         return 0;
     };
-    state
-        .simulation
-        .active_run()
-        .and_then(|run| run.analyses.get(index))
-        .map_or(0, |analysis| {
-            analysis
-                .waveforms
-                .iter()
-                .filter(|waveform| waveform.visible)
-                .count()
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let cursors = state.ui.results.cursors;
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    models
+        .iter()
+        .find(|model| model.analysis_index == index)
+        .map_or(0, |model| {
+            readout_rows(model, cursors, presentation, quantity_policy).len()
         })
 }
 
 /// Height of one marker row.
 pub(super) const MARKER_ROW_H: f32 = 22.0;
+
+/// How many branches of one trace the readout will name separately.
+///
+/// Two is the hysteresis loop this exists for and six covers a retrace with
+/// a few passes. Past that the rows stop being a measurement and become a
+/// listing, so the readout says how many branches there are instead of
+/// pretending to report each one.
+pub(super) const MAX_READOUT_BRANCHES: usize = 6;
+
+/// How one branch of a multi-branch sweep names itself.
+///
+/// Two branches are the ordinary loop and read as the direction they travel.
+/// Past two the direction alone no longer identifies a branch, so its ordinal
+/// leads. Plain ASCII throughout: the bundled faces carry no arrow glyph, and
+/// a tofu box beside a measured value is worse than a word.
+pub(super) fn branch_tag(shape: &SweepShape, run: usize) -> String {
+    let direction = match shape.runs().get(run).map(|run| run.orientation) {
+        Some(XOrientation::Descending) => "rev",
+        _ => "fwd",
+    };
+    if shape.branch_count() <= 2 {
+        direction.to_owned()
+    } else {
+        format!("r{} {direction}", run + 1)
+    }
+}
 
 /// Kind owns the marker's colour: a spec limit reads as a bound to meet,
 /// a peak as a called-out feature, a note as neutral annotation.
@@ -98,35 +136,38 @@ pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
         .collect()
 }
 
-/// Exact height the readout strip needs, or zero when it stands down.
+/// Whether the cursor has a strip on this sheet to report about.
 ///
-/// The dock is content-fit up to a 212 px body, then its one body viewport
-/// scrolls. Expanded cursor/marker content, marker-only, collapsed-header,
-/// and no-strip states remain distinct.
-fn cursor_target_available(state: &AppState) -> bool {
-    state.ui.results.cursor_readout_active()
-        && state
-            .ui
-            .results
-            .cursor_strip
-            .and_then(|index| {
-                state
-                    .simulation
-                    .active_run()
-                    .and_then(|run| run.analyses.get(index))
-            })
-            .is_some()
+/// "On this sheet" is the operative half: the retained analysis surviving is
+/// not enough, because switching viewers reprojects the stack and can leave
+/// the cursor pointing at a strip the sheet no longer draws. The band was
+/// still reserved for it, and the table it opened for drew nothing.
+fn cursor_target_available(state: &mut AppState) -> bool {
+    if !state.ui.results.cursor_readout_active() {
+        return false;
+    }
+    let Some(index) = state.ui.results.cursor_strip else {
+        return false;
+    };
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    models.iter().any(|model| model.analysis_index == index)
 }
 
-fn cursor_body_height(state: &AppState) -> f32 {
+fn cursor_body_height(state: &mut AppState) -> f32 {
     if !cursor_target_available(state) {
         return 0.0;
     }
-    // One column-header row, one X-domain row, then every visible trace row.
-    (2 + readout_trace_count(state)) as f32 * READOUT_ROW_H
+    // One column-header row, one X-domain row, then every projected row.
+    (2 + readout_row_count(state)) as f32 * READOUT_ROW_H
 }
 
-pub(super) fn marker_body_height(state: &AppState) -> f32 {
+pub(super) fn marker_body_height(state: &mut AppState) -> f32 {
     let markers = visible_markers(state).len();
     if markers > 0 {
         markers as f32 * MARKER_ROW_H
@@ -137,7 +178,7 @@ pub(super) fn marker_body_height(state: &AppState) -> f32 {
     }
 }
 
-fn readout_body_content_height(state: &AppState) -> f32 {
+fn readout_body_content_height(state: &mut AppState) -> f32 {
     cursor_body_height(state).max(marker_body_height(state))
 }
 
@@ -145,7 +186,17 @@ pub(super) fn readout_columns_side_by_side(width: f32, cursor: bool, markers: bo
     cursor && markers && width >= READOUT_DESKTOP_SPLIT_MIN_W
 }
 
-pub fn readout_strip_height(state: &AppState) -> f32 {
+/// Exact height the readout strip needs, or zero when it stands down.
+///
+/// The dock is content-fit up to a 212 px body, then its one body viewport
+/// scrolls. Expanded cursor/marker content, marker-only, collapsed-header,
+/// and no-strip states remain distinct.
+///
+/// Takes the state mutably because the row count is read from the strip
+/// projection rather than from the retained waveform list, and that
+/// projection is the models cache: the alternative was a band sized by one
+/// rule and filled by another.
+pub fn readout_strip_height(state: &mut AppState) -> f32 {
     let cursor = state.ui.results.cursor_readout_active();
     let markers = !visible_markers(state).is_empty();
     if !cursor && !markers {
@@ -206,11 +257,7 @@ fn readout_header(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let cursor = state.ui.results.cursor_readout_active();
-    let trace_count = if cursor {
-        readout_trace_count(state)
-    } else {
-        0
-    };
+    let trace_count = if cursor { readout_row_count(state) } else { 0 };
     let marker_count = visible_markers(state).len();
     let title = if cursor {
         "Cursors & markers"
@@ -219,7 +266,7 @@ fn readout_header(ui: &mut Ui, state: &mut AppState, rect: egui::Rect) {
     };
     let count = if cursor {
         format!(
-            "{trace_count} trace{} · {marker_count} marker{}",
+            "{trace_count} row{} · {marker_count} marker{}",
             if trace_count == 1 { "" } else { "s" },
             if marker_count == 1 { "" } else { "s" }
         )
@@ -469,47 +516,72 @@ fn cursor_readout_table(ui: &mut Ui, state: &mut AppState) {
         .b
         .map(|b| x_separation(model, a, b, significant_digits, quantity_policy))
         .unwrap_or_default();
+    // The X row's last cell is where the sweep's own shape is stated: a
+    // reader looking at two rows per signal is owed the reason there are two.
+    let branch_note = readout_branch_note(model).unwrap_or_default();
     draw_row(
         1,
-        [model.x_label(), &a_x, &b_x, &delta_x, ""],
+        [model.x_label(), &a_x, &b_x, &delta_x, &branch_note],
         [c.text_dim, c.accent, c.traces[4], c.text, c.text_faint],
         theme::mono(tokens::FS_0, FontWeight::Regular),
         None,
     );
 
     // Per-trace values at A and B, their difference, and their own slope.
-    let rows = value_rows(model, a, presentation, quantity_policy);
-    let row_colors = readout_traces(model)
-        .map(|trace| trace.color)
-        .collect::<Vec<_>>();
-    let b_rows = cursors
-        .b
-        .map(|b| value_rows(model, b, presentation, quantity_policy));
-    let deltas = cursors
-        .b
-        .map(|b| delta_values(model, a, b, presentation, quantity_policy));
-    let slopes = cursors.b.map(|b| slope_values(model, a, b, presentation));
-    for (index, (name, a_value)) in rows.iter().enumerate() {
-        let b_value = b_rows
-            .as_ref()
-            .and_then(|values| values.get(index))
-            .map_or("", |(_, value)| value.as_str());
-        let delta = deltas
-            .as_ref()
-            .and_then(|values| values.get(index))
-            .map_or("", String::as_str);
-        let slope = slopes
-            .as_ref()
-            .and_then(|values| values.get(index))
-            .map_or("", String::as_str);
+    let rows = readout_rows(model, cursors, presentation, quantity_policy);
+    for (index, row) in rows.iter().enumerate() {
         draw_row(
             index + 2,
-            [name, a_value, b_value, delta, slope],
+            [&row.name, &row.a, &row.b, &row.delta, &row.slope],
             [c.text_dim, c.text, c.text, c.text_dim, c.text_dim],
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            row_colors.get(index).copied(),
+            Some(row.swatch),
         );
     }
+
+    // The table is painted, not built from widgets, so nothing about it
+    // reaches a screen reader on its own. The marker half of the strip
+    // already publishes its rows; this half stated the same numbers to a
+    // sighted reader and nothing at all to anyone else.
+    let response = ui.interact(rect, ui.id().with("cursor-readout"), egui::Sense::hover());
+    let summary = readout_accessibility_text(model, cursors, &a_x, &b_x, &delta_x, &rows);
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, summary.clone()));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Table);
+        node.set_label(summary.clone());
+    });
+}
+
+/// The A/B/Δ/slope table, spoken.
+///
+/// One string rather than a node per cell: the table is a single painted
+/// grid, so there is no per-cell rect to attach a node to, and a reader who
+/// asks what the cursors say wants the reading, not a walk of the widget.
+fn readout_accessibility_text(
+    model: &StripModel,
+    cursors: CursorPair,
+    a_x: &str,
+    b_x: &str,
+    delta_x: &str,
+    rows: &[ReadoutRow],
+) -> String {
+    let mut text = format!("Cursor readout. {} A {a_x}", model.x_label());
+    if cursors.b.is_some() {
+        text.push_str(&format!(", B {b_x}, \u{0394} {delta_x}"));
+    } else {
+        text.push_str(", cursor B not placed");
+    }
+    if let Some(note) = readout_branch_note(model) {
+        text.push_str(&format!(", {note}"));
+    }
+    for row in rows {
+        text.push_str(&format!(
+            ". {}: A {}, B {}, \u{0394} {}, slope {}",
+            row.name, row.a, row.b, row.delta, row.slope
+        ));
+    }
+    text
 }
 
 /// The marker half of the strip: one editable row per marker.
@@ -793,91 +865,204 @@ pub(super) fn readout_traces(model: &StripModel) -> impl Iterator<Item = &StripT
     model.traces.iter().filter(|trace| trace.visible)
 }
 
-pub(super) fn value_rows(
-    model: &StripModel,
-    x: f64,
-    presentation: ResultPresentationPolicy,
-    quantity_policy: crate::quantity::QuantityPresentationPolicy,
-) -> Vec<(String, String)> {
-    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
-    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    readout_traces(model)
-        .map(|trace| {
-            let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
-            (
-                trace.name.clone(),
-                model.format_trace_value(trace, value, significant_digits, quantity_policy),
-            )
-        })
-        .collect()
-}
+/// Nothing was measured here.
+pub(super) const READOUT_ABSENT: &str = "—";
 
-/// Per-trace change between the cursors, in the same order and length as
-/// [`value_rows`] so the readout strip's columns stay aligned row for row.
+/// One row of the cursor readout: what a trace — or one branch of it — says
+/// at A, at B, and between them.
 ///
-/// The difference is taken in value space, never between two formatted
-/// readouts, so a Δ can never disagree with the values above it.
-pub(super) fn delta_values(
+/// A row is a branch rather than a trace because a sweep that turns around
+/// has two answers at the same abscissa, and one composite cell holding both
+/// is not a column of measurements any more. The overlay run a row belongs to
+/// is named on the row for the same reason: two runs of the same signal
+/// otherwise arrive as two rows with one name.
+pub(super) struct ReadoutRow {
+    pub(super) name: String,
+    pub(super) swatch: egui::Color32,
+    pub(super) a: String,
+    pub(super) b: String,
+    pub(super) delta: String,
+    pub(super) slope: String,
+}
+
+/// Every row the readout will draw for one strip, in draw order.
+///
+/// One producer, because the value, difference and slope columns were three
+/// independent walks of the same trace list and only stayed aligned by
+/// producing equal-length vectors — which stopped being true the moment one
+/// trace owed the reader more than one row.
+pub(super) fn readout_rows(
     model: &StripModel,
-    a: f64,
-    b: f64,
+    cursors: CursorPair,
     presentation: ResultPresentationPolicy,
     quantity_policy: crate::quantity::QuantityPresentationPolicy,
-) -> Vec<String> {
+) -> Vec<ReadoutRow> {
+    readout_traces(model)
+        .flat_map(|trace| trace_readout_rows(model, trace, cursors, presentation, quantity_policy))
+        .collect()
+}
+
+/// The suffix that says which run a row's numbers came from.
+///
+/// The active run owns the signal's name, so only an overlay adds one. Two
+/// runs of the same signal are otherwise two rows spelled identically, with
+/// nothing in the table to say which is being compared against which.
+fn run_tag(model: &StripModel, trace: &StripTrace) -> Option<String> {
+    trace
+        .overlay
+        .then(|| format!("run {}", run_ordinal(model, trace)))
+}
+
+/// Which overlay run of the strip this trace belongs to, counting from one in
+/// the order the strip drew them.
+fn run_ordinal(model: &StripModel, trace: &StripTrace) -> usize {
+    model
+        .traces
+        .iter()
+        .filter(|candidate| candidate.overlay)
+        .map(|candidate| candidate.run_id)
+        .collect::<std::collections::BTreeSet<_>>()
+        .iter()
+        .position(|run_id| *run_id == trace.run_id)
+        .map_or(1, |index| index + 1)
+}
+
+fn trace_readout_rows(
+    model: &StripModel,
+    trace: &StripTrace,
+    cursors: CursorPair,
+    presentation: ResultPresentationPolicy,
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> Vec<ReadoutRow> {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    readout_traces(model)
-        .map(|trace| {
-            let dv = sample_at_with(&trace.x, &trace.y, b, interpolation)
-                - sample_at_with(&trace.x, &trace.y, a, interpolation);
-            model.format_trace_value(trace, dv, significant_digits, quantity_policy)
+    let shape = trace.shape.as_ref();
+    let branches = shape.branch_count();
+    let qualifiers = |branch: Option<usize>| -> String {
+        let mut name = trace.name.clone();
+        if let Some(branch) = branch {
+            name.push(' ');
+            name.push_str(&branch_tag(shape, branch));
+        }
+        if let Some(tag) = run_tag(model, trace) {
+            name.push_str(" · ");
+            name.push_str(&tag);
+        }
+        name
+    };
+    let format =
+        |value: f64| model.format_trace_value(trace, value, significant_digits, quantity_policy);
+
+    // Past the branch budget — or with no branch model at all — the honest
+    // answer is the nearest retained sample, and the row says so rather than
+    // presenting an interpolation of a curve that has no single value here.
+    if branches > MAX_READOUT_BRANCHES || shape.class() == SweepClass::NonSweep {
+        let approximate = |x: Option<f64>| {
+            x.map_or_else(
+                || READOUT_ABSENT.to_owned(),
+                |x| format!("\u{2248} {}", format(nearest_sample(&trace.x, &trace.y, x))),
+            )
+        };
+        return vec![ReadoutRow {
+            name: qualifiers(None),
+            swatch: trace.color,
+            a: approximate(cursors.a),
+            b: approximate(cursors.b),
+            delta: READOUT_ABSENT.to_owned(),
+            slope: READOUT_ABSENT.to_owned(),
+        }];
+    }
+
+    let sample = |x: f64, branch: Option<usize>| -> Option<f64> {
+        match branch {
+            None => Some(sample_at_with_shape(
+                &trace.x,
+                &trace.y,
+                shape,
+                x,
+                interpolation,
+            )),
+            Some(branch) => {
+                let mut out = Vec::new();
+                sample_branches_into(&trace.x, &trace.y, shape, x, interpolation, &mut out);
+                out.iter()
+                    .find(|found| found.run == branch)
+                    .map(|found| found.value)
+            }
+        }
+    };
+    let denominator = match (cursors.a, cursors.b) {
+        (Some(a), Some(b)) => match model.x_scale {
+            XScale::Log10 if a > 0.0 && b > 0.0 => b.log10() - a.log10(),
+            XScale::Log10 => f64::NAN,
+            XScale::Linear => b - a,
+        },
+        _ => f64::NAN,
+    };
+
+    let branch_list: Vec<Option<usize>> = if shape.is_monotone() || branches == 0 {
+        vec![None]
+    } else {
+        (0..branches).map(Some).collect()
+    };
+    branch_list
+        .into_iter()
+        .map(|branch| {
+            let at = |cursor: Option<f64>| cursor.and_then(|x| sample(x, branch));
+            let (a_value, b_value) = (at(cursors.a), at(cursors.b));
+            let difference = match (a_value, b_value) {
+                (Some(a), Some(b)) => Some(b - a),
+                _ => None,
+            };
+            let slope = difference
+                .filter(|_| denominator.is_finite() && denominator.abs() > 1e-12)
+                .map(|difference| difference / denominator)
+                .filter(|slope| slope.is_finite());
+            ReadoutRow {
+                name: qualifiers(branch),
+                swatch: trace.color,
+                a: a_value.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
+                b: b_value.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
+                delta: difference.map_or_else(|| READOUT_ABSENT.to_owned(), &format),
+                slope: slope.map_or_else(
+                    || READOUT_ABSENT.to_owned(),
+                    |slope| {
+                        // A trace names its slope in its own unit, never the
+                        // strip's: a current sharing a sheet with voltages must
+                        // not report mA/ms of rise as volts. `trace_unit` is the
+                        // one owner of that mapping.
+                        let y_unit = model.trace_unit(trace);
+                        let x_unit = match model.x_scale {
+                            XScale::Log10 => "dec",
+                            XScale::Linear if model.x_unit.is_empty() => "x",
+                            XScale::Linear => model.x_unit.as_str(),
+                        };
+                        let suffix = if y_unit.is_empty() {
+                            format!(" /{x_unit}")
+                        } else {
+                            format!(" {y_unit}/{x_unit}")
+                        };
+                        fmt_significant(slope, significant_digits, &suffix)
+                    },
+                ),
+            }
         })
         .collect()
 }
 
-/// Per-trace slope between the cursors. Logarithmic X domains report change
-/// per decade; linear domains report change per displayed X unit.
-pub(super) fn slope_values(
-    model: &StripModel,
-    a: f64,
-    b: f64,
-    presentation: ResultPresentationPolicy,
-) -> Vec<String> {
-    let significant_digits = usize::from(presentation.displayed_significant_digits().get());
-    let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let denominator = match model.x_scale {
-        XScale::Log10 if a > 0.0 && b > 0.0 => b.log10() - a.log10(),
-        XScale::Log10 => f64::NAN,
-        XScale::Linear => b - a,
-    };
-    readout_traces(model)
-        .map(|trace| {
-            if !denominator.is_finite() || denominator.abs() <= 1e-12 {
-                return "—".to_owned();
-            }
-            let delta = sample_at_with(&trace.x, &trace.y, b, interpolation)
-                - sample_at_with(&trace.x, &trace.y, a, interpolation);
-            let slope = delta / denominator;
-            if !slope.is_finite() {
-                return "—".to_owned();
-            }
-            // A trace names its slope in its own unit, never the strip's: a
-            // current sharing a sheet with voltages must not report mA/ms of
-            // rise as volts. `trace_unit` is the one owner of that mapping.
-            let y_unit = model.trace_unit(trace);
-            let x_unit = match model.x_scale {
-                XScale::Log10 => "dec",
-                XScale::Linear if model.x_unit.is_empty() => "x",
-                XScale::Linear => model.x_unit.as_str(),
-            };
-            let suffix = if y_unit.is_empty() {
-                format!(" /{x_unit}")
-            } else {
-                format!(" {y_unit}/{x_unit}")
-            };
-            fmt_significant(slope, significant_digits, &suffix)
-        })
-        .collect()
+/// What the X row says about the shape of the sweep it is reporting, when
+/// that shape is not one pass.
+pub(super) fn readout_branch_note(model: &StripModel) -> Option<String> {
+    let mut branches = 1usize;
+    for trace in readout_traces(model) {
+        if trace.shape.class() == SweepClass::NonSweep
+            || trace.shape.branch_count() > MAX_READOUT_BRANCHES
+        {
+            return Some("multi-branch sweep".to_owned());
+        }
+        branches = branches.max(trace.shape.branch_count());
+    }
+    (branches > 1).then(|| format!("{branches} branches"))
 }
 
 /// The separation between the cursors, named the way the X axis reads: a
@@ -932,15 +1117,20 @@ pub(super) fn measurement_rows(
     for trace in model.traces.iter().filter(|t| t.visible).take(4) {
         let key = (trace_key(model, trace), a_bits, b_bits);
         let stats = derived.stats_or(key, || {
-            let (start, end) = match window {
-                Some((a, b)) => {
-                    let start = trace.x.partition_point(|&v| v < a);
-                    let end = trace.x.partition_point(|&v| v <= b);
-                    (start, end.max(start))
-                }
-                None => (0, trace.y.len()),
+            let Some((a, b)) = window else {
+                return basic::calculate_min_max_rms(&trace.y);
             };
-            basic::calculate_min_max_rms(&trace.y[start..end])
+            // A bisected [start, end) is only the window on an ascending
+            // sweep. A reverse sweep gets the complementary slice and a loop
+            // gets one contiguous run that spans both branches — so the
+            // reported minimum, maximum and rms described samples the cursors
+            // never enclosed. The shape names the ranges that are inside it.
+            let ranges = trace.shape.window_ranges(&trace.x, a.min(b), a.max(b));
+            let samples: Vec<f64> = ranges
+                .into_iter()
+                .flat_map(|range| trace.y.get(range).unwrap_or_default().iter().copied())
+                .collect();
+            basic::calculate_min_max_rms(&samples)
         });
         let Some((min, max, rms)) = stats else {
             continue;

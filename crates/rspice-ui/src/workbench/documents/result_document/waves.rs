@@ -11,9 +11,11 @@ mod extent;
 pub(super) use extent::FamilyEnvelopePlan;
 pub(super) mod marker_dialog;
 mod readout;
+mod viewport;
 
 pub(crate) use expressions::*;
 pub(crate) use readout::*;
+pub(crate) use viewport::*;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -27,9 +29,13 @@ use crate::state::{
     AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, SimulationState,
 };
 use crate::ui::icons::Icon;
+use crate::ui::plot::sample::{
+    BranchSample, SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
+    sample_branches_into,
+};
 use crate::ui::plot::{
-    self, Axis, CursorPair, DisplayDecimation, PlotSpec, SampleInterpolation, Trace, XScale,
-    fmt_si_significant, fmt_significant, sample_at_with,
+    self, Axis, CursorPair, DisplayDecimation, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation,
+    Trace, XScale, fmt_si_significant, fmt_significant, sample_at_with,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -159,6 +165,14 @@ struct StripTrace {
     color: egui::Color32,
     x: SharedWaveformValues,
     y: SharedWaveformValues,
+    /// What this trace's abscissa actually is: one ascending sweep, a reverse
+    /// sweep, or a loop that turns around partway.
+    ///
+    /// Carried on the trace rather than derived where it is needed, because
+    /// every consumer needs it on every frame and one of them — the hover
+    /// readout — is a `Fn` closure the plot holds while it already owns the
+    /// decimation cache mutably, so it has no route back to the memo.
+    shape: Arc<SweepShape>,
     kind: TraceKind,
     visible: bool,
     /// The run this trace belongs to (cache-key discriminator).
@@ -839,6 +853,60 @@ fn apply_family_trace_style<'a>(
     trace
 }
 
+/// What one DC-sweep analysis actually swept, named and given its unit.
+///
+/// Read out of the deck the run executed rather than out of the workspace's
+/// current authoring, for the reason every other frozen-run reading is: a
+/// sheet over a completed run has to describe that run. `None` whenever the
+/// evidence does not settle it — a run whose decks were not retained, or one
+/// with several sweeps whose points do not line up with its analyses — and
+/// the analysis default stands.
+fn swept_source_axis(
+    simulation: &SimulationState,
+    run: &SimulationRun,
+    analysis_index: usize,
+) -> Option<(String, String)> {
+    let deck = simulation.executed_decks.get(run.id)?;
+    let source = deck
+        .points
+        .get(analysis_index)
+        .and_then(|point| dc_card_source(&point.deck))
+        .or_else(|| {
+            let sources: std::collections::BTreeSet<String> = deck
+                .points
+                .iter()
+                .filter_map(|point| dc_card_source(&point.deck))
+                .collect();
+            (sources.len() == 1)
+                .then(|| sources.into_iter().next())
+                .flatten()
+        })?;
+    // SPICE names a source by what it is: the leading letter is the element
+    // type, so it is also the quantity being swept. Anything else is a swept
+    // parameter, which has no unit the sheet is entitled to invent.
+    let unit = match source
+        .chars()
+        .next()
+        .map(|first| first.to_ascii_uppercase())
+    {
+        Some('V') => "V",
+        Some('I') => "A",
+        _ => "",
+    };
+    Some((source, unit.to_owned()))
+}
+
+/// The source named by the first `.dc` card of a deck.
+fn dc_card_source(deck: &str) -> Option<String> {
+    deck.lines().find_map(|line| {
+        let mut tokens = line.split_whitespace();
+        tokens
+            .next()
+            .filter(|first| first.eq_ignore_ascii_case(".dc"))?;
+        tokens.next().map(str::to_owned)
+    })
+}
+
 fn append_projected_traces(
     traces: &mut Vec<StripTrace>,
     derived: &mut DerivedSeries,
@@ -888,6 +956,17 @@ fn append_projected_traces(
             || base_name.to_owned(),
             |group| format!("{base_name} · {}", group.label),
         );
+        let shape = derived.shape_or(
+            shape_key(
+                analysis_key,
+                source_waveform_name,
+                kind,
+                presentation_key,
+                run_id,
+                false,
+            ),
+            || SweepShape::of(&projection.x),
+        );
         traces.push(StripTrace {
             waveform_index,
             source_waveform_name: source_waveform_name.to_owned(),
@@ -898,6 +977,7 @@ fn append_projected_traces(
             color: family_style.map_or(signal_color, |style| family_color(style, signal_color)),
             x: projection.x,
             y,
+            shape,
             kind,
             visible: visible
                 && family_visibility_key.is_none_or(|key| !hidden_family_traces.contains(&key)),
@@ -967,6 +1047,18 @@ pub(super) fn build_models(
         } else {
             analysis_default_unit(analysis.analysis_type)
         };
+        // A DC sweep's abscissa is whatever source the run swept, and the
+        // retained result keeps the values without naming what produced them —
+        // so every DC sheet said volts, including a sweep of a current source,
+        // which is off by a whole quantity. The deck the run executed is that
+        // run's own frozen evidence and its `.dc` card names the source.
+        let swept_source = (analysis.analysis_type == AnalysisType::DcSweep)
+            .then(|| swept_source_axis(simulation, run, analysis_index))
+            .flatten();
+        if let Some((source, unit)) = swept_source.as_ref() {
+            x_label = source;
+            x_unit = unit;
+        }
         if let Some(axis) = sample_selection
             .and_then(SourceSampleSelection::family_render_plan)
             .map(FamilyRenderPlan::x_axis)
@@ -1223,6 +1315,17 @@ pub(super) fn build_models(
                 } else {
                     (Arc::clone(&overlay_waveform.x), source_y)
                 };
+                let shape = derived.shape_or(
+                    shape_key(
+                        analysis_key,
+                        source_name,
+                        *signal_kind,
+                        *presentation_key,
+                        overlay_run.id,
+                        true,
+                    ),
+                    || SweepShape::of(&projected.0),
+                );
                 projected_overlay_traces.push(StripTrace {
                     waveform_index: overlay_index,
                     source_waveform_name: source_name.clone(),
@@ -1233,6 +1336,7 @@ pub(super) fn build_models(
                     color: *display_color,
                     x: projected.0,
                     y: projected.1,
+                    shape,
                     kind: *signal_kind,
                     visible: *signal_visible,
                     run_id: overlay_run.id,
@@ -1314,6 +1418,34 @@ fn displayed_phase_series(
     derived.get_or(
         key ^ RADIANS_KEY_BIT ^ if continuous { CONTINUOUS_KEY_BIT } else { 0 },
         || Arc::new(degrees.iter().map(|value| value.to_radians()).collect()),
+    )
+}
+
+/// Identity of one trace's X column for the sweep-shape memo.
+///
+/// The abscissa is projected before the ordinate is: a family group selects
+/// its own exact rows, and an overlay run carries its own coordinates, so the
+/// key has to name the group and the run as well as the signal. It is not
+/// [`trace_key`], because that folds in the phase wrap/unwrap choice — which
+/// changes Y and leaves X exactly where it was.
+fn shape_key(
+    analysis_key: AnalysisPresentationKey,
+    source_waveform_name: &str,
+    kind: TraceKind,
+    presentation_key: u64,
+    run_id: u64,
+    overlay: bool,
+) -> u64 {
+    run_mixed_key(
+        stable_hash(&(
+            analysis_key,
+            source_waveform_name,
+            kind as u8,
+            presentation_key,
+            "x-shape",
+        )),
+        run_id,
+        overlay,
     )
 }
 
@@ -1638,6 +1770,13 @@ fn matching_spec_limits(
     pane: &UnitPane,
     t: &Tokens,
 ) -> Vec<plot::LimitLine> {
+    // The bounds a run was judged against are the ones its receipt froze, not
+    // the ones the workspace is authoring now. Drawn as overlays on a
+    // completed run's waveforms, a limit edited after the run put a line the
+    // run had never been measured against straight across its curve — beside
+    // the verdict the run had actually earned. This is the same resolver the
+    // specifications sheet reads.
+    let specifications = super::run_specifications(state);
     let mut seen = HashSet::new();
     let mut limits = Vec::new();
     for trace in pane
@@ -1646,7 +1785,7 @@ fn matching_spec_limits(
         .filter_map(|index| model.traces.get(*index))
         .filter(|trace| trace.visible && !trace.overlay)
     {
-        for specification in state.workspace.specs.iter().filter(|specification| {
+        for specification in specifications.iter().filter(|specification| {
             specification
                 .measurement
                 .eq_ignore_ascii_case(&trace.source_waveform_name)
@@ -1829,180 +1968,6 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
     }
 }
 
-fn scaled_range(range: (f64, f64), factor: f64, logarithmic: bool) -> Option<(f64, f64)> {
-    if !factor.is_finite() || factor <= 0.0 || !range.0.is_finite() || !range.1.is_finite() {
-        return None;
-    }
-    if logarithmic {
-        if range.0 <= 0.0 || range.1 <= range.0 {
-            return None;
-        }
-        let low = range.0.log10();
-        let high = range.1.log10();
-        let center = (low + high) * 0.5;
-        let half_span = (high - low) * 0.5 * factor;
-        return Some((
-            10.0_f64.powf(center - half_span),
-            10.0_f64.powf(center + half_span),
-        ));
-    }
-    if range.1 <= range.0 {
-        return None;
-    }
-    let center = (range.0 + range.1) * 0.5;
-    let half_span = (range.1 - range.0) * 0.5 * factor;
-    Some((center - half_span, center + half_span))
-}
-
-pub(super) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.simulation,
-        &mut state.ui.results,
-        presentation.complex_number_display(),
-        t,
-    );
-    let Some((model, ordinal, pane)) = active_pane(&models, &state.ui.results) else {
-        return;
-    };
-    let current = state.ui.results.analysis_plot_view_pane(
-        super::ResultViewer::Waves,
-        model.analysis_key,
-        ordinal,
-    );
-    let x = current
-        .x
-        .or_else(|| model.x_range)
-        .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
-    let y = current
-        .y
-        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces))
-        .and_then(|range| scaled_range(range, factor, false));
-    let view = state.ui.results.analysis_plot_view_pane_mut(
-        super::ResultViewer::Waves,
-        model.analysis_key,
-        ordinal,
-    );
-    if let Some(x) = x {
-        view.x = Some(x);
-    }
-    if let Some(y) = y {
-        view.y = Some(y);
-    }
-}
-
-pub(super) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.simulation,
-        &mut state.ui.results,
-        presentation.complex_number_display(),
-        t,
-    );
-    let Some((model, ordinal, _)) = active_pane(&models, &state.ui.results) else {
-        return;
-    };
-    state.ui.results.reset_analysis_plot_view_pane(
-        super::ResultViewer::Waves,
-        model.analysis_key,
-        ordinal,
-    );
-}
-
-/// Drop every pinned viewport on the strip the active pane belongs to.
-///
-/// The instrument bar's fit button fits one pane; the workspace-level Fit
-/// gesture fits the whole strip, because the panes of a strip share one X
-/// domain and leaving the others pinned would make them disagree about the
-/// window they show. With no active pane — nothing has been clicked yet —
-/// every strip of the sheet fits, which is what "fit" means before the user
-/// has singled one out.
-pub(super) fn fit_active_strip(state: &mut AppState) {
-    let viewer = super::ResultViewer::Waves;
-    match state.ui.results.active_wave_pane.as_ref() {
-        Some(key) => {
-            let analysis = key.analysis;
-            state.ui.results.reset_analysis_plot_view(viewer, analysis);
-        }
-        None => state.ui.results.reset_all_analysis_plot_views(viewer),
-    }
-}
-
-/// Whether the active pane is showing a viewport the user pinned rather than
-/// the retained data's own extent.
-///
-/// The waveform stack keys its viewports by analysis, not by the legacy
-/// `Global` plot index, so this is the only honest reading for these sheets.
-fn active_pane_is_pinned(tokens: &Tokens, state: &mut AppState) -> bool {
-    let Some(key) = state.ui.results.active_wave_pane.clone() else {
-        return false;
-    };
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.simulation,
-        &mut state.ui.results,
-        presentation.complex_number_display(),
-        tokens,
-    );
-    let Some(model) = models
-        .iter()
-        .find(|model| model.analysis_key == key.analysis)
-    else {
-        return false;
-    };
-    let panes = model.unit_panes();
-    (0..panes.len()).any(|ordinal| {
-        state
-            .ui
-            .results
-            .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
-            .is_zoomed()
-    })
-}
-
-/// Move a placed cursor by a fraction of the visible X interval.
-///
-/// The nudge is expressed in the window the reader is looking at, not the
-/// full retained sweep, so one keypress moves the same visible distance
-/// however far the sheet is zoomed in.
-pub(super) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool, steps: f64) {
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.simulation,
-        &mut state.ui.results,
-        presentation.complex_number_display(),
-        tokens,
-    );
-    let Some(strip) = state.ui.results.cursor_strip else {
-        return;
-    };
-    let Some(model) = models.iter().find(|model| model.analysis_index == strip) else {
-        return;
-    };
-    let Some(full) = model.x_range else {
-        return;
-    };
-    let panes = model.unit_panes().len();
-    let (x0, x1) = shared_x_view(&state.ui.results, model.analysis_key, panes).unwrap_or(full);
-    let cursor = if cursor_b {
-        &mut state.ui.results.cursors.b
-    } else {
-        &mut state.ui.results.cursors.a
-    };
-    let Some(position) = cursor else {
-        return;
-    };
-    let moved = if model.x_scale == XScale::Log10 && *position > 0.0 && x0 > 0.0 && x1 > x0 {
-        let decades = (x1.log10() - x0.log10()) * 0.01 * steps;
-        10.0_f64.powf(position.log10() + decades)
-    } else {
-        *position + (x1 - x0) * 0.01 * steps
-    };
-    if moved.is_finite() {
-        *position = moved.clamp(full.0.min(full.1), full.0.max(full.1));
-    }
-}
-
 const fn cursor_interpolation(policy: CursorInterpolation) -> SampleInterpolation {
     match policy {
         CursorInterpolation::MonotoneCubicWhereValid => SampleInterpolation::MonotoneCubic,
@@ -2153,7 +2118,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
                             .enumerate()
                             .map(|(i, expr)| LegendChip {
                                 name: &expr_labels[i],
-                                color: expr_color(&t, model.signal_trace_count + i),
+                                color: expr_color(&t, expr_palette_slot(model, i)),
                                 on: expr.visible,
                             })
                             .collect();
@@ -2333,151 +2298,6 @@ fn model_x_axis(
     } else {
         axis
     }
-}
-
-fn shared_x_view(
-    results: &ResultsState,
-    analysis: AnalysisPresentationKey,
-    pane_count: usize,
-) -> Option<(f64, f64)> {
-    (0..pane_count).find_map(|ordinal| {
-        results
-            .analysis_plot_view_pane(super::ResultViewer::Waves, analysis, ordinal)
-            .x
-    })
-}
-
-fn set_shared_x_view(
-    results: &mut ResultsState,
-    analysis: AnalysisPresentationKey,
-    pane_count: usize,
-    range: Option<(f64, f64)>,
-) {
-    for ordinal in 0..pane_count {
-        results
-            .analysis_plot_view_pane_mut(super::ResultViewer::Waves, analysis, ordinal)
-            .x = range;
-    }
-}
-
-fn shared_axis_viewport_fraction(scale: XScale, full: (f64, f64), view: (f64, f64)) -> (f64, f64) {
-    let start = scale.normalize(view.0, full.0, full.1).clamp(0.0, 1.0);
-    let end = scale.normalize(view.1, full.0, full.1).clamp(0.0, 1.0);
-    (start.min(end), start.max(end))
-}
-
-fn panned_shared_x_view(
-    scale: XScale,
-    full: (f64, f64),
-    view: (f64, f64),
-    fraction_delta: f64,
-) -> Option<(f64, f64)> {
-    if !fraction_delta.is_finite() {
-        return None;
-    }
-    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
-    let width = end - start;
-    if !(width > 0.0 && width < 1.0) {
-        return None;
-    }
-    let next_start = (start + fraction_delta).clamp(0.0, 1.0 - width);
-    let next_end = next_start + width;
-    Some((
-        scale.denormalize(next_start, full.0, full.1),
-        scale.denormalize(next_end, full.0, full.1),
-    ))
-}
-
-fn zoomed_shared_x_view(
-    scale: XScale,
-    full: (f64, f64),
-    view: (f64, f64),
-    anchor_fraction: f64,
-    factor: f64,
-) -> Option<(f64, f64)> {
-    if !anchor_fraction.is_finite() || !factor.is_finite() || factor <= 0.0 {
-        return None;
-    }
-    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
-    let width = end - start;
-    if width <= 0.0 {
-        return None;
-    }
-    let anchor = anchor_fraction.clamp(0.0, 1.0);
-    let relative = ((anchor - start) / width).clamp(0.0, 1.0);
-    let next_width = (width * factor).clamp(1.0e-6, 1.0);
-    let next_start = (anchor - relative * next_width).clamp(0.0, 1.0 - next_width);
-    let next_end = next_start + next_width;
-    Some((
-        scale.denormalize(next_start, full.0, full.1),
-        scale.denormalize(next_end, full.0, full.1),
-    ))
-}
-
-/// Resize the shared viewport by dragging one edge of the overview window.
-///
-/// The dragged edge follows the pointer and the opposite edge stays fixed,
-/// so the gesture zooms and pans in one motion the way pulling a scrollbar
-/// handle does.
-fn resized_shared_x_view(
-    scale: XScale,
-    full: (f64, f64),
-    view: (f64, f64),
-    move_start: bool,
-    edge_fraction: f64,
-) -> Option<(f64, f64)> {
-    if !edge_fraction.is_finite() {
-        return None;
-    }
-    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
-    let edge = edge_fraction.clamp(0.0, 1.0);
-    let (next_start, next_end) = if move_start {
-        (edge.min(end - SHARED_X_MIN_WINDOW), end)
-    } else {
-        (start, edge.max(start + SHARED_X_MIN_WINDOW))
-    };
-    let next_start = next_start.clamp(0.0, 1.0 - SHARED_X_MIN_WINDOW);
-    let next_end = next_end.clamp(next_start + SHARED_X_MIN_WINDOW, 1.0);
-    Some((
-        scale.denormalize(next_start, full.0, full.1),
-        scale.denormalize(next_end, full.0, full.1),
-    ))
-}
-
-/// The name the strip prints into the panes' left gutter beside the tick
-/// values, following the mockup's axis vocabulary.
-///
-/// The tick values themselves are SI-prefixed bare numbers, so the gutter is
-/// where the axis states its unit — once, for the whole row.
-fn shared_x_gutter_label(unit: &str) -> String {
-    let name = match unit {
-        "s" => "TIME",
-        "Hz" => "FREQ",
-        _ => "X",
-    };
-    if unit.is_empty() {
-        name.to_owned()
-    } else {
-        format!("{name} · {unit}")
-    }
-}
-
-fn recentered_shared_x_view(
-    scale: XScale,
-    full: (f64, f64),
-    view: (f64, f64),
-    centre_fraction: f64,
-) -> Option<(f64, f64)> {
-    let (start, end) = shared_axis_viewport_fraction(scale, full, view);
-    let width = end - start;
-    if !(width > 0.0 && width < 1.0 && centre_fraction.is_finite()) {
-        return None;
-    }
-    let next_start = (centre_fraction.clamp(0.0, 1.0) - width * 0.5).clamp(0.0, 1.0 - width);
-    Some((
-        scale.denormalize(next_start, full.0, full.1),
-        scale.denormalize(next_start + width, full.0, full.1),
-    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2770,12 +2590,15 @@ fn active_pane_extents(
     let x = model
         .x_range
         .map(|full| shared_x_view(&state.ui.results, key.analysis, panes.len()).unwrap_or(full));
-    let y = state
+    let pinned = state
         .ui
         .results
         .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
-        .y
-        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces));
+        .y;
+    let y = match pinned {
+        Some(range) => Some(range),
+        None => displayed_pane_auto_y(state, model, pane, ordinal, tokens),
+    };
     (x, y)
 }
 
@@ -2881,15 +2704,18 @@ fn active_pane_viewports(
         .results
         .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
         .y;
-    let y = pinned
-        .or_else(|| pane_y_range(&mut state.ui.results.derived, model, &pane.traces))
-        .map(|(y0, y1)| {
-            format!(
-                "{} … {}",
-                fmt_in_unit(y0, pane.unit, digits),
-                fmt_in_unit(y1, pane.unit, digits)
-            )
-        });
+    let unit = pane.unit;
+    let y = match pinned {
+        Some(range) => Some(range),
+        None => displayed_pane_auto_y(state, model, pane, ordinal, tokens),
+    }
+    .map(|(y0, y1)| {
+        format!(
+            "{} … {}",
+            fmt_in_unit(y0, unit, digits),
+            fmt_in_unit(y1, unit, digits)
+        )
+    });
     (x, y)
 }
 
@@ -3398,6 +3224,18 @@ fn show_shared_x_axis(
     // plot.
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let mut last_right = f32::NEG_INFINITY;
+    // Past a certain zoom the tick labels stop being values and become
+    // differences from one. This strip draws its own tick row instead of
+    // letting a plot draw one, so it also owes the reader that value: a row
+    // reading "−40n … 0 … +40n" with nothing to subtract them from states a
+    // window somewhere near zero, which is not where the reader is. Stated
+    // once, at the head of the row and brighter than the ticks, exactly as
+    // the plot's own axis states it.
+    if let Some(anchor) = axis.offset_anchor() {
+        let galley = painter.layout_no_wrap(anchor.to_owned(), font.clone(), c.text);
+        last_right = plot_left + galley.size().x;
+        painter.galley(egui::pos2(plot_left, label_top), galley, c.text);
+    }
     for (value, label) in &axis.ticks {
         let fraction = model.x_scale.normalize(*value, axis.min, axis.max);
         if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
@@ -3773,6 +3611,135 @@ fn show_strip_plot(
     );
 }
 
+/// The Y interval a pane fits itself to when the reader has not pinned one.
+///
+/// Everything the pane draws widens it: the traces, whatever expressions the
+/// strip carries, and the specification limits — a bound drawn off the top of
+/// the axis is a bound the reader cannot check against.
+fn pane_auto_y(
+    pane_range: Option<(f64, f64)>,
+    exprs: &[ResolvedExpr],
+    limits: &[plot::LimitLine],
+) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    if let Some((a, b)) = pane_range {
+        lo = a;
+        hi = b;
+    }
+    for expr in exprs {
+        if let Some((a, b)) = expr.y_extremes {
+            lo = lo.min(a);
+            hi = hi.max(b);
+        }
+    }
+    for limit in limits {
+        lo = lo.min(limit.y);
+        hi = hi.max(limit.y);
+    }
+    if !lo.is_finite() || !hi.is_finite() {
+        None
+    } else if lo == hi && lo > 0.0 {
+        Some((lo / 1.1, hi * 1.1))
+    } else if lo == hi {
+        Some((lo - 1.0, hi + 1.0))
+    } else {
+        Some((lo, hi))
+    }
+}
+
+/// The Y interval one pane of a strip is showing right now, automatic fit
+/// included.
+///
+/// The inspector's extents, the axis-limit editor and the zoom control all
+/// read this rather than the traces' own extremes: an expression or a
+/// specification limit widens the drawn axis, and reporting the narrower
+/// interval meant the typed limits opened on numbers that were not on screen.
+pub(super) fn displayed_pane_auto_y(
+    state: &mut AppState,
+    model: &StripModel,
+    pane: &UnitPane,
+    ordinal: usize,
+    t: &Tokens,
+) -> Option<(f64, f64)> {
+    let pane_range = pane_y_range(&mut state.ui.results.derived, model, &pane.traces);
+    let limits = if state.ui.results.show_spec_limits {
+        matching_spec_limits(state, model, pane, t)
+    } else {
+        Vec::new()
+    };
+    // Only the strip's first pane draws its expressions; the others must not
+    // widen themselves against a curve they do not carry.
+    let exprs = if ordinal == 0 {
+        resolve_strip_exprs(state, model, t)
+    } else {
+        Vec::new()
+    };
+    pane_auto_y(pane_range, &exprs, &limits)
+}
+
+/// The active-run trace whose drawn curve passes closest to the pointer.
+///
+/// Two things make this the trace the reader is pointing at rather than an
+/// approximation of it. The value is mapped to the screen through the pane's
+/// own scale, which is the mapping the painter used — a linear guess on a
+/// decade pane picks a curve the pointer is nowhere near. And a loop is
+/// measured on every branch that reaches this abscissa, so clicking the return
+/// leg of a hysteresis curve anchors to that curve rather than to whichever
+/// neighbour happened to sit near its forward leg.
+fn nearest_drawn_trace<'a>(
+    pane_traces: &[(usize, &'a StripTrace)],
+    x: f64,
+    pointer_y: Option<f32>,
+    plot_rect: egui::Rect,
+    y_scale: XScale,
+    (y0, y1): (f64, f64),
+    interpolation: SampleInterpolation,
+) -> Option<&'a StripTrace> {
+    let screen_y = |value: f64| -> Option<f32> {
+        let fraction = y_scale.normalize(value, y0, y1);
+        (value.is_finite() && fraction.is_finite())
+            .then(|| plot_rect.bottom() - fraction as f32 * plot_rect.height())
+    };
+    let mut samples: Vec<BranchSample> = Vec::new();
+    let mut best: Option<(&StripTrace, f32)> = None;
+    for (_, trace) in pane_traces.iter().filter(|(_, trace)| !trace.overlay) {
+        // The ordinary sweep has one answer here and is spared the branch
+        // walk; anything else is measured on every leg that reaches this
+        // abscissa, so clicking the return leg of a loop finds that curve.
+        let mut values: Vec<f64> = if trace.shape.is_single_ascending() {
+            Vec::new()
+        } else {
+            sample_branches_into(
+                &trace.x,
+                &trace.y,
+                &trace.shape,
+                x,
+                interpolation,
+                &mut samples,
+            );
+            samples.iter().map(|sample| sample.value).collect()
+        };
+        if values.is_empty() {
+            values.push(sample_at_with_shape(
+                &trace.x,
+                &trace.y,
+                &trace.shape,
+                x,
+                interpolation,
+            ));
+        }
+        for value in values {
+            let Some(y) = screen_y(value) else { continue };
+            let distance = pointer_y.map_or(0.0, |pointer| (pointer - y).abs());
+            if best.is_none_or(|(_, closest)| distance < closest) {
+                best = Some((trace, distance));
+            }
+        }
+    }
+    best.map(|(trace, _)| trace)
+}
+
 fn show_unit_pane(
     ui: &mut Ui,
     state: &mut AppState,
@@ -3800,33 +3767,7 @@ fn show_unit_pane(
     } else {
         Vec::new()
     };
-    let auto_y = {
-        let mut lo = f64::INFINITY;
-        let mut hi = f64::NEG_INFINITY;
-        if let Some((a, b)) = pane_range {
-            lo = a;
-            hi = b;
-        }
-        for expr in exprs {
-            if let Some((a, b)) = expr.y_extremes {
-                lo = lo.min(a);
-                hi = hi.max(b);
-            }
-        }
-        for limit in &specification_limits {
-            lo = lo.min(limit.y);
-            hi = hi.max(limit.y);
-        }
-        if !lo.is_finite() || !hi.is_finite() {
-            None
-        } else if lo == hi && lo > 0.0 {
-            Some((lo / 1.1, hi * 1.1))
-        } else if lo == hi {
-            Some((lo - 1.0, hi + 1.0))
-        } else {
-            Some((lo, hi))
-        }
-    };
+    let auto_y = pane_auto_y(pane_range, exprs, &specification_limits);
     let log_y_available = auto_y.is_some_and(|(minimum, maximum)| minimum > 0.0 && maximum > 0.0);
     let mut log_y = pane_log_y(&state.ui.results, model, pane) && log_y_available;
     if !log_y_available && log_y {
@@ -3892,8 +3833,17 @@ fn show_unit_pane(
         // ticks, which stay legible where the lattice would crowd.
         y0 = (y0 / 45.0).floor() * 45.0;
         y1 = (y1 / 45.0).ceil() * 45.0;
-        let ticks: Vec<f64> = (0..=((y1 - y0) / 45.0) as i64)
-            .map(|i| y0 + i as f64 * 45.0)
+        // Continuous phase does not stay inside one turn: an unwrapped loop
+        // response walks thousands of degrees, and 45° steps across it are
+        // thousands of labels stacked into an unreadable band — and thousands
+        // of galleys laid out every frame. The lattice thins by whole 45°
+        // multiples so what is left still falls on the values a phase reading
+        // is taken at.
+        let steps = ((y1 - y0) / 45.0).round().max(0.0) as usize;
+        let stride = (steps + 1).div_ceil(MAX_AXIS_TICKS).max(1);
+        let ticks: Vec<f64> = (0..=steps)
+            .step_by(stride)
+            .map(|index| 45.0f64.mul_add(index as f64, y0))
             .collect();
         Axis::with_ticks(y0, y1, "°", &ticks)
     } else {
@@ -3912,6 +3862,11 @@ fn show_unit_pane(
     } else {
         y_axis
     };
+    // The scale the pane is actually drawn on. Every hit test below maps
+    // through it rather than assuming a linear ordinate, because "nearest"
+    // has to mean nearest on screen — and on a decade pane a linear guess is
+    // wrong by most of the window.
+    let y_scale = if log_y { XScale::Log10 } else { XScale::Linear };
     // The plot's own description is where the caution has to live as words.
     // The kind tag carries it as colour and a glyph, and neither of those
     // reaches a reader who cannot see the strip.
@@ -3986,8 +3941,14 @@ fn show_unit_pane(
         } else {
             trace.color
         };
+        // The reduction has to be told what the abscissa is. Without it a
+        // reverse sweep vanished the moment it was zoomed — every window it
+        // was asked for came back empty — and a hysteresis loop lost whichever
+        // branch fell outside one contiguous index window.
         let mut plot_trace = apply_family_trace_style(
-            Trace::new(&trace.x, &trace.y, color).cache_key(trace_key(model, trace)),
+            Trace::new(&trace.x, &trace.y, color)
+                .cache_key(trace_key(model, trace))
+                .shape(&trace.shape),
             trace.family_style,
         );
         if trace.overlay {
@@ -3999,7 +3960,8 @@ fn show_unit_pane(
         spec.traces.push(apply_family_trace_style(
             Trace::new(&expr.x, &expr.y, expr.color)
                 .thin()
-                .cache_key(expr.cache_key),
+                .cache_key(expr.cache_key)
+                .shape(&expr.shape),
             expr.family_style,
         ));
     }
@@ -4024,12 +3986,37 @@ fn show_unit_pane(
         let Some((_, trace)) = anchored else {
             continue;
         };
-        let y = sample_at_with(&trace.x, &trace.y, marker.x(), interpolation);
-        if !y.is_finite() {
+        // A loop has a value on each branch that reaches this X, and a tag on
+        // only one of them points at half the evidence.
+        let mut samples = Vec::new();
+        sample_branches_into(
+            &trace.x,
+            &trace.y,
+            &trace.shape,
+            marker.x(),
+            interpolation,
+            &mut samples,
+        );
+        if trace.shape.branch_count() <= 1 || samples.is_empty() {
+            let y =
+                sample_at_with_shape(&trace.x, &trace.y, &trace.shape, marker.x(), interpolation);
+            if y.is_finite() {
+                spec.markers
+                    .push(plot::Marker::point(marker.x(), y, color, label));
+            }
             continue;
         }
-        spec.markers
-            .push(plot::Marker::point(marker.x(), y, color, label));
+        for sample in &samples {
+            if !sample.value.is_finite() {
+                continue;
+            }
+            spec.markers.push(plot::Marker::point(
+                marker.x(),
+                sample.value,
+                color,
+                format!("{label} {}", branch_tag(&trace.shape, sample.run)),
+            ));
+        }
     }
 
     let model_cursor_domain = model.cursor_domain();
@@ -4043,15 +4030,45 @@ fn show_unit_pane(
             model.x_label().to_owned(),
             model.format_x(x, significant_digits, quantity_policy),
         )];
+        let mut samples: Vec<BranchSample> = Vec::new();
         for (_, trace) in pane_traces.iter().take(6) {
-            let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
-            rows.push((
-                trace.name.clone(),
-                model.format_trace_value(trace, value, significant_digits, quantity_policy),
-            ));
+            sample_branches_into(
+                &trace.x,
+                &trace.y,
+                &trace.shape,
+                x,
+                interpolation,
+                &mut samples,
+            );
+            // A sweep with one answer at this X keeps its single unlabelled
+            // row. A loop reports each branch that reaches here, because one
+            // of the two numbers is not the reading.
+            if trace.shape.branch_count() <= 1
+                || samples.is_empty()
+                || samples.len() > MAX_READOUT_BRANCHES
+            {
+                let value =
+                    sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
+                rows.push((
+                    trace.name.clone(),
+                    model.format_trace_value(trace, value, significant_digits, quantity_policy),
+                ));
+                continue;
+            }
+            for sample in &samples {
+                rows.push((
+                    format!("{} {}", trace.name, branch_tag(&trace.shape, sample.run)),
+                    model.format_trace_value(
+                        trace,
+                        sample.value,
+                        significant_digits,
+                        quantity_policy,
+                    ),
+                ));
+            }
         }
         for expr in exprs.iter().take(3) {
-            let value = sample_at_with(&expr.x, &expr.y, x, interpolation);
+            let value = sample_at_with_shape(&expr.x, &expr.y, &expr.shape, x, interpolation);
             rows.push((
                 expr.label.clone(),
                 fmt_si_significant(value, "", significant_digits),
@@ -4085,23 +4102,16 @@ fn show_unit_pane(
     {
         let pointer_y = response.response.interact_pointer_pos().map(|pos| pos.y);
         let plot_rect = response.plot_rect;
-        // "Nearest" has to mean what the eye sees, so traces are measured
-        // in screen space against the pane's drawn range.
-        let screen_y = |value: f64| -> Option<f32> {
-            (value.is_finite() && y1 > y0).then(|| {
-                plot_rect.bottom() - ((value - y0) / (y1 - y0)) as f32 * plot_rect.height()
-            })
-        };
-        let nearest = pane_traces
-            .iter()
-            .filter(|(_, trace)| !trace.overlay)
-            .filter_map(|(_, trace)| {
-                let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
-                let y = screen_y(value)?;
-                Some((trace, pointer_y.map_or(0.0, |pointer| (pointer - y).abs())))
-            })
-            .min_by(|(_, a), (_, b)| a.total_cmp(b));
-        if let Some((trace, _)) = nearest {
+        let nearest = nearest_drawn_trace(
+            &pane_traces,
+            clicked_x,
+            pointer_y,
+            plot_rect,
+            y_scale,
+            (y0, y1),
+            interpolation,
+        );
+        if let Some(trace) = nearest {
             // The pane being drawn owns the marker, and placing one is the
             // first half of saying what it means, so the dialog opens on it.
             let placement = super::MarkerPlacement {
@@ -4124,23 +4134,16 @@ fn show_unit_pane(
             .interact_pointer_pos()
             .map(|position| position.y);
         let nearest_anchor = placing_cursor_a.then(|| {
-            pane_traces
-                .iter()
-                .filter(|(_, trace)| !trace.overlay)
-                .filter_map(|(_, trace)| {
-                    let value = sample_at_with(&trace.x, &trace.y, clicked_x, interpolation);
-                    if !value.is_finite() || y1 <= y0 {
-                        return None;
-                    }
-                    let screen_y = response.plot_rect.bottom()
-                        - ((value - y0) / (y1 - y0)) as f32 * response.plot_rect.height();
-                    Some((
-                        anchor_key(model, trace),
-                        pointer_y.map_or(0.0, |pointer| (pointer - screen_y).abs()),
-                    ))
-                })
-                .min_by(|(_, left), (_, right)| left.total_cmp(right))
-                .map(|(anchor, _)| anchor)
+            nearest_drawn_trace(
+                &pane_traces,
+                clicked_x,
+                pointer_y,
+                response.plot_rect,
+                y_scale,
+                (y0, y1),
+                interpolation,
+            )
+            .map(|trace| anchor_key(model, trace))
         });
         let results = &mut state.ui.results;
         if results.cursor_strip != Some(model.analysis_index)

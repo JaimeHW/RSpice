@@ -2152,6 +2152,36 @@ pub(crate) fn retained_evidence_is_valid(
     valid
 }
 
+/// The content digest of one retained dataset.
+///
+/// Hashing a dataset encodes every retained sample of it. The resolved
+/// displayed view carries the digest so it can prove the run behind a
+/// document is still the run it resolved — and everything that reads that
+/// view calls `run()` to re-check it, several times per frame, for a reader
+/// who is not touching anything.
+///
+/// Keyed by data version like the validity memo beside it, so a generation
+/// the memo has not seen misses by construction rather than by remembering
+/// to be cleared.
+pub(crate) fn retained_dataset_digest(
+    state: &AppState,
+    run: &SimulationRun,
+) -> crate::product::ContentDigest {
+    let key = (state.simulation.data_version, run.dataset_id);
+    if let Some(known) = state.ui.results.dataset_digests.borrow().get(&key) {
+        return *known;
+    }
+    frame_work::note(frame_work::DatasetWalk::DatasetDigest);
+    let digest = run.dataset_content_digest();
+    state
+        .ui
+        .results
+        .dataset_digests
+        .borrow_mut()
+        .insert(key, digest);
+    digest
+}
+
 /// The same question for an analysis already in hand, resolved to its key.
 pub(super) fn analysis_evidence_is_valid(
     state: &AppState,
@@ -2437,6 +2467,9 @@ pub struct ResultsState {
     /// Memoized retained-evidence verdict per (data version, analysis); see
     /// [`retained_evidence_is_valid`].
     pub(super) retained_evidence_validity: RefCell<HashMap<(u64, AnalysisPresentationKey), bool>>,
+    /// Memoized dataset content digest per (data version, dataset); see
+    /// [`retained_dataset_digest`].
+    pub(super) dataset_digests: RefCell<HashMap<(u64, DatasetId), crate::product::ContentDigest>>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// Row/column selection for the TABLE viewer.
@@ -3088,6 +3121,9 @@ impl ResultsState {
         self.retained_evidence_validity
             .get_mut()
             .retain(|(_, analysis), _| live(*analysis));
+        self.dataset_digests
+            .get_mut()
+            .retain(|(_, dataset), _| retained.contains(dataset));
         self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
         self.favorite_result_artifacts
@@ -3507,14 +3543,33 @@ impl ResultsState {
         });
     }
 
-    pub(super) fn reset_analysis_plot_view_pane(
+    /// Drop one axis' override on every pane of one strip, whatever ordinal it
+    /// was stored under.
+    ///
+    /// The wave stack's panes share an abscissa, so an X window released on
+    /// one ordinal and left on the rest is a strip whose panes disagree. Every
+    /// stored ordinal is visited rather than the ones the strip currently
+    /// draws, because a strip that has lost a pane keeps the departed
+    /// ordinal's entry — and that entry goes on reporting the strip as zoomed
+    /// with no pane left to fit it from. An entry with nothing left to say is
+    /// removed, so the pinned-axis and zoomed predicates read the same answer.
+    pub(super) fn clear_analysis_plot_view_axis(
         &mut self,
         viewer: ResultViewer,
         analysis: AnalysisPresentationKey,
-        pane: usize,
+        axis: PaneAxis,
     ) {
         let plot = self.scoped_plot_key(PlotPresentationKey::Analysis(analysis.authored()));
-        self.views.remove(&(viewer, plot, pane));
+        self.views.retain(|(key_viewer, key_plot, _), view| {
+            if (*key_viewer, *key_plot) != (viewer, plot) {
+                return true;
+            }
+            match axis {
+                PaneAxis::X => view.x = None,
+                PaneAxis::Y => view.y = None,
+            }
+            view.is_zoomed()
+        });
     }
 
     /// Whether any pane of one plot is zoomed away from the automatic view.
@@ -3658,6 +3713,13 @@ pub struct DerivedSeries {
     /// Cached windowed (min, max, rms) measurements, keyed by
     /// (series key, window-start bits, window-end bits).
     stats: std::collections::HashMap<WindowStatsKey, WindowStats>,
+    /// Cached monotone structure of a series' X column, per series key.
+    ///
+    /// Classifying costs one pass over the abscissa, and the renderer, the
+    /// cursor readout and the marker hit test all need the same answer on
+    /// every frame. It is held here rather than on the trace because only the
+    /// cache knows when the data behind it changed.
+    shapes: std::collections::HashMap<u64, std::sync::Arc<crate::ui::plot::sample::SweepShape>>,
 }
 
 impl DerivedSeries {
@@ -3666,8 +3728,23 @@ impl DerivedSeries {
             self.map.clear();
             self.ranges.clear();
             self.stats.clear();
+            self.shapes.clear();
             self.version = version;
         }
+    }
+
+    /// Fetch or classify the monotone structure of a series' X column.
+    pub fn shape_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> crate::ui::plot::sample::SweepShape,
+    ) -> std::sync::Arc<crate::ui::plot::sample::SweepShape> {
+        if let Some(hit) = self.shapes.get(&key) {
+            return std::sync::Arc::clone(hit);
+        }
+        let shape = std::sync::Arc::new(build());
+        self.shapes.insert(key, std::sync::Arc::clone(&shape));
+        shape
     }
 
     /// Fetch or compute the cached finite (min, max) of a series.
@@ -4265,7 +4342,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // owning scroll body are content-fit, so a stage with nothing to report
     // gives the whole area back to the document.
     let strip_height = match chrome {
-        ResultChrome::Full => readout_strip_height(&app.state),
+        ResultChrome::Full => readout_strip_height(&mut app.state),
         ResultChrome::CompactSplit => 0.0,
     };
     let available = ui.available_rect_before_wrap();
@@ -4311,7 +4388,7 @@ fn result_stage_bar_visible(state: &AppState) -> bool {
 ///
 /// Only the cursor-bearing waveform viewers carry a readout; structured
 /// documents (OP, specs, tables) have no cursor to report.
-fn readout_strip_height(state: &AppState) -> f32 {
+fn readout_strip_height(state: &mut AppState) -> f32 {
     match state.ui.results.viewer {
         ResultViewer::Waves
         | ResultViewer::DcSweep
@@ -4421,6 +4498,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         // Both are derived from the retained datasets, so a new version makes
         // them answers to an old question.
         results.retained_evidence_validity.get_mut().clear();
+        results.dataset_digests.get_mut().clear();
         results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
