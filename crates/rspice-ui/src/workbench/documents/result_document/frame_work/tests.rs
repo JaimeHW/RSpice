@@ -461,7 +461,19 @@ fn corrupted_evidence_closes_the_gates_that_read_the_memo() {
 
 /// Report the counts rather than asserting on them, for tuning the fixes.
 /// Not a gate: `--ignored` keeps it out of the ordinary run.
+///
+/// ```text
+/// cargo test -p rspice-ui --lib report_idle_frame_work -- --ignored --nocapture
+/// ```
+// The crate denies `print_stdout` because the desktop build detaches from its
+// console and the browser build has no stderr, so a stray diagnostic reaches
+// nobody. This is the same exception `services::license` already carries: an
+// `#[ignore]`d operator entry point whose entire output *is* the printed
+// table, read through `--nocapture`. Routing it through `log` would put the
+// table behind a logger no test installs. The allow is per-function so the
+// rule keeps holding for every other test in the crate.
 #[test]
+#[allow(clippy::print_stdout)]
 #[ignore = "measurement harness"]
 fn report_idle_frame_work() {
     for (name, viewer) in surfaces() {

@@ -1264,7 +1264,22 @@ fn source_files_have_no_byte_order_mark() {
 /// outside the Models shell still spelled the page by its old name. They spell
 /// it `Models` now, so the alias -- and the `allow(non_upper_case_globals)`
 /// that let a `const` be named like a variant -- has nothing left to serve.
-const MAX_LINT_SUPPRESSIONS: usize = 57;
+///
+/// 57 -> 59 when this test started counting `#[expect(..)]` as well as
+/// `#[allow(..)]`. It had only ever matched `[allow(`, so an `#[expect]`
+/// suppressed a lint without moving the number the ceiling watches -- a hole
+/// in the one gate whose whole job is to make suppression cost something.
+/// Closing it counted the `result_large_err` expect in
+/// `services::cloud_account::live_relay`, which had been sitting outside the
+/// tally since it was written (+1). The second (+1) is a new
+/// `allow(clippy::print_stdout)` on `frame_work::tests::report_idle_frame_work`
+/// -- the same case `services::license` already argued and won: an
+/// `#[ignore]`d measurement harness whose entire output is the table a human
+/// reads through `--nocapture`, where routing through `log` would only put it
+/// behind a logger no test installs. Both forms suppress, so both are counted;
+/// prefer whichever states the reason, and expect the number to move either
+/// way.
+const MAX_LINT_SUPPRESSIONS: usize = 59;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
@@ -1273,7 +1288,9 @@ fn lint_suppressions_do_not_grow() {
     let mut suppressions = 0usize;
     for path in rust_sources(&root) {
         let source = fs::read_to_string(&path).unwrap_or_default();
-        suppressions += strip_line_comments(&source).matches("[allow(").count();
+        let stripped = strip_line_comments(&source);
+        suppressions += stripped.matches("[allow(").count();
+        suppressions += stripped.matches("[expect(").count();
     }
     assert!(
         suppressions <= MAX_LINT_SUPPRESSIONS,
