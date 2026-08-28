@@ -70,10 +70,41 @@ fn header_cell(ui: &mut Ui, label: &str) {
     theme::paint_focus_ring(ui, &cell, ui.max_rect());
 }
 
-fn operating_point_row_count(analysis: &AnalysisResult) -> usize {
-    let dc_rows = analysis.dc_op.as_ref().map_or(0, |op| {
+fn dc_op_row_count(analysis: &AnalysisResult) -> usize {
+    analysis.dc_op.as_ref().map_or(0, |op| {
         op.node_voltages.len() + op.branch_currents.len() + op.power_dissipation.len()
-    });
+    })
+}
+
+/// Rows the retained solver state contributes to the typed table.
+///
+/// It is a fallback: the DC block is the authority on the operating point, and
+/// the raw MNA vector is offered only when that block yielded nothing to show.
+/// Beyond that, a solution entry no retained name can address is not a row —
+/// the producer has no quantity to put in the row's second column.
+///
+/// The count and the producer decided both clauses independently, and
+/// disagreed on both. The count dropped the solver state when the DC block was
+/// *empty*, the producer dropped it when the block was merely *present*, and
+/// neither bounded the solution by the names addressing it. An analysis
+/// retaining an empty `dc_op` therefore counted rows nothing could produce,
+/// and the table drew that many blank lines under the last real one.
+fn mna_solution_row_count(
+    dc_rows: usize,
+    mna_node_names: &[String],
+    mna_branch_names: &[String],
+    mna_solution: &[f64],
+) -> usize {
+    if dc_rows > 0 {
+        return 0;
+    }
+    mna_solution
+        .len()
+        .min(mna_node_names.len().saturating_add(mna_branch_names.len()))
+}
+
+fn operating_point_row_count(analysis: &AnalysisResult) -> usize {
+    let dc_rows = dc_op_row_count(analysis);
     let device_rows = analysis.device_op.as_ref().map_or(0, |report| {
         report
             .entries
@@ -85,12 +116,14 @@ fn operating_point_row_count(analysis: &AnalysisResult) -> usize {
         Some(AnalysisResultPayload::OperatingPoint {
             selected_devices,
             violation_devices,
+            mna_node_names,
+            mna_branch_names,
             mna_solution,
             ..
         }) => {
             1 + selected_devices.len()
                 + violation_devices.len()
-                + usize::from(dc_rows == 0) * mna_solution.len()
+                + mna_solution_row_count(dc_rows, mna_node_names, mna_branch_names, mna_solution)
         }
         _ => 0,
     };
@@ -184,7 +217,14 @@ fn operating_point_row_at(analysis: &AnalysisResult, mut index: usize) -> Option
         });
     }
     index -= violation_devices.len();
-    if analysis.dc_op.is_some() || index >= mna_solution.len() {
+    if index
+        >= mna_solution_row_count(
+            dc_op_row_count(analysis),
+            mna_node_names,
+            mna_branch_names,
+            mna_solution,
+        )
+    {
         return None;
     }
     let (source, quantity) = if index < mna_node_names.len() {
@@ -1170,6 +1210,88 @@ mod tests {
         let current = operating_point_row_at(&analysis, 1).expect("current row");
         assert_eq!(current.quantity, "I(V1)");
         assert_eq!(current.value, "-2.50000000000000005e-3");
+    }
+
+    /// A typed operating-point payload carrying the retained solver state.
+    fn mna_payload() -> AnalysisResultPayload {
+        use crate::state::{
+            OperatingPointAccuracyEvidence, OperatingPointAnnotationEvidence,
+            OperatingPointDeviceDetailEvidence, OperatingPointHomotopyEvidence,
+            OperatingPointInitialGuessEvidence, OperatingPointNodeInitializationEvidence,
+            OperatingPointProcessEvidence, OperatingPointSaveDeviceEvidence,
+            OperatingPointTemperatureEvidence,
+        };
+        AnalysisResultPayload::OperatingPoint {
+            temperature_mode: OperatingPointTemperatureEvidence::Nominal27C,
+            temperature_celsius: 27.0,
+            initial_guess: OperatingPointInitialGuessEvidence::Automatic,
+            node_initialization: OperatingPointNodeInitializationEvidence::UseIcAndNodeset,
+            homotopy: OperatingPointHomotopyEvidence::Adaptive,
+            annotation: OperatingPointAnnotationEvidence::VoltagesAndCurrents,
+            device_detail: OperatingPointDeviceDetailEvidence::SelectedAndViolations,
+            save_device_op: OperatingPointSaveDeviceEvidence::Enabled,
+            accuracy: OperatingPointAccuracyEvidence::Balanced,
+            selected_devices: Vec::new(),
+            violation_devices: Vec::new(),
+            violation_source_content_digest: None,
+            validated_startup_directives: 0,
+            mna_node_names: vec!["in".to_owned(), "out".to_owned()],
+            mna_branch_names: vec!["V1".to_owned()],
+            mna_solution: vec![1.0, 0.5, -0.5e-3],
+            effective_source_content_digest: None,
+            run_point_index: 0,
+            run_point_count: 1,
+            run_point_process: OperatingPointProcessEvidence::TT,
+            run_point_supply_voltage: None,
+            run_point_nominal_supply_voltage: None,
+        }
+    }
+
+    /// The count and the producer must answer the same question.
+    ///
+    /// They decided the solver-state fallback separately: the count admitted
+    /// it whenever the DC block contributed no rows, and the producer refused
+    /// it whenever a DC block was present at all. An analysis retaining an
+    /// empty `dc_op` therefore counted three rows and produced one, and the
+    /// table drew two blank lines under it.
+    #[test]
+    fn the_typed_operating_point_count_and_its_rows_share_one_gate() {
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_result_payload(mna_payload());
+        analysis.dc_op = Some(DcOpResult::default());
+
+        let count = operating_point_row_count(&analysis);
+        for index in 0..count {
+            assert!(
+                operating_point_row_at(&analysis, index).is_some(),
+                "row {index} of {count} is counted but cannot be produced"
+            );
+        }
+    }
+
+    /// The other half of the same gate: a solution the retained names cannot
+    /// address is not a row either.
+    #[test]
+    fn unaddressable_solver_state_is_not_counted_as_a_row() {
+        let mut analysis =
+            AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_result_payload(mna_payload());
+        let Some(AnalysisResultPayload::OperatingPoint {
+            mna_branch_names, ..
+        }) = analysis.result_payload.as_mut()
+        else {
+            panic!("the fixture retains an operating-point payload");
+        };
+        // Three entries in the solution, but only the two node names left to
+        // address them by.
+        mna_branch_names.clear();
+
+        let count = operating_point_row_count(&analysis);
+        for index in 0..count {
+            assert!(
+                operating_point_row_at(&analysis, index).is_some(),
+                "row {index} of {count} is counted but cannot be produced"
+            );
+        }
     }
 
     /// A transient run of `samples` retained rows, 1 µs apart.
