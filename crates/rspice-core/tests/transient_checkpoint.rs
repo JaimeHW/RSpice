@@ -417,6 +417,55 @@ c1 out 0 1u ic=1
     );
 }
 
+/// A restart may widen its own maximum step. The captured cap bounded the
+/// steps of the segment that is already over; it is not seam state, and Xyce
+/// likewise recomputes the working cap from the restart deck rather than
+/// comparing it against the restart file. The resumed segment must therefore
+/// take steps its own cap allows, not steps the captured cap allowed.
+#[test]
+fn resume_honors_its_own_maximum_step_instead_of_the_captured_one() {
+    const CAPTURED_STEP: f64 = 10.0e-6;
+    const RESUME_STEP: f64 = 200.0e-6;
+    const SPLIT: f64 = 500.0e-6;
+    const STOP: f64 = 3.0e-3;
+
+    let netlist = Netlist::parse(
+        "\
+* checkpoint restart widens its maximum step
+r1 out 0 1k
+c1 out 0 1u ic=1
+.tran 100u 3m uic
+.end
+",
+    )
+    .expect("widened-cap checkpoint deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, SPLIT, CAPTURED_STEP)
+        .expect("first segment completes under the fine cap");
+
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, STOP, RESUME_STEP)
+        .expect("a resumed segment may choose a coarser maximum step");
+
+    assert_eq!(resumed.time[0].to_bits(), checkpoint.time.to_bits());
+    let widest = resumed
+        .time
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(0.0_f64, f64::max);
+    assert!(
+        widest > CAPTURED_STEP,
+        "the captured cap must not clamp the resumed segment: widest resumed step {widest:e}s \
+         did not exceed the captured cap {CAPTURED_STEP:e}s"
+    );
+    assert!(
+        widest <= RESUME_STEP * (1.0 + 1.0e-12),
+        "the resumed segment's own cap still binds: widest resumed step {widest:e}s exceeds \
+         {RESUME_STEP:e}s"
+    );
+}
+
 #[test]
 fn checkpoint_file_round_trip_resumes_identically() {
     let netlist = Netlist::parse(DECK).expect("deck parses");

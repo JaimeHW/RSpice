@@ -75,9 +75,12 @@ pub struct TransientCheckpoint {
     /// Startup contract of the selected `.TRAN` analysis. Optional only so
     /// older files can be parsed and rejected with a precise resume error.
     startup_mode: Option<TransientStartupMode>,
-    /// Per-call transient maximum-step bound. This is separate from the
-    /// resolved configuration identity because transient APIs accept an
-    /// explicit cap that materially controls the integration trajectory.
+    /// Per-call transient maximum-step bound the captured segment ran under.
+    /// This is provenance, not resume state: like the stop horizon, the cap
+    /// only bounds steps a segment is about to take, so a resumed segment
+    /// selects its own. It is recorded separately from the resolved
+    /// configuration identity precisely so that changing it cannot be
+    /// mistaken for continuing a different simulation.
     integration_max_step: Option<Value>,
     /// Dynamically discovered transmission-line arrivals that had not yet
     /// occurred at `time`. These are distinct from authored/source
@@ -1986,19 +1989,31 @@ impl TransientCheckpoint {
         Ok(())
     }
 
-    pub(crate) fn validate_integration_max_step(
-        &self,
-        requested_max_step: Value,
-    ) -> Result<(), String> {
-        let Some(captured_max_step) = self.integration_max_step else {
+    /// Require that the checkpoint records the maximum step its own segment
+    /// ran under.
+    ///
+    /// The recorded cap deliberately does not constrain the resumed segment's
+    /// cap. Nothing carried across the seam depends on it: the cap bounds
+    /// forward steps only, the resumed segment restarts its integration order
+    /// from the seam state, and local truncation error still polices every
+    /// step it takes. Xyce agrees: its restart path never compares the two.
+    /// It restores `maxTimeStepUser` from the restart file and then recomputes
+    /// the working cap from the *restart* deck on every step
+    /// (`StepErrorControl::updateMaxTimeStep`), so a restart deck whose
+    /// `.TRAN` omits a step ceiling picks up `0.1*(tstop-tstart)` from its own
+    /// extended horizon with no reference to the captured value at all.
+    /// Demanding equality would refuse the ordinary Xyce restart pattern of
+    /// extending `.TRAN` over an otherwise identical deck, because RSpice
+    /// derives the cap from that very line.
+    ///
+    /// What must still hold is that the cap was recorded, so a legacy
+    /// checkpoint written before the field existed fails closed instead of
+    /// resuming with unknown provenance.
+    pub(crate) fn validate_recorded_integration_max_step(&self) -> Result<(), String> {
+        if self.integration_max_step.is_none() {
             return Err(
                 "legacy transient checkpoint does not record its per-run maximum step".to_string(),
             );
-        };
-        if captured_max_step.to_bits() != requested_max_step.to_bits() {
-            return Err(format!(
-                "checkpoint maximum step {captured_max_step:.17e}s does not match requested maximum step {requested_max_step:.17e}s"
-            ));
         }
         Ok(())
     }
@@ -2011,8 +2026,10 @@ impl TransientCheckpoint {
     /// carry no `integration_max_step`. Callers must first authenticate the
     /// higher-level continuation artifact and this checkpoint's exact
     /// netlist/configuration identity. Ordinary resume validation is still
-    /// required after binding; this helper only makes that exact validation
-    /// possible and cannot upgrade an accepted transient checkpoint.
+    /// required after binding; this helper only records the cap the first real
+    /// segment runs under, so that segment resumes from a checkpoint whose
+    /// provenance is complete, and it cannot upgrade an accepted transient
+    /// checkpoint.
     pub(in crate::engine) fn bind_authenticated_synthetic_origin_max_step(
         &self,
         requested_max_step: Value,
@@ -2037,7 +2054,7 @@ impl TransientCheckpoint {
 
         let mut bound = self.clone();
         bound.integration_max_step = Some(requested_max_step);
-        bound.validate_integration_max_step(requested_max_step)?;
+        bound.validate_recorded_integration_max_step()?;
         Ok(bound)
     }
 
@@ -3152,14 +3169,13 @@ mod tests {
             Some(requested.to_bits())
         );
         bound
-            .validate_integration_max_step(requested)
-            .expect("ordinary exact maximum-step validation accepts the bound clone");
-        let adjacent = Value::from_bits(requested.to_bits() + 1);
+            .validate_recorded_integration_max_step()
+            .expect("binding completes the provenance ordinary resume requires");
         assert!(
-            bound
-                .validate_integration_max_step(adjacent)
-                .expect_err("ordinary resume remains bit-exact")
-                .contains("does not match")
+            synthetic
+                .validate_recorded_integration_max_step()
+                .expect_err("an unbound synthetic origin still fails closed")
+                .contains("does not record its per-run maximum step")
         );
 
         for invalid in [0.0, -1.0e-9, Value::NAN, Value::INFINITY] {

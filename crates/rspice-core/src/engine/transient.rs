@@ -2365,7 +2365,7 @@ impl Engine {
             }
             .map_err(SimulationError::Circuit)?;
             checkpoint
-                .validate_integration_max_step(max_step)
+                .validate_recorded_integration_max_step()
                 .map_err(SimulationError::Circuit)?;
         }
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
