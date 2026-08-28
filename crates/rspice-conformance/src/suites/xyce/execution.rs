@@ -14,6 +14,7 @@ use super::contracts_bug706::Bug706Role;
 use super::contracts_bug805::Bug805Role;
 use super::contracts_bug805_son::Bug805SonRole;
 use super::contracts_bug806::Bug806Role;
+use super::contracts_bug907_son::Bug907SonRole;
 use super::contracts_bug981::Bug981Role;
 use super::contracts_bug986::Bug986Role;
 use super::contracts_bug1152::Bug1152Role;
@@ -718,6 +719,23 @@ impl XyceTestRunner {
         if let Some(role) = Bug986Role::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug986_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug907SonRole::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug907_son_oracle(deck, role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -13860,28 +13878,62 @@ impl XyceTestRunner {
         plan: &XyceStaticDcPlan,
         start: Instant,
     ) -> Result<(Netlist, Vec<DcSweepPointResult>), SimulationError> {
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        self.run_static_dc_results_with_abort(plan, &abort)
+    }
+
+    pub(super) fn run_static_dc_results_with_abort(
+        &self,
+        plan: &XyceStaticDcPlan,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Netlist, Vec<DcSweepPointResult>), SimulationError> {
         if !plan.steps.is_empty() {
             return Err(SimulationError::Netlist(
                 ".STEP static DC execution requires the stepped .prn contract".to_string(),
             ));
         }
-        let netlist = Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
-            &plan.source,
-            &plan.deck_path,
-            plan.expression_dialect,
-            plan.parameter_redefinition_policy,
-            plan.parameter_redefinition_diagnostic_policy,
-            plan.execution_dir.as_deref(),
-        )
-        .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let options = NetlistParseOptions {
+            statistical_mode: StatisticalParamMode::Nominal,
+            expression_dialect: plan.expression_dialect,
+            parameter_redefinition_policy: plan.parameter_redefinition_policy,
+            parameter_redefinition_diagnostic_policy: plan.parameter_redefinition_diagnostic_policy,
+            ..NetlistParseOptions::default()
+        };
+        let netlist = if let Some(sources) = plan.sealed_sources.clone() {
+            if plan.execution_dir.is_some() {
+                return Err(SimulationError::Netlist(
+                    "sealed static DC plan cannot use a live execution directory".into(),
+                ));
+            }
+            Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+                &plan.source,
+                &plan.deck_path,
+                sources,
+                options,
+                abort,
+            )
+            .map_err(|err| SimulationError::Netlist(format!("{err}")))?
+        } else {
+            Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
+                &plan.source,
+                &plan.deck_path,
+                plan.expression_dialect,
+                plan.parameter_redefinition_policy,
+                plan.parameter_redefinition_diagnostic_policy,
+                plan.execution_dir.as_deref(),
+            )
+            .map_err(|err| SimulationError::Netlist(format!("{err}")))?
+        };
         let engine = self.create_dc_engine();
-        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let results = engine.run_dc_sweep2_spec_with_report_and_abort(
             &netlist,
             &plan.dc.source,
             &plan.dc.primary_spec(),
             plan.dc.sweep2.as_ref(),
-            &abort,
+            abort,
         )?;
         Ok((netlist, results))
     }

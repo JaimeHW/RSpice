@@ -216,6 +216,7 @@ impl XyceTestRunner {
             dc_data: None,
             steps,
             diagnostics: netlist.diagnostics.clone(),
+            sealed_sources: None,
         };
         Ok((plan, netlist))
     }

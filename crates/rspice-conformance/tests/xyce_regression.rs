@@ -10295,6 +10295,43 @@ fn test_xyce_bug986_erroption_breakpoint_source_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_bug907_nested_library_exact_release_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_907_SON/test2.cir",
+            "bug907_nested_library_relational_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_907_SON/test2_nolib.cir",
+            "bug907_flat_release_reference",
+            false,
+            Some("Netlists/Certification_Tests/BUG_907_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the strict flat-first nested-LIB PRN relation: {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+    let rlc = runner.run_test(root.join("Netlists/Certification_Tests/BUG_907_SON/rlc.cir"));
+    assert!(
+        rlc.passed && rlc.expected_unsupported && !rlc.upstream_excluded,
+        "BUG907 recursive-include diagnostic owner must remain unqualified: {rlc:?}"
+    );
+    assert_eq!(rlc.contract, "unsupported_xyce_contract");
+}
+
+#[test]
 fn test_xyce_issue202_redefined_parameter_mode_matrix() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

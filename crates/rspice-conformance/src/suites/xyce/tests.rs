@@ -12430,6 +12430,7 @@ VMON 1 2 0V\n\
         dc_data: None,
         steps: Vec::new(),
         diagnostics: Vec::new(),
+        sealed_sources: None,
     };
     XyceTestRunner::validate_passive_res_primary_dc_plan(&res_plan)
         .expect("canonical resistor plan qualifies");

@@ -38,9 +38,9 @@ use rspice_core::netlist::{
     DeviceInitialConditionSource, DuplicateSubcircuitPortBindingError, ElementKind,
     ElementProvenance, FreqVariation, MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError,
     Netlist, NetlistParseOptions, OutputDirectiveKind, OutputExpressionIssue, OutputSymbolKind,
-    ParameterRedefinitionPolicy, ParametricValue, ParseError, PrintDelimiter,
-    StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind, StartupDirectiveScope,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    ParameterRedefinitionPolicy, ParametricValue, ParseError, PrintDelimiter, SealedSourceBundle,
+    SealedSourceEdge, StartupDiagnosticCode, StartupDiagnosticStage, StartupDirectiveKind,
+    StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
     UnresolvedSubcircuitParameterError, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, flatten_netlist,
     flatten_netlist_with_models, flatten_netlist_with_models_with_abort,
     validate_output_expressions_with_abort, validate_output_symbols,
@@ -63,15 +63,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 270;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 271;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "af176297eca808f756f7ada7dba4590ec31b32aff17ae3fac1b1c2c2c9cf5238";
+    "0804923675e2673906e7deb07516aa5c6784e12ac714a96e3371f9c6c5827234";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "17112989be5e98d11a396840c7991f429bbefa428d317c6d340d2b184a8ecf6c";
+    "7c1ae6112ce385fce0ad648c9988869220c61afc653ed908dcdd133d4cb919ac";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "7ab4a804272f7fd750dd74f3c519b8bd4a4e684f7c0d0da031e459958059b0c7";
+    "8bfa26cccb981404c0d8ad30a93e78144481a7ce30aaff3f57be07c665fb447c";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -7481,6 +7481,10 @@ struct XyceStaticDcPlan {
     dc_data: Option<XyceDcDataSweep>,
     steps: Vec<StepCommand>,
     diagnostics: Vec<rspice_core::netlist::ParseDiagnostic>,
+    /// Authenticated include/library closure used during plan construction.
+    /// When present, execution must replay from this bundle without consulting
+    /// the live filesystem.
+    sealed_sources: Option<SealedSourceBundle>,
 }
 
 /// Native static DC sensitivity contract.  Xyce emits a sensitivity table
@@ -12572,6 +12576,7 @@ mod contracts_bug805;
 mod contracts_bug805_son;
 mod contracts_bug806;
 mod contracts_bug864;
+mod contracts_bug907_son;
 mod contracts_bug981;
 mod contracts_bug986;
 mod contracts_dc;

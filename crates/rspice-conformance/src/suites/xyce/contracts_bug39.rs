@@ -715,6 +715,7 @@ impl XyceTestRunner {
             dc_data: None,
             steps: Vec::new(),
             diagnostics,
+            sealed_sources: None,
         };
         Ok((plan, netlist))
     }
