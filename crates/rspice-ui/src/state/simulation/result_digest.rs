@@ -8,6 +8,10 @@
 
 use sha2::{Digest as _, Sha256};
 
+use super::analysis_result::{
+    FloquetOrbitKindEvidence, FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence,
+    FloquetStabilityVerdictEvidence, PstbStabilityClassificationEvidence,
+};
 use super::*;
 use crate::product::ContentDigest;
 use crate::state::{
@@ -22,6 +26,7 @@ const RESULT_DIGEST_ENCODING_VERSION_V4: u16 = 4;
 const RESULT_DIGEST_ENCODING_VERSION_V5: u16 = 5;
 const RESULT_DIGEST_ENCODING_VERSION_V6: u16 = 6;
 const RESULT_DIGEST_ENCODING_VERSION_V7: u16 = 7;
+const RESULT_DIGEST_ENCODING_VERSION_V8: u16 = 8;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -137,7 +142,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -149,7 +154,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -204,6 +209,13 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
     }
 
+    /// Schema-v16 digest retained solely for authenticated migration. It
+    /// predates durable PSS/PSTB Floquet payloads.
+    #[must_use]
+    pub(crate) fn legacy_v7_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         self.result_data_writer_with_encoding(version).finish()
     }
@@ -217,6 +229,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.analysis-result-data/v5",
             RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.analysis-result-data/v6",
             RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.analysis-result-data/v7",
+            RESULT_DIGEST_ENCODING_VERSION_V8 => "rspice.analysis-result-data/v8",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -301,7 +314,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -341,6 +354,12 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
     }
 
+    /// Schema-v16 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v7_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -350,6 +369,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.simulation-dataset-data/v5",
             RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.simulation-dataset-data/v6",
             RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.simulation-dataset-data/v7",
+            RESULT_DIGEST_ENCODING_VERSION_V8 => "rspice.simulation-dataset-data/v8",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -363,7 +383,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V4 => analysis.legacy_v4_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V5 => analysis.legacy_v5_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V6 => analysis.legacy_v6_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V7 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V7 => analysis.legacy_v7_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V8 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -526,6 +547,111 @@ fn encode_result_payload(
                 // mismatch instead of panicking on a tampered document.
                 writer.u8(u8::MAX);
             }
+        }
+        AnalysisResultPayload::PssFloquet {
+            period_s,
+            fundamental_frequency_hz,
+            iterations,
+            residual_norm,
+            multipliers,
+            floquet_evidence,
+            orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
+        } => {
+            if encoding_version < RESULT_DIGEST_ENCODING_VERSION_V8 {
+                // No authentic schema-v16 result could contain this payload.
+                // Migration rejects it before invoking the legacy encoder;
+                // the sentinel keeps digest helpers total for adversarial data.
+                writer.u8(u8::MAX);
+                return;
+            }
+            writer.u8(8);
+            writer.option(period_s.as_ref(), |writer, value| writer.f64(*value));
+            writer.option(fundamental_frequency_hz.as_ref(), |writer, value| {
+                writer.f64(*value)
+            });
+            writer.option(iterations.as_ref(), |writer, value| writer.u64(*value));
+            writer.option(residual_norm.as_ref(), |writer, value| writer.f64(*value));
+            writer.sequence(multipliers.len());
+            for multiplier in multipliers {
+                encode_complex_result_value(writer, multiplier.multiplier);
+            }
+            encode_floquet_spectrum_evidence(writer, floquet_evidence);
+            writer.u8(floquet_orbit_kind_tag(*orbit_kind));
+            writer.option(trivial_multiplier_index.as_ref(), |writer, value| {
+                writer.u64(*value)
+            });
+            writer.u8(floquet_stability_verdict_tag(*stability_verdict));
+        }
+        AnalysisResultPayload::Pstb {
+            period_s,
+            fundamental_frequency_hz,
+            stability_threshold,
+            probe_instance,
+            detect_subharmonics,
+            modes,
+            floquet_evidence,
+            orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
+            stability_classification,
+            min_stability_margin_db,
+            max_multiplier_magnitude,
+            num_unstable,
+            subharmonics,
+            converged,
+            iterations,
+        } => {
+            if encoding_version < RESULT_DIGEST_ENCODING_VERSION_V8 {
+                writer.u8(u8::MAX - 1);
+                return;
+            }
+            writer.u8(9);
+            writer.option(period_s.as_ref(), |writer, value| writer.f64(*value));
+            writer.option(fundamental_frequency_hz.as_ref(), |writer, value| {
+                writer.f64(*value)
+            });
+            writer.option(stability_threshold.as_ref(), |writer, value| {
+                writer.f64(*value)
+            });
+            writer.option(probe_instance.as_deref(), |writer, value| {
+                writer.string(value)
+            });
+            writer.option(detect_subharmonics.as_ref(), |writer, value| {
+                writer.bool(*value)
+            });
+            writer.sequence(modes.len());
+            for mode in modes {
+                encode_complex_result_value(writer, mode.multiplier);
+                encode_complex_result_value(writer, mode.exponent);
+                writer.f64(mode.probe_participation);
+                writer.bool(mode.is_unstable);
+                writer.bool(mode.is_trivial);
+                writer.option(mode.subharmonic_order.as_ref(), |writer, value| {
+                    writer.u64(*value)
+                });
+            }
+            encode_floquet_spectrum_evidence(writer, floquet_evidence);
+            writer.u8(floquet_orbit_kind_tag(*orbit_kind));
+            writer.option(trivial_multiplier_index.as_ref(), |writer, value| {
+                writer.u64(*value)
+            });
+            writer.u8(floquet_stability_verdict_tag(*stability_verdict));
+            writer.u8(pstb_stability_classification_tag(*stability_classification));
+            writer.option(min_stability_margin_db.as_ref(), |writer, value| {
+                writer.f64(*value)
+            });
+            writer.option(max_multiplier_magnitude.as_ref(), |writer, value| {
+                writer.f64(*value)
+            });
+            writer.option(num_unstable.as_ref(), |writer, value| writer.u64(*value));
+            writer.sequence(subharmonics.len());
+            for order in subharmonics {
+                writer.u64(*order);
+            }
+            writer.option(converged.as_ref(), |writer, value| writer.bool(*value));
+            writer.option(iterations.as_ref(), |writer, value| writer.u64(*value));
         }
         AnalysisResultPayload::Sensitivity {
             output,
@@ -734,8 +860,68 @@ const fn soa_violation_severity_tag(severity: SoaViolationSeverityEvidence) -> u
 fn encode_complex_result_values(writer: &mut ResultDigestWriter, values: &[ComplexResultValue]) {
     writer.sequence(values.len());
     for value in values {
-        writer.f64(value.real);
-        writer.f64(value.imaginary);
+        encode_complex_result_value(writer, *value);
+    }
+}
+
+fn encode_complex_result_value(writer: &mut ResultDigestWriter, value: ComplexResultValue) {
+    writer.f64(value.real);
+    writer.f64(value.imaginary);
+}
+
+fn encode_floquet_spectrum_evidence(
+    writer: &mut ResultDigestWriter,
+    evidence: &FloquetSpectrumEvidence,
+) {
+    match evidence {
+        FloquetSpectrumEvidence::NotComputed => writer.u8(0),
+        FloquetSpectrumEvidence::NoDynamicModes => writer.u8(1),
+        FloquetSpectrumEvidence::Qualified { certificate } => {
+            writer.u8(2);
+            encode_floquet_spectrum_certificate(writer, *certificate);
+        }
+        FloquetSpectrumEvidence::LegacyUnknown => writer.u8(3),
+    }
+}
+
+fn encode_floquet_spectrum_certificate(
+    writer: &mut ResultDigestWriter,
+    certificate: FloquetSpectrumCertificateEvidence,
+) {
+    writer.u64(certificate.problem_order);
+    writer.f64(certificate.max_backward_error);
+    writer.f64(certificate.qualification_tolerance);
+}
+
+const fn floquet_orbit_kind_tag(orbit_kind: FloquetOrbitKindEvidence) -> u8 {
+    match orbit_kind {
+        FloquetOrbitKindEvidence::Driven => 0,
+        FloquetOrbitKindEvidence::Autonomous => 1,
+        FloquetOrbitKindEvidence::LegacyUnknown => 2,
+    }
+}
+
+const fn floquet_stability_verdict_tag(verdict: FloquetStabilityVerdictEvidence) -> u8 {
+    match verdict {
+        FloquetStabilityVerdictEvidence::Stable => 0,
+        FloquetStabilityVerdictEvidence::Unstable => 1,
+        FloquetStabilityVerdictEvidence::Marginal => 2,
+        FloquetStabilityVerdictEvidence::Indeterminate => 3,
+    }
+}
+
+const fn pstb_stability_classification_tag(
+    classification: PstbStabilityClassificationEvidence,
+) -> u8 {
+    match classification {
+        PstbStabilityClassificationEvidence::Stable => 0,
+        PstbStabilityClassificationEvidence::UnstableReal => 1,
+        PstbStabilityClassificationEvidence::UnstableComplex => 2,
+        PstbStabilityClassificationEvidence::PeriodDoubling => 3,
+        PstbStabilityClassificationEvidence::NeimarkSacker => 4,
+        PstbStabilityClassificationEvidence::SaddleNode => 5,
+        PstbStabilityClassificationEvidence::Marginal => 6,
+        PstbStabilityClassificationEvidence::Indeterminate => 7,
     }
 }
 
@@ -1086,6 +1272,173 @@ const fn saved_output_streaming_tag(streaming: SavedOutputStreaming) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::simulation::analysis_result::{
+        PssFloquetMultiplierEvidence, PstbFloquetModeEvidence, PstbStabilityClassificationEvidence,
+    };
+
+    fn stable_pstb_result() -> AnalysisResult {
+        let certificate = FloquetSpectrumCertificateEvidence {
+            problem_order: 1,
+            max_backward_error: 0.0,
+            qualification_tolerance:
+                FloquetSpectrumCertificateEvidence::canonical_qualification_tolerance(1).unwrap(),
+        };
+        let multiplier = ComplexResultValue {
+            real: 0.5,
+            imaginary: 0.0,
+        };
+        AnalysisResult::new(1, AnalysisType::Pstb, "PSTB").with_result_payload(
+            AnalysisResultPayload::Pstb {
+                period_s: Some(1.0),
+                fundamental_frequency_hz: Some(1.0),
+                stability_threshold: Some(1.0),
+                probe_instance: Some("LPROBE".to_owned()),
+                detect_subharmonics: Some(false),
+                modes: vec![PstbFloquetModeEvidence {
+                    multiplier,
+                    exponent: ComplexResultValue {
+                        real: 0.5_f64.ln(),
+                        imaginary: 0.0,
+                    },
+                    probe_participation: 0.25,
+                    is_unstable: false,
+                    is_trivial: false,
+                    subharmonic_order: None,
+                }],
+                floquet_evidence: FloquetSpectrumEvidence::Qualified { certificate },
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+                stability_classification: PstbStabilityClassificationEvidence::Stable,
+                min_stability_margin_db: Some(-20.0 * 0.5_f64.log10()),
+                max_multiplier_magnitude: Some(0.5),
+                num_unstable: Some(0),
+                subharmonics: Vec::new(),
+                converged: Some(true),
+                iterations: Some(0),
+            },
+        )
+    }
+
+    #[test]
+    fn periodic_payload_fields_are_v8_identity_while_v7_stays_legacy() {
+        let pss =
+            AnalysisResult::new(1, AnalysisType::Pss, "PSS")
+                .with_result_payload(AnalysisResultPayload::PssFloquet {
+                period_s: Some(1.0),
+                fundamental_frequency_hz: Some(1.0),
+                iterations: Some(2),
+                residual_norm: Some(1.0e-12),
+                multipliers: vec![PssFloquetMultiplierEvidence {
+                    multiplier: ComplexResultValue {
+                        real: 0.5,
+                        imaginary: 0.0,
+                    },
+                }],
+                floquet_evidence: FloquetSpectrumEvidence::Qualified {
+                    certificate: FloquetSpectrumCertificateEvidence {
+                        problem_order: 1,
+                        max_backward_error: 0.0,
+                        qualification_tolerance:
+                            FloquetSpectrumCertificateEvidence::canonical_qualification_tolerance(1)
+                                .unwrap(),
+                    },
+                },
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            });
+        let mut changed_pss = pss.clone();
+        let Some(AnalysisResultPayload::PssFloquet { multipliers, .. }) =
+            changed_pss.result_payload.as_mut()
+        else {
+            unreachable!()
+        };
+        multipliers[0].multiplier.real = 0.25;
+        assert_ne!(pss.result_data_digest(), changed_pss.result_data_digest());
+        assert_eq!(
+            pss.legacy_v7_result_data_digest(),
+            changed_pss.legacy_v7_result_data_digest()
+        );
+
+        let source = stable_pstb_result();
+        assert!(source.validate_retained_evidence().is_ok());
+        let baseline = source.result_data_digest();
+        let legacy = source.legacy_v7_result_data_digest();
+
+        macro_rules! assert_mutation_is_identity {
+            ($pattern:pat, $mutation:expr) => {{
+                let mut changed = source.clone();
+                let Some($pattern) = changed.result_payload.as_mut() else {
+                    unreachable!()
+                };
+                $mutation;
+                assert_ne!(baseline, changed.result_data_digest());
+                assert_eq!(
+                    legacy,
+                    changed.legacy_v7_result_data_digest(),
+                    "schema-v16 encoded no periodic payload semantics"
+                );
+            }};
+        }
+
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb { period_s, .. },
+            *period_s = Some(2.0)
+        );
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb {
+                stability_threshold,
+                ..
+            },
+            *stability_threshold = Some(1.1)
+        );
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb { probe_instance, .. },
+            *probe_instance = Some("LALT".to_owned())
+        );
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb { modes, .. },
+            modes[0].probe_participation = 0.5
+        );
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb {
+                floquet_evidence,
+                ..
+            },
+            *floquet_evidence = FloquetSpectrumEvidence::NotComputed
+        );
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb {
+                stability_classification,
+                ..
+            },
+            *stability_classification = PstbStabilityClassificationEvidence::Marginal
+        );
+        assert_mutation_is_identity!(
+            AnalysisResultPayload::Pstb { iterations, .. },
+            *iterations = Some(1)
+        );
+
+        let mut first_run = SimulationRun::new(1);
+        first_run.analyses = vec![source.clone()];
+        let mut second_run = first_run.clone();
+        let Some(AnalysisResultPayload::Pstb { modes, .. }) =
+            second_run.analyses[0].result_payload.as_mut()
+        else {
+            unreachable!()
+        };
+        modes[0].probe_participation = 0.75;
+        assert_ne!(
+            first_run.dataset_content_digest(),
+            second_run.dataset_content_digest(),
+            "a full mode hidden from presentation remains dataset identity"
+        );
+        assert_eq!(
+            first_run.legacy_v7_dataset_content_digest(),
+            second_run.legacy_v7_dataset_content_digest()
+        );
+    }
 
     fn operating_point_result() -> AnalysisResult {
         AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_result_payload(

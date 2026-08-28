@@ -467,6 +467,155 @@ impl PoleZeroRootSetEvidence {
     }
 }
 
+/// Strict residual certificate for one complete retained Floquet spectrum.
+///
+/// This UI-owned representation is the durable serde contract. Validation is
+/// delegated to the core constructor so a project cannot authenticate an
+/// inflated qualification tolerance after the numerical contract changes.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FloquetSpectrumCertificateEvidence {
+    pub problem_order: u64,
+    pub max_backward_error: f64,
+    pub qualification_tolerance: f64,
+}
+
+impl FloquetSpectrumCertificateEvidence {
+    #[must_use]
+    pub fn canonical_qualification_tolerance(problem_order: u64) -> Option<f64> {
+        let problem_order = usize::try_from(problem_order).ok()?;
+        Some(
+            rspice_core::analysis::FloquetSpectrumCertificate::canonical_qualification_tolerance(
+                problem_order,
+            ),
+        )
+    }
+
+    fn as_core(self) -> Option<rspice_core::analysis::FloquetSpectrumCertificate> {
+        rspice_core::analysis::FloquetSpectrumCertificate::new(
+            usize::try_from(self.problem_order).ok()?,
+            self.max_backward_error,
+            self.qualification_tolerance,
+        )
+    }
+
+    #[must_use]
+    pub fn is_strictly_qualified(self) -> bool {
+        self.as_core().is_some()
+    }
+}
+
+/// Provenance for a durable Floquet multiplier vector.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FloquetSpectrumEvidence {
+    /// Stability post-processing was not performed.
+    NotComputed,
+    /// The periodic map is an authenticated zero-order driven map.
+    NoDynamicModes,
+    /// Every multiplier belongs to a complete strict eigenspectrum.
+    Qualified {
+        certificate: FloquetSpectrumCertificateEvidence,
+    },
+    /// Truthful state for a project written before Floquet certificates were
+    /// retained. It never proves a stability classification.
+    #[default]
+    LegacyUnknown,
+}
+
+impl FloquetSpectrumEvidence {
+    #[must_use]
+    pub const fn certificate(&self) -> Option<FloquetSpectrumCertificateEvidence> {
+        match self {
+            Self::Qualified { certificate } => Some(*certificate),
+            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => None,
+        }
+    }
+
+    fn is_consistent_with_count(&self, multiplier_count: usize) -> bool {
+        match self {
+            Self::NotComputed | Self::NoDynamicModes | Self::LegacyUnknown => multiplier_count == 0,
+            Self::Qualified { certificate } => {
+                multiplier_count > 0
+                    && certificate.is_strictly_qualified()
+                    && u64::try_from(multiplier_count).ok() == Some(certificate.problem_order)
+            }
+        }
+    }
+
+    fn as_core(&self) -> Option<rspice_core::analysis::FloquetSpectrumEvidence> {
+        match self {
+            Self::NotComputed => Some(rspice_core::analysis::FloquetSpectrumEvidence::NotComputed),
+            Self::NoDynamicModes => {
+                Some(rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes)
+            }
+            Self::Qualified { certificate } => {
+                Some(rspice_core::analysis::FloquetSpectrumEvidence::Qualified {
+                    certificate: certificate.as_core()?,
+                })
+            }
+            Self::LegacyUnknown => {
+                Some(rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown)
+            }
+        }
+    }
+}
+
+/// Orbit policy used to interpret a retained Floquet spectrum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FloquetOrbitKindEvidence {
+    Driven,
+    Autonomous,
+    /// The producing project did not retain an orbit policy.
+    #[default]
+    LegacyUnknown,
+}
+
+/// Evidence-aware periodic stability verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FloquetStabilityVerdictEvidence {
+    Stable,
+    Unstable,
+    Marginal,
+    Indeterminate,
+}
+
+/// Rich PSTB classification refining the shared four-state verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PstbStabilityClassificationEvidence {
+    Stable,
+    UnstableReal,
+    UnstableComplex,
+    PeriodDoubling,
+    NeimarkSacker,
+    SaddleNode,
+    Marginal,
+    Indeterminate,
+}
+
+/// One exact multiplier in the complete PSS Floquet vector.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PssFloquetMultiplierEvidence {
+    pub multiplier: ComplexResultValue,
+}
+
+/// One complete PSTB mode. The containing vector is authoritative and is
+/// never truncated by presentation limits.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PstbFloquetModeEvidence {
+    pub multiplier: ComplexResultValue,
+    pub exponent: ComplexResultValue,
+    pub probe_participation: f64,
+    pub is_unstable: bool,
+    pub is_trivial: bool,
+    pub subharmonic_order: Option<u64>,
+}
+
 /// Analysis basis used to produce a retained sensitivity result.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -862,6 +1011,56 @@ pub enum AnalysisResultPayload {
         #[serde(default)]
         gain: Option<f64>,
     },
+    /// Durable periodic-steady-state Floquet evidence. Execution artifacts
+    /// such as the monodromy matrix and shooting state are intentionally not
+    /// part of the project result contract.
+    PssFloquet {
+        /// Absent only on an authenticated schema-v16 migration marker.
+        period_s: Option<f64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        fundamental_frequency_hz: Option<f64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        iterations: Option<u64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        residual_norm: Option<f64>,
+        multipliers: Vec<PssFloquetMultiplierEvidence>,
+        floquet_evidence: FloquetSpectrumEvidence,
+        orbit_kind: FloquetOrbitKindEvidence,
+        trivial_multiplier_index: Option<u64>,
+        stability_verdict: FloquetStabilityVerdictEvidence,
+    },
+    /// Durable periodic-stability evidence. `modes` is the complete sorted
+    /// spectrum; ordinary result waveforms remain presentation-only subsets.
+    Pstb {
+        /// Absent only on an authenticated schema-v16 migration marker.
+        period_s: Option<f64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        fundamental_frequency_hz: Option<f64>,
+        /// Exact outer multiplier-magnitude boundary used by the producer.
+        stability_threshold: Option<f64>,
+        /// Canonical circuit identity whose eigenvector participation is stored.
+        probe_instance: Option<String>,
+        /// Whether root-of-unity classification was requested.
+        detect_subharmonics: Option<bool>,
+        modes: Vec<PstbFloquetModeEvidence>,
+        floquet_evidence: FloquetSpectrumEvidence,
+        orbit_kind: FloquetOrbitKindEvidence,
+        trivial_multiplier_index: Option<u64>,
+        stability_verdict: FloquetStabilityVerdictEvidence,
+        stability_classification: PstbStabilityClassificationEvidence,
+        /// None is a real current result when there is no applicable
+        /// non-trivial mode; it is never represented by infinity.
+        min_stability_margin_db: Option<f64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        max_multiplier_magnitude: Option<f64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        num_unstable: Option<u64>,
+        subharmonics: Vec<u64>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        converged: Option<bool>,
+        /// Absent only on an authenticated schema-v16 migration marker.
+        iterations: Option<u64>,
+    },
     Sensitivity {
         output: String,
         result_mode: SensitivityResultMode,
@@ -906,6 +1105,181 @@ pub enum AnalysisResultPayload {
 }
 
 impl AnalysisResultPayload {
+    /// Construct the only truthful periodic-stability payload that can be
+    /// added while migrating a pre-v17 successful result. No numerical
+    /// evidence or orbit policy is inferred from presentation waveforms.
+    pub(crate) fn legacy_periodic_marker(analysis_type: AnalysisType) -> Option<Self> {
+        match analysis_type {
+            AnalysisType::Pss => Some(Self::PssFloquet {
+                period_s: None,
+                fundamental_frequency_hz: None,
+                iterations: None,
+                residual_norm: None,
+                multipliers: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::LegacyUnknown,
+                orbit_kind: FloquetOrbitKindEvidence::LegacyUnknown,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Indeterminate,
+            }),
+            AnalysisType::Pstb => Some(Self::Pstb {
+                period_s: None,
+                fundamental_frequency_hz: None,
+                stability_threshold: None,
+                probe_instance: None,
+                detect_subharmonics: None,
+                modes: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::LegacyUnknown,
+                orbit_kind: FloquetOrbitKindEvidence::LegacyUnknown,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Indeterminate,
+                stability_classification: PstbStabilityClassificationEvidence::Indeterminate,
+                min_stability_margin_db: None,
+                max_multiplier_magnitude: None,
+                num_unstable: None,
+                subharmonics: Vec::new(),
+                converged: None,
+                iterations: None,
+            }),
+            _ => None,
+        }
+    }
+
+    fn scalar_evidence(&self, name: &str) -> Option<ScalarEvidenceCandidate> {
+        let value = match self {
+            Self::PssFloquet {
+                period_s,
+                fundamental_frequency_hz,
+                multipliers,
+                floquet_evidence,
+                ..
+            } => {
+                if name.eq_ignore_ascii_case("pss.period") {
+                    *period_s
+                } else if name.eq_ignore_ascii_case("pss.fundamental_frequency") {
+                    *fundamental_frequency_hz
+                } else if name.eq_ignore_ascii_case("pss.mode_count")
+                    && matches!(
+                        floquet_evidence,
+                        FloquetSpectrumEvidence::NoDynamicModes
+                            | FloquetSpectrumEvidence::Qualified { .. }
+                    )
+                {
+                    Some(multipliers.len() as f64)
+                } else {
+                    None
+                }
+            }
+            Self::Pstb {
+                period_s,
+                fundamental_frequency_hz,
+                modes,
+                floquet_evidence,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                ..
+            } => {
+                if name.eq_ignore_ascii_case("pstb.period") {
+                    *period_s
+                } else if name.eq_ignore_ascii_case("pstb.fundamental_frequency") {
+                    *fundamental_frequency_hz
+                } else if name.eq_ignore_ascii_case("pstb.mode_count")
+                    && matches!(
+                        floquet_evidence,
+                        FloquetSpectrumEvidence::NoDynamicModes
+                            | FloquetSpectrumEvidence::Qualified { .. }
+                    )
+                {
+                    Some(modes.len() as f64)
+                } else if name.eq_ignore_ascii_case("pstb.unstable_mode_count") {
+                    num_unstable.map(|count| count as f64)
+                } else if name.eq_ignore_ascii_case("pstb.max_multiplier_magnitude") {
+                    *max_multiplier_magnitude
+                } else if name.eq_ignore_ascii_case("pstb.min_stability_margin_db") {
+                    *min_stability_margin_db
+                } else {
+                    None
+                }
+            }
+            Self::ScalarMeasurements { values } => values
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value),
+            _ => None,
+        }?;
+        if !value.is_finite() {
+            return None;
+        }
+
+        Some(ScalarEvidenceCandidate {
+            value: Some(value),
+            passed: true,
+        })
+    }
+
+    fn scalar_evidence_names(&self) -> Vec<String> {
+        match self {
+            Self::PssFloquet {
+                period_s,
+                fundamental_frequency_hz,
+                floquet_evidence,
+                ..
+            } => {
+                let mut names = Vec::with_capacity(3);
+                if period_s.is_some() {
+                    names.push("pss.period".to_owned());
+                }
+                if fundamental_frequency_hz.is_some() {
+                    names.push("pss.fundamental_frequency".to_owned());
+                }
+                if matches!(
+                    floquet_evidence,
+                    FloquetSpectrumEvidence::NoDynamicModes
+                        | FloquetSpectrumEvidence::Qualified { .. }
+                ) {
+                    names.push("pss.mode_count".to_owned());
+                }
+                names
+            }
+            Self::Pstb {
+                period_s,
+                fundamental_frequency_hz,
+                floquet_evidence,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                ..
+            } => {
+                let mut names = Vec::with_capacity(6);
+                if period_s.is_some() {
+                    names.push("pstb.period".to_owned());
+                }
+                if fundamental_frequency_hz.is_some() {
+                    names.push("pstb.fundamental_frequency".to_owned());
+                }
+                if matches!(
+                    floquet_evidence,
+                    FloquetSpectrumEvidence::NoDynamicModes
+                        | FloquetSpectrumEvidence::Qualified { .. }
+                ) {
+                    names.push("pstb.mode_count".to_owned());
+                }
+                if num_unstable.is_some() {
+                    names.push("pstb.unstable_mode_count".to_owned());
+                }
+                if max_multiplier_magnitude.is_some() {
+                    names.push("pstb.max_multiplier_magnitude".to_owned());
+                }
+                if min_stability_margin_db.is_some() {
+                    names.push("pstb.min_stability_margin_db".to_owned());
+                }
+                names
+            }
+            Self::ScalarMeasurements { values } => values.keys().cloned().collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Validate exact retained evidence against the analysis that owns it.
     pub fn validate_for(&self, analysis_type: AnalysisType) -> Result<(), String> {
         match self {
@@ -1011,6 +1385,78 @@ impl AnalysisResultPayload {
                 if gain.is_some_and(|gain| !gain.is_finite()) {
                     return Err("pole-zero gain is non-finite".to_owned());
                 }
+            }
+            Self::PssFloquet {
+                period_s,
+                fundamental_frequency_hz,
+                iterations,
+                residual_norm,
+                multipliers,
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+            } => {
+                if analysis_type != AnalysisType::Pss {
+                    return Err(format!(
+                        "PSS Floquet payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                validate_pss_floquet_payload(
+                    *period_s,
+                    *fundamental_frequency_hz,
+                    *iterations,
+                    *residual_norm,
+                    multipliers,
+                    floquet_evidence,
+                    *orbit_kind,
+                    *trivial_multiplier_index,
+                    *stability_verdict,
+                )?;
+            }
+            Self::Pstb {
+                period_s,
+                fundamental_frequency_hz,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+            } => {
+                if analysis_type != AnalysisType::Pstb {
+                    return Err(format!(
+                        "PSTB payload does not match analysis type {analysis_type:?}"
+                    ));
+                }
+                validate_pstb_payload(
+                    *period_s,
+                    *fundamental_frequency_hz,
+                    *stability_threshold,
+                    probe_instance.as_deref(),
+                    *detect_subharmonics,
+                    modes,
+                    floquet_evidence,
+                    *orbit_kind,
+                    *trivial_multiplier_index,
+                    *stability_verdict,
+                    *stability_classification,
+                    *min_stability_margin_db,
+                    *max_multiplier_magnitude,
+                    *num_unstable,
+                    subharmonics,
+                    *converged,
+                    *iterations,
+                )?;
             }
             Self::Sensitivity {
                 output,
@@ -1396,7 +1842,11 @@ impl AnalysisResultPayload {
     #[must_use]
     pub fn has_data(&self) -> bool {
         match self {
-            Self::OperatingPoint { .. } | Self::PoleZero { .. } | Self::Sensitivity { .. } => true,
+            Self::OperatingPoint { .. }
+            | Self::PoleZero { .. }
+            | Self::PssFloquet { .. }
+            | Self::Pstb { .. }
+            | Self::Sensitivity { .. } => true,
             Self::ScalarMeasurements { values } => !values.is_empty(),
             Self::TransferFunction {
                 gain,
@@ -1411,6 +1861,456 @@ impl AnalysisResultPayload {
                 real_traces,
             } => !digital_traces.is_empty() || !real_traces.is_empty(),
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_pss_floquet_payload(
+    period_s: Option<f64>,
+    fundamental_frequency_hz: Option<f64>,
+    _iterations: Option<u64>,
+    residual_norm: Option<f64>,
+    multipliers: &[PssFloquetMultiplierEvidence],
+    evidence: &FloquetSpectrumEvidence,
+    orbit_kind: FloquetOrbitKindEvidence,
+    trivial_multiplier_index: Option<u64>,
+    verdict: FloquetStabilityVerdictEvidence,
+) -> Result<(), String> {
+    if matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
+        || orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
+    {
+        let exact_legacy_marker = period_s.is_none()
+            && fundamental_frequency_hz.is_none()
+            && _iterations.is_none()
+            && residual_norm.is_none()
+            && multipliers.is_empty()
+            && matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
+            && orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
+            && trivial_multiplier_index.is_none()
+            && verdict == FloquetStabilityVerdictEvidence::Indeterminate;
+        return exact_legacy_marker.then_some(()).ok_or_else(|| {
+            "legacy PSS Floquet evidence is not an exact migration marker".to_owned()
+        });
+    }
+
+    let (Some(period_s), Some(frequency_hz), Some(_), Some(residual_norm)) = (
+        period_s,
+        fundamental_frequency_hz,
+        _iterations,
+        residual_norm,
+    ) else {
+        return Err("current PSS Floquet payload is missing global metrics".to_owned());
+    };
+    if !period_s.is_finite()
+        || period_s <= 0.0
+        || !frequency_hz.is_finite()
+        || frequency_hz <= 0.0
+        || !same_retained_float(frequency_hz, 1.0 / period_s)
+        || !residual_norm.is_finite()
+        || residual_norm < 0.0
+    {
+        return Err("PSS Floquet period, frequency, or residual is invalid".to_owned());
+    }
+
+    let values = multipliers
+        .iter()
+        .map(|mode| mode.multiplier)
+        .collect::<Vec<_>>();
+    validate_complex_values(&values, "PSS Floquet multiplier")?;
+    if !evidence.is_consistent_with_count(values.len()) {
+        return Err(
+            "PSS Floquet certificate does not cover the complete multiplier vector".to_owned(),
+        );
+    }
+    if matches!(evidence, FloquetSpectrumEvidence::NoDynamicModes)
+        && orbit_kind != FloquetOrbitKindEvidence::Driven
+    {
+        return Err(
+            "a zero-order PSS Floquet spectrum must use the driven orbit policy".to_owned(),
+        );
+    }
+
+    let expected_trivial = expected_trivial_floquet_index(&values, evidence, orbit_kind)?;
+    if trivial_multiplier_index != expected_trivial {
+        return Err("PSS autonomous phase-mode index is inconsistent with the spectrum".to_owned());
+    }
+    let expected_verdict = derive_floquet_verdict(
+        &values,
+        evidence,
+        orbit_kind,
+        trivial_multiplier_index,
+        rspice_core::analysis::FLOQUET_UNIT_CIRCLE_BAND,
+    )?;
+    if verdict != expected_verdict {
+        return Err("PSS stability verdict is inconsistent with its Floquet evidence".to_owned());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_pstb_payload(
+    period_s: Option<f64>,
+    fundamental_frequency_hz: Option<f64>,
+    stability_threshold: Option<f64>,
+    probe_instance: Option<&str>,
+    detect_subharmonics: Option<bool>,
+    modes: &[PstbFloquetModeEvidence],
+    evidence: &FloquetSpectrumEvidence,
+    orbit_kind: FloquetOrbitKindEvidence,
+    trivial_multiplier_index: Option<u64>,
+    verdict: FloquetStabilityVerdictEvidence,
+    classification: PstbStabilityClassificationEvidence,
+    min_stability_margin_db: Option<f64>,
+    max_multiplier_magnitude: Option<f64>,
+    num_unstable: Option<u64>,
+    subharmonics: &[u64],
+    converged: Option<bool>,
+    iterations: Option<u64>,
+) -> Result<(), String> {
+    if matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
+        || orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
+    {
+        let exact_legacy_marker = period_s.is_none()
+            && fundamental_frequency_hz.is_none()
+            && stability_threshold.is_none()
+            && probe_instance.is_none()
+            && detect_subharmonics.is_none()
+            && modes.is_empty()
+            && matches!(evidence, FloquetSpectrumEvidence::LegacyUnknown)
+            && orbit_kind == FloquetOrbitKindEvidence::LegacyUnknown
+            && trivial_multiplier_index.is_none()
+            && verdict == FloquetStabilityVerdictEvidence::Indeterminate
+            && classification == PstbStabilityClassificationEvidence::Indeterminate
+            && min_stability_margin_db.is_none()
+            && max_multiplier_magnitude.is_none()
+            && num_unstable.is_none()
+            && subharmonics.is_empty()
+            && converged.is_none()
+            && iterations.is_none();
+        return exact_legacy_marker
+            .then_some(())
+            .ok_or_else(|| "legacy PSTB evidence is not an exact migration marker".to_owned());
+    }
+
+    let (
+        Some(period_s),
+        Some(frequency_hz),
+        Some(stability_threshold),
+        Some(probe_instance),
+        Some(detect_subharmonics),
+        Some(max_multiplier_magnitude),
+        Some(num_unstable),
+        Some(true),
+        Some(_),
+    ) = (
+        period_s,
+        fundamental_frequency_hz,
+        stability_threshold,
+        probe_instance,
+        detect_subharmonics,
+        max_multiplier_magnitude,
+        num_unstable,
+        converged,
+        iterations,
+    )
+    else {
+        return Err(
+            "current PSTB payload is missing provenance, convergence, or global metrics".to_owned(),
+        );
+    };
+    if !period_s.is_finite()
+        || period_s <= 0.0
+        || !frequency_hz.is_finite()
+        || frequency_hz <= 0.0
+        || !same_retained_float(frequency_hz, 1.0 / period_s)
+        || !stability_threshold.is_finite()
+        || stability_threshold < 1.0
+        || probe_instance.is_empty()
+        || probe_instance.trim() != probe_instance
+        || probe_instance
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return Err(
+            "PSTB period, frequency, stability boundary, or probe identity is invalid".to_owned(),
+        );
+    }
+    if !matches!(
+        evidence,
+        FloquetSpectrumEvidence::NoDynamicModes | FloquetSpectrumEvidence::Qualified { .. }
+    ) || !evidence.is_consistent_with_count(modes.len())
+    {
+        return Err("PSTB requires a complete current Floquet spectrum".to_owned());
+    }
+    if matches!(evidence, FloquetSpectrumEvidence::NoDynamicModes)
+        && orbit_kind != FloquetOrbitKindEvidence::Driven
+    {
+        return Err("a zero-order PSTB spectrum must use the driven orbit policy".to_owned());
+    }
+
+    let values = modes.iter().map(|mode| mode.multiplier).collect::<Vec<_>>();
+    validate_complex_values(&values, "PSTB Floquet multiplier")?;
+    if !pstb_modes_are_canonically_sorted(modes) {
+        return Err("PSTB Floquet modes are not in canonical sorted order".to_owned());
+    }
+    let expected_trivial = expected_trivial_floquet_index(&values, evidence, orbit_kind)?;
+    if trivial_multiplier_index != expected_trivial {
+        return Err(
+            "PSTB autonomous phase-mode index is inconsistent with the spectrum".to_owned(),
+        );
+    }
+    let trivial_index = trivial_multiplier_index
+        .map(usize::try_from)
+        .transpose()
+        .map_err(|_| "PSTB phase-mode index does not fit this platform".to_owned())?;
+
+    let mut expected_subharmonics = Vec::new();
+    let mut expected_unstable_count = 0_u64;
+    let mut expected_min_margin: Option<f64> = None;
+    for (index, mode) in modes.iter().enumerate() {
+        let value = complex_value(mode.multiplier);
+        let magnitude = value.norm();
+        if !magnitude.is_finite()
+            || magnitude <= 0.0
+            || !mode.exponent.real.is_finite()
+            || !mode.exponent.imaginary.is_finite()
+            || !mode.probe_participation.is_finite()
+            || !(0.0..=1.0).contains(&mode.probe_participation)
+        {
+            return Err(format!(
+                "PSTB Floquet mode {index} contains invalid numerical data"
+            ));
+        }
+        let expected_exponent = value.ln() / period_s;
+        if !same_retained_float(mode.exponent.real, expected_exponent.re)
+            || !same_retained_float(mode.exponent.imaginary, expected_exponent.im)
+        {
+            return Err(format!(
+                "PSTB Floquet mode {index} has an inconsistent exponent"
+            ));
+        }
+        let expected_trivial_flag = trivial_index == Some(index);
+        let expected_unstable = !expected_trivial_flag && magnitude > stability_threshold;
+        if mode.is_trivial != expected_trivial_flag || mode.is_unstable != expected_unstable {
+            return Err(format!(
+                "PSTB Floquet mode {index} has inconsistent stability flags"
+            ));
+        }
+        expected_unstable_count += u64::from(expected_unstable);
+
+        if !expected_trivial_flag {
+            let margin = -20.0 * magnitude.log10();
+            if !margin.is_finite() {
+                return Err(format!("PSTB Floquet mode {index} has a non-finite margin"));
+            }
+            expected_min_margin = Some(match expected_min_margin {
+                Some(current) if current.total_cmp(&margin).is_le() => current,
+                _ => margin,
+            });
+        }
+
+        let detected_order = detect_subharmonics
+            .then(|| detected_subharmonic_order(value))
+            .flatten();
+        if mode.subharmonic_order != detected_order {
+            return Err(format!(
+                "PSTB Floquet mode {index} has inconsistent subharmonic evidence"
+            ));
+        }
+        if let Some(order) = detected_order {
+            expected_subharmonics.push(order);
+        }
+    }
+
+    let expected_max_magnitude = modes
+        .first()
+        .map_or(0.0, |mode| complex_value(mode.multiplier).norm());
+    if !max_multiplier_magnitude.is_finite()
+        || !same_retained_float(max_multiplier_magnitude, expected_max_magnitude)
+        || num_unstable != expected_unstable_count
+        || !same_optional_retained_float(min_stability_margin_db, expected_min_margin)
+        || subharmonics != expected_subharmonics
+    {
+        return Err(
+            "PSTB aggregate counts, margins, or subharmonics contradict the complete spectrum"
+                .to_owned(),
+        );
+    }
+
+    let expected_verdict = derive_floquet_verdict(
+        &values,
+        evidence,
+        orbit_kind,
+        trivial_multiplier_index,
+        stability_threshold - 1.0,
+    )?;
+    if verdict != expected_verdict {
+        return Err("PSTB stability verdict contradicts the complete Floquet spectrum".to_owned());
+    }
+    let expected_classification = classify_pstb_modes(modes, verdict, trivial_index)?;
+    if classification != expected_classification {
+        return Err(
+            "PSTB rich stability classification contradicts the complete spectrum".to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn expected_trivial_floquet_index(
+    values: &[ComplexResultValue],
+    evidence: &FloquetSpectrumEvidence,
+    orbit_kind: FloquetOrbitKindEvidence,
+) -> Result<Option<u64>, String> {
+    match orbit_kind {
+        FloquetOrbitKindEvidence::Driven => Ok(None),
+        FloquetOrbitKindEvidence::Autonomous => {
+            if !matches!(evidence, FloquetSpectrumEvidence::Qualified { .. }) {
+                return Ok(None);
+            }
+            let values = values
+                .iter()
+                .copied()
+                .map(complex_value)
+                .collect::<Vec<_>>();
+            rspice_core::analysis::select_autonomous_phase_mode(&values)
+                .map(u64::try_from)
+                .transpose()
+                .map_err(|_| {
+                    "Floquet phase-mode index does not fit the durable contract".to_owned()
+                })
+        }
+        FloquetOrbitKindEvidence::LegacyUnknown => {
+            Err("current Floquet evidence has an unknown orbit policy".to_owned())
+        }
+    }
+}
+
+fn derive_floquet_verdict(
+    values: &[ComplexResultValue],
+    evidence: &FloquetSpectrumEvidence,
+    orbit_kind: FloquetOrbitKindEvidence,
+    trivial_multiplier_index: Option<u64>,
+    band: f64,
+) -> Result<FloquetStabilityVerdictEvidence, String> {
+    let values = values
+        .iter()
+        .copied()
+        .map(complex_value)
+        .collect::<Vec<_>>();
+    let evidence = evidence
+        .as_core()
+        .ok_or_else(|| "Floquet certificate is not core-authentic".to_owned())?;
+    let orbit_kind = match orbit_kind {
+        FloquetOrbitKindEvidence::Driven => rspice_core::analysis::FloquetOrbitKind::Driven,
+        FloquetOrbitKindEvidence::Autonomous => rspice_core::analysis::FloquetOrbitKind::Autonomous,
+        FloquetOrbitKindEvidence::LegacyUnknown => {
+            return Ok(FloquetStabilityVerdictEvidence::Indeterminate);
+        }
+    };
+    let trivial_multiplier_index = trivial_multiplier_index
+        .map(usize::try_from)
+        .transpose()
+        .map_err(|_| "Floquet phase-mode index does not fit this platform".to_owned())?;
+    let verdict = match rspice_core::analysis::classify_floquet_stability(
+        &values,
+        &evidence,
+        orbit_kind,
+        trivial_multiplier_index,
+        band,
+    ) {
+        rspice_core::analysis::FloquetStabilityVerdict::Stable => {
+            FloquetStabilityVerdictEvidence::Stable
+        }
+        rspice_core::analysis::FloquetStabilityVerdict::Unstable => {
+            FloquetStabilityVerdictEvidence::Unstable
+        }
+        rspice_core::analysis::FloquetStabilityVerdict::Marginal => {
+            FloquetStabilityVerdictEvidence::Marginal
+        }
+        rspice_core::analysis::FloquetStabilityVerdict::Indeterminate => {
+            FloquetStabilityVerdictEvidence::Indeterminate
+        }
+        // The durable schema must be deliberately revised before it can
+        // authenticate a future core semantic state.
+        _ => return Err("unsupported core Floquet stability verdict".to_owned()),
+    };
+    Ok(verdict)
+}
+
+fn classify_pstb_modes(
+    modes: &[PstbFloquetModeEvidence],
+    verdict: FloquetStabilityVerdictEvidence,
+    trivial_index: Option<usize>,
+) -> Result<PstbStabilityClassificationEvidence, String> {
+    match verdict {
+        FloquetStabilityVerdictEvidence::Stable => Ok(PstbStabilityClassificationEvidence::Stable),
+        FloquetStabilityVerdictEvidence::Indeterminate => {
+            Ok(PstbStabilityClassificationEvidence::Indeterminate)
+        }
+        FloquetStabilityVerdictEvidence::Unstable => {
+            let dominant = modes.iter().find(|mode| mode.is_unstable).ok_or_else(|| {
+                "PSTB unstable verdict has no mode outside the stability boundary".to_owned()
+            })?;
+            if dominant.multiplier.imaginary.abs() > 0.01 {
+                Ok(PstbStabilityClassificationEvidence::UnstableComplex)
+            } else {
+                Ok(PstbStabilityClassificationEvidence::UnstableReal)
+            }
+        }
+        FloquetStabilityVerdictEvidence::Marginal => {
+            for (index, mode) in modes.iter().enumerate() {
+                if trivial_index == Some(index) {
+                    continue;
+                }
+                let value = complex_value(mode.multiplier);
+                if (value + num_complex::Complex64::new(1.0, 0.0)).norm() < 0.01 {
+                    return Ok(PstbStabilityClassificationEvidence::PeriodDoubling);
+                }
+                if (value - num_complex::Complex64::new(1.0, 0.0)).norm() < 0.01 {
+                    return Ok(PstbStabilityClassificationEvidence::SaddleNode);
+                }
+                if (value.norm() - 1.0).abs() < 0.01 && value.im.abs() > 0.01 {
+                    return Ok(PstbStabilityClassificationEvidence::NeimarkSacker);
+                }
+            }
+            Ok(PstbStabilityClassificationEvidence::Marginal)
+        }
+    }
+}
+
+fn pstb_modes_are_canonically_sorted(modes: &[PstbFloquetModeEvidence]) -> bool {
+    modes.windows(2).all(|pair| {
+        let left = &pair[0].multiplier;
+        let right = &pair[1].multiplier;
+        complex_value(*right)
+            .norm()
+            .total_cmp(&complex_value(*left).norm())
+            .then_with(|| left.real.total_cmp(&right.real))
+            .then_with(|| left.imaginary.total_cmp(&right.imaginary))
+            .is_le()
+    })
+}
+
+fn detected_subharmonic_order(value: num_complex::Complex64) -> Option<u64> {
+    if (value.norm() - 1.0).abs() > 0.01 {
+        return None;
+    }
+    let angle = value.arg().abs();
+    (2_u64..=8).find(|order| {
+        let expected_angle = 2.0 * std::f64::consts::PI / *order as f64;
+        (angle - expected_angle).abs() < 0.01
+    })
+}
+
+fn complex_value(value: ComplexResultValue) -> num_complex::Complex64 {
+    num_complex::Complex64::new(value.real, value.imaginary)
+}
+
+fn same_optional_retained_float(left: Option<f64>, right: Option<f64>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => same_retained_float(left, right),
+        (None, None) => true,
+        (Some(_), None) | (None, Some(_)) => false,
     }
 }
 
@@ -1594,6 +2494,12 @@ fn contains_retained_coordinate(sorted: &[f64], target: f64) -> bool {
 ///
 /// This represents one analysis within a simulation run, containing
 /// all the data needed to display results in the appropriate viewer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ScalarEvidenceCandidate {
+    pub value: Option<f64>,
+    pub passed: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
     /// Unique ID within the simulation run
@@ -1662,6 +2568,49 @@ impl AnalysisResult {
     #[must_use]
     pub fn provenance(&self) -> Option<&AnalysisResultProvenance> {
         self.provenance.as_ref()
+    }
+
+    /// Exact scalar evidence exposed to specification and result-document
+    /// consumers. Explicit `.MEAS` results take precedence over a same-named
+    /// analysis-native scalar so one execution cannot be counted twice.
+    pub(crate) fn scalar_evidence(&self, name: &str) -> Vec<ScalarEvidenceCandidate> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Vec::new();
+        }
+
+        let measurements = self
+            .measurements
+            .iter()
+            .filter(|measurement| measurement.name.eq_ignore_ascii_case(name))
+            .map(|measurement| ScalarEvidenceCandidate {
+                value: measurement.value.filter(|value| value.is_finite()),
+                passed: measurement.passed && measurement.error.is_none(),
+            })
+            .collect::<Vec<_>>();
+        if !measurements.is_empty() {
+            return measurements;
+        }
+
+        self.result_payload
+            .as_ref()
+            .and_then(|payload| payload.scalar_evidence(name))
+            .into_iter()
+            .collect()
+    }
+
+    /// Canonical discoverable scalar names for the active retained dataset.
+    /// These are evidence keys, not synthesized stability booleans.
+    pub(crate) fn scalar_evidence_names(&self) -> Vec<String> {
+        let mut names = self
+            .measurements
+            .iter()
+            .map(|measurement| measurement.name.clone())
+            .collect::<Vec<_>>();
+        if let Some(payload) = &self.result_payload {
+            names.extend(payload.scalar_evidence_names());
+        }
+        names
     }
 
     /// Create a new successful analysis result
@@ -2119,6 +3068,257 @@ impl AnalysisResult {
 #[cfg(test)]
 mod retained_payload_tests {
     use super::*;
+
+    fn floquet_certificate(problem_order: u64) -> FloquetSpectrumCertificateEvidence {
+        FloquetSpectrumCertificateEvidence {
+            problem_order,
+            max_backward_error: 0.0,
+            qualification_tolerance:
+                FloquetSpectrumCertificateEvidence::canonical_qualification_tolerance(problem_order)
+                    .unwrap(),
+        }
+    }
+
+    fn stable_pstb_payload() -> AnalysisResultPayload {
+        let multiplier = ComplexResultValue {
+            real: 0.5,
+            imaginary: 0.0,
+        };
+        let exponent = complex_value(multiplier).ln();
+        AnalysisResultPayload::Pstb {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            stability_threshold: Some(1.0),
+            probe_instance: Some("LPROBE".to_owned()),
+            detect_subharmonics: Some(false),
+            modes: vec![PstbFloquetModeEvidence {
+                multiplier,
+                exponent: ComplexResultValue {
+                    real: exponent.re,
+                    imaginary: exponent.im,
+                },
+                probe_participation: 0.25,
+                is_unstable: false,
+                is_trivial: false,
+                subharmonic_order: None,
+            }],
+            floquet_evidence: FloquetSpectrumEvidence::Qualified {
+                certificate: floquet_certificate(1),
+            },
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            stability_classification: PstbStabilityClassificationEvidence::Stable,
+            min_stability_margin_db: Some(-20.0 * 0.5_f64.log10()),
+            max_multiplier_magnitude: Some(0.5),
+            num_unstable: Some(0),
+            subharmonics: Vec::new(),
+            converged: Some(true),
+            iterations: Some(0),
+        }
+    }
+
+    #[test]
+    fn pss_floquet_payload_requires_core_authentic_complete_evidence() {
+        let valid = AnalysisResultPayload::PssFloquet {
+            period_s: Some(2.0),
+            fundamental_frequency_hz: Some(0.5),
+            iterations: Some(4),
+            residual_norm: Some(1.0e-12),
+            multipliers: vec![PssFloquetMultiplierEvidence {
+                multiplier: ComplexResultValue {
+                    real: 0.5,
+                    imaginary: 0.0,
+                },
+            }],
+            floquet_evidence: FloquetSpectrumEvidence::Qualified {
+                certificate: floquet_certificate(1),
+            },
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+        };
+        assert!(valid.validate_for(AnalysisType::Pss).is_ok());
+        assert!(valid.validate_for(AnalysisType::Pstb).is_err());
+
+        let mut inflated = valid.clone();
+        let AnalysisResultPayload::PssFloquet {
+            floquet_evidence: FloquetSpectrumEvidence::Qualified { certificate },
+            ..
+        } = &mut inflated
+        else {
+            unreachable!()
+        };
+        certificate.qualification_tolerance *= 2.0;
+        assert!(inflated.validate_for(AnalysisType::Pss).is_err());
+
+        let legacy = AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pss).unwrap();
+        assert!(legacy.validate_for(AnalysisType::Pss).is_ok());
+        let mut forged_legacy = legacy;
+        let AnalysisResultPayload::PssFloquet { period_s, .. } = &mut forged_legacy else {
+            unreachable!()
+        };
+        *period_s = Some(1.0);
+        assert!(forged_legacy.validate_for(AnalysisType::Pss).is_err());
+    }
+
+    #[test]
+    fn pstb_payload_recomputes_mode_flags_counts_metrics_and_classification() {
+        let valid = stable_pstb_payload();
+        assert!(valid.validate_for(AnalysisType::Pstb).is_ok());
+
+        let mutations: [fn(&mut AnalysisResultPayload); 3] = [
+            |payload: &mut AnalysisResultPayload| {
+                let AnalysisResultPayload::Pstb { num_unstable, .. } = payload else {
+                    unreachable!()
+                };
+                *num_unstable = Some(1);
+            },
+            |payload: &mut AnalysisResultPayload| {
+                let AnalysisResultPayload::Pstb {
+                    stability_classification,
+                    ..
+                } = payload
+                else {
+                    unreachable!()
+                };
+                *stability_classification = PstbStabilityClassificationEvidence::UnstableReal;
+            },
+            |payload: &mut AnalysisResultPayload| {
+                let AnalysisResultPayload::Pstb { probe_instance, .. } = payload else {
+                    unreachable!()
+                };
+                *probe_instance = Some(" LPROBE".to_owned());
+            },
+        ];
+        for mutate in mutations {
+            let mut tampered = valid.clone();
+            mutate(&mut tampered);
+            assert!(tampered.validate_for(AnalysisType::Pstb).is_err());
+        }
+    }
+
+    #[test]
+    fn pstb_zero_dynamic_modes_and_single_autonomous_phase_are_json_safe() {
+        let zero_order = AnalysisResultPayload::Pstb {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            stability_threshold: Some(1.0),
+            probe_instance: Some("LPROBE".to_owned()),
+            detect_subharmonics: Some(false),
+            modes: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            stability_classification: PstbStabilityClassificationEvidence::Stable,
+            min_stability_margin_db: None,
+            max_multiplier_magnitude: Some(0.0),
+            num_unstable: Some(0),
+            subharmonics: Vec::new(),
+            converged: Some(true),
+            iterations: Some(0),
+        };
+        assert!(zero_order.validate_for(AnalysisType::Pstb).is_ok());
+        serde_json::to_string(&zero_order).expect("zero-order PSTB payload is strict-JSON safe");
+
+        let multiplier = ComplexResultValue {
+            real: 1.0 + 0.5 * rspice_core::analysis::FLOQUET_UNIT_CIRCLE_BAND,
+            imaginary: 0.0,
+        };
+        let exponent = complex_value(multiplier).ln();
+        let autonomous = AnalysisResultPayload::Pstb {
+            period_s: Some(1.0),
+            fundamental_frequency_hz: Some(1.0),
+            stability_threshold: Some(1.0),
+            probe_instance: Some("LPROBE".to_owned()),
+            detect_subharmonics: Some(false),
+            modes: vec![PstbFloquetModeEvidence {
+                multiplier,
+                exponent: ComplexResultValue {
+                    real: exponent.re,
+                    imaginary: exponent.im,
+                },
+                probe_participation: 1.0,
+                is_unstable: false,
+                is_trivial: true,
+                subharmonic_order: None,
+            }],
+            floquet_evidence: FloquetSpectrumEvidence::Qualified {
+                certificate: floquet_certificate(1),
+            },
+            orbit_kind: FloquetOrbitKindEvidence::Autonomous,
+            trivial_multiplier_index: Some(0),
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            stability_classification: PstbStabilityClassificationEvidence::Stable,
+            min_stability_margin_db: None,
+            max_multiplier_magnitude: Some(complex_value(multiplier).norm()),
+            num_unstable: Some(0),
+            subharmonics: Vec::new(),
+            converged: Some(true),
+            iterations: Some(0),
+        };
+        assert!(autonomous.validate_for(AnalysisType::Pstb).is_ok());
+    }
+
+    #[test]
+    fn durable_floquet_scalars_are_central_and_never_fabricate_a_stability_bool() {
+        let result = AnalysisResult::new(1, AnalysisType::Pstb, "PSTB")
+            .with_result_payload(stable_pstb_payload());
+        let scalar = |name: &str| {
+            let candidates = result.scalar_evidence(name);
+            assert_eq!(candidates.len(), 1, "missing scalar evidence {name}");
+            assert!(candidates[0].passed);
+            candidates[0].value.unwrap()
+        };
+
+        assert_eq!(scalar("pstb.period"), 1.0);
+        assert_eq!(scalar("PSTB.FUNDAMENTAL_FREQUENCY"), 1.0);
+        assert_eq!(scalar("pstb.mode_count"), 1.0);
+        assert_eq!(scalar("pstb.unstable_mode_count"), 0.0);
+        assert_eq!(scalar("pstb.max_multiplier_magnitude"), 0.5);
+        assert_eq!(
+            scalar("pstb.min_stability_margin_db"),
+            -20.0 * 0.5_f64.log10()
+        );
+        assert!(result.scalar_evidence("pstb.is_stable").is_empty());
+        assert!(
+            !result
+                .scalar_evidence_names()
+                .iter()
+                .any(|name| name == "pstb.is_stable" || name == "pstb.stability")
+        );
+
+        let legacy = AnalysisResult::new(2, AnalysisType::Pstb, "legacy").with_result_payload(
+            AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pstb).unwrap(),
+        );
+        assert!(legacy.scalar_evidence("pstb.mode_count").is_empty());
+        assert!(legacy.scalar_evidence_names().is_empty());
+    }
+
+    #[test]
+    fn zero_order_pss_exposes_an_authenticated_zero_mode_count() {
+        let payload = AnalysisResultPayload::PssFloquet {
+            period_s: Some(2.0),
+            fundamental_frequency_hz: Some(0.5),
+            iterations: Some(2),
+            residual_norm: Some(1.0e-12),
+            multipliers: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            orbit_kind: FloquetOrbitKindEvidence::Driven,
+            trivial_multiplier_index: None,
+            stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+        };
+        let result = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(payload);
+
+        assert_eq!(result.scalar_evidence("pss.period")[0].value, Some(2.0));
+        assert_eq!(
+            result.scalar_evidence("pss.fundamental_frequency")[0].value,
+            Some(0.5)
+        );
+        assert_eq!(result.scalar_evidence("pss.mode_count")[0].value, Some(0.0));
+        assert!(result.scalar_evidence("pss.is_stable").is_empty());
+    }
 
     #[test]
     fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {

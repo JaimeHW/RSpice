@@ -246,6 +246,106 @@ fn schema_v15_pole_zero_results_migrate_only_as_legacy_unknown() {
     );
 }
 
+fn persisted_periodic_at_schema_v16(analysis_type: AnalysisType) -> ProjectSimulationResults {
+    let mut run = SimulationRun::new(351);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(AnalysisResult::new(
+        1,
+        analysis_type,
+        match analysis_type {
+            AnalysisType::Pss => "PSS",
+            AnalysisType::Pstb => "PSTB",
+            _ => unreachable!(),
+        },
+    ));
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 351;
+    let mut persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.schema_version = POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION;
+    downgrade_result_digests_to_v7(&mut persisted);
+    persisted
+}
+
+#[test]
+fn schema_v16_periodic_results_migrate_to_explicit_unknown_without_inference() {
+    for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
+        let mut persisted = persisted_periodic_at_schema_v16(analysis_type);
+        assert!(persisted.runs[0].analyses[0].waveforms.is_empty());
+        persisted
+            .migrate_to_current(ProjectId::new())
+            .expect("authentic zero-waveform schema-v16 periodic result migrates");
+        assert_eq!(
+            persisted.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        let payload = persisted.runs[0].analyses[0]
+            .result_payload
+            .as_ref()
+            .expect("migration adds an explicit periodic marker");
+        let json = serde_json::to_value(payload).expect("marker serializes");
+        assert_eq!(json["floquet_evidence"]["status"], "legacy_unknown");
+        assert_eq!(json["orbit_kind"], "legacy_unknown");
+        assert_eq!(json["stability_verdict"], "indeterminate");
+        assert_eq!(json["multipliers"].as_array().map(Vec::len).unwrap_or(0), 0);
+        assert_eq!(json["modes"].as_array().map(Vec::len).unwrap_or(0), 0);
+        assert!(json["period_s"].is_null());
+        assert!(json["fundamental_frequency_hz"].is_null());
+        persisted
+            .validate()
+            .expect("migrated marker is sealed by the V8 current contract");
+    }
+}
+
+#[test]
+fn schema_v16_cannot_inject_periodic_evidence_or_overwrite_an_existing_payload() {
+    let mut injected = persisted_periodic_at_schema_v16(AnalysisType::Pss);
+    injected.runs[0].analyses[0].result_payload = PersistedField::Value(
+        AnalysisResultPayload::legacy_periodic_marker(AnalysisType::Pss).unwrap(),
+    );
+    let error = injected
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v16 cannot inject a payload that its V7 contract never admitted");
+    assert!(
+        error.contains("periodic stability evidence introduced by schema v17"),
+        "{error}"
+    );
+
+    let mut nonperiodic = persisted_periodic_at_schema_v16(AnalysisType::Pstb);
+    nonperiodic.runs[0].analyses[0].result_payload =
+        PersistedField::Value(AnalysisResultPayload::ScalarMeasurements {
+            values: std::collections::BTreeMap::from([("legacy".to_owned(), 1.0)]),
+        });
+    downgrade_result_digests_to_v7(&mut nonperiodic);
+    let original = nonperiodic.clone();
+    let error = nonperiodic
+        .migrate_to_current(ProjectId::new())
+        .expect_err("migration must not replace an authenticated nonperiodic payload");
+    assert!(
+        error.contains("must match successful periodic analysis type"),
+        "{error}"
+    );
+    assert_eq!(nonperiodic, original, "failed migration is transactional");
+}
+
+#[test]
+fn current_schema_rejects_successful_periodic_results_without_the_typed_payload() {
+    for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
+        let mut current = persisted_periodic_at_schema_v16(analysis_type);
+        current.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+        let error = current
+            .validate()
+            .expect_err("current periodic success cannot omit its typed evidence");
+        assert!(
+            error.contains("must match successful periodic analysis type"),
+            "{error}"
+        );
+    }
+}
+
 #[test]
 fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_policy() {
     let plan_id = SimulationPlanId::new();

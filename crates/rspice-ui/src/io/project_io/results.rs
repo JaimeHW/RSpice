@@ -26,6 +26,7 @@ pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
 use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
     validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
+    validate_v16_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -195,7 +196,10 @@ impl ProjectSimulationResults {
     /// units are admitted; a v12 waveform that already carries one is rejected
     /// rather than resealed, because no v12 digest ever covered those bytes.
     /// Schemas v13 through v15 are authenticated with the last required-gain
-    /// payload encoding before optional pole-zero gain is admitted. Schema-v14
+    /// payload encoding before optional pole-zero gain is admitted. Schema-v16
+    /// is authenticated with its exact V7 encoding before recognizable PSS or
+    /// PSTB curve-only results acquire an explicit legacy-unknown periodic
+    /// marker. No spectrum, orbit policy, or verdict is inferred. Schema-v14
     /// receipts predate the deck's hierarchy map and keep an empty
     /// one: a run that executed before the map was sealed has no occurrence
     /// record, and inventing rows for it would forge the provenance the map
@@ -214,10 +218,22 @@ impl ProjectSimulationResults {
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
         migrate_legacy_specification_receipts(self, source_schema)?;
+        reject_periodic_stability_payload_before_schema_v17(self, source_schema)?;
         reject_pole_zero_evidence_before_schema_v16(self, source_schema)?;
         reject_hierarchy_maps_before_schema_v15(self, source_schema)?;
         reject_executed_decks_before_schema_v15(self, source_schema)?;
         reject_derived_task_identities_before_schema_v15(self, source_schema)?;
+        if source_schema == POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                validate_v16_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                synthesize_legacy_periodic_markers(run)?;
+                seal_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if matches!(
             source_schema,
             WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION
@@ -226,6 +242,7 @@ impl ProjectSimulationResults {
         ) {
             for run in &mut self.runs {
                 validate_v13_to_v15_result_digests(run, source_schema)?;
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -234,6 +251,7 @@ impl ProjectSimulationResults {
         if source_schema == OPERATING_POINT_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v12_result_digests(run)?;
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -242,6 +260,7 @@ impl ProjectSimulationResults {
         if source_schema == TRANSFER_FUNCTION_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v11_result_digests(run)?;
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -250,6 +269,7 @@ impl ProjectSimulationResults {
         if source_schema == RELIABILITY_SOA_RESULTS_SCHEMA_VERSION {
             for run in &mut self.runs {
                 validate_v10_result_digests(run)?;
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -281,6 +301,7 @@ impl ProjectSimulationResults {
                         analysis.id
                     ));
                 }
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -299,6 +320,7 @@ impl ProjectSimulationResults {
                         analysis.id
                     ));
                 }
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -311,6 +333,7 @@ impl ProjectSimulationResults {
             for run in &mut self.runs {
                 require_legacy_result_digest_absence(run, source_schema)?;
                 validate_result_fields_for_source_schema(run, source_schema)?;
+                synthesize_legacy_periodic_markers(run)?;
                 seal_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -505,6 +528,7 @@ impl ProjectSimulationResults {
             };
             run.provenance_mode = PersistedField::Value(migrated_mode);
             run.lifecycle = Some(SimulationRunLifecycle::LegacyUnknown);
+            synthesize_legacy_periodic_markers(run)?;
             seal_project_result_digests(run)?;
             run.validate(run_idx)?;
         }
@@ -758,7 +782,7 @@ fn reject_pole_zero_evidence_before_schema_v16(
     results: &ProjectSimulationResults,
     source_schema: u32,
 ) -> Result<(), String> {
-    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
+    if source_schema >= POLE_ZERO_EVIDENCE_RESULTS_SCHEMA_VERSION {
         return Ok(());
     }
     for run in &results.runs {
@@ -783,6 +807,48 @@ fn reject_pole_zero_evidence_before_schema_v16(
                     analysis.id
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+fn reject_periodic_stability_payload_before_schema_v17(
+    results: &ProjectSimulationResults,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for run in &results.runs {
+        for analysis in &run.analyses {
+            if matches!(
+                analysis.result_payload.as_ref(),
+                Some(AnalysisResultPayload::PssFloquet { .. })
+                    | Some(AnalysisResultPayload::Pstb { .. })
+            ) {
+                return Err(format!(
+                    "schema-v{source_schema} analysis {} contains periodic stability evidence introduced by schema v17",
+                    analysis.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn synthesize_legacy_periodic_markers(run: &mut ProjectSimulationRun) -> Result<(), String> {
+    for analysis in &mut run.analyses {
+        if !analysis.success || !analysis.result_payload.is_missing() {
+            continue;
+        }
+        let analysis_type = analysis_type_from_key(&analysis.analysis_type).ok_or_else(|| {
+            format!(
+                "legacy analysis {} has unknown analysis type '{}'",
+                analysis.id, analysis.analysis_type
+            )
+        })?;
+        if let Some(marker) = AnalysisResultPayload::legacy_periodic_marker(analysis_type) {
+            analysis.result_payload = PersistedField::Value(marker);
         }
     }
     Ok(())
@@ -1685,6 +1751,26 @@ impl ProjectAnalysisResult {
             if !self.success {
                 return Err(format!(
                     "{prefix}.result_payload is not permitted on a failed analysis"
+                ));
+            }
+        }
+        let analysis_type =
+            analysis_type_from_key(&self.analysis_type).expect("analysis type was checked above");
+        if self.success {
+            let has_required_periodic_payload = match analysis_type {
+                AnalysisType::Pss => matches!(
+                    self.result_payload.as_ref(),
+                    Some(AnalysisResultPayload::PssFloquet { .. })
+                ),
+                AnalysisType::Pstb => matches!(
+                    self.result_payload.as_ref(),
+                    Some(AnalysisResultPayload::Pstb { .. })
+                ),
+                _ => true,
+            };
+            if !has_required_periodic_payload {
+                return Err(format!(
+                    "{prefix}.result_payload is required and must match successful periodic analysis type {analysis_type:?}"
                 ));
             }
         }
