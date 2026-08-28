@@ -96,12 +96,25 @@ fn lifetime_range(years: &[f64]) -> Option<(f64, f64)> {
     Some((0.0, stop))
 }
 
-fn device_cache_seed(analysis_id: u64, device_id: &str) -> u64 {
+/// The decimation-cache base for one (analysis, device, plot).
+///
+/// The plot belongs in the base rather than being XORed into the finished
+/// key beside the trace ordinal: an ordinal folded in with XOR aliases the
+/// moment it reaches a bit the base already sets, and two traces sharing a
+/// key serve each other's envelopes — one curve drawn in another's place,
+/// with nothing to show anything went wrong. [`plot::trace_cache_key`] is
+/// where the ordinal goes, and it moves it into bits this base cannot
+/// occupy.
+fn device_plot_cache_seed(analysis_id: u64, device_id: &str, plot_index: usize) -> u64 {
     device_id.as_bytes().iter().fold(
-        0x5245_4C49_0000_0000_u64 ^ analysis_id.rotate_left(19),
+        0x5245_4C49_0000_0000_u64 ^ analysis_id.rotate_left(19) ^ plot_index as u64,
         |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01B3),
     )
 }
+
+/// Trace ordinals within one degradation plot.
+const PRIMARY_SERIES: usize = 0;
+const SECONDARY_SERIES: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
 enum DegradationPlot {
@@ -171,17 +184,17 @@ fn show_degradation_plot(
     .accessible_detail(
         "Lines connect exact retained reliability checkpoints; hover and selection snap to a retained checkpoint and no lifetime extrapolation is shown.",
     );
-    let cache_seed = device_cache_seed(analysis_id, &device.device_id);
+    let cache_seed = device_plot_cache_seed(analysis_id, &device.device_id, plot_index);
     spec.traces.push(
         Trace::new(&years, &primary, primary_color)
             .marker_style(0)
-            .cache_key(cache_seed ^ plot_index as u64),
+            .cache_key(plot::trace_cache_key(cache_seed, PRIMARY_SERIES)),
     );
     if let Some(secondary) = &secondary {
         spec.traces.push(
             Trace::new(&years, secondary, colors.traces[1])
                 .marker_style(1)
-                .cache_key(cache_seed ^ 0x100 ^ plot_index as u64),
+                .cache_key(plot::trace_cache_key(cache_seed, SECONDARY_SERIES)),
         );
     }
     if let Some(index) = selected_checkpoint
@@ -644,6 +657,34 @@ mod tests {
                 mobility_shift: -years * 0.02,
                 drain_source_resistance_shift: years * 0.03,
             },
+        }
+    }
+
+    /// Every curve the ageing sheet can draw owns its decimation cache entry.
+    ///
+    /// Two traces sharing a key serve each other's envelopes, and nothing on
+    /// the sheet says so. The keys were composed by XORing the plot ordinal
+    /// into a per-device seed and the trace ordinal into the same bits, which
+    /// is the aliasing shape [`plot::trace_cache_key`] exists to close.
+    #[test]
+    fn no_two_ageing_curves_share_a_decimation_cache_key() {
+        let mut keys = std::collections::BTreeSet::new();
+        for analysis_id in [0_u64, 1, 7, u64::MAX] {
+            // The empty identity matters: it is the one input that reaches
+            // the fold without a single mixing round.
+            for device_id in ["", "M1", "M2", "x1.m1", "x1.m2"] {
+                for plot_index in 0..2 {
+                    let seed = device_plot_cache_seed(analysis_id, device_id, plot_index);
+                    for series in [PRIMARY_SERIES, SECONDARY_SERIES] {
+                        let key = plot::trace_cache_key(seed, series);
+                        assert!(
+                            keys.insert(key),
+                            "({analysis_id}, {device_id:?}, plot {plot_index}, series \
+                             {series}) reuses cache key {key:#x}"
+                        );
+                    }
+                }
+            }
         }
     }
 

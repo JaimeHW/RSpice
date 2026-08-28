@@ -354,8 +354,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .body(|body| {
                     body.rows(ROW_HEIGHT, visible_rules.len(), |mut row| {
                         let rule = visible_rules[row.index()];
-                        let evaluation = &evaluations[rule];
-                        let facts = plan.facts(rule).expect("one fact set per retained rule");
+                        // `rule` is an ordinal from the memoized plan and
+                        // `evaluations` is the live retained evidence. They
+                        // agree for every generation the plan was built
+                        // against, and a panic is not how a Results sheet
+                        // should report that they stopped agreeing: a row it
+                        // cannot vouch for is a row it does not draw.
+                        let (Some(evaluation), Some(facts)) =
+                            (evaluations.get(rule), plan.facts(rule))
+                        else {
+                            return;
+                        };
                         let is_selected = selected.as_ref().is_some_and(|selection| {
                             selection.analysis == analysis_key
                                 && selection.device_id == evaluation.device_id
