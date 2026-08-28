@@ -10194,6 +10194,38 @@ fn test_xyce_bug981_output_schedule_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_bug706_rc_include_inline_release_relational_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, contract, wrapper, exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_706_SON/rc_simple_lib.cir",
+            "bug706_rc_include_relational_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_706_SON/rc_simple_xyce.cir",
+            "bug706_rc_inline_release_reference",
+            false,
+            Some("Netlists/Certification_Tests/BUG_706_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should reproduce the strict inline-good to include-test Release relation, got {result:?}"
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source.as_deref(), exclusion);
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug986_erroption_breakpoint_source_relational_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
