@@ -10,7 +10,7 @@ use egui::Ui;
 
 use crate::quantity::QuantityPresentationPolicy;
 use crate::state::{
-    AnalysisResult, AnalysisType, SharedWaveformValues, ac_bode_summary_for_selection,
+    AnalysisResult, AnalysisType, SharedWaveformValues, ac_bode_shape_for_selection,
 };
 use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
@@ -24,11 +24,10 @@ struct BodeModel {
     /// presentation choice only — the margins are always measured on the
     /// unwrapped branch, whichever trace is painted.
     phase_deg: Option<SharedWaveformValues>,
+    /// The measured response, including whether the sweep proves its
+    /// lowest-frequency gain is the DC gain — the card's labels depend on it,
+    /// and an unproven claim of DC gain is a wrong reading of a right number.
     margins: BodeDerived,
-    /// Whether the sweep proves its lowest-frequency gain is the DC gain.
-    /// The card's labels depend on it: an unproven claim of DC gain is a
-    /// wrong reading of a right number.
-    adc_is_dc: bool,
 }
 
 /// Summary facts of the selected retained ordinary-noise spectrum for the
@@ -42,10 +41,112 @@ struct NoiseSpectrumModel {
     band: Option<(f64, f64)>,
 }
 
+/// Which retained traces one analysis' ordinary-noise spectrum is made of.
+///
+/// Resolving it walks every sample of every candidate density — each value
+/// finite and positive, each frequency positive and strictly ascending — and
+/// compares each contributor's frequency axis against the anchor's. That is
+/// the whole structural half of the noise sheet, and the tab strip, the
+/// spectrum card and the contributor table each asked for it independently,
+/// on every frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct NoiseSpectrumShape {
+    /// The density the sheet anchors its frequency axis on: the
+    /// input-referred spectrum when one is retained, else the
+    /// output-referred one.
+    anchor: usize,
+    /// Renderable densities sharing that axis. An input-referred spectrum
+    /// stands alone, so it counts one.
+    trace_count: usize,
+}
+
+fn resolve_noise_spectrum_shape(analysis: &AnalysisResult) -> Option<NoiseSpectrumShape> {
+    let input_referred = analysis.waveforms.iter().position(|waveform| {
+        is_input_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
+    });
+    let anchor = match input_referred {
+        Some(index) => index,
+        None => analysis.waveforms.iter().position(|waveform| {
+            is_output_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
+        })?,
+    };
+    let frequency = &analysis.waveforms[anchor].x;
+    let trace_count = if input_referred.is_some() {
+        1
+    } else {
+        analysis
+            .waveforms
+            .iter()
+            .filter(|waveform| {
+                !is_input_noise_name(&waveform.name)
+                    && (is_output_noise_name(&waveform.name)
+                        || is_noise_contributor_name(&waveform.name))
+                    && noise_waveform_is_renderable(waveform)
+                    && waveform.x.as_slice() == frequency.as_slice()
+            })
+            .count()
+    };
+    Some(NoiseSpectrumShape {
+        anchor,
+        trace_count,
+    })
+}
+
+/// The same answer, resolved once per dataset generation.
+///
+/// Memoized rather than threaded through because it is a property of an
+/// immutable dataset: it can only change when the datasets do, and the data
+/// version is part of the key so a generation the memo has not seen misses
+/// by construction. The cell is what lets the tab strip's gate keep its
+/// `&AppState` signature.
+pub(super) fn noise_spectrum_shape(
+    state: &AppState,
+    run: &crate::state::SimulationRun,
+    analysis: &AnalysisResult,
+) -> Option<NoiseSpectrumShape> {
+    let key = (
+        state.simulation.data_version,
+        super::AnalysisPresentationKey::new(run.dataset_id, analysis),
+    );
+    if let Some(known) = state.ui.results.noise_spectrum_shapes.borrow().get(&key) {
+        return *known;
+    }
+    let shape = resolve_noise_spectrum_shape(analysis);
+    state
+        .ui
+        .results
+        .noise_spectrum_shapes
+        .borrow_mut()
+        .insert(key, shape);
+    shape
+}
+
+/// Whether one analysis holds an ordinary-noise spectrum this workspace can
+/// draw, through the memo that owns the question.
+pub(super) fn ordinary_noise_spectrum_is_renderable_in(
+    state: &AppState,
+    run: &crate::state::SimulationRun,
+    analysis: &AnalysisResult,
+) -> bool {
+    is_ordinary_noise_result(analysis) && noise_spectrum_shape(state, run, analysis).is_some()
+}
+
+/// The analysis kinds an ordinary-noise spectrum can come from, and the
+/// requirement that the solve behind it completed. Free of the dataset, so
+/// it is the cheap half of every gate below.
+fn is_ordinary_noise_result(analysis: &AnalysisResult) -> bool {
+    analysis.success
+        && matches!(
+            analysis.analysis_type,
+            AnalysisType::Noise | AnalysisType::Hbnoise
+        )
+}
+
 fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
     if waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
         return false;
     }
+    super::frame_work::note(super::frame_work::DatasetWalk::NoiseSpectrumScan);
     if waveform
         .y
         .iter()
@@ -68,16 +169,11 @@ fn noise_waveform_is_renderable(waveform: &crate::state::WaveformData) -> bool {
     positive_count >= 2
 }
 
+/// The same question without a session to memoize against, for the printed
+/// page and the visualization document, which resolve a run they hold
+/// directly rather than the one the workspace has open.
 pub(super) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
-    analysis.success
-        && matches!(
-            analysis.analysis_type,
-            AnalysisType::Noise | AnalysisType::Hbnoise
-        )
-        && analysis.waveforms.iter().any(|waveform| {
-            (is_input_noise_name(&waveform.name) || is_output_noise_name(&waveform.name))
-                && noise_waveform_is_renderable(waveform)
-        })
+    is_ordinary_noise_result(analysis) && resolve_noise_spectrum_shape(analysis).is_some()
 }
 
 /// Why the stability card has no numbers to show.
@@ -95,25 +191,30 @@ enum NoMargins {
 fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     let simulation = &state.simulation;
     let run = simulation.active_run().ok_or(NoMargins::NoResponse)?;
-    let summary = ac_bode_summary_for_selection(run, simulation.active_analysis_idx)
+    // Which traces, not what they measure. Resolving the summary here — and
+    // only then consulting the memo below — meant the memo saved nothing: the
+    // conversion and every crossing search had already happened by the time
+    // its key was known.
+    let shape = ac_bode_shape_for_selection(run, simulation.active_analysis_idx)
         .ok_or(NoMargins::NoResponse)?;
 
-    // Fail closed, as every sibling sheet does. The summary resolves which
+    // Fail closed, as every sibling sheet does. The shape resolves which
     // exact analysis it read, so the gate names that one rather than the
     // ordinal selection.
     let analysis = run
         .analyses
-        .get(summary.analysis_index)
+        .get(shape.analysis_index)
         .ok_or(NoMargins::NoResponse)?;
     if !analysis.success {
         return Err(NoMargins::AnalysisFailed(analysis.error_message.clone()));
     }
 
-    let adc_is_dc = summary.metrics.adc_is_dc;
-    let phase = summary
-        .phase_index
-        .zip(summary.phase_deg.as_ref())
-        .map(|(phase_index, phase)| (phase_index, Arc::clone(phase)));
+    let phase = shape.phase_index.and_then(|phase_index| {
+        analysis
+            .waveforms
+            .get(phase_index)
+            .map(|waveform| (phase_index, Arc::clone(&waveform.y)))
+    });
 
     // Margins + extremes from the curves, cached on (data version, resolved
     // magnitude waveform) — the crossings and folds are O(points) and both
@@ -122,18 +223,23 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     let margins = match state.ui.results.bode {
         Some(d)
             if d.version == version
-                && d.analysis_index == summary.analysis_index
-                && d.mag_index == summary.mag_index =>
+                && d.analysis_index == shape.analysis_index
+                && d.mag_index == shape.mag_index =>
         {
             d
         }
         _ => {
-            let metrics = summary.metrics;
+            super::frame_work::note(super::frame_work::DatasetWalk::BodeMargins);
+            let metrics =
+                crate::state::ac_bode_summary_for_analysis(analysis, shape.analysis_index)
+                    .ok_or(NoMargins::NoResponse)?
+                    .metrics;
             let d = BodeDerived {
                 version,
-                analysis_index: summary.analysis_index,
-                mag_index: summary.mag_index,
+                analysis_index: shape.analysis_index,
+                mag_index: shape.mag_index,
                 adc_db: metrics.adc_db,
+                adc_is_dc: metrics.adc_is_dc,
                 ugf: metrics.ugf,
                 pm_deg: metrics.pm_deg,
                 pm_phase_deg: metrics.pm_phase_deg,
@@ -151,18 +257,14 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     // are measured on the unwrapped branch either way.
     let phase_deg = match &phase {
         Some((phase_index, raw)) if state.ui.results.phase_continuous => {
-            let key = (summary.analysis_index as u64) << 32 | *phase_index as u64;
+            let key = (shape.analysis_index as u64) << 32 | *phase_index as u64;
             Some(state.ui.results.derived.unwrapped(key, raw))
         }
         Some((_, raw)) => Some(Arc::clone(raw)),
         None => None,
     };
 
-    Ok(BodeModel {
-        phase_deg,
-        margins,
-        adc_is_dc,
-    })
+    Ok(BodeModel { phase_deg, margins })
 }
 
 fn normalized_noise_name(name: &str) -> String {
@@ -216,7 +318,9 @@ fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
 /// no noise intent for the binding to honour.
 pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.simulation.active_run()?;
-    selected_noise_analysis_index_in(state.simulation.active_analysis_idx, run)
+    selected_noise_analysis_index_with(state.simulation.active_analysis_idx, run, |analysis| {
+        ordinary_noise_spectrum_is_renderable_in(state, run, analysis)
+    })
 }
 
 /// The same binding, from the selection and the run rather than the session.
@@ -229,15 +333,32 @@ pub(super) fn selected_noise_analysis_index_in(
     globally_selected: Option<usize>,
     run: &crate::state::SimulationRun,
 ) -> Option<usize> {
+    selected_noise_analysis_index_with(
+        globally_selected,
+        run,
+        ordinary_noise_spectrum_is_renderable,
+    )
+}
+
+/// The binding rule itself, stated once.
+///
+/// The sheet resolves renderability through the workspace memo and the
+/// printed page resolves it directly, but they must reach the same analysis:
+/// a page that steps to a neighbouring result puts another analysis'
+/// contributors under the selected one's name, on paper. So the rule takes
+/// the oracle as a parameter rather than being written out twice.
+fn selected_noise_analysis_index_with(
+    globally_selected: Option<usize>,
+    run: &crate::state::SimulationRun,
+    renderable: impl Fn(&AnalysisResult) -> bool,
+) -> Option<usize> {
     if let Some(selected) = globally_selected
         && let Some(analysis) = run.analyses.get(selected)
         && is_noise_analysis(analysis.analysis_type)
     {
-        return ordinary_noise_spectrum_is_renderable(analysis).then_some(selected);
+        return renderable(analysis).then_some(selected);
     }
-    run.analyses
-        .iter()
-        .position(ordinary_noise_spectrum_is_renderable)
+    run.analyses.iter().position(renderable)
 }
 
 fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)> {
@@ -247,33 +368,11 @@ fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)>
 }
 
 fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
+    let run = state.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
-    let input_referred = analysis.waveforms.iter().find(|waveform| {
-        is_input_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
-    });
-    let anchor = match input_referred {
-        Some(waveform) => waveform,
-        None => analysis.waveforms.iter().find(|waveform| {
-            is_output_noise_name(&waveform.name) && noise_waveform_is_renderable(waveform)
-        })?,
-    };
-
-    let frequency = Arc::clone(&anchor.x);
-    let trace_count = if input_referred.is_some() {
-        1
-    } else {
-        analysis
-            .waveforms
-            .iter()
-            .filter(|waveform| {
-                !is_input_noise_name(&waveform.name)
-                    && (is_output_noise_name(&waveform.name)
-                        || is_noise_contributor_name(&waveform.name))
-                    && noise_waveform_is_renderable(waveform)
-                    && waveform.x.as_slice() == frequency.as_slice()
-            })
-            .count()
-    };
+    let shape = noise_spectrum_shape(state, run, analysis)?;
+    let frequency = Arc::clone(&analysis.waveforms.get(shape.anchor)?.x);
+    let trace_count = shape.trace_count;
     let (total_rms, input_rms, band) = analysis
         .noise_summary
         .as_ref()
@@ -324,7 +423,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             return;
         }
     };
-    let rows = margin_rows(model.margins, model.adc_is_dc, &quantity_policy);
+    let rows = margin_rows(model.margins, &quantity_policy);
     super::stat_table(ui, &rows);
 
     // A folded phase margin reads like a verdict and is not one. It goes above
@@ -345,7 +444,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ui,
             "Phase data unavailable for this response — re-run the analysis to compute margins.",
         );
-    } else if model.adc_is_dc {
+    } else if model.margins.adc_is_dc {
         super::panel_note(
             ui,
             "Margins measured on the simulated curves; the plot markers show the same values.",
@@ -368,9 +467,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 /// same reference.
 fn margin_rows(
     m: BodeDerived,
-    adc_is_dc: bool,
     quantity_policy: &QuantityPresentationPolicy,
 ) -> [(&'static str, String, bool); 6] {
+    let adc_is_dc = m.adc_is_dc;
     let fmt_opt =
         |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
     [
@@ -532,6 +631,7 @@ mod tests {
             analysis_index: 0,
             mag_index: 0,
             adc_db: Some(20.0),
+            adc_is_dc: false,
             ugf: Some(1.0e4),
             pm_deg: Some(45.0),
             pm_phase_deg: Some(-135.0),
@@ -541,8 +641,16 @@ mod tests {
         };
         let policy = QuantityPresentationPolicy::default();
 
-        let labels =
-            |adc_is_dc| margin_rows(margins, adc_is_dc, &policy).map(|(label, _, _)| label);
+        let labels = |adc_is_dc| {
+            margin_rows(
+                BodeDerived {
+                    adc_is_dc,
+                    ..margins
+                },
+                &policy,
+            )
+            .map(|(label, _, _)| label)
+        };
 
         assert_eq!(labels(true)[4], "A_dc");
         assert_eq!(labels(true)[5], "f₋₃dB");
@@ -575,12 +683,9 @@ mod tests {
         assert!(state.simulation.select_run(0));
         let model = build_model(&mut state).expect("Bode model");
 
-        assert!(!model.adc_is_dc);
+        assert!(!model.margins.adc_is_dc);
         let policy = QuantityPresentationPolicy::default();
-        assert_eq!(
-            margin_rows(model.margins, model.adc_is_dc, &policy)[4].0,
-            "A(f_min)"
-        );
+        assert_eq!(margin_rows(model.margins, &policy)[4].0, "A(f_min)");
     }
 
     /// A diverged AC run still carries whatever partial vectors the engine

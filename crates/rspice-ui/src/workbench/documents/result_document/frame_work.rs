@@ -47,12 +47,19 @@ pub(super) enum DatasetWalk {
     EyeRaster,
     /// Mapping a cursor to a retained sample by scanning the sample grid.
     TableCursorScan,
+    /// Converting a retained magnitude vector to decibels and locating every
+    /// unity-gain crossing and phase inversion on it: the frequency-response
+    /// stability extraction behind the Bode card and the Bode tab's gate.
+    BodeMargins,
+    /// Verifying one retained ordinary-noise spectrum: every sample finite
+    /// and positive, every frequency positive and strictly increasing.
+    NoiseSpectrumScan,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(test)]
-    pub(super) const ALL: [Self; 12] = [
+    pub(super) const ALL: [Self; 14] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -65,6 +72,8 @@ impl DatasetWalk {
         Self::WaveEnvelope,
         Self::EyeRaster,
         Self::TableCursorScan,
+        Self::BodeMargins,
+        Self::NoiseSpectrumScan,
     ];
 }
 

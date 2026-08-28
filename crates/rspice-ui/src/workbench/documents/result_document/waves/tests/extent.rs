@@ -6,8 +6,8 @@
 //! resolved part of their correctness: an extent taken before the reader's
 //! visibility overrides describes a strip nobody is looking at.
 
-use super::*;
 use super::super::super::frame_work::{DatasetWalk, WorkCounts};
+use super::*;
 
 /// The extent is resolved while the model is built now, so it has to be the
 /// same answer the per-frame walk gave: the axis, the overview lane and every
@@ -286,7 +286,12 @@ fn each_pane_of_a_two_unit_strip_keeps_its_own_envelope() {
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0], "#fff"),
-            WaveformData::new("I(R1)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0e-3, 2.0e-3], "#0af"),
+            WaveformData::new(
+                "I(R1)",
+                vec![0.0, 1.0, 2.0],
+                vec![0.0, 1.0e-3, 2.0e-3],
+                "#0af",
+            ),
         ]),
     );
     let presentation = state.ui.preferences.result_presentation_policy();
@@ -309,12 +314,7 @@ fn each_pane_of_a_two_unit_strip_keeps_its_own_envelope() {
     let first: Vec<_> = panes
         .iter()
         .map(|pane| {
-            super::super::extent::family_envelopes(
-                &mut state.ui.results,
-                generation,
-                model,
-                pane,
-            )
+            super::super::extent::family_envelopes(&mut state.ui.results, generation, model, pane)
         })
         .collect();
 

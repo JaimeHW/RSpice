@@ -140,9 +140,17 @@ pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> boo
 /// produces one — and the sheet behind this offering refuses a failed solve
 /// outright, because margins read off vectors the engine emitted before
 /// giving up are not measurements. Only the raw-curve branch was checking.
+///
+/// The question is one of shape — are the traces a Bode sheet needs present?
+/// — so it is asked of [`crate::state::ac_bode_shape_for_analysis`] and not
+/// of the summary. The summary answers the same shape question by measuring
+/// the response first: a decibel conversion of the whole magnitude vector,
+/// an unwrapped copy of the phase, and every crossing search over both. The
+/// tab strip asks this about every analysis in the run, on every frame,
+/// whichever sheet is open.
 pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
-        && (crate::state::ac_bode_summary_for_analysis(analysis, 0).is_some()
+        && (crate::state::ac_bode_shape_for_analysis(analysis, 0).is_some()
             || (analysis.analysis_type.is_raw_frequency_curve()
                 && analysis.waveforms.iter().any(|waveform| {
                     waveform.visible
@@ -2575,6 +2583,10 @@ pub struct ResultsState {
     /// Memoized dataset content digest per (data version, dataset); see
     /// [`retained_dataset_digest`].
     pub(super) dataset_digests: RefCell<HashMap<(u64, DatasetId), crate::product::ContentDigest>>,
+    /// Memoized ordinary-noise spectrum structure per (data version,
+    /// analysis); see [`bode::noise_spectrum_shape`].
+    noise_spectrum_shapes:
+        RefCell<HashMap<(u64, AnalysisPresentationKey), Option<bode::NoiseSpectrumShape>>>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// Row/column selection for the TABLE viewer.
@@ -3237,6 +3249,9 @@ impl ResultsState {
         self.dataset_digests
             .get_mut()
             .retain(|(_, dataset), _| retained.contains(dataset));
+        self.noise_spectrum_shapes
+            .get_mut()
+            .retain(|(_, analysis), _| live(*analysis));
         self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
         self.favorite_result_artifacts
@@ -3793,6 +3808,12 @@ pub struct BodeDerived {
     pub(crate) mag_index: usize,
     /// DC (lowest-frequency) gain in dB.
     pub(crate) adc_db: Option<f64>,
+    /// Whether the sweep provably starts below every pole, so `adc_db` may be
+    /// presented as the DC gain rather than as `A(f_min)`. Memoized with the
+    /// margins because it is the same measurement of the same curves: read
+    /// off the summary instead, the card resolved the whole response on every
+    /// frame to ask one question the memo beside it already answered.
+    pub(crate) adc_is_dc: bool,
     /// Unity-gain frequency (Hz).
     pub(crate) ugf: Option<f64>,
     /// Phase margin (deg) at the UGF, folded into one turn.
@@ -4619,6 +4640,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         // them answers to an old question.
         results.retained_evidence_validity.get_mut().clear();
         results.dataset_digests.get_mut().clear();
+        results.noise_spectrum_shapes.get_mut().clear();
         results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
@@ -5925,9 +5947,9 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         }
         ResultViewer::NoiseContrib => {
             if active_run.is_some_and(|run| {
-                run.analyses
-                    .iter()
-                    .any(bode::ordinary_noise_spectrum_is_renderable)
+                run.analyses.iter().any(|analysis| {
+                    bode::ordinary_noise_spectrum_is_renderable_in(state, run, analysis)
+                })
             }) {
                 ViewerAvailability::available("A retained ordinary-noise spectrum is available")
             } else {

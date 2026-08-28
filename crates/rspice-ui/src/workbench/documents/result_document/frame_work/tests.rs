@@ -16,19 +16,42 @@ use super::{DatasetWalk, FrameSampleRead, WorkCounts};
 // Results workspace's own surfaces with the session type that workspace
 // already holds, and does not reach for the session aggregate on its own.
 use super::super::{
-    AppState, ResultViewer, eye, manifest, op_inspector, optimization, sensitivity, soa, table,
-    waves,
+    AppState, ResultViewer, bode, events, eye, fft, manifest, noise_contrib, nyquist, op_inspector,
+    optimization, sensitivity, soa, table, waves,
 };
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType, DcOpResult,
-    OperatingPointValue, SimulationRun, SoaEvaluationEvidence, SoaParameterEvidence,
-    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence, WaveformData,
+    DigitalEventPointEvidence, DigitalEventTraceEvidence, OperatingPointValue, SimulationRun,
+    SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+    SoaViolationSeverityEvidence, WaveformData,
 };
 
 /// Retained samples per transient waveform.
 const TRANSIENT_SAMPLES: usize = 250_000;
-/// Transient waveforms; the product of the two is the headline dataset size.
+/// Transient node-voltage waveforms; the product of the two is the headline
+/// dataset size.
 const TRANSIENT_TRACES: usize = 4;
+/// Transient branch-current waveforms.
+///
+/// Volts and amps do not share a Y scale, so a strip carrying both is a
+/// two-pane strip — the ordinary shape of a probed circuit, and the shape a
+/// single-slot per-strip memo cannot serve.
+const TRANSIENT_CURRENT_TRACES: usize = 2;
+/// Retained points in the frequency response.
+const AC_POINTS: usize = 40_000;
+/// Retained points in each ordinary-noise spectrum.
+const NOISE_POINTS: usize = 20_000;
+/// Retained noise spectra: input-referred, output-referred, and per-device
+/// contributors.
+const NOISE_TRACES: usize = 6;
+/// Committed XSPICE event nodes on the transient.
+const EVENT_NODES: usize = 8;
+/// Committed events on each event node.
+const EVENTS_PER_NODE: usize = 2_000;
+/// Time-domain samples the fixture's spectrum is transformed from.
+const FFT_SAMPLES: usize = 16_384;
+/// Retained points on the loop-gain locus.
+const NYQUIST_POINTS: usize = 20_000;
 /// Retained node-voltage rows on the operating point.
 const OP_NODES: usize = 20_000;
 /// Retained per-device rows on the operating point.
@@ -55,7 +78,7 @@ fn transient_analysis() -> AnalysisResult {
     let x: Vec<f64> = (0..TRANSIENT_SAMPLES)
         .map(|index| index as f64 * 1.0e-9)
         .collect();
-    let waveforms = (0..TRANSIENT_TRACES)
+    let mut waveforms: Vec<WaveformData> = (0..TRANSIENT_TRACES)
         .map(|trace| {
             let y: Vec<f64> = (0..TRANSIENT_SAMPLES)
                 .map(|index| ((index + trace) as f64 * 1.0e-3).sin())
@@ -63,7 +86,97 @@ fn transient_analysis() -> AnalysisResult {
             WaveformData::new(format!("V(n{trace})"), x.clone(), y, "#00aaff")
         })
         .collect();
-    AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(waveforms)
+    waveforms.extend((0..TRANSIENT_CURRENT_TRACES).map(|trace| {
+        let y: Vec<f64> = (0..TRANSIENT_SAMPLES)
+            .map(|index| ((index + trace) as f64 * 1.0e-3).cos() * 1.0e-3)
+            .collect();
+        WaveformData::new(format!("I(R{trace})"), x.clone(), y, "#ffbd2e")
+    }));
+
+    // The event history is retained evidence of its own — the sparse
+    // schedule the event solver accepted, not the analog timestep grid — so
+    // the EVENTS sheet reads it off the same transient the waves do.
+    let digital_traces = (0..EVENT_NODES)
+        .map(|node| DigitalEventTraceEvidence {
+            node_name: format!("d{node}"),
+            points: (0..EVENTS_PER_NODE)
+                .map(|index| DigitalEventPointEvidence {
+                    time_s: index as f64 * 1.0e-7,
+                    value_code: ((index + node) % 2) as u8,
+                })
+                .collect(),
+        })
+        .collect();
+
+    AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+        .with_waveforms(waveforms)
+        .with_result_payload(AnalysisResultPayload::TransientEvents {
+            digital_traces,
+            real_traces: Vec::new(),
+        })
+}
+
+/// A decade-swept frequency response with a magnitude/phase pair.
+///
+/// The Bode sheet, its stability card and the Bode tab's own availability
+/// gate all read this; the gate reads it for every analysis in the run, on
+/// every frame, whichever sheet is open.
+fn ac_analysis() -> AnalysisResult {
+    let frequency: Vec<f64> = (0..AC_POINTS)
+        .map(|index| 10f64.powf(index as f64 * 7.0 / AC_POINTS as f64))
+        .collect();
+    // A two-pole loop: 60 dB at DC, poles at 10 Hz and 100 kHz.
+    let magnitude: Vec<f64> = frequency
+        .iter()
+        .map(|f| 1_000.0 / ((1.0 + (f / 10.0).powi(2)).sqrt() * (1.0 + (f / 1.0e5).powi(2)).sqrt()))
+        .collect();
+    let phase: Vec<f64> = frequency
+        .iter()
+        .map(|f| -(f / 10.0).atan().to_degrees() - (f / 1.0e5).atan().to_degrees())
+        .collect();
+    AnalysisResult::new(6, AnalysisType::Ac, "AC").with_waveforms(vec![
+        WaveformData::new("|V(out)|", frequency.clone(), magnitude, "#00aaff"),
+        WaveformData::new("phase(V(out))", frequency, phase, "#ffbd2e"),
+    ])
+}
+
+/// Input- and output-referred noise densities plus per-device contributors.
+///
+/// Every one of them is verified sample by sample before the noise sheet or
+/// the noise tab will speak for it.
+fn noise_analysis() -> AnalysisResult {
+    let frequency: Vec<f64> = (0..NOISE_POINTS)
+        .map(|index| 10f64.powf(index as f64 * 6.0 / NOISE_POINTS as f64))
+        .collect();
+    let density = |scale: f64| -> Vec<f64> {
+        frequency
+            .iter()
+            .map(|f| scale * (1.0e-18 + 1.0e-15 / f))
+            .collect()
+    };
+    let mut waveforms = vec![
+        WaveformData::new(
+            "inoise_spectrum",
+            frequency.clone(),
+            density(0.5),
+            "#00aaff",
+        ),
+        WaveformData::new(
+            "onoise_spectrum",
+            frequency.clone(),
+            density(1.0),
+            "#ffbd2e",
+        ),
+    ];
+    waveforms.extend((0..NOISE_TRACES - 2).map(|device| {
+        WaveformData::new(
+            format!("noise(r{device})"),
+            frequency.clone(),
+            density(0.1 * (device as f64 + 1.0)),
+            "#7f8c98",
+        )
+    }));
+    AnalysisResult::new(7, AnalysisType::Noise, "NOISE").with_waveforms(waveforms)
 }
 
 fn operating_point_analysis() -> AnalysisResult {
@@ -202,6 +315,8 @@ fn large_state() -> AppState {
     run.add_analysis(soa_analysis());
     run.add_analysis(sensitivity_analysis());
     run.add_analysis(optimization_analysis());
+    run.add_analysis(ac_analysis());
+    run.add_analysis(noise_analysis());
     state.simulation.runs = vec![run];
     assert!(state.simulation.select_run(0));
 
@@ -216,6 +331,51 @@ fn large_state() -> AppState {
         eye.add_trace(crate::analysis::eye_diagram::EyeTrace::new(time, amplitude));
     }
     state.analysis.eye_diagram_state.load_data(eye);
+
+    let samples: Vec<f64> = (0..FFT_SAMPLES)
+        .map(|index| {
+            let t = index as f64 / FFT_SAMPLES as f64;
+            (2.0 * std::f64::consts::PI * 64.0 * t).sin()
+                + 0.1 * (2.0 * std::f64::consts::PI * 192.0 * t).sin()
+        })
+        .collect();
+    state
+        .analysis
+        .fft_state
+        .load_data(crate::analysis::fft::FftData::from_time_domain(
+            "V(n0)",
+            &samples,
+            FFT_SAMPLES as f64,
+            crate::analysis::fft::WindowFunction::Hanning,
+        ));
+
+    let (frequency, real, imaginary) = (0..NYQUIST_POINTS).fold(
+        (Vec::new(), Vec::new(), Vec::new()),
+        |(mut frequency, mut real, mut imaginary), index| {
+            let f = 10f64.powf(index as f64 * 6.0 / NYQUIST_POINTS as f64);
+            let (magnitude, phase) = (
+                1_000.0 / (1.0 + (f / 10.0).powi(2)).sqrt(),
+                -(f / 10.0).atan(),
+            );
+            frequency.push(f);
+            real.push(magnitude * phase.cos());
+            imaginary.push(magnitude * phase.sin());
+            (frequency, real, imaginary)
+        },
+    );
+    state
+        .analysis
+        .nyquist_state
+        .load_data(crate::analysis::nyquist::NyquistData::from_arrays(
+            "Loop gain",
+            &frequency,
+            &real,
+            &imaginary,
+        ));
+
+    // The reader has the envelope on: the drawn panes build it, and so does
+    // the sheet bar's own gate before them.
+    state.ui.results.show_family_envelope = true;
     state
 }
 
@@ -279,6 +439,11 @@ fn surfaces() -> Vec<(&'static str, ResultViewer)> {
         ("Eye", ResultViewer::Eye),
         ("Sensitivity", ResultViewer::Contribution),
         ("Optimization", ResultViewer::Optimization),
+        ("Bode", ResultViewer::Bode),
+        ("Noise", ResultViewer::NoiseContrib),
+        ("Nyquist", ResultViewer::Nyquist),
+        ("FFT", ResultViewer::Fft),
+        ("Events", ResultViewer::Events),
     ]
 }
 
@@ -295,6 +460,20 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
     {
         let _ = super::super::viewer_availability(state, candidate);
     }
+    // The wave instrument's sheet bar decides on every frame whether to offer
+    // the family-envelope control, and deciding means building the envelope
+    // for the active pane. It runs before the panes do, and asks the same
+    // memo they are about to ask with a different key.
+    if matches!(
+        viewer,
+        ResultViewer::Waves
+            | ResultViewer::DcSweep
+            | ResultViewer::Bode
+            | ResultViewer::NoiseContrib
+    ) {
+        let tokens = super::super::Tokens::get(ui.ctx());
+        let _ = waves::family_envelope_available(state, &tokens);
+    }
     match viewer {
         ResultViewer::Manifest => manifest::show(ui, state),
         ResultViewer::Op => op_inspector::show(ui, state),
@@ -310,6 +489,26 @@ fn show_surface(viewer: ResultViewer, ui: &mut egui::Ui, state: &mut AppState) {
             optimization::show(ui, state);
             optimization::right_panel(ui, state);
         }
+        ResultViewer::Bode => {
+            waves::show_bode(ui, state);
+            bode::right_panel(ui, state);
+        }
+        ResultViewer::NoiseContrib => {
+            waves::show_noise(ui, state);
+            noise_contrib::right_panel(ui, state);
+        }
+        ResultViewer::Nyquist => {
+            nyquist::show(ui, state);
+            nyquist::right_panel(ui, state);
+        }
+        ResultViewer::Fft => {
+            fft::show(ui, state);
+            fft::right_panel(ui, state);
+        }
+        ResultViewer::Events => {
+            events::show(ui, state);
+            events::right_panel(ui, state);
+        }
         other => panic!("{other:?} is not a measured surface"),
     }
 }
@@ -321,6 +520,10 @@ fn state_for(viewer: ResultViewer) -> AppState {
         ResultViewer::Soa => select_analysis(&mut state, AnalysisType::Soa),
         ResultViewer::Contribution => select_analysis(&mut state, AnalysisType::Sensitivity),
         ResultViewer::Optimization => select_analysis(&mut state, AnalysisType::Optimization),
+        ResultViewer::Bode | ResultViewer::Nyquist => {
+            select_analysis(&mut state, AnalysisType::Ac);
+        }
+        ResultViewer::NoiseContrib => select_analysis(&mut state, AnalysisType::Noise),
         _ => select_analysis(&mut state, AnalysisType::Transient),
     }
     if viewer == ResultViewer::Waves {

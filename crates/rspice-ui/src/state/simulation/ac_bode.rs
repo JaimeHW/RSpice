@@ -80,95 +80,158 @@ pub struct AcBodeSummary {
     pub phase_index: Option<usize>,
 }
 
-pub fn ac_bode_summary_for_run(run: &SimulationRun) -> Option<AcBodeSummary> {
-    let (analysis_index, analysis) = run.analyses.iter().enumerate().find(|(_, analysis)| {
-        analysis.analysis_type.is_bode_response() && !analysis.waveforms.is_empty()
-    })?;
-    ac_bode_summary_for_analysis(analysis, analysis_index)
+/// Which retained traces a frequency response is made of, and nothing more.
+///
+/// The shape question — is there a magnitude trace with a phase trace that
+/// matches it? — is answered from names and indices alone, in time
+/// proportional to the number of traces rather than the number of samples.
+/// [`AcBodeSummary`] is the shape plus the measurement: a decibel conversion
+/// of the whole magnitude vector, an unwrapped copy of the phase, and every
+/// crossing search over both. Asking the shape question through the summary
+/// meant a caller who only wanted to know whether a Bode sheet could be
+/// offered paid for all of it — once per analysis in the run, on every frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcBodeShape {
+    pub signal: String,
+    pub analysis_index: usize,
+    pub mag_index: usize,
+    pub phase_index: Option<usize>,
 }
 
-/// Resolve the frequency response produced by one exact prepared analysis
-/// instance.
+/// The run's normal frequency response: the first one carrying traces.
+fn first_response(run: &SimulationRun) -> Option<(usize, &AnalysisResult)> {
+    run.analyses.iter().enumerate().find(|(_, analysis)| {
+        analysis.analysis_type.is_bode_response() && !analysis.waveforms.is_empty()
+    })
+}
+
+/// The response produced by one exact prepared analysis instance.
 ///
 /// Analysis kind and display label are deliberately not used as identity:
 /// both can be identical when a run contains multiple AC configurations.
-pub fn ac_bode_summary_for_source_instance(
+fn response_by_source_instance(
     run: &SimulationRun,
     source_instance_id: AnalysisInstanceId,
-) -> Option<AcBodeSummary> {
-    let (analysis_index, analysis) = run.analyses.iter().enumerate().find(|(_, analysis)| {
+) -> Option<(usize, &AnalysisResult)> {
+    run.analyses.iter().enumerate().find(|(_, analysis)| {
         analysis
             .provenance
             .as_ref()
             .is_some_and(|provenance| provenance.source_instance_id() == source_instance_id)
-    })?;
-    ac_bode_summary_for_analysis(analysis, analysis_index)
+    })
 }
 
-/// Resolve the frequency response selected in a result browser.
+/// The response a result browser's selection names.
 ///
 /// A selected AC result with current provenance is re-resolved through its
 /// stable prepared-instance identity. Legacy results, which predate that
 /// identity, remain addressable by their run-local index. When the current
 /// selection is not a frequency response, the run's normal response fallback
 /// is retained.
+fn selected_response(
+    run: &SimulationRun,
+    selected_analysis_index: Option<usize>,
+) -> Option<(usize, &AnalysisResult)> {
+    let Some(analysis_index) = selected_analysis_index else {
+        return first_response(run);
+    };
+    let Some(analysis) = run.analyses.get(analysis_index) else {
+        return first_response(run);
+    };
+    if !analysis.analysis_type.is_bode_response() {
+        return first_response(run);
+    }
+    match analysis.provenance.as_ref() {
+        Some(provenance) => response_by_source_instance(run, provenance.source_instance_id()),
+        None => Some((analysis_index, analysis)),
+    }
+}
+
+/// Resolve the frequency response selected in a result browser; see
+/// [`selected_response`].
 pub fn ac_bode_summary_for_selection(
     run: &SimulationRun,
     selected_analysis_index: Option<usize>,
 ) -> Option<AcBodeSummary> {
-    let Some(analysis_index) = selected_analysis_index else {
-        return ac_bode_summary_for_run(run);
-    };
-    let Some(analysis) = run.analyses.get(analysis_index) else {
-        return ac_bode_summary_for_run(run);
-    };
-    if !analysis.analysis_type.is_bode_response() {
-        return ac_bode_summary_for_run(run);
-    }
+    let (analysis_index, analysis) = selected_response(run, selected_analysis_index)?;
+    ac_bode_summary_for_analysis(analysis, analysis_index)
+}
 
-    match analysis.provenance.as_ref() {
-        Some(provenance) => {
-            ac_bode_summary_for_source_instance(run, provenance.source_instance_id())
-        }
-        None => ac_bode_summary_for_analysis(analysis, analysis_index),
+/// The shape of the response a result browser's selection names, without
+/// measuring it; see [`AcBodeShape`].
+pub fn ac_bode_shape_for_selection(
+    run: &SimulationRun,
+    selected_analysis_index: Option<usize>,
+) -> Option<AcBodeShape> {
+    let (analysis_index, analysis) = selected_response(run, selected_analysis_index)?;
+    ac_bode_shape_for_analysis(analysis, analysis_index)
+}
+
+/// Which of one analysis' retained traces form a frequency response.
+///
+/// No sample is read: the answer is the magnitude trace this module would
+/// measure and the phase trace named after it, if the run retained one.
+pub fn ac_bode_shape_for_analysis(
+    analysis: &AnalysisResult,
+    analysis_index: usize,
+) -> Option<AcBodeShape> {
+    if !analysis.analysis_type.is_bode_response() || analysis.waveforms.is_empty() {
+        return None;
     }
+    let (signal, mag_index, phase_index) = if analysis.analysis_type == AnalysisType::Stb {
+        let mag_index = analysis
+            .waveforms
+            .iter()
+            .position(|waveform| waveform.name == "Loop Gain (dB)")?;
+        let phase_index = analysis
+            .waveforms
+            .iter()
+            .position(|waveform| waveform.name == "Loop Phase (deg)");
+        ("Loop Gain".to_owned(), mag_index, phase_index)
+    } else {
+        let (mag_index, mag) = select_magnitude_trace(&analysis.waveforms)?;
+        let signal = mag
+            .name
+            .trim_start_matches('|')
+            .trim_end_matches('|')
+            .to_owned();
+        let phase_name = format!("phase({signal})");
+        let phase_index = analysis
+            .waveforms
+            .iter()
+            .position(|waveform| waveform.name == phase_name);
+        (signal, mag_index, phase_index)
+    };
+    Some(AcBodeShape {
+        signal,
+        analysis_index,
+        mag_index,
+        phase_index,
+    })
 }
 
 pub fn ac_bode_summary_for_analysis(
     analysis: &AnalysisResult,
     analysis_index: usize,
 ) -> Option<AcBodeSummary> {
-    if !analysis.analysis_type.is_bode_response() || analysis.waveforms.is_empty() {
-        return None;
-    }
+    let AcBodeShape {
+        signal,
+        analysis_index,
+        mag_index,
+        phase_index,
+    } = ac_bode_shape_for_analysis(analysis, analysis_index)?;
 
-    let (mag_index, mag, signal, gain_db, phase) = if analysis.analysis_type == AnalysisType::Stb {
-        let (mag_index, mag) = analysis
-            .waveforms
-            .iter()
-            .enumerate()
-            .find(|(_, waveform)| waveform.name == "Loop Gain (dB)")?;
-        let phase = analysis
-            .waveforms
-            .iter()
-            .enumerate()
-            .find(|(_, waveform)| waveform.name == "Loop Phase (deg)");
-        (mag_index, mag, "Loop Gain", Arc::clone(&mag.y), phase)
+    let mag = analysis.waveforms.get(mag_index)?;
+    // STB retains decibels; every other response retains linear magnitude.
+    let gain_db = if analysis.analysis_type == AnalysisType::Stb {
+        Arc::clone(&mag.y)
     } else {
-        let (mag_index, mag) = select_magnitude_trace(&analysis.waveforms)?;
-        let signal = mag.name.trim_start_matches('|').trim_end_matches('|');
-        let phase_name = format!("phase({signal})");
-        let phase = analysis
-            .waveforms
-            .iter()
-            .enumerate()
-            .find(|(_, waveform)| waveform.name == phase_name);
-        (mag_index, mag, signal, magnitude_to_db(&mag.y), phase)
+        magnitude_to_db(&mag.y)
     };
-
     let frequency = Arc::clone(&mag.x);
-    let phase_deg = phase.map(|(_, waveform)| Arc::clone(&waveform.y));
-    let phase_index = phase.map(|(index, _)| index);
+    let phase_deg = phase_index
+        .and_then(|index| analysis.waveforms.get(index))
+        .map(|waveform| Arc::clone(&waveform.y));
     let metrics = metrics_from_curves(
         frequency.as_slice(),
         gain_db.as_slice(),
@@ -176,7 +239,7 @@ pub fn ac_bode_summary_for_analysis(
     );
 
     Some(AcBodeSummary {
-        signal: signal.to_owned(),
+        signal,
         frequency,
         gain_db,
         phase_deg,
@@ -1259,7 +1322,7 @@ mod tests {
     }
 
     #[test]
-    fn ac_summary_for_run_uses_first_ac_analysis_with_waveforms() {
+    fn an_unbound_selection_falls_back_to_the_first_ac_analysis_with_waveforms() {
         let frequency = [1.0, 10.0];
         let magnitude = [10.0, 1.0];
         let mut run = SimulationRun::new(7);
@@ -1268,14 +1331,14 @@ mod tests {
             "|V(out)|", &frequency, &magnitude, true,
         )]));
 
-        let summary = ac_bode_summary_for_run(&run).expect("AC summary");
+        let summary = ac_bode_summary_for_selection(&run, None).expect("AC summary");
 
         assert_eq!(summary.analysis_index, 1);
         assert_eq!(summary.signal, "V(out)");
     }
 
     #[test]
-    fn ac_summary_for_run_does_not_skip_unusable_first_ac_analysis() {
+    fn the_fallback_does_not_skip_an_unusable_first_ac_analysis() {
         let frequency = [1.0, 10.0];
         let magnitude = [10.0, 1.0];
         let mut run = SimulationRun::new(7);
@@ -1289,7 +1352,7 @@ mod tests {
             "|V(out)|", &frequency, &magnitude, true,
         )]));
 
-        assert_eq!(ac_bode_summary_for_run(&run), None);
+        assert_eq!(ac_bode_summary_for_selection(&run, None), None);
     }
 
     #[test]
@@ -1329,8 +1392,11 @@ mod tests {
             ),
         );
 
-        let first = ac_bode_summary_for_source_instance(&run, first_id).expect("first AC");
-        let second = ac_bode_summary_for_source_instance(&run, second_id).expect("second AC");
+        let (first_index, first) = response_by_source_instance(&run, first_id).expect("first AC");
+        let first = ac_bode_summary_for_analysis(first, first_index).expect("first summary");
+        let (second_index, second) =
+            response_by_source_instance(&run, second_id).expect("second AC");
+        let second = ac_bode_summary_for_analysis(second, second_index).expect("second summary");
         assert_eq!(
             (first.analysis_index, first.signal.as_str()),
             (0, "V(low_band)")

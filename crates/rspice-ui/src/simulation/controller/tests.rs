@@ -308,7 +308,10 @@ fn sealing_a_failure_declares_a_new_dataset_generation() {
         None
     );
     assert_eq!(state.simulation.data_version, before);
-    assert_eq!(controller.seal_failed_analysis(&mut state, None, None), None);
+    assert_eq!(
+        controller.seal_failed_analysis(&mut state, None, None),
+        None
+    );
     assert_eq!(state.simulation.data_version, before);
 }
 

@@ -171,8 +171,9 @@ pub use simulation::{
     SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
     SpecificationVerdict, SpecificationVerdictStatus, TransferFunctionAccuracyEvidence,
     TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_summary_for_analysis,
-    ac_bode_summary_for_selection, sealed_model_sources,
+    TransferFunctionScalarEvidence, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    sealed_model_sources,
 };
 pub use symbol::{
     MAX_SYMBOL_DOCUMENT_BYTES, MAX_SYMBOL_PIN_NAME_BYTES, MAX_SYMBOL_TEXT_BYTES, PinFindingKind,
