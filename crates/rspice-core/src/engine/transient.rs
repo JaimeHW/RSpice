@@ -8078,13 +8078,28 @@ mod tests {
     }
 
     #[test]
-    fn xyce_preserves_order_on_breakpoint_landing_then_restarts_after_acceptance() {
+    fn ngspice_and_xyce_preserve_breakpoint_landing_order_then_restart_after_acceptance() {
         assert!(!Engine::breakpoint_landing_forces_order_one(
             SpiceDialect::Xyce
         ));
-        assert!(Engine::breakpoint_landing_forces_order_one(
+        assert!(!Engine::breakpoint_landing_forces_order_one(
             SpiceDialect::Ngspice
         ));
+        assert!(Engine::breakpoint_landing_forces_order_one(
+            SpiceDialect::BestAvailable
+        ));
+
+        let landing_order = Engine::step_trapezoidal_order(
+            IntegrationMethod::Trapezoidal,
+            2,
+            Engine::breakpoint_landing_forces_order_one(SpiceDialect::Ngspice),
+        );
+        assert_eq!(landing_order, 2);
+
+        let leaving_order =
+            Engine::next_trapezoidal_order_after_accepted_step(landing_order, true, true);
+        assert_eq!(leaving_order, 1);
+
         assert_eq!(
             Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, false),
             2

@@ -650,9 +650,12 @@ impl Engine {
         }
     }
 
+    /// Whether clipping a proposed interval to a breakpoint changes the order
+    /// used to solve that landing interval. Ngspice and Xyce preserve the
+    /// current order and reinitialize only after accepting the breakpoint.
     #[inline]
     pub(super) fn breakpoint_landing_forces_order_one(dialect: SpiceDialect) -> bool {
-        dialect != SpiceDialect::Xyce
+        !matches!(dialect, SpiceDialect::Xyce | SpiceDialect::Ngspice)
     }
 
     #[inline]
