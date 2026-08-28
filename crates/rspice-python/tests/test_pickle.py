@@ -474,6 +474,9 @@ class TestPeriodicResults:
             "iterations",
             "residual_norm",
             "is_stable",
+            "stability_verdict",
+            "floquet_orbit_kind",
+            "trivial_floquet_multiplier_index",
             "period_detected",
             "num_nodes",
             "num_points",
@@ -481,7 +484,30 @@ class TestPeriodicResults:
             "node_names",
         ):
             assert getattr(restored, name) == getattr(original, name), name
+        assert restored.floquet_evidence.kind == original.floquet_evidence.kind
+        assert (
+            restored.floquet_evidence.is_qualified
+            == original.floquet_evidence.is_qualified
+        )
+        original_certificate = original.floquet_evidence.certificate
+        restored_certificate = restored.floquet_evidence.certificate
+        if original_certificate is None:
+            assert restored_certificate is None
+        else:
+            assert restored_certificate is not None
+            for name in (
+                "problem_order",
+                "max_backward_error",
+                "qualification_tolerance",
+                "is_strictly_qualified",
+            ):
+                assert getattr(restored_certificate, name) == getattr(
+                    original_certificate, name
+                )
         np.testing.assert_array_equal(restored.time, original.time)
+        np.testing.assert_array_equal(
+            restored.floquet_multipliers, original.floquet_multipliers
+        )
         np.testing.assert_array_equal(
             restored.harmonic_frequencies, original.harmonic_frequencies
         )
@@ -499,7 +525,10 @@ class TestPeriodicResults:
         assert restored.peak_to_peak("out") == original.peak_to_peak("out")
         assert repr(restored) == repr(original)
 
-    def test_pss_floquet_multipliers_travel(self):
+    @pytest.mark.parametrize("stored_is_stable", [False, True])
+    def test_legacy_pss_floquet_multipliers_migrate_indeterminate(
+        self, stored_is_stable
+    ):
         """No driven solve fills this field, so exercise it directly.
 
         `PssResult.floquet_multipliers` is populated only by the oscillator
@@ -512,9 +541,15 @@ class TestPeriodicResults:
             [[0.0, 1.0]],
             ["OUT"],
             multipliers,
-            (5, 3, 1e-12, 1e-6, True),
+            (5, 3, 1e-12, 1e-6, stored_is_stable),
         )
         assert len(original.floquet_multipliers) == 3
+        assert original.floquet_evidence.kind == "legacy_unknown"
+        assert original.floquet_evidence.certificate is None
+        assert original.floquet_orbit_kind == "autonomous"
+        assert original.trivial_floquet_multiplier_index is None
+        assert original.stability_verdict == "indeterminate"
+        assert original.is_stable is None
 
         restored = round_trip(original)
         np.testing.assert_array_equal(
@@ -523,7 +558,140 @@ class TestPeriodicResults:
         )
         assert restored.period_detected is True
         assert restored.num_harmonics == 5
+        assert restored.floquet_evidence.kind == "legacy_unknown"
+        assert restored.stability_verdict == "indeterminate"
+        assert restored.is_stable is None
         np.testing.assert_array_equal(restored.voltage_waveform("OUT"), [0.0, 1.0])
+
+    @pytest.mark.parametrize(
+        ("multipliers", "evidence", "period_detected", "orbit_kind", "trivial", "verdict", "is_stable"),
+        [
+            ([], ("no_dynamic_modes", None), False, "driven", None, "stable", True),
+            ([(0.5, 0.0)], "qualified", False, "driven", None, "stable", True),
+            ([(1.1, 0.0)], "qualified", False, "driven", None, "unstable", False),
+            ([(1.0, 0.0)], "qualified", False, "driven", None, "marginal", None),
+        ],
+    )
+    def test_current_pss_floquet_contract_round_trips_four_state_verdict(
+        self,
+        multipliers,
+        evidence,
+        period_detected,
+        orbit_kind,
+        trivial,
+        verdict,
+        is_stable,
+    ):
+        if evidence == "qualified":
+            order = len(multipliers)
+            tolerance = 128.0 * max(order, 1) * np.finfo(np.float64).eps
+            evidence = ("qualified", (order, 0.0, tolerance))
+        original = rspice.PssResult._unpickle(
+            (1e-6, 1e6, 3, 1e-12, period_detected),
+            [0.0, 5e-7],
+            [[0.0, 1.0]],
+            ["OUT"],
+            multipliers,
+            (5, 3, 1e-12, 1e-6, not bool(is_stable)),
+            (1, evidence, orbit_kind, trivial),
+        )
+        assert original.stability_verdict == verdict
+        assert original.is_stable is is_stable
+        assert original.floquet_evidence.is_qualified
+
+        restored = round_trip(original)
+        assert restored.stability_verdict == verdict
+        assert restored.is_stable is is_stable
+        assert restored.floquet_evidence.kind == original.floquet_evidence.kind
+        assert restored.floquet_orbit_kind == orbit_kind
+        assert restored.trivial_floquet_multiplier_index == trivial
+        np.testing.assert_array_equal(
+            restored.floquet_multipliers,
+            np.array([complex(real, imag) for real, imag in multipliers]),
+        )
+
+    def test_current_autonomous_pss_preserves_qualified_trivial_mode(self):
+        multipliers = [(1.0, 0.0), (0.25, -0.5), (-0.125, 0.75)]
+        tolerance = 128.0 * len(multipliers) * np.finfo(np.float64).eps
+        original = rspice.PssResult._unpickle(
+            (1e-6, 1e6, 3, 1e-12, True),
+            [0.0, 5e-7],
+            [[0.0, 1.0]],
+            ["OUT"],
+            multipliers,
+            (5, 3, 1e-12, 1e-6, False),
+            (
+                1,
+                ("qualified", (len(multipliers), 0.0, tolerance)),
+                "autonomous",
+                0,
+            ),
+        )
+        assert original.floquet_evidence.kind == "qualified"
+        certificate = original.floquet_evidence.certificate
+        assert certificate is not None
+        assert certificate.problem_order == len(multipliers)
+        assert certificate.max_backward_error == 0.0
+        assert certificate.qualification_tolerance == tolerance
+        assert certificate.is_strictly_qualified
+        assert original.floquet_orbit_kind == "autonomous"
+        assert original.trivial_floquet_multiplier_index == 0
+        assert original.stability_verdict == "stable"
+        assert original.is_stable is True
+
+        restored = round_trip(original)
+        assert restored.floquet_evidence.certificate.problem_order == len(multipliers)
+        assert restored.trivial_floquet_multiplier_index == 0
+        assert restored.stability_verdict == "stable"
+
+    @pytest.mark.parametrize("evidence_kind", ["not_computed", "legacy_unknown"])
+    def test_current_uncertified_pss_state_round_trips_indeterminate(
+        self, evidence_kind
+    ):
+        original = rspice.PssResult._unpickle(
+            (1e-6, 1e6, 3, 1e-12, False),
+            [0.0, 5e-7],
+            [[0.0, 1.0]],
+            ["OUT"],
+            [],
+            (5, 3, 1e-12, 1e-6, True),
+            (1, (evidence_kind, None), "driven", None),
+        )
+        assert original.floquet_evidence.kind == evidence_kind
+        assert not original.floquet_evidence.is_qualified
+        assert original.stability_verdict == "indeterminate"
+        assert original.is_stable is None
+
+        restored = round_trip(original)
+        assert restored.floquet_evidence.kind == evidence_kind
+        assert restored.stability_verdict == "indeterminate"
+        assert restored.is_stable is None
+
+    @pytest.mark.parametrize(
+        ("multipliers", "period_detected", "contract", "message"),
+        [
+            ([(0.5, 0.0)], False, (2, ("legacy_unknown", None), "driven", None), "version"),
+            ([(0.5, 0.0)], False, (1, ("qualified", (2, 0.0, 256.0 * np.finfo(np.float64).eps)), "driven", None), "cardinality"),
+            ([(0.5, 0.0)], False, (1, ("qualified", (1, 0.0, 256.0 * np.finfo(np.float64).eps)), "driven", None), "certificate"),
+            ([(0.5, 0.0)], False, (1, ("no_dynamic_modes", None), "driven", None), "cardinality"),
+            ([(0.5, 0.0)], False, (1, ("qualified", (1, 0.0, 128.0 * np.finfo(np.float64).eps)), "driven", 0), "orbit"),
+            ([(0.5, 0.0)], True, (1, ("qualified", (1, 0.0, 128.0 * np.finfo(np.float64).eps)), "autonomous", 0), "orbit"),
+            ([(1.0, 0.0)], True, (1, ("qualified", (1, 0.0, 128.0 * np.finfo(np.float64).eps)), "driven", None), "orbit"),
+        ],
+    )
+    def test_current_pss_pickle_rejects_invalid_floquet_contracts(
+        self, multipliers, period_detected, contract, message
+    ):
+        with pytest.raises(ValueError, match=message):
+            rspice.PssResult._unpickle(
+                (1e-6, 1e6, 3, 1e-12, period_detected),
+                [0.0, 5e-7],
+                [[0.0, 1.0]],
+                ["OUT"],
+                multipliers,
+                (5, 3, 1e-12, 1e-6, True),
+                contract,
+            )
 
     def test_hb_result(self, engine, mixer_netlist):
         original = engine.run_hb(mixer_netlist, RF_FUNDAMENTAL, harmonics=5)

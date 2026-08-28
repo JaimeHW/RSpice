@@ -6,6 +6,216 @@
 
 use super::*;
 
+/// Numerical qualification certificate for one complete Floquet spectrum.
+#[pyclass(name = "FloquetSpectrumCertificate", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyFloquetSpectrumCertificate {
+    #[pyo3(get)]
+    pub problem_order: usize,
+    #[pyo3(get)]
+    pub max_backward_error: f64,
+    #[pyo3(get)]
+    pub qualification_tolerance: f64,
+}
+
+impl PyFloquetSpectrumCertificate {
+    fn from_core(certificate: &rspice_core::analysis::FloquetSpectrumCertificate) -> Self {
+        Self {
+            problem_order: certificate.problem_order,
+            max_backward_error: certificate.max_backward_error,
+            qualification_tolerance: certificate.qualification_tolerance,
+        }
+    }
+
+    fn to_state(&self) -> FloquetSpectrumCertificateState {
+        (
+            self.problem_order,
+            self.max_backward_error,
+            self.qualification_tolerance,
+        )
+    }
+}
+
+#[pymethods]
+impl PyFloquetSpectrumCertificate {
+    /// Whether the certificate satisfies the canonical strict threshold.
+    #[getter]
+    fn is_strictly_qualified(&self) -> bool {
+        rspice_core::analysis::FloquetSpectrumCertificate::new(
+            self.problem_order,
+            self.max_backward_error,
+            self.qualification_tolerance,
+        )
+        .is_some()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "FloquetSpectrumCertificate(order={}, max_backward_error={:.3e}, tolerance={:.3e})",
+            self.problem_order, self.max_backward_error, self.qualification_tolerance,
+        )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        problem_order: usize,
+        max_backward_error: f64,
+        qualification_tolerance: f64,
+    ) -> PyResult<Self> {
+        let certificate = floquet_spectrum_certificate_from_state((
+            problem_order,
+            max_backward_error,
+            qualification_tolerance,
+        ))?;
+        Ok(Self::from_core(&certificate))
+    }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, FloquetSpectrumCertificateState)> {
+        Ok((unpickler::<Self>(py)?, self.to_state()))
+    }
+}
+
+/// Completeness and numerical provenance for the retained Floquet multipliers.
+#[pyclass(name = "FloquetSpectrumEvidence", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyFloquetSpectrumEvidence {
+    #[pyo3(get)]
+    pub kind: String,
+    certificate: Option<PyFloquetSpectrumCertificate>,
+}
+
+impl PyFloquetSpectrumEvidence {
+    fn from_core(evidence: &rspice_core::analysis::FloquetSpectrumEvidence) -> PyResult<Self> {
+        let (kind, certificate) = floquet_spectrum_evidence_state(evidence)?;
+        Ok(Self {
+            kind,
+            certificate: certificate.map(
+                |(problem_order, max_backward_error, qualification_tolerance)| {
+                    PyFloquetSpectrumCertificate {
+                        problem_order,
+                        max_backward_error,
+                        qualification_tolerance,
+                    }
+                },
+            ),
+        })
+    }
+
+    fn to_state(&self) -> FloquetSpectrumEvidenceState {
+        (
+            self.kind.clone(),
+            self.certificate
+                .as_ref()
+                .map(PyFloquetSpectrumCertificate::to_state),
+        )
+    }
+}
+
+#[pymethods]
+impl PyFloquetSpectrumEvidence {
+    #[getter]
+    fn certificate(&self) -> Option<PyFloquetSpectrumCertificate> {
+        self.certificate.clone()
+    }
+
+    #[getter]
+    fn is_qualified(&self) -> bool {
+        matches!(self.kind.as_str(), "qualified" | "no_dynamic_modes")
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "FloquetSpectrumEvidence(kind='{}', certificate={})",
+            self.kind,
+            if self.certificate.is_some() {
+                "present"
+            } else {
+                "None"
+            }
+        )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        kind: String,
+        certificate: Option<FloquetSpectrumCertificateState>,
+    ) -> PyResult<Self> {
+        let evidence = floquet_spectrum_evidence_from_state((kind, certificate))?;
+        Self::from_core(&evidence)
+    }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, FloquetSpectrumEvidenceState)> {
+        Ok((unpickler::<Self>(py)?, self.to_state()))
+    }
+}
+
+fn pss_stability_verdict_label(
+    verdict: rspice_core::analysis::FloquetStabilityVerdict,
+) -> PyResult<&'static str> {
+    use rspice_core::analysis::FloquetStabilityVerdict;
+
+    match verdict {
+        FloquetStabilityVerdict::Stable => Ok("stable"),
+        FloquetStabilityVerdict::Unstable => Ok("unstable"),
+        FloquetStabilityVerdict::Marginal => Ok("marginal"),
+        FloquetStabilityVerdict::Indeterminate => Ok("indeterminate"),
+        _ => Err(crate::errors::value_error(
+            "unsupported Floquet stability verdict".to_string(),
+        )),
+    }
+}
+
+fn validate_pickled_pss_result(result: &rspice_core::analysis::PssResult) -> PyResult<()> {
+    if !result.period.is_finite()
+        || !result.frequency.is_finite()
+        || !result.residual_norm.is_finite()
+        || result.time.iter().any(|value| !value.is_finite())
+        || result
+            .floquet_multipliers
+            .iter()
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(crate::errors::value_error(
+            "pickled PSS result contains non-finite values".to_string(),
+        ));
+    }
+    if result.node_names.len() != result.waveforms.len()
+        || result
+            .waveforms
+            .iter()
+            .any(|waveform| waveform.values.len() != result.time.len())
+    {
+        return Err(crate::errors::value_error(
+            "pickled PSS result has inconsistent node, waveform, or time cardinality".to_string(),
+        ));
+    }
+    if result
+        .waveforms
+        .iter()
+        .flat_map(|waveform| &waveform.values)
+        .any(|value| !value.is_finite())
+    {
+        return Err(crate::errors::value_error(
+            "pickled PSS result contains a non-finite waveform value".to_string(),
+        ));
+    }
+    if !result.has_consistent_floquet_contract() {
+        return Err(crate::errors::value_error(
+            "pickled PSS result has inconsistent Floquet evidence, cardinality, or orbit policy"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Periodic steady-state waveform and convergence diagnostics.
 #[pyclass(name = "PssResult", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
@@ -19,8 +229,6 @@ pub struct PyPssResult {
     pub residual_norm: f64,
     #[pyo3(get)]
     pub period: f64,
-    #[pyo3(get)]
-    pub is_stable: bool,
 }
 
 impl PyPssResult {
@@ -34,8 +242,16 @@ impl PyPssResult {
             iterations: result.iterations,
             residual_norm: result.final_residual,
             period: result.period,
-            is_stable: result.is_stable,
         }
+    }
+
+    fn floquet_contract_state(&self) -> PyResult<PssFloquetContractState> {
+        Ok((
+            PSS_FLOQUET_CONTRACT_STATE_VERSION,
+            floquet_spectrum_evidence_state(&self.inner.floquet_evidence)?,
+            floquet_orbit_kind_state(self.inner.floquet_orbit_kind)?,
+            self.inner.trivial_floquet_multiplier_index,
+        ))
     }
 
     fn waveform_index(&self, node: &NodeIdentifier) -> PyResult<Option<usize>> {
@@ -106,6 +322,46 @@ impl PyPssResult {
         py: Python<'py>,
     ) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
         self.inner.floquet_multipliers.to_pyarray(py)
+    }
+
+    /// Completeness and numerical evidence for the full multiplier vector.
+    #[getter]
+    fn floquet_evidence(&self) -> PyResult<PyFloquetSpectrumEvidence> {
+        PyFloquetSpectrumEvidence::from_core(&self.inner.floquet_evidence)
+    }
+
+    /// Periodic-orbit policy used to interpret a unity multiplier.
+    #[getter]
+    fn floquet_orbit_kind(&self) -> PyResult<String> {
+        floquet_orbit_kind_state(self.inner.floquet_orbit_kind)
+    }
+
+    /// Qualified autonomous phase-mode index, when one was selected.
+    #[getter]
+    fn trivial_floquet_multiplier_index(&self) -> Option<usize> {
+        self.inner.trivial_floquet_multiplier_index
+    }
+
+    /// Evidence-aware four-state Floquet stability verdict.
+    #[getter]
+    fn stability_verdict(&self) -> PyResult<String> {
+        Ok(pss_stability_verdict_label(self.inner.stability_verdict())?.to_string())
+    }
+
+    /// Stable/unstable convenience value. Marginal and indeterminate results
+    /// deliberately remain unknown rather than collapsing to false.
+    #[getter]
+    fn is_stable(&self) -> PyResult<Option<bool>> {
+        use rspice_core::analysis::FloquetStabilityVerdict;
+
+        match self.inner.stability_verdict() {
+            FloquetStabilityVerdict::Stable => Ok(Some(true)),
+            FloquetStabilityVerdict::Unstable => Ok(Some(false)),
+            FloquetStabilityVerdict::Marginal | FloquetStabilityVerdict::Indeterminate => Ok(None),
+            _ => Err(crate::errors::value_error(
+                "unsupported Floquet stability verdict".to_string(),
+            )),
+        }
     }
 
     #[getter]
@@ -260,6 +516,7 @@ impl PyPssResult {
     /// The orbit group is the converged periodic solution; the diagnostics
     /// group is what the shooting run reported around it.
     #[staticmethod]
+    #[pyo3(signature = (orbit, time, waveforms, node_names, floquet_multipliers, diagnostics, floquet_contract=None))]
     fn _unpickle(
         orbit: (f64, f64, usize, f64, bool),
         time: Vec<f64>,
@@ -267,30 +524,60 @@ impl PyPssResult {
         node_names: Vec<String>,
         floquet_multipliers: Vec<(f64, f64)>,
         diagnostics: (usize, usize, f64, f64, bool),
-    ) -> Self {
+        floquet_contract: Option<PssFloquetContractState>,
+    ) -> PyResult<Self> {
         let (period, frequency, iterations, residual_norm, period_detected) = orbit;
-        let (num_harmonics, run_iterations, run_residual, run_period, is_stable) = diagnostics;
-        Self {
-            inner: rspice_core::analysis::PssResult {
-                period,
-                frequency,
-                iterations,
-                residual_norm,
-                time,
-                waveforms: waveforms
-                    .into_iter()
-                    .map(rspice_core::analysis::PeriodicWaveform::from_values)
-                    .collect(),
-                node_names,
-                period_detected,
-                floquet_multipliers: complex_from_state(floquet_multipliers),
-            },
+        let (num_harmonics, run_iterations, run_residual, run_period, _legacy_is_stable) =
+            diagnostics;
+        let (floquet_evidence, floquet_orbit_kind, trivial_floquet_multiplier_index) =
+            match floquet_contract {
+                Some((version, evidence, orbit_kind, trivial_index)) => {
+                    if version != PSS_FLOQUET_CONTRACT_STATE_VERSION {
+                        return Err(crate::errors::value_error(format!(
+                            "unsupported pickled PSS Floquet contract version {version}"
+                        )));
+                    }
+                    (
+                        floquet_spectrum_evidence_from_state(evidence)?,
+                        floquet_orbit_kind_from_state(&orbit_kind)?,
+                        trivial_index,
+                    )
+                }
+                None => (
+                    rspice_core::analysis::FloquetSpectrumEvidence::LegacyUnknown,
+                    if period_detected {
+                        rspice_core::analysis::FloquetOrbitKind::Autonomous
+                    } else {
+                        rspice_core::analysis::FloquetOrbitKind::Driven
+                    },
+                    None,
+                ),
+            };
+        let inner = rspice_core::analysis::PssResult {
+            period,
+            frequency,
+            iterations,
+            residual_norm,
+            time,
+            waveforms: waveforms
+                .into_iter()
+                .map(rspice_core::analysis::PeriodicWaveform::from_values)
+                .collect(),
+            node_names,
+            period_detected,
+            floquet_multipliers: complex_from_state(floquet_multipliers),
+            floquet_evidence,
+            floquet_orbit_kind,
+            trivial_floquet_multiplier_index,
+        };
+        validate_pickled_pss_result(&inner)?;
+        Ok(Self {
+            inner,
             num_harmonics,
             iterations: run_iterations,
             residual_norm: run_residual,
             period: run_period,
-            is_stable,
-        }
+        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -306,6 +593,7 @@ impl PyPssResult {
             Vec<String>,
             Vec<(f64, f64)>,
             (usize, usize, f64, f64, bool),
+            PssFloquetContractState,
         ),
     )> {
         Ok((
@@ -331,8 +619,9 @@ impl PyPssResult {
                     self.iterations,
                     self.residual_norm,
                     self.period,
-                    self.is_stable,
+                    self.inner.is_stable(),
                 ),
+                self.floquet_contract_state()?,
             ),
         ))
     }

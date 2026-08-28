@@ -148,6 +148,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyVariableStatistics>()?;
     m.add_class::<results::PySpectrumCertificate>()?;
     m.add_class::<results::PyRootSetEvidence>()?;
+    m.add_class::<results::PyFloquetSpectrumCertificate>()?;
+    m.add_class::<results::PyFloquetSpectrumEvidence>()?;
     m.add_class::<results::PyPoleZeroResult>()?;
     m.add_class::<results::PyComplexValue>()?;
     m.add_class::<results::PyFourierResult>()?;
@@ -235,6 +237,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "VariableStatistics",
             "SpectrumCertificate",
             "RootSetEvidence",
+            "FloquetSpectrumCertificate",
+            "FloquetSpectrumEvidence",
             "PoleZeroResult",
             "ComplexValue",
             "FourierResult",
