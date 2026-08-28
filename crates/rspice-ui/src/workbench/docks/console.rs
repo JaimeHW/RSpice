@@ -1,6 +1,8 @@
 //! Unified console, problems, measurements, and task history.
 
 mod log_anchor;
+#[cfg(test)]
+mod measurement_rows_tests;
 
 use log_anchor::log_row;
 
@@ -1397,13 +1399,17 @@ fn active_measurement_rows(
     // `phase_margin` specification binds to them exactly like a .measure
     // result, and the numbers are the stability inspector card's own. A
     // deck-declared measurement of the same name keeps authority.
+    //
+    // Fail closed exactly as the Bode sheet does. A failed solve's retained
+    // vectors are whatever the engine emitted before it gave up, and a margin
+    // read off them is not a measurement — which matters more here than on
+    // the sheet, because a specification binds to these rows.
     if let Some(summary) =
         crate::state::ac_bode_summary_for_selection(run, app.state.simulation.active_analysis_idx)
+        && let Some(analysis) = run.analyses.get(summary.analysis_index)
+        && analysis.success
     {
-        let label = run
-            .analyses
-            .get(summary.analysis_index)
-            .map_or("AC", |analysis| analysis.label.as_str());
+        let label = analysis.label.as_str();
         let metrics = summary.metrics;
         for (name, value, event_axis) in [
             ("phase_margin", metrics.pm_deg, metrics.ugf),
