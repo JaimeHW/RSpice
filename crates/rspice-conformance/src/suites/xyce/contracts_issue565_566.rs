@@ -1031,7 +1031,7 @@ impl XyceTestRunner {
 
         let mut owner_prn = Vec::new();
         let mut reference_prn = Vec::new();
-        for step in 0..STEP_VALUES.len() {
+        for (step, _) in STEP_VALUES.iter().enumerate() {
             let mut pair = BTreeMap::new();
             for member_role in Issue565566Role::ALL {
                 let plan = &plans[&member_role];
