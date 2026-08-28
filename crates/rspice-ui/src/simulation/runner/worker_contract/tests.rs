@@ -44,7 +44,7 @@ fn pole_zero_worker_result_accepts_numeric_and_missing_gain_with_explicit_eviden
             r#"{"PoleZero":{"poles":[],"zeros":[],"gain":1.0}}"#
         )
         .is_err(),
-        "protocol-v10 worker results must never invent missing root evidence"
+        "current worker results must never invent missing root evidence"
     );
 }
 
@@ -115,6 +115,87 @@ pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatin
     .unwrap()
 }
 
+pub(super) fn authenticated_pstb_result() -> SimulationResult {
+    let period = 2.0;
+    let first = num_complex::Complex64::new(0.5, 0.0);
+    let second = num_complex::Complex64::new(0.25, 0.0);
+    let certificate = rspice_core::analysis::FloquetSpectrumCertificate::new(
+        2,
+        0.0,
+        rspice_core::analysis::FloquetSpectrumCertificate::canonical_qualification_tolerance(2),
+    )
+    .unwrap();
+    let modes = vec![
+        crate::simulation::results::PstbFloquetMode {
+            multiplier: (first.re, first.im),
+            exponent: (first.ln().re / period, first.ln().im / period),
+            probe_participation: 0.25,
+            is_unstable: false,
+            is_trivial: false,
+            subharmonic_order: None,
+        },
+        crate::simulation::results::PstbFloquetMode {
+            multiplier: (second.re, second.im),
+            exponent: (second.ln().re / period, second.ln().im / period),
+            probe_participation: 0.75,
+            is_unstable: false,
+            is_trivial: false,
+            subharmonic_order: None,
+        },
+    ];
+    let mode_indices = vec![1.0];
+    let waveform = |name: &str, unit: &str, value: f64| {
+        (
+            name.to_owned(),
+            WaveformData {
+                name: name.to_owned(),
+                x_values: mode_indices.clone(),
+                y_values: vec![value],
+                y_unit: unit.to_owned(),
+                is_complex: false,
+                y_imag: None,
+            },
+        )
+    };
+    let waveforms = HashMap::from([
+        waveform("Floquet |lambda|", "", first.norm()),
+        waveform(
+            "Floquet Phase (deg)",
+            "deg",
+            first.arg() * 180.0 / std::f64::consts::PI,
+        ),
+        waveform("Stability Margin (dB)", "dB", -20.0 * first.norm().log10()),
+        waveform("Mode Damping (1/s)", "1/s", -first.ln().re / period),
+        waveform(
+            "Mode Frequency (Hz)",
+            "Hz",
+            first.ln().im.abs() / period / (2.0 * std::f64::consts::PI),
+        ),
+        waveform("Probe Mode Participation", "", 0.25),
+    ]);
+    SimulationResult::Pstb {
+        period,
+        fundamental_frequency: 1.0 / period,
+        stability_threshold: 1.0 + 1.0e-6,
+        probe_instance: "LPROBE".to_owned(),
+        detect_subharmonics: true,
+        modes,
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate },
+        orbit_kind: rspice_core::analysis::FloquetOrbitKind::Driven,
+        trivial_multiplier_index: None,
+        stability_verdict: rspice_core::analysis::FloquetStabilityVerdict::Stable,
+        stability_classification: rspice_core::analysis::pstb::StabilityType::Stable,
+        min_stability_margin_db: Some(-20.0 * first.norm().log10()),
+        max_multiplier_magnitude: first.norm(),
+        num_unstable: 0,
+        subharmonics: Vec::new(),
+        converged: true,
+        iterations: 0,
+        mode_indices,
+        waveforms,
+    }
+}
+
 fn retained_hb_operating_point() -> rspice_core::engine::HbOperatingPoint {
     let config = rspice_core::analysis::HbConfig::new(1.0).with_harmonics(4);
     rspice_core::engine::HbOperatingPoint::try_from_parts(
@@ -182,7 +263,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 10);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 11);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(

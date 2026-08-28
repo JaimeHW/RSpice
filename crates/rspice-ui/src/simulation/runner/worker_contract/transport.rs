@@ -135,6 +135,48 @@ pub(super) fn validate_worker_response_before_transport(
         }
         return Ok(());
     }
+    if let WorkerSimulationResult::Pstb {
+        modes,
+        mode_indices,
+        waveforms,
+        ..
+    } = result.as_ref()
+    {
+        validate_worker_pstb_result(result)?;
+        let waveform_buffer_count = waveforms.iter().try_fold(0usize, |count, waveform| {
+            count
+                .checked_add(2 + usize::from(waveform.y_imag.is_some()))
+                .ok_or_else(|| {
+                    "PSTB worker response buffer count overflows this platform".to_owned()
+                })
+        })?;
+        let transfer_buffer_count = waveform_buffer_count.checked_add(6).ok_or_else(|| {
+            "PSTB worker response buffer count overflows this platform".to_owned()
+        })?;
+        if transfer_buffer_count > MAX_WORKER_TRANSFER_BUFFERS {
+            return Err(format!(
+                "PSTB worker response requires {transfer_buffer_count} transfer buffers, exceeding the {MAX_WORKER_TRANSFER_BUFFERS}-buffer limit"
+            ));
+        }
+        let mut numeric_values = modes
+            .len()
+            .checked_mul(5)
+            .and_then(|count| count.checked_add(mode_indices.len()))
+            .ok_or_else(|| "PSTB worker response size overflows this platform".to_owned())?;
+        for waveform in waveforms {
+            numeric_values = numeric_values
+                .checked_add(waveform.x_values.len())
+                .and_then(|count| count.checked_add(waveform.y_values.len()))
+                .and_then(|count| count.checked_add(waveform.y_imag.as_ref().map_or(0, Vec::len)))
+                .ok_or_else(|| "PSTB worker response size overflows this platform".to_owned())?;
+        }
+        if numeric_values > MAX_WORKER_F64_VALUES {
+            return Err(format!(
+                "PSTB worker response contains {numeric_values} numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
+            ));
+        }
+        return Ok(());
+    }
     let WorkerSimulationResult::Pss {
         operating_point, ..
     } = result.as_ref()
@@ -909,6 +951,81 @@ pub(super) fn worker_join_complex(
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPstbModesTransport {
+    multiplier_real: WorkerF64Series,
+    multiplier_imaginary: WorkerF64Series,
+    exponent_real: WorkerF64Series,
+    exponent_imaginary: WorkerF64Series,
+    probe_participation: WorkerF64Series,
+    is_unstable: Vec<bool>,
+    is_trivial: Vec<bool>,
+    subharmonic_order: Vec<Option<usize>>,
+}
+
+impl WorkerPstbModesTransport {
+    fn from_modes(modes: Vec<WorkerPstbFloquetMode>, buffers: &mut Vec<Vec<f64>>) -> Self {
+        let mut multiplier_real = Vec::with_capacity(modes.len());
+        let mut multiplier_imaginary = Vec::with_capacity(modes.len());
+        let mut exponent_real = Vec::with_capacity(modes.len());
+        let mut exponent_imaginary = Vec::with_capacity(modes.len());
+        let mut probe_participation = Vec::with_capacity(modes.len());
+        let mut is_unstable = Vec::with_capacity(modes.len());
+        let mut is_trivial = Vec::with_capacity(modes.len());
+        let mut subharmonic_order = Vec::with_capacity(modes.len());
+        for mode in modes {
+            multiplier_real.push(mode.multiplier.0);
+            multiplier_imaginary.push(mode.multiplier.1);
+            exponent_real.push(mode.exponent.0);
+            exponent_imaginary.push(mode.exponent.1);
+            probe_participation.push(mode.probe_participation);
+            is_unstable.push(mode.is_unstable);
+            is_trivial.push(mode.is_trivial);
+            subharmonic_order.push(mode.subharmonic_order);
+        }
+        Self {
+            multiplier_real: WorkerF64Series::from_vec(multiplier_real, buffers),
+            multiplier_imaginary: WorkerF64Series::from_vec(multiplier_imaginary, buffers),
+            exponent_real: WorkerF64Series::from_vec(exponent_real, buffers),
+            exponent_imaginary: WorkerF64Series::from_vec(exponent_imaginary, buffers),
+            probe_participation: WorkerF64Series::from_vec(probe_participation, buffers),
+            is_unstable,
+            is_trivial,
+            subharmonic_order,
+        }
+    }
+
+    fn into_modes(self, buffers: &[Vec<f64>]) -> Result<Vec<WorkerPstbFloquetMode>, String> {
+        let len = self.multiplier_real.len();
+        if len > MAX_WORKER_F64_VALUES
+            || self.multiplier_imaginary.len() != len
+            || self.exponent_real.len() != len
+            || self.exponent_imaginary.len() != len
+            || self.probe_participation.len() != len
+            || self.is_unstable.len() != len
+            || self.is_trivial.len() != len
+            || self.subharmonic_order.len() != len
+        {
+            return Err("PSTB mode columns have inconsistent cardinality".to_owned());
+        }
+        let multiplier_real = self.multiplier_real.into_vec(buffers)?;
+        let multiplier_imaginary = self.multiplier_imaginary.into_vec(buffers)?;
+        let exponent_real = self.exponent_real.into_vec(buffers)?;
+        let exponent_imaginary = self.exponent_imaginary.into_vec(buffers)?;
+        let probe_participation = self.probe_participation.into_vec(buffers)?;
+        Ok((0..len)
+            .map(|index| WorkerPstbFloquetMode {
+                multiplier: (multiplier_real[index], multiplier_imaginary[index]),
+                exponent: (exponent_real[index], exponent_imaginary[index]),
+                probe_participation: probe_participation[index],
+                is_unstable: self.is_unstable[index],
+                is_trivial: self.is_trivial[index],
+                subharmonic_order: self.subharmonic_order[index],
+            })
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WorkerSimulationResultTransport {
     Inline(WorkerSimulationResult),
     DcOp {
@@ -941,6 +1058,27 @@ pub(crate) enum WorkerSimulationResultTransport {
     Pss {
         measurements: Vec<WorkerMeasurement>,
         operating_point: WorkerPssOperatingPointTransport,
+    },
+    Pstb {
+        period: f64,
+        fundamental_frequency: f64,
+        stability_threshold: f64,
+        probe_instance: String,
+        detect_subharmonics: bool,
+        modes: WorkerPstbModesTransport,
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+        orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+        trivial_multiplier_index: Option<usize>,
+        stability_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+        stability_classification: WorkerPstbStabilityClassification,
+        min_stability_margin_db: Option<f64>,
+        max_multiplier_magnitude: f64,
+        num_unstable: usize,
+        subharmonics: Vec<usize>,
+        converged: bool,
+        iterations: usize,
+        mode_indices: WorkerF64Series,
+        waveforms: Vec<WorkerWaveformTransport>,
     },
     Hb {
         frequencies: WorkerF64Series,
@@ -1102,6 +1240,47 @@ impl WorkerSimulationResultTransport {
                     buffers,
                 ),
             },
+            WorkerSimulationResult::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices,
+                waveforms,
+            } => Self::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes: WorkerPstbModesTransport::from_modes(modes, buffers),
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices: WorkerF64Series::from_vec(mode_indices, buffers),
+                waveforms: transport_waveforms(waveforms, buffers),
+            },
             WorkerSimulationResult::Hb {
                 frequencies,
                 waveforms,
@@ -1217,7 +1396,15 @@ impl WorkerSimulationResultTransport {
         buffers: &[Vec<f64>],
     ) -> Result<WorkerSimulationResult, String> {
         match self {
-            Self::Inline(result) => Ok(result),
+            Self::Inline(result) => {
+                if matches!(result, WorkerSimulationResult::Pstb { .. }) {
+                    return Err(
+                        "PSTB worker result must use the dedicated transfer-buffer transport"
+                            .to_owned(),
+                    );
+                }
+                Ok(result)
+            }
             Self::DcOp {
                 configuration,
                 validated_startup_directives,
@@ -1286,6 +1473,51 @@ impl WorkerSimulationResultTransport {
                 measurements,
                 operating_point: operating_point.into_operating_point(buffers)?,
             }),
+            Self::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices,
+                waveforms,
+            } => {
+                let result = WorkerSimulationResult::Pstb {
+                    period,
+                    fundamental_frequency,
+                    stability_threshold,
+                    probe_instance,
+                    detect_subharmonics,
+                    modes: modes.into_modes(buffers)?,
+                    floquet_evidence,
+                    orbit_kind,
+                    trivial_multiplier_index,
+                    stability_verdict,
+                    stability_classification,
+                    min_stability_margin_db,
+                    max_multiplier_magnitude,
+                    num_unstable,
+                    subharmonics,
+                    converged,
+                    iterations,
+                    mode_indices: mode_indices.into_vec(buffers)?,
+                    waveforms: worker_waveforms_from_transport(waveforms, buffers)?,
+                };
+                validate_worker_pstb_result(&result)?;
+                Ok(result)
+            }
             Self::Hb {
                 frequencies,
                 waveforms,
@@ -1592,5 +1824,173 @@ mod pss_floquet_contract_tests {
             rspice_core::analysis::FloquetOrbitKind::Autonomous,
         );
         assert!(!pss_floquet_contract_is_authenticated(&result, 0));
+    }
+}
+
+#[cfg(test)]
+mod pstb_floquet_contract_tests {
+    use super::*;
+
+    fn response_and_worker() -> (WorkerResponse, WorkerSimulationResult) {
+        let worker =
+            WorkerSimulationResult::try_from(super::super::tests::authenticated_pstb_result())
+                .unwrap();
+        (
+            WorkerResponse {
+                id: 73,
+                outcome: WorkerOutcome::Success(Box::new(worker.clone())),
+            },
+            worker,
+        )
+    }
+
+    fn transport() -> WorkerResponseTransport {
+        let (response, _) = response_and_worker();
+        WorkerResponseTransport::from_response(response).unwrap()
+    }
+
+    fn pstb_payload_mut(
+        transport: &mut WorkerResponseTransport,
+    ) -> &mut WorkerSimulationResultTransport {
+        let WorkerOutcomeTransport::Success(payload) = &mut transport.response.outcome else {
+            panic!("fixture must be a successful PSTB response")
+        };
+        payload
+    }
+
+    #[test]
+    fn pstb_transport_round_trips_complete_spectrum_separately_from_display_projection() {
+        let (response, expected) = response_and_worker();
+        let transport = WorkerResponseTransport::from_response(response).unwrap();
+        let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Pstb {
+            modes,
+            mode_indices,
+            ..
+        }) = &transport.response.outcome
+        else {
+            panic!("PSTB must use its dedicated transport variant")
+        };
+        assert_eq!(modes.multiplier_real.len(), 2);
+        assert_eq!(modes.exponent_imaginary.len(), 2);
+        assert_eq!(mode_indices.len(), 1);
+        assert!(transport.buffers.len() >= 6);
+
+        let restored = transport.into_response().unwrap();
+        let WorkerOutcome::Success(restored) = restored.outcome else {
+            panic!("PSTB response must remain successful")
+        };
+        assert_eq!(*restored, expected);
+    }
+
+    #[test]
+    fn pstb_transport_rejects_truncated_mode_column() {
+        let mut transport = transport();
+        let WorkerSimulationResultTransport::Pstb { modes, .. } = pstb_payload_mut(&mut transport)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        modes.multiplier_imaginary = WorkerF64Series::Inline(vec![0.0]);
+        assert!(transport.into_response().is_err());
+    }
+
+    #[test]
+    fn pstb_transport_rejects_inline_bypass_of_dedicated_numeric_buffers() {
+        let (_, worker) = response_and_worker();
+        let transport = WorkerResponseTransport {
+            protocol: WORKER_RESPONSE_TRANSPORT_PROTOCOL,
+            response: WorkerResponseTransportMetadata {
+                id: 73,
+                outcome: WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Inline(
+                    worker,
+                )),
+            },
+            buffers: Vec::new(),
+        };
+        assert!(transport.into_response().is_err());
+    }
+
+    #[test]
+    fn pstb_transport_rejects_forged_or_mismatched_floquet_evidence() {
+        let mut inflated = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            floquet_evidence, ..
+        } = pstb_payload_mut(&mut inflated)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        let rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate } =
+            floquet_evidence
+        else {
+            panic!("fixture must be qualified")
+        };
+        certificate.qualification_tolerance = 1.0;
+        assert!(inflated.into_response().is_err());
+
+        let mut mismatched = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            floquet_evidence, ..
+        } = pstb_payload_mut(&mut mismatched)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *floquet_evidence = rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes;
+        assert!(mismatched.into_response().is_err());
+    }
+
+    #[test]
+    fn pstb_transport_rejects_forged_provenance_and_aggregate_metadata() {
+        let mut blank_probe = transport();
+        let WorkerSimulationResultTransport::Pstb { probe_instance, .. } =
+            pstb_payload_mut(&mut blank_probe)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        probe_instance.clear();
+        assert!(blank_probe.into_response().is_err());
+
+        let mut threshold = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            stability_threshold,
+            ..
+        } = pstb_payload_mut(&mut threshold)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *stability_threshold = 0.5;
+        assert!(threshold.into_response().is_err());
+
+        let mut policy = transport();
+        let WorkerSimulationResultTransport::Pstb {
+            detect_subharmonics,
+            modes,
+            ..
+        } = pstb_payload_mut(&mut policy)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *detect_subharmonics = false;
+        modes.subharmonic_order[0] = Some(2);
+        assert!(policy.into_response().is_err());
+
+        let mut count = transport();
+        let WorkerSimulationResultTransport::Pstb { num_unstable, .. } =
+            pstb_payload_mut(&mut count)
+        else {
+            panic!("fixture must be PSTB")
+        };
+        *num_unstable = 1;
+        assert!(count.into_response().is_err());
+
+        let (response, _) = response_and_worker();
+        let WorkerOutcome::Success(worker) = response.outcome else {
+            panic!("fixture must be successful")
+        };
+        let mut encoded = serde_json::to_value(&*worker).unwrap();
+        encoded
+            .get_mut("Pstb")
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap()
+            .remove("floquet_evidence");
+        assert!(serde_json::from_value::<WorkerSimulationResult>(encoded).is_err());
     }
 }

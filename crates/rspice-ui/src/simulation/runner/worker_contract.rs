@@ -557,7 +557,10 @@ impl WorkerResponse {
 
     pub(crate) fn into_result(self) -> Result<SimulationResult, SimulationError> {
         match self.outcome {
-            WorkerOutcome::Success(result) => Ok(SimulationResult::from(*result)),
+            WorkerOutcome::Success(result) => {
+                validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
+                Ok(SimulationResult::from(*result))
+            }
             WorkerOutcome::Failure(error) => Err(SimulationError::from(error)),
         }
     }
@@ -910,6 +913,27 @@ pub(crate) enum WorkerSimulationResult {
         waveforms: Vec<WorkerWaveform>,
         measurements: Vec<WorkerMeasurement>,
     },
+    Pstb {
+        period: f64,
+        fundamental_frequency: f64,
+        stability_threshold: f64,
+        probe_instance: String,
+        detect_subharmonics: bool,
+        modes: Vec<WorkerPstbFloquetMode>,
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+        orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+        trivial_multiplier_index: Option<usize>,
+        stability_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+        stability_classification: WorkerPstbStabilityClassification,
+        min_stability_margin_db: Option<f64>,
+        max_multiplier_magnitude: f64,
+        num_unstable: usize,
+        subharmonics: Vec<usize>,
+        converged: bool,
+        iterations: usize,
+        mode_indices: Vec<f64>,
+        waveforms: Vec<WorkerWaveform>,
+    },
     Hb {
         frequencies: Vec<f64>,
         waveforms: Vec<WorkerWaveform>,
@@ -1013,6 +1037,336 @@ pub(crate) enum WorkerSimulationResult {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerPstbFloquetMode {
+    multiplier: (f64, f64),
+    exponent: (f64, f64),
+    probe_participation: f64,
+    is_unstable: bool,
+    is_trivial: bool,
+    subharmonic_order: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WorkerPstbStabilityClassification {
+    Stable,
+    UnstableReal,
+    UnstableComplex,
+    PeriodDoubling,
+    NeimarkSacker,
+    SaddleNode,
+    Marginal,
+    Indeterminate,
+}
+
+impl WorkerPstbStabilityClassification {
+    fn try_from_core(
+        value: rspice_core::analysis::pstb::StabilityType,
+    ) -> Result<Self, SimulationError> {
+        use rspice_core::analysis::pstb::StabilityType;
+        match value {
+            StabilityType::Stable => Ok(Self::Stable),
+            StabilityType::UnstableReal => Ok(Self::UnstableReal),
+            StabilityType::UnstableComplex => Ok(Self::UnstableComplex),
+            StabilityType::PeriodDoubling => Ok(Self::PeriodDoubling),
+            StabilityType::NeimarkSacker => Ok(Self::NeimarkSacker),
+            StabilityType::SaddleNode => Ok(Self::SaddleNode),
+            StabilityType::Marginal => Ok(Self::Marginal),
+            StabilityType::Indeterminate => Ok(Self::Indeterminate),
+            _ => Err(SimulationError::InvalidConfig(
+                "PSTB returned an unsupported stability classification".to_owned(),
+            )),
+        }
+    }
+
+    fn into_core(self) -> rspice_core::analysis::pstb::StabilityType {
+        use rspice_core::analysis::pstb::StabilityType;
+        match self {
+            Self::Stable => StabilityType::Stable,
+            Self::UnstableReal => StabilityType::UnstableReal,
+            Self::UnstableComplex => StabilityType::UnstableComplex,
+            Self::PeriodDoubling => StabilityType::PeriodDoubling,
+            Self::NeimarkSacker => StabilityType::NeimarkSacker,
+            Self::SaddleNode => StabilityType::SaddleNode,
+            Self::Marginal => StabilityType::Marginal,
+            Self::Indeterminate => StabilityType::Indeterminate,
+        }
+    }
+}
+
+fn validate_worker_pstb_result(result: &WorkerSimulationResult) -> Result<(), String> {
+    let WorkerSimulationResult::Pstb {
+        period,
+        fundamental_frequency,
+        stability_threshold,
+        probe_instance,
+        detect_subharmonics,
+        modes,
+        floquet_evidence,
+        orbit_kind,
+        trivial_multiplier_index,
+        stability_verdict,
+        stability_classification,
+        min_stability_margin_db,
+        max_multiplier_magnitude,
+        num_unstable,
+        subharmonics,
+        converged,
+        mode_indices,
+        waveforms,
+        ..
+    } = result
+    else {
+        return Ok(());
+    };
+
+    if !period.is_finite()
+        || *period <= 0.0
+        || !fundamental_frequency.is_finite()
+        || *fundamental_frequency <= 0.0
+        || *fundamental_frequency != 1.0 / *period
+        || !stability_threshold.is_finite()
+        || *stability_threshold < 1.0
+        || probe_instance.is_empty()
+        || probe_instance.trim() != probe_instance.as_str()
+        || !*converged
+    {
+        return Err("PSTB period, frequency, or convergence metadata is invalid".to_owned());
+    }
+
+    let multipliers = modes
+        .iter()
+        .map(|mode| num_complex::Complex64::new(mode.multiplier.0, mode.multiplier.1))
+        .collect::<Vec<_>>();
+    if !floquet_evidence.is_consistent_with(&multipliers) {
+        return Err("PSTB Floquet evidence is inconsistent with the complete spectrum".to_owned());
+    }
+    match floquet_evidence {
+        rspice_core::analysis::FloquetSpectrumEvidence::NoDynamicModes
+            if modes.is_empty()
+                && *orbit_kind == rspice_core::analysis::FloquetOrbitKind::Driven
+                && trivial_multiplier_index.is_none() => {}
+        rspice_core::analysis::FloquetSpectrumEvidence::Qualified { certificate }
+            if certificate.is_valid()
+                && !modes.is_empty()
+                && certificate.problem_order == modes.len() => {}
+        _ => {
+            return Err("PSTB result lacks a complete canonical Floquet certificate".to_owned());
+        }
+    }
+
+    let expected_trivial = if *orbit_kind == rspice_core::analysis::FloquetOrbitKind::Autonomous {
+        rspice_core::analysis::select_autonomous_phase_mode(&multipliers)
+    } else {
+        None
+    };
+    if *trivial_multiplier_index != expected_trivial {
+        return Err("PSTB trivial phase-mode index is inconsistent with the spectrum".to_owned());
+    }
+
+    if modes.windows(2).any(|pair| {
+        let left = num_complex::Complex64::new(pair[0].multiplier.0, pair[0].multiplier.1);
+        let right = num_complex::Complex64::new(pair[1].multiplier.0, pair[1].multiplier.1);
+        right
+            .norm()
+            .total_cmp(&left.norm())
+            .then_with(|| left.re.total_cmp(&right.re))
+            .then_with(|| left.im.total_cmp(&right.im))
+            .is_gt()
+    }) {
+        return Err("PSTB complete spectrum is not in canonical sorted order".to_owned());
+    }
+
+    let mut expected_subharmonics = Vec::new();
+    let mut expected_unstable = 0usize;
+    for (index, mode) in modes.iter().enumerate() {
+        let value = multipliers[index];
+        let magnitude = value.norm();
+        let expected_exponent = value.ln() / *period;
+        if !value.re.is_finite()
+            || !value.im.is_finite()
+            || !mode.exponent.0.is_finite()
+            || !mode.exponent.1.is_finite()
+            || mode.exponent != (expected_exponent.re, expected_exponent.im)
+            || !magnitude.is_finite()
+            || magnitude <= 0.0
+            || !mode.probe_participation.is_finite()
+            || !(0.0..=1.0).contains(&mode.probe_participation)
+            || mode.is_trivial != (*trivial_multiplier_index == Some(index))
+            || (mode.is_trivial && mode.is_unstable)
+        {
+            return Err(format!("PSTB Floquet mode {} is invalid", index + 1));
+        }
+        let detected_subharmonic = (2..=8).find(|order| {
+            let expected_angle = 2.0 * std::f64::consts::PI / *order as f64;
+            (magnitude - 1.0).abs() <= 0.01 && (value.arg().abs() - expected_angle).abs() < 0.01
+        });
+        let expected_subharmonic = (*detect_subharmonics)
+            .then_some(detected_subharmonic)
+            .flatten();
+        if mode.subharmonic_order != expected_subharmonic {
+            return Err(format!(
+                "PSTB Floquet mode {} has an inconsistent subharmonic order",
+                index + 1
+            ));
+        }
+        if let Some(order) = expected_subharmonic {
+            expected_subharmonics.push(order);
+        }
+        let is_unstable = !mode.is_trivial && magnitude > *stability_threshold;
+        if mode.is_unstable != is_unstable {
+            return Err(format!(
+                "PSTB Floquet mode {} has an inconsistent instability flag",
+                index + 1
+            ));
+        }
+        if is_unstable {
+            expected_unstable += 1;
+        }
+    }
+
+    if *num_unstable != expected_unstable || *subharmonics != expected_subharmonics {
+        return Err("PSTB aggregate mode counts or subharmonics are inconsistent".to_owned());
+    }
+    let expected_maximum = multipliers.first().map_or(0.0, |value| value.norm());
+    let expected_minimum_margin = modes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *trivial_multiplier_index != Some(*index))
+        .map(|(index, _)| -20.0 * multipliers[index].norm().log10())
+        .min_by(f64::total_cmp);
+    if !max_multiplier_magnitude.is_finite()
+        || *max_multiplier_magnitude != expected_maximum
+        || min_stability_margin_db.is_some_and(|margin| !margin.is_finite())
+        || *min_stability_margin_db != expected_minimum_margin
+    {
+        return Err("PSTB global magnitude or margin metadata is inconsistent".to_owned());
+    }
+
+    let expected_verdict = rspice_core::analysis::classify_floquet_stability(
+        &multipliers,
+        floquet_evidence,
+        *orbit_kind,
+        *trivial_multiplier_index,
+        *stability_threshold - 1.0,
+    );
+    if *stability_verdict != expected_verdict {
+        return Err("PSTB stability verdict is inconsistent with the complete spectrum".to_owned());
+    }
+
+    let expected_classification = match stability_verdict {
+        rspice_core::analysis::FloquetStabilityVerdict::Stable => {
+            WorkerPstbStabilityClassification::Stable
+        }
+        rspice_core::analysis::FloquetStabilityVerdict::Indeterminate => {
+            WorkerPstbStabilityClassification::Indeterminate
+        }
+        rspice_core::analysis::FloquetStabilityVerdict::Unstable => {
+            let dominant = modes.iter().find(|mode| mode.is_unstable).ok_or_else(|| {
+                "PSTB unstable verdict has no unstable complete-spectrum mode".to_owned()
+            })?;
+            if dominant.multiplier.1.abs() > 0.01 {
+                WorkerPstbStabilityClassification::UnstableComplex
+            } else {
+                WorkerPstbStabilityClassification::UnstableReal
+            }
+        }
+        rspice_core::analysis::FloquetStabilityVerdict::Marginal => modes
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *trivial_multiplier_index != Some(*index))
+            .find_map(|(_, mode)| {
+                let value = num_complex::Complex64::new(mode.multiplier.0, mode.multiplier.1);
+                if (value + num_complex::Complex64::new(1.0, 0.0)).norm() < 0.01 {
+                    Some(WorkerPstbStabilityClassification::PeriodDoubling)
+                } else if (value - num_complex::Complex64::new(1.0, 0.0)).norm() < 0.01 {
+                    Some(WorkerPstbStabilityClassification::SaddleNode)
+                } else if (value.norm() - 1.0).abs() < 0.01 && value.im.abs() > 0.01 {
+                    Some(WorkerPstbStabilityClassification::NeimarkSacker)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(WorkerPstbStabilityClassification::Marginal),
+        _ => return Err("PSTB stability verdict is unsupported".to_owned()),
+    };
+    if *stability_classification != expected_classification {
+        return Err("PSTB rich stability classification is inconsistent".to_owned());
+    }
+
+    validate_worker_pstb_display(mode_indices, waveforms, modes, &multipliers)
+}
+
+fn validate_worker_pstb_display(
+    mode_indices: &[f64],
+    waveforms: &[WorkerWaveform],
+    modes: &[WorkerPstbFloquetMode],
+    multipliers: &[num_complex::Complex64],
+) -> Result<(), String> {
+    if mode_indices.len() > modes.len()
+        || mode_indices
+            .iter()
+            .enumerate()
+            .any(|(index, value)| *value != (index + 1) as f64)
+    {
+        return Err(
+            "PSTB display mode axis is not a leading complete-spectrum projection".to_owned(),
+        );
+    }
+    const DISPLAY: [(&str, &str); 6] = [
+        ("Floquet |lambda|", ""),
+        ("Floquet Phase (deg)", "deg"),
+        ("Stability Margin (dB)", "dB"),
+        ("Mode Damping (1/s)", "1/s"),
+        ("Mode Frequency (Hz)", "Hz"),
+        ("Probe Mode Participation", ""),
+    ];
+    if waveforms.len() != DISPLAY.len() {
+        return Err("PSTB display does not contain the exact waveform projection".to_owned());
+    }
+    let waveforms = waveforms
+        .iter()
+        .map(|waveform| (waveform.name.as_str(), waveform))
+        .collect::<HashMap<_, _>>();
+    if waveforms.len() != DISPLAY.len() {
+        return Err("PSTB display contains duplicate waveform names".to_owned());
+    }
+    for (name, unit) in DISPLAY {
+        let waveform = waveforms
+            .get(name)
+            .ok_or_else(|| format!("PSTB display is missing waveform '{name}'"))?;
+        if waveform.name != name
+            || waveform.y_unit != unit
+            || waveform.is_complex
+            || waveform.y_imag.is_some()
+            || waveform.x_values.as_slice() != mode_indices
+            || waveform.y_values.len() != mode_indices.len()
+            || waveform.y_values.iter().any(|value| !value.is_finite())
+        {
+            return Err(format!("PSTB display waveform '{name}' is malformed"));
+        }
+        for index in 0..mode_indices.len() {
+            let expected = match name {
+                "Floquet |lambda|" => multipliers[index].norm(),
+                "Floquet Phase (deg)" => multipliers[index].arg() * 180.0 / std::f64::consts::PI,
+                "Stability Margin (dB)" => -20.0 * multipliers[index].norm().log10(),
+                "Mode Damping (1/s)" => -modes[index].exponent.0,
+                "Mode Frequency (Hz)" => {
+                    modes[index].exponent.1.abs() / (2.0 * std::f64::consts::PI)
+                }
+                "Probe Mode Participation" => modes[index].probe_participation,
+                _ => unreachable!("validated PSTB display name"),
+            };
+            if waveform.y_values[index] != expected {
+                return Err(format!(
+                    "PSTB display waveform '{name}' is not a leading complete-spectrum projection"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 impl WorkerSimulationResult {
     fn estimated_numeric_payload_bytes(&self) -> usize {
@@ -1070,6 +1424,17 @@ impl WorkerSimulationResult {
                 f64_payload_bytes(frequencies.len()),
                 waveforms_payload_bytes(waveforms),
                 measurements_payload_bytes(measurements),
+            ]),
+            WorkerSimulationResult::Pstb {
+                modes,
+                mode_indices,
+                waveforms,
+                ..
+            } => sum_payload_bytes([
+                f64_payload_bytes(modes.len().saturating_mul(5)),
+                f64_payload_bytes(mode_indices.len()),
+                waveforms_payload_bytes(waveforms),
+                f64_payload_bytes(5),
             ]),
             WorkerSimulationResult::Hb {
                 frequencies,
@@ -1202,7 +1567,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 10;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 11;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1274,6 +1639,63 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 waveforms: worker_waveforms(waveforms),
                 measurements: worker_measurements(measurements),
             }),
+            SimulationResult::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices,
+                waveforms,
+            } => {
+                let result = Self::Pstb {
+                    period,
+                    fundamental_frequency,
+                    stability_threshold,
+                    probe_instance,
+                    detect_subharmonics,
+                    modes: modes
+                        .into_iter()
+                        .map(|mode| WorkerPstbFloquetMode {
+                            multiplier: mode.multiplier,
+                            exponent: mode.exponent,
+                            probe_participation: mode.probe_participation,
+                            is_unstable: mode.is_unstable,
+                            is_trivial: mode.is_trivial,
+                            subharmonic_order: mode.subharmonic_order,
+                        })
+                        .collect(),
+                    floquet_evidence,
+                    orbit_kind,
+                    trivial_multiplier_index,
+                    stability_verdict,
+                    stability_classification: WorkerPstbStabilityClassification::try_from_core(
+                        stability_classification,
+                    )?,
+                    min_stability_margin_db,
+                    max_multiplier_magnitude,
+                    num_unstable,
+                    subharmonics,
+                    converged,
+                    iterations,
+                    mode_indices,
+                    waveforms: worker_waveforms(waveforms),
+                };
+                validate_worker_pstb_result(&result).map_err(SimulationError::InvalidConfig)?;
+                Ok(result)
+            }
             SimulationResult::HarmonicBalance {
                 frequencies,
                 waveforms,
@@ -1515,6 +1937,57 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 frequencies,
                 waveforms: waveform_map(waveforms),
                 measurements: measure_results(measurements),
+            },
+            WorkerSimulationResult::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices,
+                waveforms,
+            } => Self::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                modes: modes
+                    .into_iter()
+                    .map(|mode| crate::simulation::results::PstbFloquetMode {
+                        multiplier: mode.multiplier,
+                        exponent: mode.exponent,
+                        probe_participation: mode.probe_participation,
+                        is_unstable: mode.is_unstable,
+                        is_trivial: mode.is_trivial,
+                        subharmonic_order: mode.subharmonic_order,
+                    })
+                    .collect(),
+                floquet_evidence,
+                orbit_kind,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification: stability_classification.into_core(),
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices,
+                waveforms: waveform_map(waveforms),
             },
             WorkerSimulationResult::Hb {
                 frequencies,
