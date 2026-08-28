@@ -148,21 +148,35 @@ pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> boo
 /// an unwrapped copy of the phase, and every crossing search over both. The
 /// tab strip asks this about every analysis in the run, on every frame,
 /// whichever sheet is open.
+/// Only the magnitude/phase branch is a shape question. The distortion
+/// family retains plain frequency curves with no `|…|`/`phase(…)` pairing to
+/// resolve, so its branch has to prove the curve itself is well formed —
+/// which is a walk of every retained sample, and the reason this whole
+/// predicate is asked through [`analysis_answers_structural_gate`] rather
+/// than directly.
 pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     analysis.success
         && (crate::state::ac_bode_shape_for_analysis(analysis, 0).is_some()
             || (analysis.analysis_type.is_raw_frequency_curve()
-                && analysis.waveforms.iter().any(|waveform| {
-                    waveform.visible
-                        && waveform.x.len() == waveform.y.len()
-                        && waveform.x.len() >= 2
-                        && waveform
-                            .x
-                            .iter()
-                            .zip(waveform.y.iter())
-                            .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
-                        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
-                })))
+                && analysis
+                    .waveforms
+                    .iter()
+                    .any(raw_frequency_curve_is_renderable)))
+}
+
+/// Whether one retained distortion curve is drawable: paired coordinates, a
+/// positive finite abscissa at every sample, and a strictly ascending sweep.
+fn raw_frequency_curve_is_renderable(waveform: &WaveformData) -> bool {
+    if !waveform.visible || waveform.x.len() != waveform.y.len() || waveform.x.len() < 2 {
+        return false;
+    }
+    frame_work::note(frame_work::DatasetWalk::RawFrequencyCurveScan);
+    waveform
+        .x
+        .iter()
+        .zip(waveform.y.iter())
+        .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
+        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 /// Open the dataset/manifest browser in its canonical Results frame.
@@ -2184,6 +2198,91 @@ pub(crate) fn retained_evidence_is_valid(
     valid
 }
 
+/// A structural question a tab strip asks about a retained analysis whose
+/// answer costs a walk of every retained sample.
+///
+/// Every one of these is a *shape* question — can this sheet draw this
+/// evidence? — that the retained vectors alone can answer, and every one of
+/// them was asked directly by the availability gates, about every analysis in
+/// the run, on every frame. The magnitude/phase half of the Bode question is
+/// genuinely cheap and is answered without coming here; the rest are not, so
+/// they come here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum StructuralGate {
+    /// A frequency response or a raw distortion curve the Bode sheet can
+    /// draw; see [`bode_analysis_is_renderable`].
+    BodeResponse,
+    /// An ordinary-noise spectrum; see
+    /// [`bode::ordinary_noise_spectrum_is_renderable`].
+    OrdinaryNoiseSpectrum,
+    /// A discrete complex coefficient spectrum; see
+    /// [`harmonic_balance::analysis_is_renderable`].
+    HarmonicSpectrum,
+    /// An explicitly-labelled phase-noise trace with a retained carrier; see
+    /// [`phase_noise::phase_noise_is_renderable`].
+    PhaseNoiseSpectrum,
+    /// S-parameter traces with per-port reference impedances; see
+    /// [`smith::structure_is_renderable`].
+    SParameterStructure,
+}
+
+/// One structural gate answered by walking the evidence, for callers that
+/// hold a run without a session to memoize against — the printed page, the
+/// visualization document's own compatibility check, and the tests.
+pub(crate) fn structural_gate_is_answered_directly(
+    gate: StructuralGate,
+    analysis: &AnalysisResult,
+) -> bool {
+    match gate {
+        StructuralGate::BodeResponse => bode_analysis_is_renderable(analysis),
+        StructuralGate::OrdinaryNoiseSpectrum => {
+            bode::ordinary_noise_spectrum_is_renderable(analysis)
+        }
+        StructuralGate::HarmonicSpectrum => harmonic_balance::analysis_is_renderable(analysis),
+        StructuralGate::PhaseNoiseSpectrum => phase_noise::phase_noise_is_renderable(analysis),
+        StructuralGate::SParameterStructure => smith::structure_is_renderable(analysis),
+    }
+}
+
+/// Whether one retained analysis answers a structural gate, resolved once per
+/// dataset generation.
+///
+/// Memoized for the same reason [`retained_evidence_is_valid`] is: the answer
+/// is a property of an immutable dataset, so it can only change when the
+/// datasets do, and the data version is part of the key so a generation the
+/// memo has not seen misses by construction. The cell is what lets the gates
+/// keep their `&AppState` signatures.
+pub(crate) fn analysis_answers_structural_gate(
+    state: &AppState,
+    dataset_id: DatasetId,
+    analysis: &AnalysisResult,
+    gate: StructuralGate,
+) -> bool {
+    // The ordinary-noise spectrum has a memo of its own, because the noise
+    // sheet needs the resolved shape and not only the verdict. Storing the
+    // verdict here as well would walk the same samples a second time to
+    // learn something already known.
+    if gate == StructuralGate::OrdinaryNoiseSpectrum {
+        return bode::ordinary_noise_spectrum_is_renderable_in(state, dataset_id, analysis);
+    }
+    let key = (
+        state.simulation.data_version,
+        AnalysisPresentationKey::new(dataset_id, analysis),
+        gate,
+    );
+    if let Some(known) = state.ui.results.structural_gates.borrow().get(&key) {
+        return *known;
+    }
+    let answer = structural_gate_is_answered_directly(gate, analysis);
+    state
+        .ui
+        .results
+        .structural_gates
+        .borrow_mut()
+        .insert(key, answer);
+    answer
+}
+
 /// The content digest of one retained dataset.
 ///
 /// Hashing a dataset encodes every retained sample of it. The resolved
@@ -2587,6 +2686,9 @@ pub struct ResultsState {
     /// analysis); see [`bode::noise_spectrum_shape`].
     noise_spectrum_shapes:
         RefCell<HashMap<(u64, AnalysisPresentationKey), Option<bode::NoiseSpectrumShape>>>,
+    /// Memoized structural sheet-availability verdicts per (data version,
+    /// analysis, question); see [`analysis_answers_structural_gate`].
+    structural_gates: RefCell<HashMap<(u64, AnalysisPresentationKey, StructuralGate), bool>>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
     /// Row/column selection for the TABLE viewer.
@@ -3252,6 +3354,9 @@ impl ResultsState {
         self.noise_spectrum_shapes
             .get_mut()
             .retain(|(_, analysis), _| live(*analysis));
+        self.structural_gates
+            .get_mut()
+            .retain(|(_, analysis, _), _| live(*analysis));
         self.favorite_signals.retain(|key| live(key.analysis()));
         self.recent_signals.retain(|key| live(key.analysis()));
         self.favorite_result_artifacts
@@ -4641,6 +4746,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         results.retained_evidence_validity.get_mut().clear();
         results.dataset_digests.get_mut().clear();
         results.noise_spectrum_shapes.get_mut().clear();
+        results.structural_gates.get_mut().clear();
         results.event_order_cache = None;
         // Runtime operation failures and recovery notices belong to the
         // dataset generation that reported them.
@@ -5868,8 +5974,16 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Bode => {
-            let has_frequency_response =
-                active_run.is_some_and(|run| run.analyses.iter().any(bode_analysis_is_renderable));
+            let has_frequency_response = active_run.is_some_and(|run| {
+                run.analyses.iter().any(|analysis| {
+                    analysis_answers_structural_gate(
+                        state,
+                        run.dataset_id,
+                        analysis,
+                        StructuralGate::BodeResponse,
+                    )
+                })
+            });
             if has_frequency_response {
                 ViewerAvailability::available("A usable frequency response is available")
             } else {
@@ -5892,9 +6006,14 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         }
         ResultViewer::PhaseNoise => {
             if active_run.is_some_and(|run| {
-                run.analyses
-                    .iter()
-                    .any(phase_noise::phase_noise_is_renderable)
+                run.analyses.iter().any(|analysis| {
+                    analysis_answers_structural_gate(
+                        state,
+                        run.dataset_id,
+                        analysis,
+                        StructuralGate::PhaseNoiseSpectrum,
+                    )
+                })
             }) {
                 ViewerAvailability::available(
                     "A retained periodic phase-noise spectrum is available",
@@ -5948,7 +6067,12 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::NoiseContrib => {
             if active_run.is_some_and(|run| {
                 run.analyses.iter().any(|analysis| {
-                    bode::ordinary_noise_spectrum_is_renderable_in(state, run, analysis)
+                    analysis_answers_structural_gate(
+                        state,
+                        run.dataset_id,
+                        analysis,
+                        StructuralGate::OrdinaryNoiseSpectrum,
+                    )
                 })
             }) {
                 ViewerAvailability::available("A retained ordinary-noise spectrum is available")
@@ -6013,8 +6137,12 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Smith => {
             if active_run.is_some_and(|run| {
                 state.simulation.active_analysis().is_some_and(|analysis| {
-                    smith::structure_is_renderable(analysis)
-                        && analysis_evidence_is_valid(state, run.dataset_id, analysis)
+                    analysis_answers_structural_gate(
+                        state,
+                        run.dataset_id,
+                        analysis,
+                        StructuralGate::SParameterStructure,
+                    ) && analysis_evidence_is_valid(state, run.dataset_id, analysis)
                 })
             }) {
                 ViewerAvailability::available(

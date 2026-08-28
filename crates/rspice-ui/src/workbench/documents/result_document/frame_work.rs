@@ -54,12 +54,22 @@ pub(super) enum DatasetWalk {
     /// Verifying one retained ordinary-noise spectrum: every sample finite
     /// and positive, every frequency positive and strictly increasing.
     NoiseSpectrumScan,
+    /// Verifying one retained raw frequency curve — the distortion family —
+    /// sample by sample and then coordinate by coordinate.
+    RawFrequencyCurveScan,
+    /// Verifying one retained discrete complex coefficient spectrum.
+    HarmonicSpectrumScan,
+    /// Verifying one retained phase-noise trace.
+    PhaseNoiseSpectrumScan,
+    /// Verifying one retained S-parameter trace: every frequency and every
+    /// complex coefficient behind it.
+    SParameterTraceScan,
 }
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(test)]
-    pub(super) const ALL: [Self; 14] = [
+    pub(super) const ALL: [Self; 18] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -74,6 +84,10 @@ impl DatasetWalk {
         Self::TableCursorScan,
         Self::BodeMargins,
         Self::NoiseSpectrumScan,
+        Self::RawFrequencyCurveScan,
+        Self::HarmonicSpectrumScan,
+        Self::PhaseNoiseSpectrumScan,
+        Self::SParameterTraceScan,
     ];
 }
 

@@ -52,6 +52,14 @@ const EVENTS_PER_NODE: usize = 2_000;
 const FFT_SAMPLES: usize = 16_384;
 /// Retained points on the loop-gain locus.
 const NYQUIST_POINTS: usize = 20_000;
+/// Retained points on each distortion curve.
+const DISTORTION_POINTS: usize = 40_000;
+/// Retained coefficients in the harmonic-balance spectrum.
+const HARMONIC_COEFFICIENTS: usize = 8_000;
+/// Retained offsets in the phase-noise spectrum.
+const PHASE_NOISE_POINTS: usize = 20_000;
+/// Retained frequencies in the S-parameter sweep.
+const SPARAMETER_POINTS: usize = 20_000;
 /// Retained node-voltage rows on the operating point.
 const OP_NODES: usize = 20_000;
 /// Retained per-device rows on the operating point.
@@ -138,6 +146,108 @@ fn ac_analysis() -> AnalysisResult {
         WaveformData::new("|V(out)|", frequency.clone(), magnitude, "#00aaff"),
         WaveformData::new("phase(V(out))", frequency, phase, "#ffbd2e"),
     ])
+}
+
+/// A distortion result: plain frequency curves with no magnitude/phase
+/// pairing to resolve.
+///
+/// The Bode tab offers this family too, and the only way to know whether one
+/// of its curves is drawable is to check every retained sample. Placed before
+/// the AC result so the tab strip's `any` reaches it first — which is exactly
+/// how the reader would meet it, and exactly what a gate that walks would
+/// charge them for.
+fn distortion_analysis() -> AnalysisResult {
+    let frequency: Vec<f64> = (0..DISTORTION_POINTS)
+        .map(|index| 10f64.powf(1.0 + index as f64 * 6.0 / DISTORTION_POINTS as f64))
+        .collect();
+    let curve = |scale: f64| -> Vec<f64> {
+        frequency
+            .iter()
+            .map(|f| scale / (1.0 + (f / 1.0e4).powi(2)))
+            .collect()
+    };
+    let (second_harmonic, third_harmonic) = (curve(1.0e-3), curve(1.0e-4));
+    AnalysisResult::new(8, AnalysisType::Disto, "DISTO").with_waveforms(vec![
+        WaveformData::new("HD2", frequency.clone(), second_harmonic, "#00aaff"),
+        WaveformData::new("HD3", frequency, third_harmonic, "#ffbd2e"),
+    ])
+}
+
+/// A discrete complex coefficient spectrum.
+fn harmonic_balance_analysis() -> AnalysisResult {
+    let frequency: Vec<f64> = (0..HARMONIC_COEFFICIENTS)
+        .map(|index| (index + 1) as f64 * 1.0e6)
+        .collect();
+    let real: Vec<f64> = (0..HARMONIC_COEFFICIENTS)
+        .map(|index| 1.0 / (index as f64 + 1.0))
+        .collect();
+    let imag: Vec<f64> = (0..HARMONIC_COEFFICIENTS)
+        .map(|index| -0.5 / (index as f64 + 1.0))
+        .collect();
+    let magnitude: Vec<f64> = real
+        .iter()
+        .zip(imag.iter())
+        .map(|(re, im)| re.hypot(*im))
+        .collect();
+    AnalysisResult::new(9, AnalysisType::HarmonicBalance, "HB").with_waveforms(vec![
+        WaveformData::new("|V(out)|", frequency, magnitude, "#00aaff")
+            .with_complex_components("V(out)", real, imag),
+    ])
+}
+
+/// An explicitly-labelled phase-noise spectrum with its retained carrier.
+fn phase_noise_analysis() -> AnalysisResult {
+    let offset: Vec<f64> = (0..PHASE_NOISE_POINTS)
+        .map(|index| 10f64.powf(1.0 + index as f64 * 6.0 / PHASE_NOISE_POINTS as f64))
+        .collect();
+    let level: Vec<f64> = offset
+        .iter()
+        .map(|f| -40.0 - 30.0 * f.log10() - 20.0)
+        .collect();
+    AnalysisResult::new(10, AnalysisType::Pnoise, "PNOISE")
+        .with_family_metadata(AnalysisResultFamilyMetadata::PeriodicNoise {
+            output_quantity: crate::state::PeriodicNoiseOutputQuantity::PhaseNoiseDbcPerHz,
+            carrier_frequency_hz: Some(2.4e9),
+        })
+        .with_waveforms(vec![WaveformData::new(
+            "phase_noise",
+            offset,
+            level,
+            "#00aaff",
+        )])
+}
+
+/// A two-port S-parameter sweep with its per-port reference impedances.
+fn sparameter_analysis() -> AnalysisResult {
+    let frequency: Vec<f64> = (0..SPARAMETER_POINTS)
+        .map(|index| 10f64.powf(6.0 + index as f64 * 4.0 / SPARAMETER_POINTS as f64))
+        .collect();
+    let waveforms = ["S11", "S21"]
+        .into_iter()
+        .enumerate()
+        .map(|(port, name)| {
+            let real: Vec<f64> = frequency
+                .iter()
+                .map(|f| (f.log10() + port as f64).cos() * 0.4)
+                .collect();
+            let imag: Vec<f64> = frequency
+                .iter()
+                .map(|f| (f.log10() + port as f64).sin() * 0.4)
+                .collect();
+            let magnitude: Vec<f64> = real
+                .iter()
+                .zip(imag.iter())
+                .map(|(re, im)| re.hypot(*im))
+                .collect();
+            WaveformData::new(name, frequency.clone(), magnitude, "#00aaff")
+                .with_complex_components(name, real, imag)
+        })
+        .collect();
+    AnalysisResult::new(11, AnalysisType::SParameter, "SP")
+        .with_family_metadata(AnalysisResultFamilyMetadata::SParameter {
+            reference_impedances_ohm: vec![50.0, 50.0],
+        })
+        .with_waveforms(waveforms)
 }
 
 /// Input- and output-referred noise densities plus per-device contributors.
@@ -315,8 +425,13 @@ fn large_state() -> AppState {
     run.add_analysis(soa_analysis());
     run.add_analysis(sensitivity_analysis());
     run.add_analysis(optimization_analysis());
+    run.add_analysis(distortion_analysis());
     run.add_analysis(ac_analysis());
     run.add_analysis(noise_analysis());
+    run.add_analysis(harmonic_balance_analysis());
+    run.add_analysis(phase_noise_analysis());
+    run.add_analysis(sparameter_analysis());
+
     state.simulation.runs = vec![run];
     assert!(state.simulation.select_run(0));
 
@@ -781,6 +896,40 @@ fn the_first_frame_counts_the_samples_the_steady_frames_must_not_reread() {
         "the first Waves frame read {} samples for trace extremes, fewer than the \
          {TRANSIENT_SAMPLES} one retained waveform holds, so the sample gate is vacuous",
         first.samples(FrameSampleRead::TraceExtremes)
+    );
+}
+
+/// The S-parameter gate is scoped to the *active* analysis, so the surfaces
+/// above never reach its walk — and an instrument nothing exercises is an
+/// instrument that passes forever.
+///
+/// This drives the gate the way the tab strip does, with the S-parameter
+/// result selected: once to build, then not again.
+#[test]
+fn the_smith_gate_verifies_its_traces_once_per_dataset_generation() {
+    let mut state = large_state();
+    select_analysis(&mut state, AnalysisType::SParameter);
+
+    let first = WorkCounts::reset();
+    let offered = super::super::viewer_availability(&state, ResultViewer::Smith).available;
+    let first = first.since();
+    assert!(
+        offered,
+        "the fixture must retain an S-parameter result the Smith sheet accepts"
+    );
+    assert!(
+        first.get(DatasetWalk::SParameterTraceScan) > 0,
+        "the gate answered without verifying a single retained trace, so this measures nothing"
+    );
+
+    let baseline = WorkCounts::reset();
+    for _ in 0..IDLE_FRAMES {
+        assert!(super::super::viewer_availability(&state, ResultViewer::Smith).available);
+    }
+    assert_eq!(
+        baseline.since().get(DatasetWalk::SParameterTraceScan),
+        0,
+        "the Smith tab re-verified every retained complex coefficient on an idle frame"
     );
 }
 

@@ -71,6 +71,7 @@ pub(super) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> boo
     {
         return false;
     }
+    super::frame_work::note(super::frame_work::DatasetWalk::PhaseNoiseSpectrumScan);
 
     waveform
         .x
@@ -104,15 +105,21 @@ pub(super) fn phase_noise_is_renderable(analysis: &AnalysisResult) -> bool {
 
 fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.simulation.active_run()?;
+    // Through the workspace memo: the predicate walks every retained offset
+    // and level, and this resolves on every frame the sheet is open.
+    let renderable = |analysis: &AnalysisResult| {
+        super::analysis_answers_structural_gate(
+            state,
+            run.dataset_id,
+            analysis,
+            super::StructuralGate::PhaseNoiseSpectrum,
+        )
+    };
     state
         .simulation
         .active_analysis_idx
-        .filter(|&index| {
-            run.analyses
-                .get(index)
-                .is_some_and(phase_noise_is_renderable)
-        })
-        .or_else(|| run.analyses.iter().position(phase_noise_is_renderable))
+        .filter(|&index| run.analyses.get(index).is_some_and(&renderable))
+        .or_else(|| run.analyses.iter().position(renderable))
 }
 
 fn model_from_analysis(

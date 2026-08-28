@@ -271,18 +271,22 @@ pub(crate) fn analysis_supports_viewer(viewer: ResultViewer, analysis: &Analysis
     if !analysis.success || analysis.validate_retained_evidence().is_err() {
         return false;
     }
-    viewer_can_render(viewer, analysis)
+    viewer_can_render(viewer, analysis, |gate, analysis| {
+        super::structural_gate_is_answered_directly(gate, analysis)
+    })
 }
 
-/// The same predicate, with the retained-evidence verdict taken from the
-/// workspace's memo instead of walked here.
+/// The same predicate, with the retained-evidence verdict and every
+/// structural question taken from the workspace's memos instead of walked
+/// here.
 ///
 /// The validator reads every sample of every waveform in the analysis, and
 /// resolving the displayed view asks the question once per retained analysis
-/// — on every frame, for a reader who is not touching anything. The memo is
-/// keyed by dataset generation, so it answers the same question this walk
-/// would have.
-fn analysis_supports_viewer_memoized(
+/// — on every frame, for a reader who is not touching anything. The memos are
+/// keyed by dataset generation, so they answer the same questions these walks
+/// would have. Every per-frame caller must use this one; the plain predicate
+/// above is for callers that hold a run without a session to memoize against.
+pub(crate) fn analysis_supports_viewer_memoized(
     state: &AppState,
     dataset_id: DatasetId,
     viewer: ResultViewer,
@@ -290,12 +294,23 @@ fn analysis_supports_viewer_memoized(
 ) -> bool {
     analysis.success
         && super::analysis_evidence_is_valid(state, dataset_id, analysis)
-        && viewer_can_render(viewer, analysis)
+        && viewer_can_render(viewer, analysis, |gate, analysis| {
+            super::analysis_answers_structural_gate(state, dataset_id, analysis, gate)
+        })
 }
 
 /// Whether this viewer has anything to draw from the shape of the retained
-/// result — the half of the compatibility question that costs nothing.
-fn viewer_can_render(viewer: ResultViewer, analysis: &AnalysisResult) -> bool {
+/// result.
+///
+/// Most arms cost nothing — a payload discriminant, a non-empty vector. The
+/// five that do not are asked through `structural`, so the caller decides
+/// whether they are walked or read from the workspace memo; see
+/// [`super::StructuralGate`].
+fn viewer_can_render(
+    viewer: ResultViewer,
+    analysis: &AnalysisResult,
+    structural: impl Fn(super::StructuralGate, &AnalysisResult) -> bool,
+) -> bool {
     match viewer {
         ResultViewer::Waves => {
             analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
@@ -303,13 +318,17 @@ fn viewer_can_render(viewer: ResultViewer, analysis: &AnalysisResult) -> bool {
         ResultViewer::DcSweep => {
             analysis.analysis_type == AnalysisType::DcSweep && !analysis.waveforms.is_empty()
         }
-        ResultViewer::Bode => super::bode_analysis_is_renderable(analysis),
-        ResultViewer::NoiseContrib => super::bode::ordinary_noise_spectrum_is_renderable(analysis),
+        ResultViewer::Bode => structural(super::StructuralGate::BodeResponse, analysis),
+        ResultViewer::NoiseContrib => {
+            structural(super::StructuralGate::OrdinaryNoiseSpectrum, analysis)
+        }
         ResultViewer::Fft | ResultViewer::Eye => {
             analysis.analysis_type.is_time_domain() && !analysis.waveforms.is_empty()
         }
-        ResultViewer::HarmonicBalance => super::harmonic_balance_analysis_is_renderable(analysis),
-        ResultViewer::PhaseNoise => super::phase_noise_analysis_is_renderable(analysis),
+        ResultViewer::HarmonicBalance => {
+            structural(super::StructuralGate::HarmonicSpectrum, analysis)
+        }
+        ResultViewer::PhaseNoise => structural(super::StructuralGate::PhaseNoiseSpectrum, analysis),
         ResultViewer::Nyquist => analysis.waveforms.iter().any(|waveform| {
             waveform.complex.as_ref().is_some_and(|complex| {
                 !complex.real.is_empty()
@@ -317,8 +336,16 @@ fn viewer_can_render(viewer: ResultViewer, analysis: &AnalysisResult) -> bool {
                     && complex.real.len() == waveform.x.len()
             })
         }),
-        ResultViewer::Smith => super::smith_analysis_is_renderable(analysis),
-        ResultViewer::Op => operating_point_evidence_is_renderable(analysis),
+        ResultViewer::Smith => structural(super::StructuralGate::SParameterStructure, analysis),
+        // The analysis kind is part of the question, exactly as it is in the
+        // tab strip's own gate: `op_inspector` renders nothing for an
+        // analysis that is not a DC operating point, so a transient that
+        // retained its bias solution must not be bindable to the OP sheet
+        // from a Studio pane or a persistent document either.
+        ResultViewer::Op => {
+            analysis.analysis_type == AnalysisType::DcOp
+                && operating_point_evidence_is_renderable(analysis)
+        }
         ResultViewer::Contribution => {
             matches!(
                 analysis.result_payload,

@@ -101,12 +101,12 @@ fn resolve_noise_spectrum_shape(analysis: &AnalysisResult) -> Option<NoiseSpectr
 /// `&AppState` signature.
 pub(super) fn noise_spectrum_shape(
     state: &AppState,
-    run: &crate::state::SimulationRun,
+    dataset_id: crate::product::DatasetId,
     analysis: &AnalysisResult,
 ) -> Option<NoiseSpectrumShape> {
     let key = (
         state.simulation.data_version,
-        super::AnalysisPresentationKey::new(run.dataset_id, analysis),
+        super::AnalysisPresentationKey::new(dataset_id, analysis),
     );
     if let Some(known) = state.ui.results.noise_spectrum_shapes.borrow().get(&key) {
         return *known;
@@ -125,10 +125,11 @@ pub(super) fn noise_spectrum_shape(
 /// draw, through the memo that owns the question.
 pub(super) fn ordinary_noise_spectrum_is_renderable_in(
     state: &AppState,
-    run: &crate::state::SimulationRun,
+    dataset_id: crate::product::DatasetId,
     analysis: &AnalysisResult,
 ) -> bool {
-    is_ordinary_noise_result(analysis) && noise_spectrum_shape(state, run, analysis).is_some()
+    is_ordinary_noise_result(analysis)
+        && noise_spectrum_shape(state, dataset_id, analysis).is_some()
 }
 
 /// The analysis kinds an ordinary-noise spectrum can come from, and the
@@ -319,7 +320,7 @@ fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
 pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.simulation.active_run()?;
     selected_noise_analysis_index_with(state.simulation.active_analysis_idx, run, |analysis| {
-        ordinary_noise_spectrum_is_renderable_in(state, run, analysis)
+        ordinary_noise_spectrum_is_renderable_in(state, run.dataset_id, analysis)
     })
 }
 
@@ -370,7 +371,7 @@ fn selected_noise_analysis(state: &AppState) -> Option<(usize, &AnalysisResult)>
 fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
     let run = state.simulation.active_run()?;
     let (_, analysis) = selected_noise_analysis(state)?;
-    let shape = noise_spectrum_shape(state, run, analysis)?;
+    let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
     let frequency = Arc::clone(&analysis.waveforms.get(shape.anchor)?.x);
     let trace_count = shape.trace_count;
     let (total_rms, input_rms, band) = analysis

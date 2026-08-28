@@ -153,8 +153,17 @@ pub(super) fn visualization_configuration_status(state: &AppState) -> Result<(),
                 pane.id
             ));
         }
+        // Through the workspace memos. This runs once per pane, on every
+        // frame, from the Studio's own header: resolving it directly walked
+        // every retained sample of every waveform behind every bound pane
+        // for a reader who was not touching anything.
         let exact_sheet_compatible =
-            result_document::view_context::analysis_supports_viewer(pane.viewer, analysis);
+            result_document::view_context::analysis_supports_viewer_memoized(
+                state,
+                pane.dataset_id,
+                pane.viewer,
+                analysis,
+            );
         let analysis_ids = [analysis_manifest_id(analysis.analysis_type)];
         match viewer_compatibility(
             definition.id,
@@ -627,4 +636,37 @@ pub(super) fn touch_dock(ui: &mut Ui, app: &mut RSpiceApp) {
             });
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    /// The header resolves every pane's compatibility through the workspace
+    /// memos, never by walking the datasets behind them.
+    ///
+    /// `visualization_configuration_status` runs on every frame, once per
+    /// bound pane, and it called the unmemoized predicate — which reads every
+    /// sample of every waveform in the analysis, and every structural gate
+    /// besides. The two spellings differ by one identifier, so a source guard
+    /// is what keeps the cheap one in place: nothing about calling
+    /// `analysis_supports_viewer` here fails a test on its own.
+    #[test]
+    fn the_header_never_resolves_pane_compatibility_by_walking_the_dataset() {
+        let shipped = crate::source_guard::production_source(include_str!("chrome.rs"));
+        let offenders = shipped
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| {
+                line.contains("analysis_supports_viewer")
+                    && !line.contains("analysis_supports_viewer_memoized")
+            })
+            .map(|(index, line)| format!("{}: {}", index + 1, line.trim()))
+            .collect::<Vec<_>>();
+
+        assert!(
+            offenders.is_empty(),
+            "the Studio header must resolve pane compatibility through \
+             `analysis_supports_viewer_memoized`:\n{}",
+            offenders.join("\n")
+        );
+    }
 }

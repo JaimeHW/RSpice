@@ -62,13 +62,17 @@ fn trace_is_well_formed(waveform: &crate::state::WaveformData) -> bool {
     let Some(complex) = waveform.complex.as_ref() else {
         return false;
     };
-    !waveform.x.is_empty()
-        && waveform.x.len() == complex.real.len()
-        && waveform.x.len() == complex.imag.len()
-        && waveform
-            .x
-            .iter()
-            .all(|frequency| frequency.is_finite() && *frequency > 0.0)
+    if waveform.x.is_empty()
+        || waveform.x.len() != complex.real.len()
+        || waveform.x.len() != complex.imag.len()
+    {
+        return false;
+    }
+    frame_work::note(DatasetWalk::SParameterTraceScan);
+    waveform
+        .x
+        .iter()
+        .all(|frequency| frequency.is_finite() && *frequency > 0.0)
         && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
         && complex
             .real

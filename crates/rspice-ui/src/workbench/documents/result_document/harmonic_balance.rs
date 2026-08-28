@@ -43,16 +43,17 @@ struct HarmonicBalanceModel {
 /// corresponding complex coefficients.  Name matching is intentionally not
 /// sufficient: users may name an unrelated waveform with vertical bars.
 pub(super) fn spectrum_trace_is_renderable(waveform: &WaveformData) -> bool {
-    waveform.complex.is_some()
-        && waveform.x.len() == waveform.y.len()
-        && !waveform.x.is_empty()
-        && waveform
-            .x
-            .iter()
-            .zip(waveform.y.iter())
-            .all(|(&frequency, &magnitude)| {
-                frequency.is_finite() && frequency >= 0.0 && magnitude.is_finite()
-            })
+    if waveform.complex.is_none() || waveform.x.len() != waveform.y.len() || waveform.x.is_empty() {
+        return false;
+    }
+    super::frame_work::note(super::frame_work::DatasetWalk::HarmonicSpectrumScan);
+    waveform
+        .x
+        .iter()
+        .zip(waveform.y.iter())
+        .all(|(&frequency, &magnitude)| {
+            frequency.is_finite() && frequency >= 0.0 && magnitude.is_finite()
+        })
         && waveform.x.windows(2).all(|window| window[0] <= window[1])
 }
 
@@ -72,10 +73,16 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
 /// selected analysis and otherwise resolves the first exact retained HB
 /// result in the active immutable dataset.
 pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
-    state
-        .simulation
-        .active_run()
-        .is_some_and(|run| run.analyses.iter().any(analysis_is_renderable))
+    state.simulation.active_run().is_some_and(|run| {
+        run.analyses.iter().any(|analysis| {
+            super::analysis_answers_structural_gate(
+                state,
+                run.dataset_id,
+                analysis,
+                super::StructuralGate::HarmonicSpectrum,
+            )
+        })
+    })
 }
 
 fn selected_hb_analysis(state: &AppState) -> Option<&AnalysisResult> {

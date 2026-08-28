@@ -380,7 +380,24 @@ fn prepare_active_sheet_csv(
         // transient carrying `dc_op` with that transient's event history —
         // both under a menu item the reader pressed on the OP sheet.
         ResultViewer::Op => {
-            let analysis = displayed.primary_analysis(state)?;
+            let Some(analysis) = displayed.primary_analysis(state) else {
+                // Nothing is bound to the sheet. A failed solve keeps the
+                // payload router's answer, which names the run and carries
+                // the engine's own reason. A *successful* result that simply
+                // is not an operating point is the case the sheet has to
+                // speak for: the router underneath would report on waveform
+                // samples, which is not what the reader pressed.
+                let selected = state.simulation.active_analysis()?;
+                if !selected.success || selected.analysis_type == crate::state::AnalysisType::DcOp {
+                    return None;
+                }
+                return Some(Err(format!(
+                    "The operating point cannot be exported: analysis '{}' is a {} result, not \
+                     a DC operating point.",
+                    selected.label,
+                    selected.analysis_type.short_label()
+                )));
+            };
             if !analysis.success {
                 return Some(Err(format!(
                     "The operating point cannot be exported: analysis '{}' did not complete \
