@@ -3425,6 +3425,163 @@ fn static_hb_probe_classifier_distinguishes_voltage_accessors_from_currents() {
 }
 
 #[test]
+fn hb_frequency_projection_includes_named_mna_branch_current_spectra() {
+    use rspice_core::analysis::{HbResult, SpectralBranchCurrent, SpectralVoltage};
+
+    let netlist = XyceTestRunner::parse_xyce_netlist(
+        "HB branch projection fixture\nV1 1 0 0\nR1 1 0 1\n.END\n",
+        Path::new("hb-branch-projection.cir"),
+    )
+    .expect("fixture parses");
+    let print = XycePrintRequest {
+        probes: vec!["V(1)".into(), "I(V1)".into()],
+    };
+    let columns = [
+        "Index",
+        "FREQ",
+        "Re(V(1))",
+        "Im(V(1))",
+        "Re(I(V1))",
+        "Im(I(V1))",
+    ]
+    .map(str::to_string)
+    .to_vec();
+    let reference = XycePrnTable {
+        columns: columns.clone(),
+        rows: vec![vec![0.0; columns.len()]; 5],
+    };
+    let mut result = HbResult::new(1_000.0, 1, 2);
+    result.node_names.push("1".into());
+    result.spectral_voltages.push(SpectralVoltage {
+        node_name: "1".into(),
+        coefficients: vec![
+            Complex64::new(10.0, 0.0),
+            Complex64::new(4.0, 6.0),
+            Complex64::new(-8.0, 10.0),
+        ],
+        frequencies: vec![0.0, 1_000.0, 2_000.0],
+    });
+    result.mna_branch_currents.push(SpectralBranchCurrent {
+        device_name: "V1".into(),
+        coefficients: vec![
+            Complex64::new(-1.0, 0.0),
+            Complex64::new(8.0, -10.0),
+            Complex64::new(-12.0, -14.0),
+        ],
+        frequencies: vec![0.0, 1_000.0, 2_000.0],
+    });
+
+    let table =
+        XyceTestRunner::hb_frequency_result_to_prn_table(&reference, &print, &netlist, &result)
+            .expect("retained I(V1) spectrum projects");
+    assert_eq!(table.columns, columns);
+    assert_eq!(
+        table.rows,
+        vec![
+            vec![0.0, -2_000.0, -4.0, -5.0, -6.0, 7.0],
+            vec![1.0, -1_000.0, 2.0, -3.0, 4.0, 5.0],
+            vec![2.0, 0.0, 10.0, 0.0, -1.0, 0.0],
+            vec![3.0, 1_000.0, 2.0, 3.0, 4.0, -5.0],
+            vec![4.0, 2_000.0, -4.0, 5.0, -6.0, -7.0],
+        ]
+    );
+}
+
+#[test]
+fn hb_frequency_branch_projection_rejects_malformed_or_ambiguous_spectra() {
+    use rspice_core::analysis::{HbResult, SpectralBranchCurrent, SpectralVoltage};
+
+    let netlist = XyceTestRunner::parse_xyce_netlist(
+        "HB branch projection fixture\nV1 1 0 0\nR1 1 0 1\n.END\n",
+        Path::new("hb-branch-projection.cir"),
+    )
+    .expect("fixture parses");
+    let print = XycePrintRequest {
+        probes: vec!["I(V1)".into()],
+    };
+    let reference = XycePrnTable {
+        columns: ["Index", "FREQ", "Re(I(V1))", "Im(I(V1))"]
+            .map(str::to_string)
+            .to_vec(),
+        rows: vec![vec![0.0; 4]; 3],
+    };
+    let branch = SpectralBranchCurrent {
+        device_name: "V1".into(),
+        coefficients: vec![Complex64::new(0.0, 0.0), Complex64::new(2.0, 4.0)],
+        frequencies: vec![0.0, 1_000.0],
+    };
+    let rejects = |result: &HbResult| {
+        XyceTestRunner::hb_frequency_result_to_prn_table(&reference, &print, &netlist, result)
+            .is_err()
+    };
+    let mut incomplete = HbResult::new(1_000.0, 0, 1);
+    incomplete.mna_branch_currents.push(SpectralBranchCurrent {
+        coefficients: vec![Complex64::new(0.0, 0.0)],
+        ..branch.clone()
+    });
+    assert!(rejects(&incomplete));
+
+    let mut extra = HbResult::new(1_000.0, 0, 1);
+    extra.mna_branch_currents.push(SpectralBranchCurrent {
+        coefficients: vec![
+            Complex64::new(0.0, 0.0),
+            Complex64::new(2.0, 4.0),
+            Complex64::new(9.0, 9.0),
+        ],
+        frequencies: vec![0.0, 1_000.0, 2_000.0],
+        ..branch.clone()
+    });
+    assert!(rejects(&extra));
+
+    let mut missing_frequency = HbResult::new(1_000.0, 0, 1);
+    missing_frequency
+        .mna_branch_currents
+        .push(SpectralBranchCurrent {
+            frequencies: vec![0.0],
+            ..branch.clone()
+        });
+    assert!(rejects(&missing_frequency));
+
+    let mut misaligned_frequency = HbResult::new(1_000.0, 0, 1);
+    misaligned_frequency
+        .mna_branch_currents
+        .push(SpectralBranchCurrent {
+            frequencies: vec![0.0, 1_000.5],
+            ..branch.clone()
+        });
+    assert!(rejects(&misaligned_frequency));
+
+    let mut nonfinite_frequency = HbResult::new(1_000.0, 0, 1);
+    nonfinite_frequency
+        .mna_branch_currents
+        .push(SpectralBranchCurrent {
+            frequencies: vec![0.0, Value::NAN],
+            ..branch.clone()
+        });
+    assert!(rejects(&nonfinite_frequency));
+
+    let mut ambiguous = HbResult::new(1_000.0, 0, 1);
+    ambiguous.mna_branch_currents = vec![
+        branch.clone(),
+        SpectralBranchCurrent {
+            device_name: " v1 ".into(),
+            ..branch.clone()
+        },
+    ];
+    assert!(rejects(&ambiguous));
+
+    let mut inconsistent_node = HbResult::new(1_000.0, 1, 1);
+    inconsistent_node.node_names.push("2".into());
+    inconsistent_node.spectral_voltages.push(SpectralVoltage {
+        node_name: "1".into(),
+        coefficients: vec![Complex64::new(0.0, 0.0); 2],
+        frequencies: vec![0.0, 1_000.0],
+    });
+    inconsistent_node.mna_branch_currents.push(branch);
+    assert!(rejects(&inconsistent_node));
+}
+
+#[test]
 fn xyce_paramfile_variables_parse_dakota_values() {
     let bindings = XyceTestRunner::parse_xyce_paramfile_variables(
         "2 variables\n-10.0 dakota_VV1\n+5    dakota_VV2\n1 functions\n1 TimeAt2\n",

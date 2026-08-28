@@ -2784,7 +2784,21 @@ impl XyceTestRunner {
             );
         }
         let data_columns = Self::reference_ac_data_columns(reference, print, 2)?;
-        let expected_rows = 2 * result.num_harmonics + 1;
+        if !result.fundamental_freq.is_finite() || result.fundamental_freq <= 0.0 {
+            return Err(format!(
+                "HB.FD result has invalid fundamental frequency {}",
+                result.fundamental_freq
+            ));
+        }
+        let spectrum_len = result
+            .num_harmonics
+            .checked_add(1)
+            .ok_or_else(|| "HB.FD harmonic spectrum length overflowed".to_string())?;
+        let expected_rows = result
+            .num_harmonics
+            .checked_mul(2)
+            .and_then(|rows| rows.checked_add(1))
+            .ok_or_else(|| "HB.FD two-sided row count overflowed".to_string())?;
         if reference.rows.len() != expected_rows {
             return Err(format!(
                 "HB.FD oracle has {} rows, expected {expected_rows} for {} harmonics",
@@ -2793,46 +2807,147 @@ impl XyceTestRunner {
             ));
         }
 
-        let node_names = result
-            .spectral_voltages
-            .iter()
-            .map(|node| node.node_name.clone())
+        let expected_frequencies = (0..spectrum_len)
+            .map(|harmonic| harmonic as Value * result.fundamental_freq)
             .collect::<Vec<_>>();
+        if expected_frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite())
+        {
+            return Err("HB.FD canonical harmonic-frequency grid overflowed".to_string());
+        }
+        let frequency_grid_is_canonical = |frequencies: &[Value]| {
+            frequencies.len() == spectrum_len
+                && frequencies
+                    .iter()
+                    .zip(&expected_frequencies)
+                    .all(|(actual, expected)| {
+                        actual.is_finite() && actual.to_bits() == expected.to_bits()
+                    })
+        };
+        if !frequency_grid_is_canonical(&result.harmonic_frequencies) {
+            return Err("HB.FD result harmonic-frequency grid is not canonical".to_string());
+        }
+
+        if result.node_names.len() != result.spectral_voltages.len() {
+            return Err(format!(
+                "HB.FD node metadata has {} names for {} spectra",
+                result.node_names.len(),
+                result.spectral_voltages.len()
+            ));
+        }
+        let mut node_names = Vec::with_capacity(result.spectral_voltages.len());
+        let mut normalized_node_names = BTreeSet::new();
+        for (metadata_name, node) in result.node_names.iter().zip(&result.spectral_voltages) {
+            let trimmed = node.node_name.trim();
+            if trimmed.is_empty()
+                || trimmed != node.node_name
+                || metadata_name != &node.node_name
+                || !normalized_node_names.insert(trimmed.to_ascii_lowercase())
+            {
+                return Err(format!(
+                    "HB retained inconsistent, empty, or duplicate node metadata {:?}/{:?}",
+                    metadata_name, node.node_name
+                ));
+            }
+            if node.coefficients.len() != spectrum_len
+                || !node
+                    .coefficients
+                    .iter()
+                    .all(|coefficient| coefficient.re.is_finite() && coefficient.im.is_finite())
+                || !frequency_grid_is_canonical(&node.frequencies)
+            {
+                return Err(format!(
+                    "HB node '{}' does not have an exact finite canonical spectrum",
+                    node.node_name
+                ));
+            }
+            node_names.push(node.node_name.clone());
+        }
+        let mut branch_names = Vec::with_capacity(result.mna_branch_currents.len());
+        let mut normalized_branch_names = BTreeSet::new();
+        for branch in &result.mna_branch_currents {
+            let trimmed = branch.device_name.trim();
+            if trimmed.is_empty()
+                || trimmed != branch.device_name
+                || !normalized_branch_names.insert(trimmed.to_ascii_lowercase())
+            {
+                return Err(format!(
+                    "HB retained an empty or duplicate MNA branch name {:?}",
+                    branch.device_name
+                ));
+            }
+            if branch.coefficients.len() != spectrum_len
+                || !branch
+                    .coefficients
+                    .iter()
+                    .all(|coefficient| coefficient.re.is_finite() && coefficient.im.is_finite())
+                || !frequency_grid_is_canonical(&branch.frequencies)
+            {
+                return Err(format!(
+                    "HB MNA branch '{}' does not have an exact finite canonical spectrum",
+                    branch.device_name
+                ));
+            }
+            branch_names.push(branch.device_name.clone());
+        }
+        let project_coefficient =
+            |kind: &str, name: &str, coefficients: &[Complex64], signed_harmonic: isize| {
+                let harmonic = signed_harmonic.unsigned_abs();
+                let coefficient = coefficients
+                    .get(harmonic)
+                    .copied()
+                    .ok_or_else(|| format!("HB {kind} '{name}' is missing harmonic {harmonic}"))?;
+                // Public HB spectra store physical peak-amplitude phasors.
+                // Xyce HB.FD exposes the two-sided Fourier coefficient, so
+                // positive harmonics are divided by two and negative
+                // harmonics are their complex conjugates. DC passes through.
+                let coefficient = if harmonic == 0 {
+                    coefficient
+                } else {
+                    coefficient / 2.0
+                };
+                Ok::<_, String>(if signed_harmonic < 0 {
+                    coefficient.conj()
+                } else {
+                    coefficient
+                })
+            };
         let mut rows = Vec::with_capacity(expected_rows);
         for (row_index, signed_harmonic) in
             (-(result.num_harmonics as isize)..=result.num_harmonics as isize).enumerate()
         {
-            let harmonic = signed_harmonic.unsigned_abs();
             let voltages = result
                 .spectral_voltages
                 .iter()
                 .map(|node| {
-                    let coefficient =
-                        node.coefficients.get(harmonic).copied().ok_or_else(|| {
-                            format!(
-                                "HB node '{}' is missing harmonic {harmonic}",
-                                node.node_name
-                            )
-                        })?;
-                    let coefficient = if harmonic == 0 {
-                        coefficient
-                    } else {
-                        coefficient / 2.0
-                    };
-                    Ok(if signed_harmonic < 0 {
-                        coefficient.conj()
-                    } else {
-                        coefficient
-                    })
+                    project_coefficient(
+                        "node",
+                        &node.node_name,
+                        &node.coefficients,
+                        signed_harmonic,
+                    )
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let currents = result
+                .mna_branch_currents
+                .iter()
+                .map(|branch| {
+                    project_coefficient(
+                        "MNA branch",
+                        &branch.device_name,
+                        &branch.coefficients,
+                        signed_harmonic,
+                    )
                 })
                 .collect::<Result<Vec<_>, String>>()?;
             let frequency = signed_harmonic as Value * result.fundamental_freq;
             let ac_result = AcResult {
                 frequency,
                 node_names: node_names.clone(),
-                branch_names: Vec::new(),
+                branch_names: branch_names.clone(),
                 voltages,
-                currents: Vec::new(),
+                currents,
             };
             let mut row = Vec::with_capacity(reference.columns.len());
             row.push(row_index as Value);
