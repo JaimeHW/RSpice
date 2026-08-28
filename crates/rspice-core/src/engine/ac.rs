@@ -21,7 +21,6 @@ use std::f64::consts::PI;
 
 const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
-const AC_DIAGONAL_REGULARIZATION: Value = 1.0e-15;
 const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
 
 #[derive(Debug, Clone, Copy)]
@@ -1941,7 +1940,6 @@ impl Engine {
         include_vbic_delay_branches: bool,
     ) -> Result<(), SimulationError> {
         let has_nonlinear = circuit.has_nonlinear_devices();
-        let size = circuit.matrix_size();
         let frequency_hz = omega / (2.0 * PI);
         ac_matrix.clear_values();
 
@@ -2414,11 +2412,6 @@ impl Engine {
         }
 
         Self::stamp_xspice_small_signal_ac(circuit, ac_matrix, frequency_hz);
-
-        // Add small diagonal for numerical stability
-        for i in 0..size {
-            ac_matrix.add_real(i, i, AC_DIAGONAL_REGULARIZATION);
-        }
         Ok(())
     }
 
@@ -2653,17 +2646,6 @@ impl Engine {
                 true,
                 true,
             )?;
-            if !ac_voltage_projection.is_empty() {
-                // The global diagonal regularizer is useful to the other
-                // small-signal entry points, including batched noise/adjoint
-                // solves. For the primary AC response, independent source
-                // branch rows must remain exact algebraic constraints: a
-                // current diagonal is a physical series resistance.
-                for &branch_ordinal in &circuit.voltage_sources.branch_indices {
-                    let branch = circuit.get_branch_matrix_index(branch_ordinal);
-                    ac_matrix.add_real(branch - 1, branch - 1, -AC_DIAGONAL_REGULARIZATION);
-                }
-            }
             let rhs = Self::build_ac_excitation_rhs(circuit);
             let sparse_solution = match ac_solve_denominator_floor.as_deref() {
                 Some(floor) => ac_matrix.solve_with_row_denominator_floors(&rhs, floor),
@@ -2851,6 +2833,40 @@ mod tests {
              .end\n",
         )
         .expect("deck parses")
+    }
+
+    #[test]
+    fn small_signal_matrix_contains_only_authored_physical_terms() {
+        let netlist = Netlist::parse(
+            "Physical AC operator\n\
+             V1 in 0 AC 1\n\
+             R1 in 0 1k\n\
+             .END\n",
+        )
+        .expect("deck parses");
+        let engine = Engine::default();
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+
+        let ac_matrix = Engine::try_build_small_signal_ac_matrix(
+            &circuit,
+            &matrix,
+            &vec![0.0; circuit.matrix_size()],
+            2.0 * PI * 1.0e3,
+        )
+        .expect("small-signal matrix builds");
+        let conductance = circuit.resistors.small_signal_conductance(0);
+
+        assert_eq!(
+            ac_matrix.to_dense_real(),
+            vec![vec![conductance, 1.0], vec![1.0, 0.0]],
+            "AC assembly must not add hidden node or branch diagonal terms"
+        );
+        assert_eq!(
+            ac_matrix.to_dense_imag(),
+            vec![vec![0.0, 0.0], vec![0.0, 0.0]]
+        );
     }
 
     #[test]
