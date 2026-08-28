@@ -288,6 +288,33 @@ fn marker_tag(marker: MarkerView<'_>) -> String {
         format!("{id} · {note}")
     }
 }
+/// Whether one printed series carries the retained trace a marker rides.
+///
+/// The label is what the sheet writes on the legend, and several viewers
+/// decorate it: the Bode page lists `|V(out)| (dB)`, which is never equal to
+/// the `V(out)` a marker is anchored to, so every marker on a printed Bode
+/// page was dropped without a word. The identity is the other half of the
+/// same series and is built from the retained name — `dataset:run:analysis`
+/// and then the name, colon-delimited, with a derivation suffix where the
+/// series is one — so the anchor is resolved there instead. The first three
+/// components are skipped rather than searched: an analysis ordinal of `3`
+/// would otherwise answer to a net called `3`.
+fn series_carries_trace(series: &QuickResultSeries, trace_name: &str) -> bool {
+    if series.label == trace_name {
+        return true;
+    }
+    series
+        .identity
+        .splitn(4, ':')
+        .nth(3)
+        .is_some_and(|retained| {
+            retained == trace_name
+                || retained
+                    .strip_prefix(trace_name)
+                    .is_some_and(|suffix| suffix.starts_with(':'))
+        })
+}
+
 /// The axis rectangle one plot's overlay is mapped into.
 pub(super) struct PlotFrame {
     pub x_minimum: f64,
@@ -366,7 +393,7 @@ pub(super) fn resolved_overlay_geometry(
         let Some((index, source)) = series
             .iter()
             .enumerate()
-            .find(|(_, source)| source.label == trace_name)
+            .find(|(_, source)| series_carries_trace(source, trace_name))
         else {
             continue;
         };
@@ -397,6 +424,123 @@ pub(super) fn resolved_overlay_geometry(
         });
     }
     Ok((cursors, markers))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame() -> PlotFrame {
+        PlotFrame {
+            x_minimum: 1.0,
+            x_maximum: 6.0,
+            y_minimum: -40.0,
+            y_maximum: 40.0,
+            x_span: 5.0,
+            y_span: 80.0,
+            plot_width: 100_000,
+            plot_height: 100_000,
+        }
+    }
+
+    fn anchored_marker(trace_name: &str) -> RetainedQuickViewOverlay {
+        RetainedQuickViewOverlay::for_test(
+            None,
+            None,
+            vec![RetainedQuickMarker {
+                label: "D1".to_owned(),
+                kind: MarkerKind::Note,
+                x: 3.0,
+                trace_name: Some(trace_name.to_owned()),
+            }],
+        )
+    }
+
+    /// A marker rides its retained trace, whatever the page calls it.
+    ///
+    /// Markers were matched against the series' display label, and the Bode
+    /// page decorates its labels — `|V(out)| (dB)` is never equal to the
+    /// `V(out)` a marker is anchored to. Every marker on a printed Bode page
+    /// was therefore dropped without a word, on a page whose whole reason for
+    /// carrying the overlay is that the annotations are the reading.
+    #[test]
+    fn a_bode_marker_finds_its_trace_through_the_decorated_label() {
+        let series = vec![QuickResultSeries {
+            identity: "dataset:run:1:V(out):magnitude-db".to_owned(),
+            label: "|V(out)| (dB)".to_owned(),
+            points: vec![(1.0, 40.0), (6.0, -40.0)],
+        }];
+
+        let (_, markers) = resolved_overlay_geometry(
+            ResultViewer::Bode,
+            &anchored_marker("V(out)"),
+            &series,
+            AxisScale::Linear,
+            AxisScale::Linear,
+            &frame(),
+        )
+        .expect("the marker maps inside the frame");
+
+        assert_eq!(
+            markers.len(),
+            1,
+            "the marker was dropped because the page decorates its label"
+        );
+        assert_eq!(markers[0].label, "D1");
+        assert_eq!(
+            markers[0].trace_id,
+            Some(stable_quick_trace_id(
+                ResultViewer::Bode,
+                0,
+                "dataset:run:1:V(out):magnitude-db"
+            ))
+        );
+    }
+
+    /// And a marker whose trace is not on this page still has nothing to
+    /// ride: the match is on the retained name, not on any substring of it.
+    #[test]
+    fn a_marker_for_another_trace_is_still_dropped() {
+        let series = vec![QuickResultSeries {
+            identity: "dataset:run:1:V(out):magnitude-db".to_owned(),
+            label: "|V(out)| (dB)".to_owned(),
+            points: vec![(1.0, 40.0), (6.0, -40.0)],
+        }];
+
+        let (_, markers) = resolved_overlay_geometry(
+            ResultViewer::Bode,
+            &anchored_marker("V(in)"),
+            &series,
+            AxisScale::Linear,
+            AxisScale::Linear,
+            &frame(),
+        )
+        .expect("the overlay resolves");
+
+        assert!(markers.is_empty());
+    }
+
+    /// The undecorated sheets keep matching on the name they already show.
+    #[test]
+    fn a_waveform_marker_still_rides_its_own_series() {
+        let series = vec![QuickResultSeries {
+            identity: "dataset:run:1:V(out)".to_owned(),
+            label: "V(out)".to_owned(),
+            points: vec![(1.0, 40.0), (6.0, -40.0)],
+        }];
+
+        let (_, markers) = resolved_overlay_geometry(
+            ResultViewer::Waves,
+            &anchored_marker("V(out)"),
+            &series,
+            AxisScale::Linear,
+            AxisScale::Linear,
+            &frame(),
+        )
+        .expect("the marker maps inside the frame");
+
+        assert_eq!(markers.len(), 1);
+    }
 }
 
 /// A stable id for one overlay entity, in the same shape as the trace ids so
