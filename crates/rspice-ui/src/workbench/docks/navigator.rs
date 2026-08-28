@@ -55,6 +55,10 @@ const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 204.0;
 /// workflow instead of allocating an unbounded browser/WASM string.
 const RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT: usize = 100_000;
 const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
+/// `.result-browser-status { padding: 3px 8px }` — the padding that makes the
+/// scope control a band rather than a bare row. Without it the segments are
+/// exactly the band, so they sit hard against the toolbar rule above them.
+const RESULT_BROWSER_BAND_PAD_Y: f32 = 3.0;
 const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
 const TOUCH_TARGET_HEIGHT: f32 = 44.0;
 const PANEL_SEARCH_MARGIN_X: f32 = 8.0;
@@ -1701,8 +1705,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         // set is in force, so spelling either one again costs the row the width
         // the count needs at the dock's minimum.
         let count_copy = format!("{shown} / {loaded}");
+        ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
         ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 28.0),
+            egui::vec2(ui.available_width(), t.metrics.ctl_h.max(28.0)),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.add_space(8.0);
@@ -1757,6 +1762,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     .on_hover_text(count_tooltip);
                 });
             },
+        );
+        ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
+        // `.result-browser-status` closes on its own rule, like the toolbar
+        // above it, so the scope control reads as a band of its own instead
+        // of as the first row of the list below.
+        ui.painter().hline(
+            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+            ui.cursor().top() - 0.5,
+            egui::Stroke::new(1.0, t.color.border),
         );
     }
     // The mockup's `.result-browser-selection`: what a batch action would
@@ -2029,6 +2043,13 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                 });
             },
+        );
+        // `.result-browser-selection` closes on a rule too, so the selection
+        // band and the list under it do not run together.
+        ui.painter().hline(
+            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+            ui.cursor().top() - 0.5,
+            egui::Stroke::new(1.0, t.color.border),
         );
     }
     if tab == ResultsBrowserTab::Signals {
