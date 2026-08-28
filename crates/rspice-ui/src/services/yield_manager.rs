@@ -663,8 +663,14 @@ mod tests {
     }
 
     /// The denominator convention, stated where the number is produced.
+    ///
+    /// It counts every trial the engine completed, not every trial that
+    /// produced a usable observation: a diverged trial is in the denominator
+    /// *and* in the failures, because a specification a run could not
+    /// evaluate is not one it met. That is what [`YieldResult::total_runs`]
+    /// documents, and this name used to claim the opposite of it.
     #[test]
-    fn the_yield_denominator_counts_only_the_trials_that_produced_an_observation() {
+    fn the_yield_denominator_counts_every_trial_the_engine_completed() {
         let mut manager = YieldAnalysisManager::new();
         manager.add_spec(YieldSpec::lower("gain", 1.0, ""));
         // Nine completed trials, one of which diverged into a non-finite

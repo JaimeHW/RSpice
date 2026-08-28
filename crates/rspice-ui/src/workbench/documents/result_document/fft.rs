@@ -153,16 +153,6 @@ fn spectrum_subtitle(
     )
 }
 
-/// What the legend chip beside the trace names.
-///
-/// The quantity that is plotted, which is the signal the transform read. The
-/// chip carried the level unit, which the ordinate axis already states — so
-/// the legend repeated the axis and the sheet never named its own source.
-fn legend_name<'a>(source: &'a str, level_unit: &'a str) -> &'a str {
-    let _ = level_unit;
-    source
-}
-
 /// How the panel labels the transform length.
 fn transform_size_row(fft_size: usize) -> (&'static str, String) {
     ("Transform size", format!("{fft_size} samples"))
@@ -192,8 +182,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
+    // The legend names the quantity that is plotted, which is the signal the
+    // transform read. It carried the level unit, which the ordinate axis
+    // already states — so the chip repeated the axis and the sheet never
+    // named its own source.
     let legend = [LegendChip {
-        name: legend_name(&model.source, level_unit),
+        name: &model.source,
         color: c.traces[0],
         on: true,
     }];
@@ -526,12 +520,72 @@ mod tests {
         assert!(value.contains("1024"), "{value}");
     }
 
+    /// One spectrum, rendered.
+    ///
+    /// The strip announces itself through AccessKit — the legend chip names
+    /// its trace, and `well_hint` publishes a refusal as a live status — so
+    /// the tree is where what the sheet *said* can be read back without
+    /// rasterizing it.
+    fn announced(points: Vec<crate::analysis::fft::data::FftPoint>, name: &str) -> Vec<String> {
+        let mut state = AppState::default();
+        state.analysis.fft_state.data = Some(FftData {
+            name: name.to_owned(),
+            points,
+            sample_rate: 8.0,
+            fft_size: 1024,
+            window: WindowFunction::Hanning,
+            normalization: SpectrumNormalization::Peak,
+        });
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| show(ui, &mut state));
+            },
+        )
+        .platform_output
+        .accesskit_update
+        .expect("spectrum accessibility tree")
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| node.label().map(str::to_owned))
+        .collect()
+    }
+
     /// The legend names what is plotted. It named the unit instead, which
     /// the ordinate axis already carries — so the chip repeated the axis and
     /// the sheet never said which signal the spectrum came from.
     #[test]
     fn the_legend_names_the_transformed_signal_rather_than_repeating_the_axis() {
-        assert_eq!(legend_name("V(out)", "dBV rms"), "V(out)");
+        let announced = announced(
+            vec![
+                crate::analysis::fft::data::FftPoint::new(1.0, 1.0, 0.0),
+                crate::analysis::fft::data::FftPoint::new(2.0, 0.5, 0.0),
+            ],
+            "V(out)",
+        );
+        assert!(
+            announced
+                .iter()
+                .any(|label| label == "V(out) trace selection"),
+            "the legend never named the transformed signal: {announced:?}"
+        );
+        assert!(
+            !announced
+                .iter()
+                .any(|label| label.ends_with("trace selection") && label.contains("dB")),
+            "the legend repeated the ordinate axis: {announced:?}"
+        );
     }
 
     /// Two different refusals read as one.
@@ -539,9 +593,41 @@ mod tests {
     /// "Degenerate spectrum" was printed both when the abscissa had no
     /// positive extent and when every level in view was non-finite. They are
     /// different faults with different remedies, and the reader was given no
-    /// way to tell which one they were looking at.
+    /// way to tell which one they were looking at. Two distinct constants do
+    /// not settle that on their own — both sites could still name one of
+    /// them, or name each other's — so each fault is driven through the sheet
+    /// and read back off what the sheet announced.
     #[test]
     fn the_two_degenerate_spectra_are_told_apart() {
-        assert_ne!(NO_FREQUENCY_SPAN, NO_FINITE_LEVEL);
+        // Every bin sits at zero, so the abscissa has no positive extent.
+        let no_span = announced(
+            vec![crate::analysis::fft::data::FftPoint::new(0.0, 1.0, 0.0)],
+            "V(out)",
+        );
+        assert!(
+            no_span.iter().any(|label| label == NO_FREQUENCY_SPAN),
+            "{no_span:?}"
+        );
+        assert!(
+            !no_span.iter().any(|label| label == NO_FINITE_LEVEL),
+            "the abscissa's fault was reported as the ordinate's: {no_span:?}"
+        );
+
+        // A real band, with no finite level anywhere in it.
+        let no_level = announced(
+            vec![
+                crate::analysis::fft::data::FftPoint::new(1.0, f64::NAN, 0.0),
+                crate::analysis::fft::data::FftPoint::new(2.0, f64::NAN, 0.0),
+            ],
+            "V(out)",
+        );
+        assert!(
+            no_level.iter().any(|label| label == NO_FINITE_LEVEL),
+            "{no_level:?}"
+        );
+        assert!(
+            !no_level.iter().any(|label| label == NO_FREQUENCY_SPAN),
+            "the ordinate's fault was reported as the abscissa's: {no_level:?}"
+        );
     }
 }
