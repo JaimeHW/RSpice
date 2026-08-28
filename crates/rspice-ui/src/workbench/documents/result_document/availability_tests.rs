@@ -468,6 +468,83 @@ fn op_viewer_requires_the_selected_analysis_device_report() {
     assert!(viewer_availability(&state, ResultViewer::Op).available);
 }
 
+/// The OP tab and the OP sheet answer the same question.
+///
+/// A transient retains its bias solution in `dc_op`, which lit the tab while
+/// `op_inspector::selected_op_evidence` refused the analysis outright — an
+/// offered sheet that opens onto "not a DC operating-point result". The gate
+/// and the sheet now share the predicate, and so does the export refusal.
+#[test]
+fn the_op_tab_is_offered_only_where_the_op_sheet_renders() {
+    let dc = crate::state::DcOpResult {
+        node_voltages: vec![crate::state::OperatingPointValue {
+            name: "V(out)".to_owned(),
+            value: 1.8,
+            unit: "V".to_owned(),
+        }],
+        ..crate::state::DcOpResult::default()
+    };
+
+    let transient = state_with_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_dc_op(dc.clone()),
+    );
+    assert!(
+        op_inspector::export_csv(
+            transient
+                .simulation
+                .active_analysis()
+                .expect("the fixture selects an analysis")
+        )
+        .is_none(),
+        "the sheet's own projection refuses a transient, so the tab must too"
+    );
+    assert!(
+        !viewer_availability(&transient, ResultViewer::Op).available,
+        "a transient's retained bias solution lit a sheet that refuses to draw it"
+    );
+
+    let operating_point =
+        state_with_analysis(AnalysisResult::new(1, AnalysisType::DcOp, "OP").with_dc_op(dc));
+    assert!(viewer_availability(&operating_point, ResultViewer::Op).available);
+}
+
+/// The specs tab speaks for the run the sheet reads, which is the active one.
+///
+/// `specs::show`, its right panel and the hardcopy projection all resolve
+/// `active_run()`. Offering the tab because *some* retained run measured
+/// something put the reader on a sheet that then reported no measured
+/// results, with the evidence sitting in a run they are not looking at.
+#[test]
+fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
+    let mut measured = SimulationRun::new(1);
+    let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
+    analysis.measurements = vec![rspice_core::MeasureResult::success("trise", 1.0e-9)];
+    measured.add_analysis(analysis);
+
+    let mut unmeasured = SimulationRun::new(2);
+    unmeasured.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+        ]),
+    );
+
+    let mut state = AppState::default();
+    state.simulation.runs = vec![measured, unmeasured];
+    assert!(state.workspace.specs.is_empty());
+
+    assert!(state.simulation.select_run(0));
+    assert!(
+        viewer_availability(&state, ResultViewer::Specs).available,
+        "the run the sheet reads holds a measurement"
+    );
+
+    assert!(state.simulation.select_run(1));
+    assert!(
+        !viewer_availability(&state, ResultViewer::Specs).available,
+        "the tab was offered for a measurement in a run the sheet never reads"
+    );
+}
+
 #[test]
 fn contribution_viewer_requires_the_active_valid_sensitivity_payload() {
     let payload = AnalysisResultPayload::Sensitivity {

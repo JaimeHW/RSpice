@@ -393,11 +393,27 @@ fn prepare_active_sheet_csv(
                 )));
             }
             let Some(sheet) = result_document::export_operating_point_csv(analysis) else {
-                return Some(Err(format!(
-                    "The operating point cannot be exported: analysis '{}' retains no node DC \
-                     solution and no device operating-point report.",
-                    analysis.label
-                )));
+                // Two refusals, because the export refuses for two reasons and
+                // only one of them is about missing evidence. A transient that
+                // retained its bias solution has a node DC solution; it is
+                // simply not an operating-point result, and saying otherwise
+                // sent the reader looking for evidence that was already there.
+                return Some(Err(
+                    if analysis.analysis_type != crate::state::AnalysisType::DcOp {
+                        format!(
+                            "The operating point cannot be exported: analysis '{}' is a {} \
+                             result, not a DC operating point.",
+                            analysis.label,
+                            analysis.analysis_type.short_label()
+                        )
+                    } else {
+                        format!(
+                            "The operating point cannot be exported: analysis '{}' retains no \
+                             node DC solution and no device operating-point report.",
+                            analysis.label
+                        )
+                    },
+                ));
             };
             Some(sheet)
         }

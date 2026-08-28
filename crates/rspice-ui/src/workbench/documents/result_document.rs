@@ -5877,16 +5877,28 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Eye => specialized_availability(state, ActiveViewer::EyeDiagram),
         ResultViewer::Hist => specialized_availability(state, ActiveViewer::Histogram),
         ResultViewer::Op => {
+            // The analysis kind belongs in the gate because it is already in
+            // the sheet: `op_inspector::selected_op_evidence` resolves
+            // nothing for an analysis that is not a DC operating point, so a
+            // transient that retained its bias solution lit the tab and then
+            // showed "The selected analysis is not a DC operating-point
+            // result." The bias solution behind a transient is that
+            // transient's initial condition, not an operating point measured
+            // under an operating-point solve — the sheet's solve-facts card,
+            // its detail policy and its export all describe the latter, so
+            // the coherent answer is to offer the tab only where the sheet
+            // has something to say.
             if state.simulation.active_analysis().is_some_and(|analysis| {
-                analysis.dc_op.is_some()
-                    || analysis
-                        .device_op
-                        .as_ref()
-                        .is_some_and(|report| !report.is_empty())
-                    || matches!(
-                        analysis.result_payload,
-                        Some(crate::state::AnalysisResultPayload::OperatingPoint { .. })
-                    )
+                analysis.analysis_type == crate::state::AnalysisType::DcOp
+                    && (analysis.dc_op.is_some()
+                        || analysis
+                            .device_op
+                            .as_ref()
+                            .is_some_and(|report| !report.is_empty())
+                        || matches!(
+                            analysis.result_payload,
+                            Some(crate::state::AnalysisResultPayload::OperatingPoint { .. })
+                        ))
             }) {
                 ViewerAvailability::available("Operating-point evidence is available")
             } else {
@@ -5896,8 +5908,9 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                 // node DC solution under a different analysis looking for a
                 // report they did not need and could not have produced.
                 ViewerAvailability::unavailable(
-                    "Requires the active analysis to carry a node DC solution, a device \
-                     operating-point report, or a retained operating-point payload",
+                    "Requires the active analysis to be a DC operating-point result carrying a \
+                     node DC solution, a device operating-point report, or a retained \
+                     operating-point payload",
                 )
             }
         }
@@ -5937,7 +5950,11 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             }
         }
         ResultViewer::Specs => {
-            let has_measurements = state.simulation.runs.iter().any(|run| {
+            // The active run, not the history. The sheet reads `active_run()`
+            // and nothing else, so scanning every retained run offered a tab
+            // whose sheet then reported "no measured results" — the measured
+            // results were in a run the reader is not looking at.
+            let has_measurements = active_run.is_some_and(|run| {
                 run.analyses
                     .iter()
                     .any(|analysis| !analysis.measurements.is_empty())
