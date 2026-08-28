@@ -61,7 +61,9 @@ pub use noise::{
 };
 pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
-pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
+pub use pole_zero::{
+    Matrix as PzMatrix, PoleZeroAnalysisError, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult,
+};
 pub use pss::{
     PeriodDetector, PeriodEstimate, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver,
     ShootingState,

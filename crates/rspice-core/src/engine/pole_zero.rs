@@ -2,7 +2,9 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
+use crate::analysis::pole_zero::{
+    Matrix, PoleZeroAnalysisError, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult,
+};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
 };
@@ -29,7 +31,11 @@ impl Engine {
 
         let mut dynamic_mask = vec![false; n];
         c_descriptor.for_each_stored(|row, col, value| {
-            if value.im.abs() > 1.0e-15 {
+            // Descriptor structure is scale independent. Even a very small
+            // nonzero capacitance/inductance coefficient represents a real
+            // dynamic state and may create a correspondingly large finite
+            // pole; an absolute or matrix-relative cutoff erases it.
+            if value.im != 0.0 {
                 dynamic_mask[row] = true;
                 dynamic_mask[col] = true;
             }
@@ -236,7 +242,7 @@ impl Engine {
             }
         }
         let b = solved[dynamic_count * dynamic_count..].to_vec();
-        Ok(PoleZeroAnalyzer::analyze_state_space(
+        let result = match PoleZeroAnalyzer::analyze_state_space(
             a,
             b,
             c_eff,
@@ -244,7 +250,25 @@ impl Engine {
             config,
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),
-        ))
+        ) {
+            Ok(result) => result,
+            // Sparse reduction is an optimization. Its numerical path may
+            // fail while the unreduced generalized descriptor remains
+            // regular, so let the caller try that independent exact path.
+            Err(
+                PoleZeroAnalysisError::EigenvalueFailure { .. }
+                | PoleZeroAnalysisError::NonFiniteEigenvalue { .. }
+                | PoleZeroAnalysisError::IncompleteSpectrum { .. },
+            ) => return Ok(None),
+            Err(error) => {
+                return Err(SimulationError::Solver(
+                    crate::solver::SolverError::InvalidCircuit(format!(
+                        "pole-zero sparse reduction failed: {error}"
+                    )),
+                ));
+            }
+        };
+        Ok(Some(result))
     }
 
     #[inline]
@@ -712,7 +736,11 @@ impl Engine {
         Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
         let analyzer = PoleZeroAnalyzer::new(g_matrix, c_matrix);
 
-        let result = analyzer.analyze(&config);
+        let result = analyzer.analyze(&config).map_err(|error| {
+            SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(format!(
+                "pole-zero extraction failed: {error}"
+            )))
+        })?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -775,10 +803,10 @@ mod tests {
             "unexpected zeros: {:#?}",
             result.zeros
         );
+        let dc_gain = result.dc_gain.expect("finite DC transimpedance");
         assert!(
-            (result.dc_gain - 1_000.0).abs() <= 1.0e-8,
-            "expected 1 kohm DC transimpedance, got {}",
-            result.dc_gain
+            (dc_gain - 1_000.0).abs() <= 1.0e-8,
+            "expected 1 kohm DC transimpedance, got {dc_gain}"
         );
     }
 
@@ -808,16 +836,67 @@ mod tests {
             Matrix::from_dense(g.iter().map(|row| row.to_vec()).collect()),
             Matrix::from_dense(c.iter().map(|row| row.to_vec()).collect()),
         )
-        .analyze(&config);
+        .analyze(&config)
+        .expect("dense descriptor extraction");
 
         assert_roots_close(&sparse.poles, &dense.poles);
         assert_roots_close(&sparse.zeros, &dense.zeros);
+        let sparse_gain = sparse.dc_gain.expect("sparse finite DC gain");
+        let dense_gain = dense.dc_gain.expect("dense finite DC gain");
         assert!(
-            (sparse.dc_gain - dense.dc_gain).abs()
-                <= 1.0e-10 * sparse.dc_gain.abs().max(dense.dc_gain.abs()).max(1.0),
-            "sparse gain={}, dense gain={}",
-            sparse.dc_gain,
-            dense.dc_gain
+            (sparse_gain - dense_gain).abs()
+                <= 1.0e-10 * sparse_gain.abs().max(dense_gain.abs()).max(1.0),
+            "sparse gain={sparse_gain}, dense gain={dense_gain}"
+        );
+    }
+
+    #[test]
+    fn sparse_pz_mixed_scale_capacitances_match_dense_spectrum() {
+        // Both diagonal entries are genuine dynamic states despite their very
+        // different scales. The sparse topology census must use structural
+        // nonzero membership and retain the 2e-18 entry just as the dense
+        // descriptor path does.
+        let structure = crate::solver::StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .expect("full two-state structure");
+        let mut g_sparse = crate::solver::ComplexMatrix::from_real_structure(&structure);
+        let mut c_sparse = crate::solver::ComplexMatrix::from_real_structure(&structure);
+        let g = [[1.0e-3, 0.0], [0.0, 2.0e-3]];
+        let c = [[1.0e-6, 0.0], [0.0, 2.0e-18]];
+        for row in 0..2 {
+            for col in 0..2 {
+                g_sparse.add_real(row, col, g[row][col]);
+                c_sparse.add_imag(row, col, c[row][col]);
+            }
+        }
+
+        let mut config = PoleZeroConfig::poles_and_zeros(0, 1);
+        config.compute_zeros = false;
+        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config)
+            .expect("sparse reduction does not error")
+            .expect("both mixed-scale capacitances remain dynamic");
+        let dense = PoleZeroAnalyzer::new(
+            Matrix::from_dense(g.iter().map(|row| row.to_vec()).collect()),
+            Matrix::from_dense(c.iter().map(|row| row.to_vec()).collect()),
+        )
+        .analyze(&config)
+        .expect("dense mixed-scale descriptor extraction");
+
+        assert_roots_close(&sparse.poles, &dense.poles);
+        assert_root_present_for_mixed_scale(&sparse.poles, -1.0e3);
+        assert_root_present_for_mixed_scale(&sparse.poles, -1.0e15);
+    }
+
+    fn assert_root_present_for_mixed_scale(actual: &[crate::Complex64], expected: Value) {
+        assert!(
+            actual.iter().any(|root| {
+                root.im.abs() <= 1.0e-8 * expected.abs().max(1.0)
+                    && (root.re - expected).abs() <= 1.0e-8 * expected.abs().max(1.0)
+            }),
+            "missing expected pole {expected:.6e}; actual={actual:#?}"
         );
     }
 }

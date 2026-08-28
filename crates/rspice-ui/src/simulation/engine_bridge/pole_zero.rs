@@ -77,7 +77,12 @@ impl EngineBridge {
                 abort,
             )
             .map_err(|e| self.translate_error(e))?;
-        if !pz_result.dc_gain.is_finite()
+        let dc_gain = pz_result.dc_gain.ok_or_else(|| {
+            SimulationError::SolverError(
+                "pole-zero transfer has no finite DC gain for the selected ports".to_owned(),
+            )
+        })?;
+        if !dc_gain.is_finite()
             || pz_result
                 .poles
                 .iter()
@@ -103,7 +108,7 @@ impl EngineBridge {
         Ok(SimulationResult::PoleZero {
             poles,
             zeros,
-            gain: input_sign * output_sign * pz_result.dc_gain,
+            gain: input_sign * output_sign * dc_gain,
         })
     }
 }

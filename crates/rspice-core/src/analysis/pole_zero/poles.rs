@@ -18,105 +18,66 @@ impl PoleZeroAnalyzer {
     ///
     /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
     /// For singular C, use generalized eigenvalue: G·x = -s·C·x
-    pub(crate) fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex64> {
+    pub(crate) fn find_poles(
+        &self,
+        config: &PoleZeroConfig,
+    ) -> Result<Vec<Complex64>, PoleZeroAnalysisError> {
         let n = self.num_nodes;
         if n == 0 {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let expected_poles = self.finite_pole_count();
 
         // For single-node RC circuit:
         // G + s·C = 0 → s = -G/C
         if n == 1 {
             let g = self.g_matrix.get(0, 0);
             let c = self.c_matrix.get(0, 0);
-            if c.abs() > 1e-15 {
-                return vec![Complex64::new(-g / c, 0.0)];
+            if c != 0.0 {
+                let pole = -g / c;
+                if !pole.is_finite() {
+                    return Err(PoleZeroAnalysisError::NonFiniteEigenvalue {
+                        problem: "scalar descriptor",
+                        index: 0,
+                    });
+                }
+                let poles = vec![Complex64::new(pole, 0.0)];
+                self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
+                return Ok(poles);
             }
-            return Vec::new();
+            if g != 0.0 {
+                return Ok(Vec::new());
+            }
+            return Err(PoleZeroAnalysisError::IrregularDescriptor {
+                index: 0,
+                alpha_norm: g.abs(),
+                beta_norm: c.abs(),
+            });
         }
 
         if let Some(state_space) = self.build_state_space(&vec![0.0; n], &vec![0.0; n])
-            && let Some(mut poles) = self.eigenvalues_from_matrix(&state_space.a)
+            && let Ok(mut poles) = self.eigenvalues_from_matrix(&state_space.a)
         {
-            self.canonicalize_real_roots(&mut poles);
-            poles.retain(|p| {
-                p.re.is_finite() && p.im.is_finite() && p.norm() < config.max_pole_freq * 2.0 * PI
-            });
+            self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
             poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
-            if expected_poles > 0 && poles.len() > expected_poles {
-                poles.truncate(expected_poles);
-            }
-            if self.has_complete_pole_set(&poles, expected_poles) {
-                return poles;
-            }
+            return Ok(poles);
         }
 
-        if let Some(mut poles) = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix) {
-            self.canonicalize_real_roots(&mut poles);
-            poles.retain(|p| {
-                p.re.is_finite() && p.im.is_finite() && p.norm() < config.max_pole_freq * 2.0 * PI
-            });
-            poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
-            if expected_poles > 0 && poles.len() > expected_poles {
-                poles.truncate(expected_poles);
-            }
-            if self.has_complete_pole_set(&poles, expected_poles) {
-                return poles;
-            }
-        }
-
-        if let Some(state_matrix) = self.build_descriptor_state_matrix() {
-            let mut poles = self.qr_eigenvalues(&state_matrix);
-            self.canonicalize_real_roots(&mut poles);
-            poles.retain(|p| {
-                p.re.is_finite() && p.im.is_finite() && p.norm() < config.max_pole_freq * 2.0 * PI
-            });
-            poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
-            if expected_poles > 0 && poles.len() > expected_poles {
-                poles.truncate(expected_poles);
-            }
-            if self.has_complete_pole_set(&poles, expected_poles) {
-                return poles;
-            }
-        }
-
-        // Fallback for heavily singular descriptors where state extraction fails.
-        self.eigenvalues_diagonal_fallback(config)
-    }
-
-    /// Descriptor-system reduction:
-    /// Cx' + Gx = 0
-    /// Split x into dynamic/algebraic variables and eliminate algebraic states.
-    /// This yields x_d' = A x_d where A is used for pole extraction.
-    pub(in crate::analysis::pole_zero) fn build_descriptor_state_matrix(&self) -> Option<Matrix> {
-        let partition = self.partition_descriptor()?;
-        if !self.partition_is_regular(&partition) {
-            return None;
-        }
-
-        let g_eff = self.reduced_g_matrix(&partition)?;
-        let c_dd_inv_g_eff = self.solve_matrix_columns_regularized(&partition.c_dd, &g_eff)?;
-        let mut a = c_dd_inv_g_eff;
-        for row in &mut a.data {
-            for value in row {
-                *value = -*value;
-            }
-        }
-
-        Some(a)
+        let spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix)?;
+        debug_assert_eq!(spectrum.finite.len() + spectrum.infinite, n);
+        let mut poles = spectrum.finite;
+        self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
+        poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
+        Ok(poles)
     }
 
     pub(in crate::analysis::pole_zero) fn partition_descriptor(
         &self,
     ) -> Option<DescriptorPartition> {
         let n = self.num_nodes;
-        let tol = 1e-15;
-
         let mut dynamic = Vec::new();
         for i in 0..n {
-            let row_nonzero = self.c_matrix.data[i].iter().any(|v| v.abs() > tol);
-            let col_nonzero = (0..n).any(|r| self.c_matrix.data[r][i].abs() > tol);
+            let row_nonzero = self.c_matrix.data[i].iter().any(|v| *v != 0.0);
+            let col_nonzero = (0..n).any(|r| self.c_matrix.data[r][i] != 0.0);
             if row_nonzero || col_nonzero {
                 dynamic.push(i);
             }
@@ -151,8 +112,7 @@ impl PoleZeroAnalyzer {
             return Some(partition.g_dd.clone());
         }
 
-        let g_aa_inv_g_ad =
-            self.solve_matrix_columns_regularized(&partition.g_aa, &partition.g_ad)?;
+        let g_aa_inv_g_ad = self.solve_matrix_columns(&partition.g_aa, &partition.g_ad)?;
         let correction = self.matrix_multiply(&partition.g_da, &g_aa_inv_g_ad);
         Some(self.matrix_subtract(&partition.g_dd, &correction))
     }
@@ -235,12 +195,9 @@ impl PoleZeroAnalyzer {
         } else {
             let b_a = self.extract_subvector(input_vec, &partition.algebraic);
             let l_a = self.extract_subvector(output_vec, &partition.algebraic);
-            let g_aa_inv_g_ad =
-                self.solve_matrix_columns_regularized(&partition.g_aa, &partition.g_ad)?;
-            let g_aa_inv_ba = self.solve_matrix_columns_regularized(
-                &partition.g_aa,
-                &self.vector_to_column_matrix(&b_a),
-            )?;
+            let g_aa_inv_g_ad = self.solve_matrix_columns(&partition.g_aa, &partition.g_ad)?;
+            let g_aa_inv_ba =
+                self.solve_matrix_columns(&partition.g_aa, &self.vector_to_column_matrix(&b_a))?;
 
             let gda_ginv_ba = self.matrix_multiply(&partition.g_da, &g_aa_inv_ba);
             let mut b_eff = b_d;
@@ -266,17 +223,15 @@ impl PoleZeroAnalyzer {
             (b_eff, c_eff, d_eff)
         };
 
-        let mut a = self.solve_matrix_columns_regularized(&partition.c_dd, &g_eff)?;
+        let mut a = self.solve_matrix_columns(&partition.c_dd, &g_eff)?;
         for row in &mut a.data {
             for value in row {
                 *value = -*value;
             }
         }
 
-        let b = self.solve_matrix_columns_regularized(
-            &partition.c_dd,
-            &self.vector_to_column_matrix(&b_eff),
-        )?;
+        let b =
+            self.solve_matrix_columns(&partition.c_dd, &self.vector_to_column_matrix(&b_eff))?;
 
         Some(StateSpaceModel {
             a,

@@ -29,11 +29,57 @@
 use crate::{Complex64, Value};
 use faer::{Mat, linalg::solvers::GeneralizedEigen};
 use std::f64::consts::PI;
+use thiserror::Error;
 
 /// A root counts as real when its imaginary part sits inside this band. The
 /// eigen solvers hand back conjugate pairs carrying a residual imaginary part,
 /// so an exact zero test would report every real root as complex.
 const REAL_ROOT_TOLERANCE: Value = 1e-10;
+
+/// A pole-zero extraction failure that must not be represented as an empty
+/// or estimated root set.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum PoleZeroAnalysisError {
+    /// The descriptor, state-space model, or port definition is malformed.
+    #[error("invalid pole-zero system: {0}")]
+    InvalidSystem(String),
+    /// The generalized descriptor pencil contains an indeterminate 0/0
+    /// eigenpair and therefore has no qualified finite/infinite spectrum.
+    #[error(
+        "the descriptor pencil G+sC is irregular (indeterminate generalized eigenvalue {index}, |alpha|={alpha_norm:.3e}, |beta|={beta_norm:.3e})"
+    )]
+    IrregularDescriptor {
+        index: usize,
+        alpha_norm: Value,
+        beta_norm: Value,
+    },
+    /// The selected eigensolver could not produce a spectrum.
+    #[error("{problem} eigenvalue extraction failed")]
+    EigenvalueFailure { problem: &'static str },
+    /// An eigensolver returned a non-finite coefficient or root.
+    #[error("{problem} eigenvalue {index} is non-finite")]
+    NonFiniteEigenvalue { problem: &'static str, index: usize },
+    /// A complete square eigenproblem must return one eigenpair per row.
+    #[error("{problem} spectrum is incomplete: expected {expected} eigenpairs, received {actual}")]
+    IncompleteSpectrum {
+        problem: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    /// A configured reporting limit would otherwise silently discard roots.
+    #[error(
+        "{quantity} extraction found {omitted} finite root(s) at or above the configured limit {limit:.6e} rad/s"
+    )]
+    FrequencyLimitExceeded {
+        quantity: &'static str,
+        omitted: usize,
+        limit: Value,
+    },
+    /// A transfer-function numerator could not be constructed or reduced.
+    #[error("pole-zero transfer extraction failed: {0}")]
+    TransferExtraction(&'static str),
+}
 
 //=============================================================================
 // Pole-Zero Result
@@ -46,8 +92,8 @@ pub struct PoleZeroResult {
     pub poles: Vec<Complex64>,
     /// System zeros
     pub zeros: Vec<Complex64>,
-    /// DC gain H(0)
-    pub dc_gain: Value,
+    /// DC gain H(0), when the transfer function has a finite DC value.
+    pub dc_gain: Option<Value>,
     /// High-frequency gain H(∞) if finite
     pub hf_gain: Option<Value>,
     /// Input specification
@@ -62,7 +108,7 @@ impl PoleZeroResult {
         Self {
             poles: Vec::new(),
             zeros: Vec::new(),
-            dc_gain: 1.0,
+            dc_gain: None,
             hf_gain: None,
             input: input.to_string(),
             output: output.to_string(),
@@ -87,7 +133,11 @@ impl PoleZeroResult {
 
     /// Check if system is stable (all poles have negative real parts)
     pub fn is_stable(&self) -> bool {
-        self.poles.iter().all(|p| p.re < 1e-10)
+        !self.poles.is_empty()
+            && self
+                .poles
+                .iter()
+                .all(|p| p.re.is_finite() && p.im.is_finite() && p.re < 0.0)
     }
 
     /// Get bandwidth (frequency of dominant pole)
@@ -262,6 +312,13 @@ struct StateSpaceModel {
     b: Vec<Value>,
     c: Vec<Value>,
     d: Value,
+}
+
+/// Complete finite/infinite accounting from a generalized Schur solve.
+#[derive(Debug, Clone)]
+struct GeneralizedSpectrum {
+    finite: Vec<Complex64>,
+    infinite: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

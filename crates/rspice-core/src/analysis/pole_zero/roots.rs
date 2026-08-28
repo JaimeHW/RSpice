@@ -51,16 +51,6 @@ impl PoleZeroAnalyzer {
                 && config.output_pos == config.input_neg.unwrap_or(usize::MAX))
     }
 
-    pub(in crate::analysis::pole_zero) fn is_same_root(
-        a: &Complex64,
-        b: &Complex64,
-        tol: Value,
-    ) -> bool {
-        let re_scale = 1.0 + a.re.abs().max(b.re.abs());
-        let im_scale = 1.0 + a.im.abs().max(b.im.abs());
-        (a.re - b.re).abs() <= tol * re_scale && (a.im - b.im).abs() <= tol * im_scale
-    }
-
     pub(in crate::analysis::pole_zero) fn sort_roots(&self, roots: &mut [Complex64]) {
         roots.sort_by(|a, b| {
             let a_re = if a.re.is_finite() {
@@ -87,89 +77,34 @@ impl PoleZeroAnalyzer {
         });
     }
 
-    pub(in crate::analysis::pole_zero) fn round_to_significant_digits(
+    /// Reject a configured root cutoff that would otherwise turn a complete
+    /// eigenspectrum into a silently truncated result.
+    pub(in crate::analysis::pole_zero) fn ensure_roots_within_frequency_limit(
         &self,
-        value: Value,
-        digits: i32,
-    ) -> Value {
-        if !value.is_finite() || value == 0.0 {
-            return value;
+        roots: &[Complex64],
+        config: &PoleZeroConfig,
+        quantity: &'static str,
+    ) -> Result<(), PoleZeroAnalysisError> {
+        if !config.max_pole_freq.is_finite() || config.max_pole_freq <= 0.0 {
+            return Err(PoleZeroAnalysisError::InvalidSystem(
+                "max_pole_freq must be finite and positive".to_string(),
+            ));
         }
-
-        let exponent = value.abs().log10().floor() as i32;
-        let scale = 10.0_f64.powi(digits - exponent - 1);
-        (value * scale).round() / scale
-    }
-
-    pub(in crate::analysis::pole_zero) fn canonicalize_real_roots(&self, roots: &mut [Complex64]) {
-        for root in roots {
-            if !root.re.is_finite() || !root.im.is_finite() {
-                continue;
-            }
-            if root.im.abs() <= (1.0 + root.re.abs()) * 1e-12 {
-                root.im = 0.0;
-            }
-            if root.im == 0.0 {
-                let rounded = self.round_to_significant_digits(root.re, 8);
-                let tolerance = (1.0 + root.re.abs()) * 1e-6;
-                if (rounded - root.re).abs() <= tolerance {
-                    root.re = rounded;
-                }
-            }
+        let limit = config.max_pole_freq * (2.0 * PI);
+        if !limit.is_finite() {
+            return Err(PoleZeroAnalysisError::InvalidSystem(
+                "max_pole_freq overflows when converted to angular frequency".to_string(),
+            ));
         }
-    }
-
-    pub(in crate::analysis::pole_zero) fn canonicalize_near_real_zero_pairs(
-        &self,
-        zeros: &mut [Complex64],
-    ) {
-        let snap_ratio = 1e-6;
-        let real_tolerance = 1e-9;
-
-        for idx in 0..zeros.len().saturating_sub(1) {
-            let (left, right) = zeros.split_at_mut(idx + 1);
-            let a = &mut left[idx];
-            let b = &mut right[0];
-
-            if !a.re.is_finite() || !a.im.is_finite() || !b.re.is_finite() || !b.im.is_finite() {
-                continue;
-            }
-            if (a.re - b.re).abs() > (1.0 + a.re.abs().max(b.re.abs())) * real_tolerance {
-                continue;
-            }
-            if (a.im + b.im).abs() > (1.0 + a.im.abs().max(b.im.abs())) * real_tolerance {
-                continue;
-            }
-
-            let imag_scale = a.im.abs().max(b.im.abs());
-            let root_scale = 1.0 + a.re.abs().max(b.re.abs());
-            if imag_scale <= root_scale * snap_ratio {
-                a.re = (a.re + b.re) * 0.5;
-                b.re = a.re;
-                a.im = 0.0;
-                b.im = 0.0;
-            }
+        let omitted = roots.iter().filter(|root| root.norm() >= limit).count();
+        if omitted > 0 {
+            return Err(PoleZeroAnalysisError::FrequencyLimitExceeded {
+                quantity,
+                omitted,
+                limit,
+            });
         }
-
-        self.canonicalize_real_roots(zeros);
-    }
-
-    pub(in crate::analysis::pole_zero) fn finite_pole_count(&self) -> usize {
-        self.matrix_rank(
-            &self.c_matrix,
-            self.relative_matrix_tolerance(&self.c_matrix, 1e-9),
-        )
-    }
-
-    pub(in crate::analysis::pole_zero) fn has_complete_pole_set(
-        &self,
-        poles: &[Complex64],
-        expected: usize,
-    ) -> bool {
-        if expected == 0 {
-            return true;
-        }
-        poles.len() == expected
+        Ok(())
     }
 
     pub(in crate::analysis::pole_zero) fn relative_matrix_tolerance(
@@ -191,13 +126,17 @@ impl PoleZeroAnalyzer {
     }
 
     pub(in crate::analysis::pole_zero) fn matrix_eigen_scale(&self, matrix: &Matrix) -> Value {
-        matrix
+        let max_abs = matrix
             .data
             .iter()
             .flatten()
             .map(|value| value.abs())
-            .fold(0.0_f64, f64::max)
-            .max(1.0)
+            .fold(0.0_f64, f64::max);
+        if max_abs > 0.0 && max_abs.is_finite() {
+            max_abs
+        } else {
+            1.0
+        }
     }
 
     pub(in crate::analysis::pole_zero) fn scale_matrix(
@@ -321,7 +260,7 @@ impl PoleZeroAnalyzer {
         }
 
         let identity = Matrix::identity(matrix.rows);
-        let Some(inverse) = self.solve_matrix_columns_regularized(matrix, &identity) else {
+        let Some(inverse) = self.solve_matrix_columns(matrix, &identity) else {
             return false;
         };
         let product = self.matrix_multiply(matrix, &inverse);
@@ -334,57 +273,5 @@ impl PoleZeroAnalyzer {
         }
 
         max_residual <= 1e-6
-    }
-
-    pub(in crate::analysis::pole_zero) fn matrix_rank(
-        &self,
-        matrix: &Matrix,
-        tolerance: Value,
-    ) -> usize {
-        let (rows, cols) = matrix.dims();
-        if rows == 0 || cols == 0 {
-            return 0;
-        }
-
-        let mut data = matrix.data.clone();
-        let mut rank = 0usize;
-        let mut pivot_row = 0usize;
-
-        for pivot_col in 0..cols {
-            if pivot_row >= rows {
-                break;
-            }
-
-            let mut best_row = pivot_row;
-            let mut best_value = data[pivot_row][pivot_col].abs();
-            for (row_idx, row) in data.iter().enumerate().skip(pivot_row + 1) {
-                let candidate = row[pivot_col].abs();
-                if candidate > best_value {
-                    best_value = candidate;
-                    best_row = row_idx;
-                }
-            }
-
-            if best_value <= tolerance {
-                continue;
-            }
-
-            data.swap(pivot_row, best_row);
-            let pivot = data[pivot_row][pivot_col];
-            for row_idx in (pivot_row + 1)..rows {
-                let factor = data[row_idx][pivot_col] / pivot;
-                if factor.abs() <= tolerance {
-                    continue;
-                }
-                for col_idx in pivot_col..cols {
-                    data[row_idx][col_idx] -= factor * data[pivot_row][col_idx];
-                }
-            }
-
-            rank += 1;
-            pivot_row += 1;
-        }
-
-        rank
     }
 }

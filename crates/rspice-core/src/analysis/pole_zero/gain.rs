@@ -17,30 +17,34 @@ impl PoleZeroAnalyzer {
         config: &PoleZeroConfig,
         input_label: &str,
         output_label: &str,
-    ) -> Option<PoleZeroResult> {
+    ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
         let n = a.dims().0;
-        if n == 0 || a.dims().1 != n || b.len() != n || c.len() != n || !d.is_finite() {
-            return None;
+        if n == 0
+            || a.dims().1 != n
+            || a.data.iter().any(|row| row.len() != n)
+            || a.data.iter().flatten().any(|value| !value.is_finite())
+            || b.len() != n
+            || b.iter().any(|value| !value.is_finite())
+            || c.len() != n
+            || c.iter().any(|value| !value.is_finite())
+            || !d.is_finite()
+        {
+            return Err(PoleZeroAnalysisError::InvalidSystem(
+                "reduced state-space matrices and vectors must be finite and dimensionally consistent"
+                    .to_string(),
+            ));
         }
         let helper = Self::new(Matrix::identity(n), Matrix::identity(n));
         let model = StateSpaceModel { a, b, c, d };
-        let mut model_poles = helper
-            .eigenvalues_from_matrix(&model.a)
-            .unwrap_or_else(|| helper.qr_eigenvalues(&model.a));
-        helper.canonicalize_real_roots(&mut model_poles);
-        model_poles.retain(|pole| {
-            pole.re.is_finite()
-                && pole.im.is_finite()
-                && pole.norm() < config.max_pole_freq * 2.0 * PI
-        });
-        model_poles.sort_by(|left, right| left.norm().total_cmp(&right.norm()));
-
         let mut result = PoleZeroResult::new(input_label, output_label);
         if config.compute_poles {
-            result.poles = model_poles.clone();
+            let mut model_poles = helper.eigenvalues_from_matrix(&model.a)?;
+            helper.ensure_roots_within_frequency_limit(&model_poles, config, "pole")?;
+            model_poles.sort_by(|left, right| left.norm().total_cmp(&right.norm()));
+            result.poles = model_poles;
         }
         if config.compute_zeros {
-            result.zeros = helper.zeros_from_state_space(&model, &model_poles, config);
+            result.zeros = helper.zeros_from_state_space(&model, config)?;
         }
         if let Some(a_inv_b) = helper.solve_linear(&model.a, &model.b) {
             let correction = model
@@ -51,13 +55,13 @@ impl PoleZeroAnalyzer {
                 .sum::<Value>();
             let gain = model.d - correction;
             if gain.is_finite() {
-                result.dc_gain = gain;
+                result.dc_gain = Some(gain);
             }
         }
         result.hf_gain = model.d.is_finite().then_some(model.d);
         result.sort_poles_by_magnitude();
         result.sort_zeros_by_magnitude();
-        Some(result)
+        Ok(result)
     }
 
     /// Compute DC gain H(0)
@@ -76,7 +80,7 @@ impl PoleZeroAnalyzer {
         // Solve G·x = b using Gaussian elimination
         let x = self.solve_linear(&self.g_matrix, &b)?;
 
-        Some(x[output_node])
+        x[output_node].is_finite().then_some(x[output_node])
     }
 
     pub(in crate::analysis::pole_zero) fn dc_gain_from_config(
@@ -92,7 +96,7 @@ impl PoleZeroAnalyzer {
             .sum::<Value>();
 
         if config.input_is_current {
-            return Some(vout);
+            return vout.is_finite().then_some(vout);
         }
 
         let vin = input_vec
@@ -100,11 +104,12 @@ impl PoleZeroAnalyzer {
             .zip(x.iter())
             .map(|(m, v)| m * v)
             .sum::<Value>();
-        if vin.abs() < 1e-15 {
+        if !vout.is_finite() || !vin.is_finite() || vin == 0.0 {
             return None;
         }
 
-        Some(vout / vin)
+        let gain = vout / vin;
+        gain.is_finite().then_some(gain)
     }
 
     /// Solve linear system using Gaussian elimination
@@ -169,19 +174,51 @@ impl PoleZeroAnalyzer {
     }
 
     /// Run complete pole-zero analysis
-    pub fn analyze(&self, config: &PoleZeroConfig) -> PoleZeroResult {
+    pub fn analyze(
+        &self,
+        config: &PoleZeroConfig,
+    ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
+        let (g_rows, g_cols) = self.g_matrix.dims();
+        let (c_rows, c_cols) = self.c_matrix.dims();
+        if g_rows == 0
+            || g_rows != g_cols
+            || c_rows != c_cols
+            || g_rows != c_rows
+            || self.g_matrix.data.iter().any(|row| row.len() != g_cols)
+            || self.c_matrix.data.iter().any(|row| row.len() != c_cols)
+            || self
+                .g_matrix
+                .data
+                .iter()
+                .flatten()
+                .any(|value| !value.is_finite())
+            || self
+                .c_matrix
+                .data
+                .iter()
+                .flatten()
+                .any(|value| !value.is_finite())
+        {
+            return Err(PoleZeroAnalysisError::InvalidSystem(
+                "G and C must be finite square matrices with equal dimensions".to_string(),
+            ));
+        }
         let mut result = PoleZeroResult::new(
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),
         );
 
-        if !config.input_is_current
-            && let Some((_, output_vec)) = self.build_port_vectors(config)
-            && let Some((voltage_analyzer, drive_vec, output_ext)) =
-                self.build_voltage_input_transfer_system(config, &output_vec)
-        {
+        if !config.input_is_current {
+            let (_, output_vec) = self.build_port_vectors(config).ok_or(
+                PoleZeroAnalysisError::TransferExtraction("input or output port is invalid"),
+            )?;
+            let (voltage_analyzer, drive_vec, output_ext) = self
+                .build_voltage_input_transfer_system(config, &output_vec)
+                .ok_or(PoleZeroAnalysisError::TransferExtraction(
+                    "voltage input source could not be constructed",
+                ))?;
             if config.compute_poles {
-                result.poles = voltage_analyzer.find_poles(config);
+                result.poles = voltage_analyzer.find_poles(config)?;
             }
 
             if config.compute_zeros {
@@ -190,54 +227,41 @@ impl PoleZeroAnalyzer {
                 } else if let Some(state_space) =
                     voltage_analyzer.build_state_space(&drive_vec, &output_ext)
                 {
-                    let poles = if config.compute_poles {
-                        result.poles.clone()
-                    } else {
-                        voltage_analyzer
-                            .eigenvalues_from_matrix(&state_space.a)
-                            .unwrap_or_else(|| voltage_analyzer.find_poles(config))
-                    };
-                    result.zeros =
-                        voltage_analyzer.zeros_from_state_space(&state_space, &poles, config);
+                    result.zeros = voltage_analyzer.zeros_from_state_space(&state_space, config)?;
                 } else {
-                    let poles = if config.compute_poles {
-                        result.poles.clone()
-                    } else {
-                        voltage_analyzer.find_poles(config)
-                    };
                     let zeros =
-                        voltage_analyzer.numerator_roots_raw(&drive_vec, &output_ext, config);
-                    result.zeros = voltage_analyzer.finalize_zero_roots(zeros, &poles, config);
+                        voltage_analyzer.numerator_roots_raw(&drive_vec, &output_ext, config)?;
+                    result.zeros = voltage_analyzer.finalize_zero_roots(zeros, config)?;
                 }
             }
 
             if let Some(gain) = self.dc_gain_from_config(config) {
-                result.dc_gain = gain;
+                result.dc_gain = Some(gain);
             }
 
             result.sort_poles_by_magnitude();
             result.sort_zeros_by_magnitude();
-            return result;
+            return Ok(result);
         }
 
         // Find poles
         if config.compute_poles {
-            result.poles = self.find_poles(config);
+            result.poles = self.find_poles(config)?;
         }
 
         // Find zeros
         if config.compute_zeros {
-            result.zeros = self.find_zeros(config);
+            result.zeros = self.find_zeros(config)?;
         }
 
         // Compute DC gain
         if let Some(gain) = self.dc_gain_from_config(config) {
-            result.dc_gain = gain;
+            result.dc_gain = Some(gain);
         }
 
         result.sort_poles_by_magnitude();
         result.sort_zeros_by_magnitude();
 
-        result
+        Ok(result)
     }
 }

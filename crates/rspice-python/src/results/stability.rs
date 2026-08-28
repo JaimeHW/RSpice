@@ -29,10 +29,11 @@ pub struct PyPoleZeroResult {
     poles: Vec<PyComplexValue>,
     /// System zeros
     zeros: Vec<PyComplexValue>,
-    /// DC gain H(0): a transimpedance in V/A for the default unit-current
-    /// input, or a dimensionless voltage ratio for a unit-voltage input
+    /// Finite DC gain H(0), when available: a transimpedance in V/A for the
+    /// default unit-current input, or a dimensionless voltage ratio for a
+    /// unit-voltage input.
     #[pyo3(get)]
-    pub dc_gain: f64,
+    pub dc_gain: Option<f64>,
     /// High-frequency gain H(∞) if finite
     #[pyo3(get)]
     pub hf_gain: Option<f64>,
@@ -162,11 +163,15 @@ impl PyPoleZeroResult {
     }
 
     fn __repr__(&self) -> String {
+        let dc_gain = self
+            .dc_gain
+            .map(|gain| format!("{gain:.3e}"))
+            .unwrap_or_else(|| "None".to_owned());
         format!(
-            "PoleZeroResult(poles={}, zeros={}, dc_gain={:.3e}, stable={})",
+            "PoleZeroResult(poles={}, zeros={}, dc_gain={}, stable={})",
             self.poles.len(),
             self.zeros.len(),
-            self.dc_gain,
+            dc_gain,
             self.is_stable()
         )
     }
@@ -176,7 +181,7 @@ impl PyPoleZeroResult {
     fn _unpickle(
         poles: Vec<PyComplexValue>,
         zeros: Vec<PyComplexValue>,
-        gains: (f64, Option<f64>),
+        gains: (Option<f64>, Option<f64>),
         ports: (String, String),
     ) -> Self {
         let (dc_gain, hf_gain) = gains;
@@ -200,7 +205,7 @@ impl PyPoleZeroResult {
         (
             Vec<PyComplexValue>,
             Vec<PyComplexValue>,
-            (f64, Option<f64>),
+            (Option<f64>, Option<f64>),
             (String, String),
         ),
     )> {
