@@ -6,8 +6,10 @@
 
 use super::*;
 
+mod branches;
 mod degenerate;
 mod extent;
+mod interaction;
 
 #[test]
 fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
