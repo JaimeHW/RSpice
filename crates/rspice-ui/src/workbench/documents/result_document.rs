@@ -2206,6 +2206,11 @@ pub(crate) fn retained_dataset_digest(
     digest
 }
 
+/// The two halves of a pinned view: the abscissa window, then the ordinate
+/// window. Either may be absent — the reader can pin one axis and leave the
+/// other to the page — which is why the pair is not one `Option`.
+pub(crate) type CapturedViewport = (Option<(f64, f64)>, Option<(f64, f64)>);
+
 /// The window the reader has pinned on the active sheet, if any.
 ///
 /// A sheet's zoom lives in one of two places: keyed to the analysis, which is
@@ -2222,7 +2227,7 @@ pub(crate) fn retained_dataset_digest(
 pub(crate) fn captured_viewport(
     state: &AppState,
     analysis: AnalysisPresentationKey,
-) -> Option<(Option<(f64, f64)>, Option<(f64, f64)>)> {
+) -> Option<CapturedViewport> {
     let viewer = state.ui.results.viewer;
     let analysis_pane = state
         .ui

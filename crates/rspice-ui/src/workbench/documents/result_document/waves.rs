@@ -1858,16 +1858,20 @@ pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> boo
         .is_empty()
 }
 
-fn cursor_marker_target(
-    state: &AppState,
-    models: &[StripModel],
-) -> Option<(
+/// Everything dropping a marker at cursor A needs to name where it landed:
+/// the analysis and the trace anchor that identify it across a re-run, the
+/// trace's display name, the abscissa the cursor sits on, and that trace's
+/// retained X column — kept so the marker can be re-sampled without going
+/// back through the strip model.
+type CursorMarkerTarget = (
     AnalysisPresentationKey,
     WaveformPresentationKey,
     String,
     f64,
     std::sync::Arc<Vec<f64>>,
-)> {
+);
+
+fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<CursorMarkerTarget> {
     let cursor_x = state
         .ui
         .results
