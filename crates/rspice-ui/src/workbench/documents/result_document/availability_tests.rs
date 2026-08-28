@@ -2165,3 +2165,31 @@ fn markers_for_absent_datasets_are_dropped_on_restore() {
     assert_eq!(state.ui.results.markers.len(), 1);
     assert_eq!(state.ui.results.markers[0].id, 1);
 }
+
+/// The offering gate has to fail closed on both of its branches.
+///
+/// A Bode summary resolves off the retained magnitude and phase vectors
+/// alone, so a failed AC solve still produced one — and the raw-curve branch
+/// beside it checks `success` while the summary branch did not. The sheet
+/// itself refuses a failed solve; the tab strip offered it anyway.
+#[test]
+fn a_failed_frequency_response_is_not_offered_as_a_bode_sheet() {
+    let frequency = vec![1.0, 1.0e6];
+    let mut magnitude = WaveformData::new("|V(out)|", frequency.clone(), vec![40.0, -40.0], "#fff");
+    magnitude.visible = true;
+    let mut phase = WaveformData::new("phase(V(out))", frequency, vec![0.0, -135.0], "#fff");
+    phase.visible = true;
+
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![magnitude, phase]);
+    assert!(
+        bode_analysis_is_renderable(&analysis),
+        "the fixture has to be renderable before the gate can withhold it"
+    );
+
+    analysis.success = false;
+    assert!(
+        !bode_analysis_is_renderable(&analysis),
+        "a failed solve was offered a frequency-response sheet"
+    );
+}
