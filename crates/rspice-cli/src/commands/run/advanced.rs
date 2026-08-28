@@ -541,7 +541,7 @@ fn run_hb_with_config(
 }
 
 /// Write the harmonic-balance spectrum: harmonic frequencies as the scale,
-/// one complex column per node.
+/// one complex column per retained node voltage or MNA branch current.
 fn export_hb(
     ctx: &RunContext<'_>,
     fundamental: f64,
@@ -555,16 +555,29 @@ fn export_hb(
         .spectral_voltages
         .iter()
         .map(|sv| sv.coefficients.len())
+        .chain(
+            result
+                .mna_branch_currents
+                .iter()
+                .map(|branch| branch.coefficients.len()),
+        )
         .max()
         .unwrap_or(0);
     let frequencies: Vec<f64> = result
         .spectral_voltages
-        .first()
-        .filter(|sv| sv.frequencies.len() == num_coeffs)
-        .map(|sv| sv.frequencies.clone())
+        .iter()
+        .map(|sv| &sv.frequencies)
+        .chain(
+            result
+                .mna_branch_currents
+                .iter()
+                .map(|branch| &branch.frequencies),
+        )
+        .find(|frequencies| frequencies.len() == num_coeffs)
+        .cloned()
         .unwrap_or_else(|| (0..num_coeffs).map(|k| fundamental * k as f64).collect());
 
-    let signals: Vec<crate::commands::run_signals::ComplexSignal> = result
+    let mut signals: Vec<crate::commands::run_signals::ComplexSignal> = result
         .spectral_voltages
         .iter()
         .map(|sv| {
@@ -588,6 +601,26 @@ fn export_hb(
             }
         })
         .collect();
+    signals.extend(result.mna_branch_currents.iter().map(|branch| {
+        let mut real = Vec::with_capacity(num_coeffs);
+        let mut imag = Vec::with_capacity(num_coeffs);
+        for harmonic in 0..num_coeffs {
+            let coefficient = branch
+                .coefficients
+                .get(harmonic)
+                .copied()
+                .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0));
+            real.push(coefficient.re);
+            imag.push(coefficient.im);
+        }
+        crate::commands::run_signals::ComplexSignal {
+            display_name: format!("I({})", branch.device_name),
+            raw_name: branch.device_name.clone(),
+            kind: crate::commands::run_signals::SignalKind::Current,
+            real,
+            imag,
+        }
+    }));
     let signals = crate::commands::run_signals::apply_save_set_complex(signals, &ctx.netlist.saves);
 
     if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {

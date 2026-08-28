@@ -62,6 +62,22 @@ fn scalar_csv_value(csv: &str, name: &str) -> f64 {
         .unwrap_or_else(|| panic!("missing {name} in {csv}"))
 }
 
+fn complex_csv_value_at(csv: &str, name: &str, frequency: f64) -> (f64, f64) {
+    let frequencies = csv_column(csv, "frequency");
+    let real = csv_column(csv, &format!("Re({name})"));
+    let imaginary = csv_column(csv, &format!("Im({name})"));
+    let row = frequencies
+        .iter()
+        .position(|value| (*value - frequency).abs() <= frequency.abs().max(1.0) * 1.0e-12)
+        .unwrap_or_else(|| panic!("missing {frequency} Hz row in {csv}"));
+    (real[row], imaginary[row])
+}
+
+fn complex_csv_magnitude_at(csv: &str, name: &str, frequency: f64) -> f64 {
+    let (real, imaginary) = complex_csv_value_at(csv, name, frequency);
+    real.hypot(imaginary)
+}
+
 #[test]
 fn two_step_dimensions_wrap_the_complete_dc_sweep_in_xyce_order() {
     let dir = test_dir("dc");
@@ -166,6 +182,124 @@ fn femto_step_runs_exactly_six_fresh_transient_analyses() {
         !step_output(&output_path, 7).exists(),
         "the femto grid must contain exactly six coordinates"
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn authored_hb_runs_once_per_step_coordinate_with_distinct_spectra() {
+    let dir = test_dir("hb");
+    let deck = dir.join("harmonic_balance.sp");
+    let output_path = dir.join("spectrum.csv");
+    std::fs::write(
+        &deck,
+        "* STEP around authored harmonic balance\n\
+         .param amplitude=100m\n\
+         V1 out 0 SIN(0 {amplitude} 1meg)\n\
+         R1 out 0 1k\n\
+         .step param amplitude list 100m 300m\n\
+         .hb 1meg\n\
+         .print hb V(out) I(V1)\n\
+         .end\n",
+    )
+    .expect("write stepped HB deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        !output_path.exists(),
+        "the unqualified path must not be reused"
+    );
+
+    for (index, expected) in [0.1, 0.3].into_iter().enumerate() {
+        let path = step_output(&output_path, index + 1);
+        let csv = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let fundamental = complex_csv_magnitude_at(&csv, "V(OUT)", 1.0e6);
+        assert!(
+            (fundamental - expected).abs() <= expected * 1.0e-8,
+            "coordinate {} must bind amplitude={expected}: {csv}",
+            index + 1
+        );
+        let (voltage_real, voltage_imaginary) = complex_csv_value_at(&csv, "V(OUT)", 1.0e6);
+        let (current_real, current_imaginary) = complex_csv_value_at(&csv, "I(V1)", 1.0e6);
+        let current_magnitude = current_real.hypot(current_imaginary);
+        assert!(
+            (current_magnitude - expected / 1_000.0).abs() <= expected * 1.0e-11,
+            "coordinate {} must retain the V1 branch-current spectrum: {csv}",
+            index + 1
+        );
+        assert!(
+            (voltage_real + 1_000.0 * current_real).abs() <= expected * 1.0e-8
+                && (voltage_imaginary + 1_000.0 * current_imaginary).abs() <= expected * 1.0e-8,
+            "coordinate {} must satisfy V(out)/R1 + I(V1) = 0: {csv}",
+            index + 1
+        );
+    }
+    assert!(
+        !step_output(&output_path, 3).exists(),
+        "the bounded plan must contain exactly two HB coordinates"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn conditional_hb_signature_change_fails_before_any_step_output() {
+    let dir = test_dir("conditional_hb");
+    let deck = dir.join("conditional_hb.sp");
+    let output_path = dir.join("conditional_hb.csv");
+    std::fs::write(
+        &deck,
+        "* STEP must not conditionally add harmonic balance\n\
+         .param mode=0\n\
+         V1 out 0 SIN(0 100m 1meg)\n\
+         R1 out 0 1k\n\
+         .step param mode list 0 1\n\
+         .if (mode==1)\n\
+         .hb 1meg\n\
+         .endif\n\
+         .end\n",
+    )
+    .expect("write conditional HB deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert_eq!(
+        run.status.code(),
+        Some(2),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("conditionally changes"),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(!output_path.exists());
+    assert!(!step_output(&output_path, 1).exists());
+    assert!(!step_output(&output_path, 2).exists());
 
     let _ = std::fs::remove_dir_all(&dir);
 }

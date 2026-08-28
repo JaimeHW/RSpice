@@ -2468,6 +2468,8 @@ impl XyceTestRunner {
             b3soi_gmin_scaling,
             device_try_to_compact,
             hb_num_frequencies,
+            hb_save_ic_data,
+            linsol_hb_preconditioner,
             nonlinear_continuation,
             gmin_stepping,
             source_stepping,
@@ -2543,6 +2545,8 @@ impl XyceTestRunner {
             && device_zero_resistance_tol.is_none()
             && b3soi_gmin_scaling.is_none()
             && device_try_to_compact.is_none()
+            && hb_save_ic_data.is_none()
+            && linsol_hb_preconditioner.is_none()
             && nonlinear_continuation.is_none()
             // The continuation rungs, damping, the factorization backend and
             // both step bounds are stated absent rather than ignored: this

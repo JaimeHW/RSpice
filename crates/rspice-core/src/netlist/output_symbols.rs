@@ -56,6 +56,8 @@ pub enum OutputAnalysisKind {
     Tran,
     /// Small-signal AC analysis.
     Ac,
+    /// Harmonic-balance analysis.
+    Hb,
     /// DC sweep analysis.
     Dc,
     /// Noise spectral-density analysis.
@@ -77,6 +79,7 @@ impl OutputAnalysisKind {
         match keyword.trim().to_ascii_uppercase().as_str() {
             "TR" | "TRAN" | "TRAN_CONT" => Some(Self::Tran),
             "AC" | "AC_CONT" => Some(Self::Ac),
+            "HB" => Some(Self::Hb),
             "DC" | "DC_CONT" => Some(Self::Dc),
             "NOISE" | "NOISE_CONT" => Some(Self::Noise),
             "DISTO" => Some(Self::Disto),
@@ -3648,6 +3651,30 @@ R1 out ref 1k\n\
         ] {
             assert_eq!(OutputAnalysisKind::from_keyword(keyword), Some(expected));
         }
+    }
+
+    #[test]
+    fn harmonic_balance_print_retains_its_complex_analysis_domain() {
+        let netlist = Netlist::parse(
+            "typed HB output\n\
+             V1 out 0 SIN(0 1 100k)\n\
+             R1 out 0 1k\n\
+             .HB 100k\n\
+             .PRINT HB V(out) I(V1)\n\
+             .END\n",
+        )
+        .expect("HB output request parses");
+        let [request] = netlist.output_requests.as_slice() else {
+            panic!("expected one typed HB output request");
+        };
+
+        assert_eq!(request.directive, OutputDirectiveKind::Print);
+        assert_eq!(request.analysis, Some(OutputAnalysisKind::Hb));
+        assert_eq!(request.operands, ["V(out)", "I(V1)"]);
+        assert_eq!(
+            OutputAnalysisKind::from_keyword("hb"),
+            Some(OutputAnalysisKind::Hb)
+        );
     }
 
     #[test]

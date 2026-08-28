@@ -1645,7 +1645,27 @@ pub(super) fn parse_options_command(
                 }
                 options.hb_num_frequencies.push(count);
             }
+            (Some("HBINT"), "SAVEICDATA") => {
+                options.hb_save_ic_data =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (Some("HBINT"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
+            }
+            (Some("LINSOL-HB"), "PREC_TYPE") => {
+                options.linsol_hb_preconditioner =
+                    Some(parse_xyce_hb_preconditioner_option(stream, line_num)?);
+            }
+            (Some("LINSOL-HB"), _) => {
                 let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
                 ignore_unknown_option(
                     stream,
@@ -2405,6 +2425,7 @@ pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
             | "OUTPUT"
             | "RESTART"
             | "HBINT"
+            | "LINSOL-HB"
     )
 }
 
@@ -2901,6 +2922,33 @@ fn parse_matrix_solver_option(
             line: line_num,
             message: format!(
                 "unsupported .OPTIONS SOLVER backend '{name}'; expected AUTO, KLU, or FAER"
+            ),
+        }),
+    }
+}
+
+fn parse_xyce_hb_preconditioner_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<crate::netlist::XyceHbPreconditioner, ParseError> {
+    let TokenKind::Ident(name) = &stream.peek().kind else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".OPTIONS LINSOL-HB PREC_TYPE expects a preconditioner name, found {:?}",
+                stream.peek().kind
+            ),
+        });
+    };
+    let name = name.clone();
+    stream.advance();
+
+    match name.to_ascii_uppercase().as_str() {
+        "BLOCK_JACOBI" => Ok(crate::netlist::XyceHbPreconditioner::BlockJacobi),
+        _ => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "unsupported .OPTIONS LINSOL-HB PREC_TYPE '{name}'; expected BLOCK_JACOBI"
             ),
         }),
     }
@@ -6484,6 +6532,64 @@ mod tests {
         };
         assert_eq!(frequencies, &[10.0e3, 20.0e3]);
         assert_eq!(netlist.options.hb_num_frequencies, vec![50, 25]);
+    }
+
+    #[test]
+    fn harmonic_balance_authored_options_are_typed_without_unknown_diagnostics() {
+        let netlist = Netlist::parse(
+            "typed HB options\n\
+             V1 1 0 SIN(0 1 100k)\n\
+             R1 1 0 1k\n\
+             .hb 100k\n\
+             .options hbint numfreq=5 saveicdata=1\n\
+             .options linsol-hb prec_type=block_jacobi\n\
+             .end\n",
+        )
+        .expect("BUG340 harmonic-balance options parse");
+
+        assert_eq!(netlist.options.hb_num_frequencies, vec![5]);
+        assert_eq!(netlist.options.hb_save_ic_data, Some(true));
+        assert_eq!(
+            netlist.options.linsol_hb_preconditioner,
+            Some(crate::netlist::XyceHbPreconditioner::BlockJacobi)
+        );
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option"),
+            "typed HB options must not be diagnosed as unknown: {:?}",
+            netlist.diagnostics
+        );
+
+        let mut merged = crate::netlist::SimulationOptions {
+            hb_save_ic_data: Some(false),
+            ..Default::default()
+        };
+        merged.merge(&netlist.options);
+        assert_eq!(merged.hb_save_ic_data, Some(true));
+        assert_eq!(
+            merged.linsol_hb_preconditioner,
+            Some(crate::netlist::XyceHbPreconditioner::BlockJacobi)
+        );
+    }
+
+    #[test]
+    fn harmonic_balance_preconditioner_rejects_unsupported_names() {
+        let error = Netlist::parse(
+            "invalid HB preconditioner\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             .hb 100k\n\
+             .options linsol-hb prec_type=ilu\n\
+             .end\n",
+        )
+        .expect_err("unsupported HB preconditioners must fail closed");
+
+        assert!(
+            error.to_string().contains("expected BLOCK_JACOBI"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

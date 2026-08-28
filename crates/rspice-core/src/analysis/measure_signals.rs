@@ -88,7 +88,9 @@ impl MeasurementSignalDomain {
     fn for_analysis(analysis: OutputAnalysisKind) -> Result<Self, String> {
         match analysis {
             OutputAnalysisKind::Tran | OutputAnalysisKind::Dc => Ok(Self::Real),
-            OutputAnalysisKind::Ac | OutputAnalysisKind::Noise => Ok(Self::Complex),
+            OutputAnalysisKind::Ac | OutputAnalysisKind::Hb | OutputAnalysisKind::Noise => {
+                Ok(Self::Complex)
+            }
             other => Err(format!(
                 "interface-node measurement projection does not support {other:?} analysis"
             )),
@@ -5677,6 +5679,14 @@ mod tests {
             },
         )
         .expect("Xyce test netlist parses")
+    }
+
+    #[test]
+    fn harmonic_balance_measurement_signal_domain_is_complex() {
+        assert_eq!(
+            MeasurementSignalDomain::for_analysis(OutputAnalysisKind::Hb),
+            Ok(MeasurementSignalDomain::Complex)
+        );
     }
 
     fn tran_result() -> TransientResult {

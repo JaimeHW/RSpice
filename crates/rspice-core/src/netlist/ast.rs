@@ -3049,6 +3049,17 @@ impl XyceRestartOptions {
     }
 }
 
+/// Preconditioner selected by Xyce's `.OPTIONS LINSOL-HB PREC_TYPE`.
+///
+/// This enum contains only algorithms whose authored semantics RSpice can
+/// preserve. Unsupported names fail parsing instead of silently selecting a
+/// different harmonic-balance linear solve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XyceHbPreconditioner {
+    /// Block-Jacobi preconditioning over the harmonic-balance block system.
+    BlockJacobi,
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -3135,6 +3146,12 @@ pub struct SimulationOptions {
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
+    /// Xyce `.OPTIONS HBINT SAVEICDATA`: retain the authored request to write
+    /// the harmonic-balance initial-condition data set.
+    pub hb_save_ic_data: Option<bool>,
+    /// Xyce `.OPTIONS LINSOL-HB PREC_TYPE`: typed harmonic-balance linear
+    /// solver preconditioner selection.
+    pub linsol_hb_preconditioner: Option<XyceHbPreconditioner>,
     /// Explicit Xyce nonlinear continuation policy.
     pub nonlinear_continuation: Option<NonlinearContinuationMode>,
     /// `.OPTIONS GMINSTEPPING`: allow the GMIN homotopy rung when the direct
@@ -3594,6 +3611,12 @@ impl SimulationOptions {
         }
         if !other.hb_num_frequencies.is_empty() {
             self.hb_num_frequencies = other.hb_num_frequencies.clone();
+        }
+        if other.hb_save_ic_data.is_some() {
+            self.hb_save_ic_data = other.hb_save_ic_data;
+        }
+        if other.linsol_hb_preconditioner.is_some() {
+            self.linsol_hb_preconditioner = other.linsol_hb_preconditioner;
         }
     }
 

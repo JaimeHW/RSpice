@@ -1154,12 +1154,13 @@ fn physical_step_analysis_kind(
         AnalysisCommand::Dc { .. } => Ok(Some("dc")),
         AnalysisCommand::Ac { .. } => Ok(Some("ac")),
         AnalysisCommand::Tran { .. } => Ok(Some("tran")),
+        AnalysisCommand::Hb { .. } => Ok(Some("hb")),
         unsupported => Err(CliError::InvalidArgument {
             message: format!(
                 ".STEP cannot yet wrap the authored analysis {unsupported:?} without ambiguous nested-run or output semantics"
             ),
             suggestion: Some(
-                "use an authored .OP, .DC, .AC, or .TRAN child analysis for this stepped run"
+                "use an authored .OP, .DC, .AC, .TRAN, or .HB child analysis for this stepped run"
                     .to_string(),
             ),
         }),
@@ -1214,7 +1215,8 @@ fn validate_step_frontend_compatibility(
         return Err(CliError::InvalidArgument {
             message: format!("{mode} cannot be combined with an authored .STEP deck"),
             suggestion: Some(
-                "encode the desired .OP, .DC, .AC, or .TRAN child analysis in the deck".to_string(),
+                "encode the desired .OP, .DC, .AC, .TRAN, or .HB child analysis in the deck"
+                    .to_string(),
             ),
         });
     }
@@ -1259,7 +1261,7 @@ fn validate_step_frontend_compatibility(
         return Err(CliError::InvalidArgument {
             message: "a multi-dimensional .STEP deck requires an explicit child analysis"
                 .to_string(),
-            suggestion: Some("add .OP, .DC, .AC, or .TRAN to the deck".to_string()),
+            suggestion: Some("add .OP, .DC, .AC, .TRAN, or .HB to the deck".to_string()),
         });
     }
     Ok(())
@@ -1322,7 +1324,7 @@ fn preflight_step_coordinates(
                     signature
                 ),
                 suggestion: Some(
-                    "keep the authored .OP, .DC, .AC, or .TRAN card set unconditional across every coordinate"
+                    "keep the authored .OP, .DC, .AC, .TRAN, or .HB card set unconditional across every coordinate"
                         .to_string(),
                 ),
             });
