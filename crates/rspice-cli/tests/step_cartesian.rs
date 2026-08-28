@@ -171,6 +171,50 @@ fn femto_step_runs_exactly_six_fresh_transient_analyses() {
 }
 
 #[test]
+fn default_ngspice_cli_does_not_apply_xyce_print_voltage_wildcard() {
+    let dir = test_dir("ngspice_tran_print_vstar");
+    let deck = dir.join("transient_vstar.sp");
+    let output_path = dir.join("wave.csv");
+    std::fs::write(
+        &deck,
+        "* STEP transient PRINT V(*)\n\
+         VDrive Supply 0 PULSE(0 1 0 1p 1p 20p 50p)\n\
+         RLoad Supply Load {resistance}\n\
+         CLoad Load 0 1p\n\
+         .param resistance=1k\n\
+         .step param resistance list 1k 2k\n\
+         .tran 5p 20p\n\
+         .print tran V(Load) V(*)\n\
+         .end\n",
+    )
+    .expect("write stepped wildcard deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        !run.status.success(),
+        "default CLI mode must not reinterpret ngspice V(*) as Xyce: stdout={}; stderr={}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&run.stderr).contains("V(*)"),
+        "failure must retain the unsupported authored probe: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(!output_path.exists());
+    assert!(!step_output(&output_path, 1).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn step_data_table_reaches_the_typed_planner_and_binds_each_row() {
     let dir = test_dir("data");
     let deck = dir.join("data_step.sp");

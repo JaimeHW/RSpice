@@ -26,7 +26,8 @@ use crate::engine::{SimulationError, TransientDeviceOpTrace, TransientResult};
 use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression, is_real};
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, NetlistSourceLocation, OutputAnalysisKind, OutputDirectiveKind,
-    OutputOperandKind, OutputRequest, SaveSignal, canonical_symbol,
+    OutputNodeNamespace, OutputOperandKind, OutputRequest, SaveSignal, canonical_symbol,
+    collect_output_node_namespace_with_limits_and_abort,
     collect_requested_interface_node_aliases_with_abort, is_current_output_accessor,
     is_current_projection_accessor, is_device_lead_current_accessor,
 };
@@ -1277,16 +1278,79 @@ fn matching_print_requests(netlist: &Netlist, analysis: OutputAnalysisKind) -> V
         .collect()
 }
 
+struct RealOutputProjectionPlan {
+    column_count: usize,
+    wildcard_voltage_nodes: Vec<WildcardVoltageNode>,
+    expand_complete_voltage_wildcard: bool,
+}
+
+struct WildcardVoltageNode {
+    lookup_name: String,
+    display_name: String,
+}
+
+fn ordered_wildcard_voltage_nodes(
+    names: &[String],
+    voltage_count: usize,
+    netlist: &Netlist,
+    namespace: &OutputNodeNamespace,
+) -> Result<Vec<WildcardVoltageNode>, String> {
+    if names.len() != voltage_count {
+        return Err(format!(
+            "V(*) requires complete node-name metadata, but the result has {} name(s) for {voltage_count} voltage vector(s)",
+            names.len()
+        ));
+    }
+
+    let mut seen = HashSet::new();
+    let mut nodes = Vec::with_capacity(names.len());
+    for name in names {
+        if name.trim().is_empty() {
+            return Err("V(*) encountered an unnamed circuit node".to_string());
+        }
+        if netlist.ground_policy().is_ground(name) {
+            continue;
+        }
+        let canonical = canonical_symbol(name);
+        if !namespace.external.contains(&canonical) {
+            continue;
+        }
+        if !seen.insert(canonical.clone()) {
+            return Err(format!(
+                "V(*) encountered duplicate case-insensitive circuit node name '{name}'"
+            ));
+        }
+        nodes.push(WildcardVoltageNode {
+            lookup_name: name.clone(),
+            display_name: if namespace.authored_top_level.contains(&canonical) {
+                canonical
+            } else {
+                canonical.replace('.', ":")
+            },
+        });
+    }
+    Ok(nodes)
+}
+
 fn preflight_real_output_requests(
     requests: &[&OutputRequest],
     analysis: OutputAnalysisKind,
     point_count: usize,
+    node_metadata: Option<(&[String], usize)>,
+    netlist: &Netlist,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> Result<usize, OutputProjectionError> {
+) -> Result<RealOutputProjectionPlan, OutputProjectionError> {
     if abort.is_aborted() {
         return Err(OutputProjectionError::Aborted);
     }
+    // Xyce defines direct PRINT voltage wildcards. Ngspice's `all`/`allv`
+    // selectors and Spectre SAVE globs are different languages and remain
+    // owned by their existing frontend paths.
+    let expand_complete_voltage_wildcard =
+        netlist.params.expression_dialect() == crate::config::ExpressionDialect::Xyce;
+    let mut wildcard_voltage_nodes = None;
+    let mut column_count = 0usize;
     for request in requests {
         if request.operands.len() != request.operand_kinds.len() {
             return Err(output_request_error(
@@ -1301,19 +1365,74 @@ fn preflight_real_output_requests(
                 ),
             ));
         }
+        for (operand_index, kind) in request.operand_kinds.iter().enumerate() {
+            let OutputOperandKind::Probe(signal) = kind else {
+                column_count = column_count.checked_add(1).unwrap_or(usize::MAX);
+                continue;
+            };
+            if expand_complete_voltage_wildcard
+                && matches!(signal, SaveSignal::Voltage(node) if node == "*")
+            {
+                if wildcard_voltage_nodes.is_none() {
+                    let Some((names, voltage_count)) = node_metadata else {
+                        return Err(output_request_error(
+                            request,
+                            analysis,
+                            operand_index,
+                            None,
+                            "V(*) requires circuit node metadata".to_string(),
+                        ));
+                    };
+                    let namespace = match collect_output_node_namespace_with_limits_and_abort(
+                        netlist, limits, abort,
+                    ) {
+                        Ok(namespace) => namespace,
+                        Err(crate::netlist::ParseWithAbortError::Aborted) => {
+                            return Err(OutputProjectionError::Aborted);
+                        }
+                        Err(crate::netlist::ParseWithAbortError::Parse(error)) => {
+                            return Err(output_request_error(
+                                request,
+                                analysis,
+                                operand_index,
+                                None,
+                                format!(
+                                    "V(*) external-node namespace could not be elaborated: {error}"
+                                ),
+                            ));
+                        }
+                    };
+                    wildcard_voltage_nodes = Some(
+                        ordered_wildcard_voltage_nodes(names, voltage_count, netlist, &namespace)
+                            .map_err(|detail| {
+                            output_request_error(request, analysis, operand_index, None, detail)
+                        })?,
+                    );
+                }
+                column_count = column_count
+                    .checked_add(
+                        wildcard_voltage_nodes
+                            .as_ref()
+                            .expect("initialized above")
+                            .len(),
+                    )
+                    .unwrap_or(usize::MAX);
+            } else {
+                column_count = column_count.checked_add(1).unwrap_or(usize::MAX);
+            }
+        }
     }
-    let column_count = requests
-        .iter()
-        .map(|request| request.operands.len())
-        .try_fold(0usize, usize::checked_add)
-        .unwrap_or(usize::MAX);
     let requested_values = point_count.saturating_mul(column_count.saturating_add(1));
     ResourceLimitError::ensure(
         ResourceKind::ResultValues,
         requested_values,
         limits.max_result_values,
     )?;
-    Ok(column_count)
+    Ok(RealOutputProjectionPlan {
+        column_count,
+        wildcard_voltage_nodes: wildcard_voltage_nodes.unwrap_or_default(),
+        expand_complete_voltage_wildcard,
+    })
 }
 
 /// Evaluate source-authored real `.PRINT TRAN` requests in exact card and
@@ -1328,10 +1447,12 @@ fn evaluate_tran_output_columns_with_abort(
     if requests.is_empty() {
         return Ok(Vec::new());
     }
-    let column_count = preflight_real_output_requests(
+    let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
         result.time.len(),
+        Some((&result.node_names, result.voltages.len())),
+        netlist,
         limits,
         abort,
     )?;
@@ -1357,7 +1478,7 @@ fn evaluate_tran_output_columns_with_abort(
         &result.time,
         &signals,
         &netlist.params,
-        column_count,
+        &projection,
         abort,
     )
 }
@@ -1398,10 +1519,15 @@ fn evaluate_dc_output_columns_with_abort(
     if requests.is_empty() {
         return Ok(Vec::new());
     }
-    let column_count = preflight_real_output_requests(
+    let node_metadata = sweep
+        .first()
+        .map(|(_, result)| (result.node_names.as_slice(), result.node_voltages.len()));
+    let projection = preflight_real_output_requests(
         &requests,
         OutputAnalysisKind::Dc,
         sweep.len(),
+        node_metadata,
+        netlist,
         limits,
         abort,
     )?;
@@ -1439,7 +1565,7 @@ fn evaluate_dc_output_columns_with_abort(
         &series.axis,
         &signals,
         &netlist.params,
-        column_count,
+        &projection,
         abort,
     )
 }
@@ -1545,7 +1671,7 @@ fn evaluate_real_output_requests(
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     params: &crate::netlist::ParamContext,
-    column_count: usize,
+    projection: &RealOutputProjectionPlan,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<OutputColumn>, OutputProjectionError> {
     if abort.is_aborted() {
@@ -1553,7 +1679,7 @@ fn evaluate_real_output_requests(
     }
 
     let signal_index = CanonicalMeasureSignalIndex::new(signals);
-    let mut columns = Vec::with_capacity(column_count);
+    let mut columns = Vec::with_capacity(projection.column_count);
     for request in requests {
         for (operand_index, (authored, kind)) in request
             .operands
@@ -1563,6 +1689,34 @@ fn evaluate_real_output_requests(
         {
             if abort.is_aborted() {
                 return Err(OutputProjectionError::Aborted);
+            }
+            if projection.expand_complete_voltage_wildcard
+                && matches!(kind, OutputOperandKind::Probe(SaveSignal::Voltage(node)) if node == "*")
+            {
+                for node in &projection.wildcard_voltage_nodes {
+                    if abort.is_aborted() {
+                        return Err(OutputProjectionError::Aborted);
+                    }
+                    let expanded_name = format!("V({})", node.display_name);
+                    let expanded_kind =
+                        OutputOperandKind::Probe(SaveSignal::Voltage(node.lookup_name.clone()));
+                    let evaluated = evaluate_output_operand(
+                        &expanded_name,
+                        &expanded_kind,
+                        axis,
+                        &signal_index,
+                        params,
+                        abort,
+                    )
+                    .map_err(|error| match error {
+                        OutputOperandEvaluationError::Aborted => OutputProjectionError::Aborted,
+                        OutputOperandEvaluationError::Detail { row, detail } => {
+                            output_request_error(request, analysis, operand_index, row, detail)
+                        }
+                    })?;
+                    columns.push(evaluated);
+                }
+                continue;
             }
             let evaluated =
                 evaluate_output_operand(authored, kind, axis, &signal_index, params, abort)
@@ -5516,6 +5670,17 @@ pub fn unevaluated_measurements(
 mod tests {
     use super::*;
 
+    fn xyce_netlist(source: &str) -> Netlist {
+        Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce test netlist parses")
+    }
+
     fn tran_result() -> TransientResult {
         TransientResult {
             time: vec![0.0, 1.0, 2.0, 3.0],
@@ -5595,6 +5760,179 @@ mod tests {
         assert_eq!(projected[2].values, projected[0].values);
         assert_eq!(projected[3].values, vec![0.0, 2.0, 4.0, 6.0]);
         assert_eq!(projected[4].values, projected[1].values);
+    }
+
+    #[test]
+    fn complete_voltage_wildcard_expands_in_node_order_and_preserves_explicit_probes() {
+        let netlist = xyce_netlist(
+            "complete voltage wildcard\n\
+             V1 Zed 0 0\n\
+             R1 Zed alpha 1k\n\
+             R2 alpha Top.Dot 1k\n\
+             R3 Top.Dot 0 1k\n\
+             X1 alpha CELL\n\
+             .SUBCKT CELL in\n\
+             R4 in Inner 1k\n\
+             R5 Inner 0 1k\n\
+             .ENDS CELL\n\
+             .TRAN 1 3\n\
+             .PRINT TRAN V(alpha) V(*) V(Zed)\n\
+             .END\n",
+        );
+        let mut result = tran_result();
+        result.num_nodes = 5;
+        result.node_names = vec![
+            "Zed".into(),
+            "alpha".into(),
+            "M1.__dint".into(),
+            "Top.Dot".into(),
+            "X1.Inner".into(),
+        ];
+        result.voltages = vec![
+            vec![0.0, 1.0, 2.0, 3.0],
+            vec![10.0, 11.0, 12.0, 13.0],
+            vec![30.0, 31.0, 32.0, 33.0],
+            vec![20.0, 21.0, 22.0, 23.0],
+            vec![40.0, 41.0, 42.0, 43.0],
+        ];
+
+        let projected = evaluate_tran_output_requests(&netlist, &result)
+            .expect("V(*) expands to ordinary voltage columns");
+        assert_eq!(
+            projected
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "V(alpha)",
+                "V(ZED)",
+                "V(ALPHA)",
+                "V(TOP.DOT)",
+                "V(X1:INNER)",
+                "V(Zed)"
+            ]
+        );
+        assert!(
+            projected
+                .iter()
+                .all(|column| column.kind == OutputColumnKind::Voltage)
+        );
+        assert_eq!(projected[0].values, result.voltages[1]);
+        assert_eq!(projected[1].values, result.voltages[0]);
+        assert_eq!(projected[2].values, result.voltages[1]);
+        assert_eq!(projected[3].values, result.voltages[3]);
+        assert_eq!(projected[4].values, result.voltages[4]);
+        assert_eq!(projected[5].values, result.voltages[0]);
+    }
+
+    #[test]
+    fn xyce_complete_voltage_wildcard_counts_columns_without_claiming_partial_patterns() {
+        let netlist = xyce_netlist(
+            "bounded voltage wildcard\n\
+             V1 a 0 0\n\
+             R1 a b 1k\n\
+             R2 b 0 1k\n\
+             .TRAN 1 3\n\
+             .PRINT TRAN V(*)\n\
+             .END\n",
+        );
+        let mut result = tran_result();
+        result.num_nodes = 2;
+        result.node_names = vec!["a".into(), "b".into()];
+        result.voltages = vec![vec![0.0; 4], vec![1.0; 4]];
+        let mut limits = ResourceLimits::default();
+        limits.max_result_values = 11;
+        let error = evaluate_tran_output_requests_with_abort(&netlist, &result, limits, &NoAbort)
+            .expect_err("axis plus two expanded columns require twelve values");
+        assert!(matches!(
+            error,
+            SimulationError::ResourceLimit(ResourceLimitError {
+                resource: ResourceKind::ResultValues,
+                requested: 12,
+                limit: 11,
+            })
+        ));
+
+        for unsupported in ["V(a*)", "V(*,a)"] {
+            let unsupported_netlist = xyce_netlist(&format!(
+                "future voltage wildcard\nV1 a 0 0\n.TRAN 1 3\n.PRINT TRAN {unsupported}\n.END\n"
+            ));
+            let error = evaluate_tran_output_requests(&unsupported_netlist, &result)
+                .expect_err("unimplemented pattern must remain fail-closed at projection");
+            assert!(matches!(
+                error,
+                OutputProjectionError::Operand {
+                    analysis: OutputAnalysisKind::Tran,
+                    operand_index: 0,
+                    detail,
+                    ..
+                } if detail.contains("unavailable")
+            ));
+        }
+
+        let ngspice =
+            Netlist::parse("ngspice literal star\nV1 a 0 0\n.TRAN 1 3\n.PRINT TRAN V(*)\n.END\n")
+                .expect("ngspice literal-star deck parses");
+        let error = evaluate_tran_output_requests(&ngspice, &result)
+            .expect_err("Xyce V(*) expansion must not leak into ngspice mode");
+        assert!(matches!(
+            error,
+            OutputProjectionError::Operand { detail, .. } if detail.contains("unavailable")
+        ));
+
+        let empty_result = TransientResult {
+            time: result.time.clone(),
+            step_sizes: result.step_sizes.clone(),
+            voltages: Vec::new(),
+            branch_currents: Vec::new(),
+            num_nodes: 0,
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+            store_traces: Vec::new(),
+        };
+        assert!(
+            evaluate_tran_output_requests(&netlist, &empty_result)
+                .expect("Xyce empty wildcard expansion succeeds")
+                .is_empty(),
+            "an empty Xyce wildcard expansion must omit columns"
+        );
+    }
+
+    #[test]
+    fn dc_complete_voltage_wildcard_excludes_ground_and_uses_first_row_node_order() {
+        let netlist = xyce_netlist(
+            "DC voltage wildcard\n\
+             V1 Zed 0 0\n\
+             R1 Zed alpha 1k\n\
+             R2 alpha 0 1k\n\
+             .DC V1 0 1 1\n\
+             .PRINT DC V(*)\n\
+             .END\n",
+        );
+        let point = |names: Vec<&str>, values: Vec<Value>| {
+            let mut result = SimulationResult::new(2, 0);
+            result.node_names = names.into_iter().map(str::to_string).collect();
+            result.node_voltages = values;
+            result
+        };
+        let sweep = vec![
+            (0.0, point(vec!["0", "Zed", "alpha"], vec![0.0, 1.0, 2.0])),
+            (1.0, point(vec!["0", "alpha", "Zed"], vec![0.0, 20.0, 10.0])),
+        ];
+        let projected = evaluate_dc_output_requests(&netlist, &sweep)
+            .expect("DC V(*) expands and aligns later rows by name");
+        assert_eq!(
+            projected
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            ["V(ZED)", "V(ALPHA)"]
+        );
+        assert_eq!(projected[0].values, vec![1.0, 10.0]);
+        assert_eq!(projected[1].values, vec![2.0, 20.0]);
     }
 
     #[test]

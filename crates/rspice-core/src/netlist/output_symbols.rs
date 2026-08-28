@@ -199,6 +199,31 @@ pub struct OutputRequest {
 }
 
 impl OutputRequest {
+    pub(crate) fn has_complete_transient_voltage_wildcard(&self) -> bool {
+        self.directive == OutputDirectiveKind::Print
+            && self
+                .analysis
+                .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+            && self.operand_kinds.iter().any(
+                |kind| matches!(kind, OutputOperandKind::Probe(super::SaveSignal::Voltage(node)) if node == "*"),
+            )
+    }
+
+    pub(crate) fn has_complete_transient_save_voltage_wildcard(&self) -> bool {
+        self.directive == OutputDirectiveKind::Save
+            && self
+                .analysis
+                .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
+            && (self.operand_kinds.iter().any(
+                |kind| matches!(kind, OutputOperandKind::Probe(super::SaveSignal::Voltage(node)) if node == "*"),
+            ) || self.dependencies.iter().any(|dependency| {
+                !dependency.expression
+                    && dependency.kind == OutputSymbolKind::Node
+                    && dependency.operator.eq_ignore_ascii_case("V")
+                    && dependency.symbol.trim() == "*"
+            }))
+    }
+
     /// Whether this request needs any transient device-current operand.
     pub(crate) fn requires_transient_device_current_operand(&self) -> bool {
         self.analysis
@@ -232,6 +257,29 @@ impl OutputRequest {
     /// and for voltage operands nested inside expressions; device-current
     /// dependencies are intentionally excluded.
     pub(crate) fn selects_transient_node_voltage(&self, node: &str) -> bool {
+        self.selects_transient_node_voltage_impl(node, true)
+    }
+
+    /// Capture-time variant used when Xyce's complete `.PRINT V(*)`
+    /// selector is projected through the authoritative external namespace.
+    /// Other explicit probes and partial patterns remain independently
+    /// meaningful, including intentional probes of model-private nodes.
+    pub(crate) fn selects_transient_node_voltage_except_complete_wildcard(
+        &self,
+        node: &str,
+    ) -> bool {
+        self.selects_transient_node_voltage_impl(node, false)
+    }
+
+    /// Node dependencies not represented by a direct SAVE `V(...)` probe.
+    /// Direct voltage probes are intentionally excluded: their wildcard
+    /// language is owned by [`SaveSet`](super::SaveSet), whose `*` is one
+    /// hierarchy level. Expressions and typed accessors such as Xyce's
+    /// `N(device_state)` remain request-owned so exact private probes work.
+    pub(crate) fn selects_transient_node_voltage_outside_direct_save_voltage(
+        &self,
+        node: &str,
+    ) -> bool {
         if self
             .analysis
             .is_some_and(|analysis| analysis != OutputAnalysisKind::Tran)
@@ -241,6 +289,26 @@ impl OutputRequest {
         let node = canonical_symbol(node);
         self.dependencies.iter().any(|dependency| {
             dependency.kind == OutputSymbolKind::Node
+                && (dependency.expression || !dependency.operator.eq_ignore_ascii_case("V"))
+                && hierarchy_pattern_matches(&canonical_symbol(&dependency.symbol), &node)
+        })
+    }
+
+    fn selects_transient_node_voltage_impl(
+        &self,
+        node: &str,
+        include_complete_wildcard: bool,
+    ) -> bool {
+        if self
+            .analysis
+            .is_some_and(|analysis| analysis != OutputAnalysisKind::Tran)
+        {
+            return false;
+        }
+        let node = canonical_symbol(node);
+        self.dependencies.iter().any(|dependency| {
+            dependency.kind == OutputSymbolKind::Node
+                && (include_complete_wildcard || dependency.symbol.trim() != "*")
                 && hierarchy_pattern_matches(&canonical_symbol(&dependency.symbol), &node)
         })
     }
@@ -1194,10 +1262,7 @@ pub fn validate_output_symbols_with_abort(
             // N(YMIN!KTRANS1_H)).
             devices.insert(canonical_symbol(&format!("YMIN!{}", element.name)));
         }
-        for node in &element.nodes {
-            nodes.insert(canonical_symbol(node));
-        }
-        collect_embedded_element_nodes(&element.kind, &mut nodes);
+        collect_output_element_nodes(element, &mut nodes);
     }
     let node_aliases = collect_interface_node_aliases_with_abort(netlist, abort)?;
     ensure_parse_not_aborted(abort)?;
@@ -1342,10 +1407,7 @@ pub(crate) fn collect_output_node_namespace_from_elements_with_abort(
     nodes.insert("0".to_string());
     for (index, element) in elements.iter().enumerate() {
         poll_parse_abort(abort, index)?;
-        for node in &element.nodes {
-            nodes.insert(canonical_symbol(node));
-        }
-        collect_embedded_element_nodes(&element.kind, &mut nodes);
+        collect_output_element_nodes(element, &mut nodes);
     }
     let aliases = collect_interface_node_aliases_with_abort(netlist, abort)?;
     for (alias, target) in aliases.iter() {
@@ -1355,6 +1417,116 @@ pub(crate) fn collect_output_node_namespace_from_elements_with_abort(
     }
     ensure_parse_not_aborted(abort)?;
     Ok(nodes)
+}
+
+fn collect_output_node_namespace_from_elements_with_limits_and_abort(
+    netlist: &Netlist,
+    elements: &[Element],
+    limits: crate::resource::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<HashSet<String>, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    let mut nodes = HashSet::new();
+    nodes.insert("0".to_string());
+    for (index, element) in elements.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        collect_output_element_nodes(element, &mut nodes);
+    }
+    let aliases = collect_interface_node_aliases_impl_with_limits(
+        netlist,
+        None,
+        abort,
+        limits.max_hierarchy_depth,
+        limits.max_flattened_elements,
+    )?;
+    for (alias, target) in aliases.iter() {
+        if nodes.contains(target) {
+            nodes.insert(alias.to_string());
+        }
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(nodes)
+}
+
+fn collect_output_element_nodes(element: &Element, nodes: &mut HashSet<String>) {
+    match &element.provenance {
+        super::ElementProvenance::GeneratedDynamicInternalNode { node: private, .. } => {
+            for node in &element.nodes {
+                if !node.eq_ignore_ascii_case(private) {
+                    nodes.insert(canonical_symbol(node));
+                }
+            }
+        }
+        // Every non-ground terminal on a state-derivative equation is an
+        // implementation-owned state node. Ground is seeded independently.
+        super::ElementProvenance::GeneratedDynamicStateDerivative { .. } => {}
+        _ => {
+            for node in &element.nodes {
+                nodes.insert(canonical_symbol(node));
+            }
+            collect_embedded_element_nodes(&element.kind, nodes);
+        }
+    }
+}
+
+/// Output-visible nodes together with the subset whose spelling was authored
+/// directly at the top level.  Keeping these namespaces separate lets output
+/// formatting distinguish a literal dotted top-level node from the dot used
+/// internally by the flattener as a hierarchy separator.
+pub(crate) struct OutputNodeNamespace {
+    pub(crate) external: HashSet<String>,
+    pub(crate) authored_top_level: HashSet<String>,
+}
+
+/// Rebuild the parser-certified external node namespace for output expansion.
+///
+/// This deliberately reuses the same bounded flattener and embedded-node/
+/// interface-alias collector as semantic validation. Solver result names are
+/// not authoritative here because device construction may append private
+/// prime, charge, or model-state nodes to that namespace.
+pub(crate) fn collect_output_node_namespace_with_limits_and_abort(
+    netlist: &Netlist,
+    limits: crate::resource::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<OutputNodeNamespace, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    // Circuit construction restarts this stream immediately before its own
+    // flattening pass. Repeat that reset on a private clone so conditional or
+    // statistical subcircuit elaboration selects the identical public
+    // topology without perturbing a later analysis on the caller's netlist.
+    let mut replay = netlist.clone();
+    replay.params = netlist.params.isolated_random_clone();
+    replay.params.restart_statistical_stream();
+    let mut flattener = Flattener::with_models_config(
+        &replay.subcircuits,
+        &replay.models,
+        FlattenerConfig {
+            max_depth: limits.max_hierarchy_depth,
+            max_elements: limits.max_flattened_elements,
+            ..FlattenerConfig::default()
+        },
+    );
+    let elements = flattener.flatten_with_abort(&replay, abort)?;
+    let external = collect_output_node_namespace_from_elements_with_limits_and_abort(
+        &replay, &elements, limits, abort,
+    )?;
+    let mut authored_top_level = HashSet::new();
+    authored_top_level.insert("0".to_string());
+    for (index, element) in replay.elements.iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        if !matches!(element.provenance, super::ElementProvenance::Authored) {
+            continue;
+        }
+        for node in &element.nodes {
+            authored_top_level.insert(canonical_symbol(node));
+        }
+        collect_embedded_element_nodes(&element.kind, &mut authored_top_level);
+    }
+    ensure_parse_not_aborted(abort)?;
+    Ok(OutputNodeNamespace {
+        external,
+        authored_top_level,
+    })
 }
 
 fn n_operator_device_vector_exists(devices: &HashSet<String>, canonical: &str) -> bool {

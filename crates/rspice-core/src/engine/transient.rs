@@ -15,8 +15,8 @@ use crate::device::semiconductor::{
 };
 use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::netlist::{
-    AnalysisCommand, OutputAnalysisKind, OutputSymbolKind, SaveSignal,
-    is_device_lead_current_accessor,
+    AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind, OutputSymbolKind, SaveSet,
+    SaveSignal, is_device_lead_current_accessor,
 };
 use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController,
@@ -400,14 +400,27 @@ impl TransientCapturePlan {
         netlist: &Netlist,
         request: &crate::netlist::OutputRequest,
         candidate: &str,
+        project_complete_wildcard: bool,
     ) -> bool {
-        if request.selects_transient_node_voltage(candidate) {
+        let save_owns_direct_patterns = request.directive == OutputDirectiveKind::Save;
+        let selected = if save_owns_direct_patterns {
+            request.selects_transient_node_voltage_outside_direct_save_voltage(candidate)
+        } else if project_complete_wildcard {
+            request.selects_transient_node_voltage_except_complete_wildcard(candidate)
+        } else {
+            request.selects_transient_node_voltage(candidate)
+        };
+        if selected {
             return true;
         }
 
         let candidate = Self::canonical_symbol(candidate);
         request.dependencies.iter().any(|dependency| {
             dependency.kind == OutputSymbolKind::Node
+                && (!save_owns_direct_patterns
+                    || dependency.expression
+                    || !dependency.operator.eq_ignore_ascii_case("V"))
+                && (!project_complete_wildcard || dependency.symbol.trim() != "*")
                 && request
                     .analysis
                     .is_none_or(|analysis| analysis == OutputAnalysisKind::Tran)
@@ -462,6 +475,7 @@ impl TransientCapturePlan {
         branch_names: &[String],
         retain_xyce_voltage_source_currents: bool,
         voltage_source_names: &[String],
+        external_wildcard_nodes: Option<&HashSet<String>>,
     ) -> Self {
         // Measurement evaluation currently happens after integration. Until
         // measurements become online reducers, retain all analog operands for
@@ -479,16 +493,54 @@ impl TransientCapturePlan {
             .output_requests
             .iter()
             .any(Self::request_requires_power_voltage);
+        let mut explicit_saves = netlist.saves.clone();
+        let save_owns_complete_wildcard = netlist
+            .output_requests
+            .iter()
+            .any(crate::netlist::OutputRequest::has_complete_transient_save_voltage_wildcard);
+        let project_xyce_complete_print_wildcard = netlist.params.expression_dialect()
+            == crate::config::ExpressionDialect::Xyce
+            && netlist
+                .output_requests
+                .iter()
+                .any(crate::netlist::OutputRequest::has_complete_transient_voltage_wildcard);
+        if external_wildcard_nodes.is_some() {
+            explicit_saves
+                .signals
+                .retain(|signal| !matches!(signal, SaveSignal::Voltage(node) if node == "*"));
+        }
+        // The parser aggregates PRINT and SAVE operands into `netlist.saves`.
+        // Reapply a direct SAVE V(*) separately so it keeps SaveSet's
+        // one-level matching semantics while also intersecting the
+        // parser-certified public node namespace. Builder-private nodes may
+        // have no hierarchy separator (for example a DAE state variable), so
+        // name-shape filtering alone is not an output-visibility boundary.
+        let complete_save_wildcard = save_owns_complete_wildcard.then(|| SaveSet {
+            signals: vec![SaveSignal::Voltage("*".to_string())],
+        });
         let voltages = node_names
             .iter()
             .map(|name| {
+                let externally_visible = external_wildcard_nodes
+                    .is_some_and(|nodes| nodes.contains(&Self::canonical_symbol(name)));
                 retain_all
                     || retain_power_voltages
-                    || netlist.saves.retains_voltage_operand(name)
-                    || netlist
-                        .output_requests
-                        .iter()
-                        .any(|request| Self::request_selects_node(netlist, request, name))
+                    || (project_xyce_complete_print_wildcard && externally_visible)
+                    || complete_save_wildcard.as_ref().is_some_and(|saves| {
+                        externally_visible && saves.retains_voltage_operand(name)
+                    })
+                    || (!explicit_saves.signals.is_empty()
+                        && explicit_saves.retains_voltage_operand(name))
+                    || netlist.output_requests.iter().any(|request| {
+                        let project_complete_wildcard = project_xyce_complete_print_wildcard
+                            && request.has_complete_transient_voltage_wildcard();
+                        Self::request_selects_node(
+                            netlist,
+                            request,
+                            name,
+                            project_complete_wildcard,
+                        )
+                    })
             })
             .collect();
         let branch_currents = branch_names
@@ -2929,12 +2981,43 @@ impl Engine {
                 .output_requests
                 .iter()
                 .any(|request| request.requires_transient_device_current_operand());
+        let has_xyce_complete_voltage_wildcard = netlist.params.expression_dialect()
+            == crate::config::ExpressionDialect::Xyce
+            && netlist
+                .output_requests
+                .iter()
+                .any(crate::netlist::OutputRequest::has_complete_transient_voltage_wildcard);
+        let has_complete_save_voltage_wildcard = netlist
+            .output_requests
+            .iter()
+            .any(crate::netlist::OutputRequest::has_complete_transient_save_voltage_wildcard);
+        let external_wildcard_nodes = if has_xyce_complete_voltage_wildcard
+            || has_complete_save_voltage_wildcard
+        {
+            Some(
+                crate::netlist::collect_output_node_namespace_with_limits_and_abort(
+                    netlist,
+                    self.config.resource_limits,
+                    abort,
+                )
+                .map_err(|error| match error {
+                    crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+                    crate::netlist::ParseWithAbortError::Parse(error) => SimulationError::Netlist(
+                        format!("V(*) external-node namespace could not be elaborated: {error}"),
+                    ),
+                })?
+                .external,
+            )
+        } else {
+            None
+        };
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             &node_names,
             &branch_names,
             retain_xyce_voltage_source_currents,
             &circuit.voltage_sources.names,
+            external_wildcard_nodes.as_ref(),
         );
         let trace_capacity = self.transient_initial_trace_capacity(
             (tstop - resume_time).max(0.0),
@@ -8169,6 +8252,332 @@ mod tests {
         assert!(transient_newton_uses_correction_form(false, true, false));
         assert!(transient_newton_uses_correction_form(true, false, false));
         assert!(!transient_newton_uses_correction_form(false, false, false));
+    }
+
+    fn run_xyce_legacy_bsim_wildcard(output_cards: &str) -> TransientResult {
+        let source = format!(
+            "Xyce wildcard excludes legacy BSIM prime nodes\n\
+             VDS D 0 0.05\n\
+             VGS G 0 1.8\n\
+             M1 D G 0 0 B1 L=10u W=50u\n\
+             .MODEL B1 NMOS LEVEL=4 TOX=0.03 VDD=5 RSH=35\n\
+             .TRAN 1n 2n\n\
+             {output_cards}\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse_with_options(
+            &source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce legacy BSIM wildcard deck parses");
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .run_tran(&netlist, 2.0e-9, 1.0e-9)
+            .expect("legacy BSIM wildcard transient solves")
+    }
+
+    fn assert_only_external_bsim_voltage_traces(result: &TransientResult) {
+        for external in ["D", "G"] {
+            let trace = result
+                .try_voltage_waveform_named(external)
+                .unwrap_or_else(|| panic!("missing external waveform {external}"));
+            assert_eq!(trace.len(), result.time.len());
+        }
+        for private in ["M1.__dint", "M1.__sint"] {
+            let trace = result
+                .try_voltage_waveform_named(private)
+                .unwrap_or_else(|| panic!("missing private-node metadata {private}"));
+            assert!(
+                trace.is_empty(),
+                "wildcard must not capture or resource-charge {private}"
+            );
+        }
+        assert_eq!(
+            result
+                .voltages
+                .iter()
+                .filter(|trace| !trace.is_empty())
+                .count(),
+            2,
+            "only D and G may contribute voltage traces to the result budget"
+        );
+    }
+
+    #[test]
+    fn save_complete_voltage_wildcard_uses_one_level_pattern_for_bsim_nodes() {
+        let result = run_xyce_legacy_bsim_wildcard(".SAVE V(*)");
+        assert_only_external_bsim_voltage_traces(&result);
+    }
+
+    #[test]
+    fn mixed_print_and_save_complete_voltage_wildcards_do_not_capture_bsim_private_nodes() {
+        let result = run_xyce_legacy_bsim_wildcard(".PRINT TRAN V(*)\n.SAVE V(*)");
+        assert_only_external_bsim_voltage_traces(&result);
+    }
+
+    fn run_xyce_team_memristor_capture(output_cards: &str) -> TransientResult {
+        let source = format!(
+            "Xyce wildcard excludes builder-generated TEAM state\n\
+             .MODEL MRM1 MEMRISTOR LEVEL=2 RON=50 ROFF=1k\n\
+             YMEMRISTOR MR1 IN 0 MRM1 IVRELATION=1\n\
+             V1 IN 0 DC 0.2\n\
+             .TRAN 1n 4n\n\
+             {output_cards}\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse_with_options(
+            &source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce TEAM wildcard deck parses");
+        let namespace = crate::netlist::collect_output_node_namespace_with_limits_and_abort(
+            &netlist,
+            crate::resource::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .expect("TEAM public-node namespace elaborates");
+        assert!(namespace.external.contains("IN"));
+        assert!(!namespace.external.contains("YMEMRISTOR!MR1_X"));
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .run_tran(&netlist, 4.0e-9, 1.0e-9)
+            .expect("TEAM wildcard transient solves")
+    }
+
+    fn assert_team_wildcard_avoids_private_state(result: &TransientResult) {
+        assert_eq!(
+            result
+                .try_voltage_waveform_named("IN")
+                .expect("authored IN waveform exists")
+                .len(),
+            result.time.len()
+        );
+        assert!(
+            result
+                .try_voltage_waveform_named("YMEMRISTOR!MR1_X")
+                .expect("builder-generated TEAM state remains in solver metadata")
+                .is_empty(),
+            "V(*) must not capture or resource-charge builder-generated TEAM state"
+        );
+        assert_eq!(
+            result
+                .voltages
+                .iter()
+                .filter(|trace| !trace.is_empty())
+                .count(),
+            1,
+            "only the authored IN node may contribute a voltage trace"
+        );
+    }
+
+    #[test]
+    fn save_complete_voltage_wildcard_excludes_no_dot_team_private_state() {
+        let wildcard = run_xyce_team_memristor_capture(".SAVE V(*)");
+        assert_team_wildcard_avoids_private_state(&wildcard);
+
+        let save_all = run_xyce_team_memristor_capture(".SAVE ALL");
+        assert_eq!(save_all.time, wildcard.time);
+        assert_eq!(
+            save_all
+                .try_voltage_waveform_named("YMEMRISTOR!MR1_X")
+                .expect("SAVE ALL TEAM state waveform")
+                .len(),
+            save_all.time.len(),
+            "SAVE ALL must preserve builder-private state capture"
+        );
+        assert_eq!(
+            save_all.voltages.iter().map(Vec::len).sum::<usize>(),
+            wildcard
+                .voltages
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>()
+                .saturating_add(wildcard.time.len()),
+            "SAVE V(*) must avoid charging exactly one TEAM state waveform"
+        );
+    }
+
+    #[test]
+    fn mixed_print_and_save_wildcards_exclude_no_dot_team_private_state() {
+        let wildcard = run_xyce_team_memristor_capture(".PRINT TRAN V(*)\n.SAVE V(*)");
+        assert_team_wildcard_avoids_private_state(&wildcard);
+
+        let exact_private = run_xyce_team_memristor_capture(".SAVE N(YMEMRISTOR!MR1_X)");
+        assert_eq!(
+            exact_private
+                .try_voltage_waveform_named("YMEMRISTOR!MR1_X")
+                .expect("exact TEAM state waveform")
+                .len(),
+            exact_private.time.len(),
+            "an intentional exact private-node probe must remain capturable"
+        );
+    }
+
+    #[test]
+    fn xyce_print_voltage_wildcard_excludes_generated_laplace_state_from_output_and_budget() {
+        let parse = |output_card: &str| {
+            let source = format!(
+                "Xyce V(*) excludes parser-generated LAPLACE state\n\
+                 VIN IN 0 PULSE(0 1 0 1n 1n 10u 20u)\n\
+                 E1 OUT 0 LAPLACE {{V(IN)}} = {{1/(1+s/1e6)}}\n\
+                 RLOAD OUT 0 1k\n\
+                 .TRAN 100n 1u\n\
+                 {output_card}\n\
+                 .END\n"
+            );
+            Netlist::parse_with_options(
+                &source,
+                crate::netlist::NetlistParseOptions {
+                    expression_dialect: crate::config::ExpressionDialect::Xyce,
+                    ..Default::default()
+                },
+            )
+            .expect("Xyce LAPLACE wildcard deck parses")
+        };
+        let engine =
+            || Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+
+        let wildcard_netlist = parse(".PRINT TRAN V(*)");
+        let wildcard = engine()
+            .run_tran(&wildcard_netlist, 1.0e-6, 1.0e-7)
+            .expect("LAPLACE wildcard transient solves");
+        for external in ["IN", "OUT"] {
+            assert_eq!(
+                wildcard
+                    .try_voltage_waveform_named(external)
+                    .unwrap_or_else(|| panic!("missing external waveform {external}"))
+                    .len(),
+                wildcard.time.len()
+            );
+        }
+        let state = wildcard
+            .try_voltage_waveform_named("E1.__X1")
+            .expect("generated LAPLACE state remains in solver metadata");
+        assert!(state.is_empty(), "V(*) must not capture generated state");
+
+        let projected = crate::analysis::evaluate_tran_output_requests_with_abort(
+            &wildcard_netlist,
+            &wildcard,
+            crate::resource::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .expect("LAPLACE V(*) output projection succeeds");
+        assert_eq!(
+            projected.len(),
+            2,
+            "only authored IN and OUT may be emitted as wildcard columns"
+        );
+
+        let save_all_netlist = parse(".SAVE ALL");
+        let save_all = engine()
+            .run_tran(&save_all_netlist, 1.0e-6, 1.0e-7)
+            .expect("SAVE ALL LAPLACE counterfactual solves");
+        assert_eq!(save_all.time, wildcard.time);
+        assert_eq!(
+            save_all
+                .try_voltage_waveform_named("E1.__X1")
+                .expect("SAVE ALL state waveform")
+                .len(),
+            save_all.time.len()
+        );
+        let retained_voltage_values = |result: &TransientResult| {
+            result
+                .voltages
+                .iter()
+                .map(Vec::len)
+                .fold(0usize, usize::saturating_add)
+        };
+        assert_eq!(
+            retained_voltage_values(&save_all),
+            retained_voltage_values(&wildcard).saturating_add(wildcard.time.len()),
+            "wildcard capture must avoid charging exactly one generated state voltage waveform"
+        );
+        assert!(
+            Engine::transient_result_value_count(&save_all)
+                >= Engine::transient_result_value_count(&wildcard)
+                    .saturating_add(wildcard.time.len()),
+            "SAVE ALL counterfactual must charge at least the generated state waveform"
+        );
+    }
+
+    #[test]
+    fn xyce_print_complete_voltage_wildcard_does_not_capture_bsim_private_nodes() {
+        let netlist = Netlist::parse_with_options(
+            "Xyce V(*) excludes legacy BSIM prime nodes\n\
+             VDS D 0 0.05\n\
+             VGS G 0 1.8\n\
+             M1 D G 0 0 B1 L=10u W=50u\n\
+             .MODEL B1 NMOS LEVEL=4 TOX=0.03 VDD=5 RSH=35\n\
+             .TRAN 1n 2n\n\
+             .PRINT TRAN V(*)\n\
+             .END\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce legacy BSIM wildcard deck parses");
+
+        let baseline =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .run_tran(&netlist, 2.0e-9, 1.0e-9)
+                .expect("external-only wildcard transient solves");
+        for external in ["D", "G"] {
+            let trace = baseline
+                .try_voltage_waveform_named(external)
+                .unwrap_or_else(|| panic!("missing external waveform {external}"));
+            assert_eq!(trace.len(), baseline.time.len());
+        }
+        for private in ["M1.__dint", "M1.__sint"] {
+            let trace = baseline
+                .try_voltage_waveform_named(private)
+                .unwrap_or_else(|| panic!("missing private-node metadata {private}"));
+            assert!(
+                trace.is_empty(),
+                "V(*) must not capture or resource-charge {private}"
+            );
+        }
+
+        let retained = Engine::transient_result_value_count(&baseline);
+        assert_eq!(
+            baseline
+                .voltages
+                .iter()
+                .filter(|trace| !trace.is_empty())
+                .count(),
+            2,
+            "only D and G may contribute voltage traces to the result budget"
+        );
+        // Leave less than two waveform lengths of headroom for projection
+        // bookkeeping. Retaining both prime-node traces would necessarily
+        // cross this ceiling.
+        let tight_limit = retained
+            .saturating_add(baseline.time.len())
+            .saturating_add(baseline.time.len() / 2);
+        assert!(
+            retained.saturating_add(baseline.time.len().saturating_mul(2)) > tight_limit,
+            "capturing both private prime-node traces would exceed the tight budget"
+        );
+        let mut tight = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        tight.resource_limits.max_result_values = tight_limit;
+        let bounded = Engine::new(tight)
+            .run_tran(&netlist, 2.0e-9, 1.0e-9)
+            .expect("external-only capture fits the exact retained-value budget");
+        assert_eq!(Engine::transient_result_value_count(&bounded), retained);
+        assert!(
+            bounded
+                .try_voltage_waveform_named("M1.__dint")
+                .is_some_and(<[_]>::is_empty)
+        );
+        assert!(
+            bounded
+                .try_voltage_waveform_named("M1.__sint")
+                .is_some_and(<[_]>::is_empty)
+        );
     }
 
     #[test]
