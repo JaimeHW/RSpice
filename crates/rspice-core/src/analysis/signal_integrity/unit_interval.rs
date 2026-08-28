@@ -196,7 +196,7 @@ pub fn crossing_phase_at(
 /// before the mean crossing puts crossings at 0.5 and 1.5 of a two-UI window
 /// and the opening at 1.0.
 pub fn fold_anchor(mean_crossing_phase: f64, unit_interval: f64) -> Option<f64> {
-    if !(unit_interval.is_finite() && unit_interval > 0.0) || !mean_crossing_phase.is_finite() {
+    if !(unit_interval.is_finite() && unit_interval > 0.0 && mean_crossing_phase.is_finite()) {
         return None;
     }
     Some((mean_crossing_phase - 0.5 * unit_interval).rem_euclid(unit_interval))
