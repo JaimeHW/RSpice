@@ -123,6 +123,7 @@ pub mod numerics;
 /// report both read down into it.
 pub mod op_label;
 pub mod solver;
+mod spice_number;
 pub mod time_compat;
 pub mod xspice;
 

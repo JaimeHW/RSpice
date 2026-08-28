@@ -7,6 +7,7 @@
 //! - Parameter expressions ({value+1k})
 
 use crate::Value;
+use crate::spice_number::parse_spice_suffix;
 
 //=============================================================================
 // Token Types
@@ -622,140 +623,9 @@ pub fn is_xyce_device_name_char(character: char) -> bool {
         )
 }
 
-/// Resolve the SPICE engineering suffix at the head of `text`.
-///
-/// Returns the multiplier the suffix names together with how many *characters*
-/// of `text` it consumed. Text this dialect does not know as a suffix consumes
-/// nothing and scales by one, so a caller that must refuse `1bogus` rather than
-/// silently read it as `1` compares the consumed count against the length of
-/// the text it handed in.
-///
-/// This is the single semantic owner for SPICE numeric suffixes. The lexer
-/// reads every deck through it, and so must any surface whose typed text is
-/// compiled into a deck — a simulation dialog's stop-time field, for instance.
-/// A second table beside this one is how `1A` comes to mean one ampere in a
-/// field and 1e-18 seconds in the run that field configures.
-pub fn spice_suffix_scale(text: &str) -> (Value, usize) {
-    let chars: Vec<char> = text.chars().collect();
-    parse_spice_suffix(&chars)
-}
-
-/// Parse SPICE engineering suffix and return (multiplier, chars_consumed)
-///
-/// [`spice_suffix_scale`] is the `&str` door onto this table for callers
-/// outside the lexer; the table itself lives here and has exactly one copy.
-fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
-    if chars.is_empty() {
-        return (1.0, 0);
-    }
-
-    // Try three-char suffixes first
-    if chars.len() >= 3 {
-        let three: String = chars[..3].iter().collect();
-        let three_upper = three.to_uppercase();
-        match three_upper.as_str() {
-            "MEG" => return (1e6, 3),
-            "MIL" => return (25.4e-6, 3), // mil = 1/1000 inch
-            "GHZ" => return (1e9, 3),     // gigahertz
-            "MHZ" => return (1e6, 3),     // megahertz
-            "KHZ" => return (1e3, 3),     // kilohertz
-            "UHZ" => return (1e-6, 3),    // microhertz
-            "NHZ" => return (1e-9, 3),    // nanohertz
-            "PHZ" => return (1e-12, 3),   // picohertz
-            "FHZ" => return (1e-15, 3),   // femtohertz
-            "THZ" => return (1e12, 3),    // terahertz
-            _ => {}
-        }
-    }
-
-    // Two-char unit suffixes
-    if chars.len() >= 2 {
-        let c1 = chars[0].to_ascii_uppercase();
-        let c2 = chars[1].to_ascii_uppercase();
-
-        // Time units (seconds)
-        if c2 == 'S' {
-            match c1 {
-                'N' => return (1e-9, 2),  // nanoseconds
-                'P' => return (1e-12, 2), // picoseconds
-                'U' => return (1e-6, 2),  // microseconds
-                'M' => return (1e-3, 2),  // milliseconds
-                'F' => return (1e-15, 2), // femtoseconds
-                _ => {}
-            }
-        }
-
-        // Capacitance units (farads) - just consume the F, value already scaled
-        if c2 == 'F' {
-            match c1 {
-                'N' => return (1e-9, 2),  // nanofarads
-                'P' => return (1e-12, 2), // picofarads
-                'U' => return (1e-6, 2),  // microfarads
-                'M' => return (1e-3, 2),  // millifarads (rare but valid)
-                _ => {}
-            }
-        }
-
-        // Inductance units (henrys)
-        if c2 == 'H' {
-            match c1 {
-                'N' => return (1e-9, 2),  // nanohenrys
-                'P' => return (1e-12, 2), // picohenrys
-                'U' => return (1e-6, 2),  // microhenrys
-                'M' => return (1e-3, 2),  // millihenrys
-                _ => {}
-            }
-        }
-
-        // Voltage/current units with engineering prefix (e.g., mV, uA, kV).
-        if c2 == 'V' || c2 == 'A' {
-            match c1 {
-                'T' => return (1e12, 2),
-                'G' => return (1e9, 2),
-                'K' => return (1e3, 2),
-                'M' => return (1e-3, 2),
-                'U' => return (1e-6, 2),
-                'N' => return (1e-9, 2),
-                'P' => return (1e-12, 2),
-                'F' => return (1e-15, 2),
-                _ => {}
-            }
-        }
-
-        // Length units (meters) with engineering prefix. Bare `m` remains the
-        // SPICE milli scale; only a second `m` unit designator is neutral.
-        if c2 == 'M' {
-            match c1 {
-                'T' => return (1e12, 2),
-                'G' => return (1e9, 2),
-                'K' => return (1e3, 2),
-                'M' => return (1e-3, 2),
-                'U' => return (1e-6, 2),
-                'N' => return (1e-9, 2),
-                'P' => return (1e-12, 2),
-                'F' => return (1e-15, 2),
-                _ => {}
-            }
-        }
-    }
-
-    // Single char suffixes
-    let c = chars[0].to_ascii_uppercase();
-    match c {
-        'T' => (1e12, 1),
-        'G' => (1e9, 1),
-        'K' => (1e3, 1),
-        'M' => (1e-3, 1), // milli (MEG already handled above)
-        'U' => (1e-6, 1),
-        'N' => (1e-9, 1),
-        'P' => (1e-12, 1),
-        'F' => (1e-15, 1),
-        'X' if chars.len() == 1 || !chars[1].is_ascii_alphabetic() => (1e6, 1),
-        // Unit designators (e.g., "1V", "1A", ".1s") are treated as neutral scale.
-        'V' | 'A' | 'S' => (1.0, 1),
-        _ => (1.0, 0),
-    }
-}
+// Preserve the public lexer API while keeping the suffix policy below both
+// expression parsers and the deck lexer in the architectural layer graph.
+pub use crate::spice_number::spice_suffix_scale;
 
 //=============================================================================
 // Lexer Errors

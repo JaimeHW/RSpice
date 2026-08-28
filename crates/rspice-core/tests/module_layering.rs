@@ -93,6 +93,9 @@ const LAYERS: &[(&str, u32)] = &[
     // families reaching ten ranks up. The reader's half, which also answers
     // for the compiled Verilog-A catalog, stays in `circuit` for that reason.
     ("op_label", 0),
+    // SPICE engineering-suffix semantics. Both expression parsers and the
+    // deck lexer consume this leaf so numeric text has one semantic owner.
+    ("spice_number", 0),
     // A kernel library beneath the solvers.
     ("simd", 1),
     // SPICE RAW waveform files, read and written. A leaf by construction:

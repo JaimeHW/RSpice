@@ -189,7 +189,7 @@ impl<'a> Lexer<'a> {
             if self.aborted {
                 return Token::Eof;
             }
-            multiplier = crate::netlist::lexer::spice_suffix_scale(&tail).0;
+            multiplier = crate::spice_number::spice_suffix_scale(&tail).0;
         }
 
         let lexeme = if tail.is_empty() {
