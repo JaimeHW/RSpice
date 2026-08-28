@@ -7,6 +7,9 @@ use num_complex::Complex64;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::pss::{PeriodicWaveform, PssConfig, PssResult};
+use rspice_core::analysis::{
+    FloquetOrbitKind, FloquetSpectrumCertificate, FloquetSpectrumEvidence,
+};
 use rspice_core::engine::{Engine, PssAnalysisResult, PssOperatingPoint, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -21,6 +24,12 @@ fn retained_linear_operating_point() -> PssOperatingPoint {
         .map(|index| period * index as f64 / 256.0)
         .collect::<Vec<_>>();
     let zeros = vec![0.0; time.len()];
+    let certificate = FloquetSpectrumCertificate::new(
+        1,
+        0.0,
+        FloquetSpectrumCertificate::canonical_qualification_tolerance(1),
+    )
+    .unwrap();
     let result = PssResult {
         period,
         frequency: F0,
@@ -34,6 +43,9 @@ fn retained_linear_operating_point() -> PssOperatingPoint {
         node_names: vec!["in".to_owned(), "out".to_owned()],
         period_detected: false,
         floquet_multipliers: vec![Complex64::new(0.5, 0.0)],
+        floquet_evidence: FloquetSpectrumEvidence::qualified(certificate).unwrap(),
+        floquet_orbit_kind: FloquetOrbitKind::Driven,
+        trivial_floquet_multiplier_index: None,
     };
     PssOperatingPoint::try_from_parts(
         config,

@@ -26,6 +26,7 @@ pub mod ac;
 pub mod corner;
 pub mod dc;
 pub mod distortion;
+pub mod floquet;
 pub mod fourier;
 pub mod harmonic_balance;
 pub mod measure;
@@ -49,6 +50,11 @@ pub mod stb;
 pub mod temperature;
 pub mod transfer;
 
+pub use floquet::{
+    FLOQUET_UNIT_CIRCLE_BAND, FloquetOrbitKind, FloquetSpectrumCertificate,
+    FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,
+    select_autonomous_phase_mode,
+};
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
     VariableStatistics, VariationSet,

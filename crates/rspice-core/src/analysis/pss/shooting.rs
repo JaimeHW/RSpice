@@ -6,6 +6,7 @@
 #![allow(clippy::needless_range_loop)]
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::{FloquetSpectrumCertificate, FloquetSpectrumEvidence};
 use crate::numerics::eigenspectrum::{OrdinarySpectrumError, qualified_real_eigenspectrum};
 use crate::solver::{SolverError, StaticMatrix};
 
@@ -292,8 +293,33 @@ impl ShootingNewtonSolver {
         monodromy: &[Vec<Value>],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<num_complex::Complex64>, FloquetSpectrumError> {
+        let (multipliers, _) = self.compute_floquet_spectrum_with_abort(monodromy, abort)?;
+        Ok(multipliers)
+    }
+
+    /// Extract a complete Floquet spectrum together with strict evidence.
+    pub fn compute_floquet_spectrum(
+        &self,
+        monodromy: &[Vec<Value>],
+    ) -> Result<(Vec<num_complex::Complex64>, FloquetSpectrumEvidence), FloquetSpectrumError> {
+        self.compute_floquet_spectrum_with_abort(monodromy, &NoAbort)
+    }
+
+    /// Extract a complete Floquet spectrum and retain its canonical residual
+    /// certificate, checking cancellation around the atomic eigensolve.
+    pub fn compute_floquet_spectrum_with_abort(
+        &self,
+        monodromy: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<(Vec<num_complex::Complex64>, FloquetSpectrumEvidence), FloquetSpectrumError> {
         let spectrum = qualified_real_eigenspectrum(monodromy, abort)?;
-        Ok(spectrum.eigenvalues)
+        let certificate: FloquetSpectrumCertificate = spectrum.certificate;
+        let evidence = FloquetSpectrumEvidence::qualified(certificate).ok_or_else(|| {
+            FloquetSpectrumError::Numerical(
+                "qualified eigensolver returned an invalid certificate".to_owned(),
+            )
+        })?;
+        Ok((spectrum.eigenvalues, evidence))
     }
 
     /// Reset solver state for new analysis
@@ -337,5 +363,18 @@ mod tests {
             .compute_floquet_multipliers_with_abort(&[vec![0.5]], &ImmediateAbort)
             .unwrap_err();
         assert_eq!(error, FloquetSpectrumError::Aborted);
+    }
+
+    #[test]
+    fn floquet_spectrum_retains_canonical_qualification_evidence() {
+        let solver = ShootingNewtonSolver::default();
+        let (multipliers, evidence) = solver.compute_floquet_spectrum(&[vec![0.5]]).unwrap();
+        assert_eq!(multipliers, vec![num_complex::Complex64::new(0.5, 0.0)]);
+        let certificate = evidence.certificate().unwrap();
+        assert_eq!(certificate.problem_order, 1);
+        assert_eq!(
+            certificate.qualification_tolerance,
+            FloquetSpectrumCertificate::canonical_qualification_tolerance(1)
+        );
     }
 }

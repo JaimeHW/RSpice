@@ -7,25 +7,19 @@
 
 use crate::Value;
 use crate::abort_signal::AbortSignal;
+use crate::analysis::FloquetSpectrumCertificate;
 use faer::Mat;
 use faer::linalg::solvers::Eigen;
 use num_complex::Complex64;
 
 const ABORT_POLL_STRIDE: usize = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct OrdinarySpectrumCertificate {
-    pub(crate) problem_order: usize,
-    pub(crate) max_backward_error: Value,
-    pub(crate) qualification_tolerance: Value,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QualifiedOrdinarySpectrum {
     pub(crate) eigenvalues: Vec<Complex64>,
     /// Right eigenvectors stored one vector per eigenvalue.
     pub(crate) right_eigenvectors: Vec<Vec<Complex64>>,
-    pub(crate) certificate: OrdinarySpectrumCertificate,
+    pub(crate) certificate: FloquetSpectrumCertificate,
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
@@ -91,7 +85,7 @@ fn poll_periodically(
 
 #[inline]
 pub(crate) fn qualification_tolerance(problem_order: usize) -> Value {
-    128.0 * problem_order.max(1) as Value * Value::EPSILON
+    FloquetSpectrumCertificate::canonical_qualification_tolerance(problem_order)
 }
 
 fn eigenpair_backward_error(
@@ -245,14 +239,17 @@ pub(crate) fn qualified_real_eigenspectrum(
     }
 
     ensure_not_aborted(abort)?;
+    let certificate = FloquetSpectrumCertificate::new(n, max_backward_error, tolerance).ok_or(
+        OrdinarySpectrumError::NumericalQualification {
+            index: n.saturating_sub(1),
+            backward_error: max_backward_error,
+            maximum: tolerance,
+        },
+    )?;
     Ok(QualifiedOrdinarySpectrum {
         eigenvalues,
         right_eigenvectors,
-        certificate: OrdinarySpectrumCertificate {
-            problem_order: n,
-            max_backward_error,
-            qualification_tolerance: tolerance,
-        },
+        certificate,
     })
 }
 

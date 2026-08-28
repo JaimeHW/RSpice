@@ -30,6 +30,10 @@
 
 #![allow(clippy::needless_range_loop)]
 use crate::abort_signal::AbortSignal;
+use crate::analysis::{
+    FloquetOrbitKind, FloquetSpectrumEvidence, FloquetStabilityVerdict, classify_floquet_stability,
+    select_autonomous_phase_mode,
+};
 use crate::numerics::eigenspectrum::{OrdinarySpectrumError, qualified_real_eigenspectrum};
 use crate::{SimulationError, Value};
 use num_complex::Complex64;
@@ -42,6 +46,9 @@ use std::f64::consts::PI;
 /// Configuration for Periodic Stability (PSTB) analysis
 #[derive(Debug, Clone)]
 pub struct PstbConfig {
+    /// Explicit policy for driven versus autonomous periodic orbits.
+    pub orbit_kind: FloquetOrbitKind,
+
     /// Compatibility field. PSTB always retains the complete spectrum because
     /// a truncated spectrum cannot prove stability.
     pub num_eigenvalues: usize,
@@ -76,6 +83,7 @@ pub struct PstbConfig {
 impl Default for PstbConfig {
     fn default() -> Self {
         Self {
+            orbit_kind: FloquetOrbitKind::Driven,
             num_eigenvalues: 0, // Compute all
             eigenvalue_tolerance: 1e-10,
             max_iterations: 1000,
@@ -97,6 +105,12 @@ impl PstbConfig {
     /// Set number of eigenvalues to compute
     pub fn with_num_eigenvalues(mut self, n: usize) -> Self {
         self.num_eigenvalues = n;
+        self
+    }
+
+    /// Set the periodic-orbit policy used for unity-mode classification.
+    pub fn with_orbit_kind(mut self, orbit_kind: FloquetOrbitKind) -> Self {
+        self.orbit_kind = orbit_kind;
         self
     }
 
@@ -147,9 +161,7 @@ pub struct FloquetMultiplier {
     /// Whether this multiplier indicates instability
     pub is_unstable: bool,
 
-    /// Whether this is a near-unity multiplier that could be the phase mode of
-    /// an autonomous orbit. This flag is descriptive only: PSTB has no orbit-
-    /// type evidence yet, so the mode is never exempted from classification.
+    /// Whether this is the one explicitly selected autonomous phase mode.
     pub is_trivial: bool,
 
     /// Subharmonic order if |λ| ≈ 1 and λ is near a root of unity
@@ -165,9 +177,6 @@ impl FloquetMultiplier {
         let exponent = value.ln() / period;
         let magnitude = value.norm();
 
-        // Check if this is the trivial multiplier (λ ≈ 1)
-        let is_trivial = (value - Complex64::new(1.0, 0.0)).norm() < 1e-6;
-
         // Check for subharmonic (λ near n-th root of unity)
         let subharmonic_order = Self::detect_subharmonic(&value);
 
@@ -176,7 +185,7 @@ impl FloquetMultiplier {
             exponent,
             index: 0,
             is_unstable: magnitude > stability_threshold,
-            is_trivial,
+            is_trivial: false,
             subharmonic_order,
             eigenvector: None,
         }
@@ -239,6 +248,7 @@ impl FloquetMultiplier {
 
 /// Classification of periodic orbit stability
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum StabilityType {
     /// All multipliers are strictly inside the configured inner band.
     Stable,
@@ -260,6 +270,9 @@ pub enum StabilityType {
 
     /// Marginal stability (numerical uncertainty)
     Marginal,
+
+    /// Stability could not be established from consistent qualified evidence.
+    Indeterminate,
 }
 
 impl StabilityType {
@@ -285,6 +298,18 @@ pub struct PstbResult {
     /// All computed Floquet multipliers (sorted by magnitude, descending)
     pub multipliers: Vec<FloquetMultiplier>,
 
+    /// Strict completeness and residual evidence for the multiplier vector.
+    pub floquet_evidence: FloquetSpectrumEvidence,
+
+    /// Driven/autonomous orbit policy applied during classification.
+    pub orbit_kind: FloquetOrbitKind,
+
+    /// One explicitly selected autonomous phase-mode index in sorted order.
+    pub trivial_multiplier_index: Option<usize>,
+
+    /// Shared evidence-aware stability verdict.
+    pub stability_verdict: FloquetStabilityVerdict,
+
     /// Overall stability classification
     pub stability: StabilityType,
 
@@ -294,8 +319,10 @@ pub struct PstbResult {
     /// Number of unstable multipliers
     pub num_unstable: usize,
 
-    /// Minimum stability margin (for stable systems)
-    pub min_stability_margin_db: Value,
+    /// Minimum signed stability margin among applicable non-phase modes.
+    /// `None` means there is no applicable mode (for example, a zero-order
+    /// driven map or an autonomous spectrum containing only its phase mode).
+    pub min_stability_margin_db: Option<Value>,
 
     /// Maximum multiplier magnitude
     pub max_multiplier_magnitude: Value,
@@ -314,7 +341,7 @@ pub struct PstbResult {
 impl PstbResult {
     /// Check if the periodic orbit is stable
     pub fn is_stable(&self) -> bool {
-        self.stability.is_stable()
+        self.stability_verdict == FloquetStabilityVerdict::Stable
     }
 }
 
@@ -374,6 +401,40 @@ impl PstbAnalyzer {
             )));
         }
 
+        if monodromy.is_empty() {
+            self.dimension = 0;
+            let floquet_evidence = FloquetSpectrumEvidence::NoDynamicModes;
+            let stability_verdict = classify_floquet_stability(
+                &[],
+                &floquet_evidence,
+                self.config.orbit_kind,
+                None,
+                self.config.stability_threshold - 1.0,
+            );
+            let stability = if stability_verdict == FloquetStabilityVerdict::Stable {
+                StabilityType::Stable
+            } else {
+                StabilityType::Indeterminate
+            };
+            return Ok(PstbResult {
+                period,
+                fundamental_frequency,
+                multipliers: Vec::new(),
+                floquet_evidence,
+                orbit_kind: self.config.orbit_kind,
+                trivial_multiplier_index: None,
+                stability_verdict,
+                stability,
+                monodromy: Vec::new(),
+                num_unstable: 0,
+                min_stability_margin_db: None,
+                max_multiplier_magnitude: 0.0,
+                subharmonics: Vec::new(),
+                converged: true,
+                iterations: 0,
+            });
+        }
+
         let spectrum = qualified_real_eigenspectrum(monodromy, abort)
             .map_err(map_eigenspectrum_error_for_pstb)?;
         let n = spectrum.certificate.problem_order;
@@ -381,6 +442,12 @@ impl PstbAnalyzer {
             spectrum.certificate.max_backward_error <= spectrum.certificate.qualification_tolerance
         );
         self.dimension = n;
+        let floquet_evidence = FloquetSpectrumEvidence::qualified(spectrum.certificate)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "PSTB eigensolver returned an invalid Floquet certificate".to_owned(),
+                )
+            })?;
 
         // Create FloquetMultiplier objects
         let mut multipliers = Vec::with_capacity(spectrum.eigenvalues.len());
@@ -420,8 +487,36 @@ impl PstbAnalyzer {
             m.index = i;
         }
 
+        let multiplier_values = multipliers
+            .iter()
+            .map(|multiplier| multiplier.value)
+            .collect::<Vec<_>>();
+        let trivial_multiplier_index = if self.config.orbit_kind == FloquetOrbitKind::Autonomous {
+            select_autonomous_phase_mode(&multiplier_values)
+        } else {
+            None
+        };
+        if let Some(index) = trivial_multiplier_index {
+            multipliers[index].is_trivial = true;
+            multipliers[index].is_unstable = false;
+        }
+
+        let classification_band = self.config.stability_threshold - 1.0;
+        let stability_verdict = classify_floquet_stability(
+            &multiplier_values,
+            &floquet_evidence,
+            self.config.orbit_kind,
+            trivial_multiplier_index,
+            classification_band,
+        );
+
         // Classify stability
-        let stability = self.classify_stability_with_abort(&multipliers, abort)?;
+        let stability = self.classify_stability_with_abort(
+            &multipliers,
+            stability_verdict,
+            trivial_multiplier_index,
+            abort,
+        )?;
 
         // Count unstable and compute margins
         let mut num_unstable = 0;
@@ -433,21 +528,18 @@ impl PstbAnalyzer {
         }
         let max_magnitude = multipliers.first().map(|m| m.magnitude()).unwrap_or(0.0);
 
-        let min_margin_db = if num_unstable == 0 && !multipliers.is_empty() {
-            // Include every mode. A near-unity mode is not exempt without
-            // explicit evidence that the orbit is autonomous.
-            let mut minimum = f64::INFINITY;
-            for (index, multiplier) in multipliers.iter().enumerate() {
-                poll_periodically(abort, index)?;
-                let margin = multiplier.stability_margin_db();
-                if margin.total_cmp(&minimum).is_lt() {
-                    minimum = margin;
-                }
+        let mut min_margin_db: Option<Value> = None;
+        for (index, multiplier) in multipliers.iter().enumerate() {
+            poll_periodically(abort, index)?;
+            if trivial_multiplier_index == Some(index) {
+                continue;
             }
-            minimum
-        } else {
-            -max_magnitude.log10() * 20.0 // Negative margin = unstable
-        };
+            let margin = multiplier.stability_margin_db();
+            min_margin_db = Some(match min_margin_db {
+                Some(current) if current.total_cmp(&margin).is_le() => current,
+                _ => margin,
+            });
+        }
 
         // Detect subharmonics
         let mut subharmonics = Vec::new();
@@ -477,6 +569,10 @@ impl PstbAnalyzer {
             period,
             fundamental_frequency,
             multipliers,
+            floquet_evidence,
+            orbit_kind: self.config.orbit_kind,
+            trivial_multiplier_index,
+            stability_verdict,
             stability,
             monodromy: monodromy_copy,
             num_unstable,
@@ -494,63 +590,61 @@ impl PstbAnalyzer {
     fn classify_stability_with_abort(
         &self,
         multipliers: &[FloquetMultiplier],
+        verdict: FloquetStabilityVerdict,
+        trivial_multiplier_index: Option<usize>,
         abort: &dyn AbortSignal,
     ) -> Result<StabilityType, SimulationError> {
-        let mut unstable = Vec::new();
-        for (index, multiplier) in multipliers.iter().enumerate() {
+        match verdict {
+            FloquetStabilityVerdict::Stable => return Ok(StabilityType::Stable),
+            FloquetStabilityVerdict::Indeterminate => {
+                return Ok(StabilityType::Indeterminate);
+            }
+            FloquetStabilityVerdict::Unstable => {
+                let dominant = multipliers
+                    .iter()
+                    .find(|multiplier| multiplier.is_unstable)
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "PSTB unstable verdict has no multiplier outside the outer boundary"
+                                .to_owned(),
+                        )
+                    })?;
+                return if dominant.value.im.abs() > 0.01 {
+                    Ok(StabilityType::UnstableComplex)
+                } else {
+                    Ok(StabilityType::UnstableReal)
+                };
+            }
+            FloquetStabilityVerdict::Marginal => {}
+        }
+
+        // Refine a marginal verdict into a recognized bifurcation when the
+        // retained values support that label.
+        for (index, m) in multipliers.iter().enumerate() {
             poll_periodically(abort, index)?;
-            if multiplier.is_unstable {
-                unstable.push(multiplier);
+            if trivial_multiplier_index == Some(index) {
+                continue;
+            }
+            let mag = m.magnitude();
+            let imag = m.value.im.abs();
+
+            // Near λ = -1: period doubling
+            if (m.value + Complex64::new(1.0, 0.0)).norm() < 0.01 {
+                return Ok(StabilityType::PeriodDoubling);
+            }
+
+            // Near λ = +1: saddle-node. The one explicitly selected
+            // autonomous phase mode was skipped above.
+            if (m.value - Complex64::new(1.0, 0.0)).norm() < 0.01 {
+                return Ok(StabilityType::SaddleNode);
+            }
+
+            // Complex pair near unit circle: Neimark-Sacker
+            if (mag - 1.0).abs() < 0.01 && imag > 0.01 {
+                return Ok(StabilityType::NeimarkSacker);
             }
         }
-
-        if unstable.is_empty() {
-            let stable_inner_bound = (2.0 - self.config.stability_threshold).max(0.0);
-            // Check for bifurcations at unit circle
-            for (index, m) in multipliers.iter().enumerate() {
-                poll_periodically(abort, index)?;
-                if m.is_trivial {
-                    // There is no explicit autonomous-orbit evidence in this
-                    // API, so +1 cannot be silently discarded as a phase mode.
-                    return Ok(StabilityType::SaddleNode);
-                }
-                let mag = m.magnitude();
-                let imag = m.value.im.abs();
-
-                // Near λ = -1: period doubling
-                if (m.value + Complex64::new(1.0, 0.0)).norm() < 0.01 {
-                    return Ok(StabilityType::PeriodDoubling);
-                }
-
-                // Near λ = +1: saddle-node. (The tighter is_trivial band was
-                // handled above.)
-                if (m.value - Complex64::new(1.0, 0.0)).norm() < 0.01 {
-                    return Ok(StabilityType::SaddleNode);
-                }
-
-                // Complex pair near unit circle: Neimark-Sacker
-                if (mag - 1.0).abs() < 0.01 && imag > 0.01 {
-                    return Ok(StabilityType::NeimarkSacker);
-                }
-
-                // Everything at or above the symmetric inner band is
-                // marginal unless a more specific bifurcation matched above.
-                if mag >= stable_inner_bound {
-                    return Ok(StabilityType::Marginal);
-                }
-            }
-
-            Ok(StabilityType::Stable)
-        } else {
-            // There are unstable multipliers
-            let dominant = &unstable[0];
-
-            if dominant.value.im.abs() > 0.01 {
-                Ok(StabilityType::UnstableComplex)
-            } else {
-                Ok(StabilityType::UnstableReal)
-            }
-        }
+        Ok(StabilityType::Marginal)
     }
 }
 
@@ -645,12 +739,19 @@ mod tests {
     }
 
     #[test]
-    fn pstb_rejects_empty_ragged_and_nonfinite_monodromy() {
-        let invalid = [
-            Vec::<Vec<Value>>::new(),
-            vec![vec![1.0, 0.0], vec![0.0]],
-            vec![vec![Value::NAN]],
-        ];
+    fn pstb_accepts_authenticated_empty_monodromy_and_rejects_other_invalid_inputs() {
+        let mut empty_analyzer = PstbAnalyzer::new(PstbConfig::default());
+        let empty = empty_analyzer
+            .analyze_monodromy_with_abort(&[], 1.0, &NoAbort)
+            .unwrap();
+        assert_eq!(
+            empty.floquet_evidence,
+            FloquetSpectrumEvidence::NoDynamicModes
+        );
+        assert_eq!(empty.stability_verdict, FloquetStabilityVerdict::Stable);
+        assert!(empty.is_stable());
+
+        let invalid = [vec![vec![1.0, 0.0], vec![0.0]], vec![vec![Value::NAN]]];
         for monodromy in invalid {
             let mut analyzer = PstbAnalyzer::new(PstbConfig::default());
             assert!(
@@ -682,7 +783,7 @@ mod tests {
 
         assert_eq!(result.stability, StabilityType::SaddleNode);
         assert!(!result.is_stable());
-        assert_eq!(result.min_stability_margin_db, -0.0);
+        assert_eq!(result.min_stability_margin_db, Some(-0.0));
     }
 
     #[test]
@@ -696,6 +797,56 @@ mod tests {
 
         assert_eq!(result.stability, StabilityType::Marginal);
         assert!(!result.is_stable());
+    }
+
+    #[test]
+    fn autonomous_phase_selection_uses_only_the_canonical_band() {
+        let mut config = PstbConfig::default()
+            .with_orbit_kind(FloquetOrbitKind::Autonomous)
+            .with_stability_threshold(2.0);
+        let mut analyzer = PstbAnalyzer::new(config.clone());
+        let invalid_phase = analyzer
+            .analyze_monodromy_with_abort(&[vec![1.5, 0.0], vec![0.0, 0.5]], 1.0, &NoAbort)
+            .unwrap();
+        assert_eq!(invalid_phase.trivial_multiplier_index, None);
+        assert_eq!(
+            invalid_phase.stability_verdict,
+            FloquetStabilityVerdict::Indeterminate
+        );
+        assert!(!invalid_phase.is_stable());
+
+        config.stability_threshold = 1.0 + 1e-6;
+        let mut analyzer = PstbAnalyzer::new(config);
+        let stable = analyzer
+            .analyze_monodromy_with_abort(&[vec![1.0, 0.0], vec![0.0, 0.5]], 1.0, &NoAbort)
+            .unwrap();
+        assert_eq!(stable.trivial_multiplier_index, Some(0));
+        assert_eq!(stable.stability_verdict, FloquetStabilityVerdict::Stable);
+        assert!(stable.is_stable());
+
+        let phase_only = analyzer
+            .analyze_monodromy_with_abort(&[vec![1.0]], 1.0, &NoAbort)
+            .unwrap();
+        assert_eq!(phase_only.trivial_multiplier_index, Some(0));
+        assert_eq!(phase_only.min_stability_margin_db, None);
+    }
+
+    #[test]
+    fn selected_autonomous_phase_mode_is_excluded_from_unstable_metadata() {
+        let config = PstbConfig::default()
+            .with_orbit_kind(FloquetOrbitKind::Autonomous)
+            .with_stability_threshold(1.0);
+        let mut analyzer = PstbAnalyzer::new(config);
+        let result = analyzer
+            .analyze_monodromy_with_abort(&[vec![1.0000005, 0.0], vec![0.0, 0.5]], 1.0, &NoAbort)
+            .unwrap();
+
+        assert_eq!(result.stability_verdict, FloquetStabilityVerdict::Stable);
+        assert_eq!(result.trivial_multiplier_index, Some(0));
+        assert!(result.multipliers[0].is_trivial);
+        assert!(!result.multipliers[0].is_unstable);
+        assert_eq!(result.num_unstable, 0);
+        assert!(result.is_stable());
     }
 
     #[test]
@@ -714,6 +865,10 @@ mod tests {
 
         assert_eq!(result.multipliers.len(), 3);
         assert!(result.converged);
+        assert!(matches!(
+            result.floquet_evidence,
+            FloquetSpectrumEvidence::Qualified { .. }
+        ));
         assert!(
             result
                 .multipliers

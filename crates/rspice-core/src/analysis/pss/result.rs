@@ -4,23 +4,14 @@
 
 use crate::Value;
 use crate::analysis::fourier::HarmonicComponent;
+use crate::analysis::{
+    FLOQUET_UNIT_CIRCLE_BAND, FloquetOrbitKind, FloquetSpectrumEvidence, FloquetStabilityVerdict,
+    classify_floquet_stability, select_autonomous_phase_mode,
+};
 use std::f64::consts::PI;
 
-/// Stability verdict derived from a finite, non-empty Floquet spectrum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PssStabilityVerdict {
-    /// Every non-phase multiplier is strictly inside the inner unit-circle
-    /// qualification band.
-    Stable,
-    /// At least one multiplier lies outside the outer unit-circle band.
-    Unstable,
-    /// At least one multiplier lies in the numerical band around the unit
-    /// circle, with none outside it.
-    Marginal,
-    /// No spectrum was supplied, or at least one multiplier is non-finite.
-    Indeterminate,
-}
+/// Compatibility alias for the shared Floquet stability verdict.
+pub type PssStabilityVerdict = FloquetStabilityVerdict;
 
 /// Result of Periodic Steady-State analysis
 ///
@@ -57,11 +48,23 @@ pub struct PssResult {
     /// Monodromy matrix eigenvalues (Floquet multipliers)
     /// Used for stability analysis and PNoise
     pub floquet_multipliers: Vec<num_complex::Complex64>,
+
+    /// Provenance proving whether `floquet_multipliers` is complete and
+    /// strictly residual-qualified.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    pub floquet_evidence: FloquetSpectrumEvidence,
+
+    /// Explicit driven/autonomous policy for interpreting a unity multiplier.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    pub floquet_orbit_kind: FloquetOrbitKind,
+
+    /// Explicitly selected autonomous phase mode, when one was qualified
+    /// within the unit-circle uncertainty band.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    pub trivial_floquet_multiplier_index: Option<usize>,
 }
 
 impl PssResult {
-    const UNIT_CIRCLE_BAND: Value = 1.0e-6;
-
     /// Create a new empty PSS result
     pub fn new(period: Value, num_nodes: usize, num_points: usize) -> Self {
         Self {
@@ -76,6 +79,55 @@ impl PssResult {
             node_names: (1..=num_nodes).map(|i| format!("N{:03}", i)).collect(),
             period_detected: false,
             floquet_multipliers: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NotComputed,
+            floquet_orbit_kind: FloquetOrbitKind::Driven,
+            trivial_floquet_multiplier_index: None,
+        }
+    }
+
+    /// Retain one Floquet spectrum and derive its explicit orbit policy.
+    pub fn set_floquet_spectrum(
+        &mut self,
+        multipliers: Vec<num_complex::Complex64>,
+        evidence: FloquetSpectrumEvidence,
+        orbit_kind: FloquetOrbitKind,
+    ) {
+        let trivial_index = if orbit_kind == FloquetOrbitKind::Autonomous
+            && matches!(&evidence, FloquetSpectrumEvidence::Qualified { .. })
+        {
+            select_autonomous_phase_mode(&multipliers)
+        } else {
+            None
+        };
+        self.floquet_multipliers = multipliers;
+        self.floquet_evidence = evidence;
+        self.floquet_orbit_kind = orbit_kind;
+        self.trivial_floquet_multiplier_index = trivial_index;
+        self.period_detected = orbit_kind == FloquetOrbitKind::Autonomous;
+    }
+
+    /// Whether the retained Floquet fields are structurally self-consistent.
+    pub fn has_consistent_floquet_contract(&self) -> bool {
+        if !self
+            .floquet_evidence
+            .is_consistent_with(&self.floquet_multipliers)
+            || self.period_detected != (self.floquet_orbit_kind == FloquetOrbitKind::Autonomous)
+        {
+            return false;
+        }
+        match self.trivial_floquet_multiplier_index {
+            None => true,
+            Some(index) => {
+                self.floquet_orbit_kind == FloquetOrbitKind::Autonomous
+                    && matches!(
+                        &self.floquet_evidence,
+                        FloquetSpectrumEvidence::Qualified { .. }
+                    )
+                    && index < self.floquet_multipliers.len()
+                    && (self.floquet_multipliers[index] - num_complex::Complex64::new(1.0, 0.0))
+                        .norm()
+                        <= FLOQUET_UNIT_CIRCLE_BAND
+            }
         }
     }
 
@@ -129,58 +181,17 @@ impl PssResult {
 
     /// Classify stability from the retained Floquet multipliers.
     ///
-    /// Empty and non-finite spectra are indeterminate rather than vacuously
-    /// stable. This is a value-only classification: live engine construction
-    /// qualifies the spectrum before populating it, but this method cannot
-    /// authenticate legacy or manually constructed public values until
-    /// spectrum evidence is added to the persistence schema.
+    /// Only a complete, finite, strictly qualified spectrum can be Stable,
+    /// Unstable, or Marginal. All legacy, uncomputed, or inconsistent data is
+    /// Indeterminate.
     pub fn stability_verdict(&self) -> PssStabilityVerdict {
-        if self.floquet_multipliers.is_empty()
-            || self
-                .floquet_multipliers
-                .iter()
-                .any(|value| !value.re.is_finite() || !value.im.is_finite())
-        {
-            return PssStabilityVerdict::Indeterminate;
-        }
-
-        let phase_mode = self
-            .period_detected
-            .then(|| {
-                self.floquet_multipliers
-                    .iter()
-                    .enumerate()
-                    .map(|(index, value)| {
-                        (
-                            index,
-                            (*value - num_complex::Complex64::new(1.0, 0.0)).norm(),
-                        )
-                    })
-                    .filter(|(_, distance)| *distance <= Self::UNIT_CIRCLE_BAND)
-                    .min_by(|left, right| left.1.total_cmp(&right.1))
-                    .map(|(index, _)| index)
-            })
-            .flatten();
-
-        let mut marginal = false;
-        for (index, multiplier) in self.floquet_multipliers.iter().enumerate() {
-            if phase_mode == Some(index) {
-                continue;
-            }
-            let magnitude = multiplier.norm();
-            if magnitude > 1.0 + Self::UNIT_CIRCLE_BAND {
-                return PssStabilityVerdict::Unstable;
-            }
-            if magnitude >= 1.0 - Self::UNIT_CIRCLE_BAND {
-                marginal = true;
-            }
-        }
-
-        if marginal {
-            PssStabilityVerdict::Marginal
-        } else {
-            PssStabilityVerdict::Stable
-        }
+        classify_floquet_stability(
+            &self.floquet_multipliers,
+            &self.floquet_evidence,
+            self.floquet_orbit_kind,
+            self.trivial_floquet_multiplier_index,
+            FLOQUET_UNIT_CIRCLE_BAND,
+        )
     }
 
     /// Convenience predicate; true only for a known-stable spectrum.
@@ -202,7 +213,26 @@ impl PssResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::FloquetSpectrumCertificate;
     use num_complex::Complex64;
+
+    fn retain_qualified(
+        result: &mut PssResult,
+        roots: Vec<Complex64>,
+        orbit_kind: FloquetOrbitKind,
+    ) {
+        let certificate = FloquetSpectrumCertificate::new(
+            roots.len(),
+            0.0,
+            FloquetSpectrumCertificate::canonical_qualification_tolerance(roots.len()),
+        )
+        .unwrap();
+        result.set_floquet_spectrum(
+            roots,
+            FloquetSpectrumEvidence::qualified(certificate).unwrap(),
+            orbit_kind,
+        );
+    }
 
     #[test]
     fn empty_and_nonfinite_floquet_spectra_are_indeterminate() {
@@ -222,13 +252,40 @@ mod tests {
     }
 
     #[test]
+    fn authenticated_driven_result_without_dynamic_modes_is_stable() {
+        let mut result = PssResult::new(1.0, 0, 0);
+        result.set_floquet_spectrum(
+            Vec::new(),
+            FloquetSpectrumEvidence::NoDynamicModes,
+            FloquetOrbitKind::Driven,
+        );
+        assert!(result.has_consistent_floquet_contract());
+        assert_eq!(result.stability_verdict(), PssStabilityVerdict::Stable);
+        assert!(result.is_stable());
+    }
+
+    #[test]
     fn finite_floquet_spectra_have_stable_or_unstable_verdicts() {
         let mut result = PssResult::new(1.0, 0, 0);
         result.floquet_multipliers = vec![Complex64::new(0.5, 0.0)];
+        assert_eq!(
+            result.stability_verdict(),
+            PssStabilityVerdict::Indeterminate
+        );
+
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(0.5, 0.0)],
+            FloquetOrbitKind::Driven,
+        );
         assert_eq!(result.stability_verdict(), PssStabilityVerdict::Stable);
         assert!(result.is_stable());
 
-        result.floquet_multipliers = vec![Complex64::new(1.01, 0.0)];
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(1.01, 0.0)],
+            FloquetOrbitKind::Driven,
+        );
         assert_eq!(result.stability_verdict(), PssStabilityVerdict::Unstable);
         assert!(!result.is_stable());
     }
@@ -236,14 +293,26 @@ mod tests {
     #[test]
     fn unit_circle_is_marginal_unless_one_autonomous_phase_mode_is_exempted() {
         let mut result = PssResult::new(1.0, 0, 0);
-        result.floquet_multipliers = vec![Complex64::new(1.0, 0.0)];
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(1.0, 0.0)],
+            FloquetOrbitKind::Driven,
+        );
         assert_eq!(result.stability_verdict(), PssStabilityVerdict::Marginal);
         assert!(!result.is_stable());
 
-        result.period_detected = true;
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(1.0, 0.0)],
+            FloquetOrbitKind::Autonomous,
+        );
         assert_eq!(result.stability_verdict(), PssStabilityVerdict::Stable);
 
-        result.floquet_multipliers.push(Complex64::new(1.0, 0.0));
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            FloquetOrbitKind::Autonomous,
+        );
         assert_eq!(
             result.stability_verdict(),
             PssStabilityVerdict::Marginal,
@@ -254,11 +323,34 @@ mod tests {
     #[test]
     fn autonomous_phase_exemption_cannot_hide_an_outward_root() {
         let mut result = PssResult::new(1.0, 0, 0);
-        result.period_detected = true;
-        result.floquet_multipliers = vec![Complex64::new(1.0005, 0.0), Complex64::new(0.5, 0.0)];
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(1.0005, 0.0), Complex64::new(0.5, 0.0)],
+            FloquetOrbitKind::Autonomous,
+        );
 
-        assert_eq!(result.stability_verdict(), PssStabilityVerdict::Unstable);
+        assert_eq!(
+            result.stability_verdict(),
+            PssStabilityVerdict::Indeterminate,
+            "an autonomous result without a qualified unity phase mode is not classifiable"
+        );
         assert!(!result.is_stable());
+    }
+
+    #[test]
+    fn inconsistent_trivial_index_is_indeterminate() {
+        let mut result = PssResult::new(1.0, 0, 0);
+        retain_qualified(
+            &mut result,
+            vec![Complex64::new(0.5, 0.0)],
+            FloquetOrbitKind::Driven,
+        );
+        result.trivial_floquet_multiplier_index = Some(0);
+        assert!(!result.has_consistent_floquet_contract());
+        assert_eq!(
+            result.stability_verdict(),
+            PssStabilityVerdict::Indeterminate
+        );
     }
 }
 

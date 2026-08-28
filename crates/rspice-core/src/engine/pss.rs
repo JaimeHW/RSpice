@@ -23,8 +23,8 @@
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{
-    FloquetSpectrumError, PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
-    ShootingNewtonSolver, ShootingState,
+    FloquetOrbitKind, FloquetSpectrumError, FloquetSpectrumEvidence, PeriodDetector,
+    PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::CircuitData;
 use crate::numerics::integration::CompanionCoefficients;
@@ -676,6 +676,35 @@ impl PssOperatingPoint {
                 "retained PSS operating point has a non-finite Floquet multiplier".to_owned(),
             ));
         }
+        if !analysis.result.has_consistent_floquet_contract() {
+            return Err(SimulationError::Circuit(
+                "retained PSS operating point has inconsistent Floquet evidence or orbit policy"
+                    .to_owned(),
+            ));
+        }
+        if analysis.result.floquet_multipliers != analysis.floquet_multipliers {
+            return Err(SimulationError::Circuit(
+                "retained PSS compatibility Floquet multipliers do not match the canonical result"
+                    .to_owned(),
+            ));
+        }
+        if analysis.is_stable != analysis.result.is_stable() {
+            return Err(SimulationError::Circuit(
+                "retained PSS compatibility stability flag does not match the canonical verdict"
+                    .to_owned(),
+            ));
+        }
+        let expected_orbit_kind = if config.is_autonomous() {
+            FloquetOrbitKind::Autonomous
+        } else {
+            FloquetOrbitKind::Driven
+        };
+        if analysis.result.floquet_orbit_kind != expected_orbit_kind {
+            return Err(SimulationError::Circuit(
+                "retained PSS Floquet orbit policy does not match its analysis configuration"
+                    .to_owned(),
+            ));
+        }
         let mut normalized_node_names =
             std::collections::HashSet::with_capacity(analysis.result.node_names.len());
         for node_name in &analysis.result.node_names {
@@ -737,6 +766,18 @@ impl PssOperatingPoint {
             return Err(SimulationError::Circuit(
                 "retained PSS operating point has an invalid monodromy matrix".to_owned(),
             ));
+        }
+        match (&analysis.result.floquet_evidence, analysis.monodromy.len()) {
+            (FloquetSpectrumEvidence::Qualified { certificate }, dimension)
+                if dimension > 0 && certificate.problem_order == dimension => {}
+            (FloquetSpectrumEvidence::NoDynamicModes, 0)
+                if analysis.result.floquet_orbit_kind == FloquetOrbitKind::Driven => {}
+            _ => {
+                return Err(SimulationError::Circuit(
+                    "retained PSS operating point lacks complete Floquet evidence for its monodromy matrix"
+                        .to_owned(),
+                ));
+            }
         }
         Ok(())
     }
@@ -1554,14 +1595,23 @@ impl Engine {
                 )?,
             }
         };
-        let floquet_multipliers = solver
-            .compute_floquet_multipliers_with_abort(&monodromy, abort)
-            .map_err(|error| match error {
-                FloquetSpectrumError::Aborted => SimulationError::Aborted,
-                FloquetSpectrumError::Numerical(message) => SimulationError::Circuit(format!(
-                    "PSS Floquet spectrum qualification failed: {message}"
-                )),
-            })?;
+        let orbit_kind = if config.is_autonomous() {
+            FloquetOrbitKind::Autonomous
+        } else {
+            FloquetOrbitKind::Driven
+        };
+        let (floquet_multipliers, floquet_evidence) = if monodromy.is_empty() {
+            (Vec::new(), FloquetSpectrumEvidence::NoDynamicModes)
+        } else {
+            solver
+                .compute_floquet_spectrum_with_abort(&monodromy, abort)
+                .map_err(|error| match error {
+                    FloquetSpectrumError::Aborted => SimulationError::Aborted,
+                    FloquetSpectrumError::Numerical(message) => SimulationError::Circuit(format!(
+                        "PSS Floquet spectrum qualification failed: {message}"
+                    )),
+                })?
+        };
         // Build PssResult
         let mut pss_result = self.pss_build_result(
             &waveform,
@@ -1570,7 +1620,7 @@ impl Engine {
             shooting_state.residual_norm(),
             config.is_autonomous(),
         );
-        pss_result.floquet_multipliers = floquet_multipliers.clone();
+        pss_result.set_floquet_spectrum(floquet_multipliers.clone(), floquet_evidence, orbit_kind);
         let is_stable = pss_result.is_stable();
 
         Ok((
@@ -2827,6 +2877,9 @@ mod tests {
             node_names: vec!["out".to_owned()],
             period_detected: false,
             floquet_multipliers: Vec::new(),
+            floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+            floquet_orbit_kind: FloquetOrbitKind::Driven,
+            trivial_floquet_multiplier_index: None,
         };
         (
             config,
@@ -2966,6 +3019,62 @@ mod tests {
         assert!(
             PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
                 .is_err()
+        );
+
+        let (_, mut analysis, _) = retained_parts();
+        analysis.floquet_multipliers = vec![num_complex::Complex64::new(0.5, 0.0)];
+        assert!(
+            PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
+                .is_err(),
+            "outer compatibility roots must match the canonical nested vector"
+        );
+
+        let (_, mut analysis, _) = retained_parts();
+        analysis.is_stable = false;
+        assert!(
+            PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
+                .is_err(),
+            "outer compatibility bool must match the canonical nested verdict"
+        );
+
+        let (_, mut analysis, _) = retained_parts();
+        analysis.result.floquet_orbit_kind = FloquetOrbitKind::Autonomous;
+        assert!(
+            PssOperatingPoint::try_from_parts(config.clone(), analysis, shooting_state.clone())
+                .is_err(),
+            "orbit policy must match the retained PSS configuration"
+        );
+
+        for unqualified_evidence in [
+            FloquetSpectrumEvidence::NotComputed,
+            FloquetSpectrumEvidence::LegacyUnknown,
+        ] {
+            let (_, mut analysis, mut nonempty_state) = retained_parts();
+            analysis.monodromy = vec![vec![0.5]];
+            analysis.result.floquet_evidence = unqualified_evidence;
+            analysis.result.floquet_multipliers.clear();
+            analysis.floquet_multipliers.clear();
+            analysis.is_stable = false;
+            nonempty_state.push(0.0);
+            assert!(
+                PssOperatingPoint::try_from_parts(config.clone(), analysis, nonempty_state,)
+                    .is_err(),
+                "retained nonempty monodromy must reject unqualified Floquet evidence"
+            );
+        }
+
+        let (_, mut analysis, autonomous_state) = retained_parts();
+        analysis.result.floquet_orbit_kind = FloquetOrbitKind::Autonomous;
+        analysis.result.period_detected = true;
+        analysis.is_stable = false;
+        let autonomous_config = PssConfig::autonomous()
+            .with_period_guess(1.0)
+            .with_harmonics(4)
+            .with_points_per_period(16);
+        assert!(
+            PssOperatingPoint::try_from_parts(autonomous_config, analysis, autonomous_state)
+                .is_err(),
+            "an autonomous zero-order orbit cannot authenticate its required phase mode"
         );
 
         let (_, mut analysis, _) = retained_parts();
