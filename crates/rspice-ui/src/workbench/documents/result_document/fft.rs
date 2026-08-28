@@ -69,13 +69,12 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
 
     Some(FftModel {
         revision,
-        subtitle: format!(
-            "{} · {} · {} points",
+        subtitle: spectrum_subtitle(
             fft.source_cache
                 .as_ref()
                 .map_or(data.name.as_str(), |source| source.name.as_str()),
-            data.window.display_name().to_lowercase(),
-            data.fft_size
+            data.window,
+            data.fft_size,
         ),
         source: fft
             .source_cache
@@ -129,6 +128,46 @@ fn spectrum_level_unit(
     }
 }
 
+/// The abscissa has no positive extent, so there is no spectrum to rule.
+///
+/// Both refusals used to print "Degenerate spectrum", which named the fault
+/// twice and told the reader nothing about which of the two they had. They
+/// have different causes and different remedies.
+const NO_FREQUENCY_SPAN: &str = "No frequency span — the transform produced no positive bin";
+/// Every level in view is non-finite, so there is no ordinate to rule.
+const NO_FINITE_LEVEL: &str = "No finite level in view — every magnitude in this band is NaN";
+
+/// The strip subtitle: what was transformed, how, and at what length.
+///
+/// `fft_size` is the length of the transform, not the count of points on
+/// screen: a 1024-point transform plots 513 bins. Calling it "points" beside
+/// a plotted spectrum invited exactly the reading it is not.
+fn spectrum_subtitle(
+    source: &str,
+    window: crate::analysis::fft::WindowFunction,
+    fft_size: usize,
+) -> String {
+    format!(
+        "{source} · {} · {fft_size}-point transform",
+        window.display_name().to_lowercase()
+    )
+}
+
+/// What the legend chip beside the trace names.
+///
+/// The quantity that is plotted, which is the signal the transform read. The
+/// chip carried the level unit, which the ordinate axis already states — so
+/// the legend repeated the axis and the sheet never named its own source.
+fn legend_name<'a>(source: &'a str, level_unit: &'a str) -> &'a str {
+    let _ = level_unit;
+    source
+}
+
+/// How the panel labels the transform length.
+fn transform_size_row(fft_size: usize) -> (&'static str, String) {
+    ("Transform size", format!("{fft_size} samples"))
+}
+
 fn trace_cache_key(revision: u64) -> u64 {
     0x0FF7_0001_0000_0000_u64 ^ revision.rotate_left(17)
 }
@@ -154,7 +193,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
     let legend = [LegendChip {
-        name: level_unit,
+        name: legend_name(&model.source, level_unit),
         color: c.traces[0],
         on: true,
     }];
@@ -229,7 +268,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         _ => data_max,
     };
     if !matches!(x1.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
-        well_hint(ui, "Degenerate spectrum");
+        well_hint(ui, NO_FREQUENCY_SPAN);
         return;
     }
 
@@ -251,7 +290,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         None => None,
     };
     let Some((lo, hi)) = extremes else {
-        well_hint(ui, "Degenerate spectrum");
+        well_hint(ui, NO_FINITE_LEVEL);
         return;
     };
     let (y_lo, y_hi) = view.y.unwrap_or(((lo - 8.0).max(-200.0), hi + 12.0));
@@ -365,10 +404,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         _ => "—".to_owned(),
     };
 
+    let (transform_label, transform_value) = transform_size_row(model.fft_size);
     let rows = [
         ("Source", model.source, false),
         ("Window", model.window.display_name().to_owned(), false),
-        ("Points", model.fft_size.to_string(), false),
+        (transform_label, transform_value, false),
         ("Resolution BW", resolution_bandwidth, false),
         (
             "Normalization",
@@ -463,5 +503,45 @@ mod tests {
     #[test]
     fn spectrum_revisions_never_share_a_trace_cache_identity() {
         assert_ne!(trace_cache_key(41), trace_cache_key(42));
+    }
+
+    /// The number beside a spectrum is the transform length, not the count
+    /// of points drawn — a 1024-point transform plots 513 bins. Both the
+    /// strip and the panel called it "points", which is the one reading the
+    /// number does not have.
+    #[test]
+    fn the_transform_length_is_never_called_a_count_of_plotted_points() {
+        let subtitle = spectrum_subtitle("V(out)", WindowFunction::BlackmanHarris, 1024);
+        assert!(subtitle.contains("1024"), "{subtitle}");
+        assert!(
+            !subtitle.contains("points"),
+            "the strip calls the transform length a count of plotted points: {subtitle}"
+        );
+
+        let (label, value) = transform_size_row(1024);
+        assert_ne!(
+            label, "Points",
+            "the panel calls the transform length a count of plotted points"
+        );
+        assert!(value.contains("1024"), "{value}");
+    }
+
+    /// The legend names what is plotted. It named the unit instead, which
+    /// the ordinate axis already carries — so the chip repeated the axis and
+    /// the sheet never said which signal the spectrum came from.
+    #[test]
+    fn the_legend_names_the_transformed_signal_rather_than_repeating_the_axis() {
+        assert_eq!(legend_name("V(out)", "dBV rms"), "V(out)");
+    }
+
+    /// Two different refusals read as one.
+    ///
+    /// "Degenerate spectrum" was printed both when the abscissa had no
+    /// positive extent and when every level in view was non-finite. They are
+    /// different faults with different remedies, and the reader was given no
+    /// way to tell which one they were looking at.
+    #[test]
+    fn the_two_degenerate_spectra_are_told_apart() {
+        assert_ne!(NO_FREQUENCY_SPAN, NO_FINITE_LEVEL);
     }
 }
