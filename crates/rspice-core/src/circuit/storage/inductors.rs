@@ -458,8 +458,8 @@ impl Inductors {
                 self.i_prev[index],
                 self.i_prev_prev[index],
             );
-            let history_voltage = if coeff.needs_current_history {
-                self.v_prev[index]
+            let history_voltage = if coeff.coeff_i_n != 0.0 {
+                coeff.coeff_i_n * self.v_prev[index]
             } else {
                 0.0
             };

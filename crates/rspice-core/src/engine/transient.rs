@@ -2226,6 +2226,17 @@ impl Engine {
                 "transient .FFT post-processing is parsed but not yet implemented".to_string(),
             ));
         }
+        let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
+            0.5
+        } else {
+            netlist.options.xmu.unwrap_or(0.5)
+        };
+        let modified_trapezoidal_coefficients =
+            CompanionCoefficients::trapezoidal_with_xmu(trapezoidal_xmu).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "XMU must be finite and within [0, 0.5], found {trapezoidal_xmu}"
+                ))
+            })?;
         let fingerprint = netlist_fingerprint(checkpoint_netlist);
         let netlist_identity = netlist_checkpoint_identity(checkpoint_netlist);
         let restart_identity = restart_checkpoint_identity(checkpoint_netlist);
@@ -3878,11 +3889,15 @@ impl Engine {
             }
             let effective_companion_method =
                 Self::effective_companion_method(current_method, step_trap_order);
-            let coeff = CompanionCoefficients::for_method_with_previous_step(
-                effective_companion_method,
-                dt,
-                bjt_history.accepted_dt_prev,
-            );
+            let coeff = if effective_companion_method == IntegrationMethod::Trapezoidal {
+                modified_trapezoidal_coefficients
+            } else {
+                CompanionCoefficients::for_method_with_previous_step(
+                    effective_companion_method,
+                    dt,
+                    bjt_history.accepted_dt_prev,
+                )
+            };
             // The native BSIM4 transient-NQS state was validated and released
             // with fixed BDF2 coefficients. Keep that compact-model contract
             // isolated from variable-step Gear12; applying the latter to the

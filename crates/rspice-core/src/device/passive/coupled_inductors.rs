@@ -456,8 +456,8 @@ impl MultiWindingTransformer {
                         / dt;
                 }
             }
-            if coeff.needs_current_history {
-                v_eq[i] += self.voltages_prev[i];
+            if coeff.coeff_i_n != 0.0 {
+                v_eq[i] += coeff.coeff_i_n * self.voltages_prev[i];
             }
         }
 
@@ -518,8 +518,8 @@ impl MultiWindingTransformer {
                 iterate.get(neg - 1).copied().unwrap_or(0.0)
             };
             let mut correction = -voltage;
-            if coeff.needs_current_history {
-                correction -= self.voltages_prev[row];
+            if coeff.coeff_i_n != 0.0 {
+                correction -= coeff.coeff_i_n * self.voltages_prev[row];
             }
             for column in 0..self.num_windings {
                 let Some(branch_column) = self.branches[column] else {

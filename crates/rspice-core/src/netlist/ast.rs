@@ -3171,6 +3171,12 @@ pub struct SimulationOptions {
     pub cshunt: Option<Value>,
     /// Integration method: "TRAP", "GEAR", "TRAPGEAR"
     pub method: Option<String>,
+    /// Ngspice modified-trapezoidal damping coefficient.
+    ///
+    /// `0.5` is the ordinary trapezoidal rule and `0.0` reduces the order-two
+    /// corrector to backward Euler. Values between them provide controlled
+    /// numerical damping while retaining ngspice's trapezoidal history form.
+    pub xmu: Option<Value>,
     /// Transient error tolerance factor (default: 7.0)
     pub trtol: Option<Value>,
     /// Xyce `.OPTIONS TIMEINT RELTOL` for transient LTE weighting.
@@ -3392,6 +3398,9 @@ impl SimulationOptions {
         }
         if other.method.is_some() {
             self.method = other.method.clone();
+        }
+        if other.xmu.is_some() {
+            self.xmu = other.xmu;
         }
         if other.trtol.is_some() {
             self.trtol = other.trtol;

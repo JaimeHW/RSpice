@@ -1953,6 +1953,12 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.cshunt = Some(parse_positive_real_option("CSHUNT", value, line_num)?);
             }
+            (None, "XMU")
+                if params.expression_dialect() != crate::config::ExpressionDialect::Xyce =>
+            {
+                let value = expect_value(stream, line_num, params)?;
+                options.xmu = Some(parse_xmu_option(value, line_num)?);
+            }
             (_, "TRTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);
@@ -2844,6 +2850,22 @@ pub(super) fn parse_non_negative_real_option(
                 "{} must be a finite non-negative number, found {}",
                 name, value
             ),
+        });
+    }
+    Ok(value)
+}
+
+/// Validate ngspice's modified-trapezoidal interpolation domain.
+///
+/// Ngspice defines `xmu=0` as backward Euler and `xmu=0.5` as the ordinary
+/// trapezoidal corrector (`nicomcof.c`). Values between those endpoints add
+/// damping; values outside them cease to be an interpolation between the two
+/// integration formulas and are rejected before coefficient construction.
+pub(super) fn parse_xmu_option(value: Value, line_num: usize) -> Result<Value, ParseError> {
+    if !value.is_finite() || !(0.0..=0.5).contains(&value) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("XMU must be finite and within [0, 0.5], found {value}"),
         });
     }
     Ok(value)
@@ -6321,6 +6343,36 @@ mod tests {
                 "unexpected error for {options}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn options_parse_and_validate_ngspice_xmu() {
+        for (authored, expected) in [("0", 0.0), (".49", 0.49), (".5", 0.5)] {
+            let netlist = Netlist::parse(&deck_with_options(&format!(".options xmu={authored}")))
+                .expect("valid XMU parses");
+            assert_eq!(netlist.options.xmu, Some(expected));
+        }
+
+        for invalid in ["-1e-12", ".5000000000000001", "1e309"] {
+            let error = Netlist::parse(&deck_with_options(&format!(".options xmu={invalid}")))
+                .expect_err("out-of-domain XMU must fail parsing");
+            assert!(
+                error.to_string().contains("XMU"),
+                "unexpected error: {error}"
+            );
+        }
+
+        let xyce_options = crate::netlist::NetlistParseOptions {
+            expression_dialect: crate::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        };
+        let xyce =
+            Netlist::parse_with_options(&deck_with_options(".options xmu=.49"), xyce_options)
+                .expect("Xyce treats ngspice XMU as an unknown option");
+        assert!(xyce.options.xmu.is_none());
+        assert!(xyce.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unknown-option" && diagnostic.message.contains("XMU")
+        }));
     }
 
     #[test]

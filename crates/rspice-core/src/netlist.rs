@@ -2161,8 +2161,15 @@ impl Netlist {
             return None;
         }
 
-        let value = control_set_value(parts.next().unwrap_or(""), "trtol")?;
-        Some(format!(".options trtol={value}"))
+        let assignments = parts.next().unwrap_or("");
+        let mut promoted = Vec::new();
+        if let Some(value) = control_set_value(assignments, "trtol") {
+            promoted.push(format!("trtol={value}"));
+        }
+        if let Some(value) = control_set_value(assignments, "xmu") {
+            promoted.push(format!("xmu={value}"));
+        }
+        (!promoted.is_empty()).then(|| format!(".options {}", promoted.join(" ")))
     }
 
     fn promote_control_auto_bridge_set_command(line: &str) -> Option<String> {
@@ -5063,6 +5070,24 @@ mod tests {
         )
         .expect("control option trtol promotes to .options trtol");
         assert_eq!(option_netlist.options.trtol, Some(1.0));
+    }
+
+    #[test]
+    fn control_block_option_promotes_ngspice_xmu() {
+        let netlist = Netlist::parse(
+            "control modified trapezoidal damping\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             option reltol=1e-4 xmu = .49 trtol=2\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control option XMU promotes to an authored simulation option");
+
+        assert_eq!(netlist.options.xmu, Some(0.49));
+        assert_eq!(netlist.options.trtol, Some(2.0));
+        assert!(netlist.options.reltol.is_none());
     }
 
     #[test]

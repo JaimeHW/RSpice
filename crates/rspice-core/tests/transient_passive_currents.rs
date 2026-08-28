@@ -2,6 +2,70 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::IntegrationMethod;
 
+fn modified_trapezoidal_rc_step_response(xmu: f64) -> rspice_core::engine::TransientResult {
+    let deck = format!(
+        "\
+* modified-trapezoidal RC step response
+v1 supply 0 dc 0 pulse(0 1 500u 1u 1u 10m 20m)
+r1 supply n 1k
+c1 n 0 1u
+.options method=trap trtol=1e6 xmu={xmu}
+.tran 100u 5m 0 100u
+.end
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("modified-trapezoidal deck parses");
+    Engine::new(SimulationConfig {
+        integration_method: IntegrationMethod::Trapezoidal,
+        spice_dialect: SpiceDialect::Ngspice,
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 5.0e-3, 100.0e-6)
+    .expect("modified-trapezoidal RC step response solves")
+}
+
+#[test]
+fn authored_xmu_changes_the_order_two_transient_companion() {
+    let backward_euler_endpoint = modified_trapezoidal_rc_step_response(0.0);
+    let damped = modified_trapezoidal_rc_step_response(0.49);
+    let standard = modified_trapezoidal_rc_step_response(0.5);
+
+    for result in [&backward_euler_endpoint, &damped, &standard] {
+        assert!(result.time.len() >= 3, "order-two path was never reached");
+        assert!(result.time.windows(2).all(|times| times[1] > times[0]));
+        assert!(
+            result
+                .voltages
+                .iter()
+                .flatten()
+                .all(|value| value.is_finite())
+        );
+    }
+
+    let final_voltage = |result: &rspice_core::engine::TransientResult| {
+        *result
+            .try_voltage_waveform_named("n")
+            .expect("node N waveform exists")
+            .last()
+            .expect("transient has a final point")
+    };
+    let be = final_voltage(&backward_euler_endpoint);
+    let modified = final_voltage(&damped);
+    let trap = final_voltage(&standard);
+    assert!(
+        (be - trap).abs() > 1.0e-6,
+        "XMU endpoints unexpectedly produced the same waveform: {be} vs {trap}; \
+         BE points={}, trap points={}",
+        backward_euler_endpoint.time.len(),
+        standard.time.len(),
+    );
+    assert!(
+        modified > be.min(trap) && modified < be.max(trap),
+        "XMU=0.49 should interpolate between its 0 and 0.5 endpoints: \
+         BE={be}, modified={modified}, trap={trap}"
+    );
+}
+
 #[test]
 fn transient_records_linear_resistor_branch_current_waveforms() {
     let deck = "\

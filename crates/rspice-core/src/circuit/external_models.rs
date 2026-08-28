@@ -1810,14 +1810,14 @@ impl CircuitData {
         final_step: bool,
     ) {
         let ddt_coefficients =
-            crate::device::veriloga_builtins::GeneratedDdtCoefficients::from_companion_values(
-                coefficients.coeff_g,
-                coefficients.coeff_v_n,
-                coefficients.coeff_v_n_minus_1,
-                coefficients.needs_two_history,
-                coefficients.needs_current_history,
-                dt,
-            )
+            crate::device::veriloga_builtins::GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
+                    coefficients.coeff_g,
+                    coefficients.coeff_v_n,
+                    coefficients.coeff_v_n_minus_1,
+                    coefficients.needs_two_history,
+                    coefficients.coeff_i_n,
+                    dt,
+                )
             .scaled(dynamic_residual_scale);
         self.generated_veriloga_devices
             .set_timepoint(time, dt, ddt_coefficients);
@@ -1925,11 +1925,7 @@ impl CircuitData {
                 } else {
                     0.0
                 },
-                previous_derivative_scale: if coefficients.needs_current_history {
-                    1.0
-                } else {
-                    0.0
-                },
+                previous_derivative_scale: coefficients.coeff_i_n,
             }
         } else {
             rspice_veriloga::vm::IntegrationCoefficients::inactive()

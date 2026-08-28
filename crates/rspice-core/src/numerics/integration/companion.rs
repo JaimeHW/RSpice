@@ -35,8 +35,12 @@ pub struct CompanionCoefficients {
     pub coeff_v_n_minus_1: Value,
     /// Whether v_{n-1} history is needed
     pub needs_two_history: bool,
-    /// Whether i_n current history is needed (Trapezoidal)
-    pub needs_current_history: bool,
+    /// Scale applied to the most recent conjugate-variable derivative.
+    ///
+    /// This is zero for backward Euler and Gear, one for the ordinary
+    /// trapezoidal rule, and `xmu / (1 - xmu)` for ngspice's damped
+    /// modified-trapezoidal corrector.
+    pub coeff_i_n: Value,
 }
 
 impl CompanionCoefficients {
@@ -51,7 +55,7 @@ impl CompanionCoefficients {
             coeff_v_n: 1.0,
             coeff_v_n_minus_1: 0.0,
             needs_two_history: false,
-            needs_current_history: false,
+            coeff_i_n: 0.0,
         }
     }
 
@@ -67,8 +71,34 @@ impl CompanionCoefficients {
             coeff_v_n: 2.0,
             coeff_v_n_minus_1: 0.0,
             needs_two_history: false,
-            needs_current_history: true,
+            coeff_i_n: 1.0,
         }
+    }
+
+    /// Get ngspice's modified-trapezoidal order-two coefficients.
+    ///
+    /// `NIcomCof` defines `ag0 = 1 / (dt * (1 - xmu))` and
+    /// `ag1 = xmu / (1 - xmu)`, while `NIintegrate` forms
+    /// `qdot = ag0 * (q - q_prev) - ag1 * qdot_prev`. The parser guarantees
+    /// the documented interpolation domain `0 <= xmu <= 0.5`.
+    ///
+    /// Returning `None` for an invalid programmatic value keeps this primitive
+    /// fail-closed even when a caller constructs a netlist without going
+    /// through the parser's validation.
+    #[inline]
+    pub fn trapezoidal_with_xmu(xmu: Value) -> Option<Self> {
+        if !xmu.is_finite() || !(0.0..=0.5).contains(&xmu) {
+            return None;
+        }
+        let denominator = 1.0 - xmu;
+        let gain = 1.0 / denominator;
+        Some(Self {
+            coeff_g: gain,
+            coeff_v_n: gain,
+            coeff_v_n_minus_1: 0.0,
+            needs_two_history: false,
+            coeff_i_n: xmu / denominator,
+        })
     }
 
     /// Get coefficients for Gear2/BDF2 (second order, L-stable, good for stiff)
@@ -83,7 +113,7 @@ impl CompanionCoefficients {
             coeff_v_n: 2.0,          // 4/2 = 2
             coeff_v_n_minus_1: -0.5, // -1/2
             needs_two_history: true,
-            needs_current_history: false,
+            coeff_i_n: 0.0,
         }
     }
 
@@ -121,7 +151,7 @@ impl CompanionCoefficients {
             coeff_v_n,
             coeff_v_n_minus_1,
             needs_two_history: true,
-            needs_current_history: false,
+            coeff_i_n: 0.0,
         }
     }
 
@@ -170,8 +200,8 @@ impl CompanionCoefficients {
         if self.needs_two_history {
             ieq += self.coeff_v_n_minus_1 * capacitance * v_n_minus_1 / dt;
         }
-        if self.needs_current_history {
-            ieq += i_n;
+        if self.coeff_i_n != 0.0 {
+            ieq += self.coeff_i_n * i_n;
         }
         ieq
     }
@@ -216,8 +246,9 @@ impl CompanionCoefficients {
     /// Exact dual of [`Self::capacitor_ieq`] (v <-> i, C <-> L): the i_n
     /// history term uses `coeff_v_n` (NOT `coeff_g` — they differ for Gear2),
     /// the i_{n-1} term applies only when the method keeps two history points,
-    /// and the conjugate-variable history v_n applies only for Trapezoidal
-    /// (`needs_current_history`), never for BE/Gear2.
+    /// and the conjugate-variable history v_n is weighted by `coeff_i_n`
+    /// (one for ordinary trapezoidal, below one for modified trapezoidal,
+    /// zero for BE/Gear2).
     ///
     /// The branch row is stamped as `v(np) - v(nn) - R_eq*i_{n+1} = -V_eq`,
     /// i.e. the stamp site negates this value, yielding:
@@ -245,8 +276,8 @@ impl CompanionCoefficients {
         if self.needs_two_history {
             veq += self.coeff_v_n_minus_1 * inductance * i_n_minus_1 / dt;
         }
-        if self.needs_current_history {
-            veq += v_n;
+        if self.coeff_i_n != 0.0 {
+            veq += self.coeff_i_n * v_n;
         }
         veq
     }
@@ -265,7 +296,7 @@ mod companion_coefficients_tests {
         assert_eq!(variable.coeff_v_n, fixed.coeff_v_n);
         assert_eq!(variable.coeff_v_n_minus_1, fixed.coeff_v_n_minus_1);
         assert_eq!(variable.needs_two_history, fixed.needs_two_history);
-        assert_eq!(variable.needs_current_history, fixed.needs_current_history);
+        assert_eq!(variable.coeff_i_n, fixed.coeff_i_n);
     }
 
     #[test]
@@ -305,6 +336,46 @@ mod companion_coefficients_tests {
                 coefficients.needs_two_history,
                 backward_euler.needs_two_history
             );
+        }
+    }
+
+    #[test]
+    fn modified_trapezoidal_coefficients_match_ngspice_endpoints_and_damping() {
+        let backward_euler_endpoint =
+            CompanionCoefficients::trapezoidal_with_xmu(0.0).expect("XMU=0 is valid");
+        assert_eq!(backward_euler_endpoint.coeff_g, 1.0);
+        assert_eq!(backward_euler_endpoint.coeff_v_n, 1.0);
+        assert_eq!(backward_euler_endpoint.coeff_i_n, 0.0);
+
+        let damped = CompanionCoefficients::trapezoidal_with_xmu(0.49).expect("XMU=0.49 is valid");
+        assert_eq!(damped.coeff_g, 1.0 / 0.51);
+        assert_eq!(damped.coeff_v_n, 1.0 / 0.51);
+        assert_eq!(damped.coeff_i_n, 0.49 / 0.51);
+        assert_eq!(
+            damped.capacitor_ieq(2.0, 0.25, 3.0, 0.0, 5.0),
+            (1.0 / 0.51) * 2.0 * 3.0 / 0.25 + (0.49 / 0.51) * 5.0
+        );
+        assert_eq!(
+            damped.inductor_veq(2.0, 0.25, 3.0, 0.0, 5.0),
+            (1.0 / 0.51) * 2.0 * 3.0 / 0.25 + (0.49 / 0.51) * 5.0
+        );
+
+        let standard = CompanionCoefficients::trapezoidal_with_xmu(0.5).expect("XMU=0.5 is valid");
+        let canonical = CompanionCoefficients::trapezoidal();
+        assert_eq!(standard.coeff_g, canonical.coeff_g);
+        assert_eq!(standard.coeff_v_n, canonical.coeff_v_n);
+        assert_eq!(standard.coeff_i_n, canonical.coeff_i_n);
+    }
+
+    #[test]
+    fn modified_trapezoidal_coefficients_reject_invalid_programmatic_values() {
+        for invalid in [
+            -Value::MIN_POSITIVE,
+            0.500_000_000_000_000_1,
+            Value::NAN,
+            Value::INFINITY,
+        ] {
+            assert!(CompanionCoefficients::trapezoidal_with_xmu(invalid).is_none());
         }
     }
 }

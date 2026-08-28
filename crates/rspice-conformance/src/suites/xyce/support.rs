@@ -2399,6 +2399,7 @@ impl XyceTestRunner {
             rshunt,
             cshunt,
             method,
+            xmu,
             trtol,
             timeint_reltol,
             timeint_abstol,
@@ -2484,6 +2485,7 @@ impl XyceTestRunner {
             && rshunt.is_none()
             && cshunt.is_none()
             && method.as_deref() == method_selector
+            && xmu.is_none()
             && trtol.is_none()
             && ramptime.is_none()
             && digital_delay_type.is_none()

@@ -978,8 +978,8 @@ impl Capacitors {
             if coeff.needs_two_history {
                 current -= coeff.coeff_v_n_minus_1 / dt * state.q_prev_prev;
             }
-            if coeff.needs_current_history {
-                current -= self.i_prev[index];
+            if coeff.coeff_i_n != 0.0 {
+                current -= coeff.coeff_i_n * self.i_prev[index];
             }
 
             let pos_col = (stamp.pp.row > 0).then(|| stamp.pp.row - 1);
@@ -1100,8 +1100,8 @@ impl Capacitors {
             if coeff.needs_two_history {
                 current -= coeff.coeff_v_n_minus_1 / dt * state.q_prev_prev;
             }
-            if coeff.needs_current_history {
-                current -= self.i_prev[index];
+            if coeff.coeff_i_n != 0.0 {
+                current -= coeff.coeff_i_n * self.i_prev[index];
             }
 
             state.q_prev_prev = state.q_prev;
@@ -1382,8 +1382,8 @@ impl Capacitors {
                     if coeff.needs_two_history {
                         history += (coeff.coeff_v_n_minus_1 / coeff.coeff_g) * self.v_prev_prev[i];
                     }
-                    if coeff.needs_current_history {
-                        history += self.i_prev[i] / geq;
+                    if coeff.coeff_i_n != 0.0 {
+                        history += coeff.coeff_i_n * self.i_prev[i] / geq;
                     }
                     history
                 } else {

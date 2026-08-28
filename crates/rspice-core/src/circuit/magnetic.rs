@@ -419,8 +419,8 @@ impl CircuitData {
                     // branch's local history empty so that term is not
                     // counted twice.
                     0.0
-                } else if coeff.needs_current_history {
-                    previous_static_voltage
+                } else if coeff.coeff_i_n != 0.0 {
+                    coeff.coeff_i_n * previous_static_voltage
                 } else {
                     0.0
                 };
@@ -832,9 +832,10 @@ impl CircuitData {
                 } else {
                     coeff.coeff_g / dt
                 };
-                let rate_history = if one_step_order2 || (!one_step && coeff.needs_current_history)
-                {
+                let rate_history = if one_step_order2 {
                     group.device.xyce_core_level1_rate_debug()
+                } else if !one_step && coeff.coeff_i_n != 0.0 {
+                    coeff.coeff_i_n * group.device.xyce_core_level1_rate_debug()
                 } else {
                     0.0
                 };
@@ -947,8 +948,8 @@ impl CircuitData {
                     // branch's local history empty so that term is not
                     // counted twice.
                     0.0
-                } else if coeff.needs_current_history {
-                    previous_static_voltage
+                } else if coeff.coeff_i_n != 0.0 {
+                    coeff.coeff_i_n * previous_static_voltage
                 } else {
                     0.0
                 };

@@ -949,6 +949,27 @@ impl GeneratedDdtCoefficients {
         needs_current_history: bool,
         timestep: Value,
     ) -> Self {
+        Self::from_companion_values_with_derivative_scale(
+            coeff_g,
+            coeff_v_n,
+            coeff_v_n_minus_1,
+            needs_two_history,
+            if needs_current_history { 1.0 } else { 0.0 },
+            timestep,
+        )
+    }
+
+    /// Construct generalized integration coefficients whose previous
+    /// derivative term may have a fractional weight.
+    #[inline]
+    pub fn from_companion_values_with_derivative_scale(
+        coeff_g: Value,
+        coeff_v_n: Value,
+        coeff_v_n_minus_1: Value,
+        needs_two_history: bool,
+        previous_derivative_scale: Value,
+        timestep: Value,
+    ) -> Self {
         const DDT_EPSILON: Value = 1.0e-20;
         if !timestep.is_finite() || timestep.abs() <= DDT_EPSILON {
             return Self::inactive();
@@ -964,7 +985,7 @@ impl GeneratedDdtCoefficients {
             } else {
                 0.0
             },
-            previous_derivative_scale: if needs_current_history { 1.0 } else { 0.0 },
+            previous_derivative_scale,
         }
     }
 
@@ -6498,6 +6519,28 @@ mod fixed_lane_tests {
             GeneratedDdtCoefficients::inactive().scaled(2.0),
             GeneratedDdtCoefficients::inactive()
         );
+    }
+
+    #[test]
+    fn generated_ddt_coefficients_accept_fractional_derivative_history() {
+        let generalized =
+            GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
+                1.0 / 0.51,
+                1.0 / 0.51,
+                0.0,
+                false,
+                0.49 / 0.51,
+                0.25,
+            );
+        assert_eq!(generalized.derivative_scale, (1.0 / 0.51) / 0.25);
+        assert_eq!(generalized.previous_value_scale, (1.0 / 0.51) / 0.25);
+        assert_eq!(generalized.older_value_scale, 0.0);
+        assert_eq!(generalized.previous_derivative_scale, 0.49 / 0.51);
+
+        let canonical = GeneratedDdtCoefficients::from_companion_values(
+            2.0, 2.0, 0.0, false, true, 0.25,
+        );
+        assert_eq!(canonical.previous_derivative_scale, 1.0);
     }
 
     #[test]
