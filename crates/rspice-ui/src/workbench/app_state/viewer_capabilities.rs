@@ -313,9 +313,16 @@ impl AppState {
                 if !self.specialized_viewer_cache_matches_active(viewer)
                     || self.analysis.nyquist_state.is_empty()
                 {
-                    ViewerCapability::unavailable("Requires complex loop-gain/AC response data")
+                    // The sheet takes a retained loop-gain contour and nothing
+                    // else — an AC node response is not a loop gain, and the
+                    // stability numbers beside the locus have no meaning on
+                    // one. Offering an AC sweep sent the reader to run an
+                    // analysis that can never fill this viewer.
+                    ViewerCapability::unavailable(
+                        "Requires a retained Nyquist contour from a stability (.STB) run",
+                    )
                 } else {
-                    ViewerCapability::available("Active analysis Nyquist curves loaded")
+                    ViewerCapability::available("Active analysis loop-gain locus loaded")
                 }
             }
             ActiveViewer::Fft => {
@@ -614,6 +621,38 @@ mod tests {
         assert_eq!(
             state.analysis.cache_authority,
             SpecializedViewerCacheAuthority::default()
+        );
+    }
+
+    /// The gate has to name the analysis that can open it.
+    ///
+    /// The sheet takes a retained loop-gain contour and nothing else, so
+    /// "complex loop-gain/AC response data" sends a reader to run an AC
+    /// sweep that can never fill it. And a Nyquist result is one locus, not
+    /// a set of curves.
+    #[test]
+    fn the_nyquist_gate_names_the_stability_analysis_and_its_single_locus() {
+        let mut state = AppState::default();
+        let closed = state.viewer_capability(ActiveViewer::Nyquist);
+        assert!(!closed.available);
+        assert!(
+            closed.reason.contains(".STB"),
+            "the closed gate does not name the analysis that fills it: {}",
+            closed.reason
+        );
+        assert!(
+            !closed.reason.contains("AC response"),
+            "the closed gate still offers an AC sweep: {}",
+            closed.reason
+        );
+
+        seed_result_viewers(&mut state);
+        let open = state.viewer_capability(ActiveViewer::Nyquist);
+        assert!(open.available, "{}", open.reason);
+        assert!(
+            !open.reason.contains("curves"),
+            "one locus is not a set of curves: {}",
+            open.reason
         );
     }
 
