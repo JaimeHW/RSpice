@@ -11788,3 +11788,17 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         println!("Xyce classification report: {}", report_path.display());
     }
 }
+#[cfg(feature = "veriloga-model-vbic13")]
+#[test]
+fn bug325_vbic_multiplicity_wrapper_owner_is_publicly_qualified() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = root.join("Netlists/Certification_Tests/BUG_325_SON/vbic_3T_et_cf.cir");
+    let result = runner.run_test(owner);
+    assert!(result.passed, "BUG325 failed: {:?}", result.error);
+    assert_eq!(result.contract, "bug325_vbic_multiplicity_wrapper_owner");
+
+    let control =
+        runner.run_test(root.join("Netlists/Certification_Tests/BUG_325_SON/vbic_3T_et_cf_m2.cir"));
+    assert!(control.upstream_excluded);
+}
