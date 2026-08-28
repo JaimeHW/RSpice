@@ -112,12 +112,22 @@ pub(super) struct SensitivityPlan {
     version: u64,
     analysis: AnalysisPresentationKey,
     order: Vec<usize>,
+    /// The chart's row offsets, built once with the order they address.
+    ///
+    /// The rows are uniform, but the prefix sum over them is `O(parameters)`
+    /// and it was rebuilt inside the scroll area on every frame — on the same
+    /// sheet whose whole point is that a real design ranks thousands of them.
+    offsets: RowOffsets,
     max_magnitude: f64,
 }
 
 impl SensitivityPlan {
     pub(super) fn order(&self) -> &[usize] {
         &self.order
+    }
+
+    pub(super) fn offsets(&self) -> &RowOffsets {
+        &self.offsets
     }
 }
 
@@ -144,6 +154,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     let built = Arc::new(SensitivityPlan {
         version,
         analysis: analysis_key,
+        offsets: RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, order.len())),
         order,
         max_magnitude,
     });
@@ -355,9 +366,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             );
 
             // One row per swept parameter: a real design ranks thousands, and
-            // only the ones on screen are worth laying out.
-            let offsets = RowOffsets::from_heights(std::iter::repeat_n(ROW_HEIGHT, ranked.len()));
-            let rows = offsets.plan(egui::Rangef::new(
+            // only the ones on screen are worth laying out. The offsets come
+            // from the plan, built with the ranking they address.
+            let rows = plan.offsets().plan(egui::Rangef::new(
                 viewport.min.y - HEADER_HEIGHT,
                 viewport.max.y - HEADER_HEIGHT,
             ));
@@ -806,6 +817,33 @@ mod tests {
         assert!(
             drawn < 400,
             "the panel listed {drawn} of 4000 ranked parameters for a 900 px viewport"
+        );
+    }
+
+    /// The row offsets are part of the plan, not of the frame.
+    ///
+    /// The prefix sum is `O(parameters)` and it was rebuilt inside the scroll
+    /// area on every frame, on the one sheet whose premise is that a real
+    /// design ranks thousands of them. It addresses exactly the ranking the
+    /// plan already holds, so it belongs beside it and moves only when the
+    /// ranking does.
+    #[test]
+    fn the_chart_row_offsets_are_built_once_beside_the_ranking_they_address() {
+        let mut state = ranked_state(2_000);
+        let plan = sensitivity_plan(&mut state).expect("a retained sensitivity result");
+
+        assert_eq!(plan.offsets().rows(), plan.order().len());
+        assert!(
+            (plan.offsets().total_height() - 2_000.0 * ROW_HEIGHT).abs() < 1.0e-3,
+            "the plan's extent is {}",
+            plan.offsets().total_height()
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(
+                &plan,
+                &sensitivity_plan(&mut state).expect("the memo is served")
+            ),
+            "a second frame rebuilt the plan the offsets travel in"
         );
     }
 }

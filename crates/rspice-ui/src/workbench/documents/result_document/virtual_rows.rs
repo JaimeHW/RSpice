@@ -35,7 +35,7 @@ impl RowPlan {
 /// Running row offsets: `offsets[i]` is the top of row `i`, and the last
 /// element is the total height. Built once per (data, filter, sort) rather
 /// than per frame.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct RowOffsets {
     offsets: Vec<f32>,
 }
