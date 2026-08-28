@@ -52,6 +52,14 @@ pub(super) fn project(scale: AxisScale, value: f64) -> Option<f64> {
 /// contained ones left it with no logarithmic ruling whatever — the page fell
 /// back on the frame's even divisions, which is ten equal slices of a span
 /// that has no equal slices.
+///
+/// A window with no decade boundary inside it has nothing else to caption, so
+/// there the mantissas are the majors and carry the labels. That is what the
+/// sheet does: `ui::plot::scale::decade_ticks` degrades its ladder to
+/// captioned mantissas inside a decade rather than leaving a log axis with no
+/// numbers on it, and `plot_grid` prints no caption for an empty label — so a
+/// page that ruled the mantissas as minors ruled a frequency axis with no
+/// frequencies stated anywhere on it.
 pub(super) fn plot_axis_ticks(
     x_scale: AxisScale,
     frame: &PlotFrame,
@@ -78,6 +86,11 @@ pub(super) fn plot_axis_ticks(
     if frame.x_maximum - frame.x_minimum > MINOR_DECADE_LIMIT {
         return Ok(ticks);
     }
+    // No decade boundary fell inside the window, so nothing above carries a
+    // caption and the mantissas are all the axis has left to state itself
+    // with. They are promoted rather than added to: the window is narrower
+    // than a decade, so there is no coarser rule for them to subdivide.
+    let mantissas_are_the_ladder = first > last;
     // Every decade the window touches, including the partial ones at its ends.
     let touched_first = frame.x_minimum.floor() as i64;
     let touched_last = frame.x_maximum.floor() as i64;
@@ -90,7 +103,12 @@ pub(super) fn plot_axis_ticks(
             if position <= frame.x_minimum || position >= frame.x_maximum {
                 continue;
             }
-            push_vertical_rule(&mut ticks, frame, position, String::new(), false)?;
+            let label = if mantissas_are_the_ladder {
+                fmt_si_significant(10.0_f64.powi(decade as i32) * f64::from(mantissa), "", 3)
+            } else {
+                String::new()
+            };
+            push_vertical_rule(&mut ticks, frame, position, label, mantissas_are_the_ladder)?;
         }
     }
     Ok(ticks)
@@ -140,22 +158,44 @@ mod tests {
         );
     }
 
-    /// A sub-decade sweep is ruled at its mantissas.
+    /// A sub-decade sweep is ruled *and captioned* at its mantissas.
     ///
     /// 1.9 kHz to 8.5 kHz contains no whole decade at all, so the page
     /// produced no rules whatever and fell back on the frame's even divisions
     /// — ten equal slices of a span that has no equal slices.
+    ///
+    /// Ruling them was half of it. The screen is the oracle for what an axis
+    /// says, and inside a decade `ui::plot::scale::decade_ticks` degrades its
+    /// ladder to captioned mantissas — precisely because a log axis with no
+    /// numbers on it is useless at the one zoom a reader measures at. The
+    /// page shipped the same mantissas as uncaptioned minors, and
+    /// `plot_grid` draws no caption for an empty label, so a window narrower
+    /// than a decade printed with no frequency captions anywhere on it. The
+    /// assertion below therefore reads the other way round from the one this
+    /// test first froze.
     #[test]
-    fn a_sub_decade_sweep_is_ruled_at_its_mantissas() {
+    fn a_sub_decade_sweep_is_ruled_and_captioned_at_its_mantissas() {
         let ticks = ticks(1900.0_f64.log10(), 8500.0_f64.log10());
         assert!(
             !ticks.is_empty(),
             "a sub-decade frequency sweep printed with no logarithmic ruling at all"
         );
-        // 2 through 8 kHz lie inside the window; there is no decade boundary
-        // in it to label.
+        // 2 through 8 kHz lie inside the window. There is no decade boundary
+        // in it, so these are the only captions the axis can carry.
         assert_eq!(ticks.len(), 7);
-        assert!(ticks.iter().all(|tick| !tick.major));
+        assert!(
+            ticks.iter().all(|tick| tick.major),
+            "the only rules on a sub-decade page were the ones that print no caption"
+        );
+        assert_eq!(
+            ticks
+                .iter()
+                .map(|tick| tick.label.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "2.00 k", "3.00 k", "4.00 k", "5.00 k", "6.00 k", "7.00 k", "8.00 k"
+            ]
+        );
     }
 
     /// A decade rules eight interior mantissas — 2 through 9 — not nine.
