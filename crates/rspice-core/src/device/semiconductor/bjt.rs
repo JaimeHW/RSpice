@@ -517,6 +517,16 @@ pub struct Bjt {
     /// Optional substrate node (4-terminal BJT syntax)
     pub node_substrate: NodeId,
 
+    // The legacy Gummel-Poon builder externalizes constant RC/RB/RE values
+    // as ordinary resistors. Keep the original lead and its conductance with
+    // the intrinsic device so accepted transient output can report current at
+    // the authored terminal, rather than current only at the internal prime
+    // node. The tuple is `(external_node, conductance)`; `None` means the
+    // authored lead remains the intrinsic terminal.
+    legacy_collector_lead: Option<(NodeId, Value)>,
+    legacy_base_lead: Option<(NodeId, Value)>,
+    legacy_emitter_lead: Option<(NodeId, Value)>,
+
     // MNA-promoted VBIC internal nodes (ngspice vbicsetup.c topology). The
     // circuit builder assigns these through `assign_vbic_internal_nodes`,
     // aliasing collapsed states onto their parent nodes (`cx` onto the
@@ -1048,6 +1058,9 @@ impl Bjt {
             node_base: base,
             node_emitter: emitter,
             node_substrate: 0,
+            legacy_collector_lead: None,
+            legacy_base_lead: None,
+            legacy_emitter_lead: None,
             node_cx: 0,
             node_ci: 0,
             node_bx: 0,

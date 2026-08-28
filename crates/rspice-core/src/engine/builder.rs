@@ -6176,7 +6176,7 @@ impl Engine {
                             let cint = circuit.get_or_create_node(&cint_name);
                             let rc_name = format!("{}.__rc", element.name);
                             circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
-                            bjt.node_collector = cint;
+                            bjt.externalize_legacy_collector_lead(cint, bjt.rcx);
                             bjt.clear_collector_series_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
                                 circuit.resistors.set_last_noise_temperature_offset(
@@ -6189,7 +6189,7 @@ impl Engine {
                             let eint = circuit.get_or_create_node(&eint_name);
                             let re_name = format!("{}.__re", element.name);
                             circuit.resistors.add(re_name, emitter, eint, bjt.re);
-                            bjt.node_emitter = eint;
+                            bjt.externalize_legacy_emitter_lead(eint, bjt.re);
                             bjt.clear_emitter_series_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
                                 circuit.resistors.set_last_noise_temperature_offset(
@@ -6210,7 +6210,7 @@ impl Engine {
                             let bint = circuit.get_or_create_node(&bint_name);
                             let rb_name = format!("{}.__rb", element.name);
                             circuit.resistors.add(rb_name, base, bint, bjt.rbx);
-                            bjt.node_base = bint;
+                            bjt.externalize_legacy_base_lead(bint, bjt.rbx);
                             bjt.clear_base_constant_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
                                 circuit.resistors.set_last_noise_temperature_offset(

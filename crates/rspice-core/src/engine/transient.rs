@@ -1183,6 +1183,7 @@ impl Engine {
         time: Value,
         step_size: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
+        bjt_history: &BjtTransientHistory,
         record_device_op_traces: bool,
         capture: &TransientCapturePlan,
         abort: &dyn AbortSignal,
@@ -1255,8 +1256,16 @@ impl Engine {
             }
         }
         if record_device_op_traces {
-            added_values = added_values
-                .saturating_add(result.record_device_op_sample(circuit.device_op_report()));
+            added_values = added_values.saturating_add(
+                result.record_device_op_sample(
+                    circuit
+                        .transient_device_op_report(
+                            solution,
+                            &bjt_history.accepted_terminal_currents,
+                        )
+                        .map_err(SimulationError::Circuit)?,
+                ),
+            );
         }
         circuit.accept_generic_switch_transient_step();
         abort.observe_transient_sample(result.observable_sample());
@@ -3081,7 +3090,11 @@ impl Engine {
             store_traces,
         };
         if record_device_op_traces {
-            result.record_device_op_sample(circuit.device_op_report());
+            result.record_device_op_sample(
+                circuit
+                    .initial_transient_device_op_report(&solution)
+                    .map_err(SimulationError::Circuit)?,
+            );
         }
         let mut digital_snapshot = Vec::new();
         let mut real_snapshot = Vec::new();
@@ -3291,8 +3304,13 @@ impl Engine {
             // The initial report is created before capacitor histories are
             // initialized. Refresh its sample so solution-dependent C probes
             // expose the DC-evaluated capacitance at t=0.
-            retained_result_values = retained_result_values
-                .saturating_add(result.record_device_op_sample(circuit.device_op_report()));
+            retained_result_values = retained_result_values.saturating_add(
+                result.record_device_op_sample(
+                    circuit
+                        .initial_transient_device_op_report(&solution)
+                        .map_err(SimulationError::Circuit)?,
+                ),
+            );
             self.ensure_transient_result_limits(&result, retained_result_values)?;
         }
 
@@ -6098,6 +6116,7 @@ impl Engine {
                             t,
                             dt,
                             &derived_branch_currents,
+                            &bjt_history,
                             record_device_op_traces,
                             &capture_plan,
                             abort,
@@ -7275,6 +7294,7 @@ impl Engine {
                             t,
                             dt,
                             &derived_branch_currents,
+                            &bjt_history,
                             record_device_op_traces,
                             &capture_plan,
                             abort,
@@ -7652,6 +7672,7 @@ impl Engine {
                     t,
                     dt,
                     &derived_branch_currents,
+                    &bjt_history,
                     record_device_op_traces,
                     &capture_plan,
                     abort,
@@ -8227,6 +8248,132 @@ mod tests {
     use super::*;
     use crate::{Netlist, SimulationConfig};
     use std::cell::Cell;
+
+    fn run_native_bjt_total_leads(
+        method: &str,
+        pnp: bool,
+        dynamic_charge: bool,
+    ) -> TransientResult {
+        let (kind, collector_bias, base_waveform) = if pnp {
+            ("PNP", "-5", "PULSE(0 -1 1n 0.25n 0.25n 2n 5n)")
+        } else {
+            ("NPN", "5", "PULSE(0 1 1n 0.25n 0.25n 2n 5n)")
+        };
+        let base_waveform = if dynamic_charge {
+            base_waveform
+        } else if pnp {
+            "-0.75"
+        } else {
+            "0.75"
+        };
+        let charge = if dynamic_charge { "1u" } else { "0" };
+        let source = format!(
+            "Native BJT accepted total lead currents\n\
+             VE 0 E 0\n\
+             VC 0 C {collector_bias}\n\
+             VB 0 B {base_waveform}\n\
+             VS 0 S 0\n\
+             Q1 C B E S QMOD\n\
+             .MODEL QMOD {kind} LEVEL=1 IS=3e-14 BF=130 BR=1 \
+             RB=45 RBM=45 RC=2 RE=1 CJE={charge} CJC={charge} CJS={charge} \
+             TF=0 TR=0 VJE=0.75 VJC=0.75\n\
+             .OPTIONS TIMEINT METHOD={method}\n\
+             .TRAN 0.5n 8n\n\
+             .PRINT TRAN I(VB) I(VC) I(VE) I(VS) \
+             IC(Q1) IB(Q1) IE(Q1) IS(Q1)\n\
+             .END\n"
+        );
+        let netlist = Netlist::parse_with_options(
+            &source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("native BJT lead-current deck parses");
+        Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+            .run_tran(&netlist, 8.0e-9, 0.5e-9)
+            .unwrap_or_else(|error| panic!("native BJT lead-current transient failed: {error}"))
+    }
+
+    fn assert_native_bjt_total_lead_kcl(result: &TransientResult, expect_dynamic: bool) {
+        assert!(result.time.len() >= 2);
+        assert!(result.time.windows(2).all(|pair| pair[1] > pair[0]));
+        let terminal_pairs = [("VB", "IB"), ("VC", "IC"), ("VE", "IE"), ("VS", "IS")];
+        let mut leads = Vec::new();
+        for (source, parameter) in terminal_pairs {
+            let source_current = result
+                .try_branch_current_waveform_named(source)
+                .unwrap_or_else(|| panic!("missing {source} branch trace"));
+            let lead = result
+                .try_device_op_waveform_named("q1", &parameter.to_ascii_lowercase())
+                .unwrap_or_else(|| panic!("missing Q1 {parameter} trace"));
+            assert_eq!(source_current.len(), result.time.len());
+            assert_eq!(lead.len(), result.time.len());
+            assert!(source_current.iter().all(|value| value.is_finite()));
+            assert!(lead.iter().all(|value| value.is_finite()));
+            for (index, (&source_value, &lead_value)) in
+                source_current.iter().zip(lead.iter()).enumerate()
+            {
+                assert!(
+                    (source_value - lead_value).abs() <= 1.0e-6,
+                    "{parameter} authored-lead KCL changed at row {index}: source={source_value:e}, lead={lead_value:e}"
+                );
+            }
+            leads.push(lead);
+        }
+        for index in 0..result.time.len() {
+            let terminal_sum = leads.iter().map(|lead| lead[index]).sum::<Value>();
+            assert!(
+                terminal_sum.abs() <= 1.0e-6,
+                "four-terminal BJT KCL changed at row {index}: sum={terminal_sum:e}"
+            );
+        }
+        if expect_dynamic {
+            assert!(
+                leads.iter().any(|lead| {
+                    lead.iter()
+                        .skip(1)
+                        .any(|value| (value - lead[0]).abs() > 1.0e-4)
+                }),
+                "large junction charges must create a non-static accepted lead waveform"
+            );
+        } else {
+            for lead in leads {
+                assert!(
+                    lead.iter().all(|value| (value - lead[0]).abs() <= 1.0e-10),
+                    "zero-charge constant-bias lead waveform changed: {lead:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_bjt_total_leads_follow_trap_and_gear_companions_with_external_series() {
+        for (method, pnp) in [("7", false), ("8", false), ("8", true)] {
+            let result = run_native_bjt_total_leads(method, pnp, true);
+            assert_native_bjt_total_lead_kcl(&result, true);
+        }
+    }
+
+    #[test]
+    fn native_bjt_zero_charge_leads_keep_static_t0_and_accepted_values() {
+        let result = run_native_bjt_total_leads("7", false, false);
+        assert_native_bjt_total_lead_kcl(&result, false);
+    }
+
+    #[test]
+    fn native_bjt_authored_lead_mapping_rejects_invalid_solution_nodes() {
+        let mut bjt = crate::device::Bjt::new_npn("QBAD".into(), 1, 2, 3);
+        bjt.externalize_legacy_base_lead(4, 10.0);
+        let error = bjt
+            .authored_transient_lead_currents(&[0.0; 2], [0.0; 4])
+            .expect_err("out-of-range internal lead node must fail closed");
+        assert!(
+            error.contains("QBAD") && error.contains("node 4"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn xyce_update_norm_source_distinguishes_damped_newton_from_nox() {

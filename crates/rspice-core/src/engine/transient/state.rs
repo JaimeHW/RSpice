@@ -227,6 +227,7 @@ impl Engine {
             charge_q_prev_prev: Vec::with_capacity(n),
             charge_q_prev_prev_prev: Vec::with_capacity(n),
             charge_cq_prev: Vec::with_capacity(n),
+            accepted_terminal_currents: Vec::with_capacity(n),
             dynamic_internal_prev: Vec::with_capacity(n),
             dynamic_internal_prev_prev: Vec::with_capacity(n),
             dynamic_linear_prev: Vec::with_capacity(n),
@@ -292,6 +293,7 @@ impl Engine {
                 history.charge_q_prev_prev.push(charge_values);
                 history.charge_q_prev_prev_prev.push(charge_values);
                 history.charge_cq_prev.push([0.0; BJT_DYNAMIC_CHARGE_COUNT]);
+                history.accepted_terminal_currents.push(None);
                 history.dynamic_internal_prev.push(internal);
                 history.dynamic_internal_prev_prev.push(internal);
                 history
@@ -335,6 +337,7 @@ impl Engine {
             history.charge_q_prev_prev.push(charge_values);
             history.charge_q_prev_prev_prev.push(charge_values);
             history.charge_cq_prev.push([0.0; BJT_DYNAMIC_CHARGE_COUNT]);
+            history.accepted_terminal_currents.push(None);
             history
                 .dynamic_internal_prev
                 .push(charge_snapshot.reduction.internal_voltages);

@@ -310,6 +310,9 @@ impl Engine {
         }
 
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
+            // A failed/unsupported dynamic snapshot must never expose the
+            // preceding accepted sample's current under a new time point.
+            bjt_history.accepted_terminal_currents[idx] = None;
             let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
             let vb = Self::node_voltage(accepted_solution, bjt.node_base);
             let ve = Self::node_voltage(accepted_solution, bjt.node_emitter);
@@ -383,6 +386,21 @@ impl Engine {
             };
             let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
                 Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
+            // Evaluate lead currents before rotating the accepted charge
+            // history: the companion uses Q[n] at this solution together
+            // with Q[n-1]/Q[n-2]/CQ[n-1]. The resulting Y*v-i_eq vector is
+            // therefore the same static-plus-displacement current that owned
+            // the converged Newton stamp.
+            bjt_history.accepted_terminal_currents[idx] =
+                Some(Self::reduced_bjt_transient_terminal_currents(
+                    bjt,
+                    &snapshot,
+                    coeff,
+                    dt,
+                    &bjt_history.charge_q_prev[idx],
+                    &bjt_history.charge_q_prev_prev[idx],
+                    &bjt_history.charge_cq_prev[idx],
+                )?);
             let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
                 legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
             );

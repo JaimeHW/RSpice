@@ -152,6 +152,11 @@ pub(super) struct BjtTransientHistory {
     pub(super) charge_q_prev_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
     pub(super) charge_q_prev_prev_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
     pub(super) charge_cq_prev: Vec<[Value; BJT_DYNAMIC_CHARGE_COUNT]>,
+    /// Accepted total terminal currents for legacy native BJTs, in C/B/E/S
+    /// order. `None` preserves the ordinary static operating-point report for
+    /// device families whose transient lead-current projection is not owned
+    /// by the reduced legacy companion.
+    pub(super) accepted_terminal_currents: Vec<Option<[Value; BJT_EXTERNAL_STATE_DIM]>>,
     pub(super) dynamic_internal_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
     pub(super) dynamic_internal_prev_prev: Vec<[Value; BJT_INTERNAL_STATE_DIM]>,
     pub(super) dynamic_linear_prev: Vec<VbicPredictorLinearBranchState>,

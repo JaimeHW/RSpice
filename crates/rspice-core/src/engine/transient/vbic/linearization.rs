@@ -1127,6 +1127,56 @@ impl Engine {
         Some((y_total, reduced_i_eq))
     }
 
+    /// Evaluate the four accepted terminal currents from the exact reduced
+    /// transient companion that owns the Newton stamp. This is deliberately
+    /// not a finite difference of output samples: `Y*v - i_eq` contains the
+    /// integration method's accepted `dQ/dt` history and the static `F`
+    /// contribution at the same point.
+    pub(in crate::engine::transient) fn reduced_bjt_transient_terminal_currents(
+        bjt: &crate::device::Bjt,
+        snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+    ) -> Result<[Value; BJT_EXTERNAL_STATE_DIM], SimulationError> {
+        if !snapshot.branches.iter().any(BjtChargeBranch::is_active) {
+            return Ok(bjt.operating_point_terminal_currents());
+        }
+        let linearization = Self::assemble_vbic_transient_linearization(
+            bjt,
+            snapshot,
+            coeff,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        )
+        .ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "BJT '{}' transient lead-current companion could not be assembled",
+                bjt.name
+            ))
+        })?;
+        let (admittance, source) = Self::vbic_reduce_transient_external_system(&linearization)
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "BJT '{}' transient lead-current companion could not be reduced",
+                    bjt.name
+                ))
+            })?;
+        let external = snapshot.reduction.external_voltages;
+        Ok(std::array::from_fn(|row| {
+            admittance[row]
+                .iter()
+                .zip(external.iter())
+                .map(|(coefficient, voltage)| coefficient * voltage)
+                .sum::<Value>()
+                - source[row]
+        }))
+    }
+
     #[inline]
     pub(in crate::engine::transient) fn vbic_static_stamped_external_system(
         bjt: &crate::device::Bjt,

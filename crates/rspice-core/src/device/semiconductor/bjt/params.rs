@@ -1498,11 +1498,36 @@ impl Bjt {
         self.rc = 0.0;
     }
 
+    /// Move the authored collector lead onto the builder-created series
+    /// resistor while retaining enough typed topology to report current at
+    /// that external lead during transient analysis.
+    pub(crate) fn externalize_legacy_collector_lead(
+        &mut self,
+        internal_node: NodeId,
+        resistance: Value,
+    ) {
+        debug_assert!(resistance.is_finite() && resistance > 0.0);
+        self.legacy_collector_lead = Some((self.node_collector, resistance.recip()));
+        self.node_collector = internal_node;
+    }
+
     /// Clear the emitter series resistance after the builder externalizes
     /// it onto a real circuit resistor.
     pub fn clear_emitter_series_resistance(&mut self) {
         self.re = 0.0;
         self.re_nominal = 0.0;
+    }
+
+    /// Move the authored emitter lead onto the builder-created series
+    /// resistor while retaining its transient-output topology.
+    pub(crate) fn externalize_legacy_emitter_lead(
+        &mut self,
+        internal_node: NodeId,
+        resistance: Value,
+    ) {
+        debug_assert!(resistance.is_finite() && resistance > 0.0);
+        self.legacy_emitter_lead = Some((self.node_emitter, resistance.recip()));
+        self.node_emitter = internal_node;
     }
 
     /// Clear the constant part of the base resistance after the builder
@@ -1515,6 +1540,19 @@ impl Bjt {
         self.rbx = 0.0;
         self.rbx_nominal = 0.0;
         self.rb = self.rbi.max(0.0);
+    }
+
+    /// Move the authored base lead onto the builder-created constant series
+    /// resistor while retaining its transient-output topology. Any remaining
+    /// bias-dependent base resistance stays inside the BJT.
+    pub(crate) fn externalize_legacy_base_lead(
+        &mut self,
+        internal_node: NodeId,
+        resistance: Value,
+    ) {
+        debug_assert!(resistance.is_finite() && resistance > 0.0);
+        self.legacy_base_lead = Some((self.node_base, resistance.recip()));
+        self.node_base = internal_node;
     }
 
     /// Resolve the thermal-noise temperature offset, bjtnoise.c/vbicnoise.c
@@ -1537,6 +1575,53 @@ impl Bjt {
             self.ib,
             self.intrinsic_linearization.dic_dvbe,
         )
+    }
+
+    /// Cached static terminal currents in the canonical C/B/E/S order.
+    pub(crate) fn operating_point_terminal_currents(&self) -> [Value; 4] {
+        [self.ic, self.ib, self.ie, self.isub]
+    }
+
+    /// Map intrinsic accepted-step terminal currents to the authored external
+    /// leads. A builder-externalized RC/RB/RE owns the external lead current;
+    /// its positive-to-negative orientation is authored lead to prime node,
+    /// exactly matching the SPICE convention of current entering the device.
+    pub(crate) fn authored_transient_lead_currents(
+        &self,
+        solution: &[Value],
+        intrinsic: [Value; 4],
+    ) -> Result<[Value; 4], String> {
+        let node_voltage = |node: NodeId| {
+            if node == 0 {
+                Ok(0.0)
+            } else {
+                solution.get(node - 1).copied().ok_or_else(|| {
+                    format!(
+                        "BJT '{}' authored lead node {node} is outside solution length {}",
+                        self.name,
+                        solution.len()
+                    )
+                })
+            }
+        };
+        let mapped = |lead: Option<(NodeId, Value)>,
+                      internal: NodeId,
+                      fallback: Value|
+         -> Result<Value, String> {
+            lead.map_or(Ok(fallback), |(external, conductance)| {
+                Ok(conductance * (node_voltage(external)? - node_voltage(internal)?))
+            })
+        };
+        Ok([
+            mapped(
+                self.legacy_collector_lead,
+                self.node_collector,
+                intrinsic[0],
+            )?,
+            mapped(self.legacy_base_lead, self.node_base, intrinsic[1])?,
+            mapped(self.legacy_emitter_lead, self.node_emitter, intrinsic[2])?,
+            intrinsic[3],
+        ])
     }
 
     /// Apply instance-level BJT scaling and thermal overrides.

@@ -473,7 +473,7 @@ impl CircuitData {
 
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
-            let (_, _, ie) = bjt.operating_point_currents();
+            let [_, _, ie, is] = bjt.operating_point_terminal_currents();
             let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };
             entries.push(DeviceOpEntry::new(
                 bjt.name.clone(),
@@ -483,6 +483,7 @@ impl CircuitData {
                     (OpLabel::IC, ic),
                     (OpLabel::IB, ib),
                     (OpLabel::IE, ie),
+                    (OpLabel::IS, is),
                     (OpLabel::VBE, vbe),
                     (OpLabel::VCE, vbe - vbc),
                     (OpLabel::BETA, beta),
@@ -731,6 +732,69 @@ impl CircuitData {
              name it in the label vocabulary"
         );
         report
+    }
+
+    /// Build an accepted transient report, replacing legacy native-BJT lead
+    /// currents with the exact total currents from the committed companion.
+    /// Ordinary `.OP` and every non-BJT parameter retain the static report;
+    /// the override exists only for this transient sample and cannot leak
+    /// into a later analysis.
+    pub(crate) fn transient_device_op_report(
+        &self,
+        solution: &[Value],
+        accepted_bjt_terminal_currents: &[Option<[Value; 4]>],
+    ) -> Result<DeviceOpReport, String> {
+        let mut report = self.device_op_report();
+        for (bjt, intrinsic) in self
+            .bjts
+            .devices
+            .iter()
+            .zip(accepted_bjt_terminal_currents.iter())
+        {
+            let Some(intrinsic) = intrinsic else {
+                continue;
+            };
+            let authored = bjt.authored_transient_lead_currents(solution, *intrinsic)?;
+            let Some(entry) = report.entries.iter_mut().find(|entry| {
+                entry
+                    .device_kind
+                    .eq_ignore_ascii_case(OpLabel::BJT.as_str())
+                    && entry.name.eq_ignore_ascii_case(&bjt.name)
+            }) else {
+                continue;
+            };
+            for (parameter, value) in &mut entry.params {
+                if parameter.eq_ignore_ascii_case(OpLabel::IC.as_str()) {
+                    *value = authored[0];
+                } else if parameter.eq_ignore_ascii_case(OpLabel::IB.as_str()) {
+                    *value = authored[1];
+                } else if parameter.eq_ignore_ascii_case(OpLabel::IE.as_str()) {
+                    *value = authored[2];
+                } else if parameter.eq_ignore_ascii_case(OpLabel::IS.as_str()) {
+                    *value = authored[3];
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    /// Initial transient samples have zero companion current. Still route the
+    /// cached static C/B/E/S values through builder-externalized RC/RB/RE so
+    /// t=0 and checkpoint re-anchor samples observe the authored pins.
+    pub(crate) fn initial_transient_device_op_report(
+        &self,
+        solution: &[Value],
+    ) -> Result<DeviceOpReport, String> {
+        let currents = self
+            .bjts
+            .devices
+            .iter()
+            .map(|bjt| {
+                bjt.uses_legacy_gummel_poon()
+                    .then(|| bjt.operating_point_terminal_currents())
+            })
+            .collect::<Vec<_>>();
+        self.transient_device_op_report(solution, &currents)
     }
 
     /// Read-only access to linear resistor storage (names, nodes, conductances).
