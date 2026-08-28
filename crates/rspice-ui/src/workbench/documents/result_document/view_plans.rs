@@ -22,8 +22,9 @@ pub(super) struct ViewPlans {
     /// Serialized exact evidence for the selected typed artifact; see
     /// [`super::table`].
     pub(super) artifact: Option<Arc<super::table::ArtifactTextPlan>>,
-    /// Family envelopes for the drawn wave pane; see [`super::waves`].
-    pub(super) envelope: Option<Arc<super::waves::FamilyEnvelopePlan>>,
+    /// Family envelopes for the drawn wave panes, one per pane; see
+    /// [`super::waves::FamilyEnvelopeCache`].
+    pub(super) envelopes: super::waves::FamilyEnvelopeCache,
     /// Descriptive statistics for the drawn distribution; see
     /// [`super::hist`].
     pub(super) hist: Option<Arc<super::hist::HistPlan>>,
@@ -53,7 +54,7 @@ impl ViewPlans {
         let Self {
             manifest,
             artifact,
-            envelope,
+            envelopes,
             hist,
             op,
             optimization,
@@ -62,7 +63,7 @@ impl ViewPlans {
         } = self;
         manifest.is_none()
             && artifact.is_none()
-            && envelope.is_none()
+            && envelopes.is_empty()
             && hist.is_none()
             && op.is_none()
             && optimization.borrow().is_none()

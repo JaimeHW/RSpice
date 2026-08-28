@@ -7,6 +7,7 @@
 //! visibility overrides describes a strip nobody is looking at.
 
 use super::*;
+use super::super::super::frame_work::{DatasetWalk, WorkCounts};
 
 /// The extent is resolved while the model is built now, so it has to be the
 /// same answer the per-frame walk gave: the axis, the overview lane and every
@@ -165,8 +166,6 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
 /// exactly one walk per strip per rebuild — not two, and never one per frame.
 #[test]
 fn the_extent_is_walked_once_per_strip_per_cache_build() {
-    use super::super::super::frame_work::{DatasetWalk, WorkCounts};
-
     let mut state = AppState::default();
     let run = state.simulation.start_run();
     run.add_analysis(
@@ -271,5 +270,88 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
     assert!(
         results.plans.is_empty(),
         "a viewer projection outlived the dataset it was built from"
+    );
+}
+
+/// Every pane of a strip asks for its envelope on the same frame.
+///
+/// A family probing a voltage and a current is a two-pane strip, because
+/// volts and amps do not share a Y scale — and the sheet bar's own gate asks
+/// a third time, for the active pane, to decide whether to offer the control
+/// that draws them. Against one slot each of those three answers evicted the
+/// last, so nothing was ever memoized and the walk ran three times a frame.
+#[test]
+fn each_pane_of_a_two_unit_strip_keeps_its_own_envelope() {
+    let mut state = AppState::default();
+    state.simulation.start_run().add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0], "#fff"),
+            WaveformData::new("I(R1)", vec![0.0, 1.0, 2.0], vec![0.0, 1.0e-3, 2.0e-3], "#0af"),
+        ]),
+    );
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    let panes = model.unit_panes();
+    assert_eq!(
+        panes.len(),
+        2,
+        "the fixture must produce a two-unit strip: {:?}",
+        panes.iter().map(|pane| pane.unit).collect::<Vec<_>>()
+    );
+
+    let generation = 3;
+    let first: Vec<_> = panes
+        .iter()
+        .map(|pane| {
+            super::super::extent::family_envelopes(
+                &mut state.ui.results,
+                generation,
+                model,
+                pane,
+            )
+        })
+        .collect();
+
+    let baseline = WorkCounts::reset();
+    for _ in 0..5 {
+        for (index, pane) in panes.iter().enumerate() {
+            let again = super::super::extent::family_envelopes(
+                &mut state.ui.results,
+                generation,
+                model,
+                pane,
+            );
+            assert!(
+                std::sync::Arc::ptr_eq(&first[index], &again),
+                "pane {index} ({}) was rebuilt by a sibling pane's question",
+                pane.unit
+            );
+        }
+    }
+    assert_eq!(
+        baseline.since().get(DatasetWalk::WaveEnvelope),
+        0,
+        "the panes of one strip evicted each other's envelopes"
+    );
+
+    // A new generation of models still empties the cache: the envelope is a
+    // memo of the models, never of the pane identity alone.
+    let next = super::super::extent::family_envelopes(
+        &mut state.ui.results,
+        generation + 1,
+        model,
+        &panes[0],
+    );
+    assert!(!std::sync::Arc::ptr_eq(&first[0], &next));
+    assert_eq!(
+        state.ui.results.plans.envelopes.entry_count(),
+        1,
+        "the previous generation's envelopes were kept alongside the new one"
     );
 }

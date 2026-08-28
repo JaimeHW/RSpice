@@ -95,16 +95,48 @@ pub(super) struct FamilyEnvelopeSeries {
     pub(super) maximum_cache_key: u64,
 }
 
-/// One pane's family envelopes, and the pane generation they belong to.
+/// One pane's family envelopes.
 #[derive(Debug)]
 pub(in crate::workbench::documents::result_document) struct FamilyEnvelopePlan {
-    key: u64,
     series: Vec<FamilyEnvelopeSeries>,
 }
 
 impl FamilyEnvelopePlan {
     pub(super) fn series(&self) -> &[FamilyEnvelopeSeries] {
         &self.series
+    }
+}
+
+/// Every pane's envelopes for one generation of strip models.
+///
+/// A single slot was one pane too few. Volts and amps do not share a Y
+/// scale, so a strip probing both is a two-pane strip, and on one frame pane
+/// 0 built its envelope, pane 1 evicted it, and the sheet bar's own gate —
+/// which asks the same question about the active pane, to decide whether to
+/// offer the control — evicted that. Three walks of every sample of every
+/// family member, every frame, for a picture that had not changed.
+///
+/// The generation is what makes the map safe to hold: the models are rebuilt
+/// whenever anything an envelope reads changes, so a new generation empties
+/// the map rather than being folded into keys that would accumulate.
+#[derive(Debug, Clone, Default)]
+pub(in crate::workbench::documents::result_document) struct FamilyEnvelopeCache {
+    generation: u64,
+    plans: HashMap<u64, Arc<FamilyEnvelopePlan>>,
+}
+
+impl FamilyEnvelopeCache {
+    /// Whether the cache holds no envelope at all.
+    #[cfg(test)]
+    pub(in crate::workbench::documents::result_document) fn is_empty(&self) -> bool {
+        self.plans.is_empty()
+    }
+
+    /// How many envelopes are held, for a test that pins the cache to one
+    /// generation of models rather than letting it grow across them.
+    #[cfg(test)]
+    pub(in crate::workbench::documents::result_document) fn entry_count(&self) -> usize {
+        self.plans.len()
     }
 }
 
@@ -124,8 +156,9 @@ fn envelope_key(models_generation: u64, model: &StripModel, pane: &UnitPane) -> 
 /// The walk is over every sample of every family member, collected into a
 /// map keyed by exact X coordinate and then sorted — for a swept family of a
 /// million points that is the most expensive thing the wave stack does, and
-/// the sheet bar asked for it a second time just to decide whether to offer
-/// the control that draws it.
+/// the sheet bar asks for it a second time just to decide whether to offer
+/// the control that draws it. Held per pane, because every pane of a strip
+/// asks on the same frame; see [`FamilyEnvelopeCache`].
 pub(super) fn family_envelopes(
     results: &mut ResultsState,
     models_generation: u64,
@@ -133,16 +166,18 @@ pub(super) fn family_envelopes(
     pane: &UnitPane,
 ) -> Arc<FamilyEnvelopePlan> {
     let key = envelope_key(models_generation, model, pane);
-    if let Some(plan) = results.plans.envelope.as_ref()
-        && plan.key == key
-    {
+    let cache = &mut results.plans.envelopes;
+    if cache.generation != models_generation {
+        cache.generation = models_generation;
+        cache.plans.clear();
+    }
+    if let Some(plan) = cache.plans.get(&key) {
         return Arc::clone(plan);
     }
     let built = Arc::new(FamilyEnvelopePlan {
-        key,
         series: family_envelope_series(model, pane),
     });
-    results.plans.envelope = Some(Arc::clone(&built));
+    cache.plans.insert(key, Arc::clone(&built));
     built
 }
 

@@ -8,7 +8,7 @@
 
 mod expressions;
 mod extent;
-pub(super) use extent::FamilyEnvelopePlan;
+pub(super) use extent::{FamilyEnvelopeCache, FamilyEnvelopePlan};
 pub(super) mod marker_dialog;
 mod readout;
 mod viewport;
