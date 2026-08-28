@@ -17,6 +17,16 @@ pub use monte_carlo::MonteCarloVariableResult;
 pub use operating_point::DcOpResult;
 pub use waveform::WaveformData;
 
+/// The waveform a stability run retains its Nyquist contour under.
+///
+/// This is a contract between two modules that never meet: the run writes the
+/// contour into its result's waveform map, and the post-run population reads
+/// it back out by name to seed the Nyquist sheet. Nothing compiles the pair
+/// together, so as two independent string literals a rename on either side
+/// left the sheet quietly showing nothing at all. It lives here, beside the
+/// result the name is a key into, so both ends resolve the same constant.
+pub const STB_NYQUIST_CONTOUR_WAVEFORM: &str = "Nyquist L(jw)";
+
 /// Electrical quantity represented by a transfer-function input or output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferFunctionQuantity {

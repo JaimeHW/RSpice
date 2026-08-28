@@ -476,9 +476,9 @@ fn run_stb(
     if let Some(contour) = data.nyquist {
         super::ensure_not_aborted(abort)?;
         waveforms.insert(
-            "Nyquist L(jw)".to_string(),
+            crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
             WaveformData::new_complex(
-                "Nyquist L(jw)".to_string(),
+                crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM.to_string(),
                 contour.frequencies,
                 contour.real,
                 contour.imaginary,

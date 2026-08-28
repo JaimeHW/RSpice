@@ -6,10 +6,7 @@
 
 use super::*;
 
-/// The waveform a stability run retains its Nyquist contour under. Written by
-/// `simulation::runner::spec::frequency::run_stb`; the two spellings have to
-/// stay in step for the sheet to receive anything.
-const STB_NYQUIST_CONTOUR_WAVEFORM: &str = "Nyquist L(jw)";
+use crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
 
 /// What the locus is, named for the reader rather than for the transport.
 const LOOP_GAIN_LOCUS_LABEL: &str = "L(jω)";
@@ -285,6 +282,30 @@ enum FftSourceKind {
 struct ParsedFftSourceName {
     core: String,
     kind: FftSourceKind,
+}
+
+#[cfg(test)]
+mod contour_name_tests {
+    /// The contour's name is a contract between the run and the sheet, and it
+    /// was two independent string literals in two modules with nothing that
+    /// compiled or tested the pair together. Renaming the writer's spelling
+    /// leaves the reader looking for a waveform that no longer exists, and
+    /// the Nyquist sheet quietly shows nothing at all.
+    #[test]
+    fn the_stability_contour_has_exactly_one_spelling_in_the_crate() {
+        let writer =
+            crate::source_guard::without_test_items(include_str!("../runner/spec/frequency.rs"));
+        assert!(
+            !writer.contains("\"Nyquist L(jw)\""),
+            "the stability run writes the contour name as its own literal instead of the \
+             constant the reader resolves it through"
+        );
+        let reader = crate::source_guard::without_test_items(include_str!("results_post.rs"));
+        assert!(
+            !reader.contains("\"Nyquist L(jw)\""),
+            "the post-run population resolves the contour name from its own literal"
+        );
+    }
 }
 
 #[cfg(test)]
