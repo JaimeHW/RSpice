@@ -138,6 +138,12 @@ const LAYERS: &[(&str, u32)] = &[
 ///
 /// The gate now has its own step in `ci.yml`, so the next growth fails a
 /// build on the commit that causes it rather than accumulating for a fortnight.
+///
+/// Re-measured again 2026-08-28 by the same zero-and-rewrite pass. Three
+/// edges had drifted below their ceiling and now sit on the measurement:
+/// `state -> simulation` 10 → 9, `simulation -> schematic` 3 → 1, and
+/// `app_state -> app` 5 → 4 in the shell table below. Every other edge in
+/// both tables was already exact.
 const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // The `common` <-> `workbench` cycle is retired.
     //
@@ -192,7 +198,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("simulation", "workbench", 28),
     ("io", "workbench", 19),
     // The persisted model reaching up into orchestration and editors.
-    ("state", "simulation", 10),
+    ("state", "simulation", 9),
     ("state", "services", 9),
     ("state", "io", 5),
     ("state", "schematic", 2),
@@ -203,7 +209,7 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
     // the granularity folds and the `properties`/`panels` merge.
     ("io", "simulation", 13),
     ("services", "simulation", 8),
-    ("simulation", "schematic", 3),
+    ("simulation", "schematic", 1),
     ("services", "properties", 2),
 ];
 
@@ -700,7 +706,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above. `-> app` is `DialogState`,
     // which still lives in the dialogs tree.
-    ("app_state", "app", 5),
+    ("app_state", "app", 4),
     ("app_state", "commands", 1),
     ("app_state", "simulation_analysis_tabs", 2),
     ("app_state", "workflows/file_workflow", 1),
@@ -1469,13 +1475,8 @@ fn budgeted_lines(source: &str) -> usize {
 /// `state/pdk_config/technology_package.rs` 4_742, and
 /// `workbench/documents/visualization_studio.rs` 4_695.
 ///
-/// Six entries below now sit under their ceiling — `docks/navigator.rs`
-/// (6_427/6_748), `simulation/controller/prepared_run.rs` (2_761/2_993),
-/// `docks/inspector.rs` (3_487/3_514), `state/workspace.rs` (3_424/3_459),
-/// `state/workspace/tests.rs` (2_974/2_998), and
-/// `documents/result_document/waves.rs` (4_265/4_266). Lowering each to its
-/// measured length is free ground to hold and is worth doing next time one of
-/// them is opened.
+/// Six entries below then sat under their ceiling. Lowering each to its
+/// measured length is free ground to hold — done on 2026-08-28, see below.
 ///
 /// # Two mechanical raises, 2026-08-20
 ///
@@ -1522,26 +1523,45 @@ fn budgeted_lines(source: &str) -> usize {
 /// the noise, FFT, eye and histogram cases to `tests/quick_view.rs`. Those four
 /// share a subject the rest of the file does not: a pane whose hardcopy is
 /// derived from the retained trace rather than being it.
+///
+/// # Every ceiling re-tightened to its measurement, 2026-08-28
+///
+/// Measured by zeroing every ceiling in this file and rewriting the tables
+/// from the failure output, which is the technique the header describes. Ten
+/// entries below carried slack and now sit on their measured length; the
+/// other eleven were already exact.
+///
+/// `documents/result_document.rs` 7_352 → 6_418 is the large one, and the 934
+/// lines are not a tidy-up: the frame-work instrumentation and the viewer
+/// memos moved out from under it. `docks/navigator.rs` 6_748 → 6_668 and the
+/// eight smaller reductions are the residue of the design-panel shelf split,
+/// which took `docks/navigator/design.rs` under the budget outright.
+///
+/// The two whole-number ceilings are deliberately untouched, because neither
+/// has slack to take: `&mut RSpiceApp` measures exactly 873 — the narrowing
+/// lanes stopped the moment the assertion passed — and MAX_LINT_SUPPRESSIONS
+/// is held exact by its own `assert_eq!`. A ceiling equal to its measurement
+/// is the state this file wants; only the ones above it were doing nothing.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
     ("hardcopy/contract.rs", 2_540),
-    ("io/project_io/tests/migration.rs", 2_712),
+    ("io/project_io/tests/migration.rs", 2_702),
     ("results/report_document.rs", 2_551),
-    ("simulation/controller/prepared_run.rs", 2_993),
+    ("simulation/controller/prepared_run.rs", 2_900),
     ("simulation/execution/snapshot.rs", 3_047),
-    ("state/model_library/manager.rs", 3_859),
+    ("state/model_library/manager.rs", 3_847),
     ("state/pdk_config/technology_package.rs", 4_742),
-    ("state/workspace.rs", 3_459),
-    ("state/workspace/tests.rs", 2_998),
+    ("state/workspace.rs", 3_455),
+    ("state/workspace/tests.rs", 2_974),
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
     ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
-    ("workbench/docks/inspector.rs", 3_284),
-    ("workbench/docks/navigator.rs", 6_748),
+    ("workbench/docks/inspector.rs", 3_280),
+    ("workbench/docks/navigator.rs", 6_668),
     ("workbench/documents/model_editor.rs", 2_614),
-    ("workbench/documents/result_document.rs", 7_352),
-    ("workbench/documents/result_document/waves.rs", 4_266),
+    ("workbench/documents/result_document.rs", 6_418),
+    ("workbench/documents/result_document/waves.rs", 4_229),
     ("workbench/documents/visualization_studio.rs", 4_695),
     ("workbench/documents/visualization_studio/dock.rs", 3_520),
-    ("workbench/hardcopy_adapters/sources.rs", 2_568),
+    ("workbench/hardcopy_adapters/sources.rs", 2_546),
     ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
     ("workbench/surfaces/report_authoring.rs", 4_294),
 ];
