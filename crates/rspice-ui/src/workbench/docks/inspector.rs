@@ -14,7 +14,8 @@ use crate::state::{CellViewRef, Component, ComponentType, ViewType, explicit_com
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
-use crate::workbench::documents::result_document::PaneAxis;
+use crate::workbench::documents::result_document::manifest::active_manifest;
+use crate::workbench::documents::result_document::{PaneAxis, analysis_evidence_failure};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::{AppState, MessageId, RSpiceApp, ResultViewer};
 
@@ -1392,13 +1393,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     ui.add_space(8.0);
 
-    let active_run_index = app.state.simulation.active_run_idx;
+    // The workspace's memoized projection: taking it fresh re-digested the run.
+    let manifest = active_manifest(&mut app.state);
     let mut routes = result_authority::AuthorityRoutes::default();
-    if let Some(run) = active_run_index.and_then(|index| app.state.simulation.runs.get(index)) {
-        let manifest =
-            crate::workbench::documents::result_document::manifest::ManifestViewModel::from_run(
-                run,
-            );
+    if let Some((run, manifest)) = app.state.simulation.active_run().zip(manifest.as_deref()) {
         let executed = app
             .state
             .simulation
@@ -1415,7 +1413,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         routes = result_authority::result_dataset_authority(
             ui,
             run,
-            &manifest,
+            &manifest.model,
             executed.as_deref(),
             plan_block,
         );
@@ -1445,10 +1443,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
     }
 
-    let Some(run_index) = active_run_index else {
-        return;
-    };
-    let Some(run) = app.state.simulation.runs.get(run_index) else {
+    let Some(run) = app.state.simulation.active_run() else {
         return;
     };
 
@@ -1593,10 +1588,11 @@ fn selected_result_artifact(
         SimulationRunLifecycle::Aborted => "Cancelled",
         SimulationRunLifecycle::Interrupted => "Interrupted",
     };
-    let integrity = match analysis.validate_retained_evidence() {
-        Ok(()) => "Verified".to_owned(),
-        Err(error) => format!("Corrupted: {error}"),
-    };
+    // Memoized per dataset generation: the validator walks every retained sample.
+    let integrity = analysis_evidence_failure(&app.state, run.dataset_id, analysis).map_or_else(
+        || "Verified".to_owned(),
+        |error| format!("Corrupted: {error}"),
+    );
     let canonical = selected.canonical_name().to_owned();
     let stable_path = format!(
         "dataset/{}/analysis/{analysis_identity}/artifact/{canonical}",

@@ -2215,6 +2215,28 @@ pub(super) fn analysis_evidence_is_valid(
     retained_evidence_is_valid(state, AnalysisPresentationKey::new(dataset_id, analysis))
 }
 
+/// Why one analysis' retained evidence is invalid, when it is.
+///
+/// The verdict comes from the memo, so a sound dataset costs a map lookup; the
+/// validator's own reason is produced only on the rare frame there is one to
+/// state. Readers that show the reason go through here rather than calling the
+/// validator and discarding the answer on every good frame.
+pub(crate) fn analysis_evidence_failure(
+    state: &AppState,
+    dataset_id: DatasetId,
+    analysis: &AnalysisResult,
+) -> Option<String> {
+    if analysis_evidence_is_valid(state, dataset_id, analysis) {
+        return None;
+    }
+    Some(
+        analysis
+            .validate_retained_evidence()
+            .err()
+            .unwrap_or_else(|| "retained evidence failed validation".to_owned()),
+    )
+}
+
 /// The marker tool: armed, a plot click drops a marker on the nearest
 /// visible trace. Off by default — unlike cursors, annotating is a
 /// deliberate act, and an always-armed default would litter the plot.

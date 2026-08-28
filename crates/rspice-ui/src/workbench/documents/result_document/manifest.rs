@@ -253,15 +253,15 @@ impl ManifestViewModel {
 /// over every retained sample in the run. None of that changes while the
 /// reader looks at it, and all of it happened on every frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct ManifestPlan {
+pub(crate) struct ManifestPlan {
     version: u64,
     run: u64,
-    pub(super) model: ManifestViewModel,
+    pub(crate) model: ManifestViewModel,
 }
 
 /// The active run's manifest projection, rebuilt only for a new run or a new
 /// dataset generation.
-pub(super) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
+pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
     let version = state.simulation.data_version;
     let run_id = state.simulation.active_run()?.id;
     if let Some(plan) = state.ui.results.plans.manifest.as_ref()

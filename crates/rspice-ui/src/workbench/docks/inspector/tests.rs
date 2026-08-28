@@ -695,3 +695,26 @@ fn wilson_interval_is_bounded_and_contains_the_observed_rate() {
     assert!(wilson_interval_95(0, 0).is_none());
     assert!(wilson_interval_95(2, 1).is_none());
 }
+
+/// The inspector reads the workspace's answers, not the walks behind them.
+///
+/// Both were whole-dataset work on every frame the panel was open.
+/// `ManifestViewModel::from_run` takes a SHA-256 over every retained sample
+/// in the run to state the dataset digest, and `validate_retained_evidence`
+/// walks every sample of every waveform to state the integrity row. The
+/// Results workspace owns a memo for each — keyed on the dataset generation,
+/// so neither can serve a stale answer — and the inspector is one more reader
+/// of them rather than a second computer of the same facts.
+#[test]
+fn the_result_inspector_routes_through_the_workspace_memos() {
+    let shipped = crate::source_guard::without_test_items(include_str!("../inspector.rs"));
+    assert!(
+        !shipped.contains("ManifestViewModel::from_run"),
+        "the inspector rebuilds the manifest projection, digest and all, every frame"
+    );
+    assert!(
+        !shipped.contains("validate_retained_evidence()"),
+        "the inspector walks the retained evidence itself instead of resolving the \
+         one memo that owns the verdict"
+    );
+}
