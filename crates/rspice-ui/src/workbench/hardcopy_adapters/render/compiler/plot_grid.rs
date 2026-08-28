@@ -1,8 +1,8 @@
 //! How a printed plot's grid is ruled.
 //!
 //! A plot that declares its gridlines gets those, captions and all: a
-//! logarithmic sweep is ruled at its decades, with the nine minor lines inside
-//! each, because that is what its axis has. A plot that declares none keeps
+//! logarithmic sweep is ruled at its decades, with the eight interior mantissas
+//! of each, because that is what its axis has. A plot that declares none keeps
 //! the frame's ten even divisions, which is what a linear sweep deserves — and
 //! what every plot used to get, including the frequency responses that have no
 //! even divisions to rule.
@@ -13,8 +13,8 @@ impl SemanticSceneCompiler<'_> {
     /// Rule the plot's grid.
     ///
     /// A plot that declares its gridlines gets those, captions and all: a
-    /// logarithmic sweep is ruled at its decades, with the nine minor lines
-    /// inside each, because that is what its axis has. A plot that declares
+    /// logarithmic sweep is ruled at its decades, with the eight interior
+    /// mantissas of each, because that is what its axis has. A plot that declares
     /// none keeps the frame's ten even divisions, which is what a linear
     /// sweep deserves and what every plot used to get — including the
     /// frequency responses that have no even divisions to rule.

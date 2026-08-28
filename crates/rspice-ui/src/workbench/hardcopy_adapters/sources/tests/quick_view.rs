@@ -511,8 +511,7 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
 
     assert_eq!(plot.x_scale, AxisScale::Logarithmic);
 
-    // Seven decades, so the minor lines stand down and only the decades are
-    // ruled — and each is captioned with the frequency it stands for.
+    // Seven decade lines, each captioned with the frequency it stands for.
     let major = plot
         .axis_ticks
         .iter()
@@ -526,9 +525,16 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
             .collect::<Vec<_>>(),
         ["1.00", "10.0", "100", "1.00 k", "10.0 k", "100 k", "1.00 M"]
     );
-    assert!(
-        plot.axis_ticks.iter().all(|tick| tick.major),
-        "seven decades is past the point where minor lines read as a grid"
+    // A span of exactly six decades still rules its mantissas, because that
+    // is what the sheet rules: `ui::plot::scale::minor_grid_values` stands
+    // them down past six decades of *span*, and the page follows the sheet.
+    // Eight above each of the first six decades; the seventh is the window's
+    // own right edge and has nothing above it.
+    assert_eq!(
+        plot.axis_ticks.iter().filter(|tick| !tick.major).count(),
+        48,
+        "{:?}",
+        plot.axis_ticks
     );
 
     // Equal decades: 1 Hz on the left inset, 1 kHz in the middle, 1 MHz on
@@ -544,7 +550,7 @@ fn a_frequency_sweep_is_printed_in_decades_and_ruled_at_them() {
         "every decade occupies the same width"
     );
 
-    // A sweep of two decades rules its minor lines as well, nine to a decade.
+    // A sweep of two decades rules its minor lines as well, eight to a decade.
     let frequency = [1.0, 10.0, 100.0];
     let analysis = AnalysisResult::new(7, AnalysisType::Disto, "DISTO").with_waveforms(vec![
         WaveformData::new("V(out)", frequency.to_vec(), vec![1.0, 1.0, 1.0], "#0af"),

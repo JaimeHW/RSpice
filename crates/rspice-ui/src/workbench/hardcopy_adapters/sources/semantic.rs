@@ -264,8 +264,8 @@ pub struct SemanticAxisTick {
     /// Both ends of the line, in page coordinates.
     pub start: SemanticPoint,
     pub end: SemanticPoint,
-    /// The caption, empty for a minor line. A log axis rules nine minor lines
-    /// per decade and captions none of them, exactly as the sheet does.
+    /// The caption, empty for a minor line. A log axis rules the eight interior
+    /// mantissas of a decade and captions none of them, as the sheet does.
     pub label: String,
     pub major: bool,
 }

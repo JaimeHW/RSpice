@@ -16,11 +16,14 @@ use super::*;
 use crate::results::visualization_document::AxisScale;
 use crate::ui::plot::fmt_si_significant;
 
-/// The largest number of decades a printed axis rules individually.
+/// The widest span, in decades, over which a printed axis rules its mantissas.
 ///
 /// Beyond this the minor lines stop being a grid and become a wash, so only
-/// the decade lines themselves are ruled.
-const MINOR_DECADE_LIMIT: usize = 6;
+/// the decade lines themselves are ruled. It is the span the axis covers, not
+/// a count of whole decades that happen to fall inside it — the screen rules
+/// by span (`ui::plot::scale::minor_grid_values`) and the page has to agree,
+/// or the same sweep is a grid on one and a wash on the other.
+const MINOR_DECADE_LIMIT: f64 = 6.0;
 
 /// Project a source value into the space the page is laid out in.
 ///
@@ -40,8 +43,15 @@ pub(super) fn project(scale: AxisScale, value: f64) -> Option<f64> {
 ///
 /// A linear axis keeps the frame's own even divisions, which is what it has
 /// always drawn and what a linear sweep deserves. A logarithmic axis rules
-/// its decades, and the nine minor lines inside each while there are few
-/// enough decades for them to read as a grid rather than as ink.
+/// every decade boundary it contains, and the eight interior mantissas — 2
+/// through 9 — of every decade it touches, while the span is narrow enough
+/// for them to read as a grid rather than as ink.
+///
+/// The mantissas are ruled per decade *touched*, not per decade *contained*.
+/// A 2 kHz to 8 kHz sweep contains no whole decade at all, and ruling only
+/// contained ones left it with no logarithmic ruling whatever — the page fell
+/// back on the frame's even divisions, which is ten equal slices of a span
+/// that has no equal slices.
 pub(super) fn plot_axis_ticks(
     x_scale: AxisScale,
     frame: &PlotFrame,
@@ -49,36 +59,112 @@ pub(super) fn plot_axis_ticks(
     if x_scale != AxisScale::Logarithmic {
         return Ok(Vec::new());
     }
+    if !frame.x_minimum.is_finite() || !frame.x_maximum.is_finite() {
+        return Ok(Vec::new());
+    }
     // The frame's bounds are already in log space, so a decade is an integer.
     let first = frame.x_minimum.ceil() as i64;
     let last = frame.x_maximum.floor() as i64;
-    if last < first {
-        return Ok(Vec::new());
-    }
-    let decades = usize::try_from(last - first + 1).unwrap_or(usize::MAX);
-    let rule_minors = decades <= MINOR_DECADE_LIMIT;
     let mut ticks = Vec::new();
     for decade in first..=last {
-        let exponent = decade as f64;
         push_vertical_rule(
             &mut ticks,
             frame,
-            exponent,
+            decade as f64,
             fmt_si_significant(10.0_f64.powi(decade as i32), "", 3),
             true,
         )?;
-        if !rule_minors {
-            continue;
-        }
-        for step in 2..10 {
-            let position = exponent + f64::from(step).log10();
-            if position > frame.x_maximum {
-                break;
+    }
+    if frame.x_maximum - frame.x_minimum > MINOR_DECADE_LIMIT {
+        return Ok(ticks);
+    }
+    // Every decade the window touches, including the partial ones at its ends.
+    let touched_first = frame.x_minimum.floor() as i64;
+    let touched_last = frame.x_maximum.floor() as i64;
+    for decade in touched_first..=touched_last {
+        let exponent = decade as f64;
+        for mantissa in 2..10 {
+            let position = exponent + f64::from(mantissa).log10();
+            // Strictly inside: a mantissa sitting on the frame's own edge is
+            // the axis boundary, not a subdivision of it.
+            if position <= frame.x_minimum || position >= frame.x_maximum {
+                continue;
             }
             push_vertical_rule(&mut ticks, frame, position, String::new(), false)?;
         }
     }
     Ok(ticks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A frame over `[10^x_minimum, 10^x_maximum]`, already in log space.
+    fn log_frame(x_minimum: f64, x_maximum: f64) -> PlotFrame {
+        PlotFrame {
+            x_minimum,
+            x_maximum,
+            y_minimum: 0.0,
+            y_maximum: 1.0,
+            x_span: x_maximum - x_minimum,
+            y_span: 1.0,
+            plot_width: PLOT_WIDTH_UM - 2 * PLOT_INSET_UM,
+            plot_height: PLOT_HEIGHT_UM - 2 * PLOT_INSET_UM,
+        }
+    }
+
+    fn ticks(x_minimum: f64, x_maximum: f64) -> Vec<SemanticAxisTick> {
+        plot_axis_ticks(AxisScale::Logarithmic, &log_frame(x_minimum, x_maximum))
+            .expect("the frame is inside the page")
+    }
+
+    /// The screen rules its minor lines by the span the axis covers; the page
+    /// counted whole decades that happened to fall inside it. A sweep from
+    /// 3.16 Hz to 7.9 MHz spans 6.4 decades and contains 6 whole ones, so the
+    /// page washed it in minor lines the sheet had already stood down. A
+    /// sweep from 1 Hz to 1 MHz spans exactly 6 and contains 7, so the page
+    /// dropped minor lines the sheet was drawing.
+    #[test]
+    fn minor_lines_stand_down_by_the_span_the_screen_measures() {
+        let wash = ticks(0.5, 6.9);
+        assert!(
+            wash.iter().all(|tick| tick.major),
+            "6.4 decades is past the point where minor lines read as a grid"
+        );
+
+        let ruled = ticks(0.0, 6.0);
+        assert!(
+            ruled.iter().any(|tick| !tick.major),
+            "a sweep of exactly six decades rules its minor lines on the sheet"
+        );
+    }
+
+    /// A sub-decade sweep is ruled at its mantissas.
+    ///
+    /// 1.9 kHz to 8.5 kHz contains no whole decade at all, so the page
+    /// produced no rules whatever and fell back on the frame's even divisions
+    /// — ten equal slices of a span that has no equal slices.
+    #[test]
+    fn a_sub_decade_sweep_is_ruled_at_its_mantissas() {
+        let ticks = ticks(1900.0_f64.log10(), 8500.0_f64.log10());
+        assert!(
+            !ticks.is_empty(),
+            "a sub-decade frequency sweep printed with no logarithmic ruling at all"
+        );
+        // 2 through 8 kHz lie inside the window; there is no decade boundary
+        // in it to label.
+        assert_eq!(ticks.len(), 7);
+        assert!(ticks.iter().all(|tick| !tick.major));
+    }
+
+    /// A decade rules eight interior mantissas — 2 through 9 — not nine.
+    #[test]
+    fn one_decade_rules_eight_interior_mantissas() {
+        let ticks = ticks(1.0, 2.0);
+        assert_eq!(ticks.iter().filter(|tick| tick.major).count(), 2);
+        assert_eq!(ticks.iter().filter(|tick| !tick.major).count(), 8);
+    }
 }
 
 fn push_vertical_rule(
