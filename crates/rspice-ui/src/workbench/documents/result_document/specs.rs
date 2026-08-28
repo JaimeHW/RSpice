@@ -304,9 +304,9 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
     let mut seen = HashSet::new();
     if let Some(run) = state.simulation.active_run() {
         for analysis in &run.analyses {
-            for measurement in &analysis.measurements {
-                if seen.insert(measurement.name.to_ascii_lowercase()) {
-                    names.push(measurement.name.clone());
+            for name in analysis.scalar_evidence_names() {
+                if seen.insert(name.to_ascii_lowercase()) {
+                    names.push(name);
                 }
             }
         }
@@ -349,13 +349,12 @@ fn measurement_candidates<'a>(run: &'a SimulationRun, name: &str) -> Vec<Measure
         .enumerate()
         .flat_map(|(analysis_index, analysis)| {
             analysis
-                .measurements
-                .iter()
-                .filter(move |measurement| measurement.name.eq_ignore_ascii_case(name))
-                .map(move |measurement| MeasurementCandidate {
+                .scalar_evidence(name)
+                .into_iter()
+                .map(move |evidence| MeasurementCandidate {
                     analysis_index,
                     analysis,
-                    value: measurement.value.filter(|value| value.is_finite()),
+                    value: evidence.value,
                 })
         })
         .collect()

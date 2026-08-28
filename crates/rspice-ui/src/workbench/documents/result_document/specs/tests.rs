@@ -11,8 +11,9 @@ use super::{
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{
-    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultProvenance, AnalysisType,
-    SimulationRun, SpecEntry,
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
+    AnalysisType, FloquetOrbitKindEvidence, FloquetSpectrumEvidence,
+    FloquetStabilityVerdictEvidence, SimulationRun, SpecEntry,
 };
 
 /// A hop from the studio's Requirements page names one limit. This table
@@ -204,6 +205,37 @@ fn ambiguous_unbound_measurement_never_selects_an_arbitrary_value() {
     assert_eq!(row.value, None);
     assert_eq!(row.source_analysis_index, None);
     assert!(row.detail.contains("2 retained analyses"));
+}
+
+#[test]
+fn result_rows_consume_durable_pss_scalars_without_a_measurement_copy() {
+    let payload = AnalysisResultPayload::PssFloquet {
+        period_s: Some(2.0),
+        fundamental_frequency_hz: Some(0.5),
+        iterations: Some(2),
+        residual_norm: Some(1.0e-12),
+        multipliers: Vec::new(),
+        floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+        orbit_kind: FloquetOrbitKindEvidence::Driven,
+        trivial_multiplier_index: None,
+        stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+    };
+    let mut run = SimulationRun::new(6);
+    run.add_analysis(AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(payload));
+    let spec = SpecEntry {
+        measurement: "pss.mode_count".to_owned(),
+        expression: "authenticated Floquet spectrum order".to_owned(),
+        min: Some(0.0),
+        max: Some(0.0),
+        unit: "count".to_owned(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+
+    let row = result_row(&run, spec.measurement.clone(), Some(&spec));
+
+    assert_eq!(row.value, Some(0.0));
+    assert_eq!(row.status, SpecResultStatus::Pass);
+    assert_eq!(row.source_analysis_index, Some(0));
 }
 
 #[test]

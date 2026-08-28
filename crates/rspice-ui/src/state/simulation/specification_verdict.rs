@@ -254,16 +254,9 @@ fn candidates_for(
                 };
 
             let analysis_level = analysis
-                .measurements
-                .iter()
-                .filter(move |measurement| measurement.name.eq_ignore_ascii_case(&spec.measurement))
-                .map(move |measurement| {
-                    make(
-                        measurement.value,
-                        measurement.passed && measurement.error.is_none(),
-                        None,
-                    )
-                });
+                .scalar_evidence(&spec.measurement)
+                .into_iter()
+                .map(move |evidence| make(evidence.value, evidence.passed, None));
 
             // A family that measured its own members answers the limit over all
             // of them. This is what makes a Monte Carlo trial set or an
@@ -409,7 +402,9 @@ mod tests {
     use super::*;
     use crate::product::{ContentDigest, ObjectRevision, SimulationPlanId};
     use crate::state::{
-        AnalysisResultProvenance, AnalysisType, SpecEntry, SpecPointScope, SpecificationDefinition,
+        AnalysisResultPayload, AnalysisResultProvenance, AnalysisType, FloquetOrbitKindEvidence,
+        FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence, SpecEntry, SpecPointScope,
+        SpecificationDefinition,
     };
 
     fn result(sequence: u64, source_id: AnalysisInstanceId, value: f64) -> AnalysisResult {
@@ -512,6 +507,48 @@ mod tests {
             &review_verdicts,
             &[result(3, producing_analysis, 9.5)],
         ));
+    }
+
+    #[test]
+    fn a_specification_can_bind_directly_to_authenticated_pss_scalar_evidence() {
+        let source = AnalysisInstanceId::new();
+        let analysis = AnalysisResult::new(1, AnalysisType::Pss, "PSS")
+            .with_result_payload(AnalysisResultPayload::PssFloquet {
+                period_s: Some(2.0),
+                fundamental_frequency_hz: Some(0.5),
+                iterations: Some(2),
+                residual_norm: Some(1.0e-12),
+                multipliers: Vec::new(),
+                floquet_evidence: FloquetSpectrumEvidence::NoDynamicModes,
+                orbit_kind: FloquetOrbitKindEvidence::Driven,
+                trivial_multiplier_index: None,
+                stability_verdict: FloquetStabilityVerdictEvidence::Stable,
+            })
+            .with_provenance(
+                AnalysisResultProvenance::new(
+                    source,
+                    ObjectRevision::INITIAL,
+                    ContentDigest::from_bytes([0x71; 32]),
+                    Vec::new(),
+                )
+                .unwrap(),
+            );
+        let specification = PreparedSpecification::new(SpecEntry {
+            measurement: "pss.mode_count".to_owned(),
+            expression: "authenticated Floquet spectrum order".to_owned(),
+            min: Some(0.0),
+            max: Some(0.0),
+            unit: "count".to_owned(),
+            scope: SpecPointScope::AllPoints,
+        })
+        .unwrap();
+
+        let verdicts = evaluate_specifications(&[specification], &[analysis]);
+
+        assert_eq!(verdicts.len(), 1);
+        assert_eq!(verdicts[0].status(), SpecificationVerdictStatus::Pass);
+        assert_eq!(verdicts[0].worst_value(), Some(0.0));
+        assert_eq!(verdicts[0].evidence_count(), 1);
     }
 
     #[test]
