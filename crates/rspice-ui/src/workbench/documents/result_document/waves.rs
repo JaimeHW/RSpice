@@ -48,6 +48,7 @@ use crate::workbench::{
     ComplexNumberDisplay, CursorInterpolation, LargeDatasetDisplay, ResultPresentationPolicy,
 };
 
+use super::frame_work::{self, FrameSampleRead};
 use super::strip::{LegendChip, StripHeader};
 use super::{
     AnalysisPresentationKey, DerivedSeries, ExprEditor, ExprSeries, ExprTrace,
@@ -75,6 +76,10 @@ const SHARED_X_LANE_HEIGHT: f32 = 14.0;
 /// of the full retained sweep. It is the reciprocal of the zoom ceiling, so
 /// dragging a handle cannot reach a magnification the zoom controls refuse.
 const SHARED_X_MIN_WINDOW: f64 = 1.0 / 200.0;
+/// Points the overview lane's mini-trace is drawn from, whatever the run
+/// retained. The lane is fourteen pixels tall and a plot wide, so a denser
+/// curve would not reach the reader as anything but the same grey band.
+const SHARED_X_OVERVIEW_POINTS: usize = 160;
 // Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
 // X-strip's band labels; the right edge keeps only a 14 px breathing strip
 // now that no pane owns a secondary axis.
@@ -3155,27 +3160,29 @@ fn show_shared_x_axis(
             .iter()
             .find(|trace| trace.visible && !trace.overlay)
         {
-            let (minimum, maximum) = trace
-                .y
-                .iter()
-                .copied()
-                .filter(|value| value.is_finite())
-                .fold(
-                    (f64::INFINITY, f64::NEG_INFINITY),
-                    |(minimum, maximum), value| (minimum.min(value), maximum.max(value)),
-                );
-            let (minimum, maximum) = if minimum.is_finite() && maximum.is_finite() {
-                (minimum, maximum)
-            } else {
-                (0.0, 1.0)
-            };
+            // The lane's vertical fit is the trace's own finite extremes,
+            // which the pane axis above it already holds under this very key.
+            // Folding them again here was a second full pass over the
+            // retained samples on every frame, for a curve fourteen pixels
+            // tall.
+            let (minimum, maximum) = state
+                .ui
+                .results
+                .derived
+                .range_or(trace_key(model, trace), || super::finite_extremes(&trace.y))
+                .unwrap_or((0.0, 1.0));
             let span = (maximum - minimum).max(f64::EPSILON);
-            let points = trace
-                .x
-                .iter()
-                .zip(trace.y.iter())
-                .step_by((trace.x.len() / 160).max(1))
-                .filter_map(|(&x, &y)| {
+            // Index the stride instead of stepping an iterator over it:
+            // `step_by` has only `Iterator::nth` to skip with, and a `Zip`
+            // has no `nth` of its own, so reaching every 1 562nd sample of a
+            // quarter-million-sample sweep visited all 250 000 of them.
+            let paired = trace.x.len().min(trace.y.len());
+            let stride = (trace.x.len() / SHARED_X_OVERVIEW_POINTS).max(1);
+            frame_work::note_samples(FrameSampleRead::StripOverview, paired.div_ceil(stride));
+            let points = (0..paired)
+                .step_by(stride)
+                .filter_map(|index| {
+                    let (x, y) = (trace.x[index], trace.y[index]);
                     let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
                     (fraction.is_finite() && y.is_finite()).then(|| {
                         egui::pos2(

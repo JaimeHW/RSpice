@@ -79,51 +79,119 @@ pub(super) fn note(_walk: DatasetWalk) {
     COUNTS.with(|counts| counts.borrow_mut()[_walk as usize] += 1);
 }
 
+/// One class of per-frame painting work that reads retained samples.
+///
+/// [`DatasetWalk`] counts work that must not happen at all in a steady frame.
+/// The paths named here are different: they legitimately touch the dataset on
+/// every frame — the overview lane under a strip redraws its mini-trace
+/// whatever the reader is doing — so the question is never whether they read
+/// it, but how much of it. A walk counter cannot tell reading a hundred
+/// samples from reading a million, because neither is a *complete* walk of a
+/// multi-waveform dataset, and that is exactly where a per-frame cost
+/// proportional to the whole run hid behind a clean idle-frame gate.
+///
+/// Ordinal values index the counter table, so variants are appended rather
+/// than reordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) enum FrameSampleRead {
+    /// The mini-trace drawn in a strip's shared-X overview lane.
+    StripOverview,
+    /// [`super::finite_extremes`]: one pass over a series for its bounds.
+    TraceExtremes,
+}
+
+impl FrameSampleRead {
+    /// Every variant, for reporting a complete count table.
+    #[cfg(test)]
+    pub(super) const ALL: [Self; 2] = [Self::StripOverview, Self::TraceExtremes];
+}
+
+/// Report how many retained samples a per-frame painting path is about to
+/// read, at the point it reads them.
+#[inline]
+pub(super) fn note_samples(_read: FrameSampleRead, _samples: usize) {
+    #[cfg(test)]
+    SAMPLES.with(|samples| samples.borrow_mut()[_read as usize] += _samples as u64);
+}
+
 #[cfg(test)]
 thread_local! {
     static COUNTS: std::cell::RefCell<[u64; DatasetWalk::ALL.len()]> =
         const { std::cell::RefCell::new([0; DatasetWalk::ALL.len()]) };
+    static SAMPLES: std::cell::RefCell<[u64; FrameSampleRead::ALL.len()]> =
+        const { std::cell::RefCell::new([0; FrameSampleRead::ALL.len()]) };
 }
 
 /// Counted whole-dataset work, as a snapshot that arithmetic can be done on.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct WorkCounts([u64; DatasetWalk::ALL.len()]);
+pub(super) struct WorkCounts {
+    walks: [u64; DatasetWalk::ALL.len()],
+    samples: [u64; FrameSampleRead::ALL.len()],
+}
 
 #[cfg(test)]
 impl WorkCounts {
+    const ZERO: Self = Self {
+        walks: [0; DatasetWalk::ALL.len()],
+        samples: [0; FrameSampleRead::ALL.len()],
+    };
+
     /// The counts accumulated so far on this thread.
     pub(super) fn read() -> Self {
-        Self(COUNTS.with(|counts| *counts.borrow()))
+        Self {
+            walks: COUNTS.with(|counts| *counts.borrow()),
+            samples: SAMPLES.with(|samples| *samples.borrow()),
+        }
     }
 
     /// Reset the counters and return a zero snapshot to measure against.
     pub(super) fn reset() -> Self {
-        COUNTS.with(|counts| *counts.borrow_mut() = [0; DatasetWalk::ALL.len()]);
-        Self([0; DatasetWalk::ALL.len()])
+        COUNTS.with(|counts| *counts.borrow_mut() = Self::ZERO.walks);
+        SAMPLES.with(|samples| *samples.borrow_mut() = Self::ZERO.samples);
+        Self::ZERO
     }
 
     /// Work counted since `self` was taken.
     pub(super) fn since(self) -> Self {
         let now = Self::read();
-        let mut delta = [0; DatasetWalk::ALL.len()];
-        for (index, slot) in delta.iter_mut().enumerate() {
-            *slot = now.0[index] - self.0[index];
+        let mut delta = Self::ZERO;
+        for (index, slot) in delta.walks.iter_mut().enumerate() {
+            *slot = now.walks[index] - self.walks[index];
         }
-        Self(delta)
+        for (index, slot) in delta.samples.iter_mut().enumerate() {
+            *slot = now.samples[index] - self.samples[index];
+        }
+        delta
     }
 
     /// Count for one class of work.
     pub(super) const fn get(self, walk: DatasetWalk) -> u64 {
-        self.0[walk as usize]
+        self.walks[walk as usize]
+    }
+
+    /// Retained samples read by one class of per-frame painting work.
+    pub(super) const fn samples(self, read: FrameSampleRead) -> u64 {
+        self.samples[read as usize]
     }
 
     /// Total whole-dataset walks across every class.
     pub(super) const fn total(self) -> u64 {
         let mut total = 0;
         let mut index = 0;
-        while index < self.0.len() {
-            total += self.0[index];
+        while index < self.walks.len() {
+            total += self.walks[index];
+            index += 1;
+        }
+        total
+    }
+
+    /// Total retained samples read across every painting class.
+    pub(super) const fn total_samples(self) -> u64 {
+        let mut total = 0;
+        let mut index = 0;
+        while index < self.samples.len() {
+            total += self.samples[index];
             index += 1;
         }
         total
@@ -136,6 +204,15 @@ impl WorkCounts {
             .into_iter()
             .filter(|walk| self.get(*walk) > 0)
             .map(|walk| (walk, self.get(walk)))
+            .collect()
+    }
+
+    /// The painting classes that read anything, on the same terms.
+    pub(super) fn nonzero_samples(self) -> Vec<(FrameSampleRead, u64)> {
+        FrameSampleRead::ALL
+            .into_iter()
+            .filter(|read| self.samples(*read) > 0)
+            .map(|read| (read, self.samples(read)))
             .collect()
     }
 }

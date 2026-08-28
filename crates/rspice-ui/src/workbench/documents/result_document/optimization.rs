@@ -319,7 +319,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     } else {
         auto_x0.abs().mul_add(0.025, 1.0)
     };
-    let (cost_min, cost_max) = super::finite_extremes(&view.cost.y).unwrap_or((0.0, 1.0));
+    // The convergence axis fits to the retained cost history, which does not
+    // change while the reader looks at it. Scanning for its bounds on every
+    // frame made an idle sheet cost one pass over the whole optimizer history.
+    let cost_key = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (analysis_key, "optimization-cost").hash(&mut hasher);
+        hasher.finish()
+    };
+    let (cost_min, cost_max) = state
+        .ui
+        .results
+        .derived
+        .range_or(cost_key, || super::finite_extremes(&view.cost.y))
+        .unwrap_or((0.0, 1.0));
     let y_pad = if cost_min < cost_max {
         (cost_max - cost_min) * 0.10
     } else {

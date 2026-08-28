@@ -3800,6 +3800,7 @@ pub struct BodeDerived {
 
 /// Finite (min, max) of a slice, if any finite values exist.
 pub(super) fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
+    frame_work::note_samples(frame_work::FrameSampleRead::TraceExtremes, values.len());
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for &v in values {

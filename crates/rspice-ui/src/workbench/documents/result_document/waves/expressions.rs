@@ -548,10 +548,21 @@ pub(super) fn resolve_strip_exprs(
                 .shape_or(cache_key ^ version.rotate_left(7), || {
                     SweepShape::of(&projection.x)
                 });
+            // Cached beside the shape, under the same identity: the pane's
+            // automatic fit wants an expression's bounds on every frame, and
+            // resolving a strip happens twice per frame, so scanning for them
+            // here cost two full passes over the evaluated series each time.
+            let y_extremes = state
+                .ui
+                .results
+                .derived
+                .range_or(cache_key ^ version.rotate_left(7), || {
+                    super::super::finite_extremes(&projection.y)
+                });
             resolved.push(ResolvedExpr {
                 x: projection.x,
                 shape,
-                y_extremes: super::super::finite_extremes(&projection.y),
+                y_extremes,
                 y: projection.y,
                 color: family_style.map_or(base_color, |style| family_color(style, base_color)),
                 cache_key,

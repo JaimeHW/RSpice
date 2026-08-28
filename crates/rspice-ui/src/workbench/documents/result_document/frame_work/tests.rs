@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{DatasetWalk, WorkCounts};
+use super::{DatasetWalk, FrameSampleRead, WorkCounts};
 // Through the module under measurement rather than around it: this drives the
 // Results workspace's own surfaces with the session type that workspace
 // already holds, and does not reach for the session aggregate on its own.
@@ -323,7 +323,36 @@ fn state_for(viewer: ResultViewer) -> AppState {
         ResultViewer::Optimization => select_analysis(&mut state, AnalysisType::Optimization),
         _ => select_analysis(&mut state, AnalysisType::Transient),
     }
+    if viewer == ResultViewer::Waves {
+        add_transient_expression(&mut state);
+    }
     state
+}
+
+/// Put one visible expression on the transient strip.
+///
+/// An expression is a second retained series the strip has to fit its axis to
+/// on every frame, and resolving a strip happens twice per frame — so it is
+/// where a per-frame full scan hides most easily. Without one on the fixture,
+/// every gate here is measuring a Waves sheet the product rarely shows.
+fn add_transient_expression(state: &mut AppState) {
+    let run = state
+        .simulation
+        .active_run()
+        .expect("the fixture selects a run");
+    let analysis = run
+        .analyses
+        .iter()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Transient)
+        .expect("the fixture retains a transient analysis");
+    let key = super::super::AnalysisPresentationKey::new(run.dataset_id, analysis);
+    state.ui.results.analysis_exprs.insert(
+        key,
+        vec![super::super::ExprTrace {
+            text: "V(n0) * 2".to_owned(),
+            visible: true,
+        }],
+    );
 }
 
 /// The permanent gate.
@@ -495,6 +524,63 @@ fn report_idle_frame_work() {
     }
 }
 
+/// Retained samples one surface may read across [`IDLE_FRAMES`] steady frames.
+///
+/// What is drawn sets it. The only surface that legitimately reads the dataset
+/// on a steady frame is the overview lane under a Waves strip, which draws a
+/// fixed 160 points (plus the partial last stride) per strip; this fixture has
+/// two time-domain strips, so 3 280 over ten frames. Four thousand leaves room
+/// for a third strip and is still three orders of magnitude under the
+/// 5 050 000 an unmemoized lane read.
+const STEADY_SAMPLE_CEILING_PER_SURFACE: u64 = 4_000;
+
+/// The second gate: a steady frame may read the dataset, but only as much of
+/// it as it draws.
+///
+/// The walk gate above cannot see this. Nothing here walks a *complete*
+/// dataset — an overview lane reads one trace of several, an axis fit reads
+/// one series — so it counted zero while the Waves sheet spent most of its
+/// frame reading a quarter of a million samples to place a hundred and sixty
+/// points. What makes the difference visible is counting the samples.
+#[test]
+fn no_steady_frame_reads_more_of_the_dataset_than_it_draws() {
+    let mut reads = BTreeMap::new();
+    for (name, viewer) in surfaces() {
+        let mut state = state_for(viewer);
+        let work = steady_state_work(&mut state, |ui, state| show_surface(viewer, ui, state));
+        if work.total_samples() > STEADY_SAMPLE_CEILING_PER_SURFACE {
+            reads.insert(name, (work.total_samples(), work.nonzero_samples()));
+        }
+    }
+    assert!(
+        reads.is_empty(),
+        "over {IDLE_FRAMES} idle frames these surfaces read more than \
+         {STEADY_SAMPLE_CEILING_PER_SURFACE} retained samples, which is more than they draw \
+         (surface -> (samples, [(class, samples)])):\n{reads:#?}"
+    );
+}
+
+/// The sample counter is only worth having if it can see the work. The first
+/// frame proves it: with no memo to read, it must count the reads the steady
+/// frames then refuse to repeat at that scale.
+#[test]
+fn the_first_frame_counts_the_samples_the_steady_frames_must_not_reread() {
+    let mut state = state_for(ResultViewer::Waves);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let baseline = WorkCounts::reset();
+    frame(&ctx, &mut state, &mut |ui, state| {
+        show_surface(ResultViewer::Waves, ui, state);
+    });
+    let first = baseline.since();
+    assert!(
+        first.samples(FrameSampleRead::TraceExtremes) >= TRANSIENT_SAMPLES as u64,
+        "the first Waves frame read {} samples for trace extremes, fewer than the \
+         {TRANSIENT_SAMPLES} one retained waveform holds, so the sample gate is vacuous",
+        first.samples(FrameSampleRead::TraceExtremes)
+    );
+}
+
 #[test]
 fn the_counter_reports_exactly_the_walks_that_were_noted() {
     let baseline = WorkCounts::reset();
@@ -507,6 +593,7 @@ fn the_counter_reports_exactly_the_walks_that_were_noted() {
     assert_eq!(delta.get(DatasetWalk::EyeRaster), 1);
     assert_eq!(delta.get(DatasetWalk::OpPlan), 0);
     assert_eq!(delta.total(), 3);
+    assert_eq!(delta.total_samples(), 0);
     assert_eq!(
         delta.nonzero(),
         vec![(DatasetWalk::WaveXRange, 2), (DatasetWalk::EyeRaster, 1)]
@@ -514,9 +601,33 @@ fn the_counter_reports_exactly_the_walks_that_were_noted() {
 }
 
 #[test]
+fn the_counter_reports_exactly_the_samples_that_were_read() {
+    let baseline = WorkCounts::reset();
+    super::note_samples(FrameSampleRead::StripOverview, 160);
+    super::note_samples(FrameSampleRead::StripOverview, 1);
+    super::note_samples(FrameSampleRead::TraceExtremes, 250_000);
+
+    let delta = baseline.since();
+    assert_eq!(delta.samples(FrameSampleRead::StripOverview), 161);
+    assert_eq!(delta.samples(FrameSampleRead::TraceExtremes), 250_000);
+    assert_eq!(delta.total_samples(), 250_161);
+    assert_eq!(delta.total(), 0);
+    assert_eq!(
+        delta.nonzero_samples(),
+        vec![
+            (FrameSampleRead::StripOverview, 161),
+            (FrameSampleRead::TraceExtremes, 250_000)
+        ]
+    );
+}
+
+#[test]
 fn a_reset_snapshot_measures_only_work_that_follows_it() {
     super::note(DatasetWalk::OpPlan);
+    super::note_samples(FrameSampleRead::StripOverview, 999);
     let baseline = WorkCounts::reset();
     assert_eq!(baseline.total(), 0);
+    assert_eq!(baseline.total_samples(), 0);
     assert_eq!(baseline.since().total(), 0);
+    assert_eq!(baseline.since().total_samples(), 0);
 }
