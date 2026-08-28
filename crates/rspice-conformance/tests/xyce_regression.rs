@@ -11302,6 +11302,59 @@ fn test_xyce_bug1085_i0_user_function_relational_oracle() {
     }
 }
 
+#[test]
+fn test_xyce_bug141_native_solver_backend_completion_family() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_141_SON/bug_141-empty.cir",
+            "bug141_native_solver_backend_completion_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_141_SON/abs.cir",
+            "bug141_native_solver_backend_completion_worker",
+            Some("Netlists/Certification_Tests/BUG_141_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_141_SON/bug_138_1.cir",
+            "bug141_native_solver_backend_completion_worker",
+            Some("Netlists/Certification_Tests/BUG_141_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_141_SON/dig_count.cir",
+            "bug141_native_solver_backend_completion_worker",
+            Some("Netlists/Certification_Tests/BUG_141_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_141_SON/poly.cir",
+            "bug141_native_solver_backend_completion_worker",
+            Some("Netlists/Certification_Tests/BUG_141_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            expected_exclusion.is_none(),
+            "only the comments-only BUG141 deck owns the historical wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should complete its explicitly selected KLU/Faer backend contract, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

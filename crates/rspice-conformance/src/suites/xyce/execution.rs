@@ -6,6 +6,7 @@
 
 use super::contracts_bug28::Bug28Role;
 use super::contracts_bug113::Bug113Role;
+use super::contracts_bug141::Bug141Role;
 use super::contracts_bug307::Bug307Role;
 use super::contracts_bug352::Bug352Role;
 use super::contracts_bug689::Bug689Role;
@@ -132,6 +133,23 @@ impl XyceTestRunner {
         if let Some(role) = Bug113Role::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug113_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug141Role::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug141_oracle(deck, role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
