@@ -215,7 +215,20 @@ fn is_noise_analysis(analysis_type: AnalysisType) -> bool {
 /// no noise intent for the binding to honour.
 pub(super) fn selected_noise_analysis_index(state: &AppState) -> Option<usize> {
     let run = state.simulation.active_run()?;
-    if let Some(selected) = state.simulation.active_analysis_idx
+    selected_noise_analysis_index_in(state.simulation.active_analysis_idx, run)
+}
+
+/// The same binding, from the selection and the run rather than the session.
+///
+/// The printed page resolves the analysis it prints from a run and a selection
+/// it already holds, and it must reach the same one the sheet did — a page
+/// that steps to a neighbouring result puts another analysis' contributors
+/// under the selected one's name, on paper.
+pub(super) fn selected_noise_analysis_index_in(
+    globally_selected: Option<usize>,
+    run: &crate::state::SimulationRun,
+) -> Option<usize> {
+    if let Some(selected) = globally_selected
         && let Some(analysis) = run.analyses.get(selected)
         && is_noise_analysis(analysis.analysis_type)
     {

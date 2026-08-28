@@ -112,25 +112,49 @@ pub(crate) fn smith_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     smith::analysis_is_renderable(analysis)
 }
 
+/// Whether one analysis carries an ordinary-noise spectrum a reader may see.
+///
+/// Exposed to the crate because the printed page has to make the same
+/// offering the sheet does — it used to keep its own copy of this predicate
+/// and of the binding below, with a comment saying they mirrored these.
+pub(crate) fn ordinary_noise_spectrum_is_renderable(analysis: &AnalysisResult) -> bool {
+    bode::ordinary_noise_spectrum_is_renderable(analysis)
+}
+
+/// The one noise analysis a run's ordinary-noise surfaces bind to.
+pub(crate) fn selected_noise_analysis_index(
+    globally_selected: Option<usize>,
+    run: &SimulationRun,
+) -> Option<usize> {
+    bode::selected_noise_analysis_index_in(globally_selected, run)
+}
+
 pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
     phase_noise::phase_noise_waveform_is_renderable(waveform)
 }
 
+/// Whether the tab strip offers a frequency-response sheet for one analysis.
+///
+/// The success gate belongs to both branches. A Bode summary resolves off the
+/// retained magnitude and phase vectors alone, so a failed AC solve still
+/// produces one — and the sheet behind this offering refuses a failed solve
+/// outright, because margins read off vectors the engine emitted before
+/// giving up are not measurements. Only the raw-curve branch was checking.
 pub(crate) fn bode_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
-    crate::state::ac_bode_summary_for_analysis(analysis, 0).is_some()
-        || (analysis.success
-            && analysis.analysis_type.is_raw_frequency_curve()
-            && analysis.waveforms.iter().any(|waveform| {
-                waveform.visible
-                    && waveform.x.len() == waveform.y.len()
-                    && waveform.x.len() >= 2
-                    && waveform
-                        .x
-                        .iter()
-                        .zip(waveform.y.iter())
-                        .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
-                    && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
-            }))
+    analysis.success
+        && (crate::state::ac_bode_summary_for_analysis(analysis, 0).is_some()
+            || (analysis.analysis_type.is_raw_frequency_curve()
+                && analysis.waveforms.iter().any(|waveform| {
+                    waveform.visible
+                        && waveform.x.len() == waveform.y.len()
+                        && waveform.x.len() >= 2
+                        && waveform
+                            .x
+                            .iter()
+                            .zip(waveform.y.iter())
+                            .all(|(&x, &y)| x.is_finite() && x > 0.0 && y.is_finite())
+                        && waveform.x.windows(2).all(|pair| pair[0] < pair[1])
+                })))
 }
 
 /// Open the dataset/manifest browser in its canonical Results frame.
