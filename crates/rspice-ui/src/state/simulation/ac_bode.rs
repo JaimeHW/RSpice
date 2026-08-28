@@ -19,7 +19,12 @@ use super::{AnalysisResult, AnalysisType, SharedWaveformValues, SimulationRun, W
 ///
 /// The instability phases are `-180° - 360k` for `k >= 0`: the lag-sense
 /// inversions a loop transmission reaches as it rolls off. Phase margin is the
-/// textbook `180° + ∠L(f_ugf)` against the first of them.
+/// textbook `180° + ∠L(f_ugf)` against the first of them, folded into
+/// `(-180°, 180°]` by [`crate::results::stability::phase_margin_deg`] — the
+/// turn MATLAB, ADS and Spectre all report a margin in, and the turn the
+/// Nyquist card reports in. When the fold moved the number,
+/// [`AcBodeMetrics::pm_phase_deg`] carries the angle it was folded from and
+/// the card says so beside the margin.
 ///
 /// Either curve can reach its level more than once. Both margins then name the
 /// crossing that *binds* — the one a perturbation reaches first, `min |GM_dB|`
@@ -39,8 +44,17 @@ pub struct AcBodeMetrics {
     /// Frequency of the unity-gain crossing the phase margin was measured at.
     pub ugf: Option<f64>,
     /// Binding phase margin: the smallest `|PM|` over every unity-gain
-    /// crossing in the swept band, reported signed.
+    /// crossing in the swept band, reported signed and folded into one turn.
     pub pm_deg: Option<f64>,
+    /// Unwrapped `∠L` at the crossing [`AcBodeMetrics::pm_deg`] was read at.
+    ///
+    /// The margin is folded into `(-180°, 180°]`; this is what it was folded
+    /// from. They differ exactly when the loop's phase left that turn before
+    /// crossover — a wound loop, or one with net lead — and a folded margin
+    /// reads healthy on a loop that is not, so the card has to say which case
+    /// it is in. [`crate::results::stability::phase_margin_is_folded`] asks
+    /// that question of this value.
+    pub pm_phase_deg: Option<f64>,
     /// Frequency of the phase inversion the gain margin was measured at.
     pub f180: Option<f64>,
     /// Binding gain margin: the smallest `|GM_dB|` over every phase inversion
@@ -348,8 +362,18 @@ fn phase_inversion_frequencies(frequency: &[f64], phase_unwrapped: &[f64]) -> Ve
 /// instability, which is the perturbation a gain error actually applies, and
 /// the crossing MATLAB's `margin` names. The reported value keeps its sign, so
 /// a negative gain margin still says the loop is already past that crossing.
-/// Ties go to the inversion nearest unity gain, which is the one the reader is
-/// looking at.
+/// Ties — two inversions the sweep cannot separate, being good to about
+/// [`crate::results::stability::GAIN_MARGIN_TIE_DECIBELS`] — go to the
+/// inversion nearest the unity-gain frequency in log-frequency, which is the
+/// one the loop is working at.
+///
+/// The tie band is not a nicety. Two inversions can sit the same distance
+/// either side of unity, one with headroom and one already past the critical
+/// point; separating them on a hundredth of that distance makes the *sign* of
+/// the reported margin a function of the sweep's point density. The Nyquist
+/// card applies the same band, sequentially over the same crossing order, so
+/// the two cards resolve such a dead heat to the same inversion — see
+/// `crate::analysis::nyquist`'s agreement module.
 fn binding_gain_margin(
     frequency: &[f64],
     log_frequency: &[f64],
@@ -358,15 +382,20 @@ fn binding_gain_margin(
     ugf: Option<f64>,
 ) -> Option<(f64, f64)> {
     let reference = ugf.filter(|f| *f > 0.0).map(f64::log10);
+    let distance =
+        |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
     phase_inversion_frequencies(frequency, phase_unwrapped)
         .into_iter()
         .map(|f180| (f180, -sample_at_log_frequency(log_frequency, gain_db, f180)))
-        .min_by(|a, b| {
-            let distance =
-                |f: f64| reference.map_or(f.log10(), |reference| (f.log10() - reference).abs());
-            a.1.abs()
-                .total_cmp(&b.1.abs())
-                .then_with(|| distance(a.0).total_cmp(&distance(b.0)))
+        .reduce(|best, candidate| {
+            let binds = if (candidate.1.abs() - best.1.abs()).abs()
+                <= crate::results::stability::GAIN_MARGIN_TIE_DECIBELS
+            {
+                distance(candidate.0) < distance(best.0)
+            } else {
+                candidate.1.abs() < best.1.abs()
+            };
+            if binds { candidate } else { best }
         })
 }
 
@@ -380,18 +409,27 @@ fn binding_gain_margin(
 /// of in log magnitude — and the reported sign is retained. Ties go to the
 /// lowest crossing. `ugf` names the crossing the margin was read at, so the
 /// card's two rows always describe the same point on the curve.
+///
+/// The margin is folded into `(-180°, 180°]` before it is either compared or
+/// reported. Folding only the reported value would let this card select a
+/// crossing on one quantity and print another, which is how it and the
+/// Nyquist card came to name different unity-gain frequencies on a loop whose
+/// phase had wound. The third element is the unwrapped angle the fold was
+/// applied to, which is what a wound loop has to be reported *with*.
 fn binding_phase_margin(
     frequency: &[f64],
     log_frequency: &[f64],
     gain_db: &[f64],
     phase_unwrapped: &[f64],
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, f64)> {
     log_frequency_crossings(frequency, gain_db, 0.0)
         .into_iter()
         .map(|ugf| {
+            let loop_phase = sample_at_log_frequency(log_frequency, phase_unwrapped, ugf);
             (
                 ugf,
-                180.0 + sample_at_log_frequency(log_frequency, phase_unwrapped, ugf),
+                crate::results::stability::phase_margin_deg(loop_phase),
+                loop_phase,
             )
         })
         .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
@@ -481,6 +519,7 @@ fn metrics_from_curves(
         adc_is_dc: low_frequency_gain_is_dc(frequency, gain_db),
         ugf,
         pm_deg: None,
+        pm_phase_deg: None,
         f180: None,
         gm_db: None,
         f3db,
@@ -491,11 +530,12 @@ fn metrics_from_curves(
     if let Some(phase) = phase_deg {
         let log_frequency = log_frequency_axis(frequency);
         let unwrapped = unwrap_retained_phase_deg(phase);
-        if let Some((ugf, pm_deg)) =
+        if let Some((ugf, pm_deg, pm_phase_deg)) =
             binding_phase_margin(frequency, &log_frequency, gain_db, &unwrapped)
         {
             metrics.ugf = Some(ugf);
             metrics.pm_deg = Some(pm_deg);
+            metrics.pm_phase_deg = Some(pm_phase_deg);
         }
         if let Some((f180, gm_db)) =
             binding_gain_margin(frequency, &log_frequency, gain_db, &unwrapped, metrics.ugf)

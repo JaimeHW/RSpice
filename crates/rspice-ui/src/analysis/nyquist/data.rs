@@ -116,6 +116,15 @@ pub struct NyquistMargin {
     pub value: f64,
     /// The interpolated crossing frequency, in Hz.
     pub frequency: f64,
+    /// Unwrapped `∠L` at this crossing, in degrees.
+    ///
+    /// For a phase margin it is the angle
+    /// [`crate::results::stability::phase_margin_deg`] folded into one turn to
+    /// produce `value`, and the two differ exactly when the loop's phase had
+    /// left that turn before crossover. For a gain margin it is the inversion
+    /// the crossing sits on — `-180° - 360k` — which names *which* inversion
+    /// the margin was read at rather than only where.
+    pub phase_deg: f64,
 }
 
 /// |L(jω_max)| below which the chord back to the conjugate mirror stands in
@@ -133,15 +142,7 @@ const SETTLED_HIGH_FREQUENCY_MAGNITUDE: f64 = 0.1;
 /// closure stops depending on where exactly the sweep began.
 const SETTLED_LOW_FREQUENCY_AXIS_RATIO: f64 = 1.0e-2;
 
-/// How close two −180° crossings have to be in dB before the gain margin
-/// stops preferring either on magnitude and breaks the tie at the unity-gain
-/// frequency instead.
-///
-/// A hundredth of a dB is what the interpolation between sweep samples is
-/// good to, so anything inside it is a distinction the measurement does not
-/// carry — and picking on it would make the reported crossing a function of
-/// the sweep's point density.
-const GAIN_MARGIN_TIE_DECIBELS: f64 = 1.0e-2;
+use crate::results::stability::GAIN_MARGIN_TIE_DECIBELS;
 
 // =============================================================================
 // Nyquist Data
@@ -304,10 +305,10 @@ impl NyquistData {
     /// have to name the same crossing for the same loop.
     pub fn gain_margin(&self) -> Option<NyquistMargin> {
         let branch = self.measured_branch()?;
-        let unity_gain = branch.binding_unity_crossing().map(|(at, _)| at);
+        let unity_gain = branch.binding_unity_crossing().map(|(at, _, _)| at);
         let mut best: Option<(f64, f64, NyquistMargin)> = None;
         for index in 0..branch.len() - 1 {
-            let Some(crossing) = branch.phase_crossover(index) else {
+            let Some((crossing, half_turns)) = branch.phase_crossover(index) else {
                 continue;
             };
             let magnitude = 10f64.powf(branch.interpolate(&branch.log_magnitude, index, crossing));
@@ -330,6 +331,7 @@ impl NyquistData {
                     NyquistMargin {
                         value: 1.0 / magnitude,
                         frequency: 10f64.powf(crossing),
+                        phase_deg: half_turns * 180.0,
                     },
                 ));
             }
@@ -342,16 +344,22 @@ impl NyquistData {
     /// The crossing is interpolated in log-magnitude against log-frequency,
     /// and the phase read there from the *unwrapped* phase, so a loop past
     /// −180° reports a negative margin instead of a wrapped positive one. The
-    /// angle is measured from the negative real axis: PM = 180° + ∠L.
+    /// angle is measured from the negative real axis: PM = 180° + ∠L, folded
+    /// into `(-180°, 180°]` by
+    /// [`crate::results::stability::phase_margin_deg`] — the same fold, from
+    /// the same function, the Bode card applies.
     ///
     /// A loop that crosses unity more than once reports the crossing that
-    /// binds — the smallest margin in magnitude.
+    /// binds — the smallest margin in magnitude, measured on the folded value
+    /// so that both cards select the same crossing as well as report the same
+    /// number. [`NyquistMargin::phase_deg`] carries the angle before the fold.
     pub fn phase_margin(&self) -> Option<NyquistMargin> {
         let branch = self.measured_branch()?;
-        let (crossing, value) = branch.binding_unity_crossing()?;
+        let (crossing, value, phase_deg) = branch.binding_unity_crossing()?;
         Some(NyquistMargin {
             value,
             frequency: 10f64.powf(crossing),
+            phase_deg,
         })
     }
 
@@ -399,18 +407,6 @@ fn critical_point_distance_to_segment(a: (f64, f64), b: (f64, f64)) -> f64 {
         0.0
     };
     ((px - t * dx).powi(2) + (py - t * dy).powi(2)).sqrt()
-}
-
-/// Wrap an angle in degrees into (−180, 180].
-fn wrap_degrees(degrees: f64) -> f64 {
-    let mut wrapped = degrees % 360.0;
-    if wrapped > 180.0 {
-        wrapped -= 360.0;
-    }
-    if wrapped <= -180.0 {
-        wrapped += 360.0;
-    }
-    wrapped
 }
 
 /// The swept branch in the coordinates margins are interpolated in.
@@ -484,7 +480,10 @@ impl MeasuredBranch {
     /// Only the negative real axis counts — an imaginary part changing sign
     /// while the locus is in the right half-plane is a 0° crossing, which is
     /// no phase crossover at all.
-    fn phase_crossover(&self, index: usize) -> Option<f64> {
+    ///
+    /// Returns the crossing's log-frequency and the odd number of half-turns
+    /// it sits on, which is the inversion the margin there is read at.
+    fn phase_crossover(&self, index: usize) -> Option<(f64, f64)> {
         let (imag0, imag1) = (self.imag[index], self.imag[index + 1]);
         if imag0 != 0.0 && imag0 * imag1 >= 0.0 {
             return None;
@@ -498,19 +497,21 @@ impl MeasuredBranch {
             return None;
         }
         self.solve(&self.phase, index, half_turns * PI)
+            .map(|crossing| (crossing, half_turns))
     }
 
-    /// The binding unity crossing: its log-frequency, and the phase margin
-    /// there in degrees.
+    /// The binding unity crossing: its log-frequency, the phase margin there
+    /// in degrees, and the unwrapped `∠L` that margin was folded from.
     ///
     /// The margin is measured from the negative real axis, PM = 180° + ∠L, on
     /// the *unwrapped* phase, so a loop past −180° reports a negative margin
-    /// instead of a wrapped positive one. A loop that crosses unity more than
-    /// once binds at the smallest margin in magnitude — and that crossing's
-    /// frequency is the unity-gain frequency the gain margin's tie-break is
-    /// measured against.
-    fn binding_unity_crossing(&self) -> Option<(f64, f64)> {
-        let mut best: Option<(f64, f64)> = None;
+    /// instead of a wrapped positive one, and then folded into one turn by
+    /// [`crate::results::stability::phase_margin_deg`]. A loop that crosses
+    /// unity more than once binds at the smallest margin in magnitude — and
+    /// that crossing's frequency is the unity-gain frequency the gain margin's
+    /// tie-break is measured against.
+    fn binding_unity_crossing(&self) -> Option<(f64, f64, f64)> {
+        let mut best: Option<(f64, f64, f64)> = None;
         for index in 0..self.len() - 1 {
             let Some(crossing) = self.unity_crossover(index) else {
                 continue;
@@ -519,9 +520,10 @@ impl MeasuredBranch {
             if !phase.is_finite() {
                 continue;
             }
-            let margin = wrap_degrees(180.0 + phase.to_degrees());
-            if best.is_none_or(|(_, current)| margin.abs() < current.abs()) {
-                best = Some((crossing, margin));
+            let loop_phase = phase.to_degrees();
+            let margin = crate::results::stability::phase_margin_deg(loop_phase);
+            if best.is_none_or(|(_, current, _)| margin.abs() < current.abs()) {
+                best = Some((crossing, margin, loop_phase));
             }
         }
         best
