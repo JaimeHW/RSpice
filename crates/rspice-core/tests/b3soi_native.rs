@@ -668,9 +668,19 @@ fn xyce_level10_capmod3_pd_other_charge_analyses_run_natively() {
         .run_noise(&netlist, 1, &[1.0e6], 300.15)
         .expect("noise should use native PD CAPMOD=3 charge model");
 
-    engine()
-        .run_pz(&netlist, 1, 2)
-        .expect("pole-zero should use native PD CAPMOD=3 charge model");
+    let pz_engine = engine();
+    let pz_circuit = pz_engine
+        .build_circuit(&netlist)
+        .expect("PD CAPMOD=3 PZ circuit builds");
+    let input = pz_circuit.get_node_by_name("in").expect("input node");
+    let output = pz_circuit.get_node_by_name("out").expect("output node");
+    let pz = pz_engine
+        .run_pz_ports(&netlist, input, None, output, None, false, true, false)
+        .expect("pole extraction should use native PD CAPMOD=3 charge model");
+    assert!(
+        !pz.poles.is_empty(),
+        "PD CAPMOD=3 must expose dynamic poles"
+    );
 
     let stb_deck = "\
         * STB also uses the PD small-signal charge path\n\
@@ -757,9 +767,19 @@ fn native_soi_dd_capmod2_charge_analyses_run_natively() {
     engine()
         .run_noise(&netlist, 1, &[1.0e6], 300.15)
         .expect("DD CAPMOD=2 noise should run");
-    engine()
-        .run_pz(&netlist, 1, 2)
-        .expect("DD CAPMOD=2 pole-zero should run");
+    let pz_engine = engine();
+    let pz_circuit = pz_engine
+        .build_circuit(&netlist)
+        .expect("DD CAPMOD=2 PZ circuit builds");
+    let input = pz_circuit.get_node_by_name("in").expect("input node");
+    let output = pz_circuit.get_node_by_name("out").expect("output node");
+    let pz = pz_engine
+        .run_pz_ports(&netlist, input, None, output, None, false, true, false)
+        .expect("DD CAPMOD=2 pole extraction should run");
+    assert!(
+        !pz.poles.is_empty(),
+        "DD CAPMOD=2 must expose dynamic poles"
+    );
 
     let stb_deck = "\
         * STB shares the DD small-signal charge gate\n\
@@ -804,9 +824,19 @@ fn native_soi_fd_capmod2_charge_analyses_run_natively() {
     engine()
         .run_noise(&netlist, 1, &[1.0e6], 300.15)
         .expect("FD CAPMOD=2 noise should run");
-    engine()
-        .run_pz(&netlist, 1, 2)
-        .expect("FD CAPMOD=2 pole-zero should run");
+    let pz_engine = engine();
+    let pz_circuit = pz_engine
+        .build_circuit(&netlist)
+        .expect("FD CAPMOD=2 PZ circuit builds");
+    let input = pz_circuit.get_node_by_name("in").expect("input node");
+    let output = pz_circuit.get_node_by_name("out").expect("output node");
+    let pz = pz_engine
+        .run_pz_ports(&netlist, input, None, output, None, false, true, false)
+        .expect("FD CAPMOD=2 pole extraction should run");
+    assert!(
+        !pz.poles.is_empty(),
+        "FD CAPMOD=2 must expose dynamic poles"
+    );
 
     let stb_deck = "\
         * STB shares the FD small-signal charge path\n\
