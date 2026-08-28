@@ -111,8 +111,8 @@ fn attach_run(
     let snapshot = ContentDigest::from_bytes(SNAPSHOT);
     let mut run = SimulationRun::new(RUN_ID);
     for (index, task) in tasks.iter().take(produced).enumerate() {
-        run.add_analysis(
-            AnalysisResult::new(index as u64 + 1, task.analysis_type, "result").with_provenance(
+        let mut result = AnalysisResult::new(index as u64 + 1, task.analysis_type, "result")
+            .with_provenance(
                 AnalysisResultProvenance::new(
                     task.instance_id,
                     source_revision,
@@ -120,8 +120,11 @@ fn attach_run(
                     task.dependencies.clone(),
                 )
                 .expect("prepared provenance"),
-            ),
-        );
+            );
+        if let Some(payload) = AnalysisResultPayload::legacy_periodic_marker(task.analysis_type) {
+            result = result.with_result_payload(payload);
+        }
+        run.add_analysis(result);
     }
     let receipts = tasks
         .iter()

@@ -56,22 +56,22 @@ fn sealed_rf_results(retained: usize) -> ProjectSimulationResults {
             .unwrap_or_else(|error| panic!("tag {} must seal a task: {error}", kind.tag())),
         );
         if index < retained {
-            run.add_analysis(
-                AnalysisResult::new(
-                    index as u64 + 1,
-                    kind.result_analysis_type(),
-                    format!("{kind:?}"),
-                )
-                .with_provenance(
-                    AnalysisResultProvenance::new(
-                        ids[index],
-                        ObjectRevision::INITIAL,
-                        snapshot,
-                        dependency_ids,
-                    )
-                    .expect("a retained result names its authenticated task"),
-                ),
-            );
+            let analysis_type = kind.result_analysis_type();
+            let mut result =
+                AnalysisResult::new(index as u64 + 1, analysis_type, format!("{kind:?}"))
+                    .with_provenance(
+                        AnalysisResultProvenance::new(
+                            ids[index],
+                            ObjectRevision::INITIAL,
+                            snapshot,
+                            dependency_ids,
+                        )
+                        .expect("a retained result names its authenticated task"),
+                    );
+            if let Some(payload) = AnalysisResultPayload::legacy_periodic_marker(analysis_type) {
+                result = result.with_result_payload(payload);
+            }
+            run.add_analysis(result);
         }
     }
 
