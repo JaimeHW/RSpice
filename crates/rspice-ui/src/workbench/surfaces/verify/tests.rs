@@ -1792,3 +1792,277 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// The reliability panes' evidence gate
+// ---------------------------------------------------------------------------
+
+/// Retained samples in the fixture SOA stress histories. Large enough that a
+/// per-frame revalidation is real work, small enough to build in a test.
+const EVIDENCE_SAMPLES: usize = 512;
+/// Evaluated rules, and so retained stress waveforms, in the fixture.
+const EVIDENCE_RULES: usize = 8;
+/// Frames measured after the first, matching the Results idle-frame gate: ten
+/// is enough that a per-frame walk cannot hide behind an alternating schedule.
+const EVIDENCE_IDLE_FRAMES: usize = 10;
+
+/// An SOA analysis whose retained evidence validates, built in the shape the
+/// validator accepts: one exact worst-point event per warned rule.
+fn soa_evidence_analysis() -> AnalysisResult {
+    use crate::state::{
+        SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+        SoaViolationSeverityEvidence,
+    };
+
+    let time: Vec<f64> = (0..EVIDENCE_SAMPLES)
+        .map(|index| index as f64 * 1.0e-9)
+        .collect();
+    let mut waveforms = Vec::with_capacity(EVIDENCE_RULES);
+    let mut evaluations = Vec::with_capacity(EVIDENCE_RULES);
+    let mut violations = Vec::with_capacity(EVIDENCE_RULES);
+    for rule in 0..EVIDENCE_RULES {
+        let device_id = format!("M{rule:03}");
+        let y: Vec<f64> = (0..EVIDENCE_SAMPLES)
+            .map(|index| 3.0 * (index as f64 + 1.0) / EVIDENCE_SAMPLES as f64)
+            .collect();
+        let worst_actual_value = y[EVIDENCE_SAMPLES - 1];
+        let worst_time_s = time[EVIDENCE_SAMPLES - 1];
+        waveforms.push(crate::state::WaveformData::new(
+            crate::services::safety::soa_stress_waveform_name(
+                &device_id,
+                crate::services::safety::SoAParameter::Vds,
+            ),
+            time.clone(),
+            y,
+            "#00aaff",
+        ));
+        evaluations.push(SoaEvaluationEvidence {
+            device_id: device_id.clone(),
+            parameter: SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 3.3,
+            worst_actual_value,
+            worst_time_s,
+            sample_count: EVIDENCE_SAMPLES as u64,
+            unit: "V".to_owned(),
+            description: "Maximum drain-source voltage".to_owned(),
+            verdict: SoaRuleVerdictEvidence::Warning,
+        });
+        violations.push(SoaViolationEvidence {
+            device_id,
+            parameter: SoaParameterEvidence::DrainSourceVoltage,
+            limit_value: 3.3,
+            actual_value: worst_actual_value,
+            time_s: worst_time_s,
+            severity: SoaViolationSeverityEvidence::Warning,
+        });
+    }
+    AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Soa { time })
+        .with_waveforms(waveforms)
+        .with_result_payload(crate::state::AnalysisResultPayload::Soa {
+            evaluations,
+            violations,
+        })
+}
+
+/// A reliability analysis whose checkpoints match its retained lifetime axis.
+fn reliability_evidence_analysis() -> AnalysisResult {
+    use crate::state::{
+        ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
+        ReliabilityStressEvidence,
+    };
+
+    let years = vec![1.0, 10.0];
+    let devices = (0..EVIDENCE_RULES)
+        .map(|device| ReliabilityDeviceEvidence {
+            device_id: format!("M{device:03}"),
+            stress: ReliabilityStressEvidence {
+                average_gate_stress_v: 1.2,
+                average_drain_stress_v: 1.8,
+                average_temperature_k: 358.15,
+                duration_s: 3_600.0,
+            },
+            checkpoints: years
+                .iter()
+                .enumerate()
+                .map(|(index, years)| ReliabilityCheckpointEvidence {
+                    years: *years,
+                    shift: ReliabilityShiftEvidence {
+                        threshold_voltage_shift_v: 0.01 * (index as f64 + 1.0),
+                        mobility_shift: -0.001 * (index as f64 + 1.0),
+                        drain_source_resistance_shift: 0.0005 * (index as f64 + 1.0),
+                    },
+                })
+                .collect(),
+        })
+        .collect();
+    AnalysisResult::new(2, AnalysisType::Reliability, "Reliability")
+        .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Reliability { years })
+        .with_result_payload(crate::state::AnalysisResultPayload::Reliability { devices })
+}
+
+/// An application whose active run retains validated SOA and reliability
+/// evidence, which is what both panes on the reliability tab report from.
+fn app_retaining_reliability_evidence() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let mut run = sealed_run(
+        1,
+        plan_id,
+        AnalysisInstanceId::new(),
+        9,
+        soa_evidence_analysis(),
+    );
+    run.add_analysis(attributed(reliability_evidence_analysis()));
+    app.state.simulation.runs = vec![run];
+    assert!(app.state.simulation.select_run(0));
+    app
+}
+
+/// Both reliability panes gate on retained evidence, and the validator walks
+/// every retained sample of every waveform. Asked inside the panes' own
+/// filters that was two whole-dataset walks a frame, for a reader who was not
+/// touching anything and a verdict that cannot change while the dataset does
+/// not.
+#[test]
+fn the_reliability_panes_validate_retained_evidence_once_per_dataset_generation() {
+    use crate::workbench::documents::result_document::frame_work::{DatasetWalk, WorkCounts};
+
+    let mut app = app_retaining_reliability_evidence();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    // One frame of the reliability tab against unchanged state and identical
+    // input, drawn through the pane's own entry point.
+    let mut frame = || {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_680.0, 1_020.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| reliability(ui, &mut app));
+            },
+        );
+    };
+
+    // The first frame is allowed to build the memo the rest read — but it must
+    // build it through the counted owner. A pane that validates on its own is
+    // uncounted, so this half of the gate is what keeps the other half from
+    // passing by measuring nothing.
+    let opening = WorkCounts::reset();
+    frame();
+    assert_eq!(
+        opening.since().get(DatasetWalk::EvidenceValidation),
+        2,
+        "the SOA and aging gates must each ask the memoized owner once on the \
+         opening frame; a gate that walks the dataset itself is not counted here \
+         and would leave the idle-frame assertion below measuring nothing"
+    );
+
+    let baseline = WorkCounts::reset();
+    for _ in 0..EVIDENCE_IDLE_FRAMES {
+        frame();
+    }
+    let work = baseline.since();
+
+    assert_eq!(
+        work.get(DatasetWalk::EvidenceValidation),
+        0,
+        "the reliability panes revalidated the retained dataset on an idle frame; counted work was {:?}",
+        work.nonzero()
+    );
+}
+
+/// The verdict the panes read is the memo's, not a fresh walk.
+///
+/// Corrupting a retained waveform without declaring a new dataset generation
+/// is a change only a re-walk could see. The gate must not see it — and must
+/// see it the moment the generation moves, or the memo would be answering a
+/// question about a dataset that is no longer on screen.
+#[test]
+fn the_reliability_evidence_gate_answers_from_the_memoized_verdict() {
+    let mut app = app_retaining_reliability_evidence();
+    assert!(
+        latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
+        "the fixture retains validated SOA evidence"
+    );
+
+    // A retained waveform with more coordinates than values is exactly what
+    // `validate_retained_evidence` exists to refuse.
+    let analysis = app.state.simulation.runs[0]
+        .analyses
+        .iter_mut()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Soa)
+        .expect("the fixture retains an SOA analysis");
+    let mut shortened = analysis.waveforms[0].y.as_ref().clone();
+    shortened.pop();
+    analysis.waveforms[0].y = std::sync::Arc::new(shortened);
+
+    assert!(
+        latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
+        "the gate re-walked the dataset instead of reading the memoized verdict"
+    );
+
+    app.state.simulation.data_version = app.state.simulation.data_version.wrapping_add(1);
+
+    assert!(
+        latest_validated_analysis(&app, AnalysisType::Soa).is_none(),
+        "the gate served a verdict from the previous dataset generation"
+    );
+}
+
+/// Routing the gate through the memo must not change which analyses the panes
+/// accept: validated evidence still resolves, and evidence the validator
+/// refuses is still withheld rather than rendered.
+#[test]
+fn the_reliability_evidence_gate_admits_exactly_what_the_validator_accepts() {
+    let mut app = app_retaining_reliability_evidence();
+    for analysis_type in [AnalysisType::Soa, AnalysisType::Reliability] {
+        let admitted = latest_validated_analysis(&app, analysis_type).is_some();
+        let validates = app
+            .state
+            .simulation
+            .active_run()
+            .expect("the fixture selects a run")
+            .analyses
+            .iter()
+            .rev()
+            .find(|analysis| analysis.analysis_type == analysis_type)
+            .is_some_and(|analysis| analysis.validate_retained_evidence().is_ok());
+        assert_eq!(
+            admitted, validates,
+            "{analysis_type:?} evidence must be admitted exactly when it validates"
+        );
+    }
+
+    let analysis = app.state.simulation.runs[0]
+        .analyses
+        .iter_mut()
+        .find(|analysis| analysis.analysis_type == AnalysisType::Reliability)
+        .expect("the fixture retains a reliability analysis");
+    // Checkpoints that no longer cover the retained lifetime axis.
+    match &mut analysis.result_payload {
+        Some(crate::state::AnalysisResultPayload::Reliability { devices }) => {
+            devices[0].checkpoints.pop();
+        }
+        _ => panic!("the fixture retains a reliability payload"),
+    }
+    app.state.simulation.data_version = app.state.simulation.data_version.wrapping_add(1);
+
+    assert!(
+        latest_validated_analysis(&app, AnalysisType::Reliability).is_none(),
+        "refused reliability evidence must be withheld, not rendered"
+    );
+    assert!(
+        latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
+        "one refused analysis must not close the other pane's gate"
+    );
+}

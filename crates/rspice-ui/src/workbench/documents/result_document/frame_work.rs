@@ -1,16 +1,21 @@
-//! Instrumentation for whole-dataset work done inside a Results frame.
+//! Instrumentation for whole-dataset work done inside one workbench frame.
 //!
 //! Immediate mode hides cost: a viewer that rebuilds a million-sample
 //! projection every frame is indistinguishable, in the source, from one that
 //! reads a memo. The only way to keep the difference honest is to count it,
-//! so every place the Results workspace walks a complete retained dataset
-//! reports the walk here before doing it.
+//! so every place that walks a complete retained dataset reports the walk
+//! here before doing it.
+//!
+//! The accounting lives beside the Results workspace because that is where
+//! the walks and their memos are, but it is crate-visible rather than
+//! Results-private: the same retained datasets are read by other workspaces,
+//! and a walk they perform costs the reader exactly what one here does.
 //!
 //! The counters exist only under `cfg(test)`; in a shipped build [`note`] is
 //! an empty function and the call sites optimize away. What ships is the
-//! discipline: a new whole-dataset walk on a Results surface is expected to
-//! name itself in [`DatasetWalk`], and the idle-frame gate then holds it to
-//! being memoized.
+//! discipline: a new whole-dataset walk on any surface is expected to name
+//! itself in [`DatasetWalk`], and the idle-frame gates then hold it to being
+//! memoized.
 
 /// One class of work whose cost scales with the retained dataset rather than
 /// with what the reader can see.
@@ -18,7 +23,7 @@
 /// Ordinal values index the counter table, so variants are appended rather
 /// than reordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(super) enum DatasetWalk {
+pub(crate) enum DatasetWalk {
     /// `AnalysisResult::validate_retained_evidence` — walks every retained
     /// sample of every waveform in one analysis.
     EvidenceValidation,
@@ -69,7 +74,7 @@ pub(super) enum DatasetWalk {
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
     #[cfg(test)]
-    pub(super) const ALL: [Self; 18] = [
+    pub(crate) const ALL: [Self; 18] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
         Self::ManifestViewModel,
@@ -97,7 +102,7 @@ impl DatasetWalk {
 /// miss, never at the memo lookup — so the count answers "how much dataset
 /// did this frame touch", not "how often was the answer wanted".
 #[inline]
-pub(super) fn note(_walk: DatasetWalk) {
+pub(crate) fn note(_walk: DatasetWalk) {
     #[cfg(test)]
     COUNTS.with(|counts| counts.borrow_mut()[_walk as usize] += 1);
 }
@@ -148,7 +153,7 @@ thread_local! {
 /// Counted whole-dataset work, as a snapshot that arithmetic can be done on.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct WorkCounts {
+pub(crate) struct WorkCounts {
     walks: [u64; DatasetWalk::ALL.len()],
     samples: [u64; FrameSampleRead::ALL.len()],
 }
@@ -161,7 +166,7 @@ impl WorkCounts {
     };
 
     /// The counts accumulated so far on this thread.
-    pub(super) fn read() -> Self {
+    pub(crate) fn read() -> Self {
         Self {
             walks: COUNTS.with(|counts| *counts.borrow()),
             samples: SAMPLES.with(|samples| *samples.borrow()),
@@ -169,14 +174,14 @@ impl WorkCounts {
     }
 
     /// Reset the counters and return a zero snapshot to measure against.
-    pub(super) fn reset() -> Self {
+    pub(crate) fn reset() -> Self {
         COUNTS.with(|counts| *counts.borrow_mut() = Self::ZERO.walks);
         SAMPLES.with(|samples| *samples.borrow_mut() = Self::ZERO.samples);
         Self::ZERO
     }
 
     /// Work counted since `self` was taken.
-    pub(super) fn since(self) -> Self {
+    pub(crate) fn since(self) -> Self {
         let now = Self::read();
         let mut delta = Self::ZERO;
         for (index, slot) in delta.walks.iter_mut().enumerate() {
@@ -189,7 +194,7 @@ impl WorkCounts {
     }
 
     /// Count for one class of work.
-    pub(super) const fn get(self, walk: DatasetWalk) -> u64 {
+    pub(crate) const fn get(self, walk: DatasetWalk) -> u64 {
         self.walks[walk as usize]
     }
 
@@ -199,7 +204,7 @@ impl WorkCounts {
     }
 
     /// Total whole-dataset walks across every class.
-    pub(super) const fn total(self) -> u64 {
+    pub(crate) const fn total(self) -> u64 {
         let mut total = 0;
         let mut index = 0;
         while index < self.walks.len() {
@@ -222,7 +227,7 @@ impl WorkCounts {
 
     /// The classes that counted anything, for a failure message that names
     /// the offending surface instead of only its total.
-    pub(super) fn nonzero(self) -> Vec<(DatasetWalk, u64)> {
+    pub(crate) fn nonzero(self) -> Vec<(DatasetWalk, u64)> {
         DatasetWalk::ALL
             .into_iter()
             .filter(|walk| self.get(*walk) > 0)

@@ -1937,6 +1937,26 @@ fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {
     analysis.success && analysis.provenance.is_some()
 }
 
+/// The same analysis, kept only when its retained evidence validates.
+///
+/// The validator walks every retained sample of every waveform. Asked inside
+/// a per-frame filter it re-walked the complete dataset on every frame, for a
+/// verdict that is a property of an immutable dataset and so cannot change
+/// until the datasets do. The Results workspace owns the memoized answer,
+/// keyed by data version and analysis; this asks that owner rather than
+/// keeping a second verdict of its own.
+fn latest_validated_analysis(
+    app: &RSpiceApp,
+    analysis_type: crate::state::AnalysisType,
+) -> Option<&crate::state::AnalysisResult> {
+    let dataset_id = app.state.simulation.active_run()?.dataset_id;
+    latest_analysis(app, analysis_type).filter(|analysis| {
+        crate::workbench::documents::result_document::analysis_evidence_is_valid(
+            &app.state, dataset_id, analysis,
+        )
+    })
+}
+
 fn request_analysis_run(
     app: &mut RSpiceApp,
     kinds: &[crate::simulation::plan::AnalysisKind],

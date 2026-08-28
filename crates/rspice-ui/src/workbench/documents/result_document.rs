@@ -10,7 +10,7 @@ mod create_document;
 mod events;
 mod eye;
 mod fft;
-mod frame_work;
+pub(crate) mod frame_work;
 mod harmonic_balance;
 mod hist;
 pub(crate) mod manifest;
@@ -2373,6 +2373,12 @@ fn captured_ordinate(viewer: ResultViewer, view: PlotView) -> Option<(f64, f64)>
 }
 
 /// The same question for an analysis already in hand, resolved to its key.
+///
+/// Crate-visible because the memo is the owner of that verdict for the whole
+/// shell rather than a Results-local convenience. The Verify workspace's
+/// evidence gates ask the same question of the same immutable datasets, and a
+/// second copy of the walk there would be a second answer to keep in step as
+/// well as a second million-sample scan.
 pub(crate) fn analysis_evidence_is_valid(
     state: &AppState,
     dataset_id: DatasetId,

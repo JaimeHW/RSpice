@@ -546,14 +546,15 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     });
 
-    let soa_payload = latest_analysis(app, crate::state::AnalysisType::Soa)
-        .filter(|analysis| analysis.validate_retained_evidence().is_ok())
-        .and_then(|analysis| match &analysis.result_payload {
-            Some(crate::state::AnalysisResultPayload::Soa {
-                evaluations,
-                violations,
-            }) => Some((evaluations.as_slice(), violations.as_slice())),
-            _ => None,
+    let soa_payload =
+        latest_validated_analysis(app, crate::state::AnalysisType::Soa).and_then(|analysis| {
+            match &analysis.result_payload {
+                Some(crate::state::AnalysisResultPayload::Soa {
+                    evaluations,
+                    violations,
+                }) => Some((evaluations.as_slice(), violations.as_slice())),
+                _ => None,
+            }
         });
     let t = Tokens::get(ui.ctx());
     let soa_headers = vec![
@@ -642,9 +643,8 @@ pub(super) fn reliability(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
 
-    let reliability_payload = latest_analysis(app, crate::state::AnalysisType::Reliability)
-        .filter(|analysis| analysis.validate_retained_evidence().is_ok())
-        .and_then(
+    let reliability_payload =
+        latest_validated_analysis(app, crate::state::AnalysisType::Reliability).and_then(
             |analysis| match (&analysis.family_metadata, &analysis.result_payload) {
                 (
                     Some(crate::state::AnalysisResultFamilyMetadata::Reliability { years }),
