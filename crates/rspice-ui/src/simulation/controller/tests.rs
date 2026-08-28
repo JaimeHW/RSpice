@@ -1511,15 +1511,36 @@ fn advanced_result_conversion_retains_exact_family_metadata() {
 #[test]
 fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
     use crate::state::{
-        AnalysisResultPayload, ComplexResultValue, SensitivityResultMode, SensitivityResultRow,
+        AnalysisResultPayload, ComplexResultValue, PoleZeroRootSetEvidence,
+        PoleZeroSpectrumCertificate, SensitivityResultMode, SensitivityResultRow,
     };
 
     let controller = SimulationController::new();
+    let pole_evidence = PoleZeroRootSetEvidence::Qualified {
+        certificate: PoleZeroSpectrumCertificate {
+            problem_order: 2,
+            infinite_count: 0,
+            max_backward_error: 1.0e-14,
+            qualification_tolerance:
+                PoleZeroSpectrumCertificate::canonical_qualification_tolerance(2).unwrap(),
+        },
+    };
+    let zero_evidence = PoleZeroRootSetEvidence::Qualified {
+        certificate: PoleZeroSpectrumCertificate {
+            problem_order: 1,
+            infinite_count: 0,
+            max_backward_error: 2.0e-14,
+            qualification_tolerance:
+                PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+        },
+    };
     let pole_zero = controller.convert_to_analysis_result_with_metadata_owned(
         crate::simulation::SimulationResult::PoleZero {
             poles: vec![(-1.0, 2.0), (-1.0, -2.0)],
             zeros: vec![(-3.0, 0.0)],
-            gain: 4.0,
+            pole_evidence: pole_evidence.clone(),
+            zero_evidence: zero_evidence.clone(),
+            gain: Some(4.0),
         },
         AnalysisType::PoleZero,
         "PZ",
@@ -1541,7 +1562,9 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
                 real: -3.0,
                 imaginary: 0.0,
             }],
-            gain: 4.0,
+            pole_evidence,
+            zero_evidence,
+            gain: Some(4.0),
         })
     );
     assert!(pole_zero.has_data());

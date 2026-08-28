@@ -39,13 +39,13 @@ pub use analysis_result::{
     OperatingPointHomotopyEvidence, OperatingPointInitialGuessEvidence,
     OperatingPointNodeInitializationEvidence, OperatingPointProcessEvidence,
     OperatingPointSaveDeviceEvidence, OperatingPointTemperatureEvidence, OperatingPointValue,
-    PeriodicNoiseOutputQuantity, RealEventPointEvidence, RealEventTraceEvidence,
-    ReliabilityCheckpointEvidence, ReliabilityDeviceEvidence, ReliabilityShiftEvidence,
-    ReliabilityStressEvidence, SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
-    SoaViolationSeverityEvidence, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence,
+    PeriodicNoiseOutputQuantity, PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate,
+    RealEventPointEvidence, RealEventTraceEvidence, ReliabilityCheckpointEvidence,
+    ReliabilityDeviceEvidence, ReliabilityShiftEvidence, ReliabilityStressEvidence,
+    SensitivityResultMode, SensitivityResultRow, SoaEvaluationEvidence, SoaParameterEvidence,
+    SoaRuleVerdictEvidence, SoaViolationEvidence, SoaViolationSeverityEvidence,
+    TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use analysis_tag::{AnalysisAvailability, CanonicalAnalysisKind};
 pub use analysis_type::AnalysisType;

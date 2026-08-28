@@ -391,6 +391,14 @@ pub(super) struct ExactSourceRow {
     pub(super) origin: String,
 }
 
+pub(super) struct RetainedPoleZeroPayload<'a> {
+    pub(super) poles: &'a [crate::state::ComplexResultValue],
+    pub(super) zeros: &'a [crate::state::ComplexResultValue],
+    pub(super) pole_evidence: &'a crate::state::PoleZeroRootSetEvidence,
+    pub(super) zero_evidence: &'a crate::state::PoleZeroRootSetEvidence,
+    pub(super) gain: Option<f64>,
+}
+
 pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
     let Some(run) = state.simulation.active_run() else {
         return Vec::new();
@@ -401,8 +409,16 @@ pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
     let Some(analysis) = run.analyses.get(analysis_index) else {
         return Vec::new();
     };
-    if let Some((poles, zeros, gain)) = retained_pole_zero_payload(analysis) {
-        return exact_pole_zero_rows(run, analysis, poles, zeros, gain);
+    if let Some(payload) = retained_pole_zero_payload(analysis) {
+        return exact_pole_zero_rows(
+            run,
+            analysis,
+            payload.poles,
+            payload.zeros,
+            payload.pole_evidence,
+            payload.zero_evidence,
+            payload.gain,
+        );
     }
     if let Some((output, result_mode, rows)) = retained_sensitivity_payload(analysis) {
         return exact_sensitivity_rows(run, analysis, output, result_mode, rows);
@@ -448,11 +464,7 @@ pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
 
 pub(super) fn retained_pole_zero_payload(
     analysis: &AnalysisResult,
-) -> Option<(
-    &[crate::state::ComplexResultValue],
-    &[crate::state::ComplexResultValue],
-    f64,
-)> {
+) -> Option<RetainedPoleZeroPayload<'_>> {
     if !analysis.success || analysis.analysis_type != AnalysisType::PoleZero {
         return None;
     }
@@ -461,9 +473,19 @@ pub(super) fn retained_pole_zero_payload(
         return None;
     }
     match payload {
-        AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
-            Some((poles.as_slice(), zeros.as_slice(), *gain))
-        }
+        AnalysisResultPayload::PoleZero {
+            poles,
+            zeros,
+            pole_evidence,
+            zero_evidence,
+            gain,
+        } => Some(RetainedPoleZeroPayload {
+            poles: poles.as_slice(),
+            zeros: zeros.as_slice(),
+            pole_evidence,
+            zero_evidence,
+            gain: *gain,
+        }),
         AnalysisResultPayload::OperatingPoint { .. }
         | AnalysisResultPayload::Sensitivity { .. }
         | AnalysisResultPayload::TransferFunction { .. }
@@ -533,16 +555,22 @@ pub(super) fn exact_pole_zero_rows(
     analysis: &AnalysisResult,
     poles: &[crate::state::ComplexResultValue],
     zeros: &[crate::state::ComplexResultValue],
-    gain: f64,
+    pole_evidence: &crate::state::PoleZeroRootSetEvidence,
+    zero_evidence: &crate::state::PoleZeroRootSetEvidence,
+    gain: Option<f64>,
 ) -> Vec<ExactSourceRow> {
-    let mut rows = Vec::with_capacity(1 + (poles.len() + zeros.len()) * 2);
+    let mut rows = Vec::with_capacity(11 + (poles.len() + zeros.len()) * 2);
     rows.push(ExactSourceRow {
         binding: short_dataset(run.dataset_id),
         stable_row: format!("{}:gain", analysis.id),
         coordinate: "scalar".to_owned(),
-        value: format!("{gain:.17e}"),
+        value: gain
+            .map(|gain| format!("{gain:.17e}"))
+            .unwrap_or_else(|| "unavailable".to_owned()),
         origin: "DC transfer gain".to_owned(),
     });
+    append_root_evidence_rows(&mut rows, run, analysis, "pole", pole_evidence);
+    append_root_evidence_rows(&mut rows, run, analysis, "zero", zero_evidence);
     for (kind, roots) in [("pole", poles), ("zero", zeros)] {
         for (index, root) in roots.iter().enumerate() {
             for (component, value) in [("real", root.real), ("imaginary", root.imaginary)] {
@@ -557,6 +585,45 @@ pub(super) fn exact_pole_zero_rows(
         }
     }
     rows
+}
+
+fn append_root_evidence_rows(
+    rows: &mut Vec<ExactSourceRow>,
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+    kind: &str,
+    evidence: &crate::state::PoleZeroRootSetEvidence,
+) {
+    rows.push(ExactSourceRow {
+        binding: short_dataset(run.dataset_id),
+        stable_row: format!("{}:{kind}_evidence.status", analysis.id),
+        coordinate: format!("{kind}_evidence.status"),
+        value: evidence.label().to_owned(),
+        origin: "root-set qualification".to_owned(),
+    });
+    let Some(certificate) = evidence.certificate() else {
+        return;
+    };
+    for (field, value) in [
+        ("problem_order", certificate.problem_order.to_string()),
+        ("infinite_count", certificate.infinite_count.to_string()),
+        (
+            "max_backward_error",
+            format!("{:.17e}", certificate.max_backward_error),
+        ),
+        (
+            "qualification_tolerance",
+            format!("{:.17e}", certificate.qualification_tolerance),
+        ),
+    ] {
+        rows.push(ExactSourceRow {
+            binding: short_dataset(run.dataset_id),
+            stable_row: format!("{}:{kind}_evidence.{field}", analysis.id),
+            coordinate: format!("{kind}_evidence.{field}"),
+            value,
+            origin: "root-set qualification certificate".to_owned(),
+        });
+    }
 }
 
 /// A dataset identity as a stage label spells it, elided by

@@ -3257,12 +3257,24 @@ fn retained_result_artifacts(
                 None,
                 ResultViewer::Op,
             ),
-            AnalysisResultPayload::PoleZero { poles, zeros, gain } => (
+            AnalysisResultPayload::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => (
                 "payload/pole-zero",
-                "Poles, zeros, and gain",
+                "Poles, zeros, gain, and qualification",
                 ResultArtifactKind::Array,
-                poles.len() + zeros.len() + 1,
-                Some(format!("gain {:.6e}", gain)),
+                poles.len() + zeros.len() + 3,
+                Some(format!(
+                    "{} · poles {} · zeros {}",
+                    gain.map(|gain| format!("gain {gain:.6e}"))
+                        .unwrap_or_else(|| "gain unavailable".to_owned()),
+                    pole_evidence.label(),
+                    zero_evidence.label()
+                )),
                 ResultViewer::PoleZero,
             ),
             AnalysisResultPayload::Sensitivity { rows, .. } => (

@@ -139,14 +139,14 @@ fn a_persisted_engine_prefix_that_does_not_name_its_occurrence_is_refused() {
 
 #[test]
 fn results_written_before_the_hierarchy_map_load_and_reserialize_without_one() {
-    let mut document = serde_json::to_value(sealed_results(Vec::new())).expect("results serialize");
+    let mut older = sealed_results(Vec::new());
+    older.schema_version = GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION;
+    downgrade_result_digests_to_v6(&mut older);
+    let document = serde_json::to_value(older).expect("results serialize");
     assert!(
         !document.to_string().contains("hierarchy_map"),
         "a run with no occurrence map writes no map field at all"
     );
-    document["schema_version"] =
-        serde_json::Value::from(GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION);
-
     let mut persisted = serde_json::from_value::<ProjectSimulationResults>(document)
         .expect("a schema-v14 document deserializes");
     persisted

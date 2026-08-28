@@ -353,6 +353,120 @@ pub struct ComplexResultValue {
     pub imaginary: f64,
 }
 
+/// Exact finite/infinite accounting and residual certificate retained for one
+/// computed pole or zero spectrum.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoleZeroSpectrumCertificate {
+    pub problem_order: u64,
+    pub infinite_count: u64,
+    pub max_backward_error: f64,
+    pub qualification_tolerance: f64,
+}
+
+impl PoleZeroSpectrumCertificate {
+    #[must_use]
+    pub fn canonical_qualification_tolerance(problem_order: u64) -> Option<f64> {
+        let problem_order = usize::try_from(problem_order).ok()?;
+        rspice_core::analysis::pole_zero::SpectrumCertificate::exact(problem_order, 0)
+            .map(|certificate| certificate.qualification_tolerance)
+    }
+
+    fn as_core(self) -> Option<rspice_core::analysis::pole_zero::SpectrumCertificate> {
+        rspice_core::analysis::pole_zero::SpectrumCertificate::new(
+            usize::try_from(self.problem_order).ok()?,
+            usize::try_from(self.infinite_count).ok()?,
+            self.max_backward_error,
+            self.qualification_tolerance,
+        )
+    }
+
+    #[must_use]
+    pub fn finite_count(self) -> Option<u64> {
+        self.as_core()
+            .and_then(|certificate| u64::try_from(certificate.finite_count()).ok())
+    }
+
+    #[must_use]
+    pub fn is_strictly_qualified(self) -> bool {
+        self.as_core()
+            .is_some_and(|certificate| certificate.is_strictly_qualified())
+    }
+}
+
+/// Qualification state attached to one retained pole or zero vector.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PoleZeroRootSetEvidence {
+    NotRequested,
+    QualifiedEmpty {
+        certificate: PoleZeroSpectrumCertificate,
+    },
+    Qualified {
+        certificate: PoleZeroSpectrumCertificate,
+    },
+    Approximate {
+        certificate: PoleZeroSpectrumCertificate,
+    },
+    /// Truthful migration state for results written before certificates were
+    /// retained. This state never proves stability.
+    #[default]
+    LegacyUnknown,
+}
+
+impl PoleZeroRootSetEvidence {
+    #[must_use]
+    pub const fn label(&self) -> &'static str {
+        match self {
+            Self::NotRequested => "not requested",
+            Self::QualifiedEmpty { .. } => "qualified empty",
+            Self::Qualified { .. } => "qualified",
+            Self::Approximate { .. } => "approximate",
+            Self::LegacyUnknown => "legacy unknown",
+        }
+    }
+
+    #[must_use]
+    pub const fn certificate(&self) -> Option<PoleZeroSpectrumCertificate> {
+        match self {
+            Self::QualifiedEmpty { certificate }
+            | Self::Qualified { certificate }
+            | Self::Approximate { certificate } => Some(*certificate),
+            Self::NotRequested | Self::LegacyUnknown => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_qualified(&self) -> bool {
+        matches!(self, Self::QualifiedEmpty { .. } | Self::Qualified { .. })
+    }
+
+    #[must_use]
+    pub fn is_consistent_with_count(&self, root_count: usize) -> bool {
+        let Ok(root_count) = u64::try_from(root_count) else {
+            return false;
+        };
+        match self {
+            Self::NotRequested => root_count == 0,
+            Self::QualifiedEmpty { certificate } => {
+                root_count == 0
+                    && certificate.is_strictly_qualified()
+                    && certificate.finite_count() == Some(0)
+            }
+            Self::Qualified { certificate } => {
+                root_count > 0
+                    && certificate.is_strictly_qualified()
+                    && certificate.finite_count() == Some(root_count)
+            }
+            Self::Approximate { certificate } => certificate.as_core().is_some_and(|certificate| {
+                !certificate.is_strictly_qualified()
+                    && u64::try_from(certificate.finite_count()).ok() == Some(root_count)
+            }),
+            Self::LegacyUnknown => true,
+        }
+    }
+}
+
 /// Analysis basis used to produce a retained sensitivity result.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
@@ -739,7 +853,14 @@ pub enum AnalysisResultPayload {
     PoleZero {
         poles: Vec<ComplexResultValue>,
         zeros: Vec<ComplexResultValue>,
-        gain: f64,
+        #[serde(default)]
+        pole_evidence: PoleZeroRootSetEvidence,
+        #[serde(default)]
+        zero_evidence: PoleZeroRootSetEvidence,
+        /// Finite DC gain when defined. Missing legacy fields deserialize as
+        /// unavailable; legacy numeric fields deserialize as `Some(value)`.
+        #[serde(default)]
+        gain: Option<f64>,
     },
     Sensitivity {
         output: String,
@@ -863,7 +984,13 @@ impl AnalysisResultPayload {
                     }
                 }
             }
-            Self::PoleZero { poles, zeros, gain } => {
+            Self::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => {
                 if analysis_type != AnalysisType::PoleZero {
                     return Err(format!(
                         "pole-zero payload does not match analysis type {analysis_type:?}"
@@ -871,7 +998,17 @@ impl AnalysisResultPayload {
                 }
                 validate_complex_values(poles, "pole")?;
                 validate_complex_values(zeros, "zero")?;
-                if !gain.is_finite() {
+                if !pole_evidence.is_consistent_with_count(poles.len()) {
+                    return Err(
+                        "pole-zero pole evidence is inconsistent with retained roots".to_owned(),
+                    );
+                }
+                if !zero_evidence.is_consistent_with_count(zeros.len()) {
+                    return Err(
+                        "pole-zero zero evidence is inconsistent with retained roots".to_owned(),
+                    );
+                }
+                if gain.is_some_and(|gain| !gain.is_finite()) {
                     return Err("pole-zero gain is non-finite".to_owned());
                 }
             }
@@ -2105,10 +2242,28 @@ mod retained_payload_tests {
                 imaginary: 2.0,
             }],
             zeros: Vec::new(),
-            gain: 1.0,
+            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            gain: Some(1.0),
         };
         assert!(payload.validate_for(AnalysisType::PoleZero).is_ok());
         assert!(payload.validate_for(AnalysisType::Ac).is_err());
+
+        let unavailable_gain = AnalysisResultPayload::PoleZero {
+            poles: vec![ComplexResultValue {
+                real: -1.0,
+                imaginary: 2.0,
+            }],
+            zeros: Vec::new(),
+            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            gain: None,
+        };
+        assert!(
+            unavailable_gain
+                .validate_for(AnalysisType::PoleZero)
+                .is_ok()
+        );
 
         let invalid = AnalysisResultPayload::PoleZero {
             poles: vec![ComplexResultValue {
@@ -2116,9 +2271,75 @@ mod retained_payload_tests {
                 imaginary: 0.0,
             }],
             zeros: Vec::new(),
-            gain: 1.0,
+            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            gain: Some(1.0),
         };
         assert!(invalid.validate_for(AnalysisType::PoleZero).is_err());
+
+        let invalid_gain = AnalysisResultPayload::PoleZero {
+            poles: Vec::new(),
+            zeros: Vec::new(),
+            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            gain: Some(f64::INFINITY),
+        };
+        assert!(invalid_gain.validate_for(AnalysisType::PoleZero).is_err());
+
+        let invalid_tolerance = AnalysisResultPayload::PoleZero {
+            poles: vec![ComplexResultValue {
+                real: -1.0,
+                imaginary: 0.0,
+            }],
+            zeros: Vec::new(),
+            pole_evidence: PoleZeroRootSetEvidence::Qualified {
+                certificate: PoleZeroSpectrumCertificate {
+                    problem_order: 1,
+                    infinite_count: 0,
+                    max_backward_error: 0.0,
+                    qualification_tolerance: 2.0
+                        * PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                            .unwrap(),
+                },
+            },
+            zero_evidence: PoleZeroRootSetEvidence::NotRequested,
+            gain: Some(1.0),
+        };
+        assert!(
+            invalid_tolerance
+                .validate_for(AnalysisType::PoleZero)
+                .expect_err("inflated qualification tolerance is not core-authentic")
+                .contains("pole evidence")
+        );
+    }
+
+    #[test]
+    fn pole_zero_payload_deserializes_legacy_numeric_and_missing_gain() {
+        let legacy: AnalysisResultPayload =
+            serde_json::from_str(r#"{"kind":"pole_zero","poles":[],"zeros":[],"gain":4.25}"#)
+                .expect("legacy numeric pole-zero gain deserializes");
+        assert!(matches!(
+            legacy,
+            AnalysisResultPayload::PoleZero {
+                gain: Some(4.25),
+                pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                ..
+            }
+        ));
+
+        let missing: AnalysisResultPayload =
+            serde_json::from_str(r#"{"kind":"pole_zero","poles":[],"zeros":[]}"#)
+                .expect("missing pole-zero gain deserializes as unavailable");
+        assert!(matches!(
+            missing,
+            AnalysisResultPayload::PoleZero {
+                gain: None,
+                pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -66,9 +66,11 @@ impl SimulationResult {
                 }
                 contributors.get(key).and_then(|vals| vals.last().copied())
             }
-            SimulationResult::PoleZero { poles, zeros, gain } => {
+            SimulationResult::PoleZero {
+                poles, zeros, gain, ..
+            } => {
                 if key.eq_ignore_ascii_case("gain") {
-                    return Some(*gain);
+                    return *gain;
                 }
                 if key.eq_ignore_ascii_case("num_poles") {
                     return Some(poles.len() as f64);
@@ -183,11 +185,18 @@ impl SimulationResult {
                 }
                 out
             }
-            SimulationResult::PoleZero { poles, zeros, gain } => HashMap::from([
-                ("gain".to_string(), *gain),
-                ("num_poles".to_string(), poles.len() as f64),
-                ("num_zeros".to_string(), zeros.len() as f64),
-            ]),
+            SimulationResult::PoleZero {
+                poles, zeros, gain, ..
+            } => {
+                let mut values = HashMap::from([
+                    ("num_poles".to_string(), poles.len() as f64),
+                    ("num_zeros".to_string(), zeros.len() as f64),
+                ]);
+                if let Some(gain) = gain {
+                    values.insert("gain".to_string(), *gain);
+                }
+                values
+            }
             SimulationResult::Sensitivity {
                 sensitivities,
                 normalized,

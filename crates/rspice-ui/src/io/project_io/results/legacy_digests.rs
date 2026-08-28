@@ -289,3 +289,57 @@ pub(super) fn validate_v12_result_digests(run: &ProjectSimulationRun) -> Result<
     }
     Ok(())
 }
+
+/// Authenticate schema-v13 through schema-v15 runs with the exact digest
+/// encoding that required every pole-zero payload to contain a numeric gain.
+/// This runs before optional gain is admitted and the document is resealed.
+pub(super) fn validate_v13_to_v15_result_digests(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    debug_assert!(
+        (WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION..=EXECUTED_DECK_RESULTS_SCHEMA_VERSION)
+            .contains(&source_schema)
+    );
+    for analysis in &run.analyses {
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v{source_schema} analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v6_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v{source_schema} analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v{source_schema} simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v6_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v{source_schema} simulation run {} dataset content digest does not match retained content",
+            run.id
+        ));
+    }
+    Ok(())
+}

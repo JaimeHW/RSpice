@@ -13,6 +13,8 @@
 //! the predicates that were its only readers — pole-zero runs here are
 //! continuous-time.
 
+use crate::state::PoleZeroRootSetEvidence;
+
 /// Type of complex root
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootType {
@@ -101,8 +103,12 @@ pub struct PoleZeroData {
     pub name: String,
     /// All roots (poles and zeros)
     pub roots: Vec<ComplexRoot>,
-    /// Gain constant
-    pub gain: f64,
+    /// Finite DC gain when the transfer has one.
+    pub gain: Option<f64>,
+    /// Completeness and numerical qualification evidence for the pole set.
+    pub pole_evidence: PoleZeroRootSetEvidence,
+    /// Completeness and numerical qualification evidence for the zero set.
+    pub zero_evidence: PoleZeroRootSetEvidence,
 }
 
 impl Default for PoleZeroData {
@@ -110,7 +116,9 @@ impl Default for PoleZeroData {
         Self {
             name: String::new(),
             roots: Vec::new(),
-            gain: 1.0,
+            gain: None,
+            pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
         }
     }
 }

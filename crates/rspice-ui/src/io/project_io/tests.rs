@@ -15,6 +15,22 @@ use crate::state::{
 };
 use crate::workbench::app_state::AppState;
 
+fn downgrade_result_digests_to_v6(results: &mut ProjectSimulationResults) {
+    for persisted_run in &mut results.runs {
+        let run = persisted_run
+            .clone()
+            .into_run()
+            .expect("current result fixture restores before digest downgrade");
+        assert_eq!(persisted_run.analyses.len(), run.analyses.len());
+        for (persisted_analysis, analysis) in persisted_run.analyses.iter_mut().zip(&run.analyses) {
+            persisted_analysis.result_data_digest =
+                PersistedField::Value(analysis.legacy_v6_result_data_digest());
+        }
+        persisted_run.dataset_content_digest =
+            PersistedField::Value(run.legacy_v6_dataset_content_digest());
+    }
+}
+
 #[test]
 fn in_memory_project_text_is_size_checked_before_parsing() {
     assert!(validate_project_text_size(MAX_PROJECT_FILE_BYTES as usize).is_ok());
@@ -1395,7 +1411,9 @@ fn typed_result_payloads_round_trip_and_reject_payload_tampering() {
                     real: -3.0,
                     imaginary: 0.0,
                 }],
-                gain: 4.0,
+                pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                gain: Some(4.0),
             },
         ),
     );

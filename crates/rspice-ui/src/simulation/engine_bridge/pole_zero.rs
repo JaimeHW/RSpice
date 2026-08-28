@@ -6,6 +6,7 @@ use super::{EngineBridge, ensure_not_aborted};
 use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
 use crate::simulation::results::SimulationResult;
 use crate::simulation::runner::SimulationError;
+use crate::state::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
 
 impl EngineBridge {
     /// Run pole-zero analysis.
@@ -77,12 +78,7 @@ impl EngineBridge {
                 abort,
             )
             .map_err(|e| self.translate_error(e))?;
-        let dc_gain = pz_result.dc_gain.ok_or_else(|| {
-            SimulationError::SolverError(
-                "pole-zero transfer has no finite DC gain for the selected ports".to_owned(),
-            )
-        })?;
-        if !dc_gain.is_finite()
+        if pz_result.dc_gain.is_some_and(|gain| !gain.is_finite())
             || pz_result
                 .poles
                 .iter()
@@ -108,8 +104,58 @@ impl EngineBridge {
         Ok(SimulationResult::PoleZero {
             poles,
             zeros,
-            gain: input_sign * output_sign * dc_gain,
+            pole_evidence: retained_root_evidence(&pz_result.pole_evidence)?,
+            zero_evidence: retained_root_evidence(&pz_result.zero_evidence)?,
+            gain: pz_result
+                .dc_gain
+                .map(|gain| input_sign * output_sign * gain),
         })
+    }
+}
+
+fn retained_certificate(
+    certificate: rspice_core::analysis::pole_zero::SpectrumCertificate,
+) -> Result<PoleZeroSpectrumCertificate, SimulationError> {
+    Ok(PoleZeroSpectrumCertificate {
+        problem_order: u64::try_from(certificate.problem_order).map_err(|_| {
+            SimulationError::SolverError(
+                "pole-zero certificate problem order exceeds the retained result contract"
+                    .to_owned(),
+            )
+        })?,
+        infinite_count: u64::try_from(certificate.infinite_count).map_err(|_| {
+            SimulationError::SolverError(
+                "pole-zero certificate infinite-root count exceeds the retained result contract"
+                    .to_owned(),
+            )
+        })?,
+        max_backward_error: certificate.max_backward_error,
+        qualification_tolerance: certificate.qualification_tolerance,
+    })
+}
+
+fn retained_root_evidence(
+    evidence: &rspice_core::analysis::pole_zero::RootSetEvidence,
+) -> Result<PoleZeroRootSetEvidence, SimulationError> {
+    use rspice_core::analysis::pole_zero::RootSetEvidence;
+
+    match evidence {
+        RootSetEvidence::NotRequested => Ok(PoleZeroRootSetEvidence::NotRequested),
+        RootSetEvidence::QualifiedEmpty { certificate } => {
+            Ok(PoleZeroRootSetEvidence::QualifiedEmpty {
+                certificate: retained_certificate(*certificate)?,
+            })
+        }
+        RootSetEvidence::Qualified { certificate } => Ok(PoleZeroRootSetEvidence::Qualified {
+            certificate: retained_certificate(*certificate)?,
+        }),
+        RootSetEvidence::Approximate { certificate } => Ok(PoleZeroRootSetEvidence::Approximate {
+            certificate: retained_certificate(*certificate)?,
+        }),
+        RootSetEvidence::LegacyUnknown => Ok(PoleZeroRootSetEvidence::LegacyUnknown),
+        _ => Err(SimulationError::SolverError(
+            "pole-zero engine returned an unsupported root evidence classification".to_owned(),
+        )),
     }
 }
 
@@ -241,5 +287,27 @@ C1 out 0 1n
         assert_eq!(resolve_node_or_ground("ground", &names), Some(0));
         assert_eq!(resolve_node_or_ground("", &names), None);
         assert_eq!(resolve_node_or_ground("missing", &names), None);
+    }
+
+    #[test]
+    fn core_root_evidence_is_retained_without_losing_certificate_fields() {
+        let certificate = rspice_core::analysis::pole_zero::SpectrumCertificate::exact(1, 0)
+            .expect("canonical certificate");
+        let retained = retained_root_evidence(
+            &rspice_core::analysis::pole_zero::RootSetEvidence::Qualified { certificate },
+        )
+        .expect("supported core evidence converts");
+
+        assert_eq!(
+            retained,
+            PoleZeroRootSetEvidence::Qualified {
+                certificate: PoleZeroSpectrumCertificate {
+                    problem_order: 1,
+                    infinite_count: 0,
+                    max_backward_error: certificate.max_backward_error,
+                    qualification_tolerance: certificate.qualification_tolerance,
+                },
+            }
+        );
     }
 }

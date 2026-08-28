@@ -344,6 +344,55 @@ fn worker_result_round_trip() {
         other => panic!("expected noise result, got {other:?}"),
     }
 
+    let pole_zero = SimulationResult::PoleZero {
+        poles: vec![(-1.0, 2.0)],
+        zeros: vec![(-3.0, 0.0)],
+        pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+            certificate: crate::state::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 1.0e-14,
+                qualification_tolerance:
+                    crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                        .unwrap(),
+            },
+        },
+        zero_evidence: crate::state::PoleZeroRootSetEvidence::Approximate {
+            certificate: crate::state::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 1.0e-9,
+                qualification_tolerance:
+                    crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                        .unwrap(),
+            },
+        },
+        gain: None,
+    };
+    let pole_zero = round_trip_result(pole_zero);
+    match pole_zero {
+        SimulationResult::PoleZero {
+            poles,
+            zeros,
+            pole_evidence,
+            zero_evidence,
+            gain,
+        } => {
+            assert_eq!(poles, vec![(-1.0, 2.0)]);
+            assert_eq!(zeros, vec![(-3.0, 0.0)]);
+            assert!(matches!(
+                pole_evidence,
+                crate::state::PoleZeroRootSetEvidence::Qualified { .. }
+            ));
+            assert!(matches!(
+                zero_evidence,
+                crate::state::PoleZeroRootSetEvidence::Approximate { .. }
+            ));
+            assert_eq!(gain, None);
+        }
+        other => panic!("expected pole-zero result, got {other:?}"),
+    }
+
     let ac = SimulationResult::Ac {
         frequencies: vec![1.0, 10.0],
         waveforms: HashMap::from([(

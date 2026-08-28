@@ -2368,7 +2368,9 @@ fn typed_pole_zero_summary_preserves_native_payload_and_exact_values() {
             real: -3.0,
             imaginary: 0.0,
         }],
-        gain: 4.0,
+        pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+        zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+        gain: Some(4.0),
     };
     let analysis =
         AnalysisResult::new(3, AnalysisType::PoleZero, "PZ").with_result_payload(payload.clone());

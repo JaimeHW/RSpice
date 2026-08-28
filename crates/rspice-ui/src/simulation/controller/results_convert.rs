@@ -292,7 +292,13 @@ impl SimulationController {
                 .with_waveforms(self.build_waveforms_with_shared_x_owned(sweep_values, waveforms))
                 .with_measurements(measurements),
 
-            SimulationResult::PoleZero { poles, zeros, gain } => {
+            SimulationResult::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => {
                 let payload = AnalysisResultPayload::PoleZero {
                     poles: poles
                         .into_iter()
@@ -302,6 +308,8 @@ impl SimulationController {
                         .into_iter()
                         .map(|(real, imaginary)| ComplexResultValue { real, imaginary })
                         .collect(),
+                    pole_evidence,
+                    zero_evidence,
                     gain,
                 };
                 self.analysis_result_with_validated_payload(analysis_type, label, payload)

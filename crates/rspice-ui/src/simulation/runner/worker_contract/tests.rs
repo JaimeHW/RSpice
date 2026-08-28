@@ -11,6 +11,44 @@ use super::*;
 mod result_round_trip;
 
 #[test]
+fn pole_zero_worker_result_accepts_numeric_and_missing_gain_with_explicit_evidence() {
+    let legacy: WorkerSimulationResult = serde_json::from_str(
+        r#"{"PoleZero":{"poles":[[-1.0,2.0]],"zeros":[[-3.0,0.0]],"pole_evidence":{"status":"legacy_unknown"},"zero_evidence":{"status":"legacy_unknown"},"gain":4.25}}"#,
+    )
+    .expect("legacy numeric pole-zero gain deserializes");
+    assert!(matches!(
+        legacy,
+        WorkerSimulationResult::PoleZero {
+            gain: Some(4.25),
+            pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            ..
+        }
+    ));
+
+    let missing: WorkerSimulationResult =
+        serde_json::from_str(r#"{"PoleZero":{"poles":[[-1.0,2.0]],"zeros":[[-3.0,0.0]],"pole_evidence":{"status":"legacy_unknown"},"zero_evidence":{"status":"legacy_unknown"}}}"#)
+            .expect("missing pole-zero gain deserializes as unavailable");
+    assert!(matches!(
+        missing,
+        WorkerSimulationResult::PoleZero {
+            gain: None,
+            pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            ..
+        }
+    ));
+
+    assert!(
+        serde_json::from_str::<WorkerSimulationResult>(
+            r#"{"PoleZero":{"poles":[],"zeros":[],"gain":1.0}}"#
+        )
+        .is_err(),
+        "protocol-v9 worker results must never invent missing root evidence"
+    );
+}
+
+#[test]
 fn behavioral_reference_error_round_trips_through_worker_contract() {
     let expected = SimulationError::BehavioralReference {
         owner_name: "b2".to_string(),

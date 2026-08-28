@@ -25,7 +25,7 @@ use executed_deck::reject_executed_decks_before_schema_v15;
 pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
 use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
-    validate_v11_result_digests, validate_v12_result_digests,
+    validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -194,7 +194,9 @@ impl ProjectSimulationResults {
     /// authenticated with their unit-free waveform encoding before per-waveform
     /// units are admitted; a v12 waveform that already carries one is rejected
     /// rather than resealed, because no v12 digest ever covered those bytes.
-    /// Schema-v14 receipts predate the deck's hierarchy map and keep an empty
+    /// Schemas v13 through v15 are authenticated with the last required-gain
+    /// payload encoding before optional pole-zero gain is admitted. Schema-v14
+    /// receipts predate the deck's hierarchy map and keep an empty
     /// one: a run that executed before the map was sealed has no occurrence
     /// record, and inventing rows for it would forge the provenance the map
     /// exists to carry. Each migrated result is then resealed with the current
@@ -212,20 +214,20 @@ impl ProjectSimulationResults {
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
         migrate_legacy_specification_receipts(self, source_schema)?;
+        reject_pole_zero_evidence_before_schema_v16(self, source_schema)?;
         reject_hierarchy_maps_before_schema_v15(self, source_schema)?;
         reject_executed_decks_before_schema_v15(self, source_schema)?;
         reject_derived_task_identities_before_schema_v15(self, source_schema)?;
-        if source_schema == GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION {
-            // Schema v14 already used the current result-content digest and
-            // sealed its governed specifications. Its receipt predates only the
-            // deck's hierarchy map, which stays empty.
-            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
-            return self.validate();
-        }
-        if source_schema == WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION {
-            // Schema v13 already used the current result-content digest. Its
-            // prepared receipt simply predates governed specification records
-            // and the explicit plan-wide policy, both initialized above.
+        if matches!(
+            source_schema,
+            WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION
+                | GOVERNED_SPECIFICATION_RESULTS_SCHEMA_VERSION
+                | EXECUTED_DECK_RESULTS_SCHEMA_VERSION
+        ) {
+            for run in &mut self.runs {
+                validate_v13_to_v15_result_digests(run, source_schema)?;
+                seal_project_result_digests(run)?;
+            }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
         }
@@ -750,6 +752,40 @@ impl ProjectSimulationResults {
         self.executed_decks.validate(&run_sequences)?;
         Ok(())
     }
+}
+
+fn reject_pole_zero_evidence_before_schema_v16(
+    results: &ProjectSimulationResults,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for run in &results.runs {
+        for analysis in &run.analyses {
+            let PersistedField::Value(AnalysisResultPayload::PoleZero {
+                pole_evidence,
+                zero_evidence,
+                ..
+            }) = &analysis.result_payload
+            else {
+                continue;
+            };
+            if !matches!(
+                pole_evidence,
+                crate::state::PoleZeroRootSetEvidence::LegacyUnknown
+            ) || !matches!(
+                zero_evidence,
+                crate::state::PoleZeroRootSetEvidence::LegacyUnknown
+            ) {
+                return Err(format!(
+                    "schema-v{source_schema} analysis {} contains pole-zero root evidence introduced by schema v16",
+                    analysis.id
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn require_legacy_result_digest_absence(

@@ -687,7 +687,9 @@ mod tests {
                 imaginary: 2.0,
             }],
             zeros: Vec::new(),
-            gain: 3.5,
+            pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            gain: Some(3.5),
         });
         state.analysis.pole_zero_state.clear();
 

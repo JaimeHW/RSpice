@@ -21,6 +21,7 @@ const RESULT_DIGEST_ENCODING_VERSION_V3: u16 = 3;
 const RESULT_DIGEST_ENCODING_VERSION_V4: u16 = 4;
 const RESULT_DIGEST_ENCODING_VERSION_V5: u16 = 5;
 const RESULT_DIGEST_ENCODING_VERSION_V6: u16 = 6;
+const RESULT_DIGEST_ENCODING_VERSION_V7: u16 = 7;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -136,7 +137,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -148,7 +149,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -196,6 +197,13 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
     }
 
+    /// Schema-v13 through schema-v15 digest retained solely for authenticated
+    /// migration. Its pole-zero payload required a numeric DC gain.
+    #[must_use]
+    pub(crate) fn legacy_v6_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         self.result_data_writer_with_encoding(version).finish()
     }
@@ -208,6 +216,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.analysis-result-data/v4",
             RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.analysis-result-data/v5",
             RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.analysis-result-data/v6",
+            RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.analysis-result-data/v7",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -244,7 +253,9 @@ impl AnalysisResult {
         });
         writer.option(self.family_metadata.as_ref(), encode_family_metadata);
         if version >= RESULT_DIGEST_ENCODING_VERSION_V2 {
-            writer.option(self.result_payload.as_ref(), encode_result_payload);
+            writer.option(self.result_payload.as_ref(), |writer, payload| {
+                encode_result_payload(writer, payload, version);
+            });
         }
 
         writer.sequence(self.measurements.len());
@@ -290,7 +301,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -323,6 +334,13 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V5)
     }
 
+    /// Schema-v13 through schema-v15 dataset digest retained solely for
+    /// authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v6_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V6)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -331,6 +349,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V4 => "rspice.simulation-dataset-data/v4",
             RESULT_DIGEST_ENCODING_VERSION_V5 => "rspice.simulation-dataset-data/v5",
             RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.simulation-dataset-data/v6",
+            RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.simulation-dataset-data/v7",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -343,7 +362,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V3 => analysis.legacy_v3_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V4 => analysis.legacy_v4_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V5 => analysis.legacy_v5_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V6 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V6 => analysis.legacy_v6_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V7 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -351,7 +371,11 @@ impl SimulationRun {
     }
 }
 
-fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResultPayload) {
+fn encode_result_payload(
+    writer: &mut ResultDigestWriter,
+    payload: &AnalysisResultPayload,
+    encoding_version: u16,
+) {
     match payload {
         AnalysisResultPayload::OperatingPoint {
             temperature_mode,
@@ -478,11 +502,30 @@ fn encode_result_payload(writer: &mut ResultDigestWriter, payload: &AnalysisResu
                 writer.digest(*digest);
             }
         }
-        AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
+        AnalysisResultPayload::PoleZero {
+            poles,
+            zeros,
+            pole_evidence,
+            zero_evidence,
+            gain,
+        } => {
             writer.u8(0);
             encode_complex_result_values(writer, poles);
             encode_complex_result_values(writer, zeros);
-            writer.f64(*gain);
+            if encoding_version >= RESULT_DIGEST_ENCODING_VERSION_V7 {
+                writer.option(gain.as_ref(), |writer, gain| writer.f64(*gain));
+                encode_pole_zero_root_evidence(writer, pole_evidence);
+                encode_pole_zero_root_evidence(writer, zero_evidence);
+            } else if let Some(gain) = gain {
+                // Preserve the byte-for-byte schema-v9 through schema-v15
+                // encoding for authenticated legacy migration.
+                writer.f64(*gain);
+            } else {
+                // No authentic legacy payload could omit gain. Keep this
+                // deterministic and distinct so validation reports a digest
+                // mismatch instead of panicking on a tampered document.
+                writer.u8(u8::MAX);
+            }
         }
         AnalysisResultPayload::Sensitivity {
             output,
@@ -694,6 +737,38 @@ fn encode_complex_result_values(writer: &mut ResultDigestWriter, values: &[Compl
         writer.f64(value.real);
         writer.f64(value.imaginary);
     }
+}
+
+fn encode_pole_zero_root_evidence(
+    writer: &mut ResultDigestWriter,
+    evidence: &PoleZeroRootSetEvidence,
+) {
+    match evidence {
+        PoleZeroRootSetEvidence::NotRequested => writer.u8(0),
+        PoleZeroRootSetEvidence::QualifiedEmpty { certificate } => {
+            writer.u8(1);
+            encode_pole_zero_certificate(writer, *certificate);
+        }
+        PoleZeroRootSetEvidence::Qualified { certificate } => {
+            writer.u8(2);
+            encode_pole_zero_certificate(writer, *certificate);
+        }
+        PoleZeroRootSetEvidence::Approximate { certificate } => {
+            writer.u8(3);
+            encode_pole_zero_certificate(writer, *certificate);
+        }
+        PoleZeroRootSetEvidence::LegacyUnknown => writer.u8(4),
+    }
+}
+
+fn encode_pole_zero_certificate(
+    writer: &mut ResultDigestWriter,
+    certificate: PoleZeroSpectrumCertificate,
+) {
+    writer.u64(certificate.problem_order);
+    writer.u64(certificate.infinite_count);
+    writer.f64(certificate.max_backward_error);
+    writer.f64(certificate.qualification_tolerance);
 }
 
 fn encode_dc_op(writer: &mut ResultDigestWriter, result: &DcOpResult) {
@@ -1330,7 +1405,27 @@ mod tests {
                     real: -3.0,
                     imaginary: 0.0,
                 }],
-                gain: 4.0,
+                pole_evidence: PoleZeroRootSetEvidence::Qualified {
+                    certificate: PoleZeroSpectrumCertificate {
+                        problem_order: 1,
+                        infinite_count: 0,
+                        max_backward_error: 1.0e-14,
+                        qualification_tolerance:
+                            PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                                .unwrap(),
+                    },
+                },
+                zero_evidence: PoleZeroRootSetEvidence::Qualified {
+                    certificate: PoleZeroSpectrumCertificate {
+                        problem_order: 1,
+                        infinite_count: 0,
+                        max_backward_error: 2.0e-14,
+                        qualification_tolerance:
+                            PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                                .unwrap(),
+                    },
+                },
+                gain: Some(4.0),
             },
         );
         let mut changed_root = pole_zero.clone();
@@ -1341,9 +1436,43 @@ mod tests {
         };
         poles[0].imaginary = 2.5;
 
+        let mut unavailable_gain = pole_zero.clone();
+        let Some(AnalysisResultPayload::PoleZero { gain, .. }) =
+            unavailable_gain.result_payload.as_mut()
+        else {
+            panic!("pole-zero payload")
+        };
+        *gain = None;
+
+        let mut approximate_evidence = pole_zero.clone();
+        let Some(AnalysisResultPayload::PoleZero { pole_evidence, .. }) =
+            approximate_evidence.result_payload.as_mut()
+        else {
+            panic!("pole-zero payload")
+        };
+        *pole_evidence = PoleZeroRootSetEvidence::Approximate {
+            certificate: PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 1.0e-9,
+                qualification_tolerance:
+                    PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+            },
+        };
+
         assert_ne!(
             pole_zero.result_data_digest(),
             changed_root.result_data_digest()
+        );
+        assert_ne!(
+            pole_zero.result_data_digest(),
+            unavailable_gain.result_data_digest(),
+            "gain availability is authenticated result evidence"
+        );
+        assert_ne!(
+            pole_zero.result_data_digest(),
+            approximate_evidence.result_data_digest(),
+            "root-set qualification is authenticated result evidence"
         );
         assert_eq!(
             pole_zero.legacy_v1_result_data_digest(),
@@ -1410,7 +1539,9 @@ mod tests {
                     imaginary: 0.0,
                 }],
                 zeros: Vec::new(),
-                gain: 1.0,
+                pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                gain: Some(1.0),
             });
         let negative_zero = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
             .with_result_payload(AnalysisResultPayload::PoleZero {
@@ -1419,7 +1550,9 @@ mod tests {
                     imaginary: -0.0,
                 }],
                 zeros: Vec::new(),
-                gain: 1.0,
+                pole_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: PoleZeroRootSetEvidence::LegacyUnknown,
+                gain: Some(1.0),
             });
         assert_eq!(
             positive_zero.result_data_digest(),

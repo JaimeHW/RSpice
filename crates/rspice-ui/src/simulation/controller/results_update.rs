@@ -149,12 +149,25 @@ impl SimulationController {
                 echo_measurements(state, measurements);
             }
 
-            SimulationResult::PoleZero { poles, zeros, gain } => {
+            SimulationResult::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => {
                 // The immutable retained result is the sole plot authority.
                 // Console output is a secondary execution log only.
+                let gain = gain
+                    .map(|gain| format!("{gain:.4}"))
+                    .unwrap_or_else(|| "unavailable".to_owned());
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
-                    "Pole-Zero Analysis: DC gain = {:.4}",
-                    gain
+                    "Pole-Zero Analysis: DC gain = {gain}"
+                )));
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "Evidence: poles {} · zeros {}",
+                    pole_evidence.label(),
+                    zero_evidence.label()
                 )));
 
                 for (i, (re, im)) in poles.iter().enumerate() {

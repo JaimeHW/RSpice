@@ -190,8 +190,12 @@ pub enum SimulationResult {
         poles: Vec<(f64, f64)>,
         /// Zeros (complex values)
         zeros: Vec<(f64, f64)>,
-        /// Transfer function gain
-        gain: f64,
+        /// Completeness and numerical qualification evidence for `poles`.
+        pole_evidence: crate::state::PoleZeroRootSetEvidence,
+        /// Completeness and numerical qualification evidence for `zeros`.
+        zero_evidence: crate::state::PoleZeroRootSetEvidence,
+        /// Finite DC transfer gain, when the selected transfer has one.
+        gain: Option<f64>,
     },
 
     /// Sensitivity analysis results

@@ -472,7 +472,7 @@ pub(super) fn reject_derived_task_identities_before_schema_v15(
     results: &ProjectSimulationResults,
     source_schema: u32,
 ) -> Result<(), String> {
-    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
+    if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {
         return Ok(());
     }
     for (run_index, run) in results.runs.iter().enumerate() {
@@ -496,7 +496,7 @@ pub(super) fn reject_hierarchy_maps_before_schema_v15(
     results: &ProjectSimulationResults,
     source_schema: u32,
 ) -> Result<(), String> {
-    if source_schema >= PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION {
+    if source_schema >= EXECUTED_DECK_RESULTS_SCHEMA_VERSION {
         return Ok(());
     }
     for (run_index, run) in results.runs.iter().enumerate() {

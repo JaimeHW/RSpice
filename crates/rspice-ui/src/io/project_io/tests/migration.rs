@@ -154,6 +154,98 @@ fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
     );
 }
 
+fn persisted_pole_zero_at_schema_v15() -> ProjectSimulationResults {
+    let mut run = SimulationRun::new(35);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
+            AnalysisResultPayload::PoleZero {
+                poles: vec![crate::state::ComplexResultValue {
+                    real: -1.0,
+                    imaginary: 0.0,
+                }],
+                zeros: Vec::new(),
+                pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                gain: Some(2.0),
+            },
+        ),
+    );
+    seal_legacy_unattributed(&mut run);
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 35;
+    let mut persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.schema_version = EXECUTED_DECK_RESULTS_SCHEMA_VERSION;
+    downgrade_result_digests_to_v6(&mut persisted);
+    persisted
+}
+
+#[test]
+fn schema_v15_pole_zero_results_migrate_only_as_legacy_unknown() {
+    let mut authentic = persisted_pole_zero_at_schema_v15();
+    authentic
+        .migrate_to_current(ProjectId::new())
+        .expect("an authentic schema-v15 pole-zero result migrates");
+    let PersistedField::Value(AnalysisResultPayload::PoleZero {
+        pole_evidence,
+        zero_evidence,
+        gain,
+        ..
+    }) = &authentic.runs[0].analyses[0].result_payload
+    else {
+        panic!("migrated pole-zero payload remains present")
+    };
+    assert_eq!(*gain, Some(2.0));
+    assert!(matches!(
+        pole_evidence,
+        crate::state::PoleZeroRootSetEvidence::LegacyUnknown
+    ));
+    assert!(matches!(
+        zero_evidence,
+        crate::state::PoleZeroRootSetEvidence::LegacyUnknown
+    ));
+
+    let mut injected = persisted_pole_zero_at_schema_v15();
+    let PersistedField::Value(AnalysisResultPayload::PoleZero { pole_evidence, .. }) =
+        &mut injected.runs[0].analyses[0].result_payload
+    else {
+        panic!("pole-zero fixture")
+    };
+    *pole_evidence = crate::state::PoleZeroRootSetEvidence::Qualified {
+        certificate: crate::state::PoleZeroSpectrumCertificate {
+            problem_order: 1,
+            infinite_count: 0,
+            max_backward_error: 0.0,
+            qualification_tolerance:
+                crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                    .unwrap(),
+        },
+    };
+    assert!(
+        injected
+            .migrate_to_current(ProjectId::new())
+            .expect_err("schema-v15 cannot smuggle unauthenticated root evidence")
+            .contains("root evidence introduced by schema v16")
+    );
+
+    let mut missing_gain = persisted_pole_zero_at_schema_v15();
+    let PersistedField::Value(AnalysisResultPayload::PoleZero { gain, .. }) =
+        &mut missing_gain.runs[0].analyses[0].result_payload
+    else {
+        panic!("pole-zero fixture")
+    };
+    *gain = None;
+    assert!(
+        missing_gain
+            .migrate_to_current(ProjectId::new())
+            .expect_err("schema-v15 required a numeric gain authenticated by V6")
+            .contains("result data digest does not match")
+    );
+}
+
 #[test]
 fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_policy() {
     let plan_id = SimulationPlanId::new();
@@ -184,6 +276,7 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
     simulation.next_run_id = 35;
     let mut persisted = ProjectSimulationResults::from_state(&simulation);
     persisted.schema_version = WAVEFORM_UNIT_RESULTS_SCHEMA_VERSION;
+    downgrade_result_digests_to_v6(&mut persisted);
     let PersistedField::Value(receipt) = &mut persisted.runs[0].prepared_receipt else {
         panic!("prepared fixture has a receipt");
     };

@@ -929,7 +929,10 @@ pub(crate) enum WorkerSimulationResult {
     PoleZero {
         poles: Vec<(f64, f64)>,
         zeros: Vec<(f64, f64)>,
-        gain: f64,
+        pole_evidence: crate::state::PoleZeroRootSetEvidence,
+        zero_evidence: crate::state::PoleZeroRootSetEvidence,
+        #[serde(default)]
+        gain: Option<f64>,
     },
     Sensitivity {
         output: String,
@@ -1199,7 +1202,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 8;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 9;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {
@@ -1297,9 +1300,19 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 summary: summary.map(WorkerNoiseSummary::from),
                 measurements: worker_measurements(measurements),
             }),
-            SimulationResult::PoleZero { poles, zeros, gain } => {
-                Ok(Self::PoleZero { poles, zeros, gain })
-            }
+            SimulationResult::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => Ok(Self::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            }),
             SimulationResult::Sensitivity {
                 output,
                 ac_mode,
@@ -1529,9 +1542,19 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 summary: summary.map(NoiseSummary::from),
                 measurements: measure_results(measurements),
             },
-            WorkerSimulationResult::PoleZero { poles, zeros, gain } => {
-                Self::PoleZero { poles, zeros, gain }
-            }
+            WorkerSimulationResult::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => Self::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            },
             WorkerSimulationResult::Sensitivity {
                 output,
                 ac_mode,

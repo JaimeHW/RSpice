@@ -4337,7 +4337,9 @@ mod integrity_scan_tests {
                     real: -3.0,
                     imaginary: 0.0,
                 }],
-                gain: 4.25,
+                pole_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                zero_evidence: crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+                gain: Some(4.25),
             });
         let mut run = SimulationRun::new(2);
         run.add_analysis(analysis);
@@ -4438,17 +4440,21 @@ mod integrity_scan_tests {
         assert!(app.state.simulation.select_run(1));
 
         let rows = exact_source_rows(&app.state);
-        assert_eq!(rows.len(), 7);
+        assert_eq!(rows.len(), 9);
         assert_eq!(rows[0].stable_row, "29:gain");
         assert_eq!(rows[0].value, format!("{:.17e}", 4.25));
-        assert_eq!(rows[1].stable_row, "29:pole[0].real");
-        assert_eq!(rows[1].value, format!("{:.17e}", -10.0));
-        assert_eq!(rows[2].stable_row, "29:pole[0].imaginary");
-        assert_eq!(rows[2].value, format!("{:.17e}", 20.0));
-        assert_eq!(rows[3].stable_row, "29:pole[1].real");
-        assert_eq!(rows[4].stable_row, "29:pole[1].imaginary");
-        assert_eq!(rows[5].stable_row, "29:zero[0].real");
-        assert_eq!(rows[6].stable_row, "29:zero[0].imaginary");
+        assert_eq!(rows[1].stable_row, "29:pole_evidence.status");
+        assert_eq!(rows[1].value, "legacy unknown");
+        assert_eq!(rows[2].stable_row, "29:zero_evidence.status");
+        assert_eq!(rows[2].value, "legacy unknown");
+        assert_eq!(rows[3].stable_row, "29:pole[0].real");
+        assert_eq!(rows[3].value, format!("{:.17e}", -10.0));
+        assert_eq!(rows[4].stable_row, "29:pole[0].imaginary");
+        assert_eq!(rows[4].value, format!("{:.17e}", 20.0));
+        assert_eq!(rows[5].stable_row, "29:pole[1].real");
+        assert_eq!(rows[6].stable_row, "29:pole[1].imaginary");
+        assert_eq!(rows[7].stable_row, "29:zero[0].real");
+        assert_eq!(rows[8].stable_row, "29:zero[0].imaginary");
     }
 
     #[test]

@@ -19,7 +19,14 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
         return None;
     }
     let payload = analysis.result_payload.as_ref()?;
-    let AnalysisResultPayload::PoleZero { poles, zeros, gain } = payload else {
+    let AnalysisResultPayload::PoleZero {
+        poles,
+        zeros,
+        pole_evidence,
+        zero_evidence,
+        gain,
+    } = payload
+    else {
         return None;
     };
     if payload.validate_for(analysis.analysis_type).is_err() {
@@ -28,6 +35,8 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
 
     let mut data = PoleZeroData::new(&analysis.label);
     data.gain = *gain;
+    data.pole_evidence = pole_evidence.clone();
+    data.zero_evidence = zero_evidence.clone();
     data.roots.extend(
         poles
             .iter()
@@ -44,36 +53,52 @@ fn active_data(state: &AppState) -> Option<PoleZeroData> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PoleStabilityVerdict {
     Stable,
-    Marginal,
     Unstable,
+    Indeterminate,
 }
 
 impl PoleStabilityVerdict {
     const fn label(self) -> &'static str {
         match self {
             Self::Stable => "stable",
-            Self::Marginal => "marginal",
             Self::Unstable => "unstable",
+            Self::Indeterminate => "indeterminate",
         }
     }
 }
 
 fn pole_stability(data: &PoleZeroData) -> PoleStabilityVerdict {
-    let mut marginal = false;
-    for pole in data.roots.iter().filter(|root| root.is_pole()) {
-        let tolerance = imaginary_axis_tolerance(pole);
-        if pole.real > tolerance {
-            return PoleStabilityVerdict::Unstable;
-        }
-        if pole.real.abs() <= tolerance {
-            marginal = true;
-        }
+    let poles = data
+        .roots
+        .iter()
+        .filter(|root| root.is_pole())
+        .collect::<Vec<_>>();
+    if !data.pole_evidence.is_qualified()
+        || !data.pole_evidence.is_consistent_with_count(poles.len())
+    {
+        return PoleStabilityVerdict::Indeterminate;
     }
-    if marginal {
-        PoleStabilityVerdict::Marginal
-    } else {
+    if poles.iter().all(|pole| pole.real < 0.0) {
         PoleStabilityVerdict::Stable
+    } else {
+        PoleStabilityVerdict::Unstable
     }
+}
+
+fn format_root_evidence(evidence: &crate::state::PoleZeroRootSetEvidence) -> String {
+    evidence.certificate().map_or_else(
+        || evidence.label().to_owned(),
+        |certificate| {
+            format!(
+                "{} · order {} · infinite {} · residual {:.3e} / {:.3e}",
+                evidence.label(),
+                certificate.problem_order,
+                certificate.infinite_count,
+                certificate.max_backward_error,
+                certificate.qualification_tolerance
+            )
+        },
+    )
 }
 
 #[derive(Debug)]
@@ -439,11 +464,27 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             format!("{} / {} · retained", summary.pole_count, summary.zero_count),
             false,
         ),
+        (
+            "Pole evidence".to_owned(),
+            format_root_evidence(&data.pole_evidence),
+            false,
+        ),
+        (
+            "Zero evidence".to_owned(),
+            format_root_evidence(&data.zero_evidence),
+            false,
+        ),
         ("Dominant pole".to_owned(), dominant, false),
         ("Worst Q".to_owned(), worst_q, false),
         ("RHP content".to_owned(), rhp, false),
         ("Imaginary axis".to_owned(), axis, false),
-        ("Gain".to_owned(), format!("{:.4}", data.gain), false),
+        (
+            "Gain".to_owned(),
+            data.gain
+                .map(|gain| format!("{gain:.4}"))
+                .unwrap_or_else(|| "Unavailable — no finite DC gain".to_owned()),
+            false,
+        ),
         (
             "Reduction".to_owned(),
             "Unavailable — matrix reduction not retained".to_owned(),
@@ -508,6 +549,24 @@ mod tests {
         AnalysisResult, AnalysisResultPayload, AnalysisType, ComplexResultValue, SimulationRun,
     };
 
+    fn qualified_evidence(root_count: u64) -> crate::state::PoleZeroRootSetEvidence {
+        let certificate = crate::state::PoleZeroSpectrumCertificate {
+            problem_order: root_count,
+            infinite_count: 0,
+            max_backward_error: 1.0e-14,
+            qualification_tolerance:
+                crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(
+                    root_count,
+                )
+                .unwrap(),
+        };
+        if root_count == 0 {
+            crate::state::PoleZeroRootSetEvidence::QualifiedEmpty { certificate }
+        } else {
+            crate::state::PoleZeroRootSetEvidence::Qualified { certificate }
+        }
+    }
+
     #[test]
     fn retained_payload_is_the_only_pole_zero_viewer_authority() {
         let mut state = AppState::default();
@@ -538,13 +597,15 @@ mod tests {
                         real: -3.0,
                         imaginary: 0.0,
                     }],
-                    gain: 4.25,
+                    pole_evidence: qualified_evidence(2),
+                    zero_evidence: qualified_evidence(1),
+                    gain: Some(4.25),
                 },
             );
 
         let data = active_data(&state).expect("retained PZ payload");
         assert_eq!(data.name, "PZ 7");
-        assert_eq!(data.gain, 4.25);
+        assert_eq!(data.gain, Some(4.25));
         assert_eq!(data.roots.len(), 3);
         assert!(data.roots[0].is_pole());
         assert_eq!((data.roots[0].real, data.roots[0].imag), (-10.0, 20.0));
@@ -555,12 +616,13 @@ mod tests {
     }
 
     #[test]
-    fn imaginary_axis_poles_are_marginal_not_stable() {
+    fn qualified_imaginary_axis_poles_are_unstable() {
         let mut data = PoleZeroData::new("axis pole");
         data.roots.push(ComplexRoot::pole(0.0, 10.0));
         data.roots.push(ComplexRoot::pole(0.0, -10.0));
+        data.pole_evidence = qualified_evidence(2);
 
-        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Marginal);
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Unstable);
     }
 
     #[test]
@@ -568,6 +630,7 @@ mod tests {
         let mut data = PoleZeroData::new("unstable");
         data.roots.push(ComplexRoot::pole(0.0, 10.0));
         data.roots.push(ComplexRoot::pole(0.5, 0.0));
+        data.pole_evidence = qualified_evidence(2);
 
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Unstable);
     }
@@ -577,7 +640,35 @@ mod tests {
         let mut data = PoleZeroData::new("stable");
         data.roots.push(ComplexRoot::pole(-0.5, 0.0));
         data.roots.push(ComplexRoot::pole(-2.0, 10.0));
+        data.pole_evidence = qualified_evidence(2);
 
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Stable);
+    }
+
+    #[test]
+    fn unqualified_pole_evidence_is_always_indeterminate() {
+        let mut data = PoleZeroData::new("unqualified");
+        data.roots.push(ComplexRoot::pole(-1.0, 0.0));
+        for evidence in [
+            crate::state::PoleZeroRootSetEvidence::NotRequested,
+            crate::state::PoleZeroRootSetEvidence::LegacyUnknown,
+            crate::state::PoleZeroRootSetEvidence::Approximate {
+                certificate: crate::state::PoleZeroSpectrumCertificate {
+                    problem_order: 1,
+                    infinite_count: 0,
+                    max_backward_error: 1.0e-9,
+                    qualification_tolerance: crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                },
+            },
+        ] {
+            data.pole_evidence = evidence;
+            assert_eq!(pole_stability(&data), PoleStabilityVerdict::Indeterminate);
+        }
+
+        data.roots.clear();
+        data.pole_evidence = crate::state::PoleZeroRootSetEvidence::NotRequested;
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Indeterminate);
+        data.pole_evidence = qualified_evidence(0);
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Stable);
     }
 

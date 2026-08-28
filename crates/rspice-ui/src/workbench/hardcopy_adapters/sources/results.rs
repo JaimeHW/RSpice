@@ -1252,8 +1252,13 @@ pub(super) fn semantic_result_summary(
             }
         }
         ResultViewer::PoleZero => {
-            let Some(AnalysisResultPayload::PoleZero { poles, zeros, gain }) =
-                &analysis.result_payload
+            let Some(AnalysisResultPayload::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            }) = &analysis.result_payload
             else {
                 return Err(HardcopySourceError::MissingViewerEvidence("pole-zero"));
             };
@@ -1272,10 +1277,48 @@ pub(super) fn semantic_result_summary(
                     exact_number(value.imaginary),
                 ]
             }));
+            let gain = gain
+                .map(exact_number)
+                .unwrap_or_else(|| "unavailable".to_owned());
             tables.push(SemanticTable {
-                title: format!("Pole-zero roots · gain {}", exact_number(*gain)),
+                title: format!("Pole-zero roots · gain {gain}"),
                 columns: vec!["Root".to_owned(), "Real".to_owned(), "Imaginary".to_owned()],
                 rows,
+            });
+            tables.push(SemanticTable {
+                title: "Root-set qualification evidence".to_owned(),
+                columns: vec![
+                    "Set".to_owned(),
+                    "Status".to_owned(),
+                    "Order".to_owned(),
+                    "Infinite".to_owned(),
+                    "Max backward error".to_owned(),
+                    "Qualification tolerance".to_owned(),
+                ],
+                rows: [("Poles", pole_evidence), ("Zeros", zero_evidence)]
+                    .into_iter()
+                    .map(|(name, evidence)| {
+                        let certificate = evidence.certificate();
+                        vec![
+                            name.to_owned(),
+                            evidence.label().to_owned(),
+                            certificate
+                                .map(|certificate| certificate.problem_order.to_string())
+                                .unwrap_or_else(|| "—".to_owned()),
+                            certificate
+                                .map(|certificate| certificate.infinite_count.to_string())
+                                .unwrap_or_else(|| "—".to_owned()),
+                            certificate
+                                .map(|certificate| exact_number(certificate.max_backward_error))
+                                .unwrap_or_else(|| "—".to_owned()),
+                            certificate
+                                .map(|certificate| {
+                                    exact_number(certificate.qualification_tolerance)
+                                })
+                                .unwrap_or_else(|| "—".to_owned()),
+                        ]
+                    })
+                    .collect(),
             });
         }
         ResultViewer::Events => {

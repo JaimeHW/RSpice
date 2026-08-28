@@ -70,7 +70,27 @@ impl SimulationResult {
             SimulationResult::Ac { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::HarmonicBalance { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::Noise { frequencies, .. } => !frequencies.is_empty(),
-            SimulationResult::PoleZero { gain, .. } => gain.is_finite(),
+            SimulationResult::PoleZero {
+                poles,
+                zeros,
+                pole_evidence,
+                zero_evidence,
+                gain,
+            } => {
+                gain.is_none_or(|gain| gain.is_finite())
+                    && pole_evidence.is_consistent_with_count(poles.len())
+                    && zero_evidence.is_consistent_with_count(zeros.len())
+                    && (!poles.is_empty()
+                        || !zeros.is_empty()
+                        || gain.is_some()
+                        || !matches!(
+                            (pole_evidence, zero_evidence),
+                            (
+                                crate::state::PoleZeroRootSetEvidence::NotRequested,
+                                crate::state::PoleZeroRootSetEvidence::NotRequested
+                            )
+                        ))
+            }
             SimulationResult::Sensitivity {
                 output,
                 sensitivities,

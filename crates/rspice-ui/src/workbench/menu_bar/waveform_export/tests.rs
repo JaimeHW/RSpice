@@ -360,19 +360,38 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
 
 #[test]
 fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
-    let analysis = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ").with_result_payload(
-        AnalysisResultPayload::PoleZero {
-            poles: vec![ComplexResultValue {
-                real: -1.0,
-                imaginary: 2.0,
-            }],
-            zeros: vec![ComplexResultValue {
-                real: -3.0,
-                imaginary: 0.0,
-            }],
-            gain: 4.25,
+    let analysis = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
+        .with_result_payload(AnalysisResultPayload::PoleZero {
+        poles: vec![ComplexResultValue {
+            real: -1.0,
+            imaginary: 2.0,
+        }],
+        zeros: vec![ComplexResultValue {
+            real: -3.0,
+            imaginary: 0.0,
+        }],
+        pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+            certificate: crate::state::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 1.0e-14,
+                qualification_tolerance:
+                    crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                        .unwrap(),
+            },
         },
-    );
+        zero_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+            certificate: crate::state::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 2.0e-14,
+                qualification_tolerance:
+                    crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                        .unwrap(),
+            },
+        },
+        gain: Some(4.25),
+    });
     let mut state = state_with_typed_result(analysis);
     let io = MockExportWorkflowIo::default();
 
@@ -387,8 +406,63 @@ fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
         concat!(
             "record,index,real_rad_per_s,imaginary_rad_per_s,value\n",
             "gain,,,,4.25000000000000000e0\n",
+            "pole_evidence,,,,qualified\n",
+            "pole_problem_order,,,,1\n",
+            "pole_infinite_count,,,,0\n",
+            "pole_max_backward_error,,,,9.99999999999999999e-15\n",
+            "pole_qualification_tolerance,,,,2.84217094304040074e-14\n",
+            "zero_evidence,,,,qualified\n",
+            "zero_problem_order,,,,1\n",
+            "zero_infinite_count,,,,0\n",
+            "zero_max_backward_error,,,,2.00000000000000000e-14\n",
+            "zero_qualification_tolerance,,,,2.84217094304040074e-14\n",
             "pole,0,-1.00000000000000000e0,2.00000000000000000e0,\n",
             "zero,0,-3.00000000000000000e0,0.00000000000000000e0,\n",
+        )
+    );
+}
+
+#[test]
+fn csv_export_marks_unavailable_pole_zero_gain_explicitly() {
+    let analysis = AnalysisResult::new(1, AnalysisType::PoleZero, "PZ")
+        .with_result_payload(AnalysisResultPayload::PoleZero {
+        poles: vec![ComplexResultValue {
+            real: -1.0,
+            imaginary: 2.0,
+        }],
+        zeros: Vec::new(),
+        pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
+            certificate: crate::state::PoleZeroSpectrumCertificate {
+                problem_order: 1,
+                infinite_count: 0,
+                max_backward_error: 1.0e-14,
+                qualification_tolerance:
+                    crate::state::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1)
+                        .unwrap(),
+            },
+        },
+        zero_evidence: crate::state::PoleZeroRootSetEvidence::NotRequested,
+        gain: None,
+    });
+    let mut state = state_with_typed_result(analysis);
+    let io = MockExportWorkflowIo::default();
+
+    action_export_csv_with_io(&mut state, &io);
+
+    let files = io.text_files.borrow();
+    assert_eq!(files[0].0, PathBuf::from("pole-zero.csv"));
+    assert_eq!(
+        files[0].1,
+        concat!(
+            "record,index,real_rad_per_s,imaginary_rad_per_s,value\n",
+            "gain,,,,unavailable\n",
+            "pole_evidence,,,,qualified\n",
+            "pole_problem_order,,,,1\n",
+            "pole_infinite_count,,,,0\n",
+            "pole_max_backward_error,,,,9.99999999999999999e-15\n",
+            "pole_qualification_tolerance,,,,2.84217094304040074e-14\n",
+            "zero_evidence,,,,not requested\n",
+            "pole,0,-1.00000000000000000e0,2.00000000000000000e0,\n",
         )
     );
 }

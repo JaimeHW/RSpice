@@ -756,10 +756,21 @@ fn prepare_typed_result_csv(
                 detail: "exact operating-point execution and retention contract".to_owned(),
             })
         }
-        AnalysisResultPayload::PoleZero { poles, zeros, gain } => {
+        AnalysisResultPayload::PoleZero {
+            poles,
+            zeros,
+            pole_evidence,
+            zero_evidence,
+            gain,
+        } => {
             let mut contents =
                 String::from("record,index,real_rad_per_s,imaginary_rad_per_s,value\n");
-            contents.push_str(&format!("gain,,,,{gain:.17e}\n"));
+            let gain = gain
+                .map(|gain| format!("{gain:.17e}"))
+                .unwrap_or_else(|| "unavailable".to_owned());
+            contents.push_str(&format!("gain,,,,{gain}\n"));
+            append_pole_zero_evidence_csv(&mut contents, "pole", pole_evidence);
+            append_pole_zero_evidence_csv(&mut contents, "zero", zero_evidence);
             for (kind, roots) in [("pole", poles), ("zero", zeros)] {
                 for (index, root) in roots.iter().enumerate() {
                     contents.push_str(&format!(
@@ -771,7 +782,18 @@ fn prepare_typed_result_csv(
             Some(PreparedTypedResultCsv {
                 default_name: "pole-zero.csv",
                 contents,
-                detail: format!("{} poles, {} zeros, exact gain", poles.len(), zeros.len()),
+                detail: format!(
+                    "{} poles ({}), {} zeros ({}), DC gain {}",
+                    poles.len(),
+                    pole_evidence.label(),
+                    zeros.len(),
+                    zero_evidence.label(),
+                    if gain == "unavailable" {
+                        "unavailable"
+                    } else {
+                        "retained"
+                    }
+                ),
             })
         }
         AnalysisResultPayload::Sensitivity {
@@ -1077,6 +1099,30 @@ fn soa_violation_severity_csv(
         SoaViolationSeverityEvidence::Warning => "warning",
         SoaViolationSeverityEvidence::Violation => "violation",
         SoaViolationSeverityEvidence::Critical => "critical",
+    }
+}
+
+fn append_pole_zero_evidence_csv(
+    contents: &mut String,
+    root_kind: &str,
+    evidence: &crate::state::PoleZeroRootSetEvidence,
+) {
+    contents.push_str(&format!("{root_kind}_evidence,,,,{}\n", evidence.label()));
+    if let Some(certificate) = evidence.certificate() {
+        for (field, value) in [
+            ("problem_order", certificate.problem_order.to_string()),
+            ("infinite_count", certificate.infinite_count.to_string()),
+            (
+                "max_backward_error",
+                format!("{:.17e}", certificate.max_backward_error),
+            ),
+            (
+                "qualification_tolerance",
+                format!("{:.17e}", certificate.qualification_tolerance),
+            ),
+        ] {
+            contents.push_str(&format!("{root_kind}_{field},,,,{value}\n"));
+        }
     }
 }
 
