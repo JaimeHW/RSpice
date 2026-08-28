@@ -126,6 +126,12 @@ impl SimulationState {
 
     /// Atomically replace yield evidence and its stable dataset authority.
     /// Empty result sets cannot retain stale provenance from a prior run.
+    ///
+    /// This is a new generation of the retained evidence. The distribution
+    /// sheet resolves its spec limits, its yield verdict and the consistency
+    /// check behind them once per data version, so replacing the evidence
+    /// underneath that memo without moving the version left the sheet showing
+    /// the previous run's limits against the new population.
     pub fn replace_yield_evidence(
         &mut self,
         results: Vec<YieldResult>,
@@ -133,6 +139,7 @@ impl SimulationState {
     ) {
         self.yield_provenance = if results.is_empty() { None } else { provenance };
         self.yield_results = results;
+        self.data_version = self.data_version.wrapping_add(1);
     }
 
     /// Yield evidence for one exact immutable dataset, if that dataset is the
@@ -1479,7 +1486,17 @@ mod tests {
         state.runs.push(run);
         state.active_run_idx = Some(0);
 
+        // Replacing the evidence is a new generation of it. The distribution
+        // sheet resolves its spec limits, its yield verdict and the
+        // consistency check behind them once per data version, so replacing
+        // the population underneath that memo without moving the version left
+        // the sheet showing the previous run's limits against the new one.
+        let version = state.data_version;
         state.replace_yield_evidence(vec![result], Some(provenance));
+        assert_ne!(
+            state.data_version, version,
+            "the yield evidence was replaced at the generation its memo already describes"
+        );
         assert_eq!(state.yield_provenance, Some(provenance));
         assert_eq!(provenance.seed, 19);
         assert_eq!(provenance.runs_requested, 3);

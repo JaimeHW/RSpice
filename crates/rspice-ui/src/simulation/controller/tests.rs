@@ -2365,3 +2365,50 @@ fn manual_deck_parameters_authored_with_units_are_read() {
     assert_eq!(values.get("vsupply").copied(), Some(5.0));
     assert_eq!(values.get("rload").copied(), Some(1e3));
 }
+
+/// Sealing an aborted run is a new generation of the retained evidence.
+///
+/// The abort path appends a partial analysis, flips the run's verdict and
+/// seals its lifecycle, and it did all of that at a constant data version.
+/// Every workspace memo over that evidence is keyed on the version — the
+/// manifest's dataset digest among them — so the reader was left holding a
+/// projection of the run as it stood before the abort.
+#[test]
+fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
+    let mut controller = SimulationController::new();
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    controller.current_run_id = Some(run_sequence);
+    assert!(state.simulation.select_run(0));
+
+    let before = state.simulation.data_version;
+    let digest_before = state.simulation.runs[0]
+        .dataset_content_digest()
+        .to_string();
+
+    controller.seal_aborted_run(
+        &mut state,
+        Some(AnalysisResult::new(
+            1,
+            AnalysisType::Transient,
+            "aborted TRAN",
+        )),
+    );
+
+    assert!(!state.simulation.runs[0].success);
+    assert_eq!(
+        state.simulation.runs[0].lifecycle,
+        SimulationRunLifecycle::Aborted
+    );
+    assert_ne!(
+        state.simulation.runs[0]
+            .dataset_content_digest()
+            .to_string(),
+        digest_before,
+        "the fixture must actually change the retained evidence"
+    );
+    assert_ne!(
+        state.simulation.data_version, before,
+        "the aborted run was sealed at the generation the memos already describe"
+    );
+}

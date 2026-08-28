@@ -1179,6 +1179,43 @@ impl SimulationController {
         Ok(succeeded)
     }
 
+    /// Seal the aborted run, keeping whatever prefix the save policy admits.
+    ///
+    /// The run the reader may already be looking at is mutated three ways
+    /// here: a partial analysis is appended to it, its verdict flips to
+    /// failed, and its lifecycle is sealed as `Aborted`. That is a new
+    /// generation of the retained evidence, and every workspace memo over it
+    /// is keyed on the generation — the manifest's dataset digest, the
+    /// operating-point row plan, the retained-evidence validity. Sealing at a
+    /// constant version left all of them describing the run as it stood
+    /// before the abort.
+    fn seal_aborted_run(&mut self, state: &mut AppState, partial: Option<AnalysisResult>) {
+        let mut retention_error = None;
+        let mut sealed = false;
+        if let Some(run_sequence) = self.current_run_id
+            && let Some(run) = state.simulation.run_by_sequence_mut(run_sequence)
+        {
+            if let Some(partial) = partial {
+                retention_error = self
+                    .retain_analysis_under_current_policy(run, partial)
+                    .err();
+            }
+            run.success = false;
+            sealed = true;
+            if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Aborted) {
+                log::error!("Failed to seal aborted run lifecycle: {error}");
+                state.push_sim_message(ConsoleMessage::error(error));
+            }
+        }
+        if sealed {
+            state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+        }
+        if let Some(error) = retention_error {
+            log::error!("{error}");
+            state.push_sim_message(ConsoleMessage::error(error));
+        }
+    }
+
     /// Adopt one terminal result only when the complete retained run remains
     /// inside the ceiling authenticated by its prepared snapshot.
     fn retain_analysis_under_current_policy(
@@ -2102,25 +2139,7 @@ impl SimulationController {
                         self.materialize_current_saved_outputs(&mut analysis);
                         analysis
                     });
-                    let mut retention_error = None;
-                    if let Some(run_sequence) = self.current_run_id
-                        && let Some(run) = state.simulation.run_by_sequence_mut(run_sequence)
-                    {
-                        if let Some(partial) = partial.take() {
-                            retention_error = self
-                                .retain_analysis_under_current_policy(run, partial)
-                                .err();
-                        }
-                        run.success = false;
-                        if let Err(error) = run.finish_lifecycle(SimulationRunLifecycle::Aborted) {
-                            log::error!("Failed to seal aborted run lifecycle: {error}");
-                            state.push_sim_message(ConsoleMessage::error(error));
-                        }
-                    }
-                    if let Some(error) = retention_error {
-                        log::error!("{error}");
-                        state.push_sim_message(ConsoleMessage::error(error));
-                    }
+                    self.seal_aborted_run(state, partial.take());
                     self.pending_analyses.clear();
                     self.successful_analysis_instances.clear();
                     self.execution_artifacts.clear();
