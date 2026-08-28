@@ -10226,6 +10226,37 @@ fn test_xyce_bug706_rc_include_inline_release_relational_oracle() {
 }
 
 #[test]
+fn test_xyce_bug706_each_role_fits_aggregate_process_watchdog() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let config = XyceRunnerConfig::default();
+    let runner = XyceTestRunner::new(&root, config.clone());
+    let relatives = [
+        "Netlists/Certification_Tests/BUG_706_SON/rc_simple_lib.cir",
+        "Netlists/Certification_Tests/BUG_706_SON/rc_simple_xyce.cir",
+    ];
+    let discovered = runner.discover_tests();
+
+    for (index, relative) in relatives.into_iter().enumerate() {
+        let deck = discovered
+            .iter()
+            .find(|deck| deck.relative_path == relative)
+            .unwrap_or_else(|| panic!("discover BUG706 role {relative}"));
+        let started = Instant::now();
+        let result = run_xyce_case_with_watchdog(&root, &config, deck, index + 1, 2);
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} must complete its full paired relation under the aggregate watchdog: {result:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(XYCE_AGGREGATE_HARD_CASE_TIMEOUT_MS as u64),
+            "{relative} exceeded aggregate hard watchdog: {:?}",
+            started.elapsed()
+        );
+    }
+}
+
+#[test]
 fn test_xyce_bug986_erroption_breakpoint_source_relational_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

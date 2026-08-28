@@ -112,12 +112,16 @@ const RETAINED_ARTIFACTS: [(&str, usize, &str, &str); RETAINED_RECORD_COUNT] = [
     ),
 ];
 
+#[cfg(test)]
 const FLAT_ELEMENT_COUNT: usize = 6_003;
 const FLAT_NODE_COUNT: usize = 3_002;
 const FLAT_BRANCH_COUNT: usize = 1;
+#[cfg(test)]
 const FLAT_SIGNATURE_BYTES: usize = 378_564;
+#[cfg(test)]
 const FLAT_SIGNATURE_SHA256: &str =
     "8dbc70b9f3b92103ea3740c64f4b5d60c2be848a145207e3735042cfb559dc68";
+#[cfg(test)]
 const FLAT_SIGNATURE_BLAKE3: &str =
     "698e3a5133d9de1486a06865a545120c87a5e4fc6ad22a88212b7997c2b67613";
 const MAX_ROWS: usize = 20_000;
@@ -359,16 +363,44 @@ impl XyceTestRunner {
         Ok(members)
     }
 
-    fn bug706_plan(&self, role: Bug706Role) -> Result<XyceStaticTranPlan, String> {
+    fn bug706_plan_from_validated_netlist(
+        role: Bug706Role,
+        path: &Path,
+        source: &str,
+        netlist: &Netlist,
+    ) -> Result<XyceStaticTranPlan, String> {
         let purpose = match role {
             Bug706Role::IncludeOwner => {
                 XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
             }
             Bug706Role::InlineGood => XyceStaticTranPlanPurpose::RelationalFamily,
         };
-        let plan =
-            self.static_tran_plan_for_path_with_purpose(&self.root.join(role.path()), purpose)?;
+        if Self::contains_control_block(source) {
+            return Err(format!("{LABEL} must not acquire a control block"));
+        }
+        Self::reject_unsupported_source_directives(source)?;
+        let output = Self::single_tran_print_output_request(source)?;
+        let print = XycePrintRequest {
+            probes: output.probes,
+        };
+        let plan = XyceStaticTranPlan {
+            deck_path: path.to_path_buf(),
+            oracle: XyceStaticTranOracle::None,
+            source: source.to_string(),
+            print: Some(print),
+            output_override: false,
+            timeint_conststep: Self::source_enables_constant_time_step_output(source),
+            tran: Self::single_tran_analysis(netlist)?,
+            steps: Self::step_commands(netlist)?,
+            contract: match role {
+                Bug706Role::IncludeOwner => XyceStaticTranContract::WrapperStatic,
+                Bug706Role::InlineGood => XyceStaticTranContract::PlainStatic,
+            },
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+        };
         Self::validate_bug706_plan(role, &plan)?;
+        plan.validate_oracle_contract(purpose, role == Bug706Role::IncludeOwner)?;
         Ok(plan)
     }
 
@@ -622,6 +654,7 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    #[cfg(test)]
     fn bug706_flat_signature(
         netlist: &Netlist,
         abort: &dyn AbortSignal,
@@ -987,6 +1020,111 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn prepare_bug706_role(
+        &self,
+        members: &BTreeMap<String, Vec<u8>>,
+        role: Bug706Role,
+        abort: &dyn AbortSignal,
+    ) -> Result<(XyceStaticTranPlan, Netlist), String> {
+        if abort.is_aborted() {
+            return Err(format!(
+                "{LABEL} exceeded its shared deadline before planning"
+            ));
+        }
+        let path = self.root.join(role.path());
+        let retained = members
+            .get(&role.file_name().to_ascii_lowercase())
+            .ok_or_else(|| format!("{LABEL} lost {}", role.file_name()))?;
+        let bytes = Self::reread_bug706_member_bounded(&path, role, retained, abort)?;
+        let source = String::from_utf8(bytes)
+            .map_err(|error| format!("{LABEL} {} is not UTF-8: {error}", role.file_name()))?;
+        let netlist = Self::parse_xyce_netlist(&source, &path)
+            .map_err(|error| format!("{LABEL} {} parse failed: {error}", role.file_name()))?;
+        Self::validate_bug706_netlist(role, &netlist)?;
+        let plan = Self::bug706_plan_from_validated_netlist(role, &path, &source, &netlist)?;
+        Ok((plan, netlist))
+    }
+
+    fn reread_bug706_member_bounded(
+        path: &Path,
+        role: Bug706Role,
+        retained: &[u8],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<u8>, String> {
+        let expected_canonical_bytes = RETAINED_ARTIFACTS
+            .into_iter()
+            .find(|artifact| artifact.0 == role.file_name())
+            .map(|artifact| artifact.1)
+            .ok_or_else(|| format!("{LABEL} lost the {} size identity", role.file_name()))?;
+        let cap = expected_canonical_bytes
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(3))
+            .ok_or_else(|| format!("{LABEL} retained-size bound overflowed"))?;
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| format!("failed to inspect {LABEL} source: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(format!(
+                "{LABEL} {} must remain a regular non-symlink file",
+                role.file_name()
+            ));
+        }
+        if metadata.len() > cap as u64 {
+            return Err(format!(
+                "{LABEL} {} exceeded its bounded reread envelope",
+                role.file_name()
+            ));
+        }
+        let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
+        fs::File::open(path)
+            .map_err(|error| format!("failed to open {LABEL} source: {error}"))?
+            .take((cap + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("failed to reread {LABEL} source: {error}"))?;
+        if bytes.len() > cap {
+            return Err(format!(
+                "{LABEL} {} grew beyond its bounded reread envelope",
+                role.file_name()
+            ));
+        }
+        if bytes.len() as u64 != metadata.len() || bytes != retained {
+            return Err(format!(
+                "{LABEL} {} source changed between independent reads",
+                role.file_name()
+            ));
+        }
+        if abort.is_aborted() {
+            return Err(format!(
+                "{LABEL} exceeded its shared deadline after bounded source reread"
+            ));
+        }
+        Ok(bytes)
+    }
+
+    fn execute_bug706_role(
+        &self,
+        role: Bug706Role,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        start: Instant,
+        abort: &dyn AbortSignal,
+    ) -> Result<XycePrnTable, String> {
+        if abort.is_aborted() {
+            return Err(format!(
+                "{LABEL} exceeded its shared deadline before execution"
+            ));
+        }
+        let result = self
+            .run_transient_family_netlist(plan, netlist, start, None, None)
+            .map_err(|error| match error {
+                SimulationError::Aborted => format!("{LABEL} exceeded its shared deadline"),
+                other => format!("{LABEL} {} execution failed: {other}", role.file_name()),
+            })?;
+        let table = Self::bug706_projected_table(plan, netlist, &result, abort)?;
+        Self::validate_bug706_table(role, &table)?;
+        Self::validate_bug706_analytic_samples(role, &table)?;
+        Ok(table)
+    }
+
     pub(super) fn validate_bug706_oracle(
         &self,
         deck: &XyceDeck,
@@ -998,73 +1136,29 @@ impl XyceTestRunner {
             return Err(format!("{LABEL} shared deadline expired before provenance"));
         }
         let members = self.validate_bug706_provenance(deck, role)?;
-        let mut plans = BTreeMap::new();
-        let mut netlists = BTreeMap::new();
-        let mut flat_signature = None;
-        for member_role in Bug706Role::ALL {
-            if abort.is_aborted() {
-                return Err(format!(
-                    "{LABEL} exceeded its shared deadline before planning"
-                ));
-            }
-            let plan = self.bug706_plan(member_role)?;
-            let bytes = members
-                .get(&member_role.file_name().to_ascii_lowercase())
-                .ok_or_else(|| format!("{LABEL} lost {}", member_role.file_name()))?;
-            if plan.source.as_bytes() != bytes.as_slice() {
-                return Err(format!(
-                    "{LABEL} {} source changed between reads",
-                    member_role.file_name()
-                ));
-            }
-            let netlist =
-                Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|error| {
-                    format!("{LABEL} {} parse failed: {error}", member_role.file_name())
-                })?;
-            Self::validate_bug706_netlist(member_role, &netlist)?;
-            let signature = Self::bug706_flat_signature(&netlist, &abort)?;
-            if flat_signature
-                .as_ref()
-                .is_some_and(|expected| expected != &signature)
-            {
-                return Err(format!(
-                    "{LABEL} include/inline flattened signatures differ"
-                ));
-            }
-            flat_signature = Some(signature);
-            plans.insert(member_role, plan);
-            netlists.insert(member_role, netlist);
-        }
-
-        let mut tables = BTreeMap::new();
         // Release wrapper direction is CIR1=inline-good followed by
-        // CIR2=include-test. Keep execution and comparison in that order.
-        for member_role in [Bug706Role::InlineGood, Bug706Role::IncludeOwner] {
-            if abort.is_aborted() {
-                return Err(format!(
-                    "{LABEL} exceeded its shared deadline before execution"
-                ));
-            }
-            let plan = &plans[&member_role];
-            let netlist = &netlists[&member_role];
-            let result = self
-                .run_transient_family_netlist(plan, netlist, start, None, None)
-                .map_err(|error| match error {
-                    SimulationError::Aborted => format!("{LABEL} exceeded its shared deadline"),
-                    other => format!(
-                        "{LABEL} {} execution failed: {other}",
-                        member_role.file_name()
-                    ),
-                })?;
-            let table = Self::bug706_projected_table(plan, netlist, &result, &abort)?;
-            Self::validate_bug706_table(member_role, &table)?;
-            Self::validate_bug706_analytic_samples(member_role, &table)?;
-            tables.insert(member_role, table);
-        }
-        self.compare_bug706_relation(
-            &tables[&Bug706Role::InlineGood],
-            &tables[&Bug706Role::IncludeOwner],
+        // CIR2=include-test. Both roles share this invocation's absolute
+        // deadline; the expensive streaming flat-signature audit remains in
+        // the dedicated structure test rather than re-elaborating each role.
+        let (inline_plan, inline_netlist) =
+            self.prepare_bug706_role(&members, Bug706Role::InlineGood, &abort)?;
+        let inline = self.execute_bug706_role(
+            Bug706Role::InlineGood,
+            &inline_plan,
+            &inline_netlist,
+            start,
+            &abort,
         )?;
+        let (owner_plan, owner_netlist) =
+            self.prepare_bug706_role(&members, Bug706Role::IncludeOwner, &abort)?;
+        let owner = self.execute_bug706_role(
+            Bug706Role::IncludeOwner,
+            &owner_plan,
+            &owner_netlist,
+            start,
+            &abort,
+        )?;
+        self.compare_bug706_relation(&inline, &owner)?;
         self.validate_bug706_provenance(deck, role)?;
         if abort.is_aborted() {
             return Err(format!(
@@ -1182,10 +1276,12 @@ mod tests {
         let abort = DeadlineAbort::new(Instant::now(), 180_000);
         let mut signatures = Vec::new();
         for role in Bug706Role::ALL {
-            let plan = runner.bug706_plan(role).expect("BUG706 plan");
-            let netlist = XyceTestRunner::parse_xyce_netlist(&plan.source, &plan.deck_path)
-                .expect("parse BUG706");
+            let path = runner.root.join(role.path());
+            let source = fs::read_to_string(&path).expect("read BUG706 source");
+            let netlist = XyceTestRunner::parse_xyce_netlist(&source, &path).expect("parse BUG706");
             XyceTestRunner::validate_bug706_netlist(role, &netlist).expect("typed BUG706");
+            XyceTestRunner::bug706_plan_from_validated_netlist(role, &path, &source, &netlist)
+                .expect("BUG706 exact plan");
             signatures.push(
                 XyceTestRunner::bug706_flat_signature(&netlist, &abort).expect("flatten BUG706"),
             );
@@ -1203,6 +1299,23 @@ mod tests {
                 Instant::now(),
             )
             .expect("execute strict BUG706 relation");
+    }
+
+    #[test]
+    fn bug706_each_production_role_fits_aggregate_watchdog_budget() {
+        let (_temporary, mut runner) = fixture("aggregate-budget");
+        runner.config.max_time_per_test_ms = 29_000;
+        for role in Bug706Role::ALL {
+            let started = Instant::now();
+            runner
+                .validate_bug706_oracle(&deck(&runner.root, role), role, started)
+                .unwrap_or_else(|error| panic!("{role:?} must fit aggregate budget: {error}"));
+            assert!(
+                started.elapsed() < Duration::from_millis(29_000),
+                "{role:?} exceeded aggregate watchdog budget: {:?}",
+                started.elapsed()
+            );
+        }
     }
 
     #[test]
@@ -1239,6 +1352,33 @@ mod tests {
                     Bug706Role::IncludeOwner,
                 )
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn bug706_bounded_reread_rejects_changed_and_oversized_members() {
+        let abort = DeadlineAbort::new(Instant::now(), 29_000);
+
+        let (_temporary, runner) = fixture("bounded-reread-change");
+        let role = Bug706Role::InlineGood;
+        let path = runner.root.join(role.path());
+        let retained = fs::read(&path).expect("read retained BUG706 member");
+        let mut changed = retained.clone();
+        changed[0] ^= 1;
+        fs::write(&path, changed).expect("mutate retained BUG706 member");
+        assert!(
+            XyceTestRunner::reread_bug706_member_bounded(&path, role, &retained, &abort).is_err(),
+            "same-size mutation must fail the independent bounded reread"
+        );
+
+        let (_temporary, runner) = fixture("bounded-reread-oversize");
+        let path = runner.root.join(role.path());
+        let retained = fs::read(&path).expect("read retained BUG706 member");
+        fs::write(&path, vec![b'x'; retained.len() * 3 + 16])
+            .expect("oversize retained BUG706 member");
+        assert!(
+            XyceTestRunner::reread_bug706_member_bounded(&path, role, &retained, &abort).is_err(),
+            "oversized mutation must fail before an unbounded allocation"
         );
     }
 
