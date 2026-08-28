@@ -340,6 +340,20 @@ fn an_unavailable_dc_gain_is_not_replaced_with_unity() {
 }
 
 #[test]
+fn dc_gain_rejects_a_ragged_public_matrix_without_panicking() {
+    // Matrix::from_dense is public and can represent ragged input. The direct
+    // DC-gain helper must validate that boundary just like full PZ analysis.
+    let analyzer = PoleZeroAnalyzer::new(
+        PzMatrix::from_dense(vec![vec![1.0, 0.0], vec![0.0]]),
+        PzMatrix::identity(2),
+    );
+
+    let call = std::panic::catch_unwind(|| analyzer.dc_gain(0, 1));
+    let gain = call.expect("dc_gain must not panic on a ragged public matrix");
+    assert_eq!(gain, None);
+}
+
+#[test]
 fn generalized_solver_retains_a_large_finite_root() {
     // A rank-one C forces the generalized QZ path. Its one finite root is
     // -1e14 rad/s; a small-beta heuristic used to misclassify it as infinite.

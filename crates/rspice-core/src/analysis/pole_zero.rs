@@ -364,3 +364,73 @@ mod zeros;
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn second_order_model(c: [Value; 2], d: Value) -> StateSpaceModel {
+        // det(sI-A) = s^2 + 7s + 12, and for B=[0,1],
+        // H(s)'s numerator is d*s^2 + (c1+7d)*s + (c0+12d).
+        StateSpaceModel {
+            a: Matrix::from_dense(vec![vec![0.0, 1.0], vec![-12.0, -7.0]]),
+            b: vec![0.0, 1.0],
+            c: c.to_vec(),
+            d,
+        }
+    }
+
+    fn state_space_zeros(model: &StateSpaceModel) -> Vec<Complex64> {
+        let helper = PoleZeroAnalyzer::new(Matrix::identity(2), Matrix::identity(2));
+        helper
+            .zeros_from_state_space(model, &PoleZeroConfig::poles_and_zeros(0, 0))
+            .expect("the fabricated state-space transfer has finite zeros")
+    }
+
+    #[test]
+    fn genuine_near_real_complex_zero_pair_remains_complex() {
+        // N(s)=(s+1)^2+epsilon^2. It is close to a repeated real zero, but
+        // its two roots are genuinely complex and must not be snapped to -1.
+        let epsilon = 2.0e-7;
+        let model = second_order_model([-11.0 + epsilon * epsilon, -5.0], 1.0);
+
+        let zeros = state_space_zeros(&model);
+
+        assert_eq!(zeros.len(), 2, "{zeros:#?}");
+        assert!(
+            zeros.iter().all(|zero| zero.im.abs() >= 0.5 * epsilon),
+            "genuine complex roots were collapsed onto the real axis: {zeros:#?}"
+        );
+        assert!(
+            zeros.iter().all(|zero| (zero.re + 1.0).abs() <= 1.0e-9),
+            "unexpected real parts: {zeros:#?}"
+        );
+        assert!(
+            (zeros[0].im + zeros[1].im).abs() <= 1.0e-9,
+            "zeros are not a conjugate pair: {zeros:#?}"
+        );
+    }
+
+    #[test]
+    fn extreme_finite_quadratic_numerator_keeps_representable_roots() {
+        // This is 1e307 * (s^2 + 2s + 2), whose roots are -1 +/- j. Every
+        // signed coefficient and intermediate product is finite, although the
+        // sum of absolute q0 terms exceeds f64::MAX and must be scaled safely.
+        let scale = 1.0e307;
+        let model = second_order_model([-10.0 * scale, -5.0 * scale], scale);
+
+        let zeros = state_space_zeros(&model);
+
+        assert_eq!(zeros.len(), 2, "{zeros:#?}");
+        for zero in &zeros {
+            assert!(
+                (zero.re + 1.0).abs() <= 1.0e-9,
+                "unexpected real part: {zeros:#?}"
+            );
+            assert!(
+                (zero.im.abs() - 1.0).abs() <= 1.0e-9,
+                "extreme finite coefficients lost the complex roots: {zeros:#?}"
+            );
+        }
+    }
+}

@@ -69,7 +69,20 @@ impl PoleZeroAnalyzer {
         // At DC (s=0), Y = G
         // Solve G·V = I where I is unit current at input
         let n = self.num_nodes;
-        if input_node >= n || output_node >= n {
+        let (rows, cols) = self.g_matrix.dims();
+        if n == 0
+            || rows != cols
+            || rows != n
+            || self.g_matrix.data.iter().any(|row| row.len() != n)
+            || self
+                .g_matrix
+                .data
+                .iter()
+                .flatten()
+                .any(|value| !value.is_finite())
+            || input_node >= n
+            || output_node >= n
+        {
             return None;
         }
 

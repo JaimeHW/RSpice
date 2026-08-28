@@ -258,7 +258,9 @@ impl Engine {
             Err(
                 PoleZeroAnalysisError::EigenvalueFailure { .. }
                 | PoleZeroAnalysisError::NonFiniteEigenvalue { .. }
-                | PoleZeroAnalysisError::IncompleteSpectrum { .. },
+                | PoleZeroAnalysisError::IncompleteSpectrum { .. }
+                | PoleZeroAnalysisError::InvalidSystem(_)
+                | PoleZeroAnalysisError::TransferExtraction(_),
             ) => return Ok(None),
             Err(error) => {
                 return Err(SimulationError::Solver(

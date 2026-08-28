@@ -22,6 +22,10 @@ impl PoleZeroAnalyzer {
                 .collect());
         }
 
+        // Qualify the underlying descriptor before interpreting an irregular
+        // augmented pencil as an identically-zero transfer numerator.
+        self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix)?;
+
         let n = self.num_nodes;
         let mut g_aug = Matrix::zeros(n + 1, n + 1);
         let mut c_aug = Matrix::zeros(n + 1, n + 1);
@@ -45,7 +49,9 @@ impl PoleZeroAnalyzer {
         };
         debug_assert_eq!(spectrum.finite.len() + spectrum.infinite, n + 1);
         let mut zeros = spectrum.finite;
-        self.certify_numerically_real_zero_pairs(&mut zeros, &g_aug, &c_aug);
+        if let Some(refined) = self.refine_second_order_pencil_roots(&g_aug, &c_aug, &zeros) {
+            zeros = refined;
+        }
         self.ensure_roots_within_frequency_limit(&zeros, config, "zero")?;
         Ok(zeros)
     }
@@ -241,82 +247,168 @@ impl PoleZeroAnalyzer {
         };
         debug_assert_eq!(spectrum.finite.len() + spectrum.infinite, n + 1);
         let mut zeros = spectrum.finite;
-        self.certify_numerically_real_zero_pairs(&mut zeros, &g_zero, &c_zero);
+        if let Some(refined) = self.refine_second_order_pencil_roots(&g_zero, &c_zero, &zeros) {
+            zeros = refined;
+        }
         self.finalize_zero_roots(zeros, config)
     }
 
-    /// Collapse a tiny conjugate split only when the real midpoint makes the
-    /// original real Rosenbrock pencil numerically rank deficient. Repeated
-    /// real roots are ill-conditioned and a generic QZ solve may split them;
-    /// the singular-value certificate avoids distance-only root snapping.
-    fn certify_numerically_real_zero_pairs(
+    /// Reconstruct a real quadratic determinant polynomial when QZ reports
+    /// exactly two finite roots. Repeated roots are intrinsically ill
+    /// conditioned in an eigenvalue solve; working from real determinant
+    /// coefficients preserves a repeated-real root or a genuine close complex
+    /// pair according to the pencil itself, without geometric root snapping.
+    fn refine_second_order_pencil_roots(
         &self,
-        roots: &mut [Complex64],
         g_matrix: &Matrix,
         c_matrix: &Matrix,
-    ) {
-        let order = g_matrix.rows.max(1);
-        let rank_tolerance = 1024.0 * order as Value * Value::EPSILON;
-        let conjugacy_tolerance = 256.0 * Value::EPSILON;
+        qz_roots: &[Complex64],
+    ) -> Option<Vec<Complex64>> {
+        if qz_roots.len() != 2 || g_matrix.rows == 0 || g_matrix.rows != g_matrix.cols {
+            return None;
+        }
 
-        for left in 0..roots.len() {
-            if roots[left].im == 0.0 || !roots[left].re.is_finite() || !roots[left].im.is_finite() {
-                continue;
-            }
-            for right in (left + 1)..roots.len() {
-                if !roots[right].re.is_finite() || !roots[right].im.is_finite() {
-                    continue;
-                }
-                let real_scale = 1.0 + roots[left].re.abs().max(roots[right].re.abs());
-                let imaginary_scale = 1.0 + roots[left].im.abs().max(roots[right].im.abs());
-                if (roots[left].re - roots[right].re).abs() > conjugacy_tolerance * real_scale
-                    || (roots[left].im + roots[right].im).abs()
-                        > conjugacy_tolerance * imaginary_scale
-                {
-                    continue;
-                }
+        let frequency_scale = qz_roots
+            .iter()
+            .map(|root| root.norm())
+            .fold(1.0_f64, Value::max);
+        let g_scale = g_matrix
+            .data
+            .iter()
+            .flatten()
+            .map(|value| value.abs())
+            .fold(0.0_f64, Value::max);
+        let c_scale = c_matrix
+            .data
+            .iter()
+            .flatten()
+            .map(|value| value.abs())
+            .fold(0.0_f64, Value::max);
+        let pencil_scale = g_scale.max(frequency_scale * c_scale);
+        if !frequency_scale.is_finite() || !pencil_scale.is_finite() || pencil_scale == 0.0 {
+            return None;
+        }
 
-                let real = 0.5 * (roots[left].re + roots[right].re);
-                let imaginary = roots[left].im.abs().max(roots[right].im.abs());
-                if imaginary > rank_tolerance.sqrt() * (1.0 + real.abs()) {
-                    continue;
-                }
-
-                let mut candidate = Matrix::zeros(g_matrix.rows, g_matrix.cols);
-                for row in 0..g_matrix.rows {
-                    for col in 0..g_matrix.cols {
-                        candidate.set(
-                            row,
-                            col,
-                            g_matrix.get(row, col) + real * c_matrix.get(row, col),
-                        );
-                    }
-                }
-                let scale = self.matrix_eigen_scale(&candidate);
-                let scaled = self.scale_matrix(&candidate, 1.0 / scale);
-                let matrix = self.to_faer_matrix(&scaled);
-                let Ok(svd) = faer::linalg::solvers::Svd::<f64>::new(matrix.as_ref()) else {
-                    continue;
-                };
-                let singular_values = svd.S().column_vector();
-                let mut largest = 0.0_f64;
-                let mut smallest = Value::INFINITY;
-                for index in 0..singular_values.nrows() {
-                    let value = singular_values.get(index).abs();
+        let determinant_at = |t: Value| -> Option<Value> {
+            let mut matrix = Matrix::zeros(g_matrix.rows, g_matrix.cols);
+            for row in 0..g_matrix.rows {
+                for col in 0..g_matrix.cols {
+                    let value = g_matrix.get(row, col) / pencil_scale
+                        + t * (frequency_scale * c_matrix.get(row, col) / pencil_scale);
                     if !value.is_finite() {
-                        smallest = Value::INFINITY;
-                        break;
+                        return None;
                     }
-                    largest = largest.max(value);
-                    smallest = smallest.min(value);
+                    matrix.set(row, col, value);
                 }
-                if largest > 0.0 && smallest <= rank_tolerance * largest {
-                    roots[left] = Complex64::new(real, 0.0);
-                    roots[right] = Complex64::new(real, 0.0);
-                    break;
+            }
+            Self::determinant_with_partial_pivoting(matrix)
+        };
+        let negative = determinant_at(-1.0)?;
+        let zero = determinant_at(0.0)?;
+        let positive = determinant_at(1.0)?;
+
+        // p(t)=a*t^2+b*t+c from p(-1), p(0), p(1), where s=t*scale.
+        let a = 0.5 * (positive + negative) - zero;
+        let b = 0.5 * (positive - negative);
+        let c = zero;
+        let coefficient_scale = a.abs().max(b.abs()).max(c.abs());
+        if !coefficient_scale.is_finite() || coefficient_scale == 0.0 {
+            return None;
+        }
+        let a = a / coefficient_scale;
+        let b = b / coefficient_scale;
+        let c = c / coefficient_scale;
+        let degree_tolerance = 4096.0 * g_matrix.rows as Value * Value::EPSILON;
+        if a.abs() <= degree_tolerance {
+            return None;
+        }
+
+        let b_squared = b * b;
+        let four_ac = 4.0 * a * c;
+        let mut discriminant = b_squared - four_ac;
+        let discriminant_tolerance = degree_tolerance * (b_squared.abs() + four_ac.abs()).max(1.0);
+        if discriminant.abs() <= discriminant_tolerance {
+            discriminant = 0.0;
+        }
+
+        let roots_t = if discriminant == 0.0 {
+            let root = -b / (2.0 * a);
+            vec![Complex64::new(root, 0.0), Complex64::new(root, 0.0)]
+        } else if discriminant > 0.0 {
+            let sqrt_discriminant = discriminant.sqrt();
+            let q = -0.5 * (b + sqrt_discriminant.copysign(b));
+            vec![Complex64::new(q / a, 0.0), Complex64::new(c / q, 0.0)]
+        } else {
+            let real = -b / (2.0 * a);
+            let imaginary = (-discriminant).sqrt() / (2.0 * a.abs());
+            vec![
+                Complex64::new(real, imaginary),
+                Complex64::new(real, -imaginary),
+            ]
+        };
+        let refined = roots_t
+            .into_iter()
+            .map(|root| Complex64::new(root.re * frequency_scale, root.im * frequency_scale))
+            .collect::<Vec<_>>();
+        if refined
+            .iter()
+            .any(|root| !root.re.is_finite() || !root.im.is_finite())
+        {
+            return None;
+        }
+
+        let mut matched = [false; 2];
+        for root in &refined {
+            let (index, distance) = qz_roots
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !matched[*index])
+                .map(|(index, qz)| (index, (*qz - *root).norm()))
+                .min_by(|left, right| left.1.total_cmp(&right.1))?;
+            let tolerance = 1.0e-4 * (1.0 + root.norm().max(qz_roots[index].norm()));
+            if distance > tolerance {
+                return None;
+            }
+            matched[index] = true;
+        }
+        Some(refined)
+    }
+
+    fn determinant_with_partial_pivoting(mut matrix: Matrix) -> Option<Value> {
+        let n = matrix.rows;
+        let mut sign = 1.0;
+        for pivot_col in 0..n {
+            let pivot_row = (pivot_col..n).max_by(|left, right| {
+                matrix
+                    .get(*left, pivot_col)
+                    .abs()
+                    .total_cmp(&matrix.get(*right, pivot_col).abs())
+            })?;
+            let pivot = matrix.get(pivot_row, pivot_col);
+            if !pivot.is_finite() {
+                return None;
+            }
+            if pivot == 0.0 {
+                return Some(0.0);
+            }
+            if pivot_row != pivot_col {
+                matrix.data.swap(pivot_row, pivot_col);
+                sign = -sign;
+            }
+            let pivot = matrix.get(pivot_col, pivot_col);
+            for row in (pivot_col + 1)..n {
+                let factor = matrix.get(row, pivot_col) / pivot;
+                for col in (pivot_col + 1)..n {
+                    let value = matrix.get(row, col) - factor * matrix.get(pivot_col, col);
+                    if !value.is_finite() {
+                        return None;
+                    }
+                    matrix.set(row, col, value);
                 }
             }
         }
+        let determinant = (0..n).fold(sign, |value, index| value * matrix.get(index, index));
+        determinant.is_finite().then_some(determinant)
     }
 
     /// Form the exact real numerator polynomial for a second-order SISO
@@ -327,26 +419,91 @@ impl PoleZeroAnalyzer {
         &self,
         model: &StateSpaceModel,
     ) -> Result<Vec<Complex64>, PoleZeroAnalysisError> {
-        let a00 = model.a.get(0, 0);
-        let a01 = model.a.get(0, 1);
-        let a10 = model.a.get(1, 0);
-        let a11 = model.a.get(1, 1);
-        let b0 = model.b[0];
-        let b1 = model.b[1];
-        let c0 = model.c[0];
-        let c1 = model.c[1];
-        let d = model.d;
+        let frequency_scale = model
+            .a
+            .data
+            .iter()
+            .flatten()
+            .map(|value| value.abs())
+            .fold(0.0_f64, Value::max)
+            .max(1.0);
+        let b_scale = model
+            .b
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0_f64, Value::max);
+        let c_scale = model
+            .c
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0_f64, Value::max);
+        let dynamic_log_scale = if b_scale > 0.0 && c_scale > 0.0 {
+            b_scale.ln() + c_scale.ln() - frequency_scale.ln()
+        } else {
+            Value::NEG_INFINITY
+        };
+        let direct_log_scale = if model.d != 0.0 {
+            model.d.abs().ln()
+        } else {
+            Value::NEG_INFINITY
+        };
+        let gain_log_scale = dynamic_log_scale.max(direct_log_scale);
+        if !gain_log_scale.is_finite() {
+            return Err(PoleZeroAnalysisError::TransferExtraction(
+                "transfer numerator is identically zero",
+            ));
+        }
+        let dynamic_weight = if dynamic_log_scale.is_finite() {
+            (dynamic_log_scale - gain_log_scale).exp()
+        } else {
+            0.0
+        };
+        let direct_weight = if direct_log_scale.is_finite() {
+            model.d.signum() * (direct_log_scale - gain_log_scale).exp()
+        } else {
+            0.0
+        };
 
-        // det(sI-A) H(s) = q2*s^2 + q1*s + q0.
-        let q2_terms = [d];
-        let q1_terms = [c0 * b0, c1 * b1, -d * a00, -d * a11];
+        let a00 = model.a.get(0, 0) / frequency_scale;
+        let a01 = model.a.get(0, 1) / frequency_scale;
+        let a10 = model.a.get(1, 0) / frequency_scale;
+        let a11 = model.a.get(1, 1) / frequency_scale;
+        let b0 = if b_scale > 0.0 {
+            model.b[0] / b_scale
+        } else {
+            0.0
+        };
+        let b1 = if b_scale > 0.0 {
+            model.b[1] / b_scale
+        } else {
+            0.0
+        };
+        let c0 = if c_scale > 0.0 {
+            model.c[0] / c_scale
+        } else {
+            0.0
+        };
+        let c1 = if c_scale > 0.0 {
+            model.c[1] / c_scale
+        } else {
+            0.0
+        };
+
+        // det(tI-A/f_scale) H(f_scale*t), divided by a common gain scale.
+        let q2_terms = [direct_weight];
+        let q1_terms = [
+            dynamic_weight * c0 * b0,
+            dynamic_weight * c1 * b1,
+            -direct_weight * a00,
+            -direct_weight * a11,
+        ];
         let q0_terms = [
-            -c0 * a11 * b0,
-            c0 * a01 * b1,
-            c1 * a10 * b0,
-            -c1 * a00 * b1,
-            d * a00 * a11,
-            -d * a01 * a10,
+            -dynamic_weight * c0 * a11 * b0,
+            dynamic_weight * c0 * a01 * b1,
+            dynamic_weight * c1 * a10 * b0,
+            -dynamic_weight * c1 * a00 * b1,
+            direct_weight * a00 * a11,
+            -direct_weight * a01 * a10,
         ];
         let coefficient = |terms: &[Value]| -> Result<(Value, Value), PoleZeroAnalysisError> {
             if terms.iter().any(|term| !term.is_finite()) {
@@ -378,7 +535,7 @@ impl PoleZeroAnalyzer {
             return Ok(Vec::new());
         }
         if q2_is_zero {
-            let root = -q0 / q1;
+            let root = (-q0 / q1) * frequency_scale;
             return root
                 .is_finite()
                 .then(|| vec![Complex64::new(root, 0.0)])
@@ -394,12 +551,12 @@ impl PoleZeroAnalyzer {
         let b_squared = b * b;
         let four_ac = 4.0 * a * c;
         let mut discriminant = b_squared - four_ac;
-        let discriminant_error = 128.0 * Value::EPSILON * (b_squared.abs() + four_ac.abs());
+        let discriminant_error = 32.0 * Value::EPSILON * (b_squared.abs() + four_ac.abs());
         if discriminant.abs() <= discriminant_error {
             discriminant = 0.0;
         }
 
-        let roots = if discriminant == 0.0 {
+        let roots_t = if discriminant == 0.0 {
             let root = -b / (2.0 * a);
             vec![Complex64::new(root, 0.0), Complex64::new(root, 0.0)]
         } else if discriminant > 0.0 {
@@ -416,6 +573,10 @@ impl PoleZeroAnalyzer {
                 Complex64::new(real, -imaginary),
             ]
         };
+        let roots = roots_t
+            .into_iter()
+            .map(|root| Complex64::new(root.re * frequency_scale, root.im * frequency_scale))
+            .collect::<Vec<_>>();
         if roots
             .iter()
             .any(|root| !root.re.is_finite() || !root.im.is_finite())
