@@ -2156,7 +2156,10 @@ fn take_contiguous_instance_expression(
     let expr = collect_contiguous_expression(stream)?;
     // A signed literal (`ic=-5`) reads as compound but is still just a number;
     // resolving it here keeps it off the deferred path it never used before.
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+    // This boundary must require complete consumption: the compatibility
+    // parser intentionally accepts numeric prefixes, which would turn
+    // `pd=2*(length+width)` into the literal `2` and discard the arithmetic.
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
         return Some(DeferrableValue::Resolved(value));
     }
     if defer {
@@ -2192,9 +2195,49 @@ pub(super) fn lex_to_parse_error(e: LexError, line_num: usize) -> ParseError {
 #[cfg(test)]
 mod tests {
     use crate::Netlist;
+    use crate::netlist::expr::ParamContext;
+    use crate::netlist::lexer::{TokenKind, TokenStream, tokenize};
 
     fn coalesce(line: &str) -> Vec<String> {
         super::coalesce_assignment_fields(super::split_spice_fields(line))
+    }
+
+    #[test]
+    fn instance_values_distinguish_complete_numbers_from_numeric_prefixed_expressions() {
+        let mut params = ParamContext::new();
+        params.set("X", 4.0);
+        let cases = [
+            ("2*X", 2.0_f64 * 4.0),
+            ("2/X", 2.0 / 4.0),
+            ("2+X", 2.0 + 4.0),
+            ("2-X", 2.0 - 4.0),
+            (".5*X", 0.5 * 4.0),
+            ("2u*X", 2.0e-6 * 4.0),
+            ("2*(X+1)", 2.0 * (4.0 + 1.0)),
+            ("2", 2.0),
+            ("-5", -5.0),
+            ("1u", 1.0e-6),
+        ];
+
+        for (source, expected) in cases {
+            let tokens = tokenize(&format!("{source} NEXT=99\n")).expect("tokenize value");
+            let mut stream = TokenStream::new(tokens);
+            let parsed = super::take_deferrable_value(&mut stream, &params, false)
+                .unwrap_or_else(|| panic!("{source} did not parse as an instance value"));
+            let super::DeferrableValue::Resolved(actual) = parsed else {
+                panic!("{source} unexpectedly remained deferred");
+            };
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "instance value {source} was truncated or mis-evaluated as {actual}"
+            );
+            assert_eq!(
+                stream.peek().kind,
+                TokenKind::Ident("NEXT".to_string()),
+                "instance value {source} consumed the following assignment"
+            );
+        }
     }
 
     #[test]

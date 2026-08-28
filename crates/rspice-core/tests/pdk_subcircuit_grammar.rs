@@ -14,7 +14,7 @@
 //! unbraced arithmetic in an instance parameter. ngspice 46 accepts both.
 
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::Netlist;
+use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist_with_models};
 use rspice_core::solver::SimulationResult;
 
 fn run_op(deck: &str) -> SimulationResult {
@@ -67,6 +67,59 @@ fn mosfet_instance_geometry_accepts_bare_arithmetic() {
         (drain_current - 240e-6).abs() < 1e-9,
         "expected Id=240uA for W=mf*aws, got {drain_current:e}"
     );
+}
+
+#[test]
+fn mosfet_instance_geometry_accepts_numeric_prefixed_bare_arithmetic() {
+    let netlist = Netlist::parse(
+        "* numeric-prefixed bare instance arithmetic\n\
+         X1 d g s b cell PARAMS: dsl=0.95u wn=2u wp=4u\n\
+         .subckt cell d g s b PARAMS: dsl=1u wn=1u wp=1u\n\
+         MN d g s b nmos W=wn L=0.35u PD=2*(dsl+wn) PS=2*(dsl+wn)\n\
+         MP d g s b pmos W=wp L=0.45u PD=2*(dsl+wp) PS=2*(dsl+wp)\n\
+         .ends\n\
+         .model nmos NMOS (LEVEL=1)\n\
+         .model pmos PMOS (LEVEL=1)\n\
+         .end\n",
+    )
+    .expect("numeric-prefixed bare instance arithmetic parses");
+    let flattened =
+        flatten_netlist_with_models(&netlist).expect("bare perimeter expressions flatten");
+
+    for (name, expected) in [
+        ("X1.MN", 2.0_f64 * (0.95e-6 + 2.0e-6)),
+        ("X1.MP", 2.0 * (0.95e-6 + 4.0e-6)),
+    ] {
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("flattened MOSFET {name} is missing"));
+        let ElementKind::Mosfet {
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("{name} is not a MOSFET: {:?}", element.kind);
+        };
+        assert!(
+            deferred_params.is_empty(),
+            "{name} retained unresolved parameters: {deferred_params:?}"
+        );
+        for perimeter in ["PD", "PS"] {
+            let actual = instance_params
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(perimeter))
+                .map(|(_, value)| *value)
+                .unwrap_or_else(|| panic!("{name} is missing {perimeter}"));
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "{name} {perimeter} truncated numeric-prefixed bare arithmetic to {actual}"
+            );
+        }
+    }
 }
 
 #[test]
