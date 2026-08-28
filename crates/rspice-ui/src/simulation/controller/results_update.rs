@@ -103,6 +103,38 @@ impl SimulationController {
                 echo_measurements(state, measurements);
             }
 
+            SimulationResult::Pstb {
+                modes,
+                floquet_evidence,
+                orbit_kind,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                trivial_multiplier_index,
+                stability_verdict,
+                stability_classification,
+                min_stability_margin_db,
+                num_unstable,
+                subharmonics,
+                converged,
+                iterations,
+                mode_indices,
+                ..
+            } => {
+                let margin = min_stability_margin_db
+                    .map(|value| format!("{value:.3} dB"))
+                    .unwrap_or_else(|| "not applicable".to_owned());
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "PSTB: {} authenticated modes ({} displayed), {} unstable, margin {margin}",
+                    modes.len(),
+                    mode_indices.len(),
+                    num_unstable,
+                )));
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
+                    "  verdict={stability_verdict:?}, classification={stability_classification:?}, orbit={orbit_kind:?}, threshold={stability_threshold:.9}, probe={probe_instance}, detect_subharmonics={detect_subharmonics}, trivial_mode={trivial_multiplier_index:?}, subharmonics={subharmonics:?}, converged={converged}, iterations={iterations}, evidence={floquet_evidence:?}"
+                )));
+            }
+
             SimulationResult::HarmonicBalance {
                 frequencies,
                 waveforms,

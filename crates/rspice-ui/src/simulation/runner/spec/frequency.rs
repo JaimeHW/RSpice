@@ -7,7 +7,7 @@ use rspice_core::abort_signal::AbortSignal;
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::execution::ResolvedExecutionDependencies;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
-use crate::simulation::results::{SimulationResult, WaveformData};
+use crate::simulation::results::{PstbFloquetMode, SimulationResult, WaveformData};
 use crate::simulation::runner::{SimulationError, SpecExecutionOptions};
 
 pub(super) fn run_frequency_spec(
@@ -627,10 +627,39 @@ fn run_pstb(
         "mode",
     );
 
-    Ok(SimulationResult::Ac {
-        frequencies: data.mode_indices,
+    let modes = data
+        .modes
+        .into_iter()
+        .map(|mode| PstbFloquetMode {
+            multiplier: mode.multiplier,
+            exponent: mode.exponent,
+            probe_participation: mode.probe_participation,
+            is_unstable: mode.is_unstable,
+            is_trivial: mode.is_trivial,
+            subharmonic_order: mode.subharmonic_order,
+        })
+        .collect();
+
+    Ok(SimulationResult::Pstb {
+        period: data.period,
+        fundamental_frequency: data.fundamental_frequency,
+        modes,
+        floquet_evidence: data.floquet_evidence,
+        orbit_kind: data.orbit_kind,
+        stability_threshold: data.stability_threshold,
+        probe_instance: data.probe_instance,
+        detect_subharmonics: data.detect_subharmonics,
+        trivial_multiplier_index: data.trivial_multiplier_index,
+        stability_verdict: data.stability_verdict,
+        stability_classification: data.stability_classification,
+        min_stability_margin_db: data.min_stability_margin_db,
+        max_multiplier_magnitude: data.max_multiplier_magnitude,
+        num_unstable: data.num_unstable,
+        subharmonics: data.subharmonics,
+        converged: data.converged,
+        iterations: data.iterations,
+        mode_indices: data.mode_indices,
         waveforms,
-        measurements: Vec::new(),
     })
 }
 

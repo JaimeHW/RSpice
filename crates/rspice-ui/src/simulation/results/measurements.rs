@@ -37,6 +37,38 @@ impl SimulationResult {
                 ..
             } => measurement_result_by_name(measurements, key)
                 .or_else(|| waveform_last_value_by_name(waveforms, key)),
+            SimulationResult::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                detect_subharmonics,
+                modes,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                waveforms,
+                ..
+            } => {
+                if key.eq_ignore_ascii_case("pstb.period") {
+                    Some(*period)
+                } else if key.eq_ignore_ascii_case("pstb.fundamental_frequency") {
+                    Some(*fundamental_frequency)
+                } else if key.eq_ignore_ascii_case("pstb.stability_threshold") {
+                    Some(*stability_threshold)
+                } else if key.eq_ignore_ascii_case("pstb.detect_subharmonics") {
+                    Some(if *detect_subharmonics { 1.0 } else { 0.0 })
+                } else if key.eq_ignore_ascii_case("pstb.mode_count") {
+                    Some(modes.len() as f64)
+                } else if key.eq_ignore_ascii_case("pstb.unstable_mode_count") {
+                    Some(*num_unstable as f64)
+                } else if key.eq_ignore_ascii_case("pstb.max_multiplier_magnitude") {
+                    Some(*max_multiplier_magnitude)
+                } else if key.eq_ignore_ascii_case("pstb.min_stability_margin_db") {
+                    *min_stability_margin_db
+                } else {
+                    waveform_last_value_by_name(waveforms, key)
+                }
+            }
             SimulationResult::Parametric { waveforms, .. }
             | SimulationResult::Corner { waveforms, .. }
             | SimulationResult::Reliability { waveforms, .. }
@@ -163,6 +195,49 @@ impl SimulationResult {
                         .map(|value| (name.clone(), value))
                 })
                 .collect(),
+            SimulationResult::Pstb {
+                period,
+                fundamental_frequency,
+                stability_threshold,
+                detect_subharmonics,
+                modes,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                num_unstable,
+                waveforms,
+                ..
+            } => {
+                let mut values = waveforms
+                    .iter()
+                    .filter_map(|(name, waveform)| {
+                        waveform
+                            .y_values
+                            .last()
+                            .copied()
+                            .map(|value| (name.clone(), value))
+                    })
+                    .collect::<HashMap<_, _>>();
+                values.insert("pstb.period".to_owned(), *period);
+                values.insert(
+                    "pstb.fundamental_frequency".to_owned(),
+                    *fundamental_frequency,
+                );
+                values.insert("pstb.stability_threshold".to_owned(), *stability_threshold);
+                values.insert(
+                    "pstb.detect_subharmonics".to_owned(),
+                    if *detect_subharmonics { 1.0 } else { 0.0 },
+                );
+                values.insert("pstb.mode_count".to_owned(), modes.len() as f64);
+                values.insert("pstb.unstable_mode_count".to_owned(), *num_unstable as f64);
+                values.insert(
+                    "pstb.max_multiplier_magnitude".to_owned(),
+                    *max_multiplier_magnitude,
+                );
+                if let Some(margin) = min_stability_margin_db {
+                    values.insert("pstb.min_stability_margin_db".to_owned(), *margin);
+                }
+                values
+            }
             SimulationResult::Noise {
                 output_noise,
                 input_noise,

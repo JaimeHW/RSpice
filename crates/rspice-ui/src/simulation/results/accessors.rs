@@ -18,6 +18,9 @@ impl SimulationResult {
             SimulationResult::Ac { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
+            SimulationResult::Pstb { waveforms, .. } => {
+                waveforms.keys().map(|s| s.as_str()).collect()
+            }
             SimulationResult::HarmonicBalance { waveforms, .. } => {
                 waveforms.keys().map(|s| s.as_str()).collect()
             }
@@ -50,6 +53,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. } => waveforms.get(name),
             SimulationResult::Transient { waveforms, .. } => waveforms.get(name),
             SimulationResult::Ac { waveforms, .. } => waveforms.get(name),
+            SimulationResult::Pstb { waveforms, .. } => waveforms.get(name),
             SimulationResult::HarmonicBalance { waveforms, .. } => waveforms.get(name),
             SimulationResult::Parametric { waveforms, .. } => waveforms.get(name),
             SimulationResult::Corner { waveforms, .. } => waveforms.get(name),
@@ -68,6 +72,53 @@ impl SimulationResult {
             SimulationResult::DcSweep { waveforms, .. } => !waveforms.is_empty(),
             SimulationResult::Transient { time, .. } => !time.is_empty(),
             SimulationResult::Ac { frequencies, .. } => !frequencies.is_empty(),
+            SimulationResult::Pstb {
+                modes,
+                floquet_evidence,
+                stability_threshold,
+                probe_instance,
+                detect_subharmonics,
+                min_stability_margin_db,
+                max_multiplier_magnitude,
+                subharmonics,
+                mode_indices,
+                waveforms,
+                ..
+            } => {
+                let multipliers = modes
+                    .iter()
+                    .map(|mode| num_complex::Complex64::new(mode.multiplier.0, mode.multiplier.1))
+                    .collect::<Vec<_>>();
+                floquet_evidence.is_consistent_with(&multipliers)
+                    && stability_threshold.is_finite()
+                    && *stability_threshold >= 1.0
+                    && !probe_instance.trim().is_empty()
+                    && min_stability_margin_db.is_none_or(f64::is_finite)
+                    && max_multiplier_magnitude.is_finite()
+                    && modes.iter().all(|mode| {
+                        mode.multiplier.0.is_finite()
+                            && mode.multiplier.1.is_finite()
+                            && mode.exponent.0.is_finite()
+                            && mode.exponent.1.is_finite()
+                            && mode.probe_participation.is_finite()
+                            && (0.0..=1.0).contains(&mode.probe_participation)
+                    })
+                    && (if *detect_subharmonics {
+                        subharmonics
+                            == &modes
+                                .iter()
+                                .filter_map(|mode| mode.subharmonic_order)
+                                .collect::<Vec<_>>()
+                    } else {
+                        subharmonics.is_empty()
+                            && modes.iter().all(|mode| mode.subharmonic_order.is_none())
+                    })
+                    && mode_indices.len() <= modes.len()
+                    && waveforms.values().all(|waveform| {
+                        waveform.x_values.len() == mode_indices.len()
+                            && waveform.y_values.len() == mode_indices.len()
+                    })
+            }
             SimulationResult::HarmonicBalance { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::Noise { frequencies, .. } => !frequencies.is_empty(),
             SimulationResult::PoleZero {
@@ -145,6 +196,7 @@ impl SimulationResult {
             SimulationResult::DcSweep { .. } => "DC Sweep",
             SimulationResult::Transient { .. } => "Transient",
             SimulationResult::Ac { .. } => "AC Analysis",
+            SimulationResult::Pstb { .. } => "Periodic Stability",
             SimulationResult::HarmonicBalance { .. } => "Harmonic Balance",
             SimulationResult::Noise { .. } => "Noise Analysis",
             SimulationResult::PoleZero { .. } => "Pole-Zero",

@@ -274,6 +274,17 @@ impl SimulationController {
                 .with_waveforms(self.build_ac_waveforms_owned(frequencies, waveforms))
                 .with_measurements(measurements),
 
+            // Durable authenticated PSTB payloads are handled by the
+            // persistence tranche. The runtime conversion retains only the
+            // bounded display projection here; the complete spectrum remains
+            // authoritative on `SimulationResult::Pstb` until conversion.
+            SimulationResult::Pstb {
+                mode_indices,
+                waveforms,
+                ..
+            } => AnalysisResult::new(1, analysis_type, label.to_string())
+                .with_waveforms(self.build_ac_waveforms_owned(mode_indices, waveforms)),
+
             SimulationResult::HarmonicBalance {
                 frequencies,
                 waveforms,

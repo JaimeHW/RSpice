@@ -56,6 +56,28 @@ impl TransferFunctionScalar {
         }
     }
 }
+
+/// One retained Floquet mode from a periodic stability analysis.
+///
+/// The vector containing these records is the complete authenticated spectrum,
+/// sorted by decreasing multiplier magnitude. Presentation limits are applied
+/// only to the separate waveform vectors in [`SimulationResult::Pstb`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PstbFloquetMode {
+    /// Complex Floquet multiplier `(real, imaginary)`.
+    pub multiplier: (f64, f64),
+    /// Complex Floquet exponent `(real, imaginary)` in `1/s`.
+    pub exponent: (f64, f64),
+    /// Normalized participation of the configured PSTB probe in this mode.
+    pub probe_participation: f64,
+    /// Whether the mode lies outside the configured outer stability boundary.
+    pub is_unstable: bool,
+    /// Whether this is the explicitly authenticated autonomous phase mode.
+    pub is_trivial: bool,
+    /// Detected root-of-unity order, when subharmonic detection was enabled.
+    pub subharmonic_order: Option<usize>,
+}
+
 /// One committed event on an XSPICE digital node.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DigitalEventPoint {
@@ -154,6 +176,33 @@ pub enum SimulationResult {
         waveforms: HashMap<String, WaveformData>,
         /// Evaluated `.MEAS AC` results (against magnitude data).
         measurements: Vec<rspice_core::MeasureResult>,
+    },
+
+    /// Authenticated periodic stability result.
+    ///
+    /// `modes` always retains the complete sorted Floquet spectrum. The mode
+    /// axis and waveforms are display projections and may contain only the
+    /// configured leading modes.
+    Pstb {
+        period: f64,
+        fundamental_frequency: f64,
+        modes: Vec<PstbFloquetMode>,
+        floquet_evidence: rspice_core::analysis::FloquetSpectrumEvidence,
+        orbit_kind: rspice_core::analysis::FloquetOrbitKind,
+        stability_threshold: f64,
+        probe_instance: String,
+        detect_subharmonics: bool,
+        trivial_multiplier_index: Option<usize>,
+        stability_verdict: rspice_core::analysis::FloquetStabilityVerdict,
+        stability_classification: rspice_core::analysis::pstb::StabilityType,
+        min_stability_margin_db: Option<f64>,
+        max_multiplier_magnitude: f64,
+        num_unstable: usize,
+        subharmonics: Vec<usize>,
+        converged: bool,
+        iterations: usize,
+        mode_indices: Vec<f64>,
+        waveforms: HashMap<String, WaveformData>,
     },
 
     /// Harmonic-balance spectra plus the exact retained numerical state used
