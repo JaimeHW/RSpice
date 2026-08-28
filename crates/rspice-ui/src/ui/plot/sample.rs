@@ -134,7 +134,11 @@ impl SweepShape {
     /// a scan instead: the answer stays exact, it just costs O(n).
     #[must_use]
     pub fn window_ranges(&self, x: &[f64], lo: f64, hi: f64) -> Vec<Range<usize>> {
-        if !(hi >= lo) {
+        // NaN is refused explicitly rather than left to the negation. The
+        // window comes from view state, which is degenerate before a plot has
+        // been fitted; an unordered or NaN window selects no samples, and must
+        // not fall through to a scan whose every comparison is false.
+        if lo.is_nan() || hi.is_nan() || hi < lo {
             return Vec::new();
         }
         if self.class == SweepClass::NonSweep {
@@ -473,6 +477,41 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// A NaN window selects nothing, on every path through the function.
+    ///
+    /// The guard is written `lo.is_nan() || hi.is_nan() || hi < lo` rather
+    /// than `!(hi >= lo)`. The forms agree, and this pins the NaN arm: view
+    /// state holds a degenerate window until a plot has been fitted, and a
+    /// bare `hi < lo` lets NaN past — the branch path then filters on
+    /// comparisons that are all false, while the scan path past the run cap
+    /// is a separate body with its own answer. Neither is a window, so both
+    /// must be refused before the split rather than after it.
+    #[test]
+    fn a_nan_window_selects_nothing_on_either_path() {
+        let branched = [0.0, 0.5, 1.0, 0.5, 0.0];
+        let shape = SweepShape::of(&branched);
+        assert_eq!(shape.window_ranges(&branched, 0.4, 0.6), vec![1..2, 3..4]);
+        for (lo, hi) in [(f64::NAN, 0.6), (0.4, f64::NAN), (f64::NAN, f64::NAN)] {
+            assert!(
+                shape.window_ranges(&branched, lo, hi).is_empty(),
+                "the branch path admitted the window [{lo}, {hi}]"
+            );
+        }
+
+        // Past the run cap the answer comes from the scan instead.
+        let sawtooth: Vec<f64> = (0..4_000)
+            .map(|index| f64::from(index % 2) + f64::from(index) * 1.0e-6)
+            .collect();
+        let scanned = SweepShape::of(&sawtooth);
+        assert_eq!(scanned.class(), SweepClass::NonSweep);
+        for (lo, hi) in [(f64::NAN, 1.1), (0.9, f64::NAN), (f64::NAN, f64::NAN)] {
+            assert!(
+                scanned.window_ranges(&sawtooth, lo, hi).is_empty(),
+                "the scan path admitted the window [{lo}, {hi}]"
+            );
         }
     }
 

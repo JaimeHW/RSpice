@@ -439,7 +439,7 @@ mod tests {
         assert!(minors.contains(&2.0));
         assert!(minors.contains(&5.0));
         assert!(minors.contains(&50.0));
-        assert!(!minors.iter().any(|value| *value == 10.0));
+        assert!(!minors.contains(&10.0));
         assert_eq!(minors.len(), 16);
         // A linear axis keeps its even subdivisions.
         let linear = linear_ticks(0.0, 1.0, 4).ticks;

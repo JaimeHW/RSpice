@@ -273,7 +273,11 @@ fn trace_marker_positions(points: &[Pos2], plot_rect: Rect) -> Vec<Pos2> {
         .filter(|pair| finite(&pair[0]) && finite(&pair[1]))
         .map(|pair| length(pair[0], pair[1]))
         .sum();
-    if !(total > 0.0) {
+    // Only finite pairs contribute, so every term is a non-negative real and
+    // the sum is either a non-negative real or `+inf` — never NaN. `<= 0.0`
+    // therefore rejects exactly what `!(total > 0.0)` rejected: a polyline
+    // with no drawable length.
+    if total <= 0.0 {
         return Vec::new();
     }
     let budget = ((plot_rect.width() - 72.0) / MIN_SPACING).floor().max(1.0);
@@ -790,7 +794,11 @@ pub fn show(
         }
         let px = mx(marker.x);
         let limit_line = marker.shape == MarkerShape::LimitLine;
-        if !limit_line && !(marker.y >= spec.y.min && marker.y <= spec.y.max) {
+        // A limit line spans the pane, so it is never clipped by Y; anything
+        // else has to land inside the window. Stated positively because the
+        // pair of negations it replaces said the same thing less directly.
+        let y_is_drawable = limit_line || (marker.y >= spec.y.min && marker.y <= spec.y.max);
+        if !y_is_drawable {
             continue;
         }
         // A limit line is a callout about the X position alone, so it spans
@@ -1651,6 +1659,48 @@ mod tests {
         let placed = trace_marker_positions(&ramp, plot);
         assert!(placed.len() >= 4 && placed.len() <= 8, "{placed:?}");
         assert!(placed.windows(2).all(|pair| pair[1].x > pair[0].x));
+    }
+
+    /// A trace with no drawable length carries no markers.
+    ///
+    /// The length guard reads `total <= 0.0` where it once read `!(total >
+    /// 0.0)`. The two agree here because `total` sums only the finite pairs,
+    /// so every term is a non-negative real and the sum is never NaN — a
+    /// non-finite sample cannot reach the arithmetic to make one. This pins
+    /// both ends of that argument: the degenerate cases still place nothing,
+    /// and a curve whose only length lies between two non-finite neighbours
+    /// is one of them.
+    #[test]
+    fn a_trace_with_no_drawable_length_places_no_markers() {
+        let plot = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+
+        // Every sample on one spot: the walk has nowhere to advance.
+        let stacked = vec![plot.center(); 64];
+        assert!(trace_marker_positions(&stacked, plot).is_empty());
+
+        // Every sample undefined: nothing survives the finite filter, so the
+        // sum is the empty sum rather than a NaN.
+        let undefined = vec![pos2(f32::NAN, f32::NAN); 64];
+        assert!(trace_marker_positions(&undefined, plot).is_empty());
+
+        // Real positions, but every segment straddles a hole, so no pair
+        // contributes and the total is still zero.
+        let straddled: Vec<Pos2> = (0..64u16)
+            .map(|index| {
+                if index % 2 == 0 {
+                    pos2(f32::from(index) * 8.0, 200.0)
+                } else {
+                    pos2(f32::INFINITY, 200.0)
+                }
+            })
+            .collect();
+        assert!(trace_marker_positions(&straddled, plot).is_empty());
+
+        // The guard has not swallowed the ordinary case.
+        let ramp: Vec<Pos2> = (0..=600u16)
+            .map(|step| pos2(f32::from(step), 200.0))
+            .collect();
+        assert!(!trace_marker_positions(&ramp, plot).is_empty());
     }
 
     /// No gesture may store a view a later gesture cannot undo.

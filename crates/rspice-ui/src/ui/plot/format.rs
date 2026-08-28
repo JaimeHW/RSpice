@@ -248,7 +248,10 @@ pub fn offset_anchor_label(anchor: f64, unit: &str, step: f64) -> String {
 /// place, 2e-4 needs four, and 20 needs none.
 fn step_decimals(scaled_step: f64) -> usize {
     let step = scaled_step.abs();
-    if !(step > 0.0) || !step.is_finite() {
+    // The finiteness test leads so it is the one that catches NaN: the pair
+    // rejects exactly what it rejected when the first half was written `!(step
+    // > 0.0)`, which is every step that is not a positive real number.
+    if !step.is_finite() || step <= 0.0 {
         return 3;
     }
     (-step.log10()).ceil().clamp(0.0, 15.0) as usize
@@ -288,6 +291,28 @@ fn tick_label_with_decimals(value: f64, decimals: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A step that is not a positive real falls back to three decimals.
+    ///
+    /// The guard reads `!step.is_finite() || step <= 0.0`, which is the same
+    /// set the earlier `!(step > 0.0) || !step.is_finite()` rejected — the
+    /// finiteness half is what catches NaN either way. This pins that: a bare
+    /// `step <= 0.0` on its own would let NaN through to `(-NaN.log10()).ceil()
+    /// .clamp(..)`, whose `as usize` cast is 0, and every tick on the axis
+    /// would lose its decimals at once.
+    #[test]
+    fn a_step_that_is_not_a_positive_real_keeps_the_default_decimals() {
+        for step in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -0.25] {
+            assert_eq!(
+                step_decimals(step),
+                3,
+                "a step of {step} did not fall back to the default"
+            );
+        }
+        // The ordinary path is untouched.
+        assert_eq!(step_decimals(0.25), 1);
+        assert_eq!(step_decimals(20.0), 0);
+    }
 
     #[test]
     fn si_formatting() {
