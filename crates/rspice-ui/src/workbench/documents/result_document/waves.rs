@@ -35,7 +35,7 @@ use crate::ui::plot::sample::{
 };
 use crate::ui::plot::{
     self, Axis, CursorPair, DisplayDecimation, MAX_AXIS_TICKS, PlotSpec, SampleInterpolation,
-    Trace, XScale, fmt_si_significant, fmt_significant, sample_at_with,
+    Trace, XScale, fmt_si_significant, fmt_significant,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1908,9 +1908,13 @@ fn cursor_marker_target(
             })
         })
         .or_else(|| pane_traces.first().copied())?;
-    let sampled = sample_at_with(
+    // Only a finiteness gate — the marker carries the X, not this value — but
+    // it is gated on the reading the strip will make, so it is taken the same
+    // way the strip takes it.
+    let sampled = sample_at_with_shape(
         &trace.x,
         &trace.y,
+        &trace.shape,
         cursor_x,
         cursor_interpolation(
             state
@@ -2261,7 +2265,10 @@ fn append_copied_cursor(
         copied_x.trim_end()
     );
     for trace in model.traces.iter().filter(|trace| trace.visible).take(6) {
-        let value = sample_at_with(&trace.x, &trace.y, x, interpolation);
+        // The copy has to say what the table says. Read unshaped, a loop's
+        // line pasted a value off the far side of its turnaround while the
+        // register on screen reported each branch.
+        let value = sample_at_with_shape(&trace.x, &trace.y, &trace.shape, x, interpolation);
         let copied = match trace.kind {
             TraceKind::PhaseDeg => policy.copy_angle(value.to_radians()),
             TraceKind::PhaseRad => policy.copy_angle(value),
@@ -2938,9 +2945,10 @@ fn show_unit_pane_header(
                             Some((x, presentation, policy)) if trace.visible => {
                                 let digits =
                                     usize::from(presentation.displayed_significant_digits().get());
-                                let value = sample_at_with(
+                                let value = sample_at_with_shape(
                                     &trace.x,
                                     &trace.y,
+                                    &trace.shape,
                                     *x,
                                     cursor_interpolation(presentation.cursor_interpolation()),
                                 );

@@ -333,6 +333,120 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
     );
 }
 
+/// What the loop reads at a quarter out, and what bisecting it says instead.
+///
+/// The forward branch takes 0.5 V there and the return branch 3.5 V. An
+/// unshaped read of the whole turning array is not either of them: the closed
+/// loop ends where it started, so every abscissa in the sweep sits at or past
+/// the "last" sample and clamps to the 4 V the return leg finishes on. That is
+/// the artifact each of the three surfaces below has to stop printing.
+fn loop_readings(
+    state: &mut AppState,
+) -> (
+    AnalysisPresentationKey,
+    WaveformPresentationKey,
+    String,
+    String,
+) {
+    let presentation = state.ui.preferences.result_presentation_policy();
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let digits = usize::from(presentation.displayed_significant_digits().get());
+    let models = cached_models(
+        &state.simulation,
+        &mut state.ui.results,
+        presentation.complex_number_display(),
+        &Tokens::default(),
+    );
+    let model = &models[0];
+    let trace = &model.traces[0];
+    (
+        model.analysis_key,
+        anchor_key(model, trace),
+        model.format_trace_value(trace, 0.5, digits, quantity_policy),
+        model.format_trace_value(trace, 4.0, digits, quantity_policy),
+    )
+}
+
+/// A marker rides one branch, and the row that reports it has to state a
+/// value that branch takes. The canvas already tags one point per covering
+/// branch; the strip row beside it read the whole turning array as if it
+/// increased and printed a number off the end of the loop.
+#[test]
+fn a_marker_row_states_a_value_the_marked_branch_takes() {
+    let mut state = hysteresis_run();
+    let (analysis, anchor, forward, artifact) = loop_readings(&mut state);
+    state
+        .ui
+        .results
+        .add_marker(analysis, anchor, "V(out)".to_owned(), 0.25);
+
+    let painted = super::interaction::painted_texts(&mut state, marker_section);
+
+    assert!(
+        painted.iter().any(|text| text == &forward),
+        "the marker row does not state the first covering branch ({forward}) that the \
+         canvas tags at this X: {painted:?}"
+    );
+    assert!(
+        !painted.iter().any(|text| text == &artifact),
+        "the marker row printed {artifact}, which the curve does not take at this X: \
+         {painted:?}"
+    );
+}
+
+/// Copy has to agree with the table it copies. The on-screen register reports
+/// one value per branch here; the clipboard bisected the same turning array
+/// and pasted a number that is on neither of them.
+#[test]
+fn the_copied_cursor_value_stays_on_a_branch_of_the_loop() {
+    let mut state = hysteresis_run();
+    state.ui.results.cursors.place(0.25);
+    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
+    let forward = quantity_policy.copy_si_value(0.5, "V");
+    let artifact = quantity_policy.copy_si_value(4.0, "V");
+
+    let copied = copy_cursor_text(&mut state).expect("a placed cursor has copy data");
+    let line = copied
+        .lines()
+        .find(|line| line.starts_with("V(out)"))
+        .expect("the copied readout lists the trace")
+        .to_owned();
+
+    assert_eq!(
+        line,
+        format!("V(out) = {}", forward.trim_end()),
+        "the clipboard disagrees with the branch-honest table it copies; the sample the \
+         loop closes on reads {}",
+        artifact.trim_end()
+    );
+}
+
+/// The chip beside a trace's name is the same reading as the register, taken
+/// at the same X — so it cannot be a value the curve never reaches while the
+/// table under it reports both branches.
+#[test]
+fn the_legend_chip_states_a_branch_value_at_cursor_a() {
+    let mut state = hysteresis_run();
+    state.ui.results.cursors.place(0.25);
+    let (_, _, forward, artifact) = loop_readings(&mut state);
+
+    let painted = super::interaction::painted_texts(&mut state, show);
+
+    assert!(
+        painted
+            .iter()
+            .any(|text| text == &format!("V(out)  {forward}")),
+        "the legend chip does not state the branch value {forward} at cursor A: {painted:?}"
+    );
+    assert!(
+        !painted
+            .iter()
+            .any(|text| text == &format!("V(out)  {artifact}")),
+        "the legend chip printed {artifact}, which the curve does not take at this X: \
+         {painted:?}"
+    );
+}
+
 fn names(rows: &[ReadoutRow]) -> Vec<&str> {
     rows.iter().map(|row| row.name.as_str()).collect()
 }

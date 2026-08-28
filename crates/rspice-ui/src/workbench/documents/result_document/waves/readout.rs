@@ -679,7 +679,18 @@ pub(super) fn marker_section(ui: &mut Ui, state: &mut AppState) {
                         .traces
                         .iter()
                         .find(|trace| !trace.overlay && anchor_key(model, trace) == anchor)?;
-                    let sampled = sample_at_with(&trace.x, &trace.y, marker_x, interpolation);
+                    // Read through the sweep's shape: a loop has no single
+                    // value here, and bisecting across its turnaround puts a
+                    // number in the row the curve never takes. This is the
+                    // canvas' own fallback — the first branch that covers the
+                    // marker's X — so the row and the tagged point agree.
+                    let sampled = sample_at_with_shape(
+                        &trace.x,
+                        &trace.y,
+                        &trace.shape,
+                        marker_x,
+                        interpolation,
+                    );
                     Some(model.format_trace_value(
                         trace,
                         sampled,
