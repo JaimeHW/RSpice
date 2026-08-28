@@ -885,7 +885,8 @@
       "availability": "production",
       "defaultViewerId": "viewer-spectrum",
       "compatibleViewerIds": [
-        "viewer-spectrum"
+        "viewer-spectrum",
+        "viewer-table"
       ],
       "implementationJourney": "periodic operating-state tones, harmonics, time reconstruction, and convergence receipt",
       "exactAlternativeRequired": true,
@@ -1057,7 +1058,8 @@
       "availability": "preview",
       "defaultViewerId": "viewer-bode",
       "compatibleViewerIds": [
-        "viewer-bode"
+        "viewer-bode",
+        "viewer-table"
       ],
       "implementationJourney": "periodic stability, Floquet/sideband margins, and instability evidence",
       "exactAlternativeRequired": true,
@@ -5446,13 +5448,15 @@
       "canonical": {
         "group": "Statistical & tabular",
         "title": "Tabular datasheet",
-        "domain": "OP · TEMP · measurements · specifications",
+        "domain": "OP · TEMP · PSS · PSTB · measurements · specifications",
         "x": "Declared dimensions",
         "y": "Typed values",
         "art": "table",
         "analysisIds": [
           "op",
-          "temp"
+          "temp",
+          "pss",
+          "pstb"
         ],
         "quickModes": [
           {
@@ -5535,7 +5539,9 @@
       "inputAuthority": {
         "analysisIds": [
           "op",
-          "temp"
+          "temp",
+          "pss",
+          "pstb"
         ],
         "externalCapabilityId": null
       },

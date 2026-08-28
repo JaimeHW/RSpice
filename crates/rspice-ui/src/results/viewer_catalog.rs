@@ -942,12 +942,12 @@ mod tests {
     }
 
     #[test]
-    fn table_requires_the_canonical_operating_point_or_temperature_result() {
+    fn table_requires_a_canonical_typed_tabular_result() {
         let empty = ViewerCapabilities::default();
         assert_eq!(
             viewer_compatibility("viewer-table", empty),
             ViewerCompatibility::MissingAnalysis {
-                accepted_analysis_ids: &["op", "temp"],
+                accepted_analysis_ids: &["op", "temp", "pss", "pstb"],
             }
         );
         assert!(
@@ -955,6 +955,16 @@ mod tests {
                 "viewer-table",
                 ViewerCapabilities {
                     analysis_ids: &["op"],
+                    external_capabilities: &[],
+                },
+            )
+            .is_compatible()
+        );
+        assert!(
+            viewer_compatibility(
+                "viewer-table",
+                ViewerCapabilities {
+                    analysis_ids: &["pstb"],
                     external_capabilities: &[],
                 },
             )
