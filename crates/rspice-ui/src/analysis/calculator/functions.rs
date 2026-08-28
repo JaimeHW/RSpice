@@ -567,18 +567,18 @@ fn crossings(x: &[f64], y: &[f64], level: f64) -> Vec<Crossing> {
             continue;
         }
         let sign = if delta > 0.0 { 1.0 } else { -1.0 };
-        if let Some((before, previous_sign)) = previous {
-            if previous_sign != sign {
-                let at = if i == before + 1 {
-                    x[before] + (level - y[before]) * (x[i] - x[before]) / (y[i] - y[before])
-                } else {
-                    x[before + 1]
-                };
-                found.push(Crossing {
-                    x: at,
-                    rising: sign > 0.0,
-                });
-            }
+        if let Some((before, previous_sign)) = previous
+            && previous_sign != sign
+        {
+            let at = if i == before + 1 {
+                x[before] + (level - y[before]) * (x[i] - x[before]) / (y[i] - y[before])
+            } else {
+                x[before + 1]
+            };
+            found.push(Crossing {
+                x: at,
+                rising: sign > 0.0,
+            });
         }
         previous = Some((i, sign));
     }
@@ -603,7 +603,10 @@ fn cross(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     forward_domain("cross", x)?;
     let level = scalar_arg("cross", "level", &args[1])?;
     let ordinal = scalar_arg("cross", "ordinal", &args[2])?;
-    if !(ordinal >= 1.0) || ordinal.fract() != 0.0 {
+    // NaN is rejected explicitly rather than left to the negation: `ordinal`
+    // is whatever the reader's expression evaluated to, and a NaN that got
+    // past here would cast to `0usize` and underflow `wanted - 1` below.
+    if ordinal.is_nan() || ordinal < 1.0 || ordinal.fract() != 0.0 {
         return Err(EvaluationError::MathError(
             "cross ordinal must be a whole number of 1 or more".to_owned(),
         ));
@@ -782,7 +785,10 @@ fn settling(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     let (x, y) = series_arg("settling", &args[0])?;
     forward_domain("settling", x)?;
     let band = scalar_arg("settling", "band", &args[1])?;
-    if !(band > 0.0) {
+    // NaN is rejected explicitly rather than left to the negation: a NaN band
+    // makes `tolerance` NaN, every in-band test below false, and `settling`
+    // would report a settling time it never measured.
+    if band.is_nan() || band <= 0.0 {
         return Err(EvaluationError::MathError(
             "settling band must be a positive percentage of the step".to_owned(),
         ));
@@ -906,7 +912,9 @@ fn thd(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     let harmonics = match args.get(1) {
         Some(value) => {
             let count = scalar_arg("thd", "harmonic count", value)?;
-            if !(count >= 2.0) || count.fract() != 0.0 {
+            // NaN is rejected explicitly rather than left to the negation: it
+            // would cast to `0usize` and ask for a THD over no harmonics.
+            if count.is_nan() || count < 2.0 || count.fract() != 0.0 {
                 return Err(EvaluationError::MathError(
                     "thd harmonic count must be a whole number of 2 or more".to_owned(),
                 ));
@@ -1701,6 +1709,54 @@ mod tests {
             0.02,
             "total harmonic distortion",
         );
+    }
+
+    /// A NaN parameter is refused by the guard that owns it, not absorbed.
+    ///
+    /// These three guards are written `x.is_nan() || x < bound` rather than
+    /// `!(x >= bound)`. The two forms agree exactly, and this pins the part
+    /// that is easy to lose: it is the NaN arm, not the comparison, that
+    /// rejects NaN. Dropping it — writing a bare `x < bound` — lets NaN
+    /// through every one of them, and none fails loudly afterwards. `cross`
+    /// and `thd` would cast NaN to `0usize`, and `settling` would measure
+    /// against a NaN tolerance that no sample can be inside and report a
+    /// settling time it never found. Asserting on the message rather than on
+    /// `is_err` keeps a later guard from passing this test by accident.
+    #[test]
+    fn a_nan_parameter_is_refused_by_its_own_guard() {
+        let (x, y) = pwl_series(&[(0.0, 0.0), (1.0, 2.0), (3.0, -2.0), (4.0, 0.0)], 11);
+        let series = wave(x, y);
+        for (name, args, expected) in [
+            (
+                "cross",
+                vec![
+                    series.clone(),
+                    CalcValue::Scalar(1.0),
+                    CalcValue::Scalar(f64::NAN),
+                ],
+                "cross ordinal must be",
+            ),
+            (
+                "settling",
+                vec![series.clone(), CalcValue::Scalar(f64::NAN)],
+                "settling band must be",
+            ),
+            (
+                "thd",
+                vec![series.clone(), CalcValue::Scalar(f64::NAN)],
+                "thd harmonic count must be",
+            ),
+        ] {
+            let outcome = call(name, args);
+            let message = match &outcome {
+                Err(error) => error.to_string(),
+                Ok(value) => panic!("{name} measured a NaN parameter and returned {value:?}"),
+            };
+            assert!(
+                message.contains(expected),
+                "{name} refused a NaN parameter, but not at its own guard: {message}"
+            );
+        }
     }
 
     #[test]
