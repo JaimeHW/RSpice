@@ -273,7 +273,7 @@ impl PyEngine {
                 abort,
             )
         })?;
-        Ok(PyPoleZeroResult::from_core(&result))
+        PyPoleZeroResult::from_core(&result)
     }
 
     pub(super) fn sensitivity_linearized_impl(

@@ -27,6 +27,23 @@ def round_trip(obj, protocol=pickle.HIGHEST_PROTOCOL):
     return pickle.loads(pickle.dumps(obj, protocol))
 
 
+def synthetic_qualified_pole_zero_result():
+    pole = rspice.ComplexValue._unpickle(-1.0, 0.0)
+    tolerance = 128.0 * np.finfo(np.float64).eps
+    pole_certificate = (1, 0, 0.0, tolerance)
+    empty_zero_certificate = (1, 1, 0.0, tolerance)
+    return rspice.PoleZeroResult._unpickle(
+        [pole],
+        [],
+        (1.0, None),
+        ("input", "output"),
+        (
+            ("qualified", pole_certificate),
+            ("qualified_empty", empty_zero_certificate),
+        ),
+    )
+
+
 class TestEnums:
     @pytest.mark.parametrize(
         "member",
@@ -244,12 +261,63 @@ class TestResults:
         assert restored.input_impedance == original.input_impedance
 
     def test_pole_zero_result(self, engine, analysis_netlist):
-        original = engine.run_pz(analysis_netlist, "in", "out")
+        original = engine.run_pz(
+            analysis_netlist, "in", "out", input_type="voltage"
+        )
         restored = round_trip(original)
 
         assert restored.num_poles == original.num_poles
         assert restored.dc_gain == original.dc_gain
         np.testing.assert_allclose(restored.poles_array, original.poles_array)
+        assert restored.pole_evidence.kind == original.pole_evidence.kind
+        assert restored.zero_evidence.kind == original.zero_evidence.kind
+        assert (
+            restored.pole_evidence.certificate.problem_order
+            == original.pole_evidence.certificate.problem_order
+        )
+        assert (
+            restored.pole_evidence.certificate.max_backward_error
+            == original.pole_evidence.certificate.max_backward_error
+        )
+        evidence = round_trip(original.pole_evidence)
+        assert evidence.kind == original.pole_evidence.kind
+        certificate = round_trip(original.pole_evidence.certificate)
+        assert certificate.finite_count == original.pole_evidence.certificate.finite_count
+
+    def test_synthetic_pole_zero_evidence_round_trip(self):
+        original = synthetic_qualified_pole_zero_result()
+
+        restored = round_trip(original)
+
+        assert restored.is_stable is True
+        assert restored.pole_evidence.kind == "qualified"
+        assert restored.pole_evidence.certificate.finite_count == 1
+        assert restored.pole_evidence.certificate.is_strictly_qualified
+        assert restored.zero_evidence.kind == "qualified_empty"
+        assert restored.zero_evidence.certificate.finite_count == 0
+        assert round_trip(original.pole_evidence).kind == "qualified"
+        assert round_trip(original.pole_evidence.certificate).problem_order == 1
+
+    def test_legacy_pole_zero_pickle_becomes_indeterminate(self):
+        original = synthetic_qualified_pole_zero_result()
+        current_state = original.__reduce__()[1]
+
+        legacy = rspice.PoleZeroResult._unpickle(*current_state[:4])
+
+        np.testing.assert_array_equal(legacy.poles_array, original.poles_array)
+        assert legacy.pole_evidence.kind == "legacy_unknown"
+        assert legacy.zero_evidence.kind == "legacy_unknown"
+        assert legacy.is_stable is None
+
+    def test_unknown_pole_zero_evidence_tag_is_rejected(self):
+        with pytest.raises(ValueError, match="unknown root-set evidence tag"):
+            rspice.PoleZeroResult._unpickle(
+                [],
+                [],
+                (None, None),
+                ("input", "output"),
+                (("future_evidence", None), ("not_requested", None)),
+            )
 
     def test_fourier_result(self, engine, analysis_netlist):
         tran = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=2e-5)

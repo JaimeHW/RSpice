@@ -8,6 +8,168 @@
 
 use super::*;
 
+/// Numerical qualification certificate for a complete eigenspectrum.
+#[pyclass(name = "SpectrumCertificate", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PySpectrumCertificate {
+    #[pyo3(get)]
+    pub problem_order: usize,
+    #[pyo3(get)]
+    pub infinite_count: usize,
+    #[pyo3(get)]
+    pub max_backward_error: f64,
+    #[pyo3(get)]
+    pub qualification_tolerance: f64,
+}
+
+impl PySpectrumCertificate {
+    fn from_core(certificate: &rspice_core::analysis::SpectrumCertificate) -> Self {
+        Self {
+            problem_order: certificate.problem_order,
+            infinite_count: certificate.infinite_count,
+            max_backward_error: certificate.max_backward_error,
+            qualification_tolerance: certificate.qualification_tolerance,
+        }
+    }
+
+    fn to_state(&self) -> SpectrumCertificateState {
+        (
+            self.problem_order,
+            self.infinite_count,
+            self.max_backward_error,
+            self.qualification_tolerance,
+        )
+    }
+}
+
+#[pymethods]
+impl PySpectrumCertificate {
+    /// Number of finite roots certified by the finite/infinite accounting.
+    #[getter]
+    fn finite_count(&self) -> usize {
+        self.problem_order.saturating_sub(self.infinite_count)
+    }
+
+    /// Whether the worst backward error satisfies the strict threshold.
+    #[getter]
+    fn is_strictly_qualified(&self) -> bool {
+        self.max_backward_error <= self.qualification_tolerance
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SpectrumCertificate(order={}, finite={}, infinite={}, max_backward_error={:.3e}, tolerance={:.3e})",
+            self.problem_order,
+            self.finite_count(),
+            self.infinite_count,
+            self.max_backward_error,
+            self.qualification_tolerance,
+        )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(
+        problem_order: usize,
+        infinite_count: usize,
+        max_backward_error: f64,
+        qualification_tolerance: f64,
+    ) -> PyResult<Self> {
+        let certificate = spectrum_certificate_from_state((
+            problem_order,
+            infinite_count,
+            max_backward_error,
+            qualification_tolerance,
+        ))?;
+        Ok(Self::from_core(&certificate))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, SpectrumCertificateState)> {
+        Ok((unpickler::<Self>(py)?, self.to_state()))
+    }
+}
+
+/// Completeness and numerical evidence for one returned pole or zero set.
+#[pyclass(name = "RootSetEvidence", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyRootSetEvidence {
+    #[pyo3(get)]
+    pub kind: String,
+    certificate: Option<PySpectrumCertificate>,
+}
+
+impl PyRootSetEvidence {
+    fn from_core(evidence: &rspice_core::analysis::RootSetEvidence) -> PyResult<Self> {
+        let (kind, certificate) = root_set_evidence_state(evidence)?;
+        Ok(Self {
+            kind,
+            certificate: certificate.map(
+                |(problem_order, infinite_count, max_backward_error, qualification_tolerance)| {
+                    PySpectrumCertificate {
+                        problem_order,
+                        infinite_count,
+                        max_backward_error,
+                        qualification_tolerance,
+                    }
+                },
+            ),
+        })
+    }
+
+    fn to_state(&self) -> RootSetEvidenceState {
+        (
+            self.kind.clone(),
+            self.certificate
+                .as_ref()
+                .map(PySpectrumCertificate::to_state),
+        )
+    }
+}
+
+#[pymethods]
+impl PyRootSetEvidence {
+    #[getter]
+    fn certificate(&self) -> Option<PySpectrumCertificate> {
+        self.certificate.clone()
+    }
+
+    /// True only for a strictly qualified complete root set.
+    #[getter]
+    fn is_qualified(&self) -> bool {
+        matches!(self.kind.as_str(), "qualified" | "qualified_empty")
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RootSetEvidence(kind='{}', certificate={})",
+            self.kind,
+            if self.certificate.is_some() {
+                "present"
+            } else {
+                "None"
+            }
+        )
+    }
+
+    /// Rebuild from pickled state. Not part of the public API.
+    #[staticmethod]
+    fn _unpickle(kind: String, certificate: Option<SpectrumCertificateState>) -> PyResult<Self> {
+        let evidence = root_set_evidence_from_state((kind, certificate))?;
+        Self::from_core(&evidence)
+    }
+
+    fn __reduce__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(Bound<'py, PyAny>, RootSetEvidenceState)> {
+        Ok((unpickler::<Self>(py)?, self.to_state()))
+    }
+}
+
 /// Pole-zero analysis result
 ///
 /// Contains poles and zeros of a circuit's transfer function.
@@ -29,6 +191,10 @@ pub struct PyPoleZeroResult {
     poles: Vec<PyComplexValue>,
     /// System zeros
     zeros: Vec<PyComplexValue>,
+    /// Completeness and numerical evidence for the pole vector.
+    pole_evidence: PyRootSetEvidence,
+    /// Completeness and numerical evidence for the zero vector.
+    zero_evidence: PyRootSetEvidence,
     /// Finite DC gain H(0), when available: a transimpedance in V/A for the
     /// default unit-current input, or a dimensionless voltage ratio for a
     /// unit-voltage input.
@@ -46,15 +212,17 @@ pub struct PyPoleZeroResult {
 }
 
 impl PyPoleZeroResult {
-    pub fn from_core(result: &rspice_core::analysis::PoleZeroResult) -> Self {
-        Self {
+    pub fn from_core(result: &rspice_core::analysis::PoleZeroResult) -> PyResult<Self> {
+        Ok(Self {
             poles: result.poles.iter().map(PyComplexValue::from_core).collect(),
             zeros: result.zeros.iter().map(PyComplexValue::from_core).collect(),
+            pole_evidence: PyRootSetEvidence::from_core(&result.pole_evidence)?,
+            zero_evidence: PyRootSetEvidence::from_core(&result.zero_evidence)?,
             dc_gain: result.dc_gain,
             hf_gain: result.hf_gain,
             input: result.input.clone(),
             output: result.output.clone(),
-        }
+        })
     }
 }
 
@@ -70,6 +238,18 @@ impl PyPoleZeroResult {
     #[getter]
     fn zeros(&self) -> Vec<PyComplexValue> {
         self.zeros.clone()
+    }
+
+    /// Completeness and numerical evidence for the pole vector.
+    #[getter]
+    fn pole_evidence(&self) -> PyRootSetEvidence {
+        self.pole_evidence.clone()
+    }
+
+    /// Completeness and numerical evidence for the zero vector.
+    #[getter]
+    fn zero_evidence(&self) -> PyRootSetEvidence {
+        self.zero_evidence.clone()
     }
 
     /// Get all poles as a complex128 NumPy array
@@ -111,12 +291,18 @@ impl PyPoleZeroResult {
     /// Check asymptotic stability: every pole is finite and strictly in the
     /// open left half-plane. Marginal poles are not reported as stable.
     #[getter]
-    fn is_stable(&self) -> bool {
-        !self.poles.is_empty()
-            && self
-                .poles
-                .iter()
-                .all(|pole| pole.real.is_finite() && pole.imag.is_finite() && pole.real < 0.0)
+    fn is_stable(&self) -> Option<bool> {
+        if !self.pole_evidence.is_qualified() {
+            return None;
+        }
+        if self
+            .poles
+            .iter()
+            .any(|pole| !pole.real.is_finite() || !pole.imag.is_finite())
+        {
+            return None;
+        }
+        Some(self.poles.iter().all(|pole| pole.real < 0.0))
     }
 
     /// Get the dominant pole (closest to imaginary axis with Re < 0)
@@ -168,32 +354,66 @@ impl PyPoleZeroResult {
             .map(|gain| format!("{gain:.3e}"))
             .unwrap_or_else(|| "None".to_owned());
         format!(
-            "PoleZeroResult(poles={}, zeros={}, dc_gain={}, stable={})",
+            "PoleZeroResult(poles={}, zeros={}, dc_gain={}, stable={}, pole_evidence='{}', zero_evidence='{}')",
             self.poles.len(),
             self.zeros.len(),
             dc_gain,
             self.is_stable()
+                .map(|stable| stable.to_string())
+                .unwrap_or_else(|| "None".to_string()),
+            self.pole_evidence.kind,
+            self.zero_evidence.kind,
         )
     }
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
+    #[pyo3(signature = (poles, zeros, gains, ports, evidence=None))]
     fn _unpickle(
         poles: Vec<PyComplexValue>,
         zeros: Vec<PyComplexValue>,
         gains: (Option<f64>, Option<f64>),
         ports: (String, String),
-    ) -> Self {
+        evidence: Option<(RootSetEvidenceState, RootSetEvidenceState)>,
+    ) -> PyResult<Self> {
         let (dc_gain, hf_gain) = gains;
         let (input, output) = ports;
-        Self {
+        let (pole_evidence, zero_evidence) = if let Some((poles, zeros)) = evidence {
+            (
+                root_set_evidence_from_state(poles)?,
+                root_set_evidence_from_state(zeros)?,
+            )
+        } else {
+            (
+                rspice_core::analysis::RootSetEvidence::LegacyUnknown,
+                rspice_core::analysis::RootSetEvidence::LegacyUnknown,
+            )
+        };
+        let core_poles = poles
+            .iter()
+            .map(|pole| rspice_core::Complex64::new(pole.real, pole.imag))
+            .collect::<Vec<_>>();
+        let core_zeros = zeros
+            .iter()
+            .map(|zero| rspice_core::Complex64::new(zero.real, zero.imag))
+            .collect::<Vec<_>>();
+        if !pole_evidence.is_consistent_with(&core_poles)
+            || !zero_evidence.is_consistent_with(&core_zeros)
+        {
+            return Err(crate::errors::value_error(
+                "root-set evidence is inconsistent with the pickled pole-zero vectors".to_string(),
+            ));
+        }
+        Ok(Self {
             poles,
             zeros,
+            pole_evidence: PyRootSetEvidence::from_core(&pole_evidence)?,
+            zero_evidence: PyRootSetEvidence::from_core(&zero_evidence)?,
             dc_gain,
             hf_gain,
             input,
             output,
-        }
+        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -207,6 +427,7 @@ impl PyPoleZeroResult {
             Vec<PyComplexValue>,
             (Option<f64>, Option<f64>),
             (String, String),
+            (RootSetEvidenceState, RootSetEvidenceState),
         ),
     )> {
         Ok((
@@ -216,6 +437,7 @@ impl PyPoleZeroResult {
                 self.zeros.clone(),
                 (self.dc_gain, self.hf_gain),
                 (self.input.clone(), self.output.clone()),
+                (self.pole_evidence.to_state(), self.zero_evidence.to_state()),
             ),
         ))
     }

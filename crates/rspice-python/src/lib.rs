@@ -146,6 +146,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyElementSensitivity>()?;
     m.add_class::<results::PySensitivityResult>()?;
     m.add_class::<results::PyVariableStatistics>()?;
+    m.add_class::<results::PySpectrumCertificate>()?;
+    m.add_class::<results::PyRootSetEvidence>()?;
     m.add_class::<results::PyPoleZeroResult>()?;
     m.add_class::<results::PyComplexValue>()?;
     m.add_class::<results::PyFourierResult>()?;
@@ -231,6 +233,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "ElementSensitivity",
             "SensitivityResult",
             "VariableStatistics",
+            "SpectrumCertificate",
+            "RootSetEvidence",
             "PoleZeroResult",
             "ComplexValue",
             "FourierResult",

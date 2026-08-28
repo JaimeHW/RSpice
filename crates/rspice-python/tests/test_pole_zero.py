@@ -15,18 +15,34 @@ class TestPoleZero:
             "out",
             input_negative="0",
             output_negative="0",
-            input_type="current",
+            input_type="voltage",
             analysis="pz",
         )
         poles = engine.run_pz(
-            rc_lowpass, "in", "out", analysis="poles"
+            rc_lowpass, "in", "out", input_type="voltage", analysis="poles"
         )
         zeros = engine.run_pz(
-            rc_lowpass, "in", "out", analysis="zeros"
+            rc_lowpass, "in", "out", input_type="voltage", analysis="zeros"
         )
         np.testing.assert_allclose(full.poles_array, poles.poles_array)
         assert poles.num_zeros == 0
         assert zeros.num_poles == 0
+        assert full.pole_evidence.kind == "qualified"
+        assert full.pole_evidence.is_qualified
+        assert full.pole_evidence.certificate is not None
+        assert full.pole_evidence.certificate.finite_count == full.num_poles
+        assert (
+            full.pole_evidence.certificate.max_backward_error
+            <= full.pole_evidence.certificate.qualification_tolerance
+        )
+        assert full.zero_evidence.kind == "qualified_empty"
+        assert full.zero_evidence.certificate is not None
+        assert full.zero_evidence.certificate.finite_count == 0
+        assert poles.zero_evidence.kind == "not_requested"
+        assert poles.zero_evidence.certificate is None
+        assert zeros.pole_evidence.kind == "not_requested"
+        assert zeros.pole_evidence.certificate is None
+        assert zeros.is_stable is None
 
     def test_engine_run_executes_pz_directive(self, engine):
         netlist = rspice.Netlist.parse(
@@ -50,7 +66,7 @@ C1 out 0 1u
             engine.run_pz(rc_lowpass, "in", "out", analysis="unknown")
 
     def test_rc_pole_location(self, engine, rc_lowpass):
-        pz = engine.run_pz(rc_lowpass, "in", "out")
+        pz = engine.run_pz(rc_lowpass, "in", "out", input_type="voltage")
         assert pz.num_poles == 1
         assert pz.is_stable
         pole = pz.poles[0]
@@ -62,7 +78,7 @@ C1 out 0 1u
         assert pz.dominant_pole_decay_hz == pytest.approx(159.155, rel=1e-4)
 
     def test_poles_array_and_complex_conversion(self, engine, rc_lowpass):
-        pz = engine.run_pz(rc_lowpass, "in", "out")
+        pz = engine.run_pz(rc_lowpass, "in", "out", input_type="voltage")
         arr = pz.poles_array
         assert arr.dtype == np.complex128
         assert arr[0] == pytest.approx(-1000.0 + 0j, rel=1e-6)
@@ -70,8 +86,8 @@ C1 out 0 1u
         assert pz.zeros_array.dtype == np.complex128
 
     def test_node_names_resolve(self, engine, rc_lowpass):
-        by_name = engine.run_pz(rc_lowpass, "in", "out")
-        by_index = engine.run_pz(rc_lowpass, 1, 2)
+        by_name = engine.run_pz(rc_lowpass, "in", "out", input_type="voltage")
+        by_index = engine.run_pz(rc_lowpass, 1, 2, input_type="voltage")
         assert by_name.poles[0].real == pytest.approx(
             by_index.poles[0].real, rel=1e-12
         )
@@ -79,3 +95,9 @@ C1 out 0 1u
     def test_unknown_node_raises_keyerror(self, engine, rc_lowpass):
         with pytest.raises(KeyError):
             engine.run_pz(rc_lowpass, "nonexistent", "out")
+
+    def test_current_input_cannot_parallel_an_ideal_voltage_source(
+        self, engine, rc_lowpass
+    ):
+        with pytest.raises(rspice.SimulationError, match="transfer extraction"):
+            engine.run_pz(rc_lowpass, "in", "out", input_type="current")

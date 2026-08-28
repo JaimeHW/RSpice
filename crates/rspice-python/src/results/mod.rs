@@ -87,7 +87,10 @@ pub(crate) use s_parameters::{PySParameterResult, SParameterNoiseData};
 pub(crate) use sensitivity::{
     PyAcSensitivity, PyAcSensitivityResult, PyElementSensitivity, PySensitivityResult,
 };
-pub(crate) use stability::{PyPoleZeroResult, PyStbResult, PyTransferFunctionResult};
+pub(crate) use stability::{
+    PyPoleZeroResult, PyRootSetEvidence, PySpectrumCertificate, PyStbResult,
+    PyTransferFunctionResult,
+};
 pub(crate) use transient::PyTransientResult;
 pub(crate) use transient_compression::{PyCompressedTransientResult, PyTransientCheckpoint};
 pub(crate) use verification::{PyAnalysisRecord, PyMeasurement, PyRunReport};
