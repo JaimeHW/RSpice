@@ -223,7 +223,7 @@ fn result_rows_consume_durable_pss_scalars_without_a_measurement_copy() {
     let mut run = SimulationRun::new(6);
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(payload));
     let spec = SpecEntry {
-        measurement: "pss.mode_count".to_owned(),
+        measurement: "pss_mode_count".to_owned(),
         expression: "authenticated Floquet spectrum order".to_owned(),
         min: Some(0.0),
         max: Some(0.0),

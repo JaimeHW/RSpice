@@ -952,6 +952,10 @@ const fn default_op_run_point_count() -> u64 {
     1
 }
 
+fn native_scalar_name_matches(name: &str, canonical: &str, dotted_compatibility: &str) -> bool {
+    name.eq_ignore_ascii_case(canonical) || name.eq_ignore_ascii_case(dotted_compatibility)
+}
+
 /// Immutable, analysis-native result evidence that is neither waveform data
 /// nor presentation state.
 ///
@@ -1153,11 +1157,15 @@ impl AnalysisResultPayload {
                 floquet_evidence,
                 ..
             } => {
-                if name.eq_ignore_ascii_case("pss.period") {
+                if native_scalar_name_matches(name, "pss_period", "pss.period") {
                     *period_s
-                } else if name.eq_ignore_ascii_case("pss.fundamental_frequency") {
+                } else if native_scalar_name_matches(
+                    name,
+                    "pss_fundamental_frequency",
+                    "pss.fundamental_frequency",
+                ) {
                     *fundamental_frequency_hz
-                } else if name.eq_ignore_ascii_case("pss.mode_count")
+                } else if native_scalar_name_matches(name, "pss_mode_count", "pss.mode_count")
                     && matches!(
                         floquet_evidence,
                         FloquetSpectrumEvidence::NoDynamicModes
@@ -1179,11 +1187,15 @@ impl AnalysisResultPayload {
                 num_unstable,
                 ..
             } => {
-                if name.eq_ignore_ascii_case("pstb.period") {
+                if native_scalar_name_matches(name, "pstb_period", "pstb.period") {
                     *period_s
-                } else if name.eq_ignore_ascii_case("pstb.fundamental_frequency") {
+                } else if native_scalar_name_matches(
+                    name,
+                    "pstb_fundamental_frequency",
+                    "pstb.fundamental_frequency",
+                ) {
                     *fundamental_frequency_hz
-                } else if name.eq_ignore_ascii_case("pstb.mode_count")
+                } else if native_scalar_name_matches(name, "pstb_mode_count", "pstb.mode_count")
                     && matches!(
                         floquet_evidence,
                         FloquetSpectrumEvidence::NoDynamicModes
@@ -1191,11 +1203,23 @@ impl AnalysisResultPayload {
                     )
                 {
                     Some(modes.len() as f64)
-                } else if name.eq_ignore_ascii_case("pstb.unstable_mode_count") {
+                } else if native_scalar_name_matches(
+                    name,
+                    "pstb_unstable_mode_count",
+                    "pstb.unstable_mode_count",
+                ) {
                     num_unstable.map(|count| count as f64)
-                } else if name.eq_ignore_ascii_case("pstb.max_multiplier_magnitude") {
+                } else if native_scalar_name_matches(
+                    name,
+                    "pstb_max_multiplier_magnitude",
+                    "pstb.max_multiplier_magnitude",
+                ) {
                     *max_multiplier_magnitude
-                } else if name.eq_ignore_ascii_case("pstb.min_stability_margin_db") {
+                } else if native_scalar_name_matches(
+                    name,
+                    "pstb_min_stability_margin_db",
+                    "pstb.min_stability_margin_db",
+                ) {
                     *min_stability_margin_db
                 } else {
                     None
@@ -1227,17 +1251,17 @@ impl AnalysisResultPayload {
             } => {
                 let mut names = Vec::with_capacity(3);
                 if period_s.is_some() {
-                    names.push("pss.period".to_owned());
+                    names.push("pss_period".to_owned());
                 }
                 if fundamental_frequency_hz.is_some() {
-                    names.push("pss.fundamental_frequency".to_owned());
+                    names.push("pss_fundamental_frequency".to_owned());
                 }
                 if matches!(
                     floquet_evidence,
                     FloquetSpectrumEvidence::NoDynamicModes
                         | FloquetSpectrumEvidence::Qualified { .. }
                 ) {
-                    names.push("pss.mode_count".to_owned());
+                    names.push("pss_mode_count".to_owned());
                 }
                 names
             }
@@ -1252,26 +1276,26 @@ impl AnalysisResultPayload {
             } => {
                 let mut names = Vec::with_capacity(6);
                 if period_s.is_some() {
-                    names.push("pstb.period".to_owned());
+                    names.push("pstb_period".to_owned());
                 }
                 if fundamental_frequency_hz.is_some() {
-                    names.push("pstb.fundamental_frequency".to_owned());
+                    names.push("pstb_fundamental_frequency".to_owned());
                 }
                 if matches!(
                     floquet_evidence,
                     FloquetSpectrumEvidence::NoDynamicModes
                         | FloquetSpectrumEvidence::Qualified { .. }
                 ) {
-                    names.push("pstb.mode_count".to_owned());
+                    names.push("pstb_mode_count".to_owned());
                 }
                 if num_unstable.is_some() {
-                    names.push("pstb.unstable_mode_count".to_owned());
+                    names.push("pstb_unstable_mode_count".to_owned());
                 }
                 if max_multiplier_magnitude.is_some() {
-                    names.push("pstb.max_multiplier_magnitude".to_owned());
+                    names.push("pstb_max_multiplier_magnitude".to_owned());
                 }
                 if min_stability_margin_db.is_some() {
-                    names.push("pstb.min_stability_margin_db".to_owned());
+                    names.push("pstb_min_stability_margin_db".to_owned());
                 }
                 names
             }
@@ -3272,14 +3296,30 @@ mod retained_payload_tests {
             candidates[0].value.unwrap()
         };
 
-        assert_eq!(scalar("pstb.period"), 1.0);
-        assert_eq!(scalar("PSTB.FUNDAMENTAL_FREQUENCY"), 1.0);
-        assert_eq!(scalar("pstb.mode_count"), 1.0);
-        assert_eq!(scalar("pstb.unstable_mode_count"), 0.0);
-        assert_eq!(scalar("pstb.max_multiplier_magnitude"), 0.5);
+        assert_eq!(scalar("pstb_period"), 1.0);
+        assert_eq!(scalar("PSTB_FUNDAMENTAL_FREQUENCY"), 1.0);
+        assert_eq!(scalar("pstb_mode_count"), 1.0);
+        assert_eq!(scalar("pstb_unstable_mode_count"), 0.0);
+        assert_eq!(scalar("pstb_max_multiplier_magnitude"), 0.5);
+        assert_eq!(
+            scalar("pstb_min_stability_margin_db"),
+            -20.0 * 0.5_f64.log10()
+        );
         assert_eq!(
             scalar("pstb.min_stability_margin_db"),
-            -20.0 * 0.5_f64.log10()
+            -20.0 * 0.5_f64.log10(),
+            "the established dotted runtime spelling remains compatible"
+        );
+        assert_eq!(
+            result.scalar_evidence_names(),
+            [
+                "pstb_period",
+                "pstb_fundamental_frequency",
+                "pstb_mode_count",
+                "pstb_unstable_mode_count",
+                "pstb_max_multiplier_magnitude",
+                "pstb_min_stability_margin_db",
+            ]
         );
         assert!(result.scalar_evidence("pstb.is_stable").is_empty());
         assert!(
@@ -3311,12 +3351,21 @@ mod retained_payload_tests {
         };
         let result = AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_result_payload(payload);
 
-        assert_eq!(result.scalar_evidence("pss.period")[0].value, Some(2.0));
+        assert_eq!(result.scalar_evidence("pss_period")[0].value, Some(2.0));
         assert_eq!(
-            result.scalar_evidence("pss.fundamental_frequency")[0].value,
+            result.scalar_evidence("pss_fundamental_frequency")[0].value,
             Some(0.5)
         );
-        assert_eq!(result.scalar_evidence("pss.mode_count")[0].value, Some(0.0));
+        assert_eq!(result.scalar_evidence("pss_mode_count")[0].value, Some(0.0));
+        assert_eq!(
+            result.scalar_evidence("pss.mode_count")[0].value,
+            Some(0.0),
+            "the established dotted runtime spelling remains compatible"
+        );
+        assert_eq!(
+            result.scalar_evidence_names(),
+            ["pss_period", "pss_fundamental_frequency", "pss_mode_count"]
+        );
         assert!(result.scalar_evidence("pss.is_stable").is_empty());
     }
 

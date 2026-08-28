@@ -534,7 +534,7 @@ mod tests {
                 .unwrap(),
             );
         let specification = PreparedSpecification::new(SpecEntry {
-            measurement: "pss.mode_count".to_owned(),
+            measurement: "pss_mode_count".to_owned(),
             expression: "authenticated Floquet spectrum order".to_owned(),
             min: Some(0.0),
             max: Some(0.0),
