@@ -607,8 +607,10 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         Self::validate_bug1035_table(Bug1035SonRole::BaselineReference, baseline)?;
         Self::validate_bug1035_table(Bug1035SonRole::DataOwner, owner)?;
-        let good = Self::xyce_prn_text_with_delimiter(baseline, &PrintDelimiter::Whitespace)?;
-        let test = Self::xyce_prn_text_with_delimiter(owner, &PrintDelimiter::Whitespace)?;
+        let good =
+            Self::xyce_legacy_compact_prn_for_comparison(baseline, &PrintDelimiter::Whitespace)?;
+        let test =
+            Self::xyce_legacy_compact_prn_for_comparison(owner, &PrintDelimiter::Whitespace)?;
         if good.as_bytes() == test.as_bytes() {
             return Ok(());
         }
@@ -782,12 +784,16 @@ mod tests {
         };
         let mut close = baseline.clone();
         close.rows[8][2] += 1e-18;
-        let baseline_bytes =
-            XyceTestRunner::xyce_prn_text_with_delimiter(&baseline, &PrintDelimiter::Whitespace)
-                .unwrap();
-        let close_bytes =
-            XyceTestRunner::xyce_prn_text_with_delimiter(&close, &PrintDelimiter::Whitespace)
-                .unwrap();
+        let baseline_bytes = XyceTestRunner::xyce_legacy_compact_prn_for_comparison(
+            &baseline,
+            &PrintDelimiter::Whitespace,
+        )
+        .unwrap();
+        let close_bytes = XyceTestRunner::xyce_legacy_compact_prn_for_comparison(
+            &close,
+            &PrintDelimiter::Whitespace,
+        )
+        .unwrap();
         assert_ne!(
             baseline_bytes, close_bytes,
             "counterfactual must reach historical comparator fallback"

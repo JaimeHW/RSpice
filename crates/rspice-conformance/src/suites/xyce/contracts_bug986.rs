@@ -598,8 +598,9 @@ impl XyceTestRunner {
         Self::validate_bug986_table(Bug986Role::ExplicitBreakpoints, explicit)?;
         Self::validate_bug986_table(Bug986Role::DisconnectedPwlBreakpoints, pwl)?;
         let explicit_text =
-            Self::xyce_prn_text_with_delimiter(explicit, &PrintDelimiter::Whitespace)?;
-        let pwl_text = Self::xyce_prn_text_with_delimiter(pwl, &PrintDelimiter::Whitespace)?;
+            Self::xyce_legacy_compact_prn_for_comparison(explicit, &PrintDelimiter::Whitespace)?;
+        let pwl_text =
+            Self::xyce_legacy_compact_prn_for_comparison(pwl, &PrintDelimiter::Whitespace)?;
         if explicit_text.is_empty() || pwl_text.is_empty() || explicit_text != pwl_text {
             return Err(format!(
                 "{LABEL} Release default-PRN byte comparison changed"

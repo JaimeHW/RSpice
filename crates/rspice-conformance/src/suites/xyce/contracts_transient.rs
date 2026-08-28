@@ -3865,6 +3865,8 @@ impl XyceTestRunner {
             && !has_qualified_bsim3_capacitor
             && !has_qualified_generated_bsimsoi461
             && purpose != XyceStaticTranPlanPurpose::DiodeAnalyticOracle
+            && purpose
+                != XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily
             && !(purpose == XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle
                 && has_qualified_legacy_device_analytic)
             && !Self::native_transient_uses_standard_startup(netlist)
@@ -4195,6 +4197,10 @@ impl XyceTestRunner {
                         ),
                         XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
                             "native Release 7.10 integrated-RMS .PRINT TRAN comparison supports the strict bare Xyce LEVEL=9 BSIM3 subset in addition to the ordinary absolute-device envelope; element '{}' requires a broader transient oracle contract",
+                            element.name
+                        ),
+                        XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily => format!(
+                            "Certification BUG 308 SON admits only the provenance-bound native LEVEL=9 BSIM3 stepped-TEMP comparator envelope; element '{}' is outside that contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::RelationalFamily

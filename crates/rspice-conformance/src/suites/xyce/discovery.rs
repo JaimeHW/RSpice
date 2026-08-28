@@ -239,6 +239,8 @@ impl XyceTestRunner {
         let generated_reference_wrapper =
             purpose == XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily;
         let fileless_relational_family = generated_reference_wrapper
+            || purpose
+                == XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily
             || purpose == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             || purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily
             || purpose == XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily;
@@ -451,6 +453,10 @@ impl XyceTestRunner {
         if !steps.is_empty() {
             if purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily {
                 Self::validate_bug1190_son_static_tran_contract(&netlist)?;
+            } else if purpose
+                == XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily
+            {
+                Self::validate_bug308_son_static_step_contract(&netlist, &steps)?;
             } else {
                 Self::validate_static_step_tran_contract(&netlist)?;
             }
@@ -534,6 +540,7 @@ impl XyceTestRunner {
                     | XyceStaticTranPlanPurpose::Bug1797RelationalFamily
                     | XyceStaticTranPlanPurpose::Bug805RelationalFamily
                     | XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily
+                    | XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily
                     | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             )
         {

@@ -28,6 +28,10 @@ use rspice_core::engine::{
 use rspice_core::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Vm, compile, parse_expression_strict,
 };
+use rspice_core::io::{
+    XycePrnFooter, XycePrnLimits, XycePrnScientificStyle, XycePrnTable, format_xyce_prn_scientific,
+    serialize_legacy_compact_prn_for_comparison, serialize_xyce_prn_sequence,
+};
 use rspice_core::netlist::expr::ComplexValue as ExprComplexValue;
 use rspice_core::netlist::expr::is_real as expression_value_is_real;
 use rspice_core::netlist::expr::{
@@ -8821,6 +8825,10 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranContract::WrapperCsv
                             | XyceStaticTranContract::WrapperCsd
                     ) | (
+                        XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                    ) | (
                         XyceStaticTranPlanPurpose::RelationalFamily
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                             | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
@@ -8833,6 +8841,10 @@ impl XyceStaticTranPlan {
                         XyceStaticTranContract::PlainStatic
                             | XyceStaticTranContract::PlainCsv
                             | XyceStaticTranContract::PlainCsd
+                    ) | (
+                        XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily,
+                        false,
+                        XyceStaticTranContract::PlainStatic
                     ) | (
                         XyceStaticTranPlanPurpose::RelationalFamily
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
@@ -9309,6 +9321,11 @@ enum XyceStaticTranPlanPurpose {
     /// deliberately available only after a dedicated family selector has
     /// proven the wrapper/sibling provenance and naming contract.
     GeneratedReferenceRelationalFamily,
+    /// Reproduce the exact Certification BUG 308 SON stepped-TEMP wrapper
+    /// against its two independently executed fixed-TEMP controls. Admission
+    /// to the native LEVEL=9 BSIM3 comparator envelope is confined to the
+    /// dedicated provenance-bound output-framing contract.
+    Bug308SonSteppedTempOutputFramingRelationalFamily,
     /// Compare the exact Certification BUG 1190 SON process-parameter alias
     /// owners with their direct model-parameter controls. Admission is scoped
     /// to the dedicated provenance-bound diode family contract.
@@ -9377,7 +9394,11 @@ impl XyceStaticTranPlanPurpose {
     }
 
     fn admits_default_level9_bsim3(self) -> bool {
-        matches!(self, Self::DefaultLevel9XyceVerifyOracle)
+        matches!(
+            self,
+            Self::DefaultLevel9XyceVerifyOracle
+                | Self::Bug308SonSteppedTempOutputFramingRelationalFamily
+        )
     }
 }
 
@@ -12464,12 +12485,6 @@ impl XyceLeadCurrentTerminal {
     }
 }
 
-#[derive(Debug, Clone)]
-struct XycePrnTable {
-    columns: Vec<String>,
-    rows: Vec<Vec<f64>>,
-}
-
 #[derive(Debug)]
 struct XyceTranRemeasureInput {
     time: Vec<Value>,
@@ -12562,6 +12577,7 @@ mod contracts_bug28;
 mod contracts_bug302;
 mod contracts_bug306_son;
 mod contracts_bug307;
+mod contracts_bug308_son;
 mod contracts_bug352;
 mod contracts_bug354;
 mod contracts_bug38;

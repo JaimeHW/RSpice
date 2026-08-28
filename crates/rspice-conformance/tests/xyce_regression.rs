@@ -10944,6 +10944,44 @@ fn test_xyce_bug306_numeric_string_timeint_method_release_relations() {
 }
 
 #[test]
+fn test_xyce_bug308_stepped_temp_output_framing_relation() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = "Netlists/Certification_Tests/BUG_308_SON/comparator3.cir";
+    assert!(runner.requires_upstream_wrapper(owner));
+    let result = runner.run_test(root.join(owner));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG308 owner should reproduce the Release stepped-TEMP/raw-framing relation: {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "bug308_stepped_temp_output_framing_wrapper_owner"
+    );
+    assert!(result.error.is_none());
+    assert!(result.mismatches.is_empty());
+
+    for helper in ["comparator0.cir", "comparator.cir"] {
+        let relative = format!("Netlists/Certification_Tests/BUG_308_SON/{helper}");
+        assert!(!runner.requires_upstream_wrapper(&relative));
+        let excluded = runner.run_test(root.join(&relative));
+        assert!(excluded.passed && excluded.upstream_excluded);
+        assert_eq!(excluded.contract, "upstream_excluded");
+        assert_eq!(
+            excluded.upstream_exclusion_source.as_deref(),
+            Some("Netlists/Certification_Tests/BUG_308_SON/exclude")
+        );
+        assert!(
+            excluded
+                .error
+                .as_deref()
+                .is_some_and(|error| error.starts_with("UPSTREAM_EXCLUDED:"))
+        );
+    }
+}
+
+#[test]
 fn test_xyce_bug307_subcircuit_model_scope_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

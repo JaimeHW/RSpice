@@ -2388,6 +2388,8 @@ impl XyceTestRunner {
             measure_use_cont_files: _,
             measure_use_lttm: _,
             output_snapshots: _,
+            output_print_header: _,
+            output_print_footer: _,
             output_time_points,
             timeint_breakpoints,
             reltol,
@@ -2412,6 +2414,7 @@ impl XyceTestRunner {
             timeint_min_order,
             timeint_max_order,
             timeint_timesteps_reversal,
+            timeint_debug_level,
             nonlin_transient_reltol,
             nonlin_transient_abstol,
             nonlin_transient_deltaxtol,
@@ -2480,6 +2483,7 @@ impl XyceTestRunner {
             && timeint_min_order.is_none()
             && timeint_max_order.is_none()
             && timeint_timesteps_reversal.is_none()
+            && timeint_debug_level.is_none()
             && device_voltage_limiting.is_none()
             && device_debug_level.is_none()
             && linsol_tr_partition.is_none()

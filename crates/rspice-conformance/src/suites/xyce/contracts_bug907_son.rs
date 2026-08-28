@@ -633,8 +633,9 @@ impl XyceTestRunner {
     fn validate_bug907_relation(flat: &XycePrnTable, owner: &XycePrnTable) -> Result<(), String> {
         Self::validate_bug907_table(Bug907SonRole::FlatReference, flat)?;
         Self::validate_bug907_table(Bug907SonRole::HierarchicalOwner, owner)?;
-        let flat = Self::xyce_prn_text_with_delimiter(flat, &PrintDelimiter::Whitespace)?;
-        let owner = Self::xyce_prn_text_with_delimiter(owner, &PrintDelimiter::Whitespace)?;
+        let flat = Self::xyce_legacy_compact_prn_for_comparison(flat, &PrintDelimiter::Whitespace)?;
+        let owner =
+            Self::xyce_legacy_compact_prn_for_comparison(owner, &PrintDelimiter::Whitespace)?;
         if flat.as_bytes() != owner.as_bytes() {
             return Err(format!("{LABEL} Release wrapper byte diff failed"));
         }

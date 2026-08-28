@@ -537,11 +537,12 @@ impl XyceTestRunner {
     }
 
     fn validate_bug302_fresh_rendering(table: &XycePrnTable) -> Result<(), String> {
-        let default = Self::xyce_prn_text_with_delimiter(table, &PrintDelimiter::Whitespace)?;
-        let comma = Self::xyce_prn_text_with_delimiter(table, &PrintDelimiter::Comma)?;
-        let tab = Self::xyce_prn_text_with_delimiter(table, &PrintDelimiter::Tab)?;
+        let default =
+            Self::xyce_legacy_compact_prn_for_comparison(table, &PrintDelimiter::Whitespace)?;
+        let comma = Self::xyce_legacy_compact_prn_for_comparison(table, &PrintDelimiter::Comma)?;
+        let tab = Self::xyce_legacy_compact_prn_for_comparison(table, &PrintDelimiter::Tab)?;
         let invalid_fallback =
-            Self::xyce_prn_text_with_delimiter(table, &PrintDelimiter::Whitespace)?;
+            Self::xyce_legacy_compact_prn_for_comparison(table, &PrintDelimiter::Whitespace)?;
         if Self::historical_bug302_delimiter_transform(&default, ",") != comma
             || Self::historical_bug302_delimiter_transform(&default, "\t") != tab
             || default != invalid_fallback
@@ -871,12 +872,13 @@ mod tests {
             (PrintDelimiter::Semicolon, ";"),
             (PrintDelimiter::Custom("||".to_string()), "||"),
         ] {
-            let rendered = XyceTestRunner::xyce_prn_text_with_delimiter(&table, &delimiter)
-                .expect("full typed delimiter domain renders");
+            let rendered =
+                XyceTestRunner::xyce_legacy_compact_prn_for_comparison(&table, &delimiter)
+                    .expect("full typed delimiter domain renders");
             assert!(rendered.starts_with(&format!("Index{separator}TIME{separator}V(1)")));
         }
         assert!(
-            XyceTestRunner::xyce_prn_text_with_delimiter(
+            XyceTestRunner::xyce_legacy_compact_prn_for_comparison(
                 &table,
                 &PrintDelimiter::Custom(String::new())
             )

@@ -552,9 +552,10 @@ impl XyceTestRunner {
                 filtered.rows.len()
             ));
         }
-        let output_text = Self::xyce_prn_text_with_delimiter(&output, &PrintDelimiter::Whitespace)?;
+        let output_text =
+            Self::xyce_legacy_compact_prn_for_comparison(&output, &PrintDelimiter::Whitespace)?;
         let filtered_text =
-            Self::xyce_prn_text_with_delimiter(&filtered, &PrintDelimiter::Whitespace)?;
+            Self::xyce_legacy_compact_prn_for_comparison(&filtered, &PrintDelimiter::Whitespace)?;
         if output_text != filtered_text {
             return Err(format!("{LABEL} Release grep/diff relation changed"));
         }
