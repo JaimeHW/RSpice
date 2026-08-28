@@ -14,6 +14,7 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::AppState;
+use crate::workbench::design_system::WorkbenchIcon;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResultOperationalCategory {
@@ -896,67 +897,25 @@ pub(super) fn show_result_operational_status(
         ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => t.color.warn,
         ResultOperationalCategory::Error => t.color.err,
     };
-    if status.blocks_visuals {
-        let available = ui.available_rect_before_wrap();
-        ui.add_space(((available.height() - 172.0) * 0.5).max(12.0));
-    }
-    // Derived before the frame borrows `state` mutably for the dismiss path.
+    // Derived before the card borrows `state` mutably for the dismiss path.
     let offer = failure_site_offer(state);
     let marked = offer
         .as_ref()
         .is_some_and(|offer| state.ui.results.marked_failure_run == Some(offer.run_sequence));
-    let mut highlight = false;
-    let mut dismiss = false;
-    let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(egui::Stroke::new(1.0, accent))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(14, 11))
-        .show(ui, |ui| {
-            ui.set_max_width(if status.blocks_visuals {
-                680.0_f32.min(ui.available_width())
-            } else {
-                ui.available_width()
-            });
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(status.state.label())
-                            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                            .color(accent),
-                    );
-                    if let Some(detail) = status.detail.as_deref() {
-                        ui.label(
-                            egui::RichText::new(detail)
-                                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                                .color(t.color.text),
-                        );
-                    }
-                    ui.label(
-                        egui::RichText::new(status.state.message())
-                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                    ui.label(
-                        egui::RichText::new(status.state.recovery())
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_faint),
-                    );
-                });
-                if status.dismissible {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        dismiss = crate::ui::widgets::Button::new("Dismiss")
-                            .show(ui)
-                            .on_hover_text("Dismiss this recorded runtime notice")
-                            .clicked();
-                    });
-                }
-            });
-            if let Some(offer) = offer.as_ref() {
-                ui.add_space(7.0);
-                highlight = show_failure_site_control(ui, offer, marked);
-            }
-        });
+    let card = OperationalCard {
+        status,
+        accent,
+        offer: offer.as_ref(),
+        marked,
+        floating: status.blocks_visuals,
+    };
+    let mut actions = OperationalCardActions::default();
+    let response = if status.blocks_visuals {
+        card.show_centered(ui, &mut actions)
+    } else {
+        card.show(ui, &mut actions)
+    };
+    let OperationalCardActions { dismiss, highlight } = actions;
     let accessible = format!(
         "{} status, {}: {} {}",
         status.state.id(),
@@ -964,20 +923,17 @@ pub(super) fn show_result_operational_status(
         status.detail.as_deref().unwrap_or(status.state.message()),
         status.state.recovery()
     );
-    response
-        .response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, accessible.as_str()));
-    ui.ctx()
-        .accesskit_node_builder(response.response.id, |node| {
-            node.set_role(
-                if status.state.category() == ResultOperationalCategory::Error {
-                    egui::accesskit::Role::Alert
-                } else {
-                    egui::accesskit::Role::Status
-                },
-            );
-            node.set_label(accessible);
-        });
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, accessible.as_str()));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(
+            if status.state.category() == ResultOperationalCategory::Error {
+                egui::accesskit::Role::Alert
+            } else {
+                egui::accesskit::Role::Status
+            },
+        );
+        node.set_label(accessible);
+    });
     if dismiss {
         state.ui.results.dismiss_runtime_condition();
     }
@@ -990,6 +946,193 @@ pub(super) fn show_result_operational_status(
         }
     }
     status.blocks_visuals
+}
+
+/// The card's own geometry, as `.viewer-operational-state` defines it: a
+/// bounded column centred in the stage, never a strip as long as whichever
+/// sentence the state happens to carry.
+const OPERATIONAL_CARD_MAX_WIDTH: f32 = 560.0;
+const OPERATIONAL_CARD_GUTTER: f32 = 16.0;
+const OPERATIONAL_CARD_PADDING: i8 = 14;
+const OPERATIONAL_CARD_ICON: f32 = 20.0;
+const OPERATIONAL_CARD_ICON_GAP: f32 = 10.0;
+/// What the banner form keeps clear of the bar above and the viewer below.
+const OPERATIONAL_BANNER_INSET: i8 = 8;
+
+/// The glyph that stands for a category before its sentence is read.
+const fn operational_icon(category: ResultOperationalCategory) -> WorkbenchIcon {
+    match category {
+        ResultOperationalCategory::Error
+        | ResultOperationalCategory::Warning
+        | ResultOperationalCategory::Partial => WorkbenchIcon::Warning,
+        ResultOperationalCategory::Loading => WorkbenchIcon::Refresh,
+        ResultOperationalCategory::Recovery | ResultOperationalCategory::Normal => {
+            WorkbenchIcon::Success
+        }
+        ResultOperationalCategory::Empty => WorkbenchIcon::Info,
+    }
+}
+
+/// What the reader pressed while the card was on screen.
+#[derive(Default)]
+struct OperationalCardActions {
+    dismiss: bool,
+    highlight: bool,
+}
+
+/// One operational card: the category glyph, then the state's label, detail,
+/// message and recovery, then whatever this state lets the reader act on.
+struct OperationalCard<'a> {
+    status: &'a ResultOperationalStatus,
+    accent: egui::Color32,
+    offer: Option<&'a FailureSiteOffer>,
+    marked: bool,
+    /// The card that owns the well — elevated and shadowed over the canvas —
+    /// rather than the banner attached above a still-usable viewer.
+    floating: bool,
+}
+
+impl OperationalCard<'_> {
+    /// Draw the card across the width its caller already fixed.
+    fn show(&self, ui: &mut Ui, actions: &mut OperationalCardActions) -> egui::Response {
+        let t = Tokens::get(ui.ctx());
+        // Severity outlines the card; an empty or loading state is not an
+        // alarm and keeps the ordinary strong border under its heading.
+        let border = match self.status.state.category() {
+            ResultOperationalCategory::Normal
+            | ResultOperationalCategory::Empty
+            | ResultOperationalCategory::Loading => t.color.border_strong,
+            ResultOperationalCategory::Partial
+            | ResultOperationalCategory::Warning
+            | ResultOperationalCategory::Error
+            | ResultOperationalCategory::Recovery => self.accent,
+        };
+        let mut frame = egui::Frame::NONE
+            .fill(if self.floating {
+                t.color.bg_elevated
+            } else {
+                t.color.bg_panel
+            })
+            .stroke(egui::Stroke::new(1.0, border))
+            .corner_radius(t.radius)
+            .inner_margin(egui::Margin::same(OPERATIONAL_CARD_PADDING));
+        if self.floating {
+            frame = frame.shadow(t.shadow());
+        } else {
+            // The banner is inset from the well it warns about, so it neither
+            // butts against the bar above it nor against the viewer below.
+            frame = frame.outer_margin(egui::Margin::same(OPERATIONAL_BANNER_INSET));
+        }
+        frame
+            .show(ui, |ui| {
+                // Both forms are laid out to a width their caller fixed, so
+                // the copy wraps inside the card rather than setting its
+                // width — a state's longest sentence is not a layout.
+                let width = ui.available_width();
+                ui.set_width(width);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = OPERATIONAL_CARD_ICON_GAP;
+                    let (glyph, _) = ui.allocate_exact_size(
+                        egui::Vec2::splat(OPERATIONAL_CARD_ICON),
+                        egui::Sense::hover(),
+                    );
+                    operational_icon(self.status.state.category()).paint(
+                        ui.painter(),
+                        glyph,
+                        self.accent,
+                    );
+                    let copy = (width - OPERATIONAL_CARD_ICON - OPERATIONAL_CARD_ICON_GAP).max(1.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(copy, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(copy);
+                            ui.spacing_mut().item_spacing.y = 3.0;
+                            ui.label(
+                                egui::RichText::new(self.status.state.label())
+                                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+                                    .color(self.accent),
+                            );
+                            if let Some(detail) = self.status.detail.as_deref() {
+                                ui.label(
+                                    egui::RichText::new(detail)
+                                        .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                                        .color(t.color.text),
+                                );
+                            }
+                            ui.label(
+                                egui::RichText::new(self.status.state.message())
+                                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                                    .color(t.color.text_dim),
+                            );
+                            ui.label(
+                                egui::RichText::new(self.status.state.recovery())
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text_faint),
+                            );
+                        },
+                    );
+                });
+                if self.offer.is_some() || self.status.dismissible {
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if let Some(offer) = self.offer {
+                            actions.highlight = show_failure_site_control(ui, offer, self.marked);
+                        }
+                        if self.status.dismissible {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    actions.dismiss = crate::ui::widgets::Button::new("Dismiss")
+                                        .show(ui)
+                                        .on_hover_text("Dismiss this recorded runtime notice")
+                                        .clicked();
+                                },
+                            );
+                        }
+                    });
+                }
+            })
+            .response
+    }
+
+    /// Centre the card in the document well it has taken over.
+    ///
+    /// The card is measured at its final width first, so it lands on the
+    /// well's own centre. What this replaces was a guessed 172 pt height
+    /// halved against the well's left edge, which put the card somewhere
+    /// different for every state and in the middle for none of them.
+    fn show_centered(&self, ui: &mut Ui, actions: &mut OperationalCardActions) -> egui::Response {
+        let well = ui.available_rect_before_wrap();
+        let width =
+            (well.width() - 2.0 * OPERATIONAL_CARD_GUTTER).clamp(1.0, OPERATIONAL_CARD_MAX_WIDTH);
+
+        let mut probe = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("result-operational-state-measure")
+                .max_rect(egui::Rect::from_min_size(
+                    well.min,
+                    egui::vec2(width, well.height().max(OPERATIONAL_CARD_MAX_WIDTH)),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min))
+                .sizing_pass()
+                .invisible(),
+        );
+        // The measuring pass presses nothing; what it reports is thrown away.
+        self.show(&mut probe, &mut OperationalCardActions::default());
+        let height = probe.min_rect().height();
+
+        let top = (well.center().y - height * 0.5).max(well.top() + OPERATIONAL_CARD_GUTTER);
+        let mut card = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    egui::pos2((well.center().x - width * 0.5).round(), top.round()),
+                    egui::vec2(width, height),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        self.show(&mut card, actions)
+    }
 }
 
 /// What the failure on display named, when it named anything markable.
@@ -1193,5 +1336,105 @@ mod failure_site_control_tests {
             state.schematic.center_request.is_none(),
             "clearing a marking must not scroll the drawing"
         );
+    }
+}
+
+#[cfg(test)]
+mod presentation_tests {
+    use super::*;
+    use egui::Rect;
+
+    /// The well the Results workspace hands a blocking state on a desktop.
+    const WELL: egui::Vec2 = egui::vec2(1280.0, 720.0);
+
+    /// Lay one blocking card out headlessly and report the well it was given
+    /// alongside the rectangle it actually took.
+    fn centered_card(state: ResultOperationalState, well_size: egui::Vec2) -> (Rect, Rect) {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let status = ResultOperationalStatus::canonical(state, true);
+        let mut well = Rect::NOTHING;
+        let mut card = Rect::NOTHING;
+        // Fonts build on the first pass and sizing settles on the second, so
+        // the geometry asserted on is the third pass's.
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, well_size)),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                well = ui.available_rect_before_wrap();
+                card = OperationalCard {
+                    status: &status,
+                    accent: Tokens::get(ui.ctx()).color.info,
+                    offer: None,
+                    marked: false,
+                    floating: true,
+                }
+                .show_centered(ui, &mut OperationalCardActions::default())
+                .rect;
+            });
+        }
+        (well, card)
+    }
+
+    /// A state that owns the well is centred in it, on both axes. The offset
+    /// this replaced was computed from a guessed card height against the
+    /// well's left edge, so the card landed neither centred nor predictably.
+    #[test]
+    fn a_blocking_card_is_centred_in_the_well_it_owns() {
+        let (well, card) = centered_card(ResultOperationalState::NoDataset, WELL);
+
+        assert!(
+            (card.center().x - well.center().x).abs() <= 1.0,
+            "card centre {:?} is not the well centre {:?}",
+            card.center(),
+            well.center()
+        );
+        assert!(
+            (card.center().y - well.center().y).abs() <= 1.0,
+            "card centre {:?} is not the well centre {:?}",
+            card.center(),
+            well.center()
+        );
+    }
+
+    /// Every state gets the same bounded column. Width used to be whatever
+    /// the state's longest sentence happened to measure, so each state drew a
+    /// differently sized card.
+    #[test]
+    fn card_width_is_the_bounded_column_and_not_the_length_of_the_sentence() {
+        let (_, empty) = centered_card(ResultOperationalState::NoDataset, WELL);
+        let (_, partial) = centered_card(ResultOperationalState::Partial, WELL);
+        let (_, offline) = centered_card(ResultOperationalState::Offline, WELL);
+
+        assert_eq!(empty.width(), OPERATIONAL_CARD_MAX_WIDTH);
+        assert_eq!(partial.width(), empty.width());
+        assert_eq!(offline.width(), empty.width());
+    }
+
+    /// Below the bounded column the card keeps its gutter rather than
+    /// touching, or overflowing, the well's edges.
+    #[test]
+    fn a_narrow_well_keeps_the_card_inside_its_gutter() {
+        let narrow = egui::vec2(360.0, 540.0);
+        let (well, card) = centered_card(ResultOperationalState::NoDataset, narrow);
+
+        assert_eq!(card.width(), well.width() - 2.0 * OPERATIONAL_CARD_GUTTER);
+        assert!(
+            well.contains_rect(card),
+            "{card:?} escaped the well {well:?}"
+        );
+    }
+
+    /// A card taller than its well is pinned to the top of it, so the copy
+    /// that explains the state is the part that stays on screen.
+    #[test]
+    fn a_card_taller_than_its_well_starts_at_the_top() {
+        let short = egui::vec2(420.0, 90.0);
+        let (well, card) = centered_card(ResultOperationalState::NoDataset, short);
+
+        assert!(card.height() > well.height(), "the case under test");
+        assert_eq!(card.top(), (well.top() + OPERATIONAL_CARD_GUTTER).round());
     }
 }
