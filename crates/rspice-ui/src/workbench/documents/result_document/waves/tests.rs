@@ -9,6 +9,7 @@ use super::*;
 mod branches;
 mod degenerate;
 mod extent;
+mod honest_axes;
 mod interaction;
 
 #[test]

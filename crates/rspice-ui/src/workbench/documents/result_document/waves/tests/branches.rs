@@ -14,7 +14,7 @@ use super::*;
 /// Forward: y = 2x over x ∈ [0, 1]. Return: y = 4 − 2x over the same span. The
 /// two branches share the turnaround, and every closed form below is read off
 /// those two lines.
-fn hysteresis_run() -> AppState {
+pub(super) fn hysteresis_run() -> AppState {
     let mut state = AppState::default();
     state.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
