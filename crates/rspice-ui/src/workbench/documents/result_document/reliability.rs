@@ -16,8 +16,15 @@ use crate::workbench::AppState;
 use super::strip::{LegendChip, StripHeader};
 use super::{AnalysisPresentationKey, ReliabilitySelection, panel_note, stat_table, well_hint};
 
+/// The retained reliability evidence of the active analysis.
+///
+/// The validation goes through the workspace memo rather than the validator,
+/// exactly as SOA's does: the tab strip asks this on every frame to decide
+/// whether to offer the sheet, and the validator walks every retained sample
+/// of every waveform in the run.
 fn active_reliability(
     simulation: &SimulationState,
+    evidence_is_valid: bool,
 ) -> Option<(&AnalysisResult, &[ReliabilityDeviceEvidence])> {
     let analysis = simulation.active_analysis()?;
     let Some(AnalysisResultFamilyMetadata::Reliability { .. }) = analysis.family_metadata.as_ref()
@@ -30,11 +37,22 @@ fn active_reliability(
     };
     if !analysis.success
         || analysis.analysis_type != AnalysisType::Reliability
-        || analysis.validate_retained_evidence().is_err()
+        || !evidence_is_valid
     {
         return None;
     }
     Some((analysis, devices))
+}
+
+/// The memoized retained-evidence verdict for whichever analysis is active.
+fn active_evidence_is_valid(state: &AppState) -> bool {
+    let Some(run) = state.simulation.active_run() else {
+        return false;
+    };
+    state
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| super::analysis_evidence_is_valid(state, run.dataset_id, analysis))
 }
 
 fn nearest_checkpoint_index(
@@ -216,7 +234,7 @@ fn show_degradation_plot(
 }
 
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
-    active_reliability(&state.simulation).is_some()
+    active_reliability(&state.simulation, active_evidence_is_valid(state)).is_some()
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -224,7 +242,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Select a dataset with retained reliability evidence");
         return;
     };
-    let Some((analysis, devices)) = active_reliability(&state.simulation) else {
+    let Some((analysis, devices)) =
+        active_reliability(&state.simulation, active_evidence_is_valid(state))
+    else {
         well_hint(ui, "Select a validated reliability analysis");
         return;
     };
@@ -654,5 +674,82 @@ mod tests {
     fn lifetime_axis_never_invents_negative_age() {
         assert_eq!(lifetime_range(&[1.0, 5.0, 10.0]), Some((0.0, 10.5)));
         assert_eq!(lifetime_range(&[-1.0, 1.0]), None);
+    }
+
+    fn reliability_state() -> AppState {
+        let device = ReliabilityDeviceEvidence {
+            device_id: "M1".to_owned(),
+            stress: ReliabilityStressEvidence {
+                average_gate_stress_v: 1.0,
+                average_drain_stress_v: 1.0,
+                average_temperature_k: 350.0,
+                duration_s: 1.0,
+            },
+            checkpoints: vec![checkpoint(1.0), checkpoint(10.0)],
+        };
+        let analysis =
+            crate::state::AnalysisResult::new(1, AnalysisType::Reliability, "Reliability")
+                .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Reliability {
+                    years: vec![1.0, 10.0],
+                })
+                .with_result_payload(AnalysisResultPayload::Reliability {
+                    devices: vec![device],
+                });
+        let mut run = crate::state::SimulationRun::new(1);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state
+    }
+
+    /// The availability gate resolves the workspace memo, never the validator.
+    ///
+    /// The tab strip asks this on every frame to decide whether to offer the
+    /// sheet, and `validate_retained_evidence` walks every retained sample of
+    /// every waveform in the analysis. Its siblings route through the one
+    /// memo that owns the question; this one called the validator directly,
+    /// so a reader who was touching nothing paid for the walk every frame.
+    ///
+    /// A memo seeded with the opposite answer is the discriminator: a gate
+    /// that reads it must follow it, and a gate that walks the evidence
+    /// itself cannot see it at all.
+    #[test]
+    fn the_reliability_gate_reads_the_one_memo_that_owns_evidence_validity() {
+        let state = reliability_state();
+        assert!(active_payload_is_valid(&state));
+
+        let run = state.simulation.active_run().expect("retained run");
+        let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
+        state
+            .ui
+            .results
+            .retained_evidence_validity
+            .borrow_mut()
+            .insert((state.simulation.data_version, key), false);
+
+        assert!(
+            !active_payload_is_valid(&state),
+            "the gate walked the evidence itself instead of resolving the workspace memo"
+        );
+    }
+
+    /// And the memo it resolves is the one every other gate reads, so a new
+    /// dataset generation moves this verdict too.
+    #[test]
+    fn corrupting_the_evidence_closes_the_reliability_gate() {
+        let mut state = reliability_state();
+        assert!(active_payload_is_valid(&state));
+
+        let mut waveform =
+            crate::state::WaveformData::new("V(m1)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+        waveform.y = std::sync::Arc::new(vec![0.0]);
+        state.simulation.runs[0].analyses[0].waveforms = vec![waveform];
+        state.simulation.data_version = state.simulation.data_version.wrapping_add(1);
+
+        assert!(
+            !active_payload_is_valid(&state),
+            "the gate served a verdict from the previous dataset generation"
+        );
     }
 }
