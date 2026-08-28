@@ -227,6 +227,24 @@ impl XyceTestRunner {
         deck: &XyceDeck,
         purpose: XyceStaticTranPlanPurpose,
     ) -> Result<XyceStaticTranPlan, String> {
+        self.static_tran_plan_for_deck_with_optional_sealed_source(deck, purpose, None)
+    }
+
+    pub(super) fn static_tran_plan_for_deck_with_sealed_source_and_purpose(
+        &self,
+        deck: &XyceDeck,
+        source: &str,
+        purpose: XyceStaticTranPlanPurpose,
+    ) -> Result<XyceStaticTranPlan, String> {
+        self.static_tran_plan_for_deck_with_optional_sealed_source(deck, purpose, Some(source))
+    }
+
+    fn static_tran_plan_for_deck_with_optional_sealed_source(
+        &self,
+        deck: &XyceDeck,
+        purpose: XyceStaticTranPlanPurpose,
+        sealed_source: Option<&str>,
+    ) -> Result<XyceStaticTranPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
         let analytic_wrapper = matches!(
             purpose,
@@ -243,6 +261,7 @@ impl XyceTestRunner {
                 == XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily
             || purpose == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             || purpose == XyceStaticTranPlanPurpose::Bug1190SonProcessParameterRelationalFamily
+            || purpose == XyceStaticTranPlanPurpose::Bug372MultiplicityRelationalFamily
             || purpose == XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily;
         if analytic_wrapper && !requires_wrapper {
             return Err(
@@ -261,8 +280,11 @@ impl XyceTestRunner {
                     .to_string(),
             );
         }
-        let source =
-            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        let source = if let Some(source) = sealed_source {
+            source.to_string()
+        } else {
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?
+        };
 
         // Wrapper-only decks without a checked-in oracle must be classified
         // before expanding large continuation cards (for example, a massive
@@ -541,6 +563,7 @@ impl XyceTestRunner {
                     | XyceStaticTranPlanPurpose::Bug805RelationalFamily
                     | XyceStaticTranPlanPurpose::Bug1284TransientRestartRelationalFamily
                     | XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily
+                    | XyceStaticTranPlanPurpose::Bug372MultiplicityRelationalFamily
                     | XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             )
         {

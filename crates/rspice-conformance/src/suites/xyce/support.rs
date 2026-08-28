@@ -1145,6 +1145,21 @@ impl XyceTestRunner {
         self.static_tran_plan_for_deck_with_purpose(&deck, purpose)
     }
 
+    pub(super) fn static_tran_plan_for_sealed_source_with_purpose(
+        &self,
+        deck_path: &Path,
+        source: &str,
+        purpose: XyceStaticTranPlanPurpose,
+    ) -> Result<XyceStaticTranPlan, String> {
+        let relative_path = self.relative_key(deck_path);
+        let deck = XyceDeck {
+            path: deck_path.to_path_buf(),
+            section: Self::section_for_relative_path(&relative_path),
+            relative_path,
+        };
+        self.static_tran_plan_for_deck_with_sealed_source_and_purpose(&deck, source, purpose)
+    }
+
     pub(super) fn select_static_tran_comparison_mode(
         plan: &XyceStaticTranPlan,
         netlist: &Netlist,

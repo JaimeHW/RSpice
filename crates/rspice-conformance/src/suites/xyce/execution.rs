@@ -12,6 +12,7 @@ use super::contracts_bug307::Bug307Role;
 use super::contracts_bug308_son::Bug308SonRole;
 use super::contracts_bug325_son::Bug325SonRole;
 use super::contracts_bug352::Bug352Role;
+use super::contracts_bug372::Bug372Role;
 use super::contracts_bug689::Bug689Role;
 use super::contracts_bug706::Bug706Role;
 use super::contracts_bug805::Bug805Role;
@@ -995,6 +996,23 @@ impl XyceTestRunner {
         if let Some(role) = Bug325SonRole::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug325_son_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug372Role::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug372_oracle(deck, role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };

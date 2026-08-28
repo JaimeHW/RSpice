@@ -3830,6 +3830,8 @@ impl XyceTestRunner {
             && Self::netlist_is_native_bug1797_bsim3_envelope(netlist);
         let has_qualified_bug805_bjt = purpose == XyceStaticTranPlanPurpose::Bug805RelationalFamily
             && Self::netlist_is_native_bug805_bjt_envelope(netlist);
+        let has_qualified_bug372_mos =
+            purpose == XyceStaticTranPlanPurpose::Bug372MultiplicityRelationalFamily;
         let has_qualified_classic_mos_parameter_alias = purpose
             == XyceStaticTranPlanPurpose::ClassicMosParameterAliasRelationalFamily
             && Self::netlist_is_native_classic_mos_parameter_alias_envelope(netlist);
@@ -3858,6 +3860,7 @@ impl XyceTestRunner {
             || has_qualified_level9_bsim3
             || has_qualified_bug1797_bsim3
             || has_qualified_bug805_bjt
+            || has_qualified_bug372_mos
             || has_qualified_classic_mos_parameter_alias
             || has_qualified_bsim4_capacitor
             || has_qualified_bsim3_capacitor)
@@ -4096,6 +4099,7 @@ impl XyceTestRunner {
                         && Self::netlist_element_is_native_classic_mos_parameter_alias(
                             netlist, element,
                         ) => {}
+                ElementKind::Mosfet { .. } if has_qualified_bug372_mos => {}
                 ElementKind::Mosfet { .. } if has_qualified_bsim4_capacitor => {}
                 ElementKind::Mosfet { .. } if has_qualified_bsim3_capacitor => {}
                 ElementKind::Mosfet { .. }
@@ -4201,6 +4205,10 @@ impl XyceTestRunner {
                         ),
                         XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily => format!(
                             "Certification BUG 308 SON admits only the provenance-bound native LEVEL=9 BSIM3 stepped-TEMP comparator envelope; element '{}' is outside that contract",
+                            element.name
+                        ),
+                        XyceStaticTranPlanPurpose::Bug372MultiplicityRelationalFamily => format!(
+                            "Certification BUG 372 admits only the dedicated provenance-bound native MOS multiplicity envelopes; element '{}' is outside that contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::RelationalFamily

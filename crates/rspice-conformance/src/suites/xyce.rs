@@ -8829,6 +8829,10 @@ impl XyceStaticTranPlan {
                         true,
                         XyceStaticTranContract::WrapperStatic
                     ) | (
+                        XyceStaticTranPlanPurpose::Bug372MultiplicityRelationalFamily,
+                        true,
+                        XyceStaticTranContract::WrapperStatic
+                    ) | (
                         XyceStaticTranPlanPurpose::RelationalFamily
                             | XyceStaticTranPlanPurpose::AgeCapRelationalFamily
                             | XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
@@ -8843,6 +8847,10 @@ impl XyceStaticTranPlan {
                             | XyceStaticTranContract::PlainCsd
                     ) | (
                         XyceStaticTranPlanPurpose::Bug308SonSteppedTempOutputFramingRelationalFamily,
+                        false,
+                        XyceStaticTranContract::PlainStatic
+                    ) | (
+                        XyceStaticTranPlanPurpose::Bug372MultiplicityRelationalFamily,
                         false,
                         XyceStaticTranContract::PlainStatic
                     ) | (
@@ -9326,6 +9334,11 @@ enum XyceStaticTranPlanPurpose {
     /// to the native LEVEL=9 BSIM3 comparator envelope is confined to the
     /// dedicated provenance-bound output-framing contract.
     Bug308SonSteppedTempOutputFramingRelationalFamily,
+    /// Reproduce the exact Certification BUG 372 explicit-parallel GOOD
+    /// versus instance-multiplicity TEST wrappers. Admission is confined to
+    /// the dedicated four-owner provenance/topology contract; this purpose
+    /// does not widen the ordinary relational MOS envelope.
+    Bug372MultiplicityRelationalFamily,
     /// Compare the exact Certification BUG 1190 SON process-parameter alias
     /// owners with their direct model-parameter controls. Admission is scoped
     /// to the dedicated provenance-bound diode family contract.
@@ -12581,6 +12594,7 @@ mod contracts_bug308_son;
 mod contracts_bug325_son;
 mod contracts_bug352;
 mod contracts_bug354;
+mod contracts_bug372;
 mod contracts_bug38;
 mod contracts_bug39;
 mod contracts_bug402;

@@ -11802,3 +11802,48 @@ fn bug325_vbic_multiplicity_wrapper_owner_is_publicly_qualified() {
         runner.run_test(root.join("Netlists/Certification_Tests/BUG_325_SON/vbic_3T_et_cf_m2.cir"));
     assert!(control.upstream_excluded);
 }
+
+#[test]
+fn bug372_native_mos_multiplicity_wrapper_owners_are_publicly_qualified() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let family = "Netlists/Certification_Tests/BUG_372";
+    for (owner, contract) in [
+        ("invert2.cir", "bug372_level2_multiplicity_wrapper_owner"),
+        ("invert3.cir", "bug372_level3_multiplicity_wrapper_owner"),
+        (
+            "invert_bsim3.cir",
+            "bug372_bsim3_multiplicity_wrapper_owner",
+        ),
+        (
+            "invert_bsim4.cir",
+            "bug372_bsim4_multiplicity_wrapper_owner",
+        ),
+    ] {
+        let result = runner.run_test(root.join(family).join(owner));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "BUG372 {owner} failed its public qualification: {:?}",
+            result.error
+        );
+        assert_eq!(result.contract, contract);
+    }
+
+    for control in [
+        "invert1-sim.cir",
+        "invert2-sim.cir",
+        "invert3-sim.cir",
+        "invert6-sim.cir",
+        "invert_b3soi-sim.cir",
+        "invert_bsim3-sim.cir",
+        "invert_bsim4-sim.cir",
+    ] {
+        let result = runner.run_test(root.join(family).join(control));
+        assert!(
+            result.passed && result.upstream_excluded,
+            "BUG372 control {control} must remain an ordinary upstream exclusion: {:?}",
+            result.error
+        );
+        assert_eq!(result.contract, "upstream_excluded");
+    }
+}
