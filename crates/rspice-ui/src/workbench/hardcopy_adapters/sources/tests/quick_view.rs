@@ -882,4 +882,126 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
         3,
         "the printed page ignored the window the reader had pinned on the sheet"
     );
+
+    // The branch production actually uses. Every zoom the waveform strip
+    // records is keyed to the analysis, not to a global ordinal, so a test
+    // that pins only `Global(0)` covers a key the sheet never writes.
+    state.ui.results.reset_plot_view(ResultViewer::Waves, 0);
+    assert_eq!(point_count(&state), 5, "the global pin is cleared");
+    let analysis_key = {
+        let run = state.simulation.active_run().expect("active run");
+        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+            run.dataset_id,
+            &run.analyses[0],
+        )
+    };
+    state
+        .ui
+        .results
+        .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
+        .apply(&crate::ui::plot::ViewChange {
+            x: Some((0.4, 0.6)),
+            y: None,
+            reset: false,
+        });
+
+    assert_eq!(
+        point_count(&state),
+        3,
+        "the window the strip records against the analysis never reached the page"
+    );
+}
+
+/// One pane's ordinate does not bound a page that merges every pane.
+///
+/// A waveform strip splits by unit — volts on one pane, amps on the next —
+/// and a Ctrl+wheel zoom moves the ordinate of the pane under the pointer,
+/// alone. The quick-view page is not a strip: it merges every visible
+/// waveform of the analysis into one plot on one linear ordinate. Carrying
+/// pane 0's volt window onto it therefore bounds the amps trace in volts,
+/// and the page's own clipper drops it — the printed page lost a trace the
+/// sheet was drawing, which is worse than the whole-sweep page it replaced.
+#[test]
+fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
+    let analysis = AnalysisResult::new(6, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        WaveformData::new(
+            "V(out)",
+            vec![0.0, 0.5, 1.0],
+            vec![0.0, 2.5, 5.0],
+            "#00ffff",
+        ),
+        WaveformData::new(
+            "I(R1)",
+            vec![0.0, 0.5, 1.0],
+            vec![1.0e-3, 2.0e-3, 3.0e-3],
+            "#ff00ff",
+        ),
+    ]);
+    let mut state = quick_view_state(analysis, ResultViewer::Waves);
+    let analysis_key = {
+        let run = state.simulation.active_run().expect("active run");
+        crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+            run.dataset_id,
+            &run.analyses[0],
+        )
+    };
+
+    let printed = |state: &AppState, label: &str| {
+        let resolved = resolve_quick_view(state).expect("the retained transient resolves");
+        let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
+            panic!("expected a semantic waveform plot")
+        };
+        let trace = plot
+            .traces
+            .iter()
+            .find(|trace| trace.label == label)
+            .unwrap_or_else(|| panic!("{label} is a visible retained waveform"));
+        trace
+            .paths
+            .iter()
+            .flatten()
+            .map(|point| point.y_um)
+            .collect::<Vec<_>>()
+    };
+
+    let ordinates = printed(&state, "I(R1)");
+    assert!(!ordinates.is_empty(), "the amps trace is on the page");
+    let unbounded_spread = {
+        let mut sorted = ordinates.clone();
+        sorted.sort_unstable();
+        sorted[sorted.len() - 1] - sorted[0]
+    };
+    assert!(
+        unbounded_spread > 0,
+        "the amps trace is drawn with a spread of its own"
+    );
+
+    // A Ctrl+wheel zoom into the top of the volt pane. Nothing about the
+    // amps pane changed.
+    state
+        .ui
+        .results
+        .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
+        .apply(&crate::ui::plot::ViewChange {
+            x: None,
+            y: Some((4.0, 5.0)),
+            reset: false,
+        });
+
+    let ordinates = printed(&state, "I(R1)");
+    assert!(
+        !ordinates.is_empty(),
+        "a volt window on pane 0 clipped the amps trace off the printed page"
+    );
+    let mut sorted = ordinates;
+    sorted.sort_unstable();
+    assert_eq!(
+        sorted[sorted.len() - 1] - sorted[0],
+        unbounded_spread,
+        "a volt window on pane 0 flattened the amps trace on the printed page"
+    );
+    assert!(
+        !printed(&state, "V(out)").is_empty(),
+        "the volt trace is still on the page"
+    );
 }

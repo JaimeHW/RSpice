@@ -2216,6 +2216,9 @@ pub(crate) fn retained_dataset_digest(
 ///
 /// `None` means the reader pinned nothing and the page rules its own extents,
 /// which is what it has always done.
+///
+/// The abscissa always travels. The ordinate travels only from a sheet whose
+/// page is the same plot the reader was reading — see [`captured_ordinate`].
 pub(crate) fn captured_viewport(
     state: &AppState,
     analysis: AnalysisPresentationKey,
@@ -2230,7 +2233,31 @@ pub(crate) fn captured_viewport(
     } else {
         state.ui.results.plot_view(viewer, 0)
     };
-    view.is_zoomed().then_some((view.x, view.y))
+    let y = captured_ordinate(viewer, view);
+    (view.x.is_some() || y.is_some()).then_some((view.x, y))
+}
+
+/// The ordinate half of a capture, which not every sheet can hand over.
+///
+/// The waveform strip is a stack of panes, split by unit, and its Y zoom is
+/// recorded per pane for that reason: one factor across volts and amps would
+/// mean nothing. Its printed page is not that stack — `quick_waveform_plot`
+/// merges every visible waveform of the analysis into one plot on one linear
+/// ordinate — so pane 0's window arrives stated in pane 0's unit and bounds
+/// traces drawn in another. On a volts-and-amps strip the page's own clipper
+/// then dropped the amps trace outright.
+///
+/// Resolving how many panes the strip actually has would mean re-deriving
+/// `waves::build_models`' unit grouping here, which is the one rule that
+/// decides it; a second copy of it would drift. The abscissa is shared across
+/// every pane of a strip — `set_shared_x_view` writes it to all of them — so
+/// it carries, and the page rules its own ordinate from the data, exactly as
+/// it did before any window was carried at all.
+fn captured_ordinate(viewer: ResultViewer, view: PlotView) -> Option<(f64, f64)> {
+    match viewer {
+        ResultViewer::Waves => None,
+        _ => view.y,
+    }
 }
 
 /// The same question for an analysis already in hand, resolved to its key.
@@ -3547,7 +3574,10 @@ impl ResultsState {
         }
     }
 
-    pub(super) fn analysis_plot_view_pane_mut(
+    /// Crate-visible because the pinned window a waveform pane holds is read
+    /// back by the Export/Print adapters, which have to be able to state the
+    /// key production actually writes.
+    pub(crate) fn analysis_plot_view_pane_mut(
         &mut self,
         viewer: ResultViewer,
         analysis: AnalysisPresentationKey,
