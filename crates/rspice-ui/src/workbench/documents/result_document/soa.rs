@@ -166,6 +166,13 @@ fn build_soa_plan(
 
 /// The scanned facts for the active SOA analysis, rebuilding them only when
 /// the dataset generation or the selected analysis changes.
+///
+/// The build reads whichever analysis is active, so a key naming a different
+/// one is refused rather than stamped onto the active analysis' facts: a memo
+/// entry whose key and content disagree is a wrong number waiting for the
+/// caller that reads it. The right panel asks with the selection's key before
+/// it has checked the selection against the active analysis, and that is
+/// exactly the case this closes.
 fn soa_plan(
     state: &mut AppState,
     analysis_key: AnalysisPresentationKey,
@@ -178,7 +185,11 @@ fn soa_plan(
     {
         return Some(std::sync::Arc::clone(plan));
     }
+    let dataset_id = state.simulation.active_run()?.dataset_id;
     let (analysis, evaluations, _) = active_soa(&state.simulation, evidence_is_valid)?;
+    if AnalysisPresentationKey::new(dataset_id, analysis) != analysis_key {
+        return None;
+    }
     let built = std::sync::Arc::new(build_soa_plan(version, analysis_key, analysis, evaluations));
     state.ui.results.plans.soa = Some(std::sync::Arc::clone(&built));
     Some(built)
@@ -1209,6 +1220,50 @@ mod tests {
             after.facts(0).expect("rule 0").stress_waveform.is_none(),
             "the replaced history no longer reproduces the rule, so no trace is offered"
         );
+    }
+
+    /// The plan is stamped with an analysis key, and the build reads whichever
+    /// analysis is active. If the two are allowed to disagree, the memo holds
+    /// one analysis' stress facts under another analysis' name — today nothing
+    /// reads that entry, which is exactly the kind of latency a refactor turns
+    /// into a wrong number on screen.
+    #[test]
+    fn a_plan_is_never_keyed_to_an_analysis_it_did_not_read() {
+        let mut state = soa_state(2, 32, 3.0);
+        let mut donor = soa_state(1, 8, 3.0);
+        let second = donor.simulation.runs[0].analyses.remove(0);
+        state.simulation.runs[0].add_analysis(second);
+        assert_eq!(
+            state.simulation.active_analysis_idx,
+            Some(0),
+            "the first analysis stays active"
+        );
+
+        let inactive = {
+            let run = state.simulation.active_run().expect("retained run");
+            AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1])
+        };
+        assert_ne!(
+            inactive,
+            active_key(&state),
+            "the fixture retains two distinguishable analyses"
+        );
+
+        let plan = soa_plan(&mut state, inactive, true);
+        assert!(
+            plan.is_none(),
+            "a plan was served for an analysis whose evidence the build never read"
+        );
+        assert!(
+            state.ui.results.plans.soa.is_none(),
+            "the memo kept an entry stamped with an analysis it did not read"
+        );
+
+        // A key check, not a shutdown: the analysis that is active still gets
+        // its plan, and it is stamped with its own key.
+        let active = active_key(&state);
+        let served = soa_plan(&mut state, active, true).expect("a validated SOA plan");
+        assert_eq!(served.analysis, active);
     }
 
     /// The table lays out what the viewport can show, not what the dataset
