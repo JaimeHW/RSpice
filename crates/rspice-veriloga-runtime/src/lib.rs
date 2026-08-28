@@ -6523,23 +6523,21 @@ mod fixed_lane_tests {
 
     #[test]
     fn generated_ddt_coefficients_accept_fractional_derivative_history() {
-        let generalized =
-            GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
-                1.0 / 0.51,
-                1.0 / 0.51,
-                0.0,
-                false,
-                0.49 / 0.51,
-                0.25,
-            );
+        let generalized = GeneratedDdtCoefficients::from_companion_values_with_derivative_scale(
+            1.0 / 0.51,
+            1.0 / 0.51,
+            0.0,
+            false,
+            0.49 / 0.51,
+            0.25,
+        );
         assert_eq!(generalized.derivative_scale, (1.0 / 0.51) / 0.25);
         assert_eq!(generalized.previous_value_scale, (1.0 / 0.51) / 0.25);
         assert_eq!(generalized.older_value_scale, 0.0);
         assert_eq!(generalized.previous_derivative_scale, 0.49 / 0.51);
 
-        let canonical = GeneratedDdtCoefficients::from_companion_values(
-            2.0, 2.0, 0.0, false, true, 0.25,
-        );
+        let canonical =
+            GeneratedDdtCoefficients::from_companion_values(2.0, 2.0, 0.0, false, true, 0.25);
         assert_eq!(canonical.previous_derivative_scale, 1.0);
     }
 
