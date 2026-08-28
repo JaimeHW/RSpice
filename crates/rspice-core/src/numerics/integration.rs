@@ -29,4 +29,8 @@ pub(crate) use breakpoint::XYCE_BREAKPOINT_TOLERANCE;
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};
 pub use companion::{CompanionCoefficients, IntegrationMethod};
 pub use lte::{LteEstimator, TransientLteReference};
-pub use timestep::{TimestepController, TrapGearController};
+pub use timestep::{
+    TimestepController, TransientErrorControl, TrapGearController,
+    XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT, XYCE_DEFAULT_NLMAX, XYCE_DEFAULT_NLMIN,
+    XyceBreakpointSpanCeiling, xyce_iteration_step_accepts, xyce_iteration_step_scale,
+};

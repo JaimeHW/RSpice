@@ -551,6 +551,17 @@ impl LteEstimator {
         }
     }
 
+    /// Apply Xyce's policy for a rejected OneStep/Gear12 attempt. LTE control
+    /// restores coefficient history; nonlinear-iteration control deliberately
+    /// retains the attempted update, matching `ERROPTION=1`'s no-restore path.
+    pub(crate) fn reject_xyce_attempt(&mut self, restore_history: bool) {
+        if restore_history {
+            self.rollback_xyce_attempt();
+        } else {
+            self.xyce_attempt_checkpoint = None;
+        }
+    }
+
     pub(crate) fn requires_signal_reference_history(&self) -> bool {
         matches!(
             self.reference,
@@ -1538,6 +1549,40 @@ mod lte_estimator_tests {
                 estimator.xyce_attempt_prev_prev_dt,
             ),
             (3.0, 3.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn xyce_iteration_control_rejection_retains_attempted_history() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        estimator.xyce_attempt_dt = 3.0;
+        estimator.xyce_attempt_prev_dt = 2.0;
+        estimator.xyce_attempt_prev_prev_dt = 1.0;
+
+        estimator.begin_xyce_attempt(4.0, 2);
+        estimator.reject_xyce_attempt(false);
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (4.0, 3.0, 2.0)
+        );
+
+        estimator.begin_xyce_attempt(5.0, 2);
+        assert_eq!(
+            (
+                estimator.xyce_attempt_dt,
+                estimator.xyce_attempt_prev_dt,
+                estimator.xyce_attempt_prev_prev_dt,
+            ),
+            (5.0, 4.0, 3.0),
+            "the next attempt must advance from the rejected mode-1 attempt"
         );
     }
 }

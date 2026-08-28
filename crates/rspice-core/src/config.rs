@@ -19,7 +19,10 @@
 //! `engine::config_resolver`, where the rest of elaboration lives.
 
 use crate::Value;
-use crate::numerics::integration::TransientLteReference;
+use crate::numerics::integration::{
+    TransientErrorControl, TransientLteReference, XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT,
+    XYCE_DEFAULT_NLMAX, XYCE_DEFAULT_NLMIN,
+};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use thiserror::Error;
 
@@ -50,6 +53,26 @@ pub enum SimulationConfigError {
         field: &'static str,
         /// Rejected value.
         value: usize,
+    },
+    /// Xyce's nonlinear-iteration thresholds were reversed.
+    #[error(
+        "transient_timeint_nlmin ({nlmin}) must be less than or equal to transient_timeint_nlmax ({nlmax})"
+    )]
+    InvalidTransientIterationRange {
+        /// Iteration count at or below which Xyce doubles the next step.
+        nlmin: usize,
+        /// Iteration count above which Xyce shrinks or reverses the step.
+        nlmax: usize,
+    },
+    /// Xyce's transient integration-order bounds were reversed or unsupported.
+    #[error(
+        "transient_timeint_min_order ({min_order}) and transient_timeint_max_order ({max_order}) must each be 1 or 2, with MINORD <= MAXORD"
+    )]
+    InvalidTransientOrderRange {
+        /// Minimum integration order.
+        min_order: u8,
+        /// Maximum integration order.
+        max_order: u8,
     },
     /// The configured transient timestep bounds were reversed.
     #[error(
@@ -273,6 +296,21 @@ pub struct SimulationConfig {
     /// Explicit Xyce `TIMEINT USEDEVICEMAX` policy. `None` uses Xyce 7.10's
     /// enabled default in Xyce mode and leaves other dialects unchanged.
     pub transient_use_device_max_timestep: Option<bool>,
+    /// Xyce `TIMEINT ERROPTION` acceptance and resize policy.
+    pub transient_error_control: TransientErrorControl,
+    /// Explicit Xyce `MINTIMESTEPSBP`. `Some(0)` explicitly disables the
+    /// ceiling, while `None` lets `ERROPTION=1` activate its default of ten.
+    pub transient_min_steps_between_breakpoints: Option<usize>,
+    /// Xyce `TIMEINT NLMIN` threshold.
+    pub transient_timeint_nlmin: usize,
+    /// Xyce `TIMEINT NLMAX` threshold.
+    pub transient_timeint_nlmax: usize,
+    /// Xyce `TIMEINT MINORD`, restricted to OneStep/Gear12 orders 1 and 2.
+    pub transient_timeint_min_order: u8,
+    /// Xyce `TIMEINT MAXORD`, restricted to OneStep/Gear12 orders 1 and 2.
+    pub transient_timeint_max_order: u8,
+    /// Xyce `TIMEINT TIMESTEPSREVERSAL` policy.
+    pub transient_timesteps_reversal: bool,
     /// Explicit transient nonlinear-update relative tolerance. `None` uses
     /// Xyce's independent `NONLIN-TRAN RELTOL=1e-2` default in Xyce mode.
     /// Native/ngspice transient convergence retains its existing voltage
@@ -419,6 +457,44 @@ impl SimulationConfig {
             "transient_timeint_max_timestep",
             self.transient_timeint_max_timestep,
         )?;
+        if self
+            .transient_min_steps_between_breakpoints
+            .is_some_and(|value| value > i32::MAX as usize)
+        {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "transient_min_steps_between_breakpoints",
+                value: self
+                    .transient_min_steps_between_breakpoints
+                    .unwrap_or_default() as Value,
+                requirement: "a non-negative signed 32-bit integer",
+            });
+        }
+        if self.transient_timeint_nlmin > i32::MAX as usize
+            || self.transient_timeint_nlmax > i32::MAX as usize
+        {
+            return Err(SimulationConfigError::InvalidValue {
+                field: "transient_timeint_nlmin/nlmax",
+                value: self
+                    .transient_timeint_nlmin
+                    .max(self.transient_timeint_nlmax) as Value,
+                requirement: "non-negative signed 32-bit integers",
+            });
+        }
+        if self.transient_timeint_nlmin > self.transient_timeint_nlmax {
+            return Err(SimulationConfigError::InvalidTransientIterationRange {
+                nlmin: self.transient_timeint_nlmin,
+                nlmax: self.transient_timeint_nlmax,
+            });
+        }
+        if !(1..=2).contains(&self.transient_timeint_min_order)
+            || !(1..=2).contains(&self.transient_timeint_max_order)
+            || self.transient_timeint_min_order > self.transient_timeint_max_order
+        {
+            return Err(SimulationConfigError::InvalidTransientOrderRange {
+                min_order: self.transient_timeint_min_order,
+                max_order: self.transient_timeint_max_order,
+            });
+        }
         validate_optional_positive(
             "transient_nonlinear_reltol",
             self.transient_nonlinear_reltol,
@@ -491,6 +567,23 @@ impl SimulationConfig {
         self.spice_dialect = dialect;
         self.apply_spice_dialect();
         self
+    }
+
+    /// Effective Xyce minimum-step count for each breakpoint-to-breakpoint
+    /// span. `ERROPTION=1` makes the metadata default of ten active only when
+    /// the deck omitted `MINTIMESTEPSBP`; an authored zero disables it.
+    pub fn effective_transient_min_steps_between_breakpoints(&self) -> Option<usize> {
+        if self.spice_dialect != SpiceDialect::Xyce {
+            return None;
+        }
+        match self.transient_min_steps_between_breakpoints {
+            Some(0) => None,
+            Some(steps) => Some(steps),
+            None if self.transient_error_control == TransientErrorControl::NonlinearIterations => {
+                Some(XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT)
+            }
+            None => None,
+        }
     }
 
     /// Reset dialect-controlled device selections to follow the current dialect.
@@ -758,6 +851,13 @@ impl Default for SimulationConfig {
             transient_lte_abstol: None,
             transient_timeint_max_timestep: None,
             transient_use_device_max_timestep: None,
+            transient_error_control: TransientErrorControl::LocalTruncation,
+            transient_min_steps_between_breakpoints: None,
+            transient_timeint_nlmin: XYCE_DEFAULT_NLMIN,
+            transient_timeint_nlmax: XYCE_DEFAULT_NLMAX,
+            transient_timeint_min_order: 1,
+            transient_timeint_max_order: 2,
+            transient_timesteps_reversal: false,
             transient_nonlinear_reltol: None,
             transient_nonlinear_abstol: None,
             transient_nonlinear_deltaxtol: None,
@@ -911,6 +1011,55 @@ impl NonlinearContinuationMode {
             34 => Some(Self::SimultaneousSourceStep),
             35 => Some(Self::SequentialSourceStep),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod timeint_config_tests {
+    use super::*;
+
+    #[test]
+    fn timeint_integer_domains_and_order_bounds_validate_fail_closed() {
+        let valid = SimulationConfig {
+            transient_min_steps_between_breakpoints: Some(0),
+            transient_timeint_nlmin: i32::MAX as usize,
+            transient_timeint_nlmax: i32::MAX as usize,
+            transient_timeint_min_order: 2,
+            transient_timeint_max_order: 2,
+            ..Default::default()
+        };
+        valid
+            .validate()
+            .expect("zero disable and i32::MAX are supported");
+
+        for invalid in [
+            SimulationConfig {
+                transient_min_steps_between_breakpoints: Some(i32::MAX as usize + 1),
+                ..Default::default()
+            },
+            SimulationConfig {
+                transient_timeint_nlmax: i32::MAX as usize + 1,
+                ..Default::default()
+            },
+            SimulationConfig {
+                transient_timeint_nlmin: 9,
+                transient_timeint_nlmax: 8,
+                ..Default::default()
+            },
+            SimulationConfig {
+                transient_timeint_min_order: 0,
+                ..Default::default()
+            },
+            SimulationConfig {
+                transient_timeint_min_order: 2,
+                transient_timeint_max_order: 1,
+                ..Default::default()
+            },
+        ] {
+            invalid
+                .validate()
+                .expect_err("invalid TIMEINT config must fail closed");
         }
     }
 }

@@ -3,7 +3,7 @@
 use crate::config::DampingStrategy;
 use crate::netlist::lexer::Token;
 use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
-use crate::numerics::integration::TransientLteReference;
+use crate::numerics::integration::{TransientErrorControl, TransientLteReference};
 use crate::solver::RealSolverBackend;
 
 use super::*;
@@ -1780,6 +1780,92 @@ pub(super) fn parse_options_command(
                     line_num,
                 )?);
             }
+            (Some("TIMEINT"), "ERROPTION") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_error_control.is_none() {
+                    options.timeint_error_control =
+                        Some(parse_transient_error_control_option(value, line_num)?);
+                } else {
+                    warn_duplicate_packaged_option("TIMEINT.ERROPTION", line_num, diagnostics);
+                }
+            }
+            (Some("TIMEINT"), "MINTIMESTEPSBP") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_min_steps_between_breakpoints.is_none() {
+                    options.timeint_min_steps_between_breakpoints =
+                        Some(parse_exact_xyce_nonnegative_integer_option(
+                            "TIMEINT.MINTIMESTEPSBP",
+                            value,
+                            line_num,
+                        )?);
+                } else {
+                    warn_duplicate_packaged_option("TIMEINT.MINTIMESTEPSBP", line_num, diagnostics);
+                }
+            }
+            (Some("TIMEINT"), "NLMIN") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_nlmin.is_none() {
+                    options.timeint_nlmin = Some(parse_exact_xyce_nonnegative_integer_option(
+                        "TIMEINT.NLMIN",
+                        value,
+                        line_num,
+                    )?);
+                } else {
+                    warn_duplicate_packaged_option("TIMEINT.NLMIN", line_num, diagnostics);
+                }
+            }
+            (Some("TIMEINT"), "NLMAX") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_nlmax.is_none() {
+                    options.timeint_nlmax = Some(parse_exact_xyce_nonnegative_integer_option(
+                        "TIMEINT.NLMAX",
+                        value,
+                        line_num,
+                    )?);
+                } else {
+                    warn_duplicate_packaged_option("TIMEINT.NLMAX", line_num, diagnostics);
+                }
+            }
+            (Some("TIMEINT"), "TIMESTEPSREVERSAL") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_timesteps_reversal.is_none() {
+                    options.timeint_timesteps_reversal = Some(parse_binary_integer_option(
+                        "TIMESTEPSREVERSAL",
+                        value,
+                        line_num,
+                    )?);
+                } else {
+                    warn_duplicate_packaged_option(
+                        "TIMEINT.TIMESTEPSREVERSAL",
+                        line_num,
+                        diagnostics,
+                    );
+                }
+            }
+            (Some("TIMEINT"), "MINORD") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_min_order.is_none() {
+                    options.timeint_min_order = Some(parse_xyce_transient_order_option(
+                        "TIMEINT.MINORD",
+                        value,
+                        line_num,
+                    )?);
+                } else {
+                    warn_duplicate_packaged_option("TIMEINT.MINORD", line_num, diagnostics);
+                }
+            }
+            (Some("TIMEINT"), "MAXORD") => {
+                let value = expect_value(stream, line_num, params)?;
+                if options.timeint_max_order.is_none() {
+                    options.timeint_max_order = Some(parse_xyce_transient_order_option(
+                        "TIMEINT.MAXORD",
+                        value,
+                        line_num,
+                    )?);
+                } else {
+                    warn_duplicate_packaged_option("TIMEINT.MAXORD", line_num, diagnostics);
+                }
+            }
             (Some("TIMEINT"), "BREAKPOINTS") => {
                 let values = parse_time_point_vector_option(
                     stream,
@@ -2144,6 +2230,20 @@ pub(super) fn parse_options_command(
     }
 
     Ok(())
+}
+
+fn warn_duplicate_packaged_option(
+    name: &str,
+    line_num: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) {
+    let message = format!("duplicate .OPTIONS {name} ignored; using the first value");
+    log::warn!("line {line_num}: {message}");
+    diagnostics.push(ParseDiagnostic::warning(
+        line_num,
+        "duplicate-option",
+        message,
+    ));
 }
 
 fn ignore_unknown_option(
@@ -2984,6 +3084,68 @@ fn parse_new_breakpoint_stepping_option(value: Value, line_num: usize) -> Result
             message: format!("NEWBPSTEPPING must be the integer 0 or 1, found {value}"),
         })
     }
+}
+
+fn parse_binary_integer_option(
+    name: &str,
+    value: Value,
+    line_num: usize,
+) -> Result<bool, ParseError> {
+    if value == 0.0 {
+        Ok(false)
+    } else if value == 1.0 {
+        Ok(true)
+    } else {
+        Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name} must be the integer 0 or 1, found {value}"),
+        })
+    }
+}
+
+fn parse_exact_xyce_nonnegative_integer_option(
+    name: &str,
+    value: Value,
+    line_num: usize,
+) -> Result<usize, ParseError> {
+    if !value.is_finite() || value < 0.0 || value != value.round() || value > i32::MAX as Value {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name} must be a non-negative signed 32-bit integer, found {value}"),
+        });
+    }
+    Ok(value as usize)
+}
+
+fn parse_xyce_transient_order_option(
+    name: &str,
+    value: Value,
+    line_num: usize,
+) -> Result<u8, ParseError> {
+    if value == 1.0 || value == 2.0 {
+        Ok(value as u8)
+    } else {
+        Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name} must be the integer 1 or 2, found {value}"),
+        })
+    }
+}
+
+fn parse_transient_error_control_option(
+    value: Value,
+    line_num: usize,
+) -> Result<TransientErrorControl, ParseError> {
+    if !value.is_finite() || value != value.round() || !(0.0..=1.0).contains(&value) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("ERROPTION must be the integer 0 or 1, found {value}"),
+        });
+    }
+    TransientErrorControl::from_xyce_selector(value as usize).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!("ERROPTION must be the integer 0 or 1, found {value}"),
+    })
 }
 
 fn parse_fft_command(
@@ -5889,6 +6051,7 @@ mod tests {
     use crate::{
         Netlist,
         netlist::{AnalysisCommand, DcSweepMode, ParseError, PrintDelimiter, SaveSignal},
+        numerics::integration::TransientErrorControl,
     };
 
     #[test]
@@ -6810,6 +6973,121 @@ mod tests {
                 .iter()
                 .all(|diagnostic| diagnostic.code != "unknown-option")
         );
+    }
+
+    #[test]
+    fn xyce_timeint_error_control_and_companions_are_typed_first_value_wins() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint erroption=1 mintimestepsbp=12 nlmin=2 nlmax=9 timestepsreversal=1 minord=2 maxord=2\n\
+             .options timeint erroption=7 mintimestepsbp=-20 nlmin=-4 nlmax=1.5 timestepsreversal=8 minord=0 maxord=3",
+        ))
+        .expect("Xyce TIMEINT iteration control parses");
+
+        assert_eq!(
+            netlist.options.timeint_error_control,
+            Some(TransientErrorControl::NonlinearIterations)
+        );
+        assert_eq!(
+            netlist.options.timeint_min_steps_between_breakpoints,
+            Some(12)
+        );
+        assert_eq!(netlist.options.timeint_nlmin, Some(2));
+        assert_eq!(netlist.options.timeint_nlmax, Some(9));
+        assert_eq!(netlist.options.timeint_timesteps_reversal, Some(true));
+        assert_eq!(netlist.options.timeint_min_order, Some(2));
+        assert_eq!(netlist.options.timeint_max_order, Some(2));
+        assert_eq!(
+            netlist
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "duplicate-option")
+                .count(),
+            7
+        );
+
+        let zero_then_one = Netlist::parse(&deck_with_options(
+            ".options timeint erroption=0\n.options timeint erroption=1",
+        ))
+        .expect("reverse duplicate order parses");
+        assert_eq!(
+            zero_then_one.options.timeint_error_control,
+            Some(TransientErrorControl::LocalTruncation),
+            "zero followed by one must retain the first packaged value"
+        );
+    }
+
+    #[test]
+    fn xyce_timeint_iteration_control_rejects_invalid_integer_domains_and_ranges() {
+        for options in [
+            ".options timeint erroption=2",
+            ".options timeint erroption=.5",
+            ".options timeint mintimestepsbp=1.5",
+            ".options timeint mintimestepsbp=1.0000000001",
+            ".options timeint mintimestepsbp=2147483648",
+            ".options timeint nlmin=-1",
+            ".options timeint nlmax=2147483648",
+            ".options timeint nlmax=2",
+            ".options timeint timestepsreversal=2",
+            ".options timeint minord=0",
+            ".options timeint maxord=3",
+            ".options timeint minord=2 maxord=1",
+        ] {
+            Netlist::parse(&deck_with_options(options))
+                .expect_err("invalid Xyce TIMEINT integer option must fail closed");
+        }
+
+        let valid = Netlist::parse(&deck_with_options(".options timeint nlmin=9 nlmax=9"))
+            .expect("equal iteration thresholds are valid");
+        assert_eq!(valid.options.timeint_nlmin, Some(9));
+        assert_eq!(valid.options.timeint_nlmax, Some(9));
+
+        let zero = Netlist::parse(&deck_with_options(
+            ".options timeint erroption=1 mintimestepsbp=0",
+        ))
+        .expect("explicit zero disables MINTIMESTEPSBP");
+        assert_eq!(zero.options.timeint_min_steps_between_breakpoints, Some(0));
+
+        let split = Netlist::parse(&deck_with_options(
+            ".options timeint nlmin=9 minord=2\n.options timeint nlmax=9 maxord=2",
+        ))
+        .expect("valid aggregate split across TIMEINT cards is finalized once");
+        assert_eq!(split.options.timeint_nlmin, Some(9));
+        assert_eq!(split.options.timeint_nlmax, Some(9));
+    }
+
+    #[test]
+    fn xyce_timeint_iteration_control_ast_merge_preserves_first_package_values() {
+        let mut merged = crate::netlist::SimulationOptions {
+            timeint_error_control: Some(TransientErrorControl::NonlinearIterations),
+            timeint_min_steps_between_breakpoints: Some(12),
+            timeint_nlmin: Some(2),
+            timeint_nlmax: Some(9),
+            timeint_timesteps_reversal: Some(true),
+            timeint_min_order: Some(2),
+            timeint_max_order: Some(2),
+            ..crate::netlist::SimulationOptions::default()
+        };
+        merged.merge(&crate::netlist::SimulationOptions {
+            timeint_error_control: Some(TransientErrorControl::LocalTruncation),
+            timeint_min_steps_between_breakpoints: Some(20),
+            timeint_nlmin: Some(4),
+            timeint_nlmax: Some(10),
+            timeint_timesteps_reversal: Some(false),
+            timeint_min_order: Some(1),
+            timeint_max_order: Some(1),
+            ..crate::netlist::SimulationOptions::default()
+        });
+
+        assert_eq!(
+            merged.timeint_error_control,
+            Some(TransientErrorControl::NonlinearIterations)
+        );
+        assert_eq!(merged.timeint_min_steps_between_breakpoints, Some(12));
+        assert_eq!(merged.timeint_nlmin, Some(2));
+        assert_eq!(merged.timeint_nlmax, Some(9));
+        assert_eq!(merged.timeint_timesteps_reversal, Some(true));
+        assert_eq!(merged.timeint_min_order, Some(2));
+        assert_eq!(merged.timeint_max_order, Some(2));
     }
 
     #[test]

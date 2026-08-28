@@ -709,6 +709,41 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     );
     hash_field(
         &mut hasher,
+        "transient_error_control",
+        config.transient_error_control,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_min_steps_between_breakpoints",
+        config.transient_min_steps_between_breakpoints,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_timeint_nlmin",
+        config.transient_timeint_nlmin,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_timeint_nlmax",
+        config.transient_timeint_nlmax,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_timeint_min_order",
+        config.transient_timeint_min_order,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_timeint_max_order",
+        config.transient_timeint_max_order,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_timesteps_reversal",
+        config.transient_timesteps_reversal,
+    );
+    hash_field(
+        &mut hasher,
         "transient_nonlinear_reltol",
         config.transient_nonlinear_reltol.map(f64::to_bits),
     );
@@ -4373,6 +4408,37 @@ mod tests {
         checkpoint
             .validate_for_with_config(&netlist, &changed_model)
             .expect_err("resolved model-routing mismatch must reject state");
+    }
+
+    #[test]
+    fn timeint_iteration_control_and_orders_are_identity_bound_and_span_resume_is_allowed() {
+        let netlist = Netlist::parse("TIMEINT checkpoint\nr1 1 0 1k\n.end\n").unwrap();
+        let base =
+            SimulationConfig::default().with_spice_dialect(crate::engine::SpiceDialect::Xyce);
+        let mut iteration_control = base.clone();
+        iteration_control.transient_error_control =
+            crate::numerics::integration::TransientErrorControl::NonlinearIterations;
+
+        assert_ne!(
+            simulation_checkpoint_identity(&base),
+            simulation_checkpoint_identity(&iteration_control),
+            "ERROPTION must participate in checkpoint configuration identity"
+        );
+        let mut fixed_order = iteration_control.clone();
+        fixed_order.transient_timeint_max_order = 1;
+        assert_ne!(
+            simulation_checkpoint_identity(&iteration_control),
+            simulation_checkpoint_identity(&fixed_order),
+            "MINORD/MAXORD must participate in checkpoint identity"
+        );
+
+        let mut checkpoint = sample();
+        checkpoint.netlist_fingerprint = netlist_fingerprint(&netlist);
+        checkpoint.netlist_identity = netlist_checkpoint_identity(&netlist);
+        checkpoint.simulation_identity = Some(simulation_checkpoint_identity(&iteration_control));
+        checkpoint
+            .validate_for_with_config(&netlist, &iteration_control)
+            .expect("resume reanchors the active span from checkpoint time");
     }
 
     #[test]

@@ -41,6 +41,7 @@ use super::{
 };
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::numerics::integration::{XYCE_DEFAULT_NLMAX, XYCE_DEFAULT_NLMIN};
 use std::collections::{HashMap, HashSet};
 
 mod chebyshev_synthesis;
@@ -732,6 +733,7 @@ fn parse_netlist_impl(
         )?;
     }
     normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
+    validate_timeint_option_aggregate(&state.options, lines.len())?;
     resolve_top_level_deferred_source_specs_with_abort(&mut state.elements, &state.params, abort)?;
     resolve_top_level_deferred_chebyshev_with_abort(
         &mut state.elements,
@@ -750,6 +752,33 @@ fn parse_netlist_impl(
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
     )
+}
+
+fn validate_timeint_option_aggregate(
+    options: &SimulationOptions,
+    final_line: usize,
+) -> Result<(), ParseError> {
+    let nlmin = options.timeint_nlmin.unwrap_or(XYCE_DEFAULT_NLMIN);
+    let nlmax = options.timeint_nlmax.unwrap_or(XYCE_DEFAULT_NLMAX);
+    if nlmin > nlmax {
+        return Err(ParseError::Syntax {
+            line: final_line,
+            message: format!(
+                "TIMEINT.NLMIN ({nlmin}) must be less than or equal to TIMEINT.NLMAX ({nlmax})"
+            ),
+        });
+    }
+    let min_order = options.timeint_min_order.unwrap_or(1);
+    let max_order = options.timeint_max_order.unwrap_or(2);
+    if min_order > max_order {
+        return Err(ParseError::Syntax {
+            line: final_line,
+            message: format!(
+                "TIMEINT.MINORD ({min_order}) must be less than or equal to TIMEINT.MAXORD ({max_order})"
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// Xyce treats a new physical card that starts with horizontal whitespace as

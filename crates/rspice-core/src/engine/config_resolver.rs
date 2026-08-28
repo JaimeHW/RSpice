@@ -8,8 +8,9 @@
 use super::{ConvergenceConfig, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use crate::Value;
 use crate::netlist::SimulationOptions as NetlistSimulationOptions;
-use crate::numerics::integration::IntegrationMethod;
-use crate::numerics::integration::TransientLteReference;
+use crate::numerics::integration::{
+    IntegrationMethod, TransientErrorControl, TransientLteReference,
+};
 
 /// Convergence preset selection used by frontends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +57,13 @@ pub struct SimulationConfigOverrides {
     pub transient_lte_abstol: Option<Value>,
     pub transient_timeint_max_timestep: Option<Value>,
     pub transient_use_device_max_timestep: Option<bool>,
+    pub transient_error_control: Option<TransientErrorControl>,
+    pub transient_min_steps_between_breakpoints: Option<usize>,
+    pub transient_timeint_nlmin: Option<usize>,
+    pub transient_timeint_nlmax: Option<usize>,
+    pub transient_timeint_min_order: Option<u8>,
+    pub transient_timeint_max_order: Option<u8>,
+    pub transient_timesteps_reversal: Option<bool>,
     pub transient_nonlinear_reltol: Option<Value>,
     pub transient_nonlinear_abstol: Option<Value>,
     pub transient_nonlinear_deltaxtol: Option<Value>,
@@ -104,6 +112,13 @@ pub fn resolve_simulation_config(
     let mut transient_lte_abstol = base.transient_lte_abstol;
     let mut transient_timeint_max_timestep = base.transient_timeint_max_timestep;
     let mut transient_use_device_max_timestep = base.transient_use_device_max_timestep;
+    let mut transient_error_control = base.transient_error_control;
+    let mut transient_min_steps_between_breakpoints = base.transient_min_steps_between_breakpoints;
+    let mut transient_timeint_nlmin = base.transient_timeint_nlmin;
+    let mut transient_timeint_nlmax = base.transient_timeint_nlmax;
+    let mut transient_timeint_min_order = base.transient_timeint_min_order;
+    let mut transient_timeint_max_order = base.transient_timeint_max_order;
+    let mut transient_timesteps_reversal = base.transient_timesteps_reversal;
     let mut transient_nonlinear_reltol = base.transient_nonlinear_reltol;
     let mut transient_nonlinear_abstol = base.transient_nonlinear_abstol;
     let mut transient_nonlinear_deltaxtol = base.transient_nonlinear_deltaxtol;
@@ -203,6 +218,27 @@ pub fn resolve_simulation_config(
         }
         if let Some(enabled) = opts.timeint_use_device_max_timestep {
             transient_use_device_max_timestep = Some(enabled);
+        }
+        if let Some(control) = opts.timeint_error_control {
+            transient_error_control = control;
+        }
+        if let Some(steps) = opts.timeint_min_steps_between_breakpoints {
+            transient_min_steps_between_breakpoints = Some(steps);
+        }
+        if let Some(nlmin) = opts.timeint_nlmin {
+            transient_timeint_nlmin = nlmin;
+        }
+        if let Some(nlmax) = opts.timeint_nlmax {
+            transient_timeint_nlmax = nlmax;
+        }
+        if let Some(order) = opts.timeint_min_order {
+            transient_timeint_min_order = order;
+        }
+        if let Some(order) = opts.timeint_max_order {
+            transient_timeint_max_order = order;
+        }
+        if let Some(enabled) = opts.timeint_timesteps_reversal {
+            transient_timesteps_reversal = enabled;
         }
         if let Some(reltol) = opts.nonlin_transient_reltol {
             transient_nonlinear_reltol = Some(reltol);
@@ -391,6 +427,27 @@ pub fn resolve_simulation_config(
     if let Some(enabled) = overrides.transient_new_bp_stepping {
         transient_new_bp_stepping = enabled;
     }
+    if let Some(control) = overrides.transient_error_control {
+        transient_error_control = control;
+    }
+    if let Some(steps) = overrides.transient_min_steps_between_breakpoints {
+        transient_min_steps_between_breakpoints = Some(steps);
+    }
+    if let Some(nlmin) = overrides.transient_timeint_nlmin {
+        transient_timeint_nlmin = nlmin;
+    }
+    if let Some(nlmax) = overrides.transient_timeint_nlmax {
+        transient_timeint_nlmax = nlmax;
+    }
+    if let Some(order) = overrides.transient_timeint_min_order {
+        transient_timeint_min_order = order;
+    }
+    if let Some(order) = overrides.transient_timeint_max_order {
+        transient_timeint_max_order = order;
+    }
+    if let Some(enabled) = overrides.transient_timesteps_reversal {
+        transient_timesteps_reversal = enabled;
+    }
 
     if let Some(preset) = overrides.convergence_preset {
         resolved.convergence_config = preset.to_convergence_config();
@@ -407,6 +464,13 @@ pub fn resolve_simulation_config(
     resolved.transient_lte_abstol = transient_lte_abstol;
     resolved.transient_timeint_max_timestep = transient_timeint_max_timestep;
     resolved.transient_use_device_max_timestep = transient_use_device_max_timestep;
+    resolved.transient_error_control = transient_error_control;
+    resolved.transient_min_steps_between_breakpoints = transient_min_steps_between_breakpoints;
+    resolved.transient_timeint_nlmin = transient_timeint_nlmin;
+    resolved.transient_timeint_nlmax = transient_timeint_nlmax;
+    resolved.transient_timeint_min_order = transient_timeint_min_order;
+    resolved.transient_timeint_max_order = transient_timeint_max_order;
+    resolved.transient_timesteps_reversal = transient_timesteps_reversal;
     resolved.transient_nonlinear_reltol = transient_nonlinear_reltol;
     resolved.transient_nonlinear_abstol = transient_nonlinear_abstol;
     resolved.transient_nonlinear_deltaxtol = transient_nonlinear_deltaxtol;
@@ -554,6 +618,11 @@ mod tests {
             spice_dialect: SpiceDialect::Xyce,
             ..Default::default()
         };
+        assert_eq!(
+            base.effective_transient_min_steps_between_breakpoints(),
+            None,
+            "ERROPTION=0 without authored MINTIMESTEPSBP preserves the prior default"
+        );
 
         let resolved = resolve_simulation_config(
             &base,
@@ -604,6 +673,82 @@ mod tests {
         assert_eq!(resolved.convergence_config.voltage_reltol, 4.0e-3);
         assert_eq!(resolved.convergence_config.voltage_abstol, 5.0e-6);
         assert_eq!(resolved.convergence_config.current_abstol, 7.0e-12);
+    }
+
+    #[test]
+    fn timeint_iteration_control_follows_override_precedence_and_given_semantics() {
+        let base = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
+        let options = NetlistSimulationOptions {
+            timeint_error_control: Some(TransientErrorControl::NonlinearIterations),
+            timeint_min_steps_between_breakpoints: Some(12),
+            timeint_nlmin: Some(2),
+            timeint_nlmax: Some(9),
+            timeint_min_order: Some(2),
+            timeint_max_order: Some(2),
+            timeint_timesteps_reversal: Some(true),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            transient_min_steps_between_breakpoints: Some(20),
+            transient_timeint_nlmin: Some(4),
+            transient_timeint_nlmax: Some(10),
+            transient_timeint_min_order: Some(1),
+            transient_timeint_max_order: Some(1),
+            transient_timesteps_reversal: Some(false),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, Some(&options), &overrides);
+        assert_eq!(
+            resolved.transient_error_control,
+            TransientErrorControl::NonlinearIterations
+        );
+        assert_eq!(resolved.transient_min_steps_between_breakpoints, Some(20));
+        assert_eq!(resolved.transient_timeint_nlmin, 4);
+        assert_eq!(resolved.transient_timeint_nlmax, 10);
+        assert_eq!(resolved.transient_timeint_min_order, 1);
+        assert_eq!(resolved.transient_timeint_max_order, 1);
+        assert!(!resolved.transient_timesteps_reversal);
+        assert_eq!(
+            resolved.effective_transient_min_steps_between_breakpoints(),
+            Some(20)
+        );
+
+        let implicit = resolve_simulation_config(
+            &base,
+            Some(&NetlistSimulationOptions {
+                timeint_error_control: Some(TransientErrorControl::NonlinearIterations),
+                ..Default::default()
+            }),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(implicit.transient_min_steps_between_breakpoints, None);
+        assert_eq!(
+            implicit.effective_transient_min_steps_between_breakpoints(),
+            Some(crate::numerics::integration::XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT)
+        );
+
+        let disabled = resolve_simulation_config(
+            &base,
+            Some(&NetlistSimulationOptions {
+                timeint_error_control: Some(TransientErrorControl::NonlinearIterations),
+                timeint_min_steps_between_breakpoints: Some(12),
+                ..Default::default()
+            }),
+            &SimulationConfigOverrides {
+                transient_min_steps_between_breakpoints: Some(0),
+                ..Default::default()
+            },
+        );
+        assert_eq!(disabled.transient_min_steps_between_breakpoints, Some(0));
+        assert_eq!(
+            disabled.effective_transient_min_steps_between_breakpoints(),
+            None,
+            "an explicit zero override disables mode-1's implicit ceiling"
+        );
     }
 
     #[test]

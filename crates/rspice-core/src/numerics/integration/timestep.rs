@@ -10,6 +10,118 @@ use crate::numerics::integration::IntegrationMethod;
 
 const TRAPGEAR_SIGN_CHANGE_FLOOR: Value = crate::constants::VNTOL;
 
+/// Xyce transient-step acceptance policy selected by `TIMEINT ERROPTION`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransientErrorControl {
+    /// `ERROPTION=0`: local-truncation error controls acceptance and resizing.
+    #[default]
+    LocalTruncation,
+    /// `ERROPTION=1`: nonlinear iteration counts control resizing and LTE does
+    /// not reject an otherwise converged step.
+    NonlinearIterations,
+}
+
+impl TransientErrorControl {
+    /// Decode Xyce's exact integer selector domain.
+    pub const fn from_xyce_selector(selector: usize) -> Option<Self> {
+        match selector {
+            0 => Some(Self::LocalTruncation),
+            1 => Some(Self::NonlinearIterations),
+            _ => None,
+        }
+    }
+
+    /// Return the Xyce integer spelling used by checkpoint identities and
+    /// diagnostics.
+    pub const fn xyce_selector(self) -> usize {
+        match self {
+            Self::LocalTruncation => 0,
+            Self::NonlinearIterations => 1,
+        }
+    }
+}
+
+/// Xyce 7.10 `TIMEINT` defaults used by `ERROPTION=1` step control.
+pub const XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT: usize = 10;
+pub const XYCE_DEFAULT_NLMIN: usize = 3;
+pub const XYCE_DEFAULT_NLMAX: usize = 8;
+
+/// Fixed ceiling for one Xyce breakpoint span.
+///
+/// Xyce computes `(next stop - interval start) / MINTIMESTEPSBP` once when a
+/// new integration interval is established. Recomputing from the remaining
+/// distance on every step would shrink geometrically and never reproduce the
+/// source algorithm.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct XyceBreakpointSpanCeiling {
+    min_steps: Option<usize>,
+    max_dt: Option<Value>,
+}
+
+impl XyceBreakpointSpanCeiling {
+    pub fn new(min_steps: Option<usize>) -> Self {
+        Self {
+            min_steps: min_steps.filter(|steps| *steps > 0),
+            max_dt: None,
+        }
+    }
+
+    /// Anchor a new ceiling at startup/resume or after actually landing on a
+    /// breakpoint. Merely discovering a runtime stop must not change the
+    /// current span: the breakpoint manager first limits the step to that stop,
+    /// then the accepted landing anchors the following span.
+    pub fn anchor(
+        &mut self,
+        current_time: Value,
+        next_breakpoint: Option<Value>,
+        final_time: Value,
+    ) -> Option<Value> {
+        let Some(min_steps) = self.min_steps else {
+            return None;
+        };
+        let span_end = next_breakpoint
+            .filter(|time| time.is_finite() && *time > current_time)
+            .map_or(final_time, |time| time.min(final_time));
+        if !current_time.is_finite()
+            || !span_end.is_finite()
+            || span_end <= current_time
+            || final_time <= current_time
+        {
+            self.max_dt = None;
+            return None;
+        }
+        self.max_dt = Some((span_end - current_time) / min_steps as Value);
+        self.max_dt
+    }
+
+    pub const fn ceiling(&self) -> Option<Value> {
+        self.max_dt
+    }
+}
+
+/// Xyce `ERROPTION=1` accepted-step multiplier.
+#[inline]
+pub const fn xyce_iteration_step_scale(iterations: usize, nlmin: usize, nlmax: usize) -> Value {
+    if iterations <= nlmin {
+        2.0
+    } else if iterations > nlmax {
+        0.125
+    } else {
+        1.0
+    }
+}
+
+/// Whether an otherwise converged `ERROPTION=1` attempt passes Xyce's
+/// optional timestep-reversal test.
+#[inline]
+pub const fn xyce_iteration_step_accepts(
+    iterations: usize,
+    nlmax: usize,
+    timesteps_reversal: bool,
+) -> bool {
+    !timesteps_reversal || iterations <= nlmax
+}
+
 /// Adaptive timestep controller
 #[derive(Debug)]
 pub struct TimestepController {
@@ -143,6 +255,7 @@ impl TimestepController {
 #[cfg(test)]
 mod timestep_controller_tests {
     use super::*;
+    use crate::numerics::integration::{BreakpointManager, BreakpointStepPolicy};
 
     #[test]
     fn dynamic_hard_minimum_clamps_existing_and_future_proposals() {
@@ -157,6 +270,73 @@ mod timestep_controller_tests {
         controller.set_hard_min_dt(1.0e-19);
         controller.force_step(5.0e-20);
         assert_eq!(controller.dt(), 1.0e-19);
+    }
+
+    #[test]
+    fn xyce_iteration_policy_uses_inclusive_nlmin_and_exclusive_nlmax() {
+        assert_eq!(xyce_iteration_step_scale(2, 3, 8), 2.0);
+        assert_eq!(xyce_iteration_step_scale(3, 3, 8), 2.0);
+        assert_eq!(xyce_iteration_step_scale(4, 3, 8), 1.0);
+        assert_eq!(xyce_iteration_step_scale(8, 3, 8), 1.0);
+        assert_eq!(xyce_iteration_step_scale(9, 3, 8), 0.125);
+        assert!(xyce_iteration_step_accepts(9, 8, false));
+        assert!(!xyce_iteration_step_accepts(9, 8, true));
+        assert!(xyce_iteration_step_accepts(8, 8, true));
+    }
+
+    #[test]
+    fn xyce_breakpoint_ceiling_reanchors_only_after_a_landing() {
+        let mut ceiling = XyceBreakpointSpanCeiling::new(Some(10));
+        assert_eq!(ceiling.anchor(0.0, Some(10.0), 20.0), Some(1.0));
+        assert_eq!(ceiling.ceiling(), Some(1.0));
+
+        // A runtime stop discovered mid-span limits the landing elsewhere but
+        // does not geometrically or identity-refresh the established ceiling.
+        let newly_discovered_runtime_stop = 4.0;
+        assert_eq!(newly_discovered_runtime_stop, 4.0);
+        assert_eq!(ceiling.ceiling(), Some(1.0));
+
+        // Only after landing does the following interval get a new fixed cap.
+        assert_eq!(ceiling.anchor(4.0, Some(10.0), 20.0), Some(0.6));
+        assert_eq!(ceiling.ceiling(), Some(0.6));
+    }
+
+    #[test]
+    fn runtime_stop_limits_landing_without_reanchoring_the_active_span() {
+        let mut breakpoints =
+            BreakpointManager::new_with_tolerance_and_policy(1.0e-12, BreakpointStepPolicy::Xyce);
+        breakpoints.add(10.0);
+        let mut ceiling = XyceBreakpointSpanCeiling::new(Some(10));
+        assert_eq!(
+            ceiling.anchor(0.0, breakpoints.next_after(0.0), 10.0),
+            Some(1.0)
+        );
+
+        // The runtime stop appears after the interval has begun. It constrains
+        // the landing, but the original 1.0 cap remains active until then.
+        breakpoints.replace_runtime_breakpoints([4.0]);
+        assert_eq!(breakpoints.next_after(1.0), Some(4.0));
+        assert_eq!(ceiling.ceiling(), Some(1.0));
+        let (dt, lands) = breakpoints.limit_step(3.5, 1.0);
+        assert_eq!(dt, 0.5);
+        assert!(lands);
+        assert_eq!(ceiling.ceiling(), Some(1.0));
+
+        breakpoints.mark_breakpoint_solved(4.0);
+        assert_eq!(
+            ceiling.anchor(4.0, breakpoints.next_after(4.0), 10.0),
+            Some(0.6)
+        );
+    }
+
+    #[test]
+    fn xyce_breakpoint_ceiling_uses_final_horizon_and_can_be_disabled() {
+        let mut ceiling = XyceBreakpointSpanCeiling::new(Some(10));
+        assert_eq!(ceiling.anchor(2.0, None, 7.0), Some(0.5));
+        assert_eq!(ceiling.ceiling(), Some(0.5));
+
+        let mut disabled = XyceBreakpointSpanCeiling::new(None);
+        assert_eq!(disabled.anchor(0.0, Some(1.0), 2.0), None);
     }
 }
 

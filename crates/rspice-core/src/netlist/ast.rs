@@ -7,7 +7,7 @@
 //! - Advanced components (switches, transmission lines, coupled inductors)
 //! - Analysis commands (DC, AC, transient, parametric, noise)
 use crate::config::{DampingStrategy, NonlinearContinuationMode};
-use crate::numerics::integration::TransientLteReference;
+use crate::numerics::integration::{TransientErrorControl, TransientLteReference};
 use crate::solver::RealSolverBackend;
 
 use crate::Value;
@@ -3105,6 +3105,21 @@ pub struct SimulationOptions {
     /// Xyce `.OPTIONS TIMEINT BREAKPOINTS` user-requested transient solver
     /// breakpoints. Unlike `output_time_points`, these do not filter output.
     pub timeint_breakpoints: Vec<Value>,
+    /// Xyce `.OPTIONS TIMEINT ERROPTION=0|1` transient acceptance policy.
+    pub timeint_error_control: Option<TransientErrorControl>,
+    /// Explicit nonnegative Xyce `MINTIMESTEPSBP`; zero disables the ceiling.
+    /// When omitted, `ERROPTION=1` activates Xyce's implicit default of ten.
+    pub timeint_min_steps_between_breakpoints: Option<usize>,
+    /// Xyce iteration-count growth threshold used by `ERROPTION=1`.
+    pub timeint_nlmin: Option<usize>,
+    /// Xyce iteration-count shrink/reversal threshold used by `ERROPTION=1`.
+    pub timeint_nlmax: Option<usize>,
+    /// Xyce `TIMEINT MINORD`, restricted to 1 or 2.
+    pub timeint_min_order: Option<u8>,
+    /// Xyce `TIMEINT MAXORD`, restricted to 1 or 2.
+    pub timeint_max_order: Option<u8>,
+    /// Xyce `TIMESTEPSREVERSAL` acceptance policy.
+    pub timeint_timesteps_reversal: Option<bool>,
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
@@ -3374,6 +3389,30 @@ impl SimulationOptions {
         }
         if !other.timeint_breakpoints.is_empty() {
             self.timeint_breakpoints = other.timeint_breakpoints.clone();
+        }
+        if self.timeint_error_control.is_none() && other.timeint_error_control.is_some() {
+            self.timeint_error_control = other.timeint_error_control;
+        }
+        if self.timeint_min_steps_between_breakpoints.is_none()
+            && other.timeint_min_steps_between_breakpoints.is_some()
+        {
+            self.timeint_min_steps_between_breakpoints =
+                other.timeint_min_steps_between_breakpoints;
+        }
+        if self.timeint_nlmin.is_none() && other.timeint_nlmin.is_some() {
+            self.timeint_nlmin = other.timeint_nlmin;
+        }
+        if self.timeint_nlmax.is_none() && other.timeint_nlmax.is_some() {
+            self.timeint_nlmax = other.timeint_nlmax;
+        }
+        if self.timeint_min_order.is_none() && other.timeint_min_order.is_some() {
+            self.timeint_min_order = other.timeint_min_order;
+        }
+        if self.timeint_max_order.is_none() && other.timeint_max_order.is_some() {
+            self.timeint_max_order = other.timeint_max_order;
+        }
+        if self.timeint_timesteps_reversal.is_none() && other.timeint_timesteps_reversal.is_some() {
+            self.timeint_timesteps_reversal = other.timeint_timesteps_reversal;
         }
         if other.reltol.is_some() {
             self.reltol = other.reltol;

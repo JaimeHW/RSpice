@@ -19,7 +19,9 @@ use crate::netlist::{
     is_device_lead_current_accessor,
 };
 use crate::numerics::integration::{
-    BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController, TrapGearController,
+    BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController,
+    TransientErrorControl, TrapGearController, XyceBreakpointSpanCeiling,
+    xyce_iteration_step_accepts, xyce_iteration_step_scale,
 };
 use crate::numerics::integration::{CompanionCoefficients, IntegrationMethod};
 use crate::numerics::xyce_hard_min_timestep;
@@ -114,6 +116,53 @@ const fn transient_newton_uses_correction_form(
     uses_xyce_damped_newton: bool,
 ) -> bool {
     has_direct_correction_rhs || uses_inductor_correction || uses_xyce_damped_newton
+}
+
+#[inline]
+const fn allows_postsolve_gmin_rescue(xyce_iteration_error_control: bool) -> bool {
+    // Xyce returns a failed transient DampedNewton/NOX solve directly to
+    // StepErrorControl. Its ERROPTION=1 path therefore retries at /8 without
+    // RSpice's post-solver system deformation.
+    !xyce_iteration_error_control
+}
+
+#[inline]
+const fn xyce_rejected_attempt_order(
+    xyce_iteration_error_control: bool,
+    attempted_order: u8,
+    lte_recovery_order: u8,
+) -> u8 {
+    if xyce_iteration_error_control {
+        attempted_order
+    } else {
+        lte_recovery_order
+    }
+}
+
+#[inline]
+const fn xyce_startup_or_restart_order(_configured_min_order: u8) -> u8 {
+    // Xyce OneStep/Gear12 always initializes at order one. MINORD constrains
+    // later error-control demotion; it does not alter initialization.
+    1
+}
+
+#[inline]
+const fn xyce_lte_recovery_order(candidate_order: u8, configured_min_order: u8) -> u8 {
+    if candidate_order < configured_min_order {
+        configured_min_order
+    } else {
+        candidate_order
+    }
+}
+
+#[inline]
+fn xyce_iteration_retry_timestep(rejected_dt: Value, hard_min_dt: Value, max_dt: Value) -> Value {
+    (rejected_dt * 0.125).clamp(hard_min_dt, max_dt)
+}
+
+#[inline]
+const fn xyce_allows_order_two(max_order: u8) -> bool {
+    max_order == 2
 }
 
 /// A sanitized finite NOX candidate still has a well-defined candidate
@@ -2727,8 +2776,18 @@ impl Engine {
         } else {
             Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
         };
+        let mut xyce_breakpoint_span_ceiling = XyceBreakpointSpanCeiling::new(
+            self.config
+                .effective_transient_min_steps_between_breakpoints(),
+        );
+        let startup_span_ceiling = xyce_breakpoint_span_ceiling.anchor(
+            resume_time,
+            breakpoints.next_after(resume_time),
+            tstop,
+        );
         let startup_max_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
             self.transient_device_max_timestep(&circuit, resume_time, hinted_max_step)
+                .min(startup_span_ceiling.unwrap_or(Value::INFINITY))
         } else {
             configured_initial_step
                 .map(|step| hinted_max_step.max(step))
@@ -2809,8 +2868,14 @@ impl Engine {
             fixed_method.unwrap_or_else(|| tg.current_method())
         };
         let native_predictor_local = !lte_estimator.uses_accepted_solution_reference();
+        let xyce_iteration_error_control = self.config.spice_dialect == SpiceDialect::Xyce
+            && self.config.transient_error_control == TransientErrorControl::NonlinearIterations;
+        let xyce_min_order = self.config.transient_timeint_min_order;
+        let xyce_max_order = self.config.transient_timeint_max_order;
         let native_order_after_restart = |method: IntegrationMethod| -> u8 {
-            if native_predictor_local && method == IntegrationMethod::Gear2 {
+            if !native_predictor_local {
+                xyce_startup_or_restart_order(xyce_min_order)
+            } else if method == IntegrationMethod::Gear2 {
                 2
             } else {
                 1
@@ -3640,11 +3705,11 @@ impl Engine {
 
             total_iterations += 1;
             if locked_grid.is_none() {
-                timestep.set_max_dt(self.transient_device_max_timestep(
-                    &circuit,
-                    t,
-                    hinted_max_step,
-                ));
+                let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
+                timestep.set_max_dt(
+                    self.transient_device_max_timestep(&circuit, t, hinted_max_step)
+                        .min(span_ceiling.unwrap_or(Value::INFINITY)),
+                );
             }
             let mut locked_step_lands_on_grid = locked_grid.is_some();
             let locked_schedule_aligned = locked_grid
@@ -3860,7 +3925,7 @@ impl Engine {
             // interval *leaving* the breakpoint is the order-one step.
             let is_first_resumed_interval = resume.is_some() && result.time.len() == 1;
             let step_trap_order = if is_first_resumed_interval {
-                1
+                native_order_after_restart(current_method)
             } else {
                 Self::step_trapezoidal_order(
                     current_method,
@@ -3969,7 +4034,11 @@ impl Engine {
             };
             macro_rules! restore_rejected_transient_nonlinear_state {
                 () => {{
-                    lte_estimator.rollback_xyce_attempt();
+                    // Xyce OneStep/Gear12 intentionally does not call
+                    // restoreHistory for ERROPTION=1 rejection. Its psi
+                    // coefficient history advances with the failed attempt;
+                    // only ERROPTION=0 performs the one-sided rollback.
+                    lte_estimator.reject_xyce_attempt(!xyce_iteration_error_control);
                     if let Some(snapshot) = rejected_attempt_nonlinear_state.as_ref().cloned() {
                         if circuit.has_xyce_core_inductors() {
                             circuit.restore_nonlinear_state_preserving_xyce_core_level2_carry(
@@ -4135,6 +4204,11 @@ impl Engine {
                 .then(|| nox_status::XyceTransientNoxStatus::new(tran_max_iterations));
             let mut xyce_weighted_update_norm = None;
             let mut converged = false;
+            // Solver-owned count for this attempted timepoint. DampedNewton's
+            // `nlStep_` is one-based; NOX iteration zero is the predictor
+            // before any linear solve. The outer transient attempt counter is
+            // deliberately unrelated to ERROPTION step control.
+            let mut nonlinear_iterations = 0_usize;
             // NOTE: an earlier fast path reused the previous accepted solution
             // without solving whenever its residual on the restamped system
             // passed the Newton tolerance (linear decks, quiet sources). That
@@ -4452,6 +4526,7 @@ impl Engine {
                         nox_status::XyceNoxDecision::Accepted { test, return_code }
                             if behavioral_converged =>
                         {
+                            nonlinear_iterations = _iter;
                             log::trace!(
                                 "Xyce transient NOX accepted t={:.6e}, dt={:.3e}, iter={}, test={}, code={}",
                                 t + dt,
@@ -4581,6 +4656,10 @@ impl Engine {
                 }
 
                 let postsolve_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
+                // One additional Newton linear solve was attempted even when
+                // factorization fails, matching DampedNewton's terminal
+                // one-based `nlStep_` accounting.
+                nonlinear_iterations = _iter.saturating_add(1);
                 match solve_result {
                     Ok(()) => {
                         let sol = &mut linear_solution;
@@ -5181,7 +5260,16 @@ impl Engine {
                     xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
                 }
                 self.record_convergence(|quality| quality.record_timestep_reduction());
-                trap_order = native_order_after_restart(current_method);
+                let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_min_order
+                } else {
+                    native_order_after_restart(current_method)
+                };
+                trap_order = xyce_rejected_attempt_order(
+                    xyce_iteration_error_control,
+                    step_trap_order,
+                    recovery_order,
+                );
 
                 // Diagnostic logging for debugging convergence issues
                 static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -5238,6 +5326,12 @@ impl Engine {
                     && circuit.has_only_xyce_core_inductors()
                     && !circuit.has_xyce_core_level2();
                 if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                    // Xyce returns a failed transient DampedNewton/NOX solve
+                    // directly to StepErrorControl. RSpice's post-solver GMIN
+                    // deformation is not part of that path; under ERROPTION=1
+                    // it would additionally replace the exact iteration count
+                    // that owns timestep control. Preserve Xyce's /8 retry.
+                    && allows_postsolve_gmin_rescue(xyce_iteration_error_control)
                     && !xyce_level1_core_only
                     && !uses_direct_xyce_dae
                     && circuit.has_nonlinear_devices()
@@ -5367,7 +5461,13 @@ impl Engine {
                 // Match ngspice's non-convergence recovery: retry at one eighth
                 // of the rejected timestep, unless a force-accept cooldown is
                 // temporarily holding dt steady to avoid ping-pong.
-                if force_accept_cooldown > 0 {
+                if xyce_iteration_error_control {
+                    timestep.force_step(xyce_iteration_retry_timestep(
+                        dt,
+                        timestep.hard_min_dt(),
+                        max_step,
+                    ));
+                } else if force_accept_cooldown > 0 {
                     force_accept_cooldown -= 1;
                     // During cooldown, keep timestep at current level (don't shrink)
                 } else {
@@ -5384,8 +5484,11 @@ impl Engine {
                 // - After MAX_RETRIES attempts (regardless of timestep state), OR
                 // - At minimum timestep AND at least MIN_RETRIES_AT_MIN have been tried
                 // This prevents both infinite loops and force-accept floods
-                let at_min_dt =
-                    Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
+                let at_min_dt = if xyce_iteration_error_control {
+                    timestep.is_at_minimum()
+                } else {
+                    Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt)
+                };
                 let exhausted_retries = retry_count >= MAX_RETRIES;
                 let exhausted_at_min = at_min_dt && retry_count >= MIN_RETRIES_AT_MINIMUM_TIMESTEP;
                 let mut force_accepted_rejected_newton_step = false;
@@ -6322,7 +6425,8 @@ impl Engine {
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
             let middle_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
 
-            if locked_grid.is_none()
+            if !xyce_iteration_error_control
+                && locked_grid.is_none()
                 && let Some(limit) = candidate_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)
             {
@@ -6443,12 +6547,23 @@ impl Engine {
             // Xyce CONSTSTEP still evaluates LTE for integration-order
             // selection, but the estimate cannot reject or resize a
             // prescribed grid step.
+            let iteration_control_accepts = xyce_iteration_step_accepts(
+                nonlinear_iterations,
+                self.config.transient_timeint_nlmax,
+                self.config.transient_timesteps_reversal,
+            );
             let accept = if locked_replay_hidden_attempt {
                 false
             } else {
-                locked_grid.is_some() || lte_accept
+                locked_grid.is_some()
+                    || if xyce_iteration_error_control {
+                        iteration_control_accepts
+                    } else {
+                        lte_accept
+                    }
             };
             let xyce_order_two_trial_eligible = lte_estimator.uses_accepted_solution_reference()
+                && xyce_allows_order_two(xyce_max_order)
                 && accept
                 && !first_accepted_transient_step
                 && !xyce_lte_restart_first_step
@@ -6460,8 +6575,9 @@ impl Engine {
                         | IntegrationMethod::TrapGear
                         | IntegrationMethod::Gear2
                 );
-            let xyce_promotes_order_two =
-                xyce_order_two_trial_eligible && lte_estimator.xyce_should_promote_order_two(lte);
+            let xyce_promotes_order_two = xyce_order_two_trial_eligible
+                && (xyce_iteration_error_control
+                    || lte_estimator.xyce_should_promote_order_two(lte));
             let xyce_history_order = if xyce_promotes_order_two {
                 2
             } else {
@@ -6472,13 +6588,22 @@ impl Engine {
             } else {
                 step_trap_order
             };
-            let xyce_rejected_order = match current_method {
-                IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => 1,
-                IntegrationMethod::Gear2 if retry_count > 0 || xyce_step_failure_count > 0 => 1,
-                _ => step_trap_order,
-            };
+            let xyce_rejected_order = xyce_lte_recovery_order(
+                match current_method {
+                    IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => 1,
+                    IntegrationMethod::Gear2 if retry_count > 0 || xyce_step_failure_count > 0 => 1,
+                    _ => step_trap_order,
+                },
+                xyce_min_order,
+            );
             let xyce_first_failure = xyce_step_failure_count == 0;
-            let lte_scale = if first_accepted_transient_step
+            let lte_scale = if xyce_iteration_error_control {
+                xyce_iteration_step_scale(
+                    nonlinear_iterations,
+                    self.config.transient_timeint_nlmin,
+                    self.config.transient_timeint_nlmax,
+                )
+            } else if first_accepted_transient_step
                 || (is_strictly_linear_transient
                     && !lte_estimator.uses_accepted_solution_reference())
             {
@@ -6507,13 +6632,27 @@ impl Engine {
                     xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
                 }
                 self.record_convergence(|quality| quality.record_timestep_reduction());
-                trap_order = if lte_estimator.uses_accepted_solution_reference() {
+                let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
                     xyce_rejected_order
                 } else {
-                    // Native/ngspice LTE retries preserve the current order.
                     Self::trapezoidal_order_after_timestep_control_reject(step_trap_order)
                 };
-                if lte_estimator.uses_accepted_solution_reference() {
+                // ERROPTION=1 rejection is only a /8 retry: unlike LTE
+                // recovery it neither rolls back history nor demotes order.
+                trap_order = xyce_rejected_attempt_order(
+                    xyce_iteration_error_control,
+                    step_trap_order,
+                    recovery_order,
+                );
+                if xyce_iteration_error_control {
+                    // Xyce OneStep.C applies the exact /8 reversal retry and
+                    // clamps only to the controller's machine floor and caps.
+                    timestep.force_step(xyce_iteration_retry_timestep(
+                        dt,
+                        timestep.hard_min_dt(),
+                        max_step,
+                    ));
+                } else if lte_estimator.uses_accepted_solution_reference() {
                     // Xyce-mode LTE is normalized against its own TIMEINT
                     // tolerance, whereas the legacy timestep controller has a
                     // fixed 1e-3 target. Apply the estimator's order-aware
@@ -6522,22 +6661,27 @@ impl Engine {
                 } else {
                     timestep.adjust(lte / lte_scale);
                 }
-                let clamped_retry_dt = Self::apply_retry_timestep_floor(
-                    timestep.dt(),
-                    legacy_bjt_retry_floor_dt,
-                    dt,
-                    max_step,
-                );
-                if clamped_retry_dt > timestep.dt() + 1e-30 {
-                    timestep.force_step(clamped_retry_dt);
+                if !xyce_iteration_error_control {
+                    let clamped_retry_dt = Self::apply_retry_timestep_floor(
+                        timestep.dt(),
+                        legacy_bjt_retry_floor_dt,
+                        dt,
+                        max_step,
+                    );
+                    if clamped_retry_dt > timestep.dt() + 1e-30 {
+                        timestep.force_step(clamped_retry_dt);
+                    }
                 }
 
                 // Force accept when recovery is unlikely:
                 // - After MAX_RETRIES attempts (regardless of timestep state), OR
                 // - At minimum timestep AND at least MIN_RETRIES_AT_MIN have been tried
                 // This prevents both infinite loops and force-accept floods
-                let at_min_dt =
-                    Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
+                let at_min_dt = if xyce_iteration_error_control {
+                    timestep.is_at_minimum()
+                } else {
+                    Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt)
+                };
                 let exhausted_retries = retry_count >= MAX_RETRIES;
                 let exhausted_at_min = at_min_dt && retry_count >= MIN_RETRIES_AT_MINIMUM_TIMESTEP;
                 let mut force_accepted_rejected_lte_step = false;
@@ -7468,10 +7612,14 @@ impl Engine {
                 &mut scheduled_checkpoints,
             )?;
             if first_accepted_transient_step {
-                let accepted_max_step =
-                    self.transient_device_max_timestep(&circuit, t, hinted_max_step);
+                let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
+                let accepted_max_step = self
+                    .transient_device_max_timestep(&circuit, t, hinted_max_step)
+                    .min(span_ceiling.unwrap_or(Value::INFINITY));
                 timestep.set_max_dt(accepted_max_step);
-                let next_dt = if lte_estimator.uses_accepted_solution_reference() {
+                let next_dt = if xyce_iteration_error_control {
+                    (dt * lte_scale).min(accepted_max_step)
+                } else if lte_estimator.uses_accepted_solution_reference() {
                     // Xyce does not test LTE on the first successful transient
                     // step (`TESTFIRSTSTEP=false`), then applies its normal
                     // maximum 2x growth before later breakpoint/device caps.
@@ -7483,32 +7631,48 @@ impl Engine {
                 };
                 timestep.force_step(next_dt);
             } else {
-                let accepted_max_step =
-                    self.transient_device_max_timestep(&circuit, t, hinted_max_step);
+                let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
+                let accepted_max_step = self
+                    .transient_device_max_timestep(&circuit, t, hinted_max_step)
+                    .min(span_ceiling.unwrap_or(Value::INFINITY));
                 timestep.set_max_dt(accepted_max_step);
-                Self::recover_timestep_after_accepted_step(
-                    &mut timestep,
-                    &lte_estimator,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    accepted_max_step,
-                    is_strictly_linear_transient,
-                    expected_source_delta,
-                    Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                    Some(lte_scale),
-                );
+                if xyce_iteration_error_control {
+                    // The LTE recovery helper floors an accepted Xyce shrink
+                    // at 0.25. ERROPTION=1 instead requires the full /8 when
+                    // the accepted solve exceeded NLMAX.
+                    timestep.force_step((dt * lte_scale).min(accepted_max_step));
+                } else {
+                    Self::recover_timestep_after_accepted_step(
+                        &mut timestep,
+                        &lte_estimator,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        accepted_max_step,
+                        is_strictly_linear_transient,
+                        expected_source_delta,
+                        Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
+                        Some(lte_scale),
+                    );
+                }
             }
             if hit_breakpoint {
                 let restart_dt = breakpoints.mark_breakpoint_solved(t);
-                timestep.force_step(restart_dt.min(timestep.dt()));
+                let span_ceiling =
+                    xyce_breakpoint_span_ceiling.anchor(t, breakpoints.next_after(t), tstop);
+                let restarted_max_step = self
+                    .transient_device_max_timestep(&circuit, t, hinted_max_step)
+                    .min(span_ceiling.unwrap_or(Value::INFINITY));
+                timestep.set_max_dt(restarted_max_step);
+                timestep.force_step(restart_dt.min(timestep.dt()).min(restarted_max_step));
                 if !lte_estimator.uses_accepted_solution_reference() && !circuit.vdmoses.is_empty()
                 {
                     lte_warmup_skips = lte_warmup_skips.max(2);
                 }
             }
-            if !first_accepted_transient_step
+            if !xyce_iteration_error_control
+                && !first_accepted_transient_step
                 && let Some(limit) = candidate_truncation_limit
                 && limit.is_finite()
                 && limit > 0.0
@@ -7549,7 +7713,7 @@ impl Engine {
                     IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
                 )
             {
-                trap_order = 1;
+                trap_order = xyce_startup_or_restart_order(xyce_min_order);
             } else if matches!(
                 current_method,
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -7564,6 +7728,9 @@ impl Engine {
                     hit_breakpoint,
                     should_promote,
                 );
+                if hit_breakpoint {
+                    trap_order = xyce_startup_or_restart_order(xyce_min_order);
+                }
                 if let Some(trial) = trapezoidal_order_trial
                     && trial.limit.is_finite()
                     && trial.limit > 0.0
@@ -7579,6 +7746,9 @@ impl Engine {
                     hit_breakpoint,
                     xyce_promotes_order_two,
                 );
+                if hit_breakpoint {
+                    trap_order = xyce_startup_or_restart_order(xyce_min_order);
+                }
             }
 
             lte_estimator.set_method_order(effective_method_order(current_method, trap_order));
@@ -9583,6 +9753,224 @@ mod tests {
             worst_dt <= 1.0e-3 + 1.0e-15,
             "exactly 1 ms was mistaken for an unset sentinel: worst dt {worst_dt:.3e}"
         );
+    }
+
+    #[test]
+    fn xyce_iteration_control_disables_postsolve_gmin_deformation() {
+        assert!(allows_postsolve_gmin_rescue(false));
+        assert!(!allows_postsolve_gmin_rescue(true));
+    }
+
+    #[test]
+    fn xyce_iteration_rejections_preserve_order_and_maxord_one_blocks_promotion() {
+        assert_eq!(xyce_rejected_attempt_order(true, 2, 1), 2);
+        assert_eq!(xyce_rejected_attempt_order(false, 2, 1), 1);
+        assert!(!xyce_allows_order_two(1));
+        assert!(xyce_allows_order_two(2));
+
+        let netlist = crate::Netlist::parse(
+            "fixed order mode one\nV1 in 0 PULSE(0 1 0 1u 1u 4u 10u)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        )
+        .expect("deck parses");
+        Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_error_control: TransientErrorControl::NonlinearIterations,
+            transient_timeint_min_order: 1,
+            transient_timeint_max_order: 1,
+            ..Default::default()
+        })
+        .run_tran(&netlist, 30.0e-6, 5.0e-6)
+        .expect("MAXORD=1 with ERROPTION=1 runs without an order-two trial");
+    }
+
+    #[test]
+    fn xyce_minord_two_does_not_change_startup_resume_or_restart_order() {
+        assert_eq!(xyce_startup_or_restart_order(1), 1);
+        assert_eq!(
+            xyce_startup_or_restart_order(2),
+            1,
+            "MINORD=2 must not change startup, resume, or breakpoint restart order"
+        );
+    }
+
+    #[test]
+    fn xyce_mode_zero_demotion_honors_minord_two() {
+        assert_eq!(
+            xyce_lte_recovery_order(1, 2),
+            2,
+            "ERROPTION=0 demotion must not go below MINORD=2"
+        );
+        assert_eq!(xyce_lte_recovery_order(2, 1), 2);
+    }
+
+    #[test]
+    fn xyce_iteration_retry_is_exact_eighth_below_legacy_bjt_floor() {
+        let rejected_dt = 8.0e-12;
+        let exact_eighth = xyce_iteration_retry_timestep(rejected_dt, 1.0e-18, 1.0);
+        assert_eq!(exact_eighth, 1.0e-12);
+
+        let legacy_floor = Some(4.0e-12);
+        let legacy_raised =
+            Engine::apply_retry_timestep_floor(exact_eighth, legacy_floor, rejected_dt, 1.0);
+        assert_eq!(legacy_raised, 4.0e-12);
+        assert!(
+            exact_eighth < legacy_raised,
+            "mode-1 Newton/reversal retry must bypass the legacy BJT startup floor"
+        );
+
+        assert_eq!(
+            xyce_iteration_retry_timestep(rejected_dt, 2.0e-12, 1.0),
+            2.0e-12,
+            "the controller hard machine minimum remains authoritative"
+        );
+    }
+
+    #[test]
+    fn xyce_minimum_breakpoint_steps_use_fixed_span_caps_and_final_horizon() {
+        let netlist = crate::Netlist::parse(
+            "fixed breakpoint spans\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             .options timeint breakpoints=0.4\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_min_steps_between_breakpoints: Some(10),
+            ..Default::default()
+        });
+        let result = engine.run_tran(&netlist, 1.0, 1.0).expect("transient runs");
+
+        let mut before_breakpoint = 0.0_f64;
+        let mut after_breakpoint = 0.0_f64;
+        for window in result.time.windows(2) {
+            let dt = window[1] - window[0];
+            if window[1] <= 0.4 + 1.0e-12 {
+                before_breakpoint = before_breakpoint.max(dt);
+            } else {
+                after_breakpoint = after_breakpoint.max(dt);
+            }
+        }
+        assert!(before_breakpoint <= 0.04 + 1.0e-12, "{before_breakpoint}");
+        assert!(after_breakpoint <= 0.06 + 1.0e-12, "{after_breakpoint}");
+        assert!(
+            result
+                .time
+                .iter()
+                .any(|time| (*time - 0.4).abs() <= 1.0e-12),
+            "the authored breakpoint must be landed on exactly: {:?}",
+            result.time
+        );
+    }
+
+    #[test]
+    fn xyce_errop_option_one_implicitly_activates_ten_final_span_steps() {
+        let netlist =
+            crate::Netlist::parse("implicit breakpoint span\nV1 1 0 1\nR1 1 0 1k\n.end\n")
+                .expect("deck parses");
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_error_control: TransientErrorControl::NonlinearIterations,
+            ..Default::default()
+        });
+        let result = engine.run_tran(&netlist, 1.0, 1.0).expect("transient runs");
+        let worst_dt = result
+            .time
+            .windows(2)
+            .map(|window| window[1] - window[0])
+            .fold(0.0, Value::max);
+        assert!(worst_dt <= 0.1 + 1.0e-12, "worst dt {worst_dt}");
+    }
+
+    #[test]
+    fn xyce_errop_one_grid_is_independent_of_lte_and_charge_truncation_tolerances() {
+        let netlist = crate::Netlist::parse(
+            "mode-one LTE independence\nV1 in 0 PULSE(0 1 0 1u 1u 4u 10u)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        )
+        .expect("RC deck parses");
+        let base = crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_error_control: TransientErrorControl::NonlinearIterations,
+            transient_min_steps_between_breakpoints: Some(0),
+            ..Default::default()
+        };
+        let tight = Engine::new(crate::SimulationConfig {
+            transient_lte_reltol: Some(1.0e-14),
+            transient_lte_abstol: Some(1.0e-18),
+            transient_trtol: 1.0e-6,
+            ..base.clone()
+        })
+        .run_tran(&netlist, 30.0e-6, 5.0e-6)
+        .expect("tight-tolerance mode-one run succeeds");
+        let loose = Engine::new(crate::SimulationConfig {
+            transient_lte_reltol: Some(1.0),
+            transient_lte_abstol: Some(1.0),
+            transient_trtol: 1.0e6,
+            ..base
+        })
+        .run_tran(&netlist, 30.0e-6, 5.0e-6)
+        .expect("loose-tolerance mode-one run succeeds");
+
+        assert_eq!(tight.time, loose.time);
+        assert_eq!(tight.step_sizes, loose.step_sizes);
+    }
+
+    #[test]
+    fn xyce_checkpoint_resume_reanchors_breakpoint_span_ceiling() {
+        let netlist = crate::Netlist::parse(
+            "checkpoint breakpoint span\nV1 1 0 1\nR1 1 0 1k\n.options timeint breakpoints=0.4\n.end\n",
+        )
+        .expect("deck parses");
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_error_control: TransientErrorControl::NonlinearIterations,
+            transient_min_steps_between_breakpoints: Some(10),
+            ..Default::default()
+        });
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 0.4, 1.0)
+            .expect("checkpoint seam lands on the explicit breakpoint");
+        assert!((checkpoint.time - 0.4).abs() <= 1.0e-12);
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 1.0, 1.0)
+            .expect("active span ceiling no longer refuses checkpoint resume");
+        assert_eq!(resumed.time.first().copied(), Some(checkpoint.time));
+        let worst_post_seam_dt = resumed
+            .time
+            .windows(2)
+            .map(|window| window[1] - window[0])
+            .fold(0.0, Value::max);
+        assert!(
+            worst_post_seam_dt <= 0.06 + 1.0e-12,
+            "resume must anchor (1.0 - 0.4) / 10, got {worst_post_seam_dt}"
+        );
+    }
+
+    #[test]
+    fn xyce_default_errop_zero_preserves_the_existing_transient_trajectory() {
+        let netlist = crate::Netlist::parse(
+            "default ERROPTION\nV1 in 0 PULSE(0 1 0 1u 1u 4u 10u)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        )
+        .expect("deck parses");
+        let default = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        })
+        .run_tran(&netlist, 30.0e-6, 5.0e-6)
+        .expect("default Xyce transient runs");
+        let explicit = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            transient_error_control: TransientErrorControl::LocalTruncation,
+            transient_min_steps_between_breakpoints: None,
+            ..Default::default()
+        })
+        .run_tran(&netlist, 30.0e-6, 5.0e-6)
+        .expect("explicit ERROPTION=0 transient runs");
+
+        assert_eq!(default.time, explicit.time);
+        assert_eq!(default.step_sizes, explicit.step_sizes);
+        assert_eq!(default.voltages, explicit.voltages);
     }
 
     #[test]
