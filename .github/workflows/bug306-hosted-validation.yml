@@ -1,0 +1,36 @@
+name: BUG306 hosted validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/bug306-hosted-validation.yml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  RUST_TOOLCHAIN: "1.94.0"
+  RSPICE_XYCE_HARD_CASE_TIMEOUT_MS: "180000"
+
+jobs:
+  full-xyce-release:
+    name: Full Xyce corpus (Linux, release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: bug306-hosted-validation
+      - name: Authoritative Xyce aggregate
+        run: >-
+          cargo test --locked --release -p rspice-conformance
+          --test xyce_regression
+          test_full_xyce_suite_summary_accounts_for_every_deck
+          -- --exact --nocapture
