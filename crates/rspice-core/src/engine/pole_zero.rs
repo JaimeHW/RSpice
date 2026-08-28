@@ -178,6 +178,7 @@ impl Engine {
         };
 
         let mut g_eff = g_dd;
+        let b_direct = b_d.clone();
         let mut b_eff = b_d;
         let mut c_eff = l_d;
         let mut d_eff = 0.0;
@@ -200,6 +201,40 @@ impl Engine {
                 for col in 0..dynamic_count {
                     c_eff[col] -= weight * g_aa_inv_g_ad[col * algebraic_count + algebraic_index];
                 }
+            }
+        }
+
+        // An ideal voltage source can clamp a current-input node. Sparse LU
+        // then leaves only roundoff in the reduced dynamic drive, which must
+        // not turn an identically-zero transfer into a qualified empty zero
+        // set. Detect cancellation relative to the elimination operations and
+        // let the independent dense descriptor path issue TransferExtraction.
+        if config.compute_zeros && config.input_is_current {
+            let solved_input_norm = g_aa_inv_b_a
+                .iter()
+                .map(|value| value.abs())
+                .fold(0.0_f64, Value::max);
+            let cancellation_tolerance = 128.0 * (n.max(1) as Value) * Value::EPSILON;
+            let effectively_zero = |value: Value, scale: Value| {
+                if scale == 0.0 {
+                    value == 0.0
+                } else {
+                    value.abs() <= cancellation_tolerance * scale
+                }
+            };
+            let dynamic_drive_is_zero = b_eff.iter().enumerate().all(|(row, value)| {
+                let elimination_scale = g_da[row]
+                    .iter()
+                    .map(|(_, conductance)| conductance.abs() * solved_input_norm)
+                    .sum::<Value>();
+                effectively_zero(*value, b_direct[row].abs() + elimination_scale)
+            });
+            let direct_scale = l_a
+                .iter()
+                .map(|weight| weight.abs() * solved_input_norm)
+                .sum::<Value>();
+            if dynamic_drive_is_zero && effectively_zero(d_eff, direct_scale) {
+                return Ok(None);
             }
         }
 
@@ -258,6 +293,7 @@ impl Engine {
             Err(
                 PoleZeroAnalysisError::EigenvalueFailure { .. }
                 | PoleZeroAnalysisError::NonFiniteEigenvalue { .. }
+                | PoleZeroAnalysisError::NumericalQualification { .. }
                 | PoleZeroAnalysisError::IncompleteSpectrum { .. }
                 | PoleZeroAnalysisError::InvalidSystem(_)
                 | PoleZeroAnalysisError::TransferExtraction(_),
@@ -663,11 +699,11 @@ impl Engine {
         }
         abort.observe_progress(0.5);
         let input_neg_node = input_neg.unwrap_or(0);
-        let matches_input_voltage_port = |np: usize, nn: usize| {
-            !input_is_current
-                && ((np == input_pos && nn == input_neg_node)
-                    || (nn == input_pos && np == input_neg_node))
+        let matches_requested_input_port = |np: usize, nn: usize| {
+            (np == input_pos && nn == input_neg_node) || (nn == input_pos && np == input_neg_node)
         };
+        let matches_input_voltage_port =
+            |np: usize, nn: usize| !input_is_current && matches_requested_input_port(np, nn);
         let mut input_voltage_branch = None;
         let mut input_voltage_gain = 1.0;
 
@@ -680,6 +716,15 @@ impl Engine {
             let nn = circuit.voltage_sources.node_neg[i];
             let br_ordinal = circuit.voltage_sources.branch_indices[i];
             let br = circuit.get_branch_matrix_index(br_ordinal) - 1;
+
+            if input_is_current && compute_zeros && matches_requested_input_port(np, nn) {
+                return Err(SimulationError::Solver(
+                    crate::solver::SolverError::InvalidCircuit(
+                        "pole-zero transfer extraction failed: the requested current input is parallel to an independent ideal voltage source"
+                            .to_string(),
+                    ),
+                ));
+            }
 
             if matches_input_voltage_port(np, nn) {
                 if input_voltage_branch.replace(br).is_some() {

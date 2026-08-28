@@ -4,10 +4,11 @@
 //! pole-zero math/result-contract regressions without involving netlist parsing,
 //! device stamping, or the sparse engine path.
 
-use rspice_core::Complex64;
 use rspice_core::analysis::{
     PoleZeroAnalysisError, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, PzMatrix,
+    RootSetEvidence, SpectrumCertificate, StabilityVerdict,
 };
+use rspice_core::{Complex64, Engine, Netlist, SimulationConfig};
 
 fn poles_only(input: usize, output: usize) -> PoleZeroConfig {
     let mut config = PoleZeroConfig::poles_and_zeros(input, output);
@@ -85,6 +86,14 @@ fn regular_singular_descriptor_eliminates_algebraic_variable() {
 
     assert_eq!(result.poles.len(), 1, "{:#?}", result.poles);
     assert_root_present(&result.poles, Complex64::new(-0.5, 0.0), 1.0e-10);
+    let certificate = result
+        .pole_evidence
+        .certificate()
+        .expect("a computed descriptor spectrum carries a certificate");
+    assert_eq!(certificate.problem_order, 2);
+    assert_eq!(certificate.infinite_count, 1);
+    assert_eq!(certificate.finite_count(), 1);
+    assert!(result.pole_evidence.is_consistent_with(&result.poles));
 }
 
 #[test]
@@ -196,6 +205,11 @@ fn requested_pole_and_zero_sets_are_independent() {
         .expect("pole-only extraction");
     assert_eq!(poles.poles.len(), 2, "{:#?}", poles.poles);
     assert!(poles.zeros.is_empty(), "{:#?}", poles.zeros);
+    assert!(matches!(
+        poles.pole_evidence,
+        RootSetEvidence::Qualified { .. }
+    ));
+    assert_eq!(poles.zero_evidence, RootSetEvidence::NotRequested);
 
     let mut zeros_config = PoleZeroConfig::poles_and_zeros(0, 0);
     zeros_config.compute_poles = false;
@@ -204,6 +218,11 @@ fn requested_pole_and_zero_sets_are_independent() {
         .expect("zero-only extraction");
     assert!(zeros.poles.is_empty(), "{:#?}", zeros.poles);
     assert_eq!(zeros.zeros.len(), 1, "{:#?}", zeros.zeros);
+    assert_eq!(zeros.pole_evidence, RootSetEvidence::NotRequested);
+    assert!(matches!(
+        zeros.zero_evidence,
+        RootSetEvidence::Qualified { .. }
+    ));
     assert_root_present(&zeros.zeros, Complex64::new(-2.0, 0.0), 1.0e-10);
 }
 
@@ -216,6 +235,169 @@ fn an_empty_pole_set_is_not_evidence_of_stability() {
         !result.is_stable(),
         "an absent pole set must be indeterminate rather than vacuously stable"
     );
+    assert_eq!(result.stability_verdict(), StabilityVerdict::Indeterminate);
+}
+
+#[test]
+fn a_regular_all_infinite_spectrum_is_qualified_empty() {
+    // det(1 + s*0) never vanishes at finite s. The regular order-one pencil
+    // therefore has exactly one infinite eigenvalue and no finite poles.
+    let analyzer = PoleZeroAnalyzer::new(
+        PzMatrix::from_dense(vec![vec![1.0]]),
+        PzMatrix::from_dense(vec![vec![0.0]]),
+    );
+
+    let result = analyzer
+        .analyze(&poles_only(0, 0))
+        .expect("the constant scalar pencil is regular");
+
+    assert!(result.poles.is_empty());
+    let RootSetEvidence::QualifiedEmpty { certificate } = &result.pole_evidence else {
+        panic!("expected qualified-empty evidence");
+    };
+    assert_eq!(certificate.problem_order, 1);
+    assert_eq!(certificate.infinite_count, 1);
+    assert_eq!(certificate.finite_count(), 0);
+    assert_eq!(result.stability_verdict(), StabilityVerdict::Stable);
+}
+
+#[test]
+fn scalar_rc_pole_and_zero_spectrum_is_qualified() {
+    // H(s)=1/(1+s*1e-3) has one pole at -1000 rad/s and no finite zeros.
+    // The zero calculation uses a Rosenbrock pencil with an infinite pair,
+    // which must still admit a finite, normwise residual certificate.
+    let analyzer = PoleZeroAnalyzer::new(
+        PzMatrix::from_dense(vec![vec![1.0]]),
+        PzMatrix::from_dense(vec![vec![1.0e-3]]),
+    );
+
+    let result = analyzer
+        .analyze(&PoleZeroConfig::poles_and_zeros(0, 0))
+        .expect("a scalar RC transfer has a regular pole-zero spectrum");
+
+    assert_eq!(result.poles, vec![Complex64::new(-1000.0, 0.0)]);
+    assert!(result.zeros.is_empty());
+    assert!(matches!(
+        result.pole_evidence,
+        RootSetEvidence::Qualified { .. }
+    ));
+    assert!(matches!(
+        result.zero_evidence,
+        RootSetEvidence::QualifiedEmpty { .. }
+    ));
+    assert!(result.has_consistent_root_evidence());
+}
+
+#[test]
+fn ideal_voltage_source_rejects_a_parallel_current_input_transfer() {
+    // The ideal source clamps node 0, so an additional current injected at
+    // that same node is sunk by the source and has identically zero transfer
+    // to node 1. This is not a qualified empty zero set.
+    let conductance = 1.0e-3;
+    let analyzer = PoleZeroAnalyzer::new(
+        PzMatrix::from_dense(vec![
+            vec![conductance, -conductance, 1.0],
+            vec![-conductance, conductance, 0.0],
+            vec![1.0, 0.0, 0.0],
+        ]),
+        PzMatrix::from_dense(vec![
+            vec![0.0, 0.0, 0.0],
+            vec![0.0, 1.0e-6, 0.0],
+            vec![0.0, 0.0, 0.0],
+        ]),
+    );
+
+    let error = analyzer
+        .analyze(&PoleZeroConfig::poles_and_zeros(0, 1))
+        .expect_err("the clamped current-to-voltage transfer is identically zero");
+    assert!(
+        matches!(error, PoleZeroAnalysisError::TransferExtraction(_)),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn engine_rejects_current_input_at_an_ideal_voltage_source_node() {
+    let netlist =
+        Netlist::parse("* voltage-driven RC\nV1 in 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.end\n")
+            .expect("RC deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let circuit = engine.build_circuit(&netlist).expect("RC circuit builds");
+    let input = circuit.get_node_by_name("in").expect("input node");
+    let output = circuit.get_node_by_name("out").expect("output node");
+
+    let error = engine
+        .run_pz(&netlist, input, output)
+        .expect_err("a current input cannot parallel an ideal voltage source");
+    assert!(
+        error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("transfer extraction"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn current_driven_rc_engine_path_accepts_its_infinite_zero_chain() {
+    let netlist = Netlist::parse(
+        "* current-driven RC PZ\nI1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.end\n",
+    )
+    .expect("RC deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let circuit = engine.build_circuit(&netlist).expect("RC circuit builds");
+    let input = circuit.get_node_by_name("in").expect("input node");
+    let output = circuit.get_node_by_name("out").expect("output node");
+
+    let result = engine
+        .run_pz(&netlist, input, output)
+        .expect("current-driven RC pole-zero solve succeeds");
+
+    assert_eq!(result.poles.len(), 1, "{:#?}", result.poles);
+    assert!(result.zeros.is_empty(), "{:#?}", result.zeros);
+    assert!(matches!(
+        result.zero_evidence,
+        RootSetEvidence::QualifiedEmpty { .. }
+    ));
+    assert!(result.has_consistent_root_evidence());
+}
+
+#[test]
+fn root_evidence_invariants_reject_mismatched_vectors() {
+    let finite = SpectrumCertificate::exact(1, 0).expect("valid exact certificate");
+    let empty = SpectrumCertificate::exact(1, 1).expect("valid exact certificate");
+    let qualified = RootSetEvidence::Qualified {
+        certificate: finite,
+    };
+    let qualified_empty = RootSetEvidence::QualifiedEmpty { certificate: empty };
+
+    assert!(qualified.is_consistent_with(&[Complex64::new(-1.0, 0.0)]));
+    assert!(!qualified.is_consistent_with(&[]));
+    assert!(qualified_empty.is_consistent_with(&[]));
+    assert!(!qualified_empty.is_consistent_with(&[Complex64::new(-1.0, 0.0)]));
+    assert!(RootSetEvidence::from_certificate(0, finite).is_none());
+    assert!(RootSetEvidence::from_certificate(1, empty).is_none());
+    assert!(SpectrumCertificate::new(1, 0, 0.0, 1.0).is_none());
+}
+
+#[test]
+fn approximate_and_legacy_poles_have_indeterminate_stability() {
+    let strict_tolerance = 128.0 * f64::EPSILON;
+    let certificate = SpectrumCertificate::new(1, 0, 1.0e-9, strict_tolerance)
+        .expect("a complete spectrum below the hard residual limit is valid");
+    let mut result = PoleZeroResult::new("input", "output");
+    result.poles = vec![Complex64::new(-1.0, 0.0)];
+    result.pole_evidence = RootSetEvidence::from_certificate(1, certificate)
+        .expect("the certificate count matches the root vector");
+
+    assert!(matches!(
+        result.pole_evidence,
+        RootSetEvidence::Approximate { .. }
+    ));
+    assert_eq!(result.stability_verdict(), StabilityVerdict::Indeterminate);
+
+    result.pole_evidence = RootSetEvidence::LegacyUnknown;
+    assert_eq!(result.stability_verdict(), StabilityVerdict::Indeterminate);
 }
 
 #[test]

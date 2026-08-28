@@ -67,6 +67,17 @@ pub enum PoleZeroAnalysisError {
         expected: usize,
         actual: usize,
     },
+    /// A complete eigenspectrum was returned, but an eigenpair has too much
+    /// normwise backward error to be retained even as an approximate result.
+    #[error(
+        "{problem} eigenvalue {index} failed numerical qualification (backward error {backward_error:.3e}, maximum {maximum:.3e})"
+    )]
+    NumericalQualification {
+        problem: &'static str,
+        index: usize,
+        backward_error: Value,
+        maximum: Value,
+    },
     /// A configured reporting limit would otherwise silently discard roots.
     #[error(
         "{quantity} extraction found {omitted} finite root(s) at or above the configured limit {limit:.6e} rad/s"
@@ -81,6 +92,162 @@ pub enum PoleZeroAnalysisError {
     TransferExtraction(&'static str),
 }
 
+/// Numerical evidence attached to one complete finite/infinite eigenspectrum.
+///
+/// `problem_order - infinite_count` is the number of finite roots represented
+/// by the associated root vector. `max_backward_error` is the worst normalized
+/// residual among every finite eigenpair and every finite right-eigenvector
+/// representative returned for an infinite eigenvalue. Generalized infinite
+/// algebraic multiplicity is accounted separately by exact homogeneous
+/// `beta == 0` classification after rejecting non-finite and indeterminate
+/// `0/0` pairs; defective infinite eigenvalues need not have one finite
+/// eigenvector per algebraic copy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectrumCertificate {
+    /// Order of the ordinary eigenproblem or generalized matrix pencil.
+    pub problem_order: usize,
+    /// Exact count of generalized eigenpairs whose homogeneous beta is zero.
+    pub infinite_count: usize,
+    /// Largest normwise backward error among finite roots and available
+    /// finite eigenvector representatives of infinite roots.
+    pub max_backward_error: Value,
+    /// Strict threshold below which the spectrum is fully qualified.
+    pub qualification_tolerance: Value,
+}
+
+impl SpectrumCertificate {
+    /// Construct a certificate after validating its finite/infinite accounting.
+    pub fn new(
+        problem_order: usize,
+        infinite_count: usize,
+        max_backward_error: Value,
+        qualification_tolerance: Value,
+    ) -> Option<Self> {
+        let certificate = Self {
+            problem_order,
+            infinite_count,
+            max_backward_error,
+            qualification_tolerance,
+        };
+        certificate.is_valid().then_some(certificate)
+    }
+
+    /// Construct exact analytic evidence for a scalar or polynomial result.
+    pub fn exact(problem_order: usize, infinite_count: usize) -> Option<Self> {
+        Self::new(
+            problem_order,
+            infinite_count,
+            0.0,
+            PoleZeroAnalyzer::qualification_tolerance(problem_order),
+        )
+    }
+
+    /// Number of finite roots certified by the finite/infinite accounting.
+    pub fn finite_count(self) -> usize {
+        self.problem_order.saturating_sub(self.infinite_count)
+    }
+
+    /// Whether all certificate fields and counts are internally valid.
+    pub fn is_valid(self) -> bool {
+        self.infinite_count <= self.problem_order
+            && self.max_backward_error.is_finite()
+            && self.max_backward_error >= 0.0
+            && self.max_backward_error <= PoleZeroAnalyzer::APPROXIMATE_BACKWARD_ERROR_LIMIT
+            && self.qualification_tolerance.is_finite()
+            && self.qualification_tolerance > 0.0
+            && self.qualification_tolerance
+                == PoleZeroAnalyzer::qualification_tolerance(self.problem_order)
+    }
+
+    /// Whether this spectrum meets the strict qualification threshold.
+    pub fn is_strictly_qualified(self) -> bool {
+        self.is_valid() && self.max_backward_error <= self.qualification_tolerance
+    }
+}
+
+/// Evidence describing why a pole or zero vector may be interpreted as a
+/// complete root set.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum RootSetEvidence {
+    /// This root quantity was not requested by the analysis configuration.
+    NotRequested,
+    /// The requested calculation proved that there are no finite roots.
+    QualifiedEmpty { certificate: SpectrumCertificate },
+    /// Every reported root belongs to a complete, strictly qualified spectrum.
+    Qualified { certificate: SpectrumCertificate },
+    /// The spectrum is complete and usable, but its residual exceeds the
+    /// strict qualification threshold while remaining below the hard limit.
+    Approximate { certificate: SpectrumCertificate },
+    /// Roots loaded from an older result that carried no numerical evidence.
+    LegacyUnknown,
+}
+
+impl RootSetEvidence {
+    /// Build evidence for a newly computed complete spectrum.
+    pub fn from_certificate(root_count: usize, certificate: SpectrumCertificate) -> Option<Self> {
+        if !certificate.is_valid() || certificate.finite_count() != root_count {
+            return None;
+        }
+        if certificate.is_strictly_qualified() {
+            if root_count == 0 {
+                Some(Self::QualifiedEmpty { certificate })
+            } else {
+                Some(Self::Qualified { certificate })
+            }
+        } else {
+            Some(Self::Approximate { certificate })
+        }
+    }
+
+    /// Numerical certificate, when this evidence came from a new computation.
+    pub fn certificate(&self) -> Option<&SpectrumCertificate> {
+        match self {
+            Self::QualifiedEmpty { certificate }
+            | Self::Qualified { certificate }
+            | Self::Approximate { certificate } => Some(certificate),
+            Self::NotRequested | Self::LegacyUnknown => None,
+        }
+    }
+
+    /// Whether this evidence is structurally consistent with a root vector.
+    pub fn is_consistent_with(&self, roots: &[Complex64]) -> bool {
+        match self {
+            Self::NotRequested => roots.is_empty(),
+            Self::QualifiedEmpty { certificate } => {
+                roots.is_empty()
+                    && certificate.is_strictly_qualified()
+                    && certificate.finite_count() == 0
+            }
+            Self::Qualified { certificate } => {
+                !roots.is_empty()
+                    && certificate.is_strictly_qualified()
+                    && certificate.finite_count() == roots.len()
+            }
+            Self::Approximate { certificate } => {
+                certificate.is_valid()
+                    && !certificate.is_strictly_qualified()
+                    && certificate.finite_count() == roots.len()
+            }
+            Self::LegacyUnknown => true,
+        }
+    }
+
+    /// Whether this evidence proves a complete, strictly qualified set.
+    pub fn is_qualified(&self) -> bool {
+        matches!(self, Self::QualifiedEmpty { .. } | Self::Qualified { .. })
+    }
+}
+
+/// Three-valued stability result. Only a qualified pole set can prove stable
+/// or unstable behavior; absent, approximate, and legacy roots are indeterminate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StabilityVerdict {
+    Stable,
+    Unstable,
+    Indeterminate,
+}
+
 //=============================================================================
 // Pole-Zero Result
 //=============================================================================
@@ -92,6 +259,10 @@ pub struct PoleZeroResult {
     pub poles: Vec<Complex64>,
     /// System zeros
     pub zeros: Vec<Complex64>,
+    /// Completeness and numerical evidence for [`Self::poles`].
+    pub pole_evidence: RootSetEvidence,
+    /// Completeness and numerical evidence for [`Self::zeros`].
+    pub zero_evidence: RootSetEvidence,
     /// DC gain H(0), when the transfer function has a finite DC value.
     pub dc_gain: Option<Value>,
     /// High-frequency gain H(∞) if finite
@@ -108,6 +279,8 @@ impl PoleZeroResult {
         Self {
             poles: Vec::new(),
             zeros: Vec::new(),
+            pole_evidence: RootSetEvidence::NotRequested,
+            zero_evidence: RootSetEvidence::NotRequested,
             dc_gain: None,
             hf_gain: None,
             input: input.to_string(),
@@ -131,13 +304,47 @@ impl PoleZeroResult {
             .min_by(|a, b| a.re.abs().total_cmp(&b.re.abs()))
     }
 
-    /// Check if system is stable (all poles have negative real parts)
+    /// Return a three-valued stability verdict from qualified pole evidence.
+    pub fn stability_verdict(&self) -> StabilityVerdict {
+        if !self.pole_evidence.is_consistent_with(&self.poles) || !self.pole_evidence.is_qualified()
+        {
+            return StabilityVerdict::Indeterminate;
+        }
+        if self
+            .poles
+            .iter()
+            .any(|pole| !pole.re.is_finite() || !pole.im.is_finite())
+        {
+            return StabilityVerdict::Indeterminate;
+        }
+        if self.poles.iter().all(|pole| pole.re < 0.0) {
+            StabilityVerdict::Stable
+        } else {
+            StabilityVerdict::Unstable
+        }
+    }
+
+    /// Check whether qualified pole evidence proves asymptotic stability.
     pub fn is_stable(&self) -> bool {
-        !self.poles.is_empty()
-            && self
-                .poles
-                .iter()
-                .all(|p| p.re.is_finite() && p.im.is_finite() && p.re < 0.0)
+        self.stability_verdict() == StabilityVerdict::Stable
+    }
+
+    /// Whether both root vectors agree with their attached evidence.
+    pub fn has_consistent_root_evidence(&self) -> bool {
+        self.pole_evidence.is_consistent_with(&self.poles)
+            && self.zero_evidence.is_consistent_with(&self.zeros)
+    }
+
+    fn set_poles(&mut self, spectrum: ComputedSpectrum) {
+        self.poles = spectrum.finite;
+        self.pole_evidence = spectrum.evidence;
+        debug_assert!(self.pole_evidence.is_consistent_with(&self.poles));
+    }
+
+    fn set_zeros(&mut self, spectrum: ComputedSpectrum) {
+        self.zeros = spectrum.finite;
+        self.zero_evidence = spectrum.evidence;
+        debug_assert!(self.zero_evidence.is_consistent_with(&self.zeros));
     }
 
     /// Get bandwidth (frequency of dominant pole)
@@ -316,9 +523,38 @@ struct StateSpaceModel {
 
 /// Complete finite/infinite accounting from a generalized Schur solve.
 #[derive(Debug, Clone)]
-struct GeneralizedSpectrum {
+struct ComputedSpectrum {
     finite: Vec<Complex64>,
-    infinite: usize,
+    evidence: RootSetEvidence,
+}
+
+impl ComputedSpectrum {
+    fn from_certificate(
+        finite: Vec<Complex64>,
+        certificate: SpectrumCertificate,
+    ) -> Result<Self, PoleZeroAnalysisError> {
+        let evidence =
+            RootSetEvidence::from_certificate(finite.len(), certificate).ok_or_else(|| {
+                PoleZeroAnalysisError::InvalidSystem(
+                    "computed spectrum evidence is internally inconsistent".to_string(),
+                )
+            })?;
+        Ok(Self { finite, evidence })
+    }
+
+    fn exact(
+        finite: Vec<Complex64>,
+        problem_order: usize,
+        infinite_count: usize,
+    ) -> Result<Self, PoleZeroAnalysisError> {
+        let certificate =
+            SpectrumCertificate::exact(problem_order, infinite_count).ok_or_else(|| {
+                PoleZeroAnalysisError::InvalidSystem(
+                    "analytic spectrum accounting is internally inconsistent".to_string(),
+                )
+            })?;
+        Self::from_certificate(finite, certificate)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,6 +591,14 @@ pub struct PoleZeroAnalyzer {
     num_nodes: usize,
 }
 
+impl PoleZeroAnalyzer {
+    const APPROXIMATE_BACKWARD_ERROR_LIMIT: Value = 1.0e-8;
+
+    fn qualification_tolerance(problem_order: usize) -> Value {
+        128.0 * problem_order.max(1) as Value * Value::EPSILON
+    }
+}
+
 mod gain;
 mod matrix_ops;
 mod poles;
@@ -385,6 +629,7 @@ mod tests {
         helper
             .zeros_from_state_space(model, &PoleZeroConfig::poles_and_zeros(0, 0))
             .expect("the fabricated state-space transfer has finite zeros")
+            .finite
     }
 
     #[test]

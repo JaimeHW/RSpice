@@ -18,13 +18,13 @@ impl PoleZeroAnalyzer {
     ///
     /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
     /// For singular C, use generalized eigenvalue: G·x = -s·C·x
-    pub(crate) fn find_poles(
+    pub(in crate::analysis::pole_zero) fn find_poles(
         &self,
         config: &PoleZeroConfig,
-    ) -> Result<Vec<Complex64>, PoleZeroAnalysisError> {
+    ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
         let n = self.num_nodes;
         if n == 0 {
-            return Ok(Vec::new());
+            return ComputedSpectrum::exact(Vec::new(), 0, 0);
         }
 
         // For single-node RC circuit:
@@ -42,10 +42,10 @@ impl PoleZeroAnalyzer {
                 }
                 let poles = vec![Complex64::new(pole, 0.0)];
                 self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
-                return Ok(poles);
+                return ComputedSpectrum::exact(poles, 1, 0);
             }
             if g != 0.0 {
-                return Ok(Vec::new());
+                return ComputedSpectrum::exact(Vec::new(), 1, 1);
             }
             return Err(PoleZeroAnalysisError::IrregularDescriptor {
                 index: 0,
@@ -54,20 +54,26 @@ impl PoleZeroAnalyzer {
             });
         }
 
+        // A nonsingular C has no infinite modes, so the ordinary state-space
+        // solve is complete and avoids known small-matrix QZ workspace issues.
         if let Some(state_space) = self.build_state_space(&vec![0.0; n], &vec![0.0; n])
-            && let Ok(mut poles) = self.eigenvalues_from_matrix(&state_space.a)
+            && state_space.a.rows == n
         {
-            self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
-            poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
-            return Ok(poles);
+            let mut spectrum = self.eigenvalues_from_matrix(&state_space.a)?;
+            self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
+            spectrum
+                .finite
+                .sort_by(|a, b| a.norm().total_cmp(&b.norm()));
+            return Ok(spectrum);
         }
 
-        let spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix)?;
-        debug_assert_eq!(spectrum.finite.len() + spectrum.infinite, n);
-        let mut poles = spectrum.finite;
-        self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
-        poles.sort_by(|a, b| a.norm().total_cmp(&b.norm()));
-        Ok(poles)
+        // Singular descriptors require generalized finite/infinite accounting.
+        let mut spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix)?;
+        self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
+        spectrum
+            .finite
+            .sort_by(|a, b| a.norm().total_cmp(&b.norm()));
+        Ok(spectrum)
     }
 
     pub(in crate::analysis::pole_zero) fn partition_descriptor(

@@ -38,13 +38,16 @@ impl PoleZeroAnalyzer {
         let model = StateSpaceModel { a, b, c, d };
         let mut result = PoleZeroResult::new(input_label, output_label);
         if config.compute_poles {
-            let mut model_poles = helper.eigenvalues_from_matrix(&model.a)?;
-            helper.ensure_roots_within_frequency_limit(&model_poles, config, "pole")?;
-            model_poles.sort_by(|left, right| left.norm().total_cmp(&right.norm()));
-            result.poles = model_poles;
+            let mut spectrum = helper.eigenvalues_from_matrix(&model.a)?;
+            helper.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
+            spectrum
+                .finite
+                .sort_by(|left, right| left.norm().total_cmp(&right.norm()));
+            result.set_poles(spectrum);
         }
         if config.compute_zeros {
-            result.zeros = helper.zeros_from_state_space(&model, config)?;
+            let spectrum = helper.zeros_from_state_space(&model, config)?;
+            result.set_zeros(spectrum);
         }
         if let Some(a_inv_b) = helper.solve_linear(&model.a, &model.b) {
             let correction = model
@@ -231,20 +234,23 @@ impl PoleZeroAnalyzer {
                     "voltage input source could not be constructed",
                 ))?;
             if config.compute_poles {
-                result.poles = voltage_analyzer.find_poles(config)?;
+                let spectrum = voltage_analyzer.find_poles(config)?;
+                result.set_poles(spectrum);
             }
 
             if config.compute_zeros {
                 if self.is_direct_voltage_port_measurement(config) {
-                    result.zeros.clear();
+                    result.set_zeros(ComputedSpectrum::exact(Vec::new(), 0, 0)?);
                 } else if let Some(state_space) =
                     voltage_analyzer.build_state_space(&drive_vec, &output_ext)
                 {
-                    result.zeros = voltage_analyzer.zeros_from_state_space(&state_space, config)?;
+                    let spectrum = voltage_analyzer.zeros_from_state_space(&state_space, config)?;
+                    result.set_zeros(spectrum);
                 } else {
-                    let zeros =
+                    let spectrum =
                         voltage_analyzer.numerator_roots_raw(&drive_vec, &output_ext, config)?;
-                    result.zeros = voltage_analyzer.finalize_zero_roots(zeros, config)?;
+                    let spectrum = voltage_analyzer.finalize_zero_roots(spectrum, config)?;
+                    result.set_zeros(spectrum);
                 }
             }
 
@@ -259,12 +265,14 @@ impl PoleZeroAnalyzer {
 
         // Find poles
         if config.compute_poles {
-            result.poles = self.find_poles(config)?;
+            let spectrum = self.find_poles(config)?;
+            result.set_poles(spectrum);
         }
 
         // Find zeros
         if config.compute_zeros {
-            result.zeros = self.find_zeros(config)?;
+            let spectrum = self.find_zeros(config)?;
+            result.set_zeros(spectrum);
         }
 
         // Compute DC gain

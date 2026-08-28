@@ -1,6 +1,14 @@
 use super::*;
 
 impl PoleZeroAnalyzer {
+    pub(in crate::analysis::pole_zero) fn matrix_frobenius_norm(matrix: &Matrix) -> Value {
+        matrix
+            .data
+            .iter()
+            .flatten()
+            .fold(0.0_f64, |norm, value| norm.hypot(*value))
+    }
+
     pub(in crate::analysis::pole_zero) fn build_port_vectors(
         &self,
         config: &PoleZeroConfig,
