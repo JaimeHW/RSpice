@@ -292,25 +292,30 @@ fn tick_label_with_decimals(value: f64, decimals: usize) -> String {
 mod tests {
     use super::*;
 
-    /// A step that is not a positive real falls back to three decimals.
+    /// A step with no positive magnitude falls back to three decimals.
     ///
     /// The guard reads `!step.is_finite() || step <= 0.0`, which is the same
     /// set the earlier `!(step > 0.0) || !step.is_finite()` rejected — the
     /// finiteness half is what catches NaN either way. This pins that: a bare
-    /// `step <= 0.0` on its own would let NaN through to `(-NaN.log10()).ceil()
-    /// .clamp(..)`, whose `as usize` cast is 0, and every tick on the axis
-    /// would lose its decimals at once.
+    /// `step <= 0.0` on its own would let NaN through to
+    /// `(-NaN.log10()).ceil().clamp(..)`, whose `as usize` cast is 0, and
+    /// every tick on the axis would lose its decimals at once.
+    ///
+    /// The test is over magnitudes because the function is: it takes `.abs()`
+    /// before the guard, so a negative step is an ordinary step read
+    /// backwards, not a rejected one.
     #[test]
-    fn a_step_that_is_not_a_positive_real_keeps_the_default_decimals() {
-        for step in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -0.25] {
+    fn a_step_with_no_positive_magnitude_keeps_the_default_decimals() {
+        for step in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0, -0.0] {
             assert_eq!(
                 step_decimals(step),
                 3,
                 "a step of {step} did not fall back to the default"
             );
         }
-        // The ordinary path is untouched.
+        // The ordinary path is untouched, in either direction.
         assert_eq!(step_decimals(0.25), 1);
+        assert_eq!(step_decimals(-0.25), 1);
         assert_eq!(step_decimals(20.0), 0);
     }
 
