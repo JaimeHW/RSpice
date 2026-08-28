@@ -485,6 +485,21 @@ pub(super) fn resolved_overlay_geometry(
     Ok((cursors, markers))
 }
 
+/// A stable id for one overlay entity, in the same shape as the trace ids so
+/// a print mapping can name a cursor or a marker across two runs of the same
+/// page.
+fn stable_overlay_id(viewer: ResultViewer, kind: &str, label: &str) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update(b"rspice-hardcopy-results-overlay-v1");
+    hasher.update(viewer.label().as_bytes());
+    hasher.update(kind.as_bytes());
+    hasher.update(label.as_bytes());
+    let bytes: [u8; 8] = hasher.finalize()[..8]
+        .try_into()
+        .expect("sha256 yields at least eight bytes");
+    u64::from_be_bytes(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,19 +615,4 @@ mod tests {
 
         assert_eq!(markers.len(), 1);
     }
-}
-
-/// A stable id for one overlay entity, in the same shape as the trace ids so
-/// a print mapping can name a cursor or a marker across two runs of the same
-/// page.
-fn stable_overlay_id(viewer: ResultViewer, kind: &str, label: &str) -> u64 {
-    let mut hasher = Sha256::new();
-    hasher.update(b"rspice-hardcopy-results-overlay-v1");
-    hasher.update(viewer.label().as_bytes());
-    hasher.update(kind.as_bytes());
-    hasher.update(label.as_bytes());
-    let bytes: [u8; 8] = hasher.finalize()[..8]
-        .try_into()
-        .expect("sha256 yields at least eight bytes");
-    u64::from_be_bytes(bytes)
 }

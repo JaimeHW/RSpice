@@ -114,6 +114,38 @@ pub(super) fn plot_axis_ticks(
     Ok(ticks)
 }
 
+fn push_vertical_rule(
+    ticks: &mut Vec<SemanticAxisTick>,
+    frame: &PlotFrame,
+    position: f64,
+    label: String,
+    major: bool,
+) -> Result<(), HardcopySourceError> {
+    if position < frame.x_minimum || position > frame.x_maximum {
+        return Ok(());
+    }
+    let point = |y| {
+        map_plot_point(
+            position,
+            y,
+            frame.x_minimum,
+            frame.y_minimum,
+            frame.x_span,
+            frame.y_span,
+            frame.plot_width,
+            frame.plot_height,
+        )
+    };
+    ticks.push(SemanticAxisTick {
+        axis: SemanticAxisKind::Horizontal,
+        start: point(frame.y_minimum)?,
+        end: point(frame.y_maximum)?,
+        label,
+        major,
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,36 +237,4 @@ mod tests {
         assert_eq!(ticks.iter().filter(|tick| tick.major).count(), 2);
         assert_eq!(ticks.iter().filter(|tick| !tick.major).count(), 8);
     }
-}
-
-fn push_vertical_rule(
-    ticks: &mut Vec<SemanticAxisTick>,
-    frame: &PlotFrame,
-    position: f64,
-    label: String,
-    major: bool,
-) -> Result<(), HardcopySourceError> {
-    if position < frame.x_minimum || position > frame.x_maximum {
-        return Ok(());
-    }
-    let point = |y| {
-        map_plot_point(
-            position,
-            y,
-            frame.x_minimum,
-            frame.y_minimum,
-            frame.x_span,
-            frame.y_span,
-            frame.plot_width,
-            frame.plot_height,
-        )
-    };
-    ticks.push(SemanticAxisTick {
-        axis: SemanticAxisKind::Horizontal,
-        start: point(frame.y_minimum)?,
-        end: point(frame.y_maximum)?,
-        label,
-        major,
-    });
-    Ok(())
 }
