@@ -214,6 +214,15 @@ fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
         ) || analysis.waveforms.iter().any(waveform_is_event))
 }
 
+/// Whether the tab strip offers an events sheet for the active analysis.
+///
+/// The validity half resolves the workspace memo rather than peeking into it.
+/// Peeking and treating a miss as a pass meant evidence nobody had validated
+/// yet — which is every analysis on the frame it first appears — was offered
+/// whatever validation would have said about it, while the SOA, Smith and
+/// Optimization gates beside it were failing closed on the same question.
+/// Resolving it also fills the memo, so the walk happens once per dataset
+/// generation rather than once per gate.
 pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
     let Some(run) = state.simulation.active_run() else {
         return false;
@@ -221,16 +230,8 @@ pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
     let Some(analysis) = state.simulation.active_analysis() else {
         return false;
     };
-    let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     analysis_is_renderable(analysis)
-        && state
-            .ui
-            .results
-            .retained_evidence_validity
-            .borrow()
-            .get(&(state.simulation.data_version, key))
-            .copied()
-            .unwrap_or(true)
+        && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
 }
 
 fn build_event_order(
@@ -1053,6 +1054,66 @@ mod tests {
                 note: EVENT_SELECTION_OTHER_ANALYSIS,
                 stale: true,
             })
+        );
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+    use crate::state::SimulationRun;
+
+    /// Availability fails closed on evidence nobody has validated yet.
+    ///
+    /// The gate read the workspace validity memo and treated a miss as a
+    /// pass, so an analysis whose retained evidence has never been checked —
+    /// which is every analysis on the frame it first appears — was offered
+    /// regardless of what validation would have said. Its siblings (SOA,
+    /// Smith, Optimization) resolve the memo instead of peeking at it, and
+    /// therefore close.
+    #[test]
+    fn never_validated_evidence_is_not_offered_as_an_events_sheet() {
+        let payload = AnalysisResultPayload::TransientEvents {
+            digital_traces: vec![crate::state::DigitalEventTraceEvidence {
+                node_name: "clk".to_owned(),
+                points: vec![crate::state::DigitalEventPointEvidence {
+                    time_s: 0.25,
+                    value_code: 0,
+                }],
+            }],
+            real_traces: Vec::new(),
+        };
+        // A waveform with more coordinates than values is exactly what
+        // `validate_retained_evidence` exists to refuse.
+        let mut corrupt = WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff");
+        corrupt.y = std::sync::Arc::new(vec![0.0]);
+        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![corrupt])
+            .with_result_payload(payload);
+        assert!(
+            analysis.validate_retained_evidence().is_err(),
+            "the fixture has to be invalid for the gate to have anything to refuse"
+        );
+        assert!(
+            analysis_is_renderable(&analysis),
+            "the fixture has to be renderable so only validity can close the gate"
+        );
+
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(analysis);
+        let mut state = AppState::default();
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+        state
+            .ui
+            .results
+            .retained_evidence_validity
+            .borrow_mut()
+            .clear();
+
+        assert!(
+            !active_analysis_is_renderable(&state),
+            "an unvalidated, invalid analysis was offered its sheet"
         );
     }
 }
