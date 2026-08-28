@@ -287,6 +287,98 @@ fn hist_plan(state: &mut AppState, histogram: &str) -> std::sync::Arc<HistPlan> 
     built
 }
 
+/// How one distribution is laid out on its abscissa.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HistAxis {
+    /// The window the axis is ruled over.
+    x0: f64,
+    x1: f64,
+    /// The one value every retained sample landed on, when the distribution
+    /// has no width at all. The sheet draws a bar for it rather than the
+    /// zero-width rectangle its bin edges describe.
+    degenerate_at: Option<f64>,
+}
+
+/// A distribution's abscissa window, and whether it is a single point.
+///
+/// A Monte Carlo whose measurement did not move retains exactly one bin whose
+/// two edges are the same number — that is what the engine's histogram builder
+/// emits when the sample range is zero. Padding a zero span by six percent
+/// leaves a window narrower than the value's own floating-point resolution:
+/// every axis label prints the same number, and the one populated bin is a
+/// one-pixel line in the middle of an empty frame. A degenerate distribution
+/// is ruled around its value instead, so the reader sees a bar standing at a
+/// number rather than an empty plot.
+fn hist_axis(histogram: &crate::analysis::histogram::data::Histogram) -> HistAxis {
+    let span = histogram.data_max - histogram.data_min;
+    if span.is_finite() && span > 0.0 {
+        let pad = span * 0.06;
+        return HistAxis {
+            x0: histogram.data_min - pad,
+            x1: histogram.data_max + pad,
+            degenerate_at: None,
+        };
+    }
+    let value = histogram.data_min;
+    if !value.is_finite() {
+        return HistAxis {
+            x0: -1.0,
+            x1: 1.0,
+            degenerate_at: None,
+        };
+    }
+    // A window a float can actually distinguish: one part in a thousand of
+    // the value, and a unit window when the value is zero.
+    let pad = if value == 0.0 {
+        1.0
+    } else {
+        value.abs() * 1.0e-3
+    };
+    HistAxis {
+        x0: value - pad,
+        x1: value + pad,
+        degenerate_at: Some(value),
+    }
+}
+
+/// The share of the frame the single bar of a degenerate distribution covers.
+const DEGENERATE_BAR_FRACTION: f32 = 0.18;
+
+/// The yield figure, with the population it was measured over.
+///
+/// A percentage alone reads as a property of the run, and it is not: the
+/// denominator is the trials the yield engine had evidence for, and a Monte
+/// Carlo that requested a hundred and completed ninety reports a yield over
+/// ninety. Both halves are stated here rather than left for the reader to
+/// reconstruct from the "Failures" row and the method panel — the count that
+/// makes the percentage mean something belongs beside it.
+fn yield_label(result: &YieldResult, authority: Option<MonteCarloAuthority<'_>>) -> String {
+    let mut label = format!(
+        "{:.1} % · {} of {} evaluated",
+        result.yield_percent, result.pass_count, result.total_runs
+    );
+    if let Some(authority) = authority
+        && authority.failures > 0
+    {
+        label.push_str(&format!(" · {} diverged excluded", authority.failures));
+    }
+    label
+}
+
+/// What the method panel says about the retained binning.
+///
+/// A collapsed distribution states that it is one: "1 retained bins" reads as
+/// a count that happens to be small, when what the reader needs to know is
+/// that the bin has no width because the measurement never moved.
+fn binning_label(histogram: &crate::analysis::histogram::data::Histogram) -> String {
+    if hist_axis(histogram).degenerate_at.is_some() {
+        return "1 retained bin · zero width, every sample at one value".to_owned();
+    }
+    let count = histogram.bins.len();
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} retained bin{plural} · selection rule unavailable")
+}
+
 /// The distribution the reader has selected, by name.
 fn selected_histogram_name(state: &AppState) -> Option<String> {
     let hist_state = &state.analysis.histogram_state;
@@ -357,10 +449,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
 
-    let span = (histogram.data_max - histogram.data_min).abs().max(1e-12);
-    let x0 = histogram.data_min - span * 0.06;
-    let x1 = histogram.data_max + span * 0.06;
-    let (x0, x1) = view.x.unwrap_or((x0, x1));
+    let axis = hist_axis(histogram);
+    let (x0, x1) = view.x.unwrap_or((axis.x0, axis.x1));
     let max_count = histogram.bins.iter().map(|b| b.count).max().unwrap_or(1) as f64;
     let y1 = (max_count * 1.18).ceil().max(4.0);
     let (y0, y1) = view.y.unwrap_or((0.0, y1));
@@ -426,9 +516,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
+    // A distribution with no width has nothing for the ±1σ band or the bin
+    // rectangles to say, so it names the value it collapsed onto instead.
+    if let Some(value) = axis.degenerate_at {
+        spec.markers.push(plot::Marker {
+            x: value,
+            y: y1 * 0.55,
+            color: c.accent,
+            label: format!(
+                "all {} samples at {}",
+                histogram.total_count,
+                fmt_si(value, "", 3)
+            ),
+            drop_line: false,
+            label_dy: 0.0,
+            shape: plot::MarkerShape::Point,
+        });
+    }
+
     // Bars under everything else, with the out-of-spec regions washed in
     // the error tint — the fail zone itself, not the data envelope.
     let bins = &histogram.bins;
+    let degenerate_at = axis.degenerate_at;
+    let total_count = histogram.total_count;
     let accent = c.accent;
     let accent_dim = c.accent_dim;
     let err = c.err;
@@ -454,6 +564,26 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 painter.rect_filled(rect, 0.0, wash);
             }
         }
+        // One bar for a distribution whose bin edges coincide: the retained
+        // rectangle has no width, so the frame supplies one.
+        if let Some(value) = degenerate_at {
+            if total_count > 0 {
+                let half = mapper.rect.width() * DEGENERATE_BAR_FRACTION * 0.5;
+                let centre = mapper.x(value);
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(centre - half, mapper.y(total_count as f64)),
+                    egui::pos2(centre + half, mapper.y(0.0)),
+                );
+                painter.rect(
+                    rect,
+                    0.0,
+                    accent_dim,
+                    egui::Stroke::new(1.0, accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            return;
+        }
         for bin in bins {
             if bin.count == 0 {
                 continue;
@@ -474,10 +604,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }));
 
     let readout = |x: f64| -> Vec<(String, String)> {
-        let count = bins
-            .iter()
-            .find(|b| x >= b.lower && x < b.upper)
-            .map_or(0, |b| b.count);
+        // A zero-width bin can never contain the pointer, so a degenerate
+        // distribution reads out the population it collapsed onto instead of
+        // reporting an empty frame.
+        let count = degenerate_at.map_or_else(
+            || {
+                bins.iter()
+                    .find(|b| x >= b.lower && x < b.upper)
+                    .map_or(0, |b| b.count)
+            },
+            |_| total_count,
+        );
         vec![
             ("x".to_owned(), fmt_si(x, "", 2)),
             ("count".to_owned(), count.to_string()),
@@ -554,10 +691,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             )
         },
     );
-    let binning = format!(
-        "{} retained bins · selection rule unavailable",
-        histogram.bins.len()
-    );
+    let binning = binning_label(histogram);
     super::stat_table(
         ui,
         &[
@@ -586,11 +720,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             .cpk
             .map_or("—".to_owned(), |v| format!("{v:.2}"));
         let rows = [
-            (
-                "Yield",
-                format!("{:.1} %", yield_result.yield_percent),
-                true,
-            ),
+            ("Yield", yield_label(yield_result, mc), true),
             ("Cpk", cpk, false),
             (
                 "Failures",
@@ -728,6 +858,130 @@ mod tests {
             Some(88.0)
         );
         assert!(selected_yield_result(&simulation, "v(out)", true).is_none());
+    }
+
+    /// The histogram a zero-variation Monte Carlo produces.
+    ///
+    /// `VariableStatistics::compute_histogram` returns `(vec![n], vec![v, v])`
+    /// whenever the sample range is not positive, and
+    /// `populate_monte_carlo_histograms` maps that to one bin whose two edges
+    /// are the same number. This is that shape, byte for byte.
+    fn zero_variation_histogram(
+        value: f64,
+        samples: usize,
+    ) -> crate::analysis::histogram::data::Histogram {
+        crate::analysis::histogram::data::Histogram {
+            name: "V(out)".to_owned(),
+            bins: vec![crate::analysis::histogram::data::HistogramBin {
+                lower: value,
+                upper: value,
+                count: samples,
+                weight: samples as f64,
+            }],
+            total_count: samples,
+            total_weight: samples as f64,
+            underflow: 0,
+            overflow: 0,
+            data_min: value,
+            data_max: value,
+        }
+    }
+
+    /// The plan's gate: a Monte Carlo whose measurement never moved must
+    /// still draw as a distribution.
+    #[test]
+    fn a_zero_variation_monte_carlo_is_ruled_around_the_value_it_collapsed_onto() {
+        let histogram = zero_variation_histogram(1.5, 40);
+        let axis = hist_axis(&histogram);
+
+        assert_eq!(
+            axis.degenerate_at,
+            Some(1.5),
+            "the sheet did not recognize a single zero-width bin"
+        );
+        assert!(
+            axis.x0 < 1.5 && 1.5 < axis.x1,
+            "the value is not inside its own window: {axis:?}"
+        );
+        // Wide enough that the axis labels differ from one another, which the
+        // 6 % padding of a zero span never achieves.
+        assert!(
+            axis.x1 - axis.x0 >= 1.5 * 1.0e-3,
+            "the window is narrower than the value's own resolution: {axis:?}"
+        );
+        assert_ne!(
+            fmt_si(axis.x0, "", 3),
+            fmt_si(axis.x1, "", 3),
+            "both ends of the axis print the same number"
+        );
+    }
+
+    /// The percentage states the population it was measured over.
+    ///
+    /// "97.0 %" alone reads as a property of the run. It is a property of the
+    /// trials the yield engine had evidence for, which is not the number
+    /// requested when trials diverged, and the reader had to reconstruct the
+    /// difference from two other rows and a second panel.
+    #[test]
+    fn the_yield_figure_states_the_population_it_was_measured_over() {
+        let result = result("V(out)", 97.0);
+        assert_eq!(
+            yield_label(&result, None),
+            "97.0 % · 97 of 100 evaluated",
+            "the yield percentage stands on its own with no denominator"
+        );
+
+        let variable = mc_variable("V(out)");
+        let authority = MonteCarloAuthority {
+            seed: 7,
+            runs_requested: 110,
+            runs_completed: 100,
+            failures: 10,
+            variable: &variable,
+        };
+        assert_eq!(
+            yield_label(&result, Some(authority)),
+            "97.0 % · 97 of 100 evaluated · 10 diverged excluded"
+        );
+    }
+
+    #[test]
+    fn a_degenerate_distribution_says_its_bin_has_no_width() {
+        assert_eq!(
+            binning_label(&zero_variation_histogram(1.5, 40)),
+            "1 retained bin · zero width, every sample at one value"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_distribution_keeps_its_padded_data_window() {
+        let mut histogram = zero_variation_histogram(0.0, 0);
+        histogram.bins = vec![
+            crate::analysis::histogram::data::HistogramBin {
+                lower: 1.0,
+                upper: 2.0,
+                count: 3,
+                weight: 3.0,
+            },
+            crate::analysis::histogram::data::HistogramBin {
+                lower: 2.0,
+                upper: 3.0,
+                count: 1,
+                weight: 1.0,
+            },
+        ];
+        histogram.total_count = 4;
+        histogram.data_min = 1.0;
+        histogram.data_max = 3.0;
+
+        let axis = hist_axis(&histogram);
+        assert_eq!(axis.degenerate_at, None);
+        assert!((axis.x0 - 0.88).abs() < 1.0e-12, "{axis:?}");
+        assert!((axis.x1 - 3.12).abs() < 1.0e-12, "{axis:?}");
+        assert_eq!(
+            binning_label(&histogram),
+            "2 retained bins · selection rule unavailable"
+        );
     }
 
     fn mc_variable(name: &str) -> MonteCarloVariableMetadata {
