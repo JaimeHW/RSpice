@@ -30,7 +30,7 @@ use crate::state::InstancePath;
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
 
-use super::page_kit::{Tone, card, card_note, ledger_head, ledger_row};
+use super::page_kit::{RowPress, Tone, card, card_note, ledger_head, ledger_row};
 
 /// Reference, quantity, the occurrence it is reached through, waveform,
 /// terminals, and what reads it.
@@ -243,6 +243,7 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
             (readers.as_str(), tone),
         ],
         selected,
+        RowPress::Taken,
     )
     .on_hover_text(row_tooltip(
         &format!(
@@ -279,6 +280,7 @@ fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Respons
             (readers.as_str(), tone),
         ],
         selected,
+        RowPress::Taken,
     )
     .on_hover_text(row_tooltip(
         &format!(

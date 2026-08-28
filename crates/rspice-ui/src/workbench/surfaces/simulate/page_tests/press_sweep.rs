@@ -490,9 +490,9 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("Outputs", 0),
     ("Specifications", 4),
     ("RunSet", 31),
-    ("Models", 2),
-    ("Solver", 42),
-    ("Save", 7),
+    ("Models", 1),
+    ("Solver", 33),
+    ("Save", 6),
     ("analysis catalogue · Analyses", 29),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
@@ -503,7 +503,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("advanced options", 27),
+    ("advanced options", 26),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -515,43 +515,29 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 ];
 
 /// Distinct controls the sweep presses in total.
-const PRESSED_FLOOR: usize = 275;
+const PRESSED_FLOOR: usize = 263;
 
 /// Controls that are wired to nothing.
 ///
-/// Every one of these is a ledger row, and they share one cause:
-/// `page_kit::ledger_row` allocates `Sense::click()` and publishes
+/// Empty, and still a list rather than a boolean, because the list is what
+/// makes this a gate a reader can act on: each surface's case compares its own
+/// findings against the entries naming that surface, so a control the studio
+/// grows and wires to nothing fails under its own name instead of moving a
+/// tally.
+///
+/// It held twelve entries when the sweep was first measured, and all twelve
+/// were one defect rather than twelve. `page_kit::ledger_row` allocated
+/// `Sense::click()` and published
 /// `WidgetInfo::selected(WidgetType::SelectableLabel, …)` for every row it
-/// draws, whether or not the caller does anything with the response. To a
-/// reader on a screen reader each of these reads as a selectable button, and
-/// pressing it does nothing at all:
-///
-/// * `page_solver.rs` takes the click only `if row.target.is_some()`, and the
-///   nine rows below state plan policy rather than an authored override, so
-///   they have no target.
-/// * `advanced_options.rs` takes it only `if !row.refused`, and the step
-///   ceiling is refused for this analysis.
-/// * `page_save/groups.rs`'s `plan_level_row` drops the response outright —
-///   its own comment says the row is deliberately not a group.
-/// * `page_models.rs` draws its "nothing to gate" placeholder as a row and
-///   drops the response too.
-///
-/// Carried here rather than excused: this list is a bill, and the fix is in
-/// product code that this lane may not touch.
-const DEAD_CONTROLS: &[&str] = &[
-    "Models: Button \"No models loaded\"",
-    "Save: Button \"Ungrouped\"",
-    "Solver: Button \"DC · untiered solves\"",
-    "Solver: Button \"Every analysis\"",
-    "Solver: Button \"Every analysis\"",
-    "Solver: Button \"Every analysis\"",
-    "Solver: Button \"Every analysis\"",
-    "Solver: Button \"Time stepped\"",
-    "Solver: Button \"Time stepped\"",
-    "Solver: Button \"Time stepped\"",
-    "Solver: Button \"Transient\"",
-    "advanced options: Button \"Step ceiling\"",
-];
+/// drew, whether or not the caller read the click — so nine solver policy rows,
+/// a refused advanced option, the capture ledger's fallback group and the
+/// models gate's "nothing to gate" placeholder each announced themselves to a
+/// screen reader as a selectable button whose press did nothing. The row now
+/// takes a `page_kit::RowPress` from its caller: a row whose click nothing
+/// reads senses hover and announces itself as a label, so it advertises no
+/// press to answer and this sweep no longer enumerates it at all. The twelve
+/// left together, which is why four surfaces' press counts fell with them.
+const DEAD_CONTROLS: &[&str] = &[];
 
 /// How many presses the segmented-selection arm excuses.
 ///

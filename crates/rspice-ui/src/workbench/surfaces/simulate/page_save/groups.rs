@@ -27,8 +27,8 @@ use crate::workbench::state::{CaptureGroupDraft, SimulationWorkflowDialog};
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::page_kit::{
-    Tone, card_body, card_head_row, card_note, card_with_head, field_pair, ledger_head, ledger_row,
-    rule_row,
+    RowPress, Tone, card_body, card_head_row, card_note, card_with_head, field_pair, ledger_head,
+    ledger_row, rule_row,
 };
 use super::{STORAGE_BUDGET_CHOICES, commit_save_policy, format_bytes};
 
@@ -188,12 +188,17 @@ pub(super) fn capture_groups(
                         ),
                     ],
                     selected == Some(row.group),
+                    // The fallback group is not a record, so selecting it would
+                    // arm commands that have nothing to act on.
+                    if row.group == CaptureGroup::ungrouped_id() {
+                        RowPress::Ignored
+                    } else {
+                        RowPress::Taken
+                    },
                 );
                 let response =
                     response.on_hover_text(row_hover(&groups, row.group, outputs, membership));
-                // The fallback group is not a record, so selecting it would arm
-                // commands that have nothing to act on.
-                if response.clicked() && row.group != CaptureGroup::ungrouped_id() {
+                if response.clicked() {
                     command = Some(GroupCommand::Select(row.group));
                 }
             }
@@ -373,6 +378,7 @@ fn plan_level_row(ui: &mut Ui, name: &str, detail: &str, bytes: u64) {
             ("—", Tone::Neutral),
         ],
         false,
+        RowPress::Ignored,
     );
 }
 

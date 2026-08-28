@@ -20,8 +20,8 @@ use crate::workbench::state::{SimulationPage, SpecificationEvidenceFilter};
 use crate::ui::widgets::{Button, select};
 
 use super::page_kit::{
-    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, field_pair,
-    filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
+    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head,
+    field_pair, filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
 };
 use super::workflows::commit_plan_change;
 
@@ -679,6 +679,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ("—", Tone::Neutral),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             } else if shown == 0 {
                 let held = format!("{} in this plan · widen the filter", specs.len());
@@ -693,6 +694,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ("—", Tone::Neutral),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             }
             for (spec, row) in specs.iter().zip(&rows) {
@@ -710,6 +712,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         (row.margin.as_str(), row.tone),
                     ],
                     selected.as_deref() == Some(spec.measurement.as_str()),
+                    RowPress::Taken,
                 )
                 .clicked()
                 {

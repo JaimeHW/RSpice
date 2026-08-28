@@ -641,6 +641,7 @@ pub(super) fn task_rate_card(
                     (duration.as_str(), Tone::Neutral),
                 ],
                 false,
+                super::page_kit::RowPress::Ignored,
             );
             // The identity first, as the plan stack spells it, so a row here
             // and a row there are visibly the same instance. The rate is the

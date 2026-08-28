@@ -23,7 +23,7 @@ use super::super::models::closure::{
 };
 use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
-    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
+    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
     ledger_head, ledger_row, ledger_row_cells, paint_text, rule_row,
 };
 
@@ -221,6 +221,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                         ("—", Tone::Neutral),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             }
             for (index, binding) in bindings.iter().enumerate() {
@@ -816,6 +817,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
                         ("—", Tone::Neutral),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             }
             for finding in reading.findings.iter().take(GATE_FINDING_ROWS) {
@@ -828,6 +830,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
                         (finding.state, finding.tone),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             }
             let remainder = reading.findings.len().saturating_sub(GATE_FINDING_ROWS);
@@ -841,6 +844,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
                         ("—", Tone::Neutral),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             }
             card_note(

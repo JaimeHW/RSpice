@@ -20,8 +20,8 @@ use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemov
 use crate::ui::widgets::{mono_input, select};
 
 use super::page_kit::{
-    Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head, ledger_row,
-    rule_row,
+    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
+    ledger_row, rule_row,
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
@@ -148,6 +148,7 @@ fn registry(
                         ("—", Tone::Neutral),
                     ],
                     false,
+                    RowPress::Ignored,
                 );
             }
             for (index, variable) in variables.iter().enumerate() {
@@ -182,6 +183,7 @@ fn registry(
                         (variable.sweep_eligibility.label(), Tone::Neutral),
                     ],
                     selected_index == Some(index),
+                    RowPress::Taken,
                 )
                 .clicked()
                 {

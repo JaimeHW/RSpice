@@ -22,8 +22,8 @@ use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemov
 use crate::workbench::commands::vocabulary::Command;
 
 use super::page_kit::{
-    Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, field_pair,
-    filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
+    RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head,
+    field_pair, filter_field, filter_row, ledger_head, ledger_row, row_matches, rule_row,
 };
 use super::workflows::{commit_plan_change, unique_copy_name};
 
@@ -336,6 +336,7 @@ fn registry(
                         (row.status.as_str(), row.status_tone),
                     ],
                     selected.as_deref() == Some(output.name.as_str()),
+                    RowPress::Taken,
                 )
                 .clicked()
                 {
@@ -632,7 +633,7 @@ pub(super) fn empty_registry_text(
 /// stores when nothing is authored, the other says the reader is looking
 /// through a narrowed view of outputs that are all still there.
 fn empty_registry_row(ui: &mut Ui, statement: &str, tone: Tone) {
-    let _ = ledger_row(ui, &[1.0], &[(statement, tone)], false);
+    ledger_row(ui, &[1.0], &[(statement, tone)], false, RowPress::Ignored);
 }
 
 fn status_cell(report: Option<&crate::simulation::SavedOutputPreflightReport>) -> (String, Tone) {

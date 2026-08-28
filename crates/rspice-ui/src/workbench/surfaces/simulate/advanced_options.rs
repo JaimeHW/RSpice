@@ -48,7 +48,7 @@ use crate::ui::widgets::{Button, mono_input};
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::AdvancedOptionsEditor;
 
-use super::page_kit::{Tone, card_note, card_with_head, ledger_head, ledger_row};
+use super::page_kit::{RowPress, Tone, card_note, card_with_head, ledger_head, ledger_row};
 
 /// Analysis · Option · Effective value · Origin, and the editor's own cell.
 const COLUMNS: [f32; 4] = [0.30, 0.22, 0.30, 0.18];
@@ -377,6 +377,13 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
                             (if row.refused { "—" } else { "Edit" }, Tone::Neutral),
                         ],
                         false,
+                        // A refused option has no editor to open, so its row
+                        // states the owner's value and answers no press.
+                        if row.refused {
+                            RowPress::Ignored
+                        } else {
+                            RowPress::Taken
+                        },
                     );
                     // The origin cell carries a whole sentence for a refused
                     // row and is the first to elide, so the hover restates it
@@ -388,7 +395,7 @@ pub(super) fn panel(ui: &mut Ui, app: &mut RSpiceApp) {
                         row.option.config_field(),
                         row.option.consumer()
                     ));
-                    if response.clicked() && !row.refused {
+                    if response.clicked() {
                         picked.set(Some(row.option));
                     }
                 }

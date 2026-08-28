@@ -48,8 +48,8 @@ use crate::workbench::app_state::SimSetupState;
 use crate::workbench::state::AnalysisOverrideDraft;
 
 use super::page_kit::{
-    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, cell_ui, field_pair,
-    ledger_group, ledger_head, ledger_row, ledger_row_cells, rule_row,
+    CARD_PAD_X, RowPress, Tone, card, card_body, card_head_row, card_note, card_row, cell_ui,
+    field_pair, ledger_group, ledger_head, ledger_row, ledger_row_cells, rule_row,
 };
 
 /// What choosing each named policy means, positionally matched to
@@ -1233,12 +1233,20 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
                         (row.origin, Tone::Neutral),
                     ],
                     is_selected,
+                    // A row with no target states the plan's policy rather than
+                    // an authored override, so there is nothing for a press to
+                    // open an editor on.
+                    if row.target.is_some() {
+                        RowPress::Taken
+                    } else {
+                        RowPress::Ignored
+                    },
                 );
                 // The origin is the row's longest cell and the first to elide,
                 // and one of them is a whole sentence about who owns the value.
                 // The hover restates it rather than leaving a reader with half.
                 let response = response.on_hover_text(row.origin);
-                if response.clicked() && row.target.is_some() {
+                if response.clicked() {
                     picked_row.set(Some(index));
                 }
             }

@@ -21,8 +21,8 @@ use crate::workbench::{AppState, RSpiceApp};
 use crate::ui::widgets::select;
 
 use super::page_kit::{
-    Tone, card, card_body, card_note, card_row, field_pair, ledger_group, ledger_head, ledger_row,
-    rule_row,
+    RowPress, Tone, card, card_body, card_note, card_row, field_pair, ledger_group, ledger_head,
+    ledger_row, rule_row,
 };
 
 const DATASET_COLUMNS: [f32; 4] = [0.26, 0.14, 0.20, 0.40];
@@ -596,6 +596,14 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
                             },
                         ],
                         row.active,
+                        // The active regression baseline is reclassified in
+                        // Verification, not here, so its row refuses the press
+                        // rather than offering one it will not answer.
+                        if row.regression_baseline {
+                            RowPress::Ignored
+                        } else {
+                            RowPress::Taken
+                        },
                     );
                     if row.regression_baseline {
                         response.on_hover_text(

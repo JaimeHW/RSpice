@@ -359,16 +359,39 @@ pub(super) fn ledger_group(ui: &mut Ui, caption: &str) {
     );
 }
 
-/// A read-only ledger row. Returns the row response so a page can select it.
+/// Whether anything reads a ledger row's click.
+///
+/// A row that senses a click and announces itself as a selectable is telling a
+/// reader that pressing it does something, and only a caller that reads
+/// [`Response::clicked`] can keep that promise. Most of the studio's rows state
+/// a record and take no press at all, so they say [`RowPress::Ignored`] and are
+/// drawn as what they are: they still sense hover, which is what lets a wide row
+/// track the cursor across its columns and carry a tooltip, and they announce
+/// themselves as labels rather than as controls wired to nothing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowPress {
+    /// The caller reads this row's `clicked()`.
+    Taken,
+    /// Nothing reads this row's click.
+    Ignored,
+}
+
+/// A read-only ledger row. Returns the row response so a page can select it,
+/// and so any row can hang a tooltip on it.
 pub(super) fn ledger_row(
     ui: &mut Ui,
     fractions: &[f32],
     cells: &[(&str, Tone)],
     selected: bool,
+    press: RowPress,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
+    let sense = match press {
+        RowPress::Taken => Sense::click(),
+        RowPress::Ignored => Sense::hover(),
+    };
     let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), t.metrics.row_h), Sense::click());
+        ui.allocate_exact_size(vec2(ui.available_width(), t.metrics.row_h), sense);
     if selected {
         ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
     } else if response.hovered() {
@@ -399,13 +422,16 @@ pub(super) fn ledger_row(
         .first()
         .map(|(text, _)| (*text).to_owned())
         .unwrap_or_default();
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
+    response.widget_info(|| match press {
+        RowPress::Taken => egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
             row_label.clone(),
-        )
+        ),
+        RowPress::Ignored => {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), row_label.clone())
+        }
     });
     theme::paint_focus_ring(ui, &response, rect);
     response
@@ -510,6 +536,7 @@ pub(super) fn receipts_card(
                     (row.digest.as_str(), Tone::Neutral),
                 ],
                 false,
+                RowPress::Ignored,
             );
         }
         card_note(ui, closing_note);
