@@ -9,6 +9,7 @@
 //! is the other half of this and sits one layer up, because it solves against
 //! an assembled matrix rather than defining one.
 
+pub(crate) mod eigenspectrum;
 pub mod integration;
 
 use crate::Value;

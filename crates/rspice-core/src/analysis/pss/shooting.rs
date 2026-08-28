@@ -5,7 +5,30 @@
 
 #![allow(clippy::needless_range_loop)]
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::numerics::eigenspectrum::{OrdinarySpectrumError, qualified_real_eigenspectrum};
 use crate::solver::{SolverError, StaticMatrix};
+
+/// Failure to extract and strictly qualify a complete Floquet spectrum.
+#[derive(Debug, Clone, thiserror::Error, PartialEq)]
+#[non_exhaustive]
+pub enum FloquetSpectrumError {
+    /// Cooperative cancellation was requested.
+    #[error("Floquet spectrum computation was aborted")]
+    Aborted,
+    /// The monodromy matrix or its eigenspectrum failed numerical validation.
+    #[error("Floquet spectrum computation failed: {0}")]
+    Numerical(String),
+}
+
+impl From<OrdinarySpectrumError> for FloquetSpectrumError {
+    fn from(error: OrdinarySpectrumError) -> Self {
+        match error {
+            OrdinarySpectrumError::Aborted => Self::Aborted,
+            error => Self::Numerical(error.to_string()),
+        }
+    }
+}
 
 /// State of the shooting Newton solver
 #[derive(Debug, Clone)]
@@ -253,157 +276,24 @@ impl ShootingNewtonSolver {
     ///
     /// Floquet multipliers are eigenvalues of the Monodromy matrix.
     /// For a stable orbit, all multipliers should have |λ| ≤ 1.
-    /// One multiplier is always 1 (corresponding to perturbations along the orbit).
+    /// An autonomous orbit has a unit phase multiplier corresponding to
+    /// perturbations along the orbit; a driven periodic solution need not.
     pub fn compute_floquet_multipliers(
         &self,
         monodromy: &[Vec<Value>],
-    ) -> Vec<num_complex::Complex64> {
-        let n = monodromy.len();
-        if n == 0 {
-            return Vec::new();
-        }
-        if monodromy
-            .iter()
-            .any(|row| row.len() != n || row.iter().any(|v| !v.is_finite()))
-        {
-            return Vec::new();
-        }
-
-        if n == 1 {
-            return vec![num_complex::Complex64::new(monodromy[0][0], 0.0)];
-        }
-        if n == 2 {
-            return self.eigenvalues_2x2(
-                monodromy[0][0],
-                monodromy[0][1],
-                monodromy[1][0],
-                monodromy[1][1],
-            );
-        }
-
-        self.qr_eigenvalues(monodromy)
+    ) -> Result<Vec<num_complex::Complex64>, FloquetSpectrumError> {
+        self.compute_floquet_multipliers_with_abort(monodromy, &NoAbort)
     }
 
-    fn eigenvalues_2x2(
+    /// Extract and strictly residual-qualify the complete Floquet spectrum,
+    /// checking for cooperative cancellation around the atomic eigensolve.
+    pub fn compute_floquet_multipliers_with_abort(
         &self,
-        a00: Value,
-        a01: Value,
-        a10: Value,
-        a11: Value,
-    ) -> Vec<num_complex::Complex64> {
-        let trace = a00 + a11;
-        let det = a00 * a11 - a01 * a10;
-        let discriminant = trace * trace - 4.0 * det;
-
-        if discriminant >= 0.0 {
-            let sqrt_d = discriminant.sqrt();
-            vec![
-                num_complex::Complex64::new((trace + sqrt_d) / 2.0, 0.0),
-                num_complex::Complex64::new((trace - sqrt_d) / 2.0, 0.0),
-            ]
-        } else {
-            let sqrt_d = (-discriminant).sqrt() / 2.0;
-            vec![
-                num_complex::Complex64::new(trace / 2.0, sqrt_d),
-                num_complex::Complex64::new(trace / 2.0, -sqrt_d),
-            ]
-        }
-    }
-
-    fn qr_eigenvalues(&self, matrix: &[Vec<Value>]) -> Vec<num_complex::Complex64> {
-        let n = matrix.len();
-        let mut a = matrix.to_vec();
-        let tol = 1e-12;
-        let max_iter = self.max_iterations.max(200) * n.max(2);
-
-        for _ in 0..max_iter {
-            let mut converged = true;
-            for i in 1..n {
-                if a[i][i - 1].abs() > tol {
-                    converged = false;
-                    break;
-                }
-            }
-            if converged {
-                break;
-            }
-
-            // Basic shifted QR iteration.
-            let shift = a[n - 1][n - 1];
-            for (i, row) in a.iter_mut().enumerate().take(n) {
-                row[i] -= shift;
-            }
-
-            let (q, r) = self.qr_decompose(&a);
-            a = self.matrix_multiply(&r, &q);
-
-            for (i, row) in a.iter_mut().enumerate().take(n) {
-                row[i] += shift;
-            }
-        }
-
-        let mut eigenvalues = Vec::with_capacity(n);
-        let mut i = 0;
-        while i < n {
-            if i == n - 1 || a[i + 1][i].abs() < tol {
-                eigenvalues.push(num_complex::Complex64::new(a[i][i], 0.0));
-                i += 1;
-            } else {
-                eigenvalues.extend(self.eigenvalues_2x2(
-                    a[i][i],
-                    a[i][i + 1],
-                    a[i + 1][i],
-                    a[i + 1][i + 1],
-                ));
-                i += 2;
-            }
-        }
-
-        eigenvalues
-    }
-
-    fn qr_decompose(&self, a: &[Vec<Value>]) -> (Vec<Vec<Value>>, Vec<Vec<Value>>) {
-        let n = a.len();
-        let mut q = vec![vec![0.0; n]; n];
-        let mut r = vec![vec![0.0; n]; n];
-        let cols: Vec<Vec<Value>> = (0..n).map(|j| (0..n).map(|i| a[i][j]).collect()).collect();
-
-        for j in 0..n {
-            let mut v = cols[j].clone();
-            for i in 0..j {
-                let q_col: Vec<Value> = (0..n).map(|k| q[k][i]).collect();
-                let dot: Value = v.iter().zip(&q_col).map(|(x, y)| x * y).sum();
-                r[i][j] = dot;
-                for k in 0..n {
-                    v[k] -= dot * q_col[k];
-                }
-            }
-
-            let norm = v.iter().map(|x| x * x).sum::<Value>().sqrt();
-            r[j][j] = norm;
-            if norm > 1e-15 {
-                for k in 0..n {
-                    q[k][j] = v[k] / norm;
-                }
-            }
-        }
-
-        (q, r)
-    }
-
-    fn matrix_multiply(&self, a: &[Vec<Value>], b: &[Vec<Value>]) -> Vec<Vec<Value>> {
-        let n = a.len();
-        let mut out = vec![vec![0.0; n]; n];
-        for i in 0..n {
-            for j in 0..n {
-                let mut sum = 0.0;
-                for k in 0..n {
-                    sum += a[i][k] * b[k][j];
-                }
-                out[i][j] = sum;
-            }
-        }
-        out
+        monodromy: &[Vec<Value>],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<num_complex::Complex64>, FloquetSpectrumError> {
+        let spectrum = qualified_real_eigenspectrum(monodromy, abort)?;
+        Ok(spectrum.eigenvalues)
     }
 
     /// Reset solver state for new analysis
@@ -416,5 +306,36 @@ impl ShootingNewtonSolver {
 impl Default for ShootingNewtonSolver {
     fn default() -> Self {
         Self::new(1e-6, 100)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn floquet_spectrum_rejects_empty_ragged_and_nonfinite_monodromy() {
+        let solver = ShootingNewtonSolver::default();
+        assert!(solver.compute_floquet_multipliers(&[]).is_err());
+        assert!(
+            solver
+                .compute_floquet_multipliers(&[vec![1.0, 0.0], vec![0.0]])
+                .is_err()
+        );
+        assert!(
+            solver
+                .compute_floquet_multipliers(&[vec![Value::NAN]])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn floquet_spectrum_honors_abort() {
+        let solver = ShootingNewtonSolver::default();
+        let error = solver
+            .compute_floquet_multipliers_with_abort(&[vec![0.5]], &ImmediateAbort)
+            .unwrap_err();
+        assert_eq!(error, FloquetSpectrumError::Aborted);
     }
 }

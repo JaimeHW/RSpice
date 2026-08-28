@@ -308,6 +308,16 @@ fn rc_steady_state_matches_the_analytic_solution() {
 fn rc_floquet_multiplier_matches_exp_minus_t_over_rc() {
     let result = run_rc_pss();
 
+    assert_eq!(
+        result.result.floquet_multipliers, result.floquet_multipliers,
+        "nested and outer PSS results must retain the same qualified spectrum"
+    );
+    assert_eq!(result.is_stable, result.result.is_stable());
+    assert!(
+        !result.result.period_detected,
+        "forced/driven PSS periods are not auto-detected"
+    );
+
     // One reactive state: the single Floquet multiplier of a linear RC is
     // exactly exp(-T/RC), independent of the drive.
     assert_eq!(
@@ -402,6 +412,11 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
         .with_tolerance(1e-6)
         .with_max_iterations(60);
     let result = engine.run_pss(&netlist, config).expect("PSS converges");
+    assert!(
+        result.result.period_detected,
+        "autonomous PSS period provenance must be retained"
+    );
+    assert_eq!(result.is_stable, result.result.is_stable());
 
     let t0 = 2.0 * std::f64::consts::PI * 1.0e-6;
     let eps: f64 = 0.05;

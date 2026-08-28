@@ -66,8 +66,8 @@ pub use pole_zero::{
     RootSetEvidence, SpectrumCertificate, StabilityVerdict,
 };
 pub use pss::{
-    PeriodDetector, PeriodEstimate, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver,
-    ShootingState,
+    FloquetSpectrumError, PeriodDetector, PeriodEstimate, PeriodicWaveform, PssConfig, PssResult,
+    PssStabilityVerdict, ShootingNewtonSolver, ShootingState,
 };
 pub use pstb::{FloquetMultiplier, PstbAnalyzer, PstbConfig, PstbResult, StabilityType};
 pub use pxf::{PxfConfig, PxfError, PxfResult, PxfSweepType, TransferPoint};

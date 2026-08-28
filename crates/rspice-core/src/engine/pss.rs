@@ -23,7 +23,8 @@
 use super::{Engine, SimulationError, TransientCheckpoint, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{
-    PeriodDetector, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
+    FloquetSpectrumError, PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
+    ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::CircuitData;
 use crate::numerics::integration::CompanionCoefficients;
@@ -420,7 +421,7 @@ pub struct PssAnalysisResult {
     pub monodromy: Vec<Vec<Value>>,
     /// Floquet multipliers (for stability analysis)
     pub floquet_multipliers: Vec<num_complex::Complex64>,
-    /// Whether circuit is stable (all multipliers inside unit circle)
+    /// Whether the shared PSS stability verdict is [`PssStabilityVerdict::Stable`](crate::analysis::PssStabilityVerdict::Stable).
     pub is_stable: bool,
 }
 
@@ -1553,16 +1554,24 @@ impl Engine {
                 )?,
             }
         };
-        let floquet_multipliers = solver.compute_floquet_multipliers(&monodromy);
-        let is_stable = floquet_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
-
+        let floquet_multipliers = solver
+            .compute_floquet_multipliers_with_abort(&monodromy, abort)
+            .map_err(|error| match error {
+                FloquetSpectrumError::Aborted => SimulationError::Aborted,
+                FloquetSpectrumError::Numerical(message) => SimulationError::Circuit(format!(
+                    "PSS Floquet spectrum qualification failed: {message}"
+                )),
+            })?;
         // Build PssResult
-        let pss_result = self.pss_build_result(
+        let mut pss_result = self.pss_build_result(
             &waveform,
             detected_period,
             iteration,
             shooting_state.residual_norm(),
+            config.is_autonomous(),
         );
+        pss_result.floquet_multipliers = floquet_multipliers.clone();
+        let is_stable = pss_result.is_stable();
 
         Ok((
             PssAnalysisResult {
@@ -2733,6 +2742,7 @@ impl Engine {
         period: Value,
         iterations: usize,
         residual_norm: Value,
+        period_detected: bool,
     ) -> PssResult {
         let n_nodes = waveform.num_nodes;
         let n_points = waveform.time.len();
@@ -2742,7 +2752,7 @@ impl Engine {
         result.iterations = iterations;
         result.residual_norm = residual_norm;
         result.node_names = waveform.node_names.clone();
-        result.period_detected = true;
+        result.period_detected = period_detected;
 
         for (i, wf) in result.waveforms.iter_mut().enumerate() {
             if i < waveform.voltages.len() {

@@ -38,5 +38,5 @@ mod shooting;
 
 pub use config::PssConfig;
 pub use period_detect::{PeriodDetector, PeriodEstimate};
-pub use result::{PeriodicWaveform, PssResult};
-pub use shooting::{ShootingNewtonSolver, ShootingState};
+pub use result::{PeriodicWaveform, PssResult, PssStabilityVerdict};
+pub use shooting::{FloquetSpectrumError, ShootingNewtonSolver, ShootingState};
