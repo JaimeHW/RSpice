@@ -147,8 +147,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let point_count = curve.len();
 
     // Component arrays for the plot engine, cached per data version.
+    //
+    // The cache and the locus live in disjoint halves of the session, so the
+    // arrays are built by reference. Copying the whole contour out first —
+    // purely to release the borrow — meant every frame paid for a complete
+    // copy of the locus before finding out the cache already held it.
     let (re, im) = {
-        let points: Vec<_> = curve.points.clone();
+        let nyquist = &state.analysis.nyquist_state;
+        let points = nyquist
+            .curve()
+            .map(|curve| curve.points.as_slice())
+            .unwrap_or_default();
         let derived = &mut state.ui.results.derived;
         let re = derived.get_or(
             plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
