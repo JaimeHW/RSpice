@@ -178,6 +178,14 @@ pub struct OutputRequest {
     /// `.PRINT` card with no delimiter or an invalid delimiter, and `None`
     /// for directives that do not own Xyce print formatting.
     pub print_delimiter: Option<PrintDelimiter>,
+    /// Effective Xyce `.PRINT PRECISION` after Xyce-compatible signed-int
+    /// conversion, retained independently from the probe list so output
+    /// writers can reproduce the requested layout.
+    pub print_precision: Option<i32>,
+    /// Effective Xyce `.PRINT WIDTH` after Xyce-compatible signed-int
+    /// conversion, retained independently from the probe list so output
+    /// writers can reproduce the requested layout.
+    pub print_width: Option<i32>,
     /// Complete source-authored output operands in card order.
     ///
     /// Unlike `dependencies`, this retains one entry per rendered column, so
@@ -337,6 +345,8 @@ impl OutputRequest {
             name: None,
             print_delimiter: matches!(directive, OutputDirectiveKind::Print)
                 .then_some(PrintDelimiter::Whitespace),
+            print_precision: None,
+            print_width: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions,
@@ -368,6 +378,8 @@ impl OutputRequest {
             analysis: None,
             name: None,
             print_delimiter: None,
+            print_precision: None,
+            print_width: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions: extract_output_expressions(source),
@@ -403,6 +415,8 @@ impl OutputRequest {
             analysis: OutputAnalysisKind::from_keyword(&statement.analysis),
             name: Some(statement.name.clone()),
             print_delimiter: None,
+            print_precision: None,
+            print_width: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions: Vec::new(),
@@ -429,6 +443,8 @@ impl OutputRequest {
             analysis: None,
             name: None,
             print_delimiter: None,
+            print_precision: None,
+            print_width: None,
             operands: Vec::new(),
             operand_kinds: Vec::new(),
             expressions: outputs
@@ -442,6 +458,14 @@ impl OutputRequest {
     pub(crate) fn with_print_delimiter(mut self, delimiter: PrintDelimiter) -> Self {
         if self.directive == OutputDirectiveKind::Print {
             self.print_delimiter = Some(delimiter);
+        }
+        self
+    }
+
+    pub(crate) fn with_print_layout(mut self, precision: Option<i32>, width: Option<i32>) -> Self {
+        if self.directive == OutputDirectiveKind::Print {
+            self.print_precision = precision;
+            self.print_width = width;
         }
         self
     }
@@ -479,6 +503,8 @@ impl OutputRequest {
             name: None,
             print_delimiter: matches!(directive, OutputDirectiveKind::Print)
                 .then_some(PrintDelimiter::Whitespace),
+            print_precision: None,
+            print_width: None,
             operands,
             operand_kinds,
             expressions,

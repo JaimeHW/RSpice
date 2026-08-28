@@ -3090,6 +3090,13 @@ pub struct SimulationOptions {
     /// contract parsing, while the transient engine retains the complete
     /// solution-variable set needed by Xyce's snapshot writer.
     pub output_snapshots: Option<bool>,
+    /// Xyce `.OPTIONS OUTPUT PRINTHEADER`: emit the column-name line for
+    /// formatted output. Xyce enables it by default.
+    pub output_print_header: Option<bool>,
+    /// Xyce `.OPTIONS OUTPUT PRINTFOOTER`: emit the terminal simulation or
+    /// parameter-sweep marker for formatted output. Xyce enables it by
+    /// default.
+    pub output_print_footer: Option<bool>,
     /// Xyce 7.10 `.OPTIONS RESTART` checkpoint and restore metadata.
     ///
     /// The core parser owns syntax, validation, and bounded schedule storage;
@@ -3120,6 +3127,11 @@ pub struct SimulationOptions {
     pub timeint_max_order: Option<u8>,
     /// Xyce `TIMESTEPSREVERSAL` acceptance policy.
     pub timeint_timesteps_reversal: Option<bool>,
+    /// Xyce `.OPTIONS TIMEINT DEBUGLEVEL`: signed 32-bit time-integrator
+    /// diagnostic verbosity after Xyce-compatible numeric conversion. This
+    /// is retained as metadata and does not alter transient equations or
+    /// timestep policy.
+    pub timeint_debug_level: Option<i32>,
     /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
     /// Each order produces a bilateral `2*N+1` collocation grid.
     pub hb_num_frequencies: Vec<usize>,
@@ -3378,6 +3390,12 @@ impl SimulationOptions {
         if other.output_snapshots.is_some() {
             self.output_snapshots = other.output_snapshots;
         }
+        if other.output_print_header.is_some() {
+            self.output_print_header = other.output_print_header;
+        }
+        if other.output_print_footer.is_some() {
+            self.output_print_footer = other.output_print_footer;
+        }
         if let Some(other_restart) = &other.restart {
             match &mut self.restart {
                 Some(restart) => restart.merge(other_restart),
@@ -3413,6 +3431,9 @@ impl SimulationOptions {
         }
         if self.timeint_timesteps_reversal.is_none() && other.timeint_timesteps_reversal.is_some() {
             self.timeint_timesteps_reversal = other.timeint_timesteps_reversal;
+        }
+        if other.timeint_debug_level.is_some() {
+            self.timeint_debug_level = other.timeint_debug_level;
         }
         if other.reltol.is_some() {
             self.reltol = other.reltol;

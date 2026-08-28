@@ -456,7 +456,16 @@ pub(super) fn parse_command(
                 &remaining_command_source(stream),
                 remaining_command_expressions(stream),
             );
-            let _ = parse_save_command(stream, line_num, logical_line, saves, false, None, None)?;
+            let _ = parse_save_command(
+                stream,
+                line_num,
+                logical_line,
+                saves,
+                false,
+                params,
+                None,
+                None,
+            )?;
             output_requests.push(request);
         }
         ".PRINT" | ".PLOT" => {
@@ -473,6 +482,7 @@ pub(super) fn parse_command(
                 logical_line,
                 saves,
                 true,
+                params,
                 Some(diagnostics),
                 Some(origin),
             )?;
@@ -483,7 +493,8 @@ pub(super) fn parse_command(
                     parsed.analysis,
                     parsed.operands,
                 )
-                .with_print_delimiter(parsed.delimiter),
+                .with_print_delimiter(parsed.delimiter)
+                .with_print_layout(parsed.precision, parsed.width),
             );
         }
         _ => {
@@ -975,6 +986,8 @@ fn decode_auto_bridge_template_field(raw: &str) -> Option<String> {
 pub(super) struct ParsedSaveCommand {
     analysis: Option<OutputAnalysisKind>,
     delimiter: PrintDelimiter,
+    precision: Option<i32>,
+    width: Option<i32>,
     operands: Vec<OutputOperand>,
 }
 
@@ -984,6 +997,7 @@ pub(super) fn parse_save_command(
     logical_line: &str,
     saves: &mut super::SaveSet,
     skip_analysis_type: bool,
+    params: &ParamContext,
     mut diagnostics: Option<&mut Vec<ParseDiagnostic>>,
     origin: Option<&NetlistSourceLocation>,
 ) -> Result<ParsedSaveCommand, ParseError> {
@@ -992,6 +1006,8 @@ pub(super) fn parse_save_command(
     let mut first_token = true;
     let mut parsed_any = false;
     let mut delimiter = PrintDelimiter::Whitespace;
+    let mut precision = None;
+    let mut width = None;
     let mut analysis = None;
     let mut operands = Vec::new();
 
@@ -1069,6 +1085,14 @@ pub(super) fn parse_save_command(
                                     });
                                 }
                             }
+                        }
+                    } else if upper == "PRECISION" || upper == "WIDTH" {
+                        let parsed =
+                            parse_print_layout_integer(&upper, &value.kind, params, line_num)?;
+                        if upper == "PRECISION" {
+                            precision = Some(parsed);
+                        } else {
+                            width = Some(parsed);
                         }
                     }
                     continue;
@@ -1298,8 +1322,49 @@ pub(super) fn parse_save_command(
     Ok(ParsedSaveCommand {
         analysis,
         delimiter,
+        precision,
+        width,
         operands,
     })
+}
+
+fn parse_print_layout_integer(
+    name: &str,
+    token: &TokenKind,
+    params: &ParamContext,
+    line_num: usize,
+) -> Result<i32, ParseError> {
+    let value = match token {
+        TokenKind::Number(value) => *value,
+        TokenKind::Expression(expression) => eval_expression(expression, params)
+            .map_err(|error| ParseError::InvalidValue(error.to_string()))?,
+        TokenKind::Ident(identifier) => params
+            .get(identifier)
+            .or_else(|| crate::netlist::lexer::parse_spice_value(identifier).ok())
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: format!(".PRINT {name} expects an integer value, found {identifier:?}"),
+            })?,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".PRINT {name} expects an integer value"),
+            });
+        }
+    };
+    let truncated = value.trunc();
+    if !value.is_finite() || truncated < i32::MIN as Value || truncated > i32::MAX as Value {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".PRINT {name} expects a finite signed 32-bit numeric value, found {value}"
+            ),
+        });
+    }
+    // Xyce 7.10 retrieves WIDTH and PRECISION with
+    // `Param::getImmutableValue<int>()`, which converts numeric values with
+    // `static_cast<int>` and therefore truncates toward zero.
+    Ok(truncated as i32)
 }
 
 fn xyce_print_delimiter_from_value(
@@ -1632,6 +1697,14 @@ pub(super) fn parse_options_command(
                 let value = expect_value(stream, line_num, params)?;
                 options.device_debug_level =
                     Some(parse_i64_option("DEVICE.DEBUGLEVEL", value, line_num)?);
+            }
+            (Some("TIMEINT"), "DEBUGLEVEL" | "DEBUG_LEVEL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.timeint_debug_level = Some(parse_xyce_i32_option(
+                    "TIMEINT.DEBUGLEVEL",
+                    value,
+                    line_num,
+                )?);
             }
             (Some("DEVICE"), "TRYTOCOMPACT" | "TRY_TO_COMPACT") => {
                 options.device_try_to_compact =
@@ -2195,6 +2268,14 @@ pub(super) fn parse_options_command(
             }
             (Some("OUTPUT"), "SNAPSHOTS") => {
                 options.output_snapshots =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (Some("OUTPUT"), "PRINTHEADER") => {
+                options.output_print_header =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (Some("OUTPUT"), "PRINTFOOTER") => {
+                options.output_print_footer =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (_, "INTERP" | "NOACCT") => {
@@ -3027,6 +3108,19 @@ fn parse_i64_option(name: &str, value: Value, line_num: usize) -> Result<i64, Pa
         });
     }
     Ok(rounded as i64)
+}
+
+fn parse_xyce_i32_option(name: &str, value: Value, line_num: usize) -> Result<i32, ParseError> {
+    let truncated = value.trunc();
+    if !value.is_finite() || truncated < i32::MIN as Value || truncated > i32::MAX as Value {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{name} must be a finite signed 32-bit numeric value, found {value}"),
+        });
+    }
+    // Xyce 7.10's `Param::getImmutableValue<int>()` converts real numeric
+    // option values with `static_cast<int>`, truncating toward zero.
+    Ok(truncated as i32)
 }
 
 fn parse_digital_delay_type_option(value: Value, line_num: usize) -> Result<i64, ParseError> {
@@ -6098,6 +6192,74 @@ mod tests {
     }
 
     #[test]
+    fn xyce_print_layout_and_output_framing_are_typed_last_authored() {
+        let netlist = Netlist::parse(
+            "typed Xyce output layout\n\
+             V1 out 0 1\n\
+             .OPTIONS OUTPUT PRINTHEADER=off PRINTFOOTER=0\n\
+             .OPTIONS OUTPUT PRINTHEADER=yes PRINTFOOTER=true\n\
+             .PRINT TRAN WIDTH=21 PRECISION=12 V(out)\n\
+             .TRAN 1n 2n\n\
+             .END\n",
+        )
+        .expect("Xyce boolean spellings and print layout parse");
+
+        assert_eq!(netlist.options.output_print_header, Some(true));
+        assert_eq!(netlist.options.output_print_footer, Some(true));
+        let [request] = netlist.output_requests.as_slice() else {
+            panic!("expected one typed output request");
+        };
+        assert_eq!(request.print_precision, Some(12));
+        assert_eq!(request.print_width, Some(21));
+        let mut merged = crate::netlist::SimulationOptions {
+            output_print_header: Some(false),
+            output_print_footer: Some(false),
+            ..Default::default()
+        };
+        merged.merge(&netlist.options);
+        assert_eq!(merged.output_print_header, Some(true));
+        assert_eq!(merged.output_print_footer, Some(true));
+        assert_eq!(
+            netlist.saves.signals,
+            vec![SaveSignal::Voltage("out".to_string())]
+        );
+        assert!(netlist.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn xyce_print_integer_layout_uses_signed_i32_truncation() {
+        for (authored, expected) in [
+            ("0", 0),
+            ("1", 1),
+            ("16", 16),
+            ("17", 17),
+            ("12.9", 12),
+            ("-1.9", -1),
+        ] {
+            let deck = format!(
+                "print integer conversion\nV1 out 0 1\n.PRINT TRAN PRECISION={authored} WIDTH={authored} V(out)\n.TRAN 1n 2n\n.END\n"
+            );
+            let netlist = Netlist::parse(&deck)
+                .unwrap_or_else(|error| panic!("layout value {authored} must parse: {error}"));
+            let [request] = netlist.output_requests.as_slice() else {
+                panic!("expected one typed output request");
+            };
+            assert_eq!(request.print_precision, Some(expected));
+            assert_eq!(request.print_width, Some(expected));
+        }
+
+        for invalid in ["2147483648", "-2147483649"] {
+            let deck = format!(
+                "invalid print width\nV1 out 0 1\n.PRINT TRAN WIDTH={invalid} V(out)\n.TRAN 1n 2n\n.END\n"
+            );
+            assert!(
+                Netlist::parse(&deck).is_err(),
+                "WIDTH={invalid} must fail closed"
+            );
+        }
+    }
+
+    #[test]
     fn xyce_inconsistent_dc_sweeps_warn_and_preserve_one_start_point() {
         let options = crate::netlist::NetlistParseOptions {
             expression_dialect: crate::config::ExpressionDialect::Xyce,
@@ -7808,6 +7970,44 @@ mod tests {
             Netlist::parse(&fractional).is_err(),
             "fractional DEVICE.DEBUGLEVEL must be rejected"
         );
+    }
+
+    #[test]
+    fn xyce_timeint_debug_level_is_typed_and_merges_last_value() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint debuglevel=3 debug_level=-100",
+        ))
+        .expect("Xyce TIMEINT.DEBUGLEVEL parses");
+        assert_eq!(netlist.options.timeint_debug_level, Some(-100));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option"),
+            "typed TIMEINT.DEBUGLEVEL must not be diagnosed as unknown: {:?}",
+            netlist.diagnostics
+        );
+
+        let mut merged = crate::netlist::SimulationOptions {
+            timeint_debug_level: Some(7),
+            ..Default::default()
+        };
+        merged.merge(&netlist.options);
+        assert_eq!(merged.timeint_debug_level, Some(-100));
+
+        let fractional = Netlist::parse(&deck_with_options(".options timeint debuglevel=1.9"))
+            .expect("Xyce truncates numeric DEBUGLEVEL toward zero");
+        assert_eq!(fractional.options.timeint_debug_level, Some(1));
+
+        for invalid in ["2147483648", "-2147483649"] {
+            assert!(
+                Netlist::parse(&deck_with_options(&format!(
+                    ".options timeint debuglevel={invalid}"
+                )))
+                .is_err(),
+                "out-of-range DEBUGLEVEL={invalid} must fail closed"
+            );
+        }
     }
 
     #[test]
