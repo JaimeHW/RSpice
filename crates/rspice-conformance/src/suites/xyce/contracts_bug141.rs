@@ -702,7 +702,17 @@ impl XyceTestRunner {
         start: Instant,
     ) -> Result<(), String> {
         let run_netlist = netlist.clone();
-        let max_step = Self::transient_family_max_step(&run_netlist, &plan.tran)?;
+        // This is a completion-only contract with no numerical gold. Preserve
+        // Xyce's native DELMAX policy and source/event breakpoints instead of
+        // injecting the harness's pointwise-oracle policy of 200 accepted
+        // steps per source transition.
+        let max_step = Self::transient_max_step_with_solver_ceiling(
+            &run_netlist,
+            &plan.tran,
+            None,
+            Self::transient_oracle_solver_max_step_for_netlist(&run_netlist, &plan.tran),
+            false,
+        )?;
         let mut config = self.xyce_engine_config(None);
         config.matrix_solver = Some(backend);
         config.transient_initial_timestep = Self::xyce_initial_timestep_for_tran(&plan.tran);
@@ -996,9 +1006,22 @@ mod tests {
         }
         let path = root.join(DIG_COUNT_PATH);
         let source = fs::read_to_string(&path).expect("read canonical BUG141 digital worker");
-        runner
+        let (plan, netlist) = runner
             .validate_bug141_dig_count_worker(&source, &path)
             .expect("canonical BUG141 digital worker preserves latch ICs");
+        let completion_max_step = XyceTestRunner::transient_max_step_with_solver_ceiling(
+            &netlist,
+            &plan.tran,
+            None,
+            XyceTestRunner::transient_oracle_solver_max_step_for_netlist(&netlist, &plan.tran),
+            false,
+        )
+        .expect("BUG141 completion execution ceiling resolves");
+        assert_eq!(
+            completion_max_step.to_bits(),
+            (0.1 * plan.tran.stop).to_bits(),
+            "completion-only BUG141 execution preserves native Xyce DELMAX instead of injecting a source-resolution oracle"
+        );
     }
 
     #[test]
