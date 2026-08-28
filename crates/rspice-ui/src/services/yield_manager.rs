@@ -132,6 +132,16 @@ pub struct DistributionStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct YieldResult {
     pub spec: YieldSpec,
+    /// The yield denominator: every trial the engine reported, whether or not
+    /// it produced a finite observation.
+    ///
+    /// This is the one convention, and it is stated wherever the percentage is
+    /// shown. A trial that diverged is counted here and counted as a failure
+    /// — a specification a run could not evaluate is not a specification it
+    /// met — so the figure is the conservative one. It is *not* the number of
+    /// runs requested: trials the engine never completed are not in the
+    /// retained population at all, and the distribution panel names them
+    /// separately rather than folding them into this count.
     pub total_runs: usize,
     pub pass_count: usize,
     pub fail_count: usize,
@@ -408,27 +418,45 @@ impl YieldAnalysisManager {
             (0.0, 0.0)
         };
 
-        // Capability Indices
+        // Capability indices.
+        //
+        // Cp is the ratio of the specification width to the process width and
+        // therefore exists only for a two-sided specification. Cpk is the
+        // distance from the mean to the nearer bound in three-sigma units, and
+        // a bound that does not exist is not a nearer one: a one-sided
+        // specification reports the one-sided form — Cpu against an upper
+        // limit, Cpl against a lower one — which is what a capability study
+        // of a process with a single limit publishes. Refusing to compute it
+        // left the majority of specifications showing an em dash for the one
+        // index they can actually have.
         let mut cp = None;
         let mut cpk = None;
 
-        if let (Some(lsl), Some(usl)) = (spec.min, spec.max)
-            && lsl.is_finite()
-            && usl.is_finite()
-            && usl > lsl
-            && std_dev > 0.0
-        {
-            let cp_val = (usl - lsl) / (6.0 * std_dev);
-            if cp_val.is_finite() {
-                cp = Some(cp_val);
+        if std_dev > 0.0 {
+            // Exactly the bounds `YieldSpec::evaluates` judges against, so an
+            // index can never be computed from a limit the verdict ignores.
+            let finite = |value: &f64| value.is_finite();
+            let (lsl, usl) = match spec.limit_type {
+                SpecLimitType::Lower => (spec.min.filter(finite), None),
+                SpecLimitType::Upper => (None, spec.max.filter(finite)),
+                SpecLimitType::Range => (spec.min.filter(finite), spec.max.filter(finite)),
+            };
+            if let (Some(lsl), Some(usl)) = (lsl, usl)
+                && usl > lsl
+            {
+                let cp_val = (usl - lsl) / (6.0 * std_dev);
+                if cp_val.is_finite() {
+                    cp = Some(cp_val);
+                }
             }
-
-            let cpu = (usl - mean) / (3.0 * std_dev);
-            let cpl = (mean - lsl) / (3.0 * std_dev);
-            let cpk_val = cpu.min(cpl);
-            if cpk_val.is_finite() {
-                cpk = Some(cpk_val);
-            }
+            let cpu = usl.map(|usl| (usl - mean) / (3.0 * std_dev));
+            let cpl = lsl.map(|lsl| (mean - lsl) / (3.0 * std_dev));
+            let cpk_val = match (cpu, cpl) {
+                (Some(cpu), Some(cpl)) => Some(cpu.min(cpl)),
+                (Some(one), None) | (None, Some(one)) => Some(one),
+                (None, None) => None,
+            };
+            cpk = cpk_val.filter(|value| value.is_finite());
         }
 
         DistributionStats {
@@ -581,6 +609,83 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(keys, vec!["alpha", "zeta"]);
+    }
+
+    /// A one-sided specification has a capability index. Cpk is the distance
+    /// from the mean to the nearer bound in three-sigma units, and a bound
+    /// that does not exist is not a nearer one — it is simply absent, which
+    /// is why the one-sided forms Cpu and Cpl are what a process with one
+    /// limit reports. Refusing to compute it left every lower- or upper-only
+    /// spec — the majority of them — showing an em dash.
+    #[test]
+    fn a_one_sided_specification_still_has_a_capability_index() {
+        let samples = vec![9.0, 10.0, 11.0];
+        // mean 10, sample std dev 1.
+        let mut lower = YieldAnalysisManager::new();
+        lower.add_spec(YieldSpec::lower("gain", 7.0, ""));
+        let stats = &lower.analyze(&[monte_carlo_result("gain", samples.clone())])["gain"].stats;
+        assert!((stats.mean - 10.0).abs() < 1.0e-12);
+        assert!((stats.std_dev - 1.0).abs() < 1.0e-12);
+        assert_eq!(
+            stats.cp, None,
+            "Cp is a two-sided ratio and has no one-sided form"
+        );
+        assert!(
+            stats.cpk.is_some_and(|cpk| (cpk - 1.0).abs() < 1.0e-12),
+            "lower-limit Cpl = (10 - 7) / (3 * 1) = 1, got {:?}",
+            stats.cpk
+        );
+
+        let mut upper = YieldAnalysisManager::new();
+        upper.add_spec(YieldSpec::upper("gain", 16.0, ""));
+        let stats = &upper.analyze(&[monte_carlo_result("gain", samples)])["gain"].stats;
+        assert_eq!(stats.cp, None);
+        assert!(
+            stats.cpk.is_some_and(|cpk| (cpk - 2.0).abs() < 1.0e-12),
+            "upper-limit Cpu = (16 - 10) / (3 * 1) = 2, got {:?}",
+            stats.cpk
+        );
+    }
+
+    /// The two-sided index is unchanged: Cpk is still the nearer of the two.
+    #[test]
+    fn a_two_sided_specification_reports_the_nearer_bound() {
+        let mut manager = YieldAnalysisManager::new();
+        manager.add_spec(YieldSpec::range("gain", 7.0, 16.0, ""));
+        let stats =
+            &manager.analyze(&[monte_carlo_result("gain", vec![9.0, 10.0, 11.0])])["gain"].stats;
+        assert!(stats.cp.is_some_and(|cp| (cp - 1.5).abs() < 1.0e-12));
+        assert!(
+            stats.cpk.is_some_and(|cpk| (cpk - 1.0).abs() < 1.0e-12),
+            "{:?}",
+            stats.cpk
+        );
+    }
+
+    /// The denominator convention, stated where the number is produced.
+    #[test]
+    fn the_yield_denominator_counts_only_the_trials_that_produced_an_observation() {
+        let mut manager = YieldAnalysisManager::new();
+        manager.add_spec(YieldSpec::lower("gain", 1.0, ""));
+        // Nine completed trials, one of which diverged into a non-finite
+        // observation. The engine reports it as a trial; it is not a sample.
+        let result = monte_carlo_result(
+            "gain",
+            vec![2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, f64::NAN],
+        );
+
+        let yield_result = &manager.analyze(&[result])["gain"];
+
+        assert_eq!(
+            yield_result.total_runs, 9,
+            "every trial the engine reported is in the denominator"
+        );
+        assert_eq!(yield_result.samples.len(), 8);
+        assert_eq!(yield_result.pass_count, 8);
+        assert_eq!(
+            yield_result.fail_count, 1,
+            "a trial with no finite observation cannot be counted as a pass"
+        );
     }
 
     #[test]
