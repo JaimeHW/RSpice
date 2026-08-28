@@ -90,11 +90,13 @@ const CONTRACT_COLUMN_GAP: f32 = 10.0;
 /// The mockup collapses this block, the analysis form's grid and the preflight
 /// strip together at `@container (width <= 560px)`
 /// (`styles/30-simulation/090-simulation-cockpit.css`). A CSS grid child
-/// shrinks to whatever its track gives it; an egui control row does not — the
-/// participation row is a select, a point picker and a stat laid out beside a
-/// label column, and it has a measured floor. So the breakpoint here is that
-/// floor doubled rather than the mockup's number, which is the same rule
-/// resolved against the widget set that actually draws it.
+/// shrinks to whatever its track gives it and stays readable doing it; the
+/// participation row — a select, a point picker and a stat laid out beside a
+/// label column — shrinks by taking the room out of the select alone, and below
+/// [`participation::CONTROL_ROW_MIN_WIDTH`] what is left of it no longer shows
+/// which mode is chosen. So the breakpoint here is that floor doubled rather
+/// than the mockup's number, which is the same rule resolved against the widget
+/// set that actually draws it.
 const CONTRACT_SPLIT_MIN_WIDTH: f32 =
     2.0 * participation::CONTROL_ROW_MIN_WIDTH + CONTRACT_COLUMN_GAP;
 const STACKED_WORKSPACE_GAP: f32 = 9.0;

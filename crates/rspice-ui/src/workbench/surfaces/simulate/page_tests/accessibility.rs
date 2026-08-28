@@ -710,15 +710,30 @@ fn every_studio_text_field_and_switch_announces_a_name() {
 /// Measured through AccessKit rather than through painted shapes, because the
 /// question is about controls: a decorative shape may legitimately be clipped,
 /// and a button may not.
+///
+/// Sampled across the whole range a window is opened at, not only the narrow
+/// end, because this defect does not grow with width -- it comes and goes in
+/// bands. The Noise form's right-hand column was drawn past the surface at
+/// every width from about 1470 to 1630 and nowhere else: the participation row
+/// reserved constants for its trailing controls instead of measuring them, so
+/// it overran the contract's left column; `Ui::columns` answers an overflowing
+/// column by advancing its parent past the widest one, which widened the whole
+/// analysis editor; and the band closes again once the rail's proportional
+/// share has grown enough to leave the editor its content width. A sweep that
+/// stopped at 1024 could not see any of that, and neither could one that
+/// checked 1400 and 1920 and called the range covered.
 #[test]
-fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
-    // The 1000-point gate, the widths either side of it, and the band where a
-    // fixed reservation is widest relative to the surface. A row that reserves
-    // a constant for its actions overflows wherever that constant plus the
-    // heading's floor exceeds the surface, and where that band falls depends on
-    // how wide the labels happen to be -- so this sweeps rather than sampling
-    // one width.
-    const GATE_WIDTHS: [f32; 6] = [620.0, 700.0, 820.0, 960.0, 1000.0, 1024.0];
+fn no_analyses_page_control_is_cut_off_at_any_gate() {
+    // The 1000-point gate and the widths either side of it, then a walk out to
+    // the widest window this is drawn in, stepping 120. Coarse, because every
+    // width costs a fixture and two render passes for each of the thirty-odd
+    // analysis forms; 120 rather than coarser, because that is comfortably
+    // inside the 160-point band described above, and a step wider than the band
+    // is a sweep that can walk straight over one.
+    const GATE_WIDTHS: [f32; 14] = [
+        620.0, 700.0, 820.0, 960.0, 1000.0, 1024.0, 1140.0, 1260.0, 1380.0, 1500.0, 1620.0, 1740.0,
+        1860.0, 1920.0,
+    ];
     // Sub-pixel: a control resting exactly on the edge is inside it, and
     // rounding in the layout must not read as a defect.
     const TOLERANCE: f64 = 0.5;
@@ -773,8 +788,10 @@ fn no_analyses_page_control_is_cut_off_at_the_narrow_gate() {
     // A sweep that measured nothing would pass forever, and one that reached
     // only the nine forms the fixture starts with would have missed the STB and
     // Noise overflow entirely -- which is how it got here.
+    // Per width rather than in total, so adding widths cannot dilute the floor
+    // into one a sweep that had stopped opening forms would still clear.
     assert!(
-        measured > 300,
+        measured > 50 * GATE_WIDTHS.len(),
         "the sweep measured only {measured} controls across {} widths and every form; \
          it is not reaching the forms it claims to check",
         GATE_WIDTHS.len()

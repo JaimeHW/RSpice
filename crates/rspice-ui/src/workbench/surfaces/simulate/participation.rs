@@ -598,11 +598,21 @@ fn picker_note(ui: &mut Ui, text: &str) {
 
 /// Gap between the participation row's controls.
 const CONTROL_ROW_GAP: f32 = 8.0;
-/// What the point picker and the participation stat take, together with the
-/// gap between them.
-const PICKER_AND_STAT_WIDTH: f32 = 118.0;
-/// What the stat alone takes, where no picker is offered.
-const STAT_WIDTH: f32 = 48.0;
+/// What [`CONTROL_ROW_MIN_WIDTH`] budgets for the row's trailing group — the
+/// point picker, the stat that says how many points are chosen, and the gaps
+/// around both.
+///
+/// The paint does not spend this, and this is not a bound on what the paint
+/// spends. The trailing group has no constant width: the picker is offered
+/// under one of the three modes and not the other two, and the stat is anything
+/// from "4/15" to "unresolved", which is two and a half times as wide. So the
+/// paint measures the picker and the stat it is about to draw, and the select
+/// takes what they leave. A trailing group wider than this budget narrows the
+/// select; it does not overrun the column.
+///
+/// A `const` floor cannot measure, which is why the floor keeps a budget at
+/// all. Nothing but the floor reads it.
+const TRAILING_GROUP_BUDGET: f32 = 118.0;
 /// The narrowest the run-at select is worth reading at.
 ///
 /// Its longest option is "Selected points", and below this the value is clipped
@@ -624,13 +634,17 @@ const PROPERTY_VALUE_COLUMN: f32 = 194.0;
 /// The narrowest column this row can be read in.
 ///
 /// It is laid out against the property list's own label column, then a select,
-/// the point picker and the stat that says how many points are chosen — which
-/// is exactly the sum below. Given less, the select falls under
-/// [`RUN_AT_SELECT_MIN_WIDTH`], so the caller that decides how wide a column to
-/// give it — [`super::CONTRACT_SPLIT_MIN_WIDTH`] — stacks its two columns
-/// instead.
+/// then the trailing group — which is the sum below. Given less, the select
+/// falls under [`RUN_AT_SELECT_MIN_WIDTH`], so the caller that decides how wide
+/// a column to give it — [`super::CONTRACT_SPLIT_MIN_WIDTH`] — stacks its two
+/// columns instead.
+///
+/// A readability threshold, not a fit guarantee: the row fits whatever column
+/// it is handed, because the select takes what the *measured* trailing group
+/// leaves rather than what [`TRAILING_GROUP_BUDGET`] assumes. This is the width
+/// below which what it leaves stops being worth reading.
 pub(super) const CONTROL_ROW_MIN_WIDTH: f32 =
-    PROPERTY_VALUE_COLUMN + CONTROL_ROW_GAP + RUN_AT_SELECT_MIN_WIDTH + PICKER_AND_STAT_WIDTH;
+    PROPERTY_VALUE_COLUMN + CONTROL_ROW_GAP + RUN_AT_SELECT_MIN_WIDTH + TRAILING_GROUP_BUDGET;
 
 /// What a participation edit on the Analyses page asks for.
 pub(super) enum ParticipationAction {
@@ -687,21 +701,42 @@ pub(super) fn participation_row(
         let row_width = ui.available_width().max(1.0);
         super::paint_control_row_label(ui, "Run-set points", row_width);
         ui.spacing_mut().item_spacing.x = CONTROL_ROW_GAP;
-        let stat_and_picker = if picker_offered {
-            PICKER_AND_STAT_WIDTH
+        let stat = entry.stat(matrix);
+        let stat_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+        let stat_tone = if entry.refusal.is_some() {
+            t.color.err
         } else {
-            STAT_WIDTH
+            t.color.text_faint
         };
+        let picker = picker_offered.then(|| crate::ui::widgets::Button::new("Choose\u{2026}"));
+        // What the row will spend after the select: a gap before each remaining
+        // control, and each control at the width it is actually about to be
+        // drawn at.
+        //
+        // Both halves of that used to be authored constants, and both were
+        // wrong. The gaps were not counted at all, and the stat was reserved 48
+        // points — enough for "4/15" and "8 pts", not for "nominal" at 58 or
+        // "unresolved" at 83. So a nominal-only instance overran its column by
+        // twenty-six points — and `Ui::columns` answers an overflowing column
+        // by advancing its parent past the widest one, which widened the whole
+        // analysis editor. Every row below inherited that width and was painted
+        // outside the pane, where there is no horizontal scroll to reach it.
+        let trailing = CONTROL_ROW_GAP
+            + picker
+                .as_ref()
+                .map_or(0.0, |picker| picker.measured_width(ui) + CONTROL_ROW_GAP)
+            + CONTROL_ROW_GAP
+            + ui.painter()
+                .layout_no_wrap(stat.clone(), stat_font.clone(), stat_tone)
+                .size()
+                .x;
         // Never wider than the room the row actually has. The floor used to be
         // `RUN_AT_SELECT_MIN_WIDTH` unconditionally, so in a column too narrow
-        // for it the row overflowed — and `Ui::columns` answers an overflowing
-        // column by advancing its parent past the widest one, which widened the
-        // whole analysis editor. Every row below inherited that width and was
-        // painted outside the pane, where there is no horizontal scroll to
-        // reach it. The select clips its own value, so a narrow one is at least
-        // legible; an off-surface one is not. `CONTRACT_SPLIT_MIN_WIDTH` is
-        // what keeps the row above the floor in the first place.
-        let width = (ui.available_width() - stat_and_picker).clamp(1.0, RUN_AT_SELECT_MAX_WIDTH);
+        // for it the row overflowed the same way. The select clips its own
+        // value, so a narrow one is at least legible; an off-surface one is not.
+        // `CONTRACT_SPLIT_MIN_WIDTH` is what keeps the row above the floor in
+        // the first place.
+        let width = (ui.available_width() - trailing).clamp(1.0, RUN_AT_SELECT_MAX_WIDTH);
         if let Some(picked) = crate::ui::widgets::select(
             ui,
             "analysis-run-at",
@@ -719,8 +754,8 @@ pub(super) fn participation_row(
                 _ => Some(ParticipationAction::ChoosePoints),
             };
         }
-        if picker_offered
-            && crate::ui::widgets::Button::new("Choose\u{2026}")
+        if let Some(picker) = picker
+            && picker
                 .show(ui)
                 .on_hover_text(
                     "Pick the exact resolved run-set points this instance is executed at",
@@ -729,15 +764,7 @@ pub(super) fn participation_row(
         {
             action = Some(ParticipationAction::ChoosePoints);
         }
-        ui.label(
-            egui::RichText::new(entry.stat(matrix))
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(if entry.refusal.is_some() {
-                    t.color.err
-                } else {
-                    t.color.text_faint
-                }),
-        );
+        ui.label(egui::RichText::new(stat).font(stat_font).color(stat_tone));
     });
     if let Some(refusal) = entry.refusal.as_deref() {
         picker_note(ui, refusal);
@@ -868,16 +895,22 @@ mod tests {
         assert!(point_selection_note(1, 15, Some(1)).contains("1 task from this instance"));
     }
 
-    /// The column the contract promises this row is wide enough to lay it out.
+    /// The column the contract promises this row is wide enough to read it in.
     ///
     /// [`super::CONTROL_ROW_MIN_WIDTH`] is a sum of the parts the row draws,
     /// but one of those parts — where the property list starts its value column
     /// — is itself a function of the row's width, so the sum cannot check
     /// itself. It is measured here instead, through the same
     /// `property_row_control_columns` the row lays out with: if that column
-    /// moves, or the picker or the select's floor grows past what it leaves,
-    /// this fails rather than the row silently overflowing and widening the
-    /// editor around it.
+    /// moves, or the trailing group's budget grows past what it leaves, the
+    /// contract splits into columns that squeeze the select below the width its
+    /// value is legible at.
+    ///
+    /// A readability claim, not a fit one. The row fits whatever column it is
+    /// handed — the select takes what the *measured* trailing group leaves, not
+    /// what [`super::TRAILING_GROUP_BUDGET`] assumes — and that the whole editor
+    /// stays inside the surface is measured end to end by
+    /// `no_analyses_page_control_is_cut_off_at_any_gate`.
     #[test]
     fn the_participation_row_fits_the_column_it_asks_for() {
         let width = super::CONTROL_ROW_MIN_WIDTH;
@@ -889,7 +922,7 @@ mod tests {
             super::PROPERTY_VALUE_COLUMN
         );
         let room = width - value_left - super::CONTROL_ROW_GAP;
-        let needed = super::RUN_AT_SELECT_MIN_WIDTH + super::PICKER_AND_STAT_WIDTH;
+        let needed = super::RUN_AT_SELECT_MIN_WIDTH + super::TRAILING_GROUP_BUDGET;
         assert!(
             room >= needed,
             "a {width}-point column leaves {room} points for the run-at row, which needs \
