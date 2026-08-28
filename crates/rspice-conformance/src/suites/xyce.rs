@@ -63,15 +63,15 @@ const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
 const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 272;
+const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 275;
 const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
     "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
 const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "2364aa843099b18342d65c99da207640b575600de92e2a470f33422703adeee8";
+    "4fffdac26f1711e8c861d3bf227d3db6a23112c83db5cca3622413c7ed221020";
 const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "13ba6f545f711f04e7af82a32804324185297ce2cfc30684f0430dbc689c7c9f";
+    "3e282e0b3f54c9c191995e4f39584b4a93a31ac4e92478bddcdce49b66edc424";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "49790373956de795be8ef93b697a708b664637e630ba9aa53d3a255705dc6e43";
+    "0ac70319d4688ce6058dfdcfcd1a6ccf7bf7bd1fbe8c00f4ef8c52ccd26b442f";
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
@@ -12441,14 +12441,14 @@ impl XyceLeadCurrentTerminal {
         }
     }
 
-    fn op_parameter(self) -> Option<&'static str> {
+    fn op_parameter(self) -> &'static str {
         match self {
-            Self::Drain => Some("id"),
-            Self::Gate => Some("ig"),
-            Self::Source => Some("is"),
-            Self::Bulk => Some("ib"),
-            Self::Collector => Some("ic"),
-            Self::Emitter => Some("ie"),
+            Self::Drain => "id",
+            Self::Gate => "ig",
+            Self::Source => "is",
+            Self::Bulk => "ib",
+            Self::Collector => "ic",
+            Self::Emitter => "ie",
         }
     }
 
@@ -12560,6 +12560,7 @@ mod contracts_bug267;
 mod contracts_bug271;
 mod contracts_bug28;
 mod contracts_bug302;
+mod contracts_bug306_son;
 mod contracts_bug307;
 mod contracts_bug352;
 mod contracts_bug354;

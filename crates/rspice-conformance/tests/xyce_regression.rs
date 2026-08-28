@@ -10891,6 +10891,59 @@ fn test_xyce_bug352_diode_model_expression_equivalence_oracle() {
 }
 
 #[test]
+fn test_xyce_bug306_numeric_string_timeint_method_release_relations() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_wrapper, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_306_SON/lead_bjt_gear.cir",
+            "bug306_gear_numeric_method_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_306_SON/lead_bjt_gear_strings.cir",
+            "bug306_gear_string_method_release_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_306_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_306_SON/lead_bjt_trap.cir",
+            "bug306_trap_numeric_method_wrapper_owner",
+            true,
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_306_SON/lead_bjt_trap_strings.cir",
+            "bug306_trap_string_method_release_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_306_SON/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_306_SON/lead_bjt_trap_strings2.cir",
+            "bug306_trapezoidal_string_method_release_control",
+            false,
+            Some("Netlists/Certification_Tests/BUG_306_SON/exclude"),
+        ),
+    ] {
+        assert_eq!(runner.requires_upstream_wrapper(relative), expected_wrapper);
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should independently reproduce the Release-7.10 numeric/string TIMEINT METHOD relation, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_bug307_subcircuit_model_scope_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

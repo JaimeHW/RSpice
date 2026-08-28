@@ -22119,15 +22119,81 @@ fn lead_current_probe_parses_xyce_terminal_accessors() {
         })
     );
     assert!(XyceTestRunner::parse_lead_current_probe("I(V1)").is_none());
-    assert_eq!(XyceLeadCurrentTerminal::Drain.op_parameter(), Some("id"));
-    assert_eq!(XyceLeadCurrentTerminal::Source.op_parameter(), Some("is"));
-    assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), Some("ig"));
-    assert_eq!(XyceLeadCurrentTerminal::Bulk.op_parameter(), Some("ib"));
-    assert_eq!(
-        XyceLeadCurrentTerminal::Collector.op_parameter(),
-        Some("ic")
-    );
-    assert_eq!(XyceLeadCurrentTerminal::Emitter.op_parameter(), Some("ie"));
+    assert_eq!(XyceLeadCurrentTerminal::Drain.op_parameter(), "id");
+    assert_eq!(XyceLeadCurrentTerminal::Source.op_parameter(), "is");
+    assert_eq!(XyceLeadCurrentTerminal::Gate.op_parameter(), "ig");
+    assert_eq!(XyceLeadCurrentTerminal::Bulk.op_parameter(), "ib");
+    assert_eq!(XyceLeadCurrentTerminal::Collector.op_parameter(), "ic");
+    assert_eq!(XyceLeadCurrentTerminal::Emitter.op_parameter(), "ie");
+}
+
+#[test]
+fn transient_lead_currents_use_typed_traces_expressions_and_hierarchy_aliases() {
+    let netlist = Netlist::parse(
+        "transient lead-current fixture\n\
+         VIB 1 0 0\n\
+         Q1 2 1 0 QMOD\n\
+         .MODEL QMOD NPN\n\
+         .END\n",
+    )
+    .expect("transient lead-current fixture parses");
+    let result = TransientResult {
+        time: vec![0.0, 1.0],
+        step_sizes: vec![0.0, 1.0],
+        voltages: Vec::new(),
+        branch_currents: vec![vec![1.0, 3.0]],
+        num_nodes: 0,
+        node_names: Vec::new(),
+        branch_names: vec!["VIB".to_string()],
+        digital_traces: Vec::new(),
+        real_traces: Vec::new(),
+        device_op_traces: vec![
+            rspice_core::engine::TransientDeviceOpTrace {
+                device_name: "Q1".to_string(),
+                parameter: "ib".to_string(),
+                values: vec![0.2, 0.4],
+            },
+            rspice_core::engine::TransientDeviceOpTrace {
+                device_name: "Q1".to_string(),
+                parameter: "ic".to_string(),
+                values: vec![1.0, 2.0],
+            },
+            rspice_core::engine::TransientDeviceOpTrace {
+                device_name: "Q1".to_string(),
+                parameter: "ie".to_string(),
+                values: vec![-1.2, -2.4],
+            },
+            rspice_core::engine::TransientDeviceOpTrace {
+                device_name: "X1.Q1".to_string(),
+                parameter: "ib".to_string(),
+                values: vec![0.6, 0.8],
+            },
+        ],
+        store_traces: Vec::new(),
+    };
+
+    for (probe, expected) in [("IB(Q1)", 0.3), ("ic(q1)", 1.5), ("IE(Q1)", -1.8)] {
+        let actual = XyceTestRunner::evaluate_atomic_tran_probe(probe, &netlist, &result, 0.5)
+            .unwrap_or_else(|error| panic!("{probe} failed: {error}"));
+        assert!((actual - expected).abs() <= 1.0e-15, "{probe}: {actual}");
+    }
+    let expression = XyceTestRunner::evaluate_tran_probe("{i(vib)-ib(q1)}", &netlist, &result, 0.5)
+        .expect("branch-minus-base-current expression evaluates in authored order");
+    assert!((expression - 1.7).abs() <= 1.0e-15);
+
+    let hierarchical =
+        XyceTestRunner::evaluate_atomic_tran_probe("IB(X1:Q1)", &netlist, &result, 0.5)
+            .expect("colon-authored hierarchy resolves dot-flattened trace identity");
+    assert!((hierarchical - 0.7).abs() <= 1.0e-15);
+
+    for missing in ["IB(MISSING)", "ID(Q1)"] {
+        let error = XyceTestRunner::evaluate_atomic_tran_probe(missing, &netlist, &result, 0.5)
+            .expect_err("missing lead-current waveform must fail closed");
+        assert!(
+            error.contains("not present in the transient result"),
+            "unexpected {missing} error: {error}"
+        );
+    }
 }
 
 #[cfg(feature = "veriloga-model-vbic13")]

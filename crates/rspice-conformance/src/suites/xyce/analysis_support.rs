@@ -2543,6 +2543,28 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
         }
 
+        if let Some(lead_current) = Self::parse_lead_current_probe(normalized) {
+            let parameter = lead_current.terminal.op_parameter();
+            let waveform = result
+                .device_op_traces
+                .iter()
+                .find(|trace| {
+                    Self::device_instance_names_match(
+                        &trace.device_name,
+                        &lead_current.element_name,
+                    ) && trace.parameter.eq_ignore_ascii_case(parameter)
+                })
+                .map(|trace| trace.values.as_slice())
+                .ok_or_else(|| {
+                    format!(
+                        "lead-current waveform '{}({})' is not present in the transient result",
+                        lead_current.terminal.function_name(),
+                        lead_current.element_name
+                    )
+                })?;
+            return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+        }
+
         if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             let pos =
                 Self::transient_voltage_named(result, netlist, &voltage_probe.node_pos, time)?;
@@ -3340,10 +3362,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
             // family label. Generated devices identify their compiled model
             // (for example VBIC13) as `device_kind`, while their canonical
             // terminal metadata still reports IC/IB/IE.
-            let parameter = probe
-                .terminal
-                .op_parameter()
-                .expect("every parsed lead-current terminal has a canonical parameter");
+            let parameter = probe.terminal.op_parameter();
             if let Some(value) = Self::xyce_device_operating_point_value(entry, parameter) {
                 return Ok(value);
             }
