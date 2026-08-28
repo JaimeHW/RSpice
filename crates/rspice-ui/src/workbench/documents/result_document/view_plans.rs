@@ -39,3 +39,34 @@ pub(super) struct ViewPlans {
     /// Safe-operating-area per-rule stress facts; see [`super::soa`].
     pub(super) soa: Option<Arc<super::soa::SoaPlan>>,
 }
+
+#[cfg(test)]
+impl ViewPlans {
+    /// Whether every memoized projection has been released.
+    ///
+    /// Spelled over the whole struct rather than over the slot a test happens
+    /// to have filled: a plan added later and forgotten by
+    /// [`super::ResultsState::retain_datasets`] holds a discarded dataset's
+    /// projection — `ArtifactTextPlan` holds a complete serialized artifact —
+    /// for the life of the session.
+    pub(super) fn is_empty(&self) -> bool {
+        let Self {
+            manifest,
+            artifact,
+            envelope,
+            hist,
+            op,
+            optimization,
+            sensitivity,
+            soa,
+        } = self;
+        manifest.is_none()
+            && artifact.is_none()
+            && envelope.is_none()
+            && hist.is_none()
+            && op.is_none()
+            && optimization.borrow().is_none()
+            && sensitivity.is_none()
+            && soa.is_none()
+    }
+}

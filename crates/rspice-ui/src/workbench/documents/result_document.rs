@@ -3212,6 +3212,14 @@ impl ResultsState {
     /// window survives a re-run; a document-keyed window belongs to its
     /// document. `eye_timebase` keeps its prepared keys for the same reason,
     /// and only its dataset-named legacy keys are pruned.
+    ///
+    /// The viewer projections are discarded wholesale rather than filtered.
+    /// Every plan carries the version and identity it was built from, so a
+    /// discarded dataset's plan can never be served — but it is still held,
+    /// and `ArtifactTextPlan` holds the complete serialized text of a typed
+    /// artifact. Pruning only runs when the retained set actually changed,
+    /// and the next frame rebuilds what it needs, so dropping all of them
+    /// here costs one rebuild and bounds the session.
     pub(crate) fn retain_datasets(&mut self, retained: &HashSet<DatasetId>) {
         let live = |analysis: AnalysisPresentationKey| retained.contains(&analysis.dataset_id());
         self.markers.retain(|marker| live(marker.analysis));
@@ -3258,6 +3266,7 @@ impl ResultsState {
             .selected_result_artifact
             .take()
             .filter(|key| live(key.analysis));
+        self.plans = view_plans::ViewPlans::default();
     }
 
     /// Bring dataset-scoped presentation state in step with the retained

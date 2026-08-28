@@ -263,4 +263,13 @@ fn family_envelopes_are_memoized_against_the_models_that_produced_them() {
         first.series().len(),
         "the rebuild is the same projection, not a different one"
     );
+
+    // Retention discards the dataset the plan projects. Its own doc promises
+    // to drop every memo about a discarded dataset, and names its two
+    // deliberate exceptions; the viewer projections were neither.
+    results.retain_datasets(&HashSet::new());
+    assert!(
+        results.plans.is_empty(),
+        "a viewer projection outlived the dataset it was built from"
+    );
 }
