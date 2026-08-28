@@ -401,6 +401,19 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ),
     ];
     super::stat_table(ui, &rows);
+
+    // The fold, before the criterion. This sheet is the one that carries the
+    // encirclement count the note points at, so the reader is being sent one
+    // row up rather than to another sheet.
+    if let Some(margin) = s.phase_margin
+        && crate::results::stability::phase_margin_is_folded(margin.phase_deg)
+    {
+        super::panel_note(
+            ui,
+            &crate::results::stability::folded_phase_margin_note(margin.phase_deg),
+        );
+    }
+
     super::panel_note(ui, &criterion_note(s.encirclements));
 }
 

@@ -136,6 +136,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
                 adc_db: metrics.adc_db,
                 ugf: metrics.ugf,
                 pm_deg: metrics.pm_deg,
+                pm_phase_deg: metrics.pm_phase_deg,
                 f180: metrics.f180,
                 gm_db: metrics.gm_db,
                 f3db: metrics.f3db,
@@ -325,6 +326,19 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     let rows = margin_rows(model.margins, model.adc_is_dc, &quantity_policy);
     super::stat_table(ui, &rows);
+
+    // A folded phase margin reads like a verdict and is not one. It goes above
+    // the sweep-provenance notes because it is the stronger claim: the others
+    // qualify what the number is referenced to, this one says the number alone
+    // cannot settle the question it looks like it answers.
+    if let Some(loop_phase) = model.margins.pm_phase_deg
+        && crate::results::stability::phase_margin_is_folded(loop_phase)
+    {
+        super::panel_note(
+            ui,
+            &crate::results::stability::folded_phase_margin_note(loop_phase),
+        );
+    }
 
     if model.phase_deg.is_none() {
         super::panel_note(
@@ -520,6 +534,7 @@ mod tests {
             adc_db: Some(20.0),
             ugf: Some(1.0e4),
             pm_deg: Some(45.0),
+            pm_phase_deg: Some(-135.0),
             f180: Some(3.0e4),
             gm_db: Some(12.0),
             f3db: Some(1.0e2),

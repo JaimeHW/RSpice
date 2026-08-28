@@ -3781,8 +3781,10 @@ pub struct BodeDerived {
     pub(crate) adc_db: Option<f64>,
     /// Unity-gain frequency (Hz).
     pub(crate) ugf: Option<f64>,
-    /// Phase margin (deg) at the UGF.
+    /// Phase margin (deg) at the UGF, folded into one turn.
     pub(crate) pm_deg: Option<f64>,
+    /// Unwrapped ∠L (deg) at the UGF — what `pm_deg` was folded from.
+    pub(crate) pm_phase_deg: Option<f64>,
     /// Frequency where phase crosses −180° (Hz).
     pub(crate) f180: Option<f64>,
     /// Gain margin (dB) at f180.
