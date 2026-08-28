@@ -697,20 +697,51 @@ fn device_sort_value(entry: &rspice_core::circuit::DeviceOpEntry, key: &str) -> 
         .filter(|value| value.is_finite())
 }
 
+/// The canonical order the device families take in the column schema.
+///
+/// A family the vocabulary does not name follows the ones it does, in the
+/// order the retained report lists them.
+const DEVICE_FAMILY_ORDER: [&str; 3] = ["MOSFET", "BJT", "DIODE"];
+
+fn device_family_rank(family: &str) -> usize {
+    DEVICE_FAMILY_ORDER
+        .iter()
+        .position(|known| known.eq_ignore_ascii_case(family))
+        .unwrap_or(DEVICE_FAMILY_ORDER.len())
+}
+
+/// The quantities the shown devices carry, as one stable column schema.
+///
+/// The schema is a property of the retained population, so it is discovered by
+/// walking the report in its own order and then ranked by device family —
+/// never by walking the rows in whatever order the reader last sorted them
+/// into. Discovering it from the sorted rows meant pressing a column heading
+/// silently rewrote the heading row itself: the same devices under a different
+/// sort produced a different column order, and the table the reader was
+/// reading rearranged itself underneath the gesture meant to order it.
 fn device_columns(
     report: &rspice_core::circuit::DeviceOpReport,
     rows: &[(String, usize)],
 ) -> Vec<(&'static str, &'static str)> {
-    let mut columns = Vec::new();
-    for (_, index) in rows {
-        let entry = &report.entries[*index];
+    let mut shown: Vec<usize> = rows.iter().map(|(_, index)| *index).collect();
+    shown.sort_unstable();
+    let mut columns: Vec<(usize, &'static str, &'static str)> = Vec::new();
+    for index in shown {
+        let entry = &report.entries[index];
+        let rank = device_family_rank(entry.device_kind);
         for (name, _) in &entry.params {
-            if !columns.iter().any(|(candidate, _)| candidate == name) {
-                columns.push((*name, device_param_unit(entry.device_kind, name)));
+            if !columns.iter().any(|(_, candidate, _)| candidate == name) {
+                columns.push((rank, *name, device_param_unit(entry.device_kind, name)));
             }
         }
     }
+    // Stable: within one family the quantities keep the order the report
+    // introduced them in.
+    columns.sort_by_key(|(rank, _, _)| *rank);
     columns
+        .into_iter()
+        .map(|(_, name, unit)| (name, unit))
+        .collect()
 }
 
 fn device_param_unit(family: &str, name: &str) -> &'static str {
@@ -1979,6 +2010,56 @@ mod tests {
             names_of(&groups),
             vec!["M_low", "M_high", "M_negative", "M_missing"]
         );
+    }
+
+    /// The column schema is a property of the retained population, never of
+    /// the reader's sort.
+    ///
+    /// Columns were discovered by walking the rows in the order they had just
+    /// been sorted into, so pressing a column heading silently rewrote the
+    /// heading row: the same devices under a different sort produced a
+    /// different column order, and the reader's eye lost the table.
+    #[test]
+    fn the_device_column_schema_does_not_move_when_the_sort_does() {
+        let report = rspice_core::circuit::DeviceOpReport {
+            entries: vec![
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "q_first".to_owned(),
+                    device_kind: "BJT",
+                    region: Some("forward"),
+                    params: vec![("ic", 1.0e-3), ("vbe", 0.7)],
+                },
+                rspice_core::circuit::DeviceOpEntry {
+                    name: "m_second".to_owned(),
+                    device_kind: "MOSFET",
+                    region: Some("saturation"),
+                    params: vec![("gm", 2.0e-3), ("vgs", 1.1)],
+                },
+            ],
+        };
+
+        let columns_under = |sort: Option<&(String, bool)>| {
+            let groups = grouped_devices(&report, None, "", sort, "amplifier");
+            device_columns(&report, &groups["amplifier"])
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+        };
+
+        let unsorted = columns_under(None);
+        let by_ic_descending = columns_under(Some(&("ic".to_owned(), false)));
+        let by_gm_ascending = columns_under(Some(&("gm".to_owned(), true)));
+
+        assert_eq!(
+            unsorted, by_ic_descending,
+            "sorting on ic rewrote the column schema"
+        );
+        assert_eq!(
+            unsorted, by_gm_ascending,
+            "sorting on gm rewrote the column schema"
+        );
+        // Families in a fixed order, and each family's quantities together.
+        assert_eq!(unsorted, vec!["gm", "vgs", "ic", "vbe"]);
     }
 
     /// A retained operating point with `nodes` nets and `devices` devices,
