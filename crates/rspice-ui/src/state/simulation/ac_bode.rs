@@ -463,11 +463,17 @@ fn low_frequency_gain_is_dc(frequency: &[f64], gain_db: &[f64]) -> bool {
         return false;
     }
     let f_min = frequency[0];
-    if !(f_min > 0.0) {
+    // Both guards refuse NaN explicitly rather than leaning on the negation.
+    // A dataset can carry a NaN frequency, and the conservative answer — "not
+    // provably DC" — is the one this function owes its caller; a NaN that fell
+    // through would put `f₋₃dB` against a gain nobody measured.
+    if f_min.is_nan() || f_min <= 0.0 {
         return false;
     }
+    // `f_min` is positive and not NaN, so `decade_top` cannot be NaN either.
     let decade_top = f_min * 10.0;
-    if !(frequency[n - 1] >= decade_top) {
+    let f_max = frequency[n - 1];
+    if f_max.is_nan() || f_max < decade_top {
         return false;
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -1062,6 +1068,32 @@ mod tests {
             .expect("AC summary")
             .metrics;
         assert!(!metrics.adc_is_dc);
+    }
+
+    /// A NaN frequency never reads as a proven DC gain.
+    ///
+    /// Both span guards are written `f.is_nan() || f <op> bound` rather than
+    /// `!(f <op> bound)`. The forms agree, and this pins the arm that carries
+    /// the meaning: without it a NaN endpoint fails every comparison, passes
+    /// both guards, and the summary claims A(f_min) is the DC gain on a sweep
+    /// whose extent is not known. "Not provably DC" is the answer this
+    /// function owes when it cannot tell.
+    #[test]
+    fn a_nan_frequency_endpoint_is_never_a_proven_dc_gain() {
+        // Flat and decade-spanning but for the NaN, so nothing except the
+        // guard under test can be what refuses these.
+        assert!(low_frequency_gain_is_dc(
+            &[1.0, 10.0, 100.0],
+            &[60.0, 59.95, 40.0]
+        ));
+        assert!(
+            !low_frequency_gain_is_dc(&[f64::NAN, 10.0, 100.0], &[60.0, 59.95, 40.0]),
+            "a NaN f_min passed the positivity guard"
+        );
+        assert!(
+            !low_frequency_gain_is_dc(&[1.0, 10.0, f64::NAN], &[60.0, 59.95, 40.0]),
+            "a NaN f_max passed the decade-span guard"
+        );
     }
 
     /// The other side of the threshold: two samples in the first decade are a

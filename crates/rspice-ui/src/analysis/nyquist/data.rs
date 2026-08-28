@@ -549,7 +549,12 @@ impl MeasuredBranch {
     /// cannot wander outside the step.
     fn solve(&self, values: &[f64], index: usize, target: f64) -> Option<f64> {
         let (mut lo, mut hi) = (self.log_frequency[index], self.log_frequency[index + 1]);
-        if !(lo < hi) {
+        // `>=` rather than `!(lo < hi)`: the two differ only on NaN, and
+        // `log_frequency` cannot hold one. `MeasuredBranch::new` admits a
+        // point only when `frequency > 0.0`, which NaN fails, so every entry
+        // here is `log10` of a positive number. The guard is about ordering
+        // alone — an unordered or empty bracket has no root to find.
+        if lo >= hi {
             return None;
         }
         let at = |x: f64| self.interpolate(values, index, x) - target;
