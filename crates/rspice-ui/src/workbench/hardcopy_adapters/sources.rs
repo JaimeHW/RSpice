@@ -12,6 +12,7 @@ mod documents;
 mod geometry;
 mod noise;
 mod prepared;
+mod quick_plots;
 mod quick_view_overlay;
 mod report_inventory;
 mod results;
@@ -21,11 +22,13 @@ pub use documents::*;
 // Crate-private: `geometry` exposes only `pub(super)` helpers, which the
 // sibling modules reach through `use super::*`.
 pub(crate) use geometry::*;
-// Module-private: `axis`, `noise` and `quick_view_overlay` expose only
-// `pub(super)` items, and the siblings reach them through `use super::*`.
+// Module-private: `axis`, `noise`, `quick_plots` and `quick_view_overlay`
+// expose only `pub(super)` items, and the siblings reach them through
+// `use super::*`.
 use axis::*;
 use noise::*;
 pub use prepared::*;
+use quick_plots::*;
 use quick_view_overlay::*;
 pub use results::*;
 pub use semantic::*;
