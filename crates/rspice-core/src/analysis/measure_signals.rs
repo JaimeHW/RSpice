@@ -1367,7 +1367,7 @@ fn preflight_real_output_requests(
         }
         for (operand_index, kind) in request.operand_kinds.iter().enumerate() {
             let OutputOperandKind::Probe(signal) = kind else {
-                column_count = column_count.checked_add(1).unwrap_or(usize::MAX);
+                column_count = column_count.saturating_add(1);
                 continue;
             };
             if expand_complete_voltage_wildcard
@@ -1409,16 +1409,14 @@ fn preflight_real_output_requests(
                         })?,
                     );
                 }
-                column_count = column_count
-                    .checked_add(
-                        wildcard_voltage_nodes
-                            .as_ref()
-                            .expect("initialized above")
-                            .len(),
-                    )
-                    .unwrap_or(usize::MAX);
+                column_count = column_count.saturating_add(
+                    wildcard_voltage_nodes
+                        .as_ref()
+                        .expect("initialized above")
+                        .len(),
+                );
             } else {
-                column_count = column_count.checked_add(1).unwrap_or(usize::MAX);
+                column_count = column_count.saturating_add(1);
             }
         }
     }
