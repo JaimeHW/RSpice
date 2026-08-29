@@ -285,6 +285,7 @@ mod noise;
 mod nox_status;
 mod rescue;
 mod residual;
+mod restart;
 mod startup;
 mod state;
 mod xyce_dae;
@@ -300,9 +301,12 @@ mod truncation;
 pub(self) use truncation::NgspiceChargeTruncationContext;
 mod vbic;
 
-pub use checkpoint::{
-    DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
-    netlist_fingerprint,
+pub use self::{
+    checkpoint::{
+        DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
+        netlist_fingerprint,
+    },
+    restart::{XyceRestartJobPlan, XyceRestartPlanError},
 };
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,

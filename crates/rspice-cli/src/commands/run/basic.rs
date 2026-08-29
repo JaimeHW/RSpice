@@ -14,7 +14,6 @@ use crate::commands::run_signals::{
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 fn map_output_projection_error(
@@ -759,17 +758,18 @@ fn run_authored_restart(
                 .saturating_sub(ctx.netlist.options.output_time_points.len())
                 .saturating_sub(ctx.netlist.options.timeint_breakpoints.len())
                 .saturating_sub(restart.intervals.len());
-            let schedule =
-                build_restart_schedule(interval, &restart.intervals, tstop, available_points)?;
-            // Validate the complete nominal namespace before starting an
-            // expensive simulation. Xyce may intentionally skip nominal
+            // Construction validates the complete nominal namespace before
+            // the expensive simulation. Xyce may intentionally skip nominal
             // files when one accepted step crosses several cadence points.
-            validate_restart_checkpoint_names(job, &schedule)?;
-            let checkpoint_encoding = if restart.pack.unwrap_or(true) {
-                rspice_core::engine::TransientCheckpointEncoding::Packed
-            } else {
-                rspice_core::engine::TransientCheckpointEncoding::Unpacked
-            };
+            let plan = rspice_core::engine::XyceRestartJobPlan::new(
+                job,
+                interval,
+                &restart.intervals,
+                tstop,
+                restart.pack,
+                available_points,
+            )
+            .map_err(|error| restart_cli_error(error.to_string()))?;
             let (result, checkpoints) = ctx
                 .engine
                 .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
@@ -777,14 +777,15 @@ fn run_authored_restart(
                     tstop,
                     max_step,
                     startup_mode,
-                    &schedule,
+                    plan.nominal_times(),
                     &abort,
                 )
                 .map_err(|error| map_restart_simulation_error(ctx, error))?;
             let mut previous_nominal = None;
             for scheduled in &checkpoints {
                 let nominal_time = scheduled.nominal_time;
-                if schedule
+                if plan
+                    .nominal_times()
                     .binary_search_by(|time| time.total_cmp(&nominal_time))
                     .is_err()
                     || previous_nominal.is_some_and(|previous| nominal_time <= previous)
@@ -796,11 +797,17 @@ fn run_authored_restart(
                     });
                 }
                 previous_nominal = Some(nominal_time);
-                let name = format!("{job}{}", xyce_restart_time_suffix(nominal_time)?);
+                let name = plan.logical_name(nominal_time).ok_or_else(|| {
+                    CliError::InternalError {
+                        message: format!(
+                            "transient restart scheduler returned unnamed nominal time {nominal_time:.17e}s"
+                        ),
+                    }
+                })?;
                 let path = safe_restart_write_path(&parent, &name)?;
                 scheduled
                     .checkpoint
-                    .save_with_encoding(&path, checkpoint_encoding)
+                    .save_with_encoding(&path, plan.encoding())
                     .map_err(|error| {
                         restart_cli_error(format!(
                             "cannot save .OPTIONS RESTART checkpoint {}: {error}",
@@ -868,148 +875,6 @@ fn validate_supported_restart_options(
         ));
     }
     Ok(())
-}
-
-fn build_restart_schedule(
-    initial_interval: f64,
-    intervals: &[rspice_core::netlist::XyceRestartInterval],
-    tstop: f64,
-    max_points: usize,
-) -> Result<Vec<f64>, CliError> {
-    if !initial_interval.is_finite() || initial_interval <= 0.0 {
-        return Err(restart_cli_error(
-            ".OPTIONS RESTART INITIAL_INTERVAL must be finite and positive",
-        ));
-    }
-    if !tstop.is_finite() || tstop <= 0.0 {
-        return Err(restart_cli_error(
-            ".OPTIONS RESTART requires a finite, positive .TRAN stop time",
-        ));
-    }
-    let mut previous_transition = None;
-    for (index, transition) in intervals.iter().enumerate() {
-        if !transition.time.is_finite()
-            || transition.time < 0.0
-            || previous_transition.is_some_and(|previous| transition.time <= previous)
-        {
-            return Err(restart_cli_error(format!(
-                ".OPTIONS RESTART transition {index} time must be finite, nonnegative, and strictly increasing"
-            )));
-        }
-        if !transition.interval.is_finite() || transition.interval <= 0.0 {
-            return Err(restart_cli_error(format!(
-                ".OPTIONS RESTART transition {index} interval must be finite and positive"
-            )));
-        }
-        previous_transition = Some(transition.time);
-    }
-
-    let mut schedule = Vec::new();
-    push_bounded_checkpoint(&mut schedule, 0.0, max_points)?;
-    let mut current = 0.0;
-    loop {
-        let next = next_restart_time(current, initial_interval, intervals)?;
-        if next > tstop {
-            break;
-        }
-        push_bounded_checkpoint(&mut schedule, next, max_points)?;
-        current = next;
-    }
-    Ok(schedule)
-}
-
-fn next_restart_time(
-    current: f64,
-    initial_interval: f64,
-    intervals: &[rspice_core::netlist::XyceRestartInterval],
-) -> Result<f64, CliError> {
-    let first_transition = intervals.first().map(|transition| transition.time);
-    let candidate = if first_transition.is_none_or(|first| current < first) {
-        let cadence = current + initial_interval;
-        first_transition.map_or(cadence, |first| cadence.min(first))
-    } else {
-        let active_index = intervals.partition_point(|transition| transition.time <= current) - 1;
-        let active = intervals[active_index];
-        let steps = ((current - active.time) / active.interval).floor();
-        let cadence = active.time + (steps + 1.0) * active.interval;
-        intervals
-            .get(active_index + 1)
-            .map_or(cadence, |next| cadence.min(next.time))
-    };
-    if !candidate.is_finite() || candidate <= current {
-        return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART cadence cannot advance beyond {current:.17e}s; increase the interval or reduce the simulated time scale"
-        )));
-    }
-    Ok(candidate)
-}
-
-fn push_bounded_checkpoint(
-    schedule: &mut Vec<f64>,
-    time: f64,
-    max_points: usize,
-) -> Result<(), CliError> {
-    if schedule.len() >= max_points {
-        return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART schedule exceeds the configured analysis-point limit of {max_points}"
-        )));
-    }
-    schedule.push(time);
-    Ok(())
-}
-
-fn validate_restart_checkpoint_names(job: &str, schedule: &[f64]) -> Result<(), CliError> {
-    let mut unique = HashSet::with_capacity(schedule.len());
-    for &time in schedule {
-        let name = format!("{job}{}", xyce_restart_time_suffix(time)?);
-        if !unique.insert(name.clone()) {
-            return Err(restart_cli_error(format!(
-                ".OPTIONS RESTART filename precision maps more than one checkpoint to '{name}'; choose a wider checkpoint interval or shorter stop time"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn xyce_restart_time_suffix(time: f64) -> Result<String, CliError> {
-    if !time.is_finite() {
-        return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART checkpoint time must be finite, found {time}"
-        )));
-    }
-    if time == 0.0 {
-        return Ok(if time.is_sign_negative() {
-            "-0".to_string()
-        } else {
-            "0".to_string()
-        });
-    }
-
-    // A fresh C++ ostream, as used by Xyce's RestartMgr, applies defaultfloat
-    // with six significant digits. The notation boundary is selected after
-    // rounding, so derive it from the already-rounded scientific spelling.
-    let scientific = format!("{time:.5e}");
-    let (mantissa, exponent) = scientific
-        .split_once('e')
-        .expect("finite Rust scientific formatting always contains an exponent");
-    let exponent = exponent
-        .parse::<i32>()
-        .expect("Rust scientific formatting emits a numeric exponent");
-    if (-4..6).contains(&exponent) {
-        let decimals =
-            usize::try_from(5 - exponent).expect("fixed-point exponent range is non-negative");
-        let mut text = format!("{time:.decimals$}");
-        while text.ends_with('0') && text.contains('.') {
-            text.pop();
-        }
-        if text.ends_with('.') {
-            text.pop();
-        }
-        Ok(text)
-    } else {
-        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
-        Ok(format!("{mantissa}e{exponent:+03}"))
-    }
 }
 
 fn restart_namespace_parent(input: &Path) -> Result<PathBuf, CliError> {
@@ -1570,66 +1435,6 @@ fn default_transient_max_step(tstep: f64, tstop: f64, tstart: f64) -> f64 {
 #[cfg(test)]
 mod restart_tests {
     use super::*;
-
-    #[test]
-    fn restart_schedule_applies_each_interval_at_its_transition() {
-        let intervals = [
-            rspice_core::netlist::XyceRestartInterval {
-                time: 10.0,
-                interval: 4.0,
-            },
-            rspice_core::netlist::XyceRestartInterval {
-                time: 17.0,
-                interval: 1.0,
-            },
-        ];
-        assert_eq!(
-            build_restart_schedule(3.0, &intervals, 19.0, 32).unwrap(),
-            vec![0.0, 3.0, 6.0, 9.0, 10.0, 14.0, 17.0, 18.0, 19.0]
-        );
-    }
-
-    #[test]
-    fn restart_schedule_is_resource_bounded() {
-        let error = build_restart_schedule(1.0, &[], 4.0, 4)
-            .expect_err("five requested checkpoints exceed a four-point limit");
-        assert!(error.to_string().contains("analysis-point limit of 4"));
-    }
-
-    #[test]
-    fn restart_suffix_matches_xyce_compact_default_float_spelling() {
-        let oracle = [
-            (0x0000_0000_0000_0000, "0"),
-            (0x8000_0000_0000_0000, "-0"),
-            (0x3e35_798e_e230_8c3a, "5e-09"),
-            (0x3f1a_36e2_0f35_445d, "9.99999e-05"),
-            (0x3f1a_36e2_0f35_445e, "0.0001"),
-            (0x3f1a_36e2_eb1c_432d, "0.0001"),
-            (0x3f50_624d_4981_4abb, "0.001"),
-            (0x40f8_69ff_5c28_f5c3, "100000"),
-            (0x412e_847e_ffff_ffff, "999999"),
-            (0x412e_847f_0000_0000, "1e+06"),
-            (0x412e_8480_0000_0000, "1e+06"),
-            (0xbf1a_36e2_0f35_445e, "-0.0001"),
-            (0xc12e_847f_0000_0000, "-1e+06"),
-            (0x54b2_49ad_2594_c37d, "1e+100"),
-            (0x2b2b_ff2e_e48e_0530, "1e-100"),
-            (0x0000_0000_0000_0001, "4.94066e-324"),
-            (0x7fef_ffff_ffff_ffff, "1.79769e+308"),
-        ];
-        for (bits, expected) in oracle {
-            let time = f64::from_bits(bits);
-            assert_eq!(
-                xyce_restart_time_suffix(time).unwrap(),
-                expected,
-                "Xyce defaultfloat mismatch for {time:.17e} (0x{bits:016X})"
-            );
-        }
-
-        for nonfinite in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert!(xyce_restart_time_suffix(nonfinite).is_err());
-        }
-    }
 
     #[test]
     fn restart_logical_names_are_single_portable_components() {
