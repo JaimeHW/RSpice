@@ -98,7 +98,12 @@ use std::path::{Path, PathBuf};
 /// The latest raise is +1 for `XyceHbTimeDomainMode`, which the conformance
 /// frontend reads from parsed netlists to prove that authored `HBINT.TAHB`
 /// controls remain typed. Its numeric rendering helper stays crate-private.
-const MAX_PUBLIC_ITEMS: usize = 4257;
+///
+/// The next +12 are also cross-crate contracts that landed after that ratchet:
+/// eight bounded packed-checkpoint APIs used by the CLI and conformance suite,
+/// three RustFFT planning-qualification items shared with the GUI, and the
+/// typed duplicate-model-parameter error exposed by the Python binding.
+const MAX_PUBLIC_ITEMS: usize = 4269;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
