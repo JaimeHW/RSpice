@@ -5,6 +5,14 @@ use std::fmt;
 use rspice_core::numerics::rustfft_qualification::RustfftQualificationError;
 use thiserror::Error;
 
+/// Maximum harmonic order accepted by the synchronous spectrum analyzer.
+///
+/// This shares the qualified transform-length ceiling: no authenticated
+/// one-sided spectrum can contain more independently resolvable orders, and
+/// malformed state cannot turn a UI recompute into an unbounded loop.
+pub(crate) const MAX_SPECTRUM_HARMONIC_ORDER: usize =
+    rspice_core::numerics::rustfft_qualification::MAX_QUALIFIED_RUSTFFT_LENGTH;
+
 /// Minimum record length accepted by the low-level spectrum builder.
 ///
 /// The interactive input pipeline and the direct builder share this boundary,
@@ -24,6 +32,88 @@ pub enum FftAllocationStage {
     TransformScratch,
     /// One-sided spectrum points.
     SpectrumPoints,
+}
+
+/// Explicit allocation site in post-transform spectrum analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpectrumAnalysisAllocationStage {
+    /// Bins excluded from broadband-noise metrics.
+    NoiseExclusionMask,
+    /// Bins excluded while locating the largest spur.
+    SpurExclusionMask,
+    /// Authenticated harmonic measurements.
+    Harmonics,
+    /// Per-bin levels used for the median noise floor.
+    NoiseLevelBins,
+}
+
+impl fmt::Display for SpectrumAnalysisAllocationStage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NoiseExclusionMask => "spectrum-analysis noise exclusion mask",
+            Self::SpurExclusionMask => "spectrum-analysis spur exclusion mask",
+            Self::Harmonics => "spectrum-analysis harmonics",
+            Self::NoiseLevelBins => "spectrum-analysis noise-level bins",
+        })
+    }
+}
+
+/// A transformed record could not be analyzed without fabricating or
+/// silently truncating a spectral metric.
+#[derive(Debug, Clone, PartialEq, Error)]
+#[non_exhaustive]
+pub enum SpectrumAnalysisError {
+    /// The requested harmonic order is outside the qualified synchronous
+    /// analysis contract.
+    #[error("spectrum harmonic order must be between {minimum} and {maximum}; received {value}")]
+    InvalidHarmonicOrder {
+        /// Rejected order.
+        value: usize,
+        /// Smallest accepted order.
+        minimum: usize,
+        /// Largest accepted order.
+        maximum: usize,
+    },
+    /// A top-level spectrum relationship is not valid for analysis.
+    #[error("spectrum analysis input invariant failed: {reason}")]
+    InvalidSpectrum {
+        /// Stable diagnostic for the rejected invariant.
+        reason: &'static str,
+    },
+    /// A stored spectrum point is not a finite physical bin.
+    #[error(
+        "spectrum analysis rejected bin {bin} (frequency {frequency:?}, magnitude {magnitude:?}, phase {phase:?}): {reason}"
+    )]
+    InvalidSpectrumPoint {
+        /// Rejected bin.
+        bin: usize,
+        /// Stored frequency.
+        frequency: f64,
+        /// Stored nonnegative magnitude.
+        magnitude: f64,
+        /// Stored phase.
+        phase: f64,
+        /// Stable diagnostic for the rejected relationship.
+        reason: &'static str,
+    },
+    /// A bounded post-transform allocation failed.
+    #[error("spectrum analysis could not reserve {requested} units for {stage}")]
+    Allocation {
+        /// Analysis stage requesting memory.
+        stage: SpectrumAnalysisAllocationStage,
+        /// Number of additional elements requested.
+        requested: usize,
+    },
+    /// A mathematically finite metric could not be materialized as `f64`.
+    #[error(
+        "spectrum metric {metric} is not representable (natural-log amplitude ratio {log_amplitude_ratio:?})"
+    )]
+    UnrepresentableMetric {
+        /// Metric being materialized.
+        metric: &'static str,
+        /// Scale-safe logarithmic ratio used to derive it.
+        log_amplitude_ratio: f64,
+    },
 }
 
 impl fmt::Display for FftAllocationStage {

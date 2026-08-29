@@ -326,13 +326,13 @@ impl AppState {
                 }
             }
             ActiveViewer::Fft => {
-                let has_spectrum = self
-                    .analysis
-                    .fft_state
-                    .data
-                    .as_ref()
-                    .map(|data| !data.is_empty())
-                    .unwrap_or(false);
+                let has_spectrum = self.analysis.fft_state.has_data()
+                    && self
+                        .analysis
+                        .fft_state
+                        .data
+                        .as_ref()
+                        .is_some_and(|data| !data.is_empty());
                 if self.specialized_viewer_cache_matches_active(viewer) && has_spectrum {
                     ViewerCapability::available("Active analysis FFT spectrum data loaded")
                 } else if self.active_analysis_supports_fft() {

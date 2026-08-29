@@ -387,20 +387,6 @@ impl FftData {
             self.points.last()?.frequency,
         ))
     }
-
-    /// Find peak magnitude bin (excluding DC)
-    pub fn find_peak(&self) -> Option<(usize, &FftPoint)> {
-        if self.points.len() < 2 {
-            return None;
-        }
-
-        self.points
-            .iter()
-            .enumerate()
-            .skip(1)
-            .filter(|(_, point)| point.magnitude.is_finite())
-            .max_by(|(_, a), (_, b)| a.magnitude.total_cmp(&b.magnitude))
-    }
 }
 
 fn preflight_fft_build(length: usize) -> Result<(), FftBuildError> {

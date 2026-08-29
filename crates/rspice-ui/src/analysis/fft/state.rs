@@ -2,7 +2,9 @@
 //!
 //! Viewer state for FFT/spectrum display.
 
-use super::data::{FftBuildError, FftData, SpectrumAnalysis, SpectrumNormalization};
+use super::data::{
+    FftBuildError, FftData, SpectrumAnalysis, SpectrumAnalysisError, SpectrumNormalization,
+};
 use super::pipeline::FftInputError;
 use super::window::WindowFunction;
 use std::sync::Arc;
@@ -25,6 +27,10 @@ pub enum FftFailure {
     /// A prepared uniform record could not be transformed safely.
     #[error("{0}")]
     Build(#[from] FftBuildError),
+    /// A transformed record could not produce a complete trustworthy metric
+    /// transaction.
+    #[error("{0}")]
+    Analysis(#[from] SpectrumAnalysisError),
     /// The asynchronous preparation worker stopped without returning either
     /// prepared input or a typed input failure.
     #[error("FFT preparation worker stopped before returning a result")]

@@ -14,7 +14,8 @@ impl FftState {
     pub fn load_data(&mut self, mut data: FftData) {
         data.convert_normalization(self.normalization)
             .expect("finite imported FFT fixture normalization");
-        let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
+        let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics)
+            .expect("finite imported FFT fixture analysis");
         self.data = Some(data);
         self.analysis = Some(analysis);
         self.source_cache = None;
@@ -24,7 +25,7 @@ impl FftState {
     }
 
     /// Load prepared uniformly sampled source and compute FFT using current settings.
-    pub fn load_prepared_input(&mut self, input: PreparedFftInput) -> Result<(), FftBuildError> {
+    pub fn load_prepared_input(&mut self, input: PreparedFftInput) -> Result<(), FftFailure> {
         if self.selected_source.is_none() {
             self.selected_source = Some(input.name.clone());
         }
@@ -49,8 +50,8 @@ impl FftState {
     pub fn set_normalization(
         &mut self,
         normalization: SpectrumNormalization,
-    ) -> Result<(), FftBuildError> {
-        if self.normalization == normalization {
+    ) -> Result<(), FftFailure> {
+        if self.normalization == normalization && self.has_data() {
             return Ok(());
         }
         self.normalization = normalization;
@@ -60,9 +61,13 @@ impl FftState {
         let Some(data) = self.data.as_mut() else {
             return Ok(());
         };
-        match data.convert_normalization(normalization) {
-            Ok(()) => {
-                self.analysis = Some(SpectrumAnalysis::analyze(data, self.num_harmonics));
+        let result = match data.convert_normalization(normalization) {
+            Ok(()) => SpectrumAnalysis::analyze(data, self.num_harmonics).map_err(FftFailure::from),
+            Err(error) => Err(error.into()),
+        };
+        match result {
+            Ok(analysis) => {
+                self.analysis = Some(analysis);
                 self.last_error = None;
                 self.mark_spectrum_changed();
                 self.update_auto_scale();
@@ -71,7 +76,7 @@ impl FftState {
             Err(error) => {
                 self.data = None;
                 self.analysis = None;
-                self.last_error = Some(error.clone().into());
+                self.last_error = Some(error.clone());
                 self.mark_spectrum_changed();
                 Err(error)
             }
@@ -132,7 +137,7 @@ impl FftState {
     }
 
     /// Recompute FFT data from cached source using current window.
-    pub fn recompute_from_source(&mut self) -> Result<(), FftBuildError> {
+    pub fn recompute_from_source(&mut self) -> Result<(), FftFailure> {
         let Some(source) = self.source_cache.as_ref() else {
             return Ok(());
         };
@@ -142,10 +147,15 @@ impl FftState {
             source.sample_rate,
             self.window,
             self.normalization,
-        );
+        )
+        .map_err(FftFailure::from)
+        .and_then(|data| {
+            SpectrumAnalysis::analyze(&data, self.num_harmonics)
+                .map(|analysis| (data, analysis))
+                .map_err(FftFailure::from)
+        });
         match result {
-            Ok(data) => {
-                let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
+            Ok((data, analysis)) => {
                 self.data = Some(data);
                 self.analysis = Some(analysis);
                 self.last_error = None;
@@ -156,7 +166,7 @@ impl FftState {
             Err(error) => {
                 self.data = None;
                 self.analysis = None;
-                self.last_error = Some(error.clone().into());
+                self.last_error = Some(error.clone());
                 self.mark_spectrum_changed();
                 Err(error)
             }
@@ -191,9 +201,9 @@ impl FftState {
         self.mark_spectrum_changed();
     }
 
-    /// Has data?
+    /// Whether the complete spectrum-and-analysis transaction is ready.
     pub fn has_data(&self) -> bool {
-        self.data.is_some()
+        self.data.is_some() && self.analysis.is_some() && self.last_error.is_none()
     }
 }
 
@@ -264,7 +274,10 @@ mod tests {
         invalid.samples[7] = f64::NAN;
         assert!(matches!(
             state.load_prepared_input(invalid),
-            Err(FftBuildError::NonFiniteInputSample { index: 7, .. })
+            Err(FftFailure::Build(FftBuildError::NonFiniteInputSample {
+                index: 7,
+                ..
+            }))
         ));
         assert!(state.data.is_none());
         assert!(state.analysis.is_none());
@@ -312,5 +325,79 @@ mod tests {
             .expect("valid preparation recovers after an input failure");
         assert!(state.has_data());
         assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn analysis_failure_is_transactional_retains_source_and_recovers() {
+        let samples = (0..64)
+            .map(|index| (index as f64 * std::f64::consts::TAU / 8.0).sin())
+            .collect::<Vec<_>>();
+        let mut state = FftState::default();
+        state
+            .load_prepared_input(PreparedFftInput {
+                name: "V(out)".to_owned(),
+                samples,
+                sample_rate: 64.0,
+                original_count: 64,
+                decimation_factor: 1,
+            })
+            .expect("valid spectrum-analysis fixture");
+        assert!(state.has_data());
+
+        state.num_harmonics = 0;
+        assert!(matches!(
+            state.recompute_from_source(),
+            Err(FftFailure::Analysis(
+                SpectrumAnalysisError::InvalidHarmonicOrder { value: 0, .. }
+            ))
+        ));
+        assert!(state.data.is_none());
+        assert!(state.analysis.is_none());
+        assert!(state.source_cache.is_some());
+        assert!(matches!(
+            state.last_error,
+            Some(FftFailure::Analysis(
+                SpectrumAnalysisError::InvalidHarmonicOrder { value: 0, .. }
+            ))
+        ));
+        assert!(!state.has_data());
+
+        state.num_harmonics = 1;
+        state
+            .recompute_from_source()
+            .expect("valid harmonic order retries the retained source");
+        assert!(state.has_data());
+        assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn readiness_requires_a_complete_error_free_transaction() {
+        let data = FftData::from_spectrum(
+            "fixture",
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 0.0],
+            &[0.0, 0.0, 0.0],
+            4.0,
+        );
+        let mut state = FftState::default();
+        state.data = Some(data);
+        assert!(!state.has_data(), "a curve without metrics is not ready");
+
+        state.data = None;
+        state.analysis = Some(SpectrumAnalysis::default());
+        assert!(!state.has_data(), "metrics without a curve are not ready");
+
+        state.data = Some(FftData::from_spectrum(
+            "fixture",
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 0.0],
+            &[0.0, 0.0, 0.0],
+            4.0,
+        ));
+        state.last_error = Some(FftFailure::WorkerDisconnected);
+        assert!(!state.has_data(), "a retained failure revokes readiness");
+
+        state.last_error = None;
+        assert!(state.has_data());
     }
 }

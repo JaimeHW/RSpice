@@ -45,8 +45,8 @@ impl FftState {
     }
 
     /// Set window function
-    pub fn set_window(&mut self, window: WindowFunction) -> Result<(), FftBuildError> {
-        if self.window == window {
+    pub fn set_window(&mut self, window: WindowFunction) -> Result<(), FftFailure> {
+        if self.window == window && self.has_data() {
             return Ok(());
         }
         self.window = window;

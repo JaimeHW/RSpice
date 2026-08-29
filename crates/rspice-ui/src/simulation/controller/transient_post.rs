@@ -604,7 +604,10 @@ fn build_fft_prepared_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::fft::{FftFailure, WindowFunction, data::FftBuildError};
+    use crate::analysis::fft::{
+        FftFailure, WindowFunction,
+        data::{FftBuildError, SpectrumAnalysisError},
+    };
     use crate::product::{AnalysisInstanceId, DatasetId};
     use crate::state::{AnalysisResult, SimulationRun};
 
@@ -839,7 +842,10 @@ mod tests {
 
         assert!(matches!(
             state.analysis.fft_state.set_window(WindowFunction::Hanning),
-            Err(FftBuildError::ErasedWindowedSample { index: 1, .. })
+            Err(FftFailure::Build(FftBuildError::ErasedWindowedSample {
+                index: 1,
+                ..
+            }))
         ));
         assert!(!state.analysis.fft_state.has_data());
         assert!(state.analysis.fft_state.last_error.is_some());
@@ -855,6 +861,60 @@ mod tests {
                 index: 1,
                 ..
             }))
+        ));
+    }
+
+    #[test]
+    fn failed_fft_analysis_cannot_leave_the_coordinator_ready() {
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        state.analysis.fft_state.window = WindowFunction::Rectangular;
+        state
+            .analysis
+            .fft_state
+            .load_prepared_input(PreparedFftInput {
+                name: "V(out)".to_owned(),
+                samples: (0..64)
+                    .map(|index| (index as f64 * std::f64::consts::TAU / 8.0).sin())
+                    .collect(),
+                sample_rate: 64.0,
+                original_count: 64,
+                decimation_factor: 1,
+            })
+            .expect("valid FFT analysis fixture");
+
+        let mut controller = SimulationController::new();
+        controller.mark_transient_view_ready(&mut state, ActiveViewer::Fft);
+        assert_eq!(
+            controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
+            DerivedViewerLoadState::Ready
+        );
+        assert!(state.analysis.cache_authority.fft.is_some());
+
+        state.analysis.fft_state.num_harmonics = 0;
+        assert!(matches!(
+            state.analysis.fft_state.recompute_from_source(),
+            Err(FftFailure::Analysis(
+                SpectrumAnalysisError::InvalidHarmonicOrder { value: 0, .. }
+            ))
+        ));
+        assert!(!state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.source_cache.is_some());
+
+        assert_eq!(
+            controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
+            DerivedViewerLoadState::Unavailable
+        );
+        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(matches!(
+            state.analysis.fft_state.last_error,
+            Some(FftFailure::Analysis(
+                SpectrumAnalysisError::InvalidHarmonicOrder { value: 0, .. }
+            ))
         ));
     }
 

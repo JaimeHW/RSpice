@@ -32,7 +32,11 @@ struct FftModel {
 
 fn build_model(state: &mut AppState) -> Option<FftModel> {
     let fft = &state.analysis.fft_state;
+    if !fft.has_data() {
+        return None;
+    }
     let data = fft.data.as_ref()?;
+    let analysis = fft.analysis.as_ref()?;
     if data.points.is_empty() {
         return None;
     }
@@ -53,18 +57,16 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
     let frequency = Arc::clone(&series.frequency);
     let magnitude_db = Arc::clone(&series.magnitude_db);
 
-    let analysis = fft.analysis.as_ref();
-    let fundamental = analysis.and_then(|a| Some((a.fundamental_frequency?, a.fundamental_db?)));
+    let fundamental = analysis.fundamental_frequency.zip(analysis.fundamental_db);
     // Harmonic list: order, frequency, dBc relative to the fundamental.
-    let harmonics = match (analysis, fundamental) {
-        (Some(a), Some((f0, db0))) if f0 > 0.0 => a
+    let harmonics = match fundamental {
+        Some((f0, db0)) if f0 > 0.0 => analysis
             .harmonics
             .iter()
-            .filter(|(f, _)| *f > f0 * 1.5)
-            .map(|&(f, db)| (((f / f0).round() as usize).max(2), f, db - db0))
+            .map(|harmonic| (harmonic.order, harmonic.frequency, harmonic.level_db - db0))
             .take(6)
             .collect(),
-        _ => Vec::new(),
+        Some(_) | None => Vec::new(),
     };
 
     Some(FftModel {
@@ -382,7 +384,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
         return;
     };
-    let Some(analysis) = state.analysis.fft_state.analysis.clone() else {
+    let Some(analysis) = state.analysis.fft_state.analysis.as_ref() else {
         super::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
         return;
     };
@@ -398,9 +400,21 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let enob = analysis
         .sinad_db
         .map(|sinad| format!("{:.1} bit", (sinad - 1.76) / 6.02));
-    let thd = analysis.thd_percent.map_or("—".to_owned(), |value| {
-        format!("{value:.3} % · {} harmonics", analysis.harmonics.len())
-    });
+    let thd = analysis.thd_percent.map_or_else(
+        || match analysis.harmonic_coverage {
+            crate::analysis::fft::data::HarmonicCoverage::InsufficientBandwidth {
+                analyzed_through,
+                ..
+            } => format!("— · bandwidth through HD{analyzed_through}"),
+            crate::analysis::fft::data::HarmonicCoverage::InsufficientResolution {
+                failed_order,
+                ..
+            } => format!("— · HD{failed_order} is not independently resolvable"),
+            crate::analysis::fft::data::HarmonicCoverage::NoFundamental { .. }
+            | crate::analysis::fft::data::HarmonicCoverage::Complete { .. } => "—".to_owned(),
+        },
+        |value| format!("{value:.3} % · {} harmonics", analysis.harmonics.len()),
+    );
     let amplitude = analysis
         .fundamental_db
         .map_or("—".to_owned(), |value| format!("{value:.1} {level_unit}"));
@@ -423,7 +437,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             model.normalization.display_name().to_owned(),
             false,
         ),
-        ("Fundamental", f(analysis.fundamental_frequency, 1), false),
+        (
+            "Dominant carrier",
+            f(analysis.fundamental_frequency, 1),
+            false,
+        ),
         ("Amplitude", amplitude, false),
         ("THD", thd, true),
         ("SNR", db(analysis.snr_db), false),
@@ -434,18 +452,20 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     ];
     super::stat_table(ui, &rows);
 
-    if let Some(f0) = analysis.fundamental_frequency {
+    if analysis.fundamental_frequency.is_some() {
         let db0 = analysis.fundamental_db.unwrap_or(0.0);
         let harmonic_rows: Vec<(String, String)> = analysis
             .harmonics
             .iter()
-            .filter(|(f, _)| *f > f0 * 1.5)
             .take(6)
-            .map(|&(f, level)| {
-                let order = ((f / f0).round() as usize).max(2);
+            .map(|harmonic| {
                 (
-                    format!("HD{order} · {}", quantity_policy.format_frequency(f, 0)),
-                    format!("{:.1} dBc", level - db0),
+                    format!(
+                        "HD{} · {}",
+                        harmonic.order,
+                        quantity_policy.format_frequency(harmonic.frequency, 0)
+                    ),
+                    format!("{:.1} dBc", harmonic.level_db - db0),
                 )
             })
             .collect();
