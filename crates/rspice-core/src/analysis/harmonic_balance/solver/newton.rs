@@ -229,6 +229,27 @@ mod exact_matrix_free_tests {
             assert_close(actual, expected);
         }
     }
+
+    #[test]
+    fn line_search_removes_unrepresentable_dc_imaginary_state() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+        solver.add_conductance(0, 0, 1.0);
+        solver.add_dc_source(0, 1.0);
+        let mut state = HbSolverState::new(1, 1);
+        state.x[0][0] = Complex64::new(1.0, 1.0);
+        solver
+            .compute_full_residual_with_gmin(&mut state, 0.0)
+            .expect("finite linear residual");
+        assert!(state.residual_norm > 0.0);
+
+        let delta = vec![vec![Complex64::new(0.0, 0.0); 2]];
+        solver
+            .apply_line_search_with_gmin(&mut state, &delta, 0.0, &NoAbort)
+            .expect("line search accepts the representable DC state");
+
+        assert_eq!(state.x[0][0], Complex64::new(1.0, 0.0));
+        assert_eq!(state.residual_norm, 0.0);
+    }
 }
 
 impl ExactHbOperator<'_> {
@@ -782,7 +803,7 @@ impl HbSolver {
             // 2. Check convergence: per-row KCL test. A global norm hides a
             // microamp imbalance at a high-impedance node behind the amp
             // scale of stiff source rows, accepting grossly wrong bias.
-            if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
+            if state.rows_converged(tol, abstol) {
                 return Ok(true);
             }
 
@@ -912,8 +933,16 @@ impl HbSolver {
                             v_new_raw
                         };
 
-                        // Keep imaginary part updated normally
-                        let im_new = x_orig[node][k].im + alpha * dx.im;
+                        // The DC coefficient of a real waveform has no
+                        // imaginary degree of freedom. Keeping a stale or
+                        // updated imaginary part here would make the line
+                        // search evaluate a state that the realified Newton
+                        // system cannot represent.
+                        let im_new = if k == 0 {
+                            0.0
+                        } else {
+                            x_orig[node][k].im + alpha * dx.im
+                        };
                         state.x[node][k] = Complex64::new(v_new, im_new);
                     }
                 }
@@ -946,7 +975,11 @@ impl HbSolver {
                         v_new_raw
                     };
 
-                    let im_new = x_orig[node][k].im + best_alpha * dx.im;
+                    let im_new = if k == 0 {
+                        0.0
+                    } else {
+                        x_orig[node][k].im + best_alpha * dx.im
+                    };
                     state.x[node][k] = Complex64::new(v_new, im_new);
                 }
             }
