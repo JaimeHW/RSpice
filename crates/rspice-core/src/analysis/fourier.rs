@@ -146,6 +146,16 @@ pub enum FourierError {
     /// The aggregate distortion metric overflowed.
     #[error("computed total harmonic distortion is non-finite ({value})")]
     NonFiniteThd { value: Value },
+    /// A public magnitude field or reference is not a valid magnitude.
+    #[error("{role} must be finite and non-negative, got {value}")]
+    InvalidMagnitude { role: &'static str, value: Value },
+    /// A retained public THD field is malformed.
+    #[error("total harmonic distortion must be finite and non-negative, got {value}")]
+    InvalidThd { value: Value },
+    /// A mathematically nonzero relative result cannot be represented by
+    /// [`Value`].
+    #[error("{quantity} is outside the representable floating-point range")]
+    UnrepresentableRelativeSpectrum { quantity: &'static str },
 }
 
 //=============================================================================
@@ -522,22 +532,69 @@ pub struct HarmonicComponent {
 }
 
 impl HarmonicComponent {
-    /// Get normalized magnitude (relative to fundamental)
-    pub fn normalized(&self, fundamental_mag: Value) -> Value {
-        if fundamental_mag > 1e-15 {
-            self.magnitude / fundamental_mag * 100.0
-        } else {
-            0.0
+    /// Get normalized magnitude (percent of the fundamental).
+    ///
+    /// `Ok(None)` means the reference magnitude is exactly zero. Invalid
+    /// public magnitude fields are rejected instead of being interpreted as
+    /// zero.
+    pub fn normalized(&self, fundamental_mag: Value) -> Result<Option<Value>, FourierError> {
+        validate_relative_magnitude("harmonic magnitude", self.magnitude)?;
+        validate_relative_magnitude("fundamental reference magnitude", fundamental_mag)?;
+        if fundamental_mag == 0.0 {
+            return Ok(None);
         }
+        if self.magnitude == 0.0 {
+            return Ok(Some(0.0));
+        }
+
+        let ratio = self.magnitude / fundamental_mag;
+        let mut percent = ratio * 100.0;
+        if ratio == 0.0 {
+            // Division can underflow even when the percentage remains
+            // representable. Scaling the necessarily-small numerator first
+            // recovers that range without risking overflow.
+            percent = (self.magnitude * 100.0) / fundamental_mag;
+        }
+        if !percent.is_finite() || percent == 0.0 {
+            return Err(FourierError::UnrepresentableRelativeSpectrum {
+                quantity: "normalized harmonic magnitude",
+            });
+        }
+        Ok(Some(percent))
     }
 
-    /// Get magnitude in dB relative to fundamental
-    pub fn db(&self, fundamental_mag: Value) -> Value {
-        if fundamental_mag > 1e-15 && self.magnitude > 1e-15 {
-            20.0 * (self.magnitude / fundamental_mag).log10()
-        } else {
-            -200.0
+    /// Get magnitude in dB relative to the fundamental.
+    ///
+    /// `Ok(None)` means the reference is exactly zero. An exactly zero
+    /// numerator with a nonzero reference is represented by negative
+    /// infinity, its exact logarithmic value.
+    pub fn db(&self, fundamental_mag: Value) -> Result<Option<Value>, FourierError> {
+        validate_relative_magnitude("harmonic magnitude", self.magnitude)?;
+        validate_relative_magnitude("fundamental reference magnitude", fundamental_mag)?;
+        if fundamental_mag == 0.0 {
+            return Ok(None);
         }
+        if self.magnitude == 0.0 {
+            return Ok(Some(Value::NEG_INFINITY));
+        }
+
+        // Subtract logarithms rather than taking the ratio first so valid
+        // extreme finite magnitudes cannot overflow or underflow.
+        let value = 20.0 * (self.magnitude.log10() - fundamental_mag.log10());
+        if !value.is_finite() {
+            return Err(FourierError::UnrepresentableRelativeSpectrum {
+                quantity: "relative harmonic magnitude in dB",
+            });
+        }
+        Ok(Some(value))
+    }
+}
+
+fn validate_relative_magnitude(role: &'static str, value: Value) -> Result<(), FourierError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(())
+    } else {
+        Err(FourierError::InvalidMagnitude { role, value })
     }
 }
 
@@ -566,15 +623,30 @@ impl FourierResult {
         self.harmonics.get(n)
     }
 
-    /// Get THD in dB, or `None` when the fundamental is exactly zero.
-    pub fn thd_db(&self) -> Option<Value> {
-        self.thd.map(|thd| {
-            if thd > 0.0 {
-                20.0 * (thd / 100.0).log10()
-            } else {
-                -200.0
-            }
-        })
+    /// Get THD in dB.
+    ///
+    /// `Ok(None)` preserves undefined THD from an exactly zero fundamental.
+    /// A defined zero-percent THD is exactly negative infinity in dB.
+    pub fn thd_db(&self) -> Result<Option<Value>, FourierError> {
+        let Some(thd) = self.thd else {
+            return Ok(None);
+        };
+        if !thd.is_finite() || thd < 0.0 {
+            return Err(FourierError::InvalidThd { value: thd });
+        }
+        if thd == 0.0 {
+            return Ok(Some(Value::NEG_INFINITY));
+        }
+
+        // THD is stored in percent; subtract log10(100) without first
+        // dividing a potentially subnormal value.
+        let value = 20.0 * (thd.log10() - 2.0);
+        if !value.is_finite() {
+            return Err(FourierError::UnrepresentableRelativeSpectrum {
+                quantity: "total harmonic distortion in dB",
+            });
+        }
+        Ok(Some(value))
     }
 }
 
