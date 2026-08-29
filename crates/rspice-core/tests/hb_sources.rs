@@ -182,3 +182,30 @@ rfloat f1 f2 1k
         "HB must surface the singular solve instead of publishing zeros: {error}"
     );
 }
+
+#[test]
+fn nonlinear_hb_is_certified_without_a_final_gmin_shunt() {
+    let deck = "\
+* Reverse-biased weak diode selects nonlinear HB without loading the node.
+i1 0 out dc 1p
+r1 out 0 1e12
+d1 0 out dweak
+.model dweak d is=1e-30 n=1 cj0=0 tt=0
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let mut config = HbConfig::new(1.0e6).with_harmonics(2);
+    config.tolerance = 1.0e-9;
+    config.abstol = 1.0e-21;
+    let result = Engine::new(SimulationConfig::default())
+        .run_hb(&netlist, config)
+        .expect("nonlinear high-impedance HB converges");
+    let dc = coefficient(&result, "out", 0);
+
+    assert!(result.converged);
+    assert!(
+        (dc.re - 1.0).abs() <= 1.0e-6,
+        "1 pA through 1 TOhm must remain 1 V after nonlinear HB, got {dc}"
+    );
+    assert_eq!(dc.im, 0.0);
+}

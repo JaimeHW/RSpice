@@ -64,15 +64,15 @@ impl HbSolver {
             }
         }
 
-        let real_structure = StaticMatrix::from_triplets(n, n, &structure)
-            .map_err(Self::map_complex_linear_solve_error)?;
+        let real_structure =
+            StaticMatrix::from_triplets(n, n, &structure).map_err(Self::map_linear_solve_error)?;
         let mut matrix = ComplexMatrix::from_real_structure(&real_structure);
         for (row_index, row) in a.iter().enumerate() {
             for (col_index, &value) in row.iter().enumerate() {
                 if value != Complex64::new(0.0, 0.0) {
                     matrix
                         .try_add(row_index, col_index, value)
-                        .map_err(Self::map_complex_linear_solve_error)?;
+                        .map_err(Self::map_linear_solve_error)?;
                 }
             }
         }
@@ -81,12 +81,12 @@ impl HbSolver {
             Ok(solution) => Ok(solution),
             Err(SolverError::InaccurateSolution(_)) if n <= 64 => matrix
                 .solve_dense_extended(b)
-                .map_err(Self::map_complex_linear_solve_error),
-            Err(error) => Err(Self::map_complex_linear_solve_error(error)),
+                .map_err(Self::map_linear_solve_error),
+            Err(error) => Err(Self::map_linear_solve_error(error)),
         }
     }
 
-    fn map_complex_linear_solve_error(error: SolverError) -> HbError {
+    pub(super) fn map_linear_solve_error(error: SolverError) -> HbError {
         match error {
             SolverError::SingularMatrix | SolverError::PivotGrowth => HbError::SingularMatrix,
             SolverError::InvalidCircuit(message) => {

@@ -522,12 +522,12 @@ impl HbSolver {
             return self.solve_linear(state);
         }
 
-        // Target GMIN for the converged solution: the SPICE-standard 1e-12.
-        // The stabilizer stays in the final residual, so anything larger
-        // would leave a visible leak at high-impedance nodes; difficult
-        // circuits get their conditioning help from the GMIN ladder below,
-        // which always refines back to this target.
-        let gmin = 1e-12;
+        // GMIN is a continuation aid, never part of the authored circuit.
+        // Commercial SPICE implementations may walk a shunted homotopy, but
+        // the result is accepted only after Newton converges on the physical
+        // zero-GMIN equations.
+        let target_gmin = 0.0;
+        let homotopy_floor = 1.0e-12;
 
         // Step 0: Solve DC operating point first
         // This establishes the nonlinear device operating points and provides a much
@@ -554,7 +554,14 @@ impl HbSolver {
         // returned above.
 
         // Step 1: Try direct Newton first
-        if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol, abort)? {
+        if self.newton_inner_loop(
+            state,
+            target_gmin,
+            self.config.max_iterations,
+            tol,
+            abstol,
+            abort,
+        )? {
             state.converged = true;
             return Ok(());
         }
@@ -574,10 +581,8 @@ impl HbSolver {
                 // Converged at higher GMIN - now refine with progressively lower GMIN
                 // Save state before refinement in case we need to restore
                 let mut last_good_state = state.x.clone();
-                let mut last_good_residual = state.residual_norm;
-
                 let mut current_gmin = gmin_level;
-                while current_gmin > gmin {
+                while current_gmin > homotopy_floor {
                     // Use factor of 2 for very gradual refinement
                     current_gmin /= 2.0;
                     if self.newton_inner_loop(
@@ -590,17 +595,23 @@ impl HbSolver {
                     )? {
                         // Success - update last good state
                         last_good_state = state.x.clone();
-                        last_good_residual = state.residual_norm;
                     } else {
                         // Failed - restore last good state and stop refining
                         state.x = last_good_state;
-                        state.residual_norm = last_good_residual;
                         break;
                     }
                 }
-                // Recompute residual with target GMIN to check tolerance
-                self.compute_full_residual_with_gmin(state, gmin)?;
-                if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
+                // The continuation state is only an initial guess. Require a
+                // complete Newton solve and residual check on the unmodified
+                // circuit before publishing it.
+                if self.newton_inner_loop(
+                    state,
+                    target_gmin,
+                    self.config.max_iterations,
+                    tol,
+                    abstol,
+                    abort,
+                )? {
                     state.converged = true;
                     return Ok(());
                 }
@@ -645,7 +656,7 @@ impl HbSolver {
             // Try Newton at this source level (using previous solution as starting point)
             let converged = self.newton_inner_loop(
                 state,
-                gmin,
+                target_gmin,
                 self.config.max_iterations / 2,
                 tol * 10.0,
                 abstol,
@@ -671,7 +682,7 @@ impl HbSolver {
         if source_stepper.is_complete()
             && self.newton_inner_loop(
                 state,
-                gmin,
+                target_gmin,
                 self.config.max_iterations,
                 tol,
                 abstol,
@@ -692,7 +703,7 @@ impl HbSolver {
         while !ptran.is_complete() && ptran_iterations < max_ptran_iter {
             // Pseudo-transient adds G_eq = C_pseudo/dt to each node diagonal
             // This damps oscillations and helps find DC solution
-            let ptran_gmin = gmin + ptran.conductance(0);
+            let ptran_gmin = target_gmin + ptran.conductance(0);
 
             let converged = self.newton_inner_loop(
                 state,
@@ -718,7 +729,7 @@ impl HbSolver {
         if ptran.is_complete()
             && self.newton_inner_loop(
                 state,
-                gmin,
+                target_gmin,
                 self.config.max_iterations,
                 tol,
                 abstol,

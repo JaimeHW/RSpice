@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::solver::convergence::SourceStepper;
+use crate::solver::{SolverError, StaticMatrix};
 
 impl HbSolver {
     /// Solve DC operating point before full HB iteration
@@ -31,11 +32,20 @@ impl HbSolver {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
-        // DC tolerances (more realistic than HB defaults)
-        // For DC analysis, we're solving KCL: sum of currents = 0
-        // Typical circuit currents are in mA-µA range, so abstol should be ~pA
-        let dc_reltol = self.config.tolerance.max(1e-3); // At least 0.1% relative
-        let dc_abstol = self.config.abstol.max(1e-9); // At least 1 pA absolute
+        // The DC seed is part of the same authenticated HB solve. Respect the
+        // caller's tolerances instead of silently weakening them.
+        let dc_reltol = self.config.tolerance;
+        let dc_abstol = self.config.abstol;
+        if !dc_reltol.is_finite() || dc_reltol <= 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB relative tolerance must be finite and positive, got {dc_reltol}"
+            )));
+        }
+        if !dc_abstol.is_finite() || dc_abstol <= 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB absolute tolerance must be finite and positive, got {dc_abstol}"
+            )));
+        }
 
         // DC-specific iteration limit
         let dc_max_iter = self.config.max_iterations.max(150);
@@ -46,8 +56,10 @@ impl HbSolver {
             return Ok(self.extract_dc_solution(state));
         }
 
-        // Target GMIN for final solution
-        let target_gmin = 1e-12;
+        // GMIN stepping is a homotopy only. The returned seed must satisfy the
+        // physical zero-GMIN DC equations.
+        let target_gmin = 0.0;
+        let homotopy_floor = 1.0e-12;
 
         // Initialize diode voltages with forward bias estimate (0.6V per diode)
         // This gives Newton a much better starting point than V=0
@@ -82,7 +94,7 @@ impl HbSolver {
                 let mut last_good_gmin = current_gmin;
                 let mut refine_failures = 0;
 
-                while current_gmin > target_gmin {
+                while current_gmin > homotopy_floor {
                     current_gmin /= 2.0;
                     if self.dc_newton_inner_loop(
                         state,
@@ -112,10 +124,16 @@ impl HbSolver {
                     }
                 }
 
-                // Verify final residual at the best achievable GMIN
-                self.compute_dc_residual(state, last_good_gmin.max(target_gmin))?;
-                if state.residual_norm < dc_abstol || state.dc_rows_converged(dc_reltol, dc_abstol)
-                {
+                // A high-GMIN solution is only a warm start. Accept the seed
+                // only after a full solve on the unmodified DC equations.
+                if self.dc_newton_inner_loop(
+                    state,
+                    target_gmin,
+                    dc_max_iter,
+                    dc_reltol,
+                    dc_abstol,
+                    abort,
+                )? {
                     return Ok(self.extract_dc_solution(state));
                 }
             }
@@ -210,12 +228,6 @@ impl HbSolver {
             if row < n && col < n && l.abs() > 1e-30 {
                 g_dc[row][col] += DC_SHORT_CONDUCTANCE;
             }
-        }
-
-        // Add small GMIN on diagonal for invertibility
-        let gmin = 1e-12;
-        for i in 0..n {
-            g_dc[i][i] += gmin;
         }
 
         // Build DC RHS (source currents at DC)
@@ -583,68 +595,64 @@ impl HbSolver {
         Ok(())
     }
 
-    /// Solve real linear system using Gaussian elimination with partial pivoting
+    /// Solve and certify a real linear system with scale-aware sparse LU.
     pub(super) fn solve_real_linear_system(
         &self,
         a: &[Vec<Value>],
         b: &[Value],
     ) -> Result<Vec<Value>, HbError> {
-        let n = a.len();
-        if n == 0 || b.len() != n {
-            return Err(HbError::InvalidCircuit("Invalid system size".to_string()));
+        let n = b.len();
+        if n == 0 {
+            return if a.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(HbError::InvalidCircuit(format!(
+                    "HB real linear system has {} matrix rows but an empty RHS",
+                    a.len()
+                )))
+            };
+        }
+        if a.len() != n {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB real linear-system dimension mismatch: matrix has {} rows, RHS has {n}",
+                a.len()
+            )));
+        }
+        if b.iter().any(|value| !value.is_finite()) {
+            return Err(HbError::InvalidCircuit(
+                "HB real linear-system RHS contains a non-finite value".to_string(),
+            ));
         }
 
-        // Create augmented matrix
-        let mut aug: Vec<Vec<Value>> = a
-            .iter()
-            .enumerate()
-            .map(|(i, row)| {
-                let mut new_row = row.clone();
-                new_row.push(b[i]);
-                new_row
-            })
-            .collect();
-
-        // Forward elimination with partial pivoting
-        for col in 0..n {
-            // Find pivot
-            let mut max_row = col;
-            let mut max_val = aug[col][col].abs();
-            for row in (col + 1)..n {
-                if aug[row][col].abs() > max_val {
-                    max_val = aug[row][col].abs();
-                    max_row = row;
+        let mut triplets = Vec::with_capacity(n);
+        for (row_index, row) in a.iter().enumerate() {
+            if row.len() != n {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB real linear-system row {row_index} has {} columns; expected {n}",
+                    row.len()
+                )));
+            }
+            for (col_index, &value) in row.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB real linear-system coefficient ({row_index}, {col_index}) is non-finite"
+                    )));
+                }
+                if row_index == col_index || value != 0.0 {
+                    triplets.push((row_index, col_index, value));
                 }
             }
-
-            if max_val < 1e-15 {
-                return Err(HbError::SingularMatrix);
-            }
-
-            // Swap rows
-            aug.swap(col, max_row);
-
-            // Eliminate
-            let pivot = aug[col][col];
-            for row in (col + 1)..n {
-                let factor = aug[row][col] / pivot;
-                for j in col..=n {
-                    aug[row][j] -= factor * aug[col][j];
-                }
-            }
         }
 
-        // Back substitution
-        let mut x = vec![0.0; n];
-        for i in (0..n).rev() {
-            let mut sum = aug[i][n];
-            for j in (i + 1)..n {
-                sum -= aug[i][j] * x[j];
-            }
-            x[i] = sum / aug[i][i];
+        let mut matrix =
+            StaticMatrix::from_triplets(n, n, &triplets).map_err(Self::map_linear_solve_error)?;
+        match matrix.solve(b) {
+            Ok(solution) => Ok(solution),
+            Err(SolverError::InaccurateSolution(_)) if n <= 64 => matrix
+                .solve_dense_extended(b)
+                .map_err(Self::map_linear_solve_error),
+            Err(error) => Err(Self::map_linear_solve_error(error)),
         }
-
-        Ok(x)
     }
 
     /// Extract DC solution as vector of real voltages
@@ -860,4 +868,72 @@ impl HbSolver {
     // =========================================================================
     // End DC Operating Point Solver
     // =========================================================================
+}
+
+#[cfg(test)]
+mod linear_solve_tests {
+    use super::*;
+    use crate::analysis::harmonic_balance::HbConfig;
+
+    fn solver() -> HbSolver {
+        HbSolver::new(HbConfig::new(1.0e9), 1)
+    }
+
+    #[test]
+    fn real_solve_rejects_singular_systems() {
+        assert!(matches!(
+            solver().solve_real_linear_system(&[vec![0.0]], &[1.0]),
+            Err(HbError::SingularMatrix)
+        ));
+    }
+
+    #[test]
+    fn real_solve_preserves_tiny_physical_coefficients() {
+        let solution = solver()
+            .solve_real_linear_system(&[vec![1.0e-18]], &[1.0])
+            .expect("1e18-ohm scalar system is nonsingular");
+        assert!((solution[0] - 1.0e18).abs() <= 1.0e3);
+    }
+
+    #[test]
+    fn linear_dc_seed_contains_no_implicit_shunt() {
+        let mut solver = solver();
+        solver.add_resistor(0, 1, 1.0e18);
+        solver.add_dc_source(0, 1.0);
+        let mut state = HbSolverState::new(1, solver.num_harmonics());
+
+        let solution = solver
+            .solve_dc_operating_point(&mut state)
+            .expect("physical high-impedance DC seed solves");
+        assert!((solution[0] - 1.0e18).abs() <= 1.0e3);
+    }
+
+    #[test]
+    fn dc_seed_rejects_invalid_caller_tolerances() {
+        let mut config = HbConfig::new(1.0e9);
+        config.tolerance = f64::NAN;
+        let mut solver = HbSolver::new(config, 1);
+        let mut state = HbSolverState::new(1, solver.num_harmonics());
+
+        assert!(matches!(
+            solver.solve_dc_operating_point(&mut state),
+            Err(HbError::InvalidCircuit(_))
+        ));
+    }
+
+    #[test]
+    fn real_solve_rejects_malformed_and_nonfinite_input() {
+        assert!(matches!(
+            solver().solve_real_linear_system(&[], &[1.0]),
+            Err(HbError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            solver().solve_real_linear_system(&[vec![f64::NAN]], &[1.0]),
+            Err(HbError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            solver().solve_real_linear_system(&[vec![1.0]], &[f64::INFINITY]),
+            Err(HbError::InvalidCircuit(_))
+        ));
+    }
 }
