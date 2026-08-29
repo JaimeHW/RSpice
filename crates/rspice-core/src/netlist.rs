@@ -1161,6 +1161,14 @@ impl Netlist {
         diagnostics.extend(netlist.diagnostics);
         netlist.diagnostics = diagnostics;
         netlist.control_dispositions = dispositions;
+        if !netlist.spef_includes.is_empty() {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: ".spef_include requires path-backed parsing so the annotation can be resolved and applied"
+                    .to_owned(),
+            }
+            .into());
+        }
         ensure_parse_not_aborted(abort)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = None;
@@ -1489,6 +1497,14 @@ impl Netlist {
         if netlist.spef_includes.is_empty() {
             return Ok(());
         }
+        if deck_path.as_os_str().is_empty() {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: ".spef_include requires a path-backed root netlist; relative SPEF dependencies cannot be resolved from pathless source"
+                    .to_owned(),
+            }
+            .into());
+        }
         let base = deck_path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -1519,8 +1535,29 @@ impl Netlist {
                 })
             })?;
             retained_source_bytes = retained_source_bytes.saturating_add(source_bytes);
-            let parasitics = spef::SpefFile::parse_with_abort(&content, abort)?;
-            let report = parasitics.apply_with_abort(netlist, abort)?;
+            let contextualize = |error: ParseWithAbortError| match error {
+                ParseWithAbortError::Aborted => ParseWithAbortError::Aborted,
+                ParseWithAbortError::Parse(ParseError::ResourceLimit(error)) => {
+                    ParseError::ResourceLimit(error).into()
+                }
+                ParseWithAbortError::Parse(ParseError::Syntax { line, message }) => {
+                    ParseError::Syntax {
+                        line,
+                        message: format!("SPEF `{}`: {message}", path.display()),
+                    }
+                    .into()
+                }
+                ParseWithAbortError::Parse(error) => ParseError::Syntax {
+                    line: 0,
+                    message: format!("SPEF `{}`: {error}", path.display()),
+                }
+                .into(),
+            };
+            let parasitics =
+                spef::SpefFile::parse_with_abort(&content, abort).map_err(&contextualize)?;
+            let report = parasitics
+                .apply_path_backed_with_abort(netlist, abort)
+                .map_err(contextualize)?;
             log::info!(
                 "SPEF `{}`: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} C added",
                 path.display(),

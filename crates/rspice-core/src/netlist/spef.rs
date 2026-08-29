@@ -17,10 +17,10 @@
 //! (Spectre's spelling) — `.include file.spef` routes there too. DSPF
 //! files need none of this: DSPF is SPICE syntax and parses directly.
 //!
-//! Unsupported sections (`*INDUC`, reduced `*R_NET`/`*C_NET`) are skipped
-//! with a warning rather than failing the deck.
+//! Unsupported sections (`*INDUC`, reduced `*R_NET`/`*C_NET`) are rejected:
+//! silently dropping extracted parasitics would simulate a different circuit.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::ast::{Element, ElementKind};
 use super::{
@@ -47,6 +47,7 @@ struct Conn {
     node: NodeRef,
     /// `*P` (port) vs `*I` (instance pin).
     is_port: bool,
+    line: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +56,7 @@ struct Cap {
     /// `None` for a grounded capacitance.
     b: Option<NodeRef>,
     farads: Value,
+    line: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -62,11 +64,13 @@ struct Res {
     a: NodeRef,
     b: NodeRef,
     ohms: Value,
+    line: usize,
 }
 
 #[derive(Debug, Clone)]
 struct DNet {
     name: String,
+    line: usize,
     conns: Vec<Conn>,
     caps: Vec<Cap>,
     ress: Vec<Res>,
@@ -129,7 +133,37 @@ impl SpefFile {
         ensure_parse_not_aborted(abort)?;
         let mut staged = netlist.clone();
         ensure_parse_not_aborted(abort)?;
-        let report = self.apply_in_place_with_abort(&mut staged, abort)?;
+        let report = self.apply_in_place_with_abort(&mut staged, abort, false)?;
+        ensure_parse_not_aborted(abort)?;
+        *netlist = staged;
+        Ok(report)
+    }
+
+    /// Strict transactional annotation used by filesystem-backed imports.
+    /// Every parsed record must resolve and the file must alter the retained
+    /// circuit; compatibility callers of [`Self::apply`] keep their historic
+    /// best-effort behavior.
+    pub(crate) fn apply_path_backed_with_abort(
+        &self,
+        netlist: &mut Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<SpefReport, ParseWithAbortError> {
+        ensure_parse_not_aborted(abort)?;
+        let mut staged = netlist.clone();
+        ensure_parse_not_aborted(abort)?;
+        let report = self.apply_in_place_with_abort(&mut staged, abort, true)?;
+        if report.nets == 0 {
+            return Err(spef_annotation_error(
+                0,
+                "document contains no *D_NET annotation",
+            ));
+        }
+        if report.resistors + report.capacitors == 0 {
+            return Err(spef_annotation_error(
+                0,
+                "document did not apply any supported R/C parasitic",
+            ));
+        }
         ensure_parse_not_aborted(abort)?;
         *netlist = staged;
         Ok(report)
@@ -139,13 +173,17 @@ impl SpefFile {
         &self,
         netlist: &mut Netlist,
         abort: &dyn AbortSignal,
+        strict: bool,
     ) -> Result<SpefReport, ParseWithAbortError> {
         let mut report = SpefReport::default();
         let mut element_index: HashMap<String, usize> = HashMap::new();
+        let mut original_nodes: HashSet<String> = HashSet::new();
         for (idx, element) in netlist.elements.iter().enumerate() {
             poll_parse_abort(abort, idx)?;
             element_index.insert(element.name.to_ascii_uppercase(), idx);
+            original_nodes.extend(element.nodes.iter().map(|node| node.to_ascii_uppercase()));
         }
+        original_nodes.insert("0".to_owned());
         let mut subckt_ports: HashMap<String, Vec<String>> = HashMap::new();
         for (subckt_index, def) in netlist.subcircuits.iter().enumerate() {
             poll_parse_abort(abort, subckt_index)?;
@@ -159,10 +197,28 @@ impl SpefFile {
 
         let mut new_elements: Vec<Element> = Vec::new();
         let mut parasitic_seq = 0_usize;
+        let declared_nets: HashSet<String> = self
+            .nets
+            .iter()
+            .map(|net| net.name.to_ascii_uppercase())
+            .collect();
+        let declared_pins: HashSet<(String, String)> = self
+            .nets
+            .iter()
+            .flat_map(|net| net.conns.iter())
+            .filter_map(|conn| match &conn.node {
+                NodeRef::Pin(instance, pin) if !conn.is_port => {
+                    Some((instance.to_ascii_uppercase(), pin.to_ascii_uppercase()))
+                }
+                _ => None,
+            })
+            .collect();
 
         for (net_index, net) in self.nets.iter().enumerate() {
             poll_parse_abort(abort, net_index)?;
             report.nets += 1;
+            let mut net_parasitics = 0usize;
+            let mut net_is_anchored = original_nodes.contains(&net.name.to_ascii_uppercase());
 
             // Bare references (ports are referenced by name, which already
             // is a deck node) pass through; subnodes and pins get generated
@@ -180,9 +236,36 @@ impl SpefFile {
             for (conn_index, conn) in net.conns.iter().enumerate() {
                 poll_parse_abort(abort, conn_index)?;
                 if conn.is_port {
+                    if strict {
+                        let NodeRef::Net(port) = &conn.node else {
+                            return Err(spef_annotation_error(
+                                conn.line,
+                                format!(
+                                    "*P connection on net `{}` is not a top-level node",
+                                    net.name
+                                ),
+                            ));
+                        };
+                        if !original_nodes.contains(&port.to_ascii_uppercase()) {
+                            return Err(spef_annotation_error(
+                                conn.line,
+                                format!(
+                                    "top-level port `{port}` on net `{}` is absent from the deck",
+                                    net.name
+                                ),
+                            ));
+                        }
+                        net_is_anchored = true;
+                    }
                     continue;
                 }
                 let NodeRef::Pin(inst, pin) = &conn.node else {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            conn.line,
+                            format!("*I connection on net `{}` is not an instance pin", net.name),
+                        ));
+                    }
                     continue;
                 };
                 match rewire_pin(
@@ -194,8 +277,17 @@ impl SpefFile {
                     &net.name,
                     &node_name(&conn.node),
                 ) {
-                    Ok(()) => report.rewired_pins += 1,
+                    Ok(()) => {
+                        report.rewired_pins += 1;
+                        net_is_anchored = true;
+                    }
                     Err(reason) => {
+                        if strict {
+                            return Err(spef_annotation_error(
+                                conn.line,
+                                format!("pin {inst}:{pin} on net `{}`: {reason}", net.name),
+                            ));
+                        }
                         report.skipped_pins += 1;
                         log::warn!(
                             "SPEF: pin {inst}:{pin} on net {} skipped: {reason}",
@@ -208,7 +300,34 @@ impl SpefFile {
             for (cap_index, cap) in net.caps.iter().enumerate() {
                 poll_parse_abort(abort, cap_index)?;
                 if !(cap.farads.is_finite() && cap.farads > 0.0) {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            cap.line,
+                            format!(
+                                "capacitance on net `{}` must be finite and positive, got {}",
+                                net.name, cap.farads
+                            ),
+                        ));
+                    }
                     continue;
+                }
+                if strict {
+                    validate_node_reference(
+                        &cap.a,
+                        &original_nodes,
+                        &declared_nets,
+                        &declared_pins,
+                        cap.line,
+                    )?;
+                    if let Some(reference) = &cap.b {
+                        validate_node_reference(
+                            reference,
+                            &original_nodes,
+                            &declared_nets,
+                            &declared_pins,
+                            cap.line,
+                        )?;
+                    }
                 }
                 let n1 = node_name(&cap.a);
                 let n2 = cap
@@ -231,12 +350,38 @@ impl SpefFile {
                     provenance: crate::netlist::ElementProvenance::Authored,
                 });
                 report.capacitors += 1;
+                net_parasitics += 1;
             }
 
             for (res_index, res) in net.ress.iter().enumerate() {
                 poll_parse_abort(abort, res_index)?;
                 if !(res.ohms.is_finite() && res.ohms > 0.0) {
+                    if strict {
+                        return Err(spef_annotation_error(
+                            res.line,
+                            format!(
+                                "resistance on net `{}` must be finite and positive, got {}",
+                                net.name, res.ohms
+                            ),
+                        ));
+                    }
                     continue;
+                }
+                if strict {
+                    validate_node_reference(
+                        &res.a,
+                        &original_nodes,
+                        &declared_nets,
+                        &declared_pins,
+                        res.line,
+                    )?;
+                    validate_node_reference(
+                        &res.b,
+                        &original_nodes,
+                        &declared_nets,
+                        &declared_pins,
+                        res.line,
+                    )?;
                 }
                 parasitic_seq += 1;
                 new_elements.push(Element {
@@ -252,6 +397,26 @@ impl SpefFile {
                     provenance: crate::netlist::ElementProvenance::Authored,
                 });
                 report.resistors += 1;
+                net_parasitics += 1;
+            }
+
+            if strict && !net_is_anchored {
+                return Err(spef_annotation_error(
+                    net.line,
+                    format!(
+                        "net `{}` has no matching deck node, top-level port, or rewired instance pin",
+                        net.name
+                    ),
+                ));
+            }
+            if strict && net_parasitics == 0 {
+                return Err(spef_annotation_error(
+                    net.line,
+                    format!(
+                        "net `{}` did not apply any supported R/C parasitic",
+                        net.name
+                    ),
+                ));
             }
         }
 
@@ -262,6 +427,51 @@ impl SpefFile {
         ensure_parse_not_aborted(abort)?;
         Ok(report)
     }
+}
+
+fn spef_annotation_error(line: usize, message: impl Into<String>) -> ParseWithAbortError {
+    ParseError::Syntax {
+        line,
+        message: format!("SPEF annotation: {}", message.into()),
+    }
+    .into()
+}
+
+fn validate_node_reference(
+    reference: &NodeRef,
+    original_nodes: &HashSet<String>,
+    declared_nets: &HashSet<String>,
+    declared_pins: &HashSet<(String, String)>,
+    line: usize,
+) -> Result<(), ParseWithAbortError> {
+    match reference {
+        NodeRef::Net(name) => {
+            if !original_nodes.contains(&name.to_ascii_uppercase()) {
+                return Err(spef_annotation_error(
+                    line,
+                    format!("node `{name}` is absent from the deck"),
+                ));
+            }
+        }
+        NodeRef::SubNode(net, index) => {
+            if index.is_empty() || !declared_nets.contains(&net.to_ascii_uppercase()) {
+                return Err(spef_annotation_error(
+                    line,
+                    format!("subnode `{net}:{index}` does not belong to a declared *D_NET"),
+                ));
+            }
+        }
+        NodeRef::Pin(instance, pin) => {
+            let key = (instance.to_ascii_uppercase(), pin.to_ascii_uppercase());
+            if !declared_pins.contains(&key) {
+                return Err(spef_annotation_error(
+                    line,
+                    format!("pin node `{instance}:{pin}` has no matching *I connection"),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Move one instance terminal from the ideal net to its SPEF subnode.
@@ -365,7 +575,6 @@ enum NetSection {
     Conn,
     Cap,
     Res,
-    Skip,
 }
 
 impl<'a> Parser<'a> {
@@ -413,8 +622,14 @@ impl<'a> Parser<'a> {
 
             // Name-map entries: `*<index> <name>`.
             if in_name_map && let Some(index) = parse_map_index(fields[0]) {
-                if let Some(name) = fields.get(1) {
-                    self.name_map.insert(index, (*name).to_owned());
+                let name = fields
+                    .get(1)
+                    .ok_or_else(|| self.error(format!("name-map entry *{index} has no name")))
+                    .map_err(ParseWithAbortError::from)?;
+                if self.name_map.insert(index, (*name).to_owned()).is_some() {
+                    return Err(self
+                        .error(format!("duplicate name-map index *{index}"))
+                        .into());
                 }
                 continue;
             }
@@ -462,8 +677,22 @@ impl<'a> Parser<'a> {
                         .get(1)
                         .ok_or_else(|| self.error("*D_NET without a net name"))
                         .map_err(ParseWithAbortError::from)?;
+                    let total_capacitance = fields
+                        .get(2)
+                        .ok_or_else(|| self.error("*D_NET without a total capacitance"))
+                        .map_err(ParseWithAbortError::from)?;
+                    self.parse_scaled_value(
+                        total_capacitance,
+                        self.cap_scale,
+                        "*D_NET total capacitance",
+                        true,
+                    )
+                    .map_err(ParseWithAbortError::from)?;
                     current = Some(DNet {
-                        name: self.resolve_name(name_field),
+                        name: self
+                            .resolve_name(name_field)
+                            .map_err(ParseWithAbortError::from)?,
+                        line: self.line_num,
                         conns: Vec::new(),
                         caps: Vec::new(),
                         ress: Vec::new(),
@@ -471,25 +700,19 @@ impl<'a> Parser<'a> {
                     section = NetSection::None;
                 }
                 "*R_NET" | "*C_NET" => {
-                    in_name_map = false;
-                    log::warn!(
-                        "SPEF line {}: reduced {keyword} sections are not supported; skipped",
-                        self.line_num
-                    );
-                    if let Some(net) = current.take() {
-                        nets.push(net);
-                    }
-                    section = NetSection::Skip;
+                    return Err(self
+                        .error(format!(
+                            "reduced {keyword} parasitics are not supported and cannot be skipped"
+                        ))
+                        .into());
                 }
                 "*CONN" => section = NetSection::Conn,
                 "*CAP" => section = NetSection::Cap,
                 "*RES" => section = NetSection::Res,
                 "*INDUC" => {
-                    log::warn!(
-                        "SPEF line {}: *INDUC section is not supported; skipped",
-                        self.line_num
-                    );
-                    section = NetSection::Skip;
+                    return Err(self
+                        .error("*INDUC parasitics are not supported and cannot be skipped")
+                        .into());
                 }
                 "*END" => {
                     if let Some(net) = current.take() {
@@ -498,47 +721,62 @@ impl<'a> Parser<'a> {
                     section = NetSection::None;
                 }
                 "*P" | "*I" if section == NetSection::Conn => {
-                    let Some(net) = current.as_mut() else {
-                        continue;
-                    };
+                    let net = current
+                        .as_mut()
+                        .ok_or_else(|| self.error("connection entry outside *D_NET"))
+                        .map_err(ParseWithAbortError::from)?;
                     let node_field = fields
                         .get(1)
                         .ok_or_else(|| self.error("connection entry without a node"))
                         .map_err(ParseWithAbortError::from)?;
-                    let node = self.parse_node_ref(node_field);
+                    let node = self
+                        .parse_node_ref(node_field)
+                        .map_err(ParseWithAbortError::from)?;
                     net.conns.push(Conn {
                         node,
                         is_port: keyword == "*P",
+                        line: self.line_num,
                     });
                 }
                 "*N" if section == NetSection::Conn => {
                     // Internal-node coordinates: topology only, no action.
                 }
                 _ if section == NetSection::Cap => {
-                    let Some(net) = current.as_mut() else {
-                        continue;
-                    };
+                    let net = current
+                        .as_mut()
+                        .ok_or_else(|| self.error("*CAP entry outside *D_NET"))
+                        .map_err(ParseWithAbortError::from)?;
                     // `id node value` (ground) or `id node node value`.
                     match fields.len() {
                         3 => {
                             let farads = self
-                                .parse_value(fields[2])
-                                .map_err(ParseWithAbortError::from)?
-                                * self.cap_scale;
-                            let a = self.parse_node_ref(fields[1]);
-                            net.caps.push(Cap { a, b: None, farads });
+                                .parse_scaled_value(fields[2], self.cap_scale, "capacitance", false)
+                                .map_err(ParseWithAbortError::from)?;
+                            let a = self
+                                .parse_node_ref(fields[1])
+                                .map_err(ParseWithAbortError::from)?;
+                            net.caps.push(Cap {
+                                a,
+                                b: None,
+                                farads,
+                                line: self.line_num,
+                            });
                         }
                         4 => {
                             let farads = self
-                                .parse_value(fields[3])
-                                .map_err(ParseWithAbortError::from)?
-                                * self.cap_scale;
-                            let a = self.parse_node_ref(fields[1]);
-                            let b = self.parse_node_ref(fields[2]);
+                                .parse_scaled_value(fields[3], self.cap_scale, "capacitance", false)
+                                .map_err(ParseWithAbortError::from)?;
+                            let a = self
+                                .parse_node_ref(fields[1])
+                                .map_err(ParseWithAbortError::from)?;
+                            let b = self
+                                .parse_node_ref(fields[2])
+                                .map_err(ParseWithAbortError::from)?;
                             net.caps.push(Cap {
                                 a,
                                 b: Some(b),
                                 farads,
+                                line: self.line_num,
                             });
                         }
                         _ => {
@@ -551,21 +789,30 @@ impl<'a> Parser<'a> {
                     }
                 }
                 _ if section == NetSection::Res => {
-                    let Some(net) = current.as_mut() else {
-                        continue;
-                    };
+                    let net = current
+                        .as_mut()
+                        .ok_or_else(|| self.error("*RES entry outside *D_NET"))
+                        .map_err(ParseWithAbortError::from)?;
                     if fields.len() != 4 {
                         return Err(self
                             .error(format!("malformed *RES entry `{line}` (expected 4 fields)"))
                             .into());
                     }
                     let ohms = self
-                        .parse_value(fields[3])
-                        .map_err(ParseWithAbortError::from)?
-                        * self.res_scale;
-                    let a = self.parse_node_ref(fields[1]);
-                    let b = self.parse_node_ref(fields[2]);
-                    net.ress.push(Res { a, b, ohms });
+                        .parse_scaled_value(fields[3], self.res_scale, "resistance", false)
+                        .map_err(ParseWithAbortError::from)?;
+                    let a = self
+                        .parse_node_ref(fields[1])
+                        .map_err(ParseWithAbortError::from)?;
+                    let b = self
+                        .parse_node_ref(fields[2])
+                        .map_err(ParseWithAbortError::from)?;
+                    net.ress.push(Res {
+                        a,
+                        b,
+                        ohms,
+                        line: self.line_num,
+                    });
                 }
                 _ => {}
             }
@@ -583,6 +830,11 @@ impl<'a> Parser<'a> {
             .get(1)
             .and_then(|f| f.parse().ok())
             .ok_or_else(|| self.error("unit statement without a multiplier"))?;
+        if !multiplier.is_finite() || multiplier <= 0.0 {
+            return Err(self.error(format!(
+                "unit multiplier must be finite and positive, got {multiplier}"
+            )));
+        }
         let unit = fields
             .get(2)
             .map(|f| f.to_ascii_uppercase())
@@ -592,39 +844,76 @@ impl<'a> Parser<'a> {
             .find(|(name, _)| *name == unit)
             .map(|(_, scale)| *scale)
             .ok_or_else(|| self.error(format!("unsupported unit `{unit}`")))?;
-        Ok(multiplier * scale)
+        let resolved = multiplier * scale;
+        if !resolved.is_finite() || resolved <= 0.0 {
+            return Err(self.error(format!("unit scale is invalid or non-finite ({resolved})")));
+        }
+        Ok(resolved)
     }
 
     fn parse_value(&self, field: &str) -> Result<Value, ParseError> {
-        field
+        let value: Value = field
             .parse()
-            .map_err(|_| self.error(format!("`{field}` is not a number")))
+            .map_err(|_| self.error(format!("`{field}` is not a number")))?;
+        if !value.is_finite() {
+            return Err(self.error(format!("`{field}` is not finite")));
+        }
+        Ok(value)
+    }
+
+    fn parse_scaled_value(
+        &self,
+        field: &str,
+        scale: Value,
+        quantity: &str,
+        allow_zero: bool,
+    ) -> Result<Value, ParseError> {
+        let value = self.parse_value(field)?;
+        if value < 0.0 || (!allow_zero && value == 0.0) {
+            let requirement = if allow_zero {
+                "non-negative"
+            } else {
+                "strictly positive"
+            };
+            return Err(self.error(format!("{quantity} must be {requirement}, got {value}")));
+        }
+        let scaled = value * scale;
+        if !scaled.is_finite() || scaled < 0.0 || (!allow_zero && scaled == 0.0) {
+            return Err(self.error(format!(
+                "scaled {quantity} is invalid or non-finite ({scaled})"
+            )));
+        }
+        Ok(scaled)
     }
 
     /// Resolve `*<index>` through the name map; pass names through.
-    fn resolve_name(&self, field: &str) -> String {
+    fn resolve_name(&self, field: &str) -> Result<String, ParseError> {
         match parse_map_index(field) {
             Some(index) => self
                 .name_map
                 .get(&index)
                 .cloned()
-                .unwrap_or_else(|| field.to_owned()),
-            None => field.to_owned(),
+                .ok_or_else(|| self.error(format!("name-map reference `{field}` is undefined"))),
+            None if field.is_empty() => Err(self.error("empty SPEF name")),
+            None => Ok(field.to_owned()),
         }
     }
 
     /// Parse a node reference: `name`, `*3`, `name:4`, `*3:A`, `inst:pin`.
-    fn parse_node_ref(&self, field: &str) -> NodeRef {
+    fn parse_node_ref(&self, field: &str) -> Result<NodeRef, ParseError> {
         match field.split_once(self.delimiter) {
-            None => NodeRef::Net(self.resolve_name(field)),
+            None => Ok(NodeRef::Net(self.resolve_name(field)?)),
             Some((base, sub)) => {
-                let base = self.resolve_name(base);
+                let base = self.resolve_name(base)?;
+                if sub.is_empty() {
+                    return Err(self.error(format!("node reference `{field}` has an empty suffix")));
+                }
                 // A purely numeric suffix is an internal subnode; anything
                 // else is an instance pin.
                 if sub.chars().all(|ch| ch.is_ascii_digit()) {
-                    NodeRef::SubNode(base, sub.to_owned())
+                    Ok(NodeRef::SubNode(base, sub.to_owned()))
                 } else {
-                    NodeRef::Pin(base, sub.to_owned())
+                    Ok(NodeRef::Pin(base, sub.to_owned()))
                 }
             }
         }
