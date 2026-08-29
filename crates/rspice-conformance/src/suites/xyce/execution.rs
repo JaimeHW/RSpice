@@ -6,6 +6,7 @@
 
 use super::contracts_bug28::Bug28Role;
 use super::contracts_bug42_son::Bug42SonRole;
+use super::contracts_bug45::{BUG45_CONTRACT, RECORD as BUG45_RECORD};
 use super::contracts_bug113::Bug113Role;
 use super::contracts_bug141::Bug141Role;
 use super::contracts_bug306_son::Bug306SonRole;
@@ -103,6 +104,22 @@ impl XyceTestRunner {
         let start = Instant::now();
         if deck.section != XyceDeckSection::Netlists {
             return self.run_discovered_test_unqualified(deck);
+        }
+        // BUG45 is itself a fail-closed assertion that this family has no
+        // upstream exclusion. Route it before the generic exclusion
+        // disposition so a newly injected cached exclusion cannot turn the
+        // protected owner into a passing `upstream_excluded` result.
+        if Self::normalize_manifest_key(&deck.relative_path) == BUG45_RECORD {
+            let result = self.run_bug45_contract(deck, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    BUG45_CONTRACT,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
         }
         let upstream_exclusion = match &self.upstream_exclusions {
             Ok(exclusions) => exclusions

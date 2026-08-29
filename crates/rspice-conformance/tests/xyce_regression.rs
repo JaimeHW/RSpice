@@ -11966,6 +11966,30 @@ fn bug411_duplicate_model_parameter_wrapper_owner_is_publicly_qualified() {
 }
 
 #[test]
+fn bug45_unknown_diode_model_parameter_wrapper_owner_is_publicly_qualified() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = "Netlists/Certification_Tests/BUG_45_SON/diode.cir";
+    assert!(
+        runner.requires_upstream_wrapper(owner),
+        "BUG45 must retain its active warning-wrapper ownership"
+    );
+    let result = runner.run_test(root.join(owner));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG45 failed its public qualification: {result:?}"
+    );
+    assert_eq!(
+        result.contract,
+        "bug45_unknown_expression_model_parameter_warning_wrapper_owner"
+    );
+    assert_eq!(result.upstream_exclusion_source, None);
+    assert!(result.error.is_none());
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn bug412_transient_cross_measurement_wrapper_owner_is_publicly_qualified() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());

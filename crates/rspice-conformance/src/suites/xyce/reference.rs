@@ -5472,6 +5472,15 @@ impl XyceTestRunner {
                 MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES
             ));
         }
+        Self::parse_upstream_exclusions_bytes(root, &manifest_path, is_vendored_corpus, &bytes)
+    }
+
+    pub(super) fn parse_upstream_exclusions_bytes(
+        root: &Path,
+        manifest_path: &Path,
+        is_vendored_corpus: bool,
+        bytes: &[u8],
+    ) -> Result<BTreeMap<String, XyceUpstreamExclusion>, String> {
         if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
             return Err("upstream-exclusions manifest must not contain a UTF-8 BOM".to_string());
         }
