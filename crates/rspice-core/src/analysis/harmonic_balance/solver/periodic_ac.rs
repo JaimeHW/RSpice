@@ -17,6 +17,80 @@ use std::f64::consts::PI;
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
+#[inline]
+fn complex_is_finite(value: Complex64) -> bool {
+    value.re.is_finite() && value.im.is_finite()
+}
+
+#[inline]
+fn finite_product_is_representable(left: Value, right: Value) -> bool {
+    let product = left * right;
+    product.is_finite() && (left == 0.0 || right == 0.0 || product != 0.0)
+}
+
+fn periodic_sideband_geometry(
+    context: &str,
+    num_nodes: usize,
+    sideband_min: i32,
+    sideband_max: i32,
+) -> Result<(usize, usize, usize), HbError> {
+    let span = i64::from(sideband_max) - i64::from(sideband_min);
+    if span < 0 {
+        return Err(HbError::InvalidCircuit(format!(
+            "{context} sideband range is empty"
+        )));
+    }
+    let count = span.checked_add(1).ok_or_else(|| {
+        HbError::InvalidCircuit(format!("{context} sideband count overflows i64"))
+    })?;
+    let sidebands = usize::try_from(count).map_err(|_| {
+        HbError::InvalidCircuit(format!(
+            "{context} sideband count {count} exceeds this platform"
+        ))
+    })?;
+    let span = usize::try_from(span).map_err(|_| {
+        HbError::InvalidCircuit(format!("{context} sideband span exceeds this platform"))
+    })?;
+    let unknowns = num_nodes.checked_mul(sidebands).ok_or_else(|| {
+        HbError::InvalidCircuit(format!(
+            "{context} lifted dimension {num_nodes} nodes x {sidebands} sidebands overflows usize"
+        ))
+    })?;
+    Ok((sidebands, unknowns, span))
+}
+
+fn validate_periodic_state(
+    state: &HbSolverState,
+    num_nodes: usize,
+    context: &str,
+) -> Result<(), HbError> {
+    if state.x.len() != num_nodes {
+        return Err(HbError::InvalidCircuit(format!(
+            "{context} state has {} node spectra for a {num_nodes}-node solver",
+            state.x.len()
+        )));
+    }
+    for (node, spectrum) in state.x.iter().enumerate() {
+        if spectrum.is_empty() {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} state node {node} has no spectral coefficients"
+            )));
+        }
+        if let Some((harmonic, value)) = spectrum
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, value)| !complex_is_finite(*value))
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} state node {node} harmonic {harmonic} is non-finite ({:+.6e}{:+.6e}j)",
+                value.re, value.im
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ScaledComplex {
     mantissa: Complex64,
@@ -423,7 +497,6 @@ struct PeriodicConversionOperator<'a> {
     sideband_min: i32,
     offset_hz: Value,
     omega0: Value,
-    omega_floor: Value,
     g_matrix: &'a [(usize, usize, Value)],
     c_matrix: &'a [(usize, usize, Value)],
     l_matrix: &'a [(usize, usize, Value)],
@@ -434,8 +507,144 @@ struct PeriodicConversionOperator<'a> {
 impl PeriodicConversionOperator<'_> {
     #[inline]
     fn omega(&self, sideband_index: usize) -> Value {
-        let k = self.sideband_min + sideband_index as i32;
-        2.0 * PI * self.offset_hz + (k as Value) * self.omega0
+        let k = i64::from(self.sideband_min) + sideband_index as i64;
+        (k as Value).mul_add(self.omega0, 2.0 * PI * self.offset_hz)
+    }
+
+    fn validate(&self, context: &str) -> Result<(), HbError> {
+        let declared_span = self.num_sidebands.checked_sub(1).ok_or_else(|| {
+            HbError::InvalidCircuit(format!("{context} operator has no sidebands"))
+        })?;
+        let declared_span = i64::try_from(declared_span).map_err(|_| {
+            HbError::InvalidCircuit(format!(
+                "{context} sideband count exceeds the i64 representation"
+            ))
+        })?;
+        let sideband_max = i64::from(self.sideband_min)
+            .checked_add(declared_span)
+            .and_then(|value| i32::try_from(value).ok())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(format!(
+                    "{context} sideband range exceeds the i32 representation"
+                ))
+            })?;
+        let (sidebands, unknowns, _) =
+            periodic_sideband_geometry(context, self.num_nodes, self.sideband_min, sideband_max)?;
+        if sidebands != self.num_sidebands {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} operator declares {} sidebands but its range contains {sidebands}",
+                self.num_sidebands
+            )));
+        }
+        if unknowns == 0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} operator has no unknowns"
+            )));
+        }
+        if !self.offset_hz.is_finite() || self.offset_hz < 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} offset frequency must be finite and non-negative, got {}",
+                self.offset_hz
+            )));
+        }
+        if !self.omega0.is_finite() || self.omega0 <= 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} fundamental angular frequency must be finite and positive, got {}",
+                self.omega0
+            )));
+        }
+
+        for sideband_index in 0..self.num_sidebands {
+            let omega = self.omega(sideband_index);
+            if !omega.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} sideband {} has a non-representable angular frequency",
+                    i64::from(self.sideband_min) + sideband_index as i64
+                )));
+            }
+        }
+
+        for (entry, &(row, column, value)) in self.g_matrix.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} static conductance entry #{entry} ({row}, {column}) is non-finite"
+                )));
+            }
+        }
+        for (entry, &(row, column, value)) in self.c_matrix.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} static capacitance entry #{entry} ({row}, {column}) is non-finite"
+                )));
+            }
+            for sideband_index in 0..self.num_sidebands {
+                let omega = self.omega(sideband_index);
+                if !finite_product_is_representable(omega, value) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "{context} static capacitance entry #{entry} ({row}, {column}) produces a non-representable admittance at sideband {}",
+                        i64::from(self.sideband_min) + sideband_index as i64
+                    )));
+                }
+            }
+        }
+        for (entry, &(row, column, inductance)) in self.l_matrix.iter().enumerate() {
+            if !inductance.is_finite() || inductance == 0.0 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} static inductance entry #{entry} ({row}, {column}) must be finite and nonzero"
+                )));
+            }
+            for sideband_index in 0..self.num_sidebands {
+                let omega = self.omega(sideband_index);
+                if omega != 0.0 {
+                    let admittance = 1.0 / (omega * inductance);
+                    if !admittance.is_finite() || admittance == 0.0 {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "{context} inductance entry #{entry} ({row}, {column}) has a non-representable admittance at sideband {}",
+                            i64::from(self.sideband_min) + sideband_index as i64
+                        )));
+                    }
+                }
+            }
+        }
+        for (kind, spectra) in [
+            ("conductance", self.g_spectra),
+            ("capacitance", self.c_spectra),
+        ] {
+            for (entry, &(row, column, ref spectrum)) in spectra.iter().enumerate() {
+                if row >= self.num_nodes || column >= self.num_nodes {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "{context} periodic {kind} entry #{entry} ({row}, {column}) is outside its {}-node operator",
+                        self.num_nodes
+                    )));
+                }
+                if spectrum.is_empty() {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "{context} periodic {kind} entry #{entry} ({row}, {column}) has no coefficients"
+                    )));
+                }
+                for (harmonic, &coefficient) in spectrum.iter().enumerate() {
+                    if !complex_is_finite(coefficient) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "{context} periodic {kind} entry #{entry} ({row}, {column}) harmonic {harmonic} is non-finite"
+                        )));
+                    }
+                    if kind == "capacitance" {
+                        for sideband_index in 0..self.num_sidebands {
+                            let omega = self.omega(sideband_index);
+                            if !finite_product_is_representable(omega, coefficient.re)
+                                || !finite_product_is_representable(omega, coefficient.im)
+                            {
+                                return Err(HbError::InvalidCircuit(format!(
+                                    "{context} periodic capacitance entry #{entry} ({row}, {column}) harmonic {harmonic} produces a non-representable admittance at sideband {}",
+                                    i64::from(self.sideband_min) + sideband_index as i64
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     #[inline]
@@ -475,8 +684,8 @@ impl PeriodicConversionOperator<'_> {
                 }
             }
             for &(i, j, l) in self.l_matrix {
-                if i < n && j < n && l.abs() > 1e-30 {
-                    let admittance = if omega_k.abs() <= self.omega_floor {
+                if i < n && j < n {
+                    let admittance = if omega_k == 0.0 {
                         Complex64::new(inductor_dc_short_admittance(l), 0.0)
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
@@ -586,8 +795,8 @@ impl PeriodicConversionOperator<'_> {
             }
         }
         for &(i, j, l) in self.l_matrix {
-            if i < n && j < n && l.abs() > 1e-30 {
-                block[i * n + j] += if omega_k.abs() <= self.omega_floor {
+            if i < n && j < n {
+                block[i * n + j] += if omega_k == 0.0 {
                     Complex64::new(inductor_dc_short_admittance(l), 0.0)
                 } else {
                     Complex64::new(0.0, -1.0 / (omega_k * l))
@@ -793,6 +1002,113 @@ impl super::krylov::KrylovPreconditioner for PeriodicPreconditioner {
 }
 
 impl HbSolver {
+    fn periodic_state_waveforms(
+        &mut self,
+        state: &HbSolverState,
+        context: &str,
+    ) -> Result<Vec<Vec<Value>>, HbError> {
+        validate_periodic_state(state, self.num_nodes, context)?;
+        let mut waveforms = Vec::with_capacity(self.num_nodes);
+        for (node, spectrum) in state.x.iter().enumerate() {
+            let waveform = self.fft.to_time_domain(spectrum);
+            if waveform.len() != self.fft.size() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} node {node} produced {} time samples, expected {}",
+                    waveform.len(),
+                    self.fft.size()
+                )));
+            }
+            if let Some((sample, value)) = waveform
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite())
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} node {node} time sample {sample} is non-finite ({value})"
+                )));
+            }
+            waveforms.push(waveform);
+        }
+        Ok(waveforms)
+    }
+
+    fn checked_periodic_spectrum(
+        &mut self,
+        waveform: &[Value],
+        harmonic_count: usize,
+        context: &str,
+    ) -> Result<Vec<Complex64>, HbError> {
+        if waveform.len() != self.fft.size() {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} has {} samples, expected {}",
+                waveform.len(),
+                self.fft.size()
+            )));
+        }
+        let max_abs = waveform
+            .iter()
+            .copied()
+            .map(Value::abs)
+            .fold(0.0, Value::max);
+        if !max_abs.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} contains a non-finite sample"
+            )));
+        }
+        if max_abs == 0.0 {
+            return Ok(Vec::new());
+        }
+
+        let binary_exponent = libm::ilogb(max_abs);
+        let mut normalized = Vec::with_capacity(waveform.len());
+        for (sample, &value) in waveform.iter().enumerate() {
+            let scaled = libm::scalbn(value, -binary_exponent);
+            if !scaled.is_finite() || (value != 0.0 && scaled == 0.0) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} sample {sample} is not representable at the shared Fourier scale"
+                )));
+            }
+            normalized.push(scaled);
+        }
+
+        let mut spectrum = self.fft.to_frequency_domain_n(&normalized, harmonic_count);
+        let expected_count = harmonic_count.min((self.fft.size() - 1) / 2) + 1;
+        if spectrum.len() != expected_count {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} produced {} Fourier coefficients, expected {expected_count}",
+                spectrum.len()
+            )));
+        }
+        for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
+            if !complex_is_finite(*coefficient) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} normalized harmonic {harmonic} is non-finite"
+                )));
+            }
+            let normalized_coefficient = *coefficient;
+            coefficient.re = libm::scalbn(coefficient.re, binary_exponent);
+            coefficient.im = libm::scalbn(coefficient.im, binary_exponent);
+            if !complex_is_finite(*coefficient)
+                || (normalized_coefficient.re != 0.0 && coefficient.re == 0.0)
+                || (normalized_coefficient.im != 0.0 && coefficient.im == 0.0)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} harmonic {harmonic} is not representable at its physical scale"
+                )));
+            }
+        }
+        if spectrum
+            .iter()
+            .all(|coefficient| *coefficient == Complex64::new(0.0, 0.0))
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} is nonzero but has no representable retained Fourier coefficient"
+            )));
+        }
+        Ok(spectrum)
+    }
+
     /// Sample the periodic small-signal conductance spectra around the
     /// converged operating point.
     ///
@@ -806,10 +1122,7 @@ impl HbSolver {
     ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
         let n = self.num_nodes;
         let n_time = self.fft.size();
-
-        let v_time: Vec<Vec<Value>> = (0..n)
-            .map(|node| self.fft.to_time_domain(&state.x[node]))
-            .collect();
+        let v_time = self.periodic_state_waveforms(state, "periodic conductance evaluation")?;
 
         // Device Jacobians are sparse.  Keeping only entries that devices
         // actually stamp avoids the previous O(nodes^2 * time-points)
@@ -823,10 +1136,29 @@ impl HbSolver {
                 for node in 0..n {
                     node_voltages[node] = v_time[node][t];
                 }
-                for device in &self.nonlinear_devices {
+                for (device_index, device) in self.nonlinear_devices.iter().enumerate() {
                     for ((i, j), g) in device.jacobian(&node_voltages) {
+                        if !g.is_finite() {
+                            return Err(HbError::InvalidCircuit(format!(
+                                "periodic conductance from {:?} device #{device_index} at ({i}, {j}), time sample {t}, is non-finite",
+                                device.device_type
+                            )));
+                        }
+                        if i > n || j > n {
+                            return Err(HbError::InvalidCircuit(format!(
+                                "periodic conductance from {:?} device #{device_index} uses invalid node pair ({i}, {j}) for a {n}-node solver",
+                                device.device_type
+                            )));
+                        }
                         if i < n && j < n {
-                            g_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t] += g;
+                            let sample =
+                                &mut g_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t];
+                            *sample += g;
+                            if !sample.is_finite() {
+                                return Err(HbError::InvalidCircuit(format!(
+                                    "periodic conductance accumulation at ({i}, {j}), time sample {t}, is non-finite"
+                                )));
+                            }
                         }
                     }
                 }
@@ -845,34 +1177,72 @@ impl HbSolver {
                     let jac_entries =
                         device.try_compute_jacobian("periodic conductance evaluation")?;
                     for entry in jac_entries {
+                        if !entry.value.is_finite() {
+                            return Err(device.runtime_error(
+                                "periodic conductance evaluation",
+                                format!(
+                                    "Jacobian program {} entry {} is non-finite at time sample {t}",
+                                    entry.program_idx, entry.jacobian_idx
+                                ),
+                            ));
+                        }
                         let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
-                            continue;
+                            return Err(device.runtime_error(
+                                "periodic conductance evaluation",
+                                format!(
+                                    "Jacobian program index {} has no mapped location",
+                                    entry.program_idx
+                                ),
+                            ));
                         };
                         let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
-                            continue;
+                            return Err(device.runtime_error(
+                                "periodic conductance evaluation",
+                                format!(
+                                    "Jacobian entry index {} has no mapped location in program {}",
+                                    entry.jacobian_idx, entry.program_idx
+                                ),
+                            ));
                         };
-                        if let (Some(i), Some(j)) = (row, col)
-                            && i < n
-                            && j < n
-                        {
-                            g_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t] +=
-                                entry.value;
+                        if let (Some(i), Some(j)) = (row, col) {
+                            if i >= n || j >= n {
+                                return Err(device.runtime_error(
+                                    "periodic conductance evaluation",
+                                    format!(
+                                        "mapped Jacobian node pair ({i}, {j}) is outside the {n}-node solver"
+                                    ),
+                                ));
+                            }
+                            let sample =
+                                &mut g_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t];
+                            *sample += entry.value;
+                            if !sample.is_finite() {
+                                return Err(device.runtime_error(
+                                    "periodic conductance evaluation",
+                                    format!(
+                                        "Jacobian accumulation at ({i}, {j}), time sample {t}, is non-finite"
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
             }
         }
 
-        Ok(g_time
-            .into_iter()
-            .filter_map(|((i, j), waveform)| {
-                let max_g: Value = waveform.iter().fold(0.0, |a, &b| a.max(b.abs()));
-                (max_g >= 1e-30).then(|| {
-                    let spectrum = self.fft.to_frequency_domain_n(&waveform, harmonic_count);
-                    (i, j, spectrum)
-                })
-            })
-            .collect())
+        let mut spectra = Vec::with_capacity(g_time.len());
+        for ((i, j), waveform) in g_time {
+            if waveform.iter().all(|value| *value == 0.0) {
+                continue;
+            }
+            let spectrum = self.checked_periodic_spectrum(
+                &waveform,
+                harmonic_count,
+                &format!("periodic conductance at ({i}, {j})"),
+            )?;
+            spectra.push((i, j, spectrum));
+        }
+        Ok(spectra)
     }
 
     /// Periodic small-signal capacitance spectra around the operating
@@ -882,20 +1252,17 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         harmonic_count: usize,
-    ) -> Vec<(usize, usize, Vec<Complex64>)> {
+    ) -> Result<Vec<(usize, usize, Vec<Complex64>)>, HbError> {
         let n = self.num_nodes;
         if !self
             .nonlinear_devices
             .iter()
             .any(|d| d.has_charge_storage())
         {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let n_time = self.fft.size();
-
-        let v_time: Vec<Vec<Value>> = (0..n)
-            .map(|node| self.fft.to_time_domain(&state.x[node]))
-            .collect();
+        let v_time = self.periodic_state_waveforms(state, "periodic capacitance evaluation")?;
 
         let mut c_time: BTreeMap<(usize, usize), Vec<Value>> = BTreeMap::new();
         let mut node_voltages = vec![0.0; n];
@@ -903,25 +1270,47 @@ impl HbSolver {
             for node in 0..n {
                 node_voltages[node] = v_time[node][t];
             }
-            for device in &self.nonlinear_devices {
+            for (device_index, device) in self.nonlinear_devices.iter().enumerate() {
                 for ((i, j), c) in device.charge_jacobian(&node_voltages) {
+                    if !c.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "periodic capacitance from {:?} device #{device_index} at ({i}, {j}), time sample {t}, is non-finite",
+                            device.device_type
+                        )));
+                    }
+                    if i > n || j > n {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "periodic capacitance from {:?} device #{device_index} uses invalid node pair ({i}, {j}) for a {n}-node solver",
+                            device.device_type
+                        )));
+                    }
                     if i < n && j < n {
-                        c_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t] += c;
+                        let sample =
+                            &mut c_time.entry((i, j)).or_insert_with(|| vec![0.0; n_time])[t];
+                        *sample += c;
+                        if !sample.is_finite() {
+                            return Err(HbError::InvalidCircuit(format!(
+                                "periodic capacitance accumulation at ({i}, {j}), time sample {t}, is non-finite"
+                            )));
+                        }
                     }
                 }
             }
         }
 
-        c_time
-            .into_iter()
-            .filter_map(|((i, j), waveform)| {
-                let max_c: Value = waveform.iter().fold(0.0, |a, &b| a.max(b.abs()));
-                (max_c >= 1e-30).then(|| {
-                    let spectrum = self.fft.to_frequency_domain_n(&waveform, harmonic_count);
-                    (i, j, spectrum)
-                })
-            })
-            .collect()
+        let mut spectra = Vec::with_capacity(c_time.len());
+        for ((i, j), waveform) in c_time {
+            if waveform.iter().all(|value| *value == 0.0) {
+                continue;
+            }
+            let spectrum = self.checked_periodic_spectrum(
+                &waveform,
+                harmonic_count,
+                &format!("periodic capacitance at ({i}, {j})"),
+            )?;
+            spectra.push((i, j, spectrum));
+        }
+        Ok(spectra)
     }
 
     /// Solve the sideband-coupled small-signal system at one offset frequency.
@@ -938,30 +1327,33 @@ impl HbSolver {
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
-        if sideband_max < sideband_min {
+        let n = self.num_nodes;
+        let (s, size, span) = periodic_sideband_geometry("PAC", n, sideband_min, sideband_max)?;
+        if size == 0 {
             return Err(HbError::InvalidCircuit(
-                "PAC sideband range is empty".to_string(),
+                "PAC requires at least one circuit unknown".to_string(),
             ));
         }
-        let n = self.num_nodes;
-        let s = (sideband_max - sideband_min + 1) as usize;
-        let size = n * s;
+        if excitations.is_empty() {
+            return Err(HbError::InvalidCircuit(
+                "PAC requires at least one excitation".to_string(),
+            ));
+        }
 
         // Dense direct elimination is still faster for small systems.  Large
         // systems build only sparse spectra and per-sideband preconditioner
         // blocks; the dense matrix is materialized lazily only if GMRES fails.
         let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
-        let mut dense = if try_krylov {
+        let dense = if try_krylov {
             None
         } else {
             Some(self.assemble_conversion_matrix(state, offset_hz, sideband_min, sideband_max)?)
         };
 
-        let span = (sideband_max - sideband_min).unsigned_abs() as usize;
         let (spectra, cap_spectra) = if try_krylov && self.has_nonlinear_devices() {
             (
                 self.conductance_spectra(state, span.max(self.num_harmonics))?,
-                self.capacitance_spectra(state, span.max(self.num_harmonics)),
+                self.capacitance_spectra(state, span.max(self.num_harmonics))?,
             )
         } else {
             (Vec::new(), Vec::new())
@@ -973,13 +1365,13 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             omega0,
-            omega_floor: omega0 * 1e-12,
             g_matrix: &self.g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
+        operator.validate("PAC")?;
         let preconditioner = if try_krylov {
             Some(PeriodicPreconditioner::build(&operator, false)?)
         } else {
@@ -989,17 +1381,40 @@ impl HbSolver {
         let mut results = Vec::with_capacity(excitations.len());
         for excitation in excitations {
             let mut rhs = vec![Complex64::new(0.0, 0.0); size];
-            let m_idx = excitation.sideband - sideband_min;
-            if m_idx < 0 || m_idx >= s as i32 {
+            let m_idx = i64::from(excitation.sideband) - i64::from(sideband_min);
+            if m_idx < 0 || m_idx >= s as i64 {
                 return Err(HbError::InvalidCircuit(format!(
                     "PAC excitation sideband {} outside [{}, {}]",
                     excitation.sideband, sideband_min, sideband_max
                 )));
             }
             for &(node, amp) in &excitation.injections {
-                if node < n {
-                    rhs[node * s + m_idx as usize] += amp;
+                if node >= n {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "PAC excitation at sideband {} references node {node}, outside the {n}-node solver",
+                        excitation.sideband
+                    )));
                 }
+                if !complex_is_finite(amp) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "PAC excitation at sideband {} has a non-finite injection at node {node} ({:+.6e}{:+.6e}j)",
+                        excitation.sideband, amp.re, amp.im
+                    )));
+                }
+                let rhs_index = node * s + m_idx as usize;
+                rhs[rhs_index] += amp;
+                if !complex_is_finite(rhs[rhs_index]) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "PAC excitation at sideband {} overflows while accumulating node {node}",
+                        excitation.sideband
+                    )));
+                }
+            }
+            if rhs.iter().all(|value| *value == Complex64::new(0.0, 0.0)) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "PAC excitation at sideband {} has no nonzero in-range injection after terminal cancellation",
+                    excitation.sideband
+                )));
             }
 
             let solution = if let Some(preconditioner) = &preconditioner {
@@ -1011,27 +1426,14 @@ impl HbSolver {
                     restart,
                     6,
                 );
-                if outcome.converged {
-                    if self.config.verbose {
-                        log::debug!(
-                            "PAC matrix-free solve: {} iterations, relative residual {:.2e}",
-                            outcome.iterations,
-                            outcome.relative_residual
-                        );
-                    }
-                    outcome.solution
-                } else {
-                    log::debug!(
-                        "PAC matrix-free solve stagnated after {} iterations (relative residual \
-                         {:.2e}); falling back to dense elimination",
-                        outcome.iterations,
-                        outcome.relative_residual
-                    );
-                    let y = dense.get_or_insert_with(|| operator.to_dense());
-                    self.solve_complex_linear_system(y, &rhs)?
-                }
+                self.qualify_periodic_ac_solution(&operator, &rhs, outcome)?
             } else {
-                self.solve_complex_linear_system(dense.as_ref().expect("dense PAC matrix"), &rhs)?
+                let matrix = dense.as_ref().ok_or_else(|| {
+                    HbError::InvalidCircuit(
+                        "PAC direct solve is missing its conversion matrix".to_string(),
+                    )
+                })?;
+                self.solve_complex_linear_system(matrix, &rhs)?
             };
 
             let mut by_node = vec![vec![Complex64::new(0.0, 0.0); s]; n];
@@ -1057,44 +1459,40 @@ impl HbSolver {
         sideband_min: i32,
         sideband_max: i32,
     ) -> Result<Vec<Vec<Complex64>>, HbError> {
-        if sideband_max < sideband_min {
+        let n = self.num_nodes;
+        let (s, size, span) =
+            periodic_sideband_geometry("PAC conversion assembly", n, sideband_min, sideband_max)?;
+        if size == 0 {
             return Err(HbError::InvalidCircuit(
-                "PAC sideband range is empty".to_string(),
+                "PAC conversion assembly requires at least one circuit unknown".to_string(),
             ));
         }
-        let n = self.num_nodes;
-        let s = (sideband_max - sideband_min + 1) as usize;
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
-        // Below this magnitude a sideband frequency counts as DC for the
-        // inductor admittance, mirroring the operating-point treatment.
-        let omega_floor = omega0 * 1e-12;
-
-        let span = (sideband_max - sideband_min).unsigned_abs() as usize;
         let spectra = if self.has_nonlinear_devices() {
             self.conductance_spectra(state, span.max(self.num_harmonics))?
         } else {
             Vec::new()
         };
         let cap_spectra = if self.has_nonlinear_devices() {
-            self.capacitance_spectra(state, span.max(self.num_harmonics))
+            self.capacitance_spectra(state, span.max(self.num_harmonics))?
         } else {
             Vec::new()
         };
 
-        Ok(PeriodicConversionOperator {
+        let operator = PeriodicConversionOperator {
             num_nodes: n,
             num_sidebands: s,
             sideband_min,
             offset_hz,
             omega0,
-            omega_floor,
             g_matrix: &self.g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
-        }
-        .to_dense())
+        };
+        operator.validate("PAC conversion assembly")?;
+        Ok(operator.to_dense())
     }
 
     /// Periodically modulated white-noise PSDs of the registered nonlinear
@@ -1226,6 +1624,71 @@ impl HbSolver {
         Ok(sources)
     }
 
+    /// Accept a matrix-free PAC solution only after an independent
+    /// componentwise backward-error check.
+    ///
+    /// The matrix helper certifies a plain transpose. Visiting every PAC
+    /// entry at its transposed coordinate therefore certifies the original
+    /// forward equation `Y*x=b` without allocating `Y` or `Y^T`.
+    fn qualify_periodic_ac_solution(
+        &self,
+        operator: &PeriodicConversionOperator<'_>,
+        rhs: &[Complex64],
+        outcome: super::krylov::GmresOutcome,
+    ) -> Result<Vec<Complex64>, HbError> {
+        let size = rhs.len();
+        let qualification = if outcome.converged {
+            rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+                size,
+                size,
+                &outcome.solution,
+                rhs,
+                |visitor| {
+                    operator.visit_entries(|row, column, value| {
+                        visitor(column, row, value);
+                    });
+                },
+            )
+        } else {
+            Err(rspice_matrix::SolverError::ConvergenceFailed(
+                outcome.iterations,
+            ))
+        };
+
+        match qualification {
+            Ok(()) => {
+                if self.config.verbose {
+                    log::debug!(
+                        "PAC matrix-free solve: {} iterations, componentwise certified \
+                         (reported normwise relative residual {:.2e})",
+                        outcome.iterations,
+                        outcome.relative_residual
+                    );
+                }
+                Ok(outcome.solution)
+            }
+            Err(
+                error @ rspice_matrix::SolverError::ConvergenceFailed(_)
+                | error @ rspice_matrix::SolverError::InaccurateSolution(_),
+            ) if size < super::krylov::KRYLOV_AUTO_THRESHOLD => {
+                log::debug!(
+                    "PAC matrix-free solution was not certified after {} iterations \
+                     (reported relative residual {:.2e}: {}); using bounded dense recovery",
+                    outcome.iterations,
+                    outcome.relative_residual,
+                    error
+                );
+                let matrix = operator.to_dense();
+                self.solve_complex_linear_system(&matrix, rhs)
+            }
+            Err(error) => Err(HbError::InvalidCircuit(format!(
+                "PAC forward {size}x{size} iterative linear solve is uncertified after {} \
+                 iterations (reported normwise relative residual {:.3e}): {error}",
+                outcome.iterations, outcome.relative_residual
+            ))),
+        }
+    }
+
     /// Accept a matrix-free PNoise adjoint only after an independent
     /// componentwise backward-error check.
     ///
@@ -1340,6 +1803,14 @@ impl HbSolver {
             ));
         }
         for source in sources {
+            let normalized_pos = (source.node_pos < n).then_some(source.node_pos);
+            let normalized_neg = (source.node_neg < n).then_some(source.node_neg);
+            if normalized_pos == normalized_neg {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' has identical terminals and no effective injection",
+                    source.name
+                )));
+            }
             if source.psd.is_empty() {
                 return Err(HbError::InvalidCircuit(format!(
                     "pnoise source '{}' has no periodic PSD coefficients",
@@ -1379,15 +1850,18 @@ impl HbSolver {
                 )));
             }
         }
-        let s = (sideband_max - sideband_min + 1) as usize;
-        let size = n * s;
+        let (s, size, span) = periodic_sideband_geometry("pnoise", n, sideband_min, sideband_max)?;
+        if size == 0 {
+            return Err(HbError::InvalidCircuit(
+                "pnoise requires at least one circuit unknown".to_string(),
+            ));
+        }
 
         let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
-        let span = (sideband_max - sideband_min).unsigned_abs() as usize;
         let (spectra, cap_spectra) = if self.has_nonlinear_devices() {
             (
                 self.conductance_spectra(state, span.max(self.num_harmonics))?,
-                self.capacitance_spectra(state, span.max(self.num_harmonics)),
+                self.capacitance_spectra(state, span.max(self.num_harmonics))?,
             )
         } else {
             (Vec::new(), Vec::new())
@@ -1399,16 +1873,18 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             omega0,
-            omega_floor: omega0 * 1e-12,
             g_matrix: &self.g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
+        operator.validate("pnoise")?;
 
         // Adjoint solve with the plain (unconjugated) transpose.
-        let out_idx = (0 - sideband_min) as usize; // k = 0 entry
+        let out_idx = usize::try_from(-i64::from(sideband_min)).map_err(|_| {
+            HbError::InvalidCircuit("pnoise sideband-zero index exceeds this platform".to_string())
+        })?;
         let mut e = vec![Complex64::new(0.0, 0.0); size];
         e[output_node * s + out_idx] = Complex64::new(1.0, 0.0);
         if let Some(r) = output_ref {
@@ -1640,7 +2116,6 @@ mod matrix_free_tests {
             sideband_min: -2,
             offset_hz: 3.0e6,
             omega0: 2.0 * PI * 1.0e6,
-            omega_floor: 2.0 * PI * 1.0e-6,
             g_matrix: g,
             c_matrix: c,
             l_matrix: &[],
@@ -2083,7 +2558,6 @@ mod matrix_free_tests {
             sideband_min: 0,
             offset_hz: 1.0,
             omega0: 2.0 * PI,
-            omega_floor: 2.0 * PI * 1.0e-12,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
@@ -2126,6 +2600,318 @@ mod matrix_free_tests {
     }
 
     #[test]
+    fn pac_forward_rejects_normwise_false_convergence_and_recovers_when_small() {
+        // For nonsymmetric A = [[1, 0], [eps, 1]], b = [1, 0], x = [1, 0]
+        // has a normwise residual below GMRES_REL_TOL but leaves the second
+        // equation wrong at its entire physical scale.
+        let eps = 1.0e-12;
+        assert!(eps < super::super::krylov::GMRES_REL_TOL);
+        let g = vec![(0, 0, 1.0), (1, 0, eps), (1, 1, 1.0)];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 2,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), 2);
+        let rhs = vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+        let false_convergence = super::super::krylov::gmres(
+            &|input| operator.apply(input),
+            &IdentityPreconditioner,
+            &rhs,
+            2,
+            1,
+        );
+        assert!(false_convergence.converged);
+        assert!(false_convergence.relative_residual < super::super::krylov::GMRES_REL_TOL);
+        assert_eq!(
+            false_convergence.solution[1],
+            Complex64::new(0.0, 0.0),
+            "the normwise GMRES criterion did not resolve the low-scale equation"
+        );
+
+        let recovered = solver
+            .qualify_periodic_ac_solution(&operator, &rhs, false_convergence)
+            .expect("a small uncertified PAC solution uses bounded dense recovery");
+        assert_close(recovered[0], Complex64::new(1.0, 0.0));
+        assert_eq!(recovered[1].im, 0.0);
+        assert!(
+            (recovered[1].re + eps).abs() <= 8.0 * Value::EPSILON * eps,
+            "forward correction {} differs from {} at its own scale",
+            recovered[1].re,
+            -eps
+        );
+    }
+
+    #[test]
+    fn pac_forward_never_materializes_dense_fallback_at_krylov_threshold() {
+        let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let eps = 1.0e-12;
+        let mut g = (0..dimension)
+            .map(|index| (index, index, 1.0))
+            .collect::<Vec<_>>();
+        g.push((1, 0, eps));
+        let operator = PeriodicConversionOperator {
+            num_nodes: dimension,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), dimension);
+        let mut rhs = vec![Complex64::new(0.0, 0.0); dimension];
+        rhs[0] = Complex64::new(1.0, 0.0);
+        let mut false_solution = vec![Complex64::new(0.0, 0.0); dimension];
+        false_solution[0] = Complex64::new(1.0, 0.0);
+        let false_convergence = super::super::krylov::GmresOutcome {
+            solution: false_solution,
+            iterations: 1,
+            relative_residual: eps,
+            converged: true,
+        };
+
+        let error = solver
+            .qualify_periodic_ac_solution(&operator, &rhs, false_convergence)
+            .expect_err("large uncertified PAC solutions must fail without dense allocation");
+        let HbError::InvalidCircuit(message) = error else {
+            panic!("unexpected error: {error}");
+        };
+        assert!(message.contains("PAC forward 256x256"), "{message}");
+        assert!(message.contains("after 1 iterations"), "{message}");
+        assert!(message.contains("backward-error"), "{message}");
+    }
+
+    #[test]
+    fn conversion_operator_preserves_sub_1e_30_inductor_admittance() {
+        let inductance = libm::scalbn(1.0, -100);
+        assert!(inductance < 1.0e-30 && inductance > 0.0);
+        let offset_hz = 1.0e9;
+        let l = [(0, 0, inductance)];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 1,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz,
+            omega0: 2.0 * PI * 1.0e6,
+            g_matrix: &[],
+            c_matrix: &[],
+            l_matrix: &l,
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        operator.validate("sub-cutoff inductor test").unwrap();
+        let expected = Complex64::new(0.0, -1.0 / (2.0 * PI * offset_hz * inductance));
+        assert_close(operator.apply(&[Complex64::new(1.0, 0.0)])[0], expected);
+        let block = operator.try_harmonic_block(0, false).unwrap();
+        assert_close(block[0], expected);
+    }
+
+    #[test]
+    fn conversion_operator_rejects_capacitance_admittance_underflow() {
+        let min_subnormal = Value::from_bits(1);
+        let offset_hz = 0.125 / (2.0 * PI);
+        let static_c = [(0, 0, min_subnormal)];
+        let static_operator = PeriodicConversionOperator {
+            num_nodes: 1,
+            num_sidebands: 2,
+            sideband_min: 0,
+            offset_hz,
+            omega0: 1.0,
+            g_matrix: &[],
+            c_matrix: &static_c,
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let static_error = static_operator
+            .validate("static capacitance underflow test")
+            .expect_err("a nonzero static capacitance may not round to zero admittance");
+        assert!(
+            static_error
+                .to_string()
+                .contains("non-representable admittance"),
+            "{static_error}"
+        );
+
+        let periodic_c = [(0, 0, vec![Complex64::new(min_subnormal, 0.0)])];
+        let periodic_operator = PeriodicConversionOperator {
+            num_nodes: 1,
+            num_sidebands: 2,
+            sideband_min: 0,
+            offset_hz,
+            omega0: 1.0,
+            g_matrix: &[],
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &periodic_c,
+        };
+        let periodic_error = periodic_operator
+            .validate("periodic capacitance underflow test")
+            .expect_err("a nonzero periodic capacitance may not round to zero admittance");
+        assert!(
+            periodic_error
+                .to_string()
+                .contains("non-representable admittance"),
+            "{periodic_error}"
+        );
+    }
+
+    #[test]
+    fn periodic_spectrum_scales_extreme_waveforms_and_rejects_erasure() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        let sample_count = solver.fft.size();
+
+        let maximum = vec![Value::MAX; sample_count];
+        let maximum_spectrum = solver
+            .checked_periodic_spectrum(&maximum, 1, "maximum waveform")
+            .expect("a representable maximum DC coefficient survives the scaled FFT");
+        assert_eq!(maximum_spectrum[0], Complex64::new(Value::MAX, 0.0));
+
+        let mut erased = vec![0.0; sample_count];
+        erased[0] = Value::from_bits(1);
+        let error = solver
+            .checked_periodic_spectrum(&erased, 1, "minimum impulse")
+            .expect_err("an unrepresentable nonzero Fourier coefficient must not become zero");
+        assert!(
+            error
+                .to_string()
+                .contains("not representable at its physical scale"),
+            "{error}"
+        );
+
+        let mut mixed_scale = vec![0.0; sample_count];
+        mixed_scale[0] = Value::MAX;
+        mixed_scale[1] = -Value::MAX;
+        mixed_scale[2] = sample_count as Value * Value::from_bits(1);
+        let error = solver
+            .checked_periodic_spectrum(&mixed_scale, 1, "mixed-scale cancellation waveform")
+            .expect_err("normalization may not erase a representable DC residue");
+        assert!(
+            error
+                .to_string()
+                .contains("not representable at the shared Fourier scale"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn periodic_spectra_preserve_sub_1e_30_device_derivatives() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 4);
+        let device = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.0, 5.0e-31, 0.0)
+            .with_intrinsic_gate(5.0e-31);
+        solver.add_nonlinear_device(device);
+        let mut state = HbSolverState::new(4, 1);
+        state.x[0][0] = Complex64::new(0.5, 0.0);
+        state.x[1][0] = Complex64::new(1.0, 0.0);
+
+        let conductance = solver.conductance_spectra(&state, 1).unwrap();
+        let gm = conductance
+            .iter()
+            .find(|(row, column, _)| *row == 0 && *column == 1)
+            .map(|(_, _, spectrum)| spectrum[0].re)
+            .expect("the sub-1e-30 MOS transconductance remains in the spectrum");
+        assert!(gm != 0.0 && gm.abs() < 1.0e-30, "gm={gm}");
+
+        let capacitance = solver.capacitance_spectra(&state, 1).unwrap();
+        assert!(
+            capacitance.iter().any(|(_, _, spectrum)| {
+                let dc = spectrum[0];
+                dc != Complex64::new(0.0, 0.0) && dc.norm() < 1.0e-30
+            }),
+            "the sub-1e-30 MOS charge derivative was discarded: {capacitance:?}"
+        );
+    }
+
+    #[test]
+    fn periodic_operator_and_state_validation_fail_closed() {
+        let invalid_spectra = [(1, 0, vec![Complex64::new(1.0, 0.0)])];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 1,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            g_matrix: &[],
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &invalid_spectra,
+            c_spectra: &[],
+        };
+        let error = operator
+            .validate("invalid periodic spectrum test")
+            .expect_err("out-of-range periodic stamps must fail before solving");
+        assert!(error.to_string().contains("outside its 1-node operator"));
+
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 2);
+        solver.add_nonlinear_device(NonlinearDeviceInstance::diode(0, 1, 1.0e-14, 1.0));
+        let mut state = HbSolverState::new(2, 1);
+        state.x[0][0] = Complex64::new(Value::NAN, 0.0);
+        let error = solver
+            .conductance_spectra(&state, 1)
+            .expect_err("non-finite periodic state must fail before device evaluation");
+        assert!(
+            error
+                .to_string()
+                .contains("node 0 harmonic 0 is non-finite")
+        );
+    }
+
+    #[test]
+    fn periodic_ac_rejects_invalid_or_cancelled_excitations() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        solver.add_conductance(0, 0, 1.0);
+        let state = HbSolverState::new(1, 1);
+
+        for (excitation, expected) in [
+            (
+                PeriodicAcExcitation {
+                    sideband: 0,
+                    injections: vec![(1, Complex64::new(1.0, 0.0))],
+                },
+                "outside the 1-node solver",
+            ),
+            (
+                PeriodicAcExcitation {
+                    sideband: 0,
+                    injections: vec![(0, Complex64::new(Value::NAN, 0.0))],
+                },
+                "non-finite injection",
+            ),
+            (
+                PeriodicAcExcitation {
+                    sideband: 0,
+                    injections: vec![
+                        (0, Complex64::new(1.0, 0.0)),
+                        (0, Complex64::new(-1.0, 0.0)),
+                    ],
+                },
+                "no nonzero in-range injection",
+            ),
+        ] {
+            let error = solver
+                .solve_periodic_ac(&state, 1.0e3, 0, 0, &[excitation])
+                .expect_err("invalid PAC excitation evidence must fail closed");
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
     fn pnoise_adjoint_never_materializes_dense_fallback_at_krylov_threshold() {
         let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
         let eps = 1.0e-12;
@@ -2139,7 +2925,6 @@ mod matrix_free_tests {
             sideband_min: 0,
             offset_hz: 1.0,
             omega0: 2.0 * PI,
-            omega_floor: 2.0 * PI * 1.0e-12,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
@@ -2181,7 +2966,6 @@ mod matrix_free_tests {
             sideband_min: 0,
             offset_hz: 1.0,
             omega0: 2.0 * PI,
-            omega_floor: 2.0 * PI * 1.0e-12,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
@@ -2214,7 +2998,6 @@ mod matrix_free_tests {
             sideband_min: 0,
             offset_hz: 1.0,
             omega0: 2.0 * PI,
-            omega_floor: 2.0 * PI * 1.0e-12,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
@@ -2245,7 +3028,6 @@ mod matrix_free_tests {
             sideband_min: 0,
             offset_hz: 1.0,
             omega0: 2.0 * PI,
-            omega_floor: 2.0 * PI * 1.0e-12,
             g_matrix: &[],
             c_matrix: &[],
             l_matrix: &[],

@@ -1360,7 +1360,7 @@ impl HbSolver {
                 Vec::new()
             };
             let c_spectra = if self.has_nonlinear_devices() {
-                self.capacitance_spectra(state, extended)
+                self.capacitance_spectra(state, extended)?
             } else {
                 Vec::new()
             };
@@ -1453,7 +1453,7 @@ impl HbSolver {
         if self.has_nonlinear_devices() {
             let extended = 2 * self.num_harmonics;
             let g_spectra = self.conductance_spectra(state, extended)?;
-            let c_spectra = self.capacitance_spectra(state, extended);
+            let c_spectra = self.capacitance_spectra(state, extended)?;
 
             let mut add_hankel = |i: usize, j: usize, k: usize, m: usize, hval: Complex64| {
                 let row_re = re_idx(i, k);

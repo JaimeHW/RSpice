@@ -405,9 +405,23 @@ impl Engine {
     pub(in crate::engine::hb) fn pac_input_injections(
         circuit: &CircuitData,
         input_name: &str,
-        _num_nodes: usize,
+        num_nodes: usize,
     ) -> Result<Vec<(usize, Complex64)>, SimulationError> {
         let trimmed = input_name.trim();
+
+        let validate_terminals = |kind: &str, np: usize, nn: usize| {
+            if np > num_nodes || nn > num_nodes {
+                return Err(SimulationError::Circuit(format!(
+                    "PAC input {kind} source '{trimmed}' references node pair ({np}, {nn}), outside the circuit's 0..={num_nodes} node range"
+                )));
+            }
+            if np == nn {
+                return Err(SimulationError::Circuit(format!(
+                    "PAC input {kind} source '{trimmed}' has identical terminals and no effective port"
+                )));
+            }
+            Ok(())
+        };
 
         if let Some(idx) = circuit
             .voltage_sources
@@ -417,6 +431,7 @@ impl Engine {
         {
             let np = circuit.voltage_sources.node_pos[idx];
             let nn = circuit.voltage_sources.node_neg[idx];
+            validate_terminals("voltage", np, nn)?;
             let mut injections = Vec::new();
             if np > 0 {
                 injections.push((np - 1, Complex64::new(HB_NORTON_G, 0.0)));
@@ -435,6 +450,7 @@ impl Engine {
         {
             let np = circuit.current_sources.node_pos[idx];
             let nn = circuit.current_sources.node_neg[idx];
+            validate_terminals("current", np, nn)?;
             let mut injections = Vec::new();
             if np > 0 {
                 injections.push((np - 1, Complex64::new(-1.0, 0.0)));
