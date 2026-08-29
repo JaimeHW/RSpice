@@ -51,6 +51,8 @@ pub const THRESHOLD_HIGH: Value = 0.9;
 pub const MIN_FFT_SAMPLES: usize = 8;
 /// Bound FFT planning before entering `rustfft`'s infallible plan allocations.
 const MAX_QUALIFIED_FFT_SAMPLES: usize = 1_048_576;
+/// Bound resampling before allocating both the output grid and values.
+const MAX_QUALIFIED_RESAMPLE_POINTS: usize = 1_048_576;
 /// Default number of harmonics for THD calculation
 pub const DEFAULT_THD_HARMONICS: usize = 10;
 
@@ -208,6 +210,22 @@ impl Waveform {
             max_value,
             min_time: time[0],
             max_time: time[time.len() - 1],
+        }
+    }
+
+    fn from_owned_validated_parts(time: Vec<Value>, values: Vec<Value>) -> Self {
+        let min_value = values.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max_value = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min_time = time[0];
+        let max_time = time[time.len() - 1];
+
+        Self {
+            time,
+            values,
+            min_value,
+            max_value,
+            min_time,
+            max_time,
         }
     }
 
@@ -1269,49 +1287,150 @@ impl Waveform {
     // Interpolation
     //=========================================================================
 
-    /// Interpolate value at arbitrary time
-    pub fn interpolate(&self, t: Value) -> Option<Value> {
+    /// Interpolate the waveform at a finite query time.
+    ///
+    /// Returns `Ok(None)` only when a finite query lies outside the authored
+    /// time range. Exact authored sample times return the authored value.
+    /// Interior interpolation is performed with a qualified affine operation;
+    /// an unrepresentable time fraction or result returns an error rather than
+    /// an endpoint or fabricated value.
+    pub fn interpolate(&self, t: Value) -> Result<Option<Value>, MeasurementError> {
+        if !t.is_finite() {
+            return Err(MeasurementError::CalculationError(format!(
+                "interpolation query time must be finite, got {t}"
+            )));
+        }
+        if self.time.is_empty() || self.time.len() != self.values.len() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "interpolation requires a nonempty matched time/value grid, got {} time point(s) and {} value(s)",
+                self.time.len(),
+                self.values.len()
+            )));
+        }
         if t < self.min_time || t > self.max_time {
-            return None;
+            return Ok(None);
         }
 
-        // Binary search for interval
         let idx = self.time.partition_point(|&x| x < t);
-
-        if idx == 0 {
-            return Some(self.values[0]);
+        if idx < self.time.len() && self.time[idx] == t {
+            return Ok(Some(self.values[idx]));
         }
-        if idx >= self.time.len() {
-            return Some(*self.values.last()?);
+        if idx == 0 || idx >= self.time.len() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "interpolation search could not bracket in-range time {t}"
+            )));
         }
 
-        // Linear interpolation
         let t0 = self.time[idx - 1];
         let t1 = self.time[idx];
         let v0 = self.values[idx - 1];
         let v1 = self.values[idx];
-
-        let alpha = (t - t0) / (t1 - t0);
-        Some(v0 + alpha * (v1 - v0))
+        let fraction_numerator =
+            scaled_positive_difference(t, t0, idx - 1, "interpolation query offset")?;
+        let time_span = scaled_positive_difference(t1, t0, idx - 1, "interpolation time span")?;
+        let fraction = scaled_positive_ratio(
+            fraction_numerator,
+            time_span,
+            idx - 1,
+            "interpolation fraction",
+        )?;
+        if !fraction.is_finite() || fraction <= 0.0 || fraction >= 1.0 {
+            return Err(MeasurementError::CalculationError(format!(
+                "interior interpolation fraction at segment {} is not representable strictly inside (0, 1): {fraction}",
+                idx - 1
+            )));
+        }
+        qualified_affine_value(v0, v1, fraction, "waveform interpolation").map(Some)
     }
 
-    /// Resample waveform at uniform intervals
-    pub fn resample(&self, num_points: usize) -> Self {
-        if num_points < 2 || self.time.len() < 2 {
-            return self.clone();
+    /// Resample the waveform onto an inclusive uniform time grid.
+    ///
+    /// At least two source and destination points are required. Allocation,
+    /// grid-representation, and interpolation failures are returned rather
+    /// than silently cloning the source or substituting zero-valued samples.
+    pub fn resample(&self, num_points: usize) -> Result<Self, MeasurementError> {
+        if num_points < 2 {
+            return Err(MeasurementError::InsufficientData(format!(
+                "resampling requires at least 2 destination points, got {num_points}"
+            )));
         }
+        if num_points > MAX_QUALIFIED_RESAMPLE_POINTS {
+            return Err(MeasurementError::CalculationError(format!(
+                "requested {num_points} resampling points exceeds the qualified limit of {MAX_QUALIFIED_RESAMPLE_POINTS}"
+            )));
+        }
+        if self.time.len() < 2 {
+            return Err(MeasurementError::InsufficientData(format!(
+                "resampling requires at least 2 source points, got {}",
+                self.time.len()
+            )));
+        }
+        validate_waveform_input(&self.time, &self.values)?;
 
-        let dt = self.duration() / (num_points - 1) as Value;
-        let mut new_time = Vec::with_capacity(num_points);
-        let mut new_values = Vec::with_capacity(num_points);
+        let mut new_time = Vec::new();
+        new_time.try_reserve_exact(num_points).map_err(|error| {
+            MeasurementError::CalculationError(format!(
+                "failed to allocate {num_points} resampled time points: {error}"
+            ))
+        })?;
+        let mut new_values = Vec::new();
+        new_values.try_reserve_exact(num_points).map_err(|error| {
+            MeasurementError::CalculationError(format!(
+                "failed to allocate {num_points} resampled values: {error}"
+            ))
+        })?;
+
+        let interval_count = num_points - 1;
+        let interval_count_value = interval_count as Value;
+        if !interval_count_value.is_finite() || interval_count_value as usize != interval_count {
+            return Err(MeasurementError::CalculationError(format!(
+                "resampling interval count {interval_count} cannot be represented exactly"
+            )));
+        }
 
         for i in 0..num_points {
-            let t = self.min_time + i as Value * dt;
+            let t = if i == 0 {
+                self.min_time
+            } else if i == interval_count {
+                self.max_time
+            } else {
+                let index_value = i as Value;
+                if index_value as usize != i {
+                    return Err(MeasurementError::CalculationError(format!(
+                        "resampling grid index {i} cannot be represented exactly"
+                    )));
+                }
+                let fraction = index_value / interval_count_value;
+                if !fraction.is_finite() || fraction <= 0.0 || fraction >= 1.0 {
+                    return Err(MeasurementError::CalculationError(format!(
+                        "resampling grid fraction at index {i} is invalid ({fraction})"
+                    )));
+                }
+                qualified_affine_value(
+                    self.min_time,
+                    self.max_time,
+                    fraction,
+                    "resampling time grid",
+                )?
+            };
+            if let Some(previous) = new_time.last()
+                && t <= *previous
+            {
+                return Err(MeasurementError::CalculationError(format!(
+                    "resampling time point {i} is not representable after its predecessor ({t} <= {previous})"
+                )));
+            }
+            let value = self.interpolate(t)?.ok_or_else(|| {
+                MeasurementError::CalculationError(format!(
+                    "resampling time point {i} unexpectedly lies outside the source grid ({t})"
+                ))
+            })?;
             new_time.push(t);
-            new_values.push(self.interpolate(t).unwrap_or(0.0));
+            new_values.push(value);
         }
 
-        Self::from_validated_parts(&new_time, &new_values)
+        validate_waveform_input(&new_time, &new_values)?;
+        Ok(Self::from_owned_validated_parts(new_time, new_values))
     }
 }
 
@@ -1372,6 +1491,31 @@ fn qualified_convex_level(
     if fraction == 1.0 {
         return Ok(maximum);
     }
+    qualified_affine_value(minimum, maximum, fraction, quantity)
+}
+
+fn qualified_affine_value(
+    start: Value,
+    end: Value,
+    fraction: Value,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    if !start.is_finite() || !end.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} requires finite endpoints, got {start} and {end}"
+        )));
+    }
+    if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} fraction must be finite and inside [0, 1], got {fraction}"
+        )));
+    }
+    if fraction == 0.0 || start == end {
+        return Ok(start);
+    }
+    if fraction == 1.0 {
+        return Ok(end);
+    }
     let calculation_error = || {
         MeasurementError::CalculationError(format!(
             "{quantity} cannot be represented without losing interpolation evidence"
@@ -1383,11 +1527,11 @@ fn qualified_convex_level(
         return Err(calculation_error());
     }
 
-    let mut level = ExactFloatSum::default();
+    let mut level = BoundedExactFloatSum::<6>::new();
     for (weight, endpoint) in [
-        (complement, minimum),
-        (complement_residual, minimum),
-        (fraction, maximum),
+        (complement, start),
+        (complement_residual, start),
+        (fraction, end),
     ] {
         let (product, residual) =
             error_free_product(weight, endpoint, 0, quantity).map_err(|_| calculation_error())?;
@@ -1395,12 +1539,93 @@ fn qualified_convex_level(
         level.add(residual).map_err(|_| calculation_error())?;
     }
     let level = level.finish().map_err(|_| calculation_error())?;
-    if !level.is_finite() || level <= minimum || level >= maximum {
+    let lower = start.min(end);
+    let upper = start.max(end);
+    if !level.is_finite() || level <= lower || level >= upper {
         return Err(MeasurementError::CalculationError(format!(
-            "interior {quantity} is not representable strictly inside ({minimum}, {maximum}): {level}"
+            "interior {quantity} is not representable strictly inside ({lower}, {upper}): {level}"
         )));
     }
     Ok(level)
+}
+
+struct BoundedExactFloatSum<const CAPACITY: usize> {
+    partials: [Value; CAPACITY],
+    len: usize,
+}
+
+impl<const CAPACITY: usize> BoundedExactFloatSum<CAPACITY> {
+    fn new() -> Self {
+        Self {
+            partials: [0.0; CAPACITY],
+            len: 0,
+        }
+    }
+
+    fn add(&mut self, mut value: Value) -> Result<(), MeasurementError> {
+        if !value.is_finite() {
+            return Err(MeasurementError::CalculationError(
+                "bounded floating-point expansion received a non-finite component".to_string(),
+            ));
+        }
+        if value == 0.0 {
+            return Ok(());
+        }
+
+        let existing_count = self.len;
+        let mut retained_count = 0usize;
+        for index in 0..existing_count {
+            let mut partial = self.partials[index];
+            if value.abs() < partial.abs() {
+                std::mem::swap(&mut value, &mut partial);
+            }
+            let high = value + partial;
+            if !high.is_finite() {
+                return Err(MeasurementError::CalculationError(
+                    "bounded floating-point expansion accumulation became non-finite".to_string(),
+                ));
+            }
+            let low = partial - (high - value);
+            if low != 0.0 {
+                self.partials[retained_count] = low;
+                retained_count += 1;
+            }
+            value = high;
+        }
+        if value != 0.0 {
+            if retained_count == CAPACITY {
+                return Err(MeasurementError::CalculationError(format!(
+                    "bounded floating-point expansion exceeded its {CAPACITY}-component capacity"
+                )));
+            }
+            self.partials[retained_count] = value;
+            retained_count += 1;
+        }
+        self.len = retained_count;
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Value, MeasurementError> {
+        if self.len == 0 {
+            return Ok(0.0);
+        }
+        let mut result = 0.0;
+        for partial in self.partials.into_iter().take(self.len) {
+            let next = result + partial;
+            if !next.is_finite() {
+                return Err(MeasurementError::CalculationError(
+                    "bounded floating-point expansion became non-finite".to_string(),
+                ));
+            }
+            result = next;
+        }
+        if result == 0.0 {
+            return Err(MeasurementError::CalculationError(
+                "bounded floating-point expansion residual cannot be represented".to_string(),
+            ));
+        }
+        Ok(result)
+    }
 }
 
 #[derive(Clone, Copy)]
