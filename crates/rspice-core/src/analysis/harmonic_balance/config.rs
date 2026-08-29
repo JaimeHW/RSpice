@@ -126,15 +126,21 @@ pub struct HbConfig {
     /// Limits the number of mixing products considered
     pub max_mixing_order: usize,
 
-    /// Force the Krylov (GMRES + block-Jacobi) Newton-step solver.
+    /// Force the Krylov solver.
     ///
     /// `false` is automatic: systems with ≥ 256 unknowns (nodes × spectral
     /// components) use Krylov, smaller systems use exact dense elimination.
-    /// Krylov stagnation always falls back to the dense solve, so this
-    /// switch affects speed only, never convergence.
+    /// Shared Arnoldi storage is bounded independently of system dimension.
+    /// Each consuming analysis owns its preconditioner, numerical qualification,
+    /// and recovery policy.
     pub use_krylov: bool,
 
-    /// GMRES restart parameter for the Krylov Newton-step solver.
+    /// Requested GMRES restart parameter for HB, PAC, and PNoise Krylov solves.
+    ///
+    /// The shared solver bounds this to the system dimension and to 64 retained
+    /// Arnoldi vectors, keeping the basis workspace O(system size). The default
+    /// is 30; requests below eight retain the historical minimum restart of
+    /// eight whenever the system dimension permits it.
     pub gmres_restart: usize,
 
     /// Enable source stepping for difficult convergence

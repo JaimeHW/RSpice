@@ -15,10 +15,9 @@
 //! one. When the matrix IS block-diagonal (linear circuit), GMRES
 //! converges in a single iteration.
 //!
-//! Correctness policy: the caller falls back to the exact dense solve
-//! whenever GMRES reports stagnation or non-convergence, so enabling the
-//! Krylov path can never change whether Newton converges — only how fast
-//! the step is computed.
+//! Correctness policy: this kernel reports a normwise-converged candidate.
+//! Callers must independently qualify it as required by their analysis and
+//! keep any recovery path within that analysis's resource contract.
 
 use num_complex::Complex64;
 
@@ -33,6 +32,18 @@ pub(super) const GMRES_REL_TOL: f64 = 1e-10;
 /// (the direct solve remains the small-problem default — exact and faster
 /// below this size).
 pub(super) const KRYLOV_AUTO_THRESHOLD: usize = 256;
+
+/// Maximum retained Arnoldi basis length for every HB-family GMRES solve.
+///
+/// GMRES stores O(restart * system_size) basis entries. Keeping this bound in
+/// the shared kernel prevents a direct or future caller from restoring
+/// quadratic workspace through an unbounded user request.
+pub(super) const GMRES_RESTART_CAP: usize = 64;
+
+#[inline]
+pub(super) fn bounded_gmres_restart(requested: usize, dimension: usize) -> usize {
+    requested.clamp(8, GMRES_RESTART_CAP).min(dimension.max(1))
+}
 
 //=============================================================================
 // Dense complex LU (preconditioner blocks)
@@ -286,7 +297,7 @@ pub(super) fn gmres(
         };
     }
 
-    let m = restart.clamp(1, size);
+    let m = bounded_gmres_restart(restart, size);
     let mut x = vec![ZERO; size];
     let mut r = b.to_vec();
     let mut beta = b_norm;
@@ -424,6 +435,15 @@ pub(super) fn gmres(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gmres_restart_is_bounded_by_one_dimension_and_shared_cap() {
+        assert_eq!(bounded_gmres_restart(0, 1_000), 8);
+        assert_eq!(bounded_gmres_restart(4, 1_000), 8);
+        assert_eq!(bounded_gmres_restart(30, 20), 20);
+        assert_eq!(bounded_gmres_restart(usize::MAX, 1_000), 64);
+        assert_eq!(bounded_gmres_restart(usize::MAX, 7), 7);
+    }
 
     /// Deterministic pseudo-random stream for reproducible test matrices.
     struct Lcg(u64);

@@ -16,6 +16,7 @@ mod sparse;
 pub use klu::{KluDiagnostics, KluSolver};
 pub use sparse::{
     ComplexMatrix, CscIndex, CscPatternToken, SparseLuSolver, StaticMatrix, TripletMatrix,
+    certify_complex_transpose_solution_by_entry_visitor,
 };
 
 /// Numeric scalar used by RSpice's real-valued circuit matrices.

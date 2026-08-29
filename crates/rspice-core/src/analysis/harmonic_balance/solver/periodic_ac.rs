@@ -292,54 +292,80 @@ impl PeriodicConversionOperator<'_> {
         dense
     }
 
-    fn harmonic_blocks(&self, transpose: bool) -> Vec<Vec<Complex64>> {
+    /// Materialize only the plain transpose needed by the PNoise adjoint.
+    ///
+    /// Building `Y` and then copying it into a second `Y^T` allocation doubles
+    /// the peak quadratic storage of the small-system recovery path.  Stamping
+    /// entries directly at `(column, row)` retains duplicate-stamp summation
+    /// while allocating exactly one dense operator.
+    fn to_dense_transpose(&self) -> Vec<Vec<Complex64>> {
+        let size = self.num_nodes * self.num_sidebands;
+        let mut transpose = vec![vec![Complex64::new(0.0, 0.0); size]; size];
+        self.visit_entries(|row, column, value| transpose[column][row] += value);
+        transpose
+    }
+
+    fn try_harmonic_block(&self, k_idx: usize, transpose: bool) -> Result<Vec<Complex64>, HbError> {
         let n = self.num_nodes;
-        let mut blocks = Vec::with_capacity(self.num_sidebands);
-        for k_idx in 0..self.num_sidebands {
-            let omega_k = self.omega(k_idx);
-            let jw = Complex64::new(0.0, omega_k);
-            let mut block = vec![Complex64::new(0.0, 0.0); n * n];
-            for &(i, j, g) in self.g_matrix {
-                if i < n && j < n {
-                    block[i * n + j] += g;
-                }
+        let block_entries = n.checked_mul(n).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "periodic preconditioner block dimension overflows usize".to_string(),
+            )
+        })?;
+        let mut block = Vec::new();
+        block.try_reserve_exact(block_entries).map_err(|error| {
+            HbError::InvalidCircuit(format!(
+                "periodic preconditioner block allocation failed: {error}"
+            ))
+        })?;
+        block.resize(block_entries, Complex64::new(0.0, 0.0));
+        let omega_k = self.omega(k_idx);
+        let jw = Complex64::new(0.0, omega_k);
+        for &(i, j, g) in self.g_matrix {
+            if i < n && j < n {
+                block[i * n + j] += g;
             }
-            for &(i, j, c) in self.c_matrix {
-                if i < n && j < n {
-                    block[i * n + j] += jw * c;
-                }
-            }
-            for &(i, j, l) in self.l_matrix {
-                if i < n && j < n && l.abs() > 1e-30 {
-                    block[i * n + j] += if omega_k.abs() <= self.omega_floor {
-                        Complex64::new(inductor_dc_short_admittance(l), 0.0)
-                    } else {
-                        Complex64::new(0.0, -1.0 / (omega_k * l))
-                    };
-                }
-            }
-            for &(i, j, ref spectrum) in self.g_spectra {
-                if let Some(&coefficient) = spectrum.first() {
-                    block[i * n + j] += coefficient;
-                }
-            }
-            for &(i, j, ref spectrum) in self.c_spectra {
-                if let Some(&coefficient) = spectrum.first() {
-                    block[i * n + j] += jw * coefficient;
-                }
-            }
-            if transpose {
-                for i in 0..n {
-                    for j in (i + 1)..n {
-                        let a = i * n + j;
-                        let b = j * n + i;
-                        block.swap(a, b);
-                    }
-                }
-            }
-            blocks.push(block);
         }
-        blocks
+        for &(i, j, c) in self.c_matrix {
+            if i < n && j < n {
+                block[i * n + j] += jw * c;
+            }
+        }
+        for &(i, j, l) in self.l_matrix {
+            if i < n && j < n && l.abs() > 1e-30 {
+                block[i * n + j] += if omega_k.abs() <= self.omega_floor {
+                    Complex64::new(inductor_dc_short_admittance(l), 0.0)
+                } else {
+                    Complex64::new(0.0, -1.0 / (omega_k * l))
+                };
+            }
+        }
+        for &(i, j, ref spectrum) in self.g_spectra {
+            if i < n
+                && j < n
+                && let Some(&coefficient) = spectrum.first()
+            {
+                block[i * n + j] += coefficient;
+            }
+        }
+        for &(i, j, ref spectrum) in self.c_spectra {
+            if i < n
+                && j < n
+                && let Some(&coefficient) = spectrum.first()
+            {
+                block[i * n + j] += jw * coefficient;
+            }
+        }
+        if transpose {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let a = i * n + j;
+                    let b = j * n + i;
+                    block.swap(a, b);
+                }
+            }
+        }
+        Ok(block)
     }
 }
 
@@ -350,17 +376,27 @@ struct PeriodicBlockPreconditioner {
 }
 
 impl PeriodicBlockPreconditioner {
-    fn build(operator: &PeriodicConversionOperator<'_>, transpose: bool) -> Self {
-        let factors = operator
-            .harmonic_blocks(transpose)
-            .into_iter()
-            .map(|block| super::krylov::LuFactors::factor(block, operator.num_nodes))
-            .collect();
-        Self {
+    fn try_build(
+        operator: &PeriodicConversionOperator<'_>,
+        transpose: bool,
+    ) -> Result<Self, HbError> {
+        let mut factors = Vec::new();
+        factors
+            .try_reserve_exact(operator.num_sidebands)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic block-preconditioner allocation failed: {error}"
+                ))
+            })?;
+        for k_idx in 0..operator.num_sidebands {
+            let block = operator.try_harmonic_block(k_idx, transpose)?;
+            factors.push(super::krylov::LuFactors::factor(block, operator.num_nodes));
+        }
+        Ok(Self {
             num_nodes: operator.num_nodes,
             num_sidebands: operator.num_sidebands,
             factors,
-        }
+        })
     }
 }
 
@@ -378,6 +414,127 @@ impl super::krylov::KrylovPreconditioner for PeriodicBlockPreconditioner {
             }
         }
         output
+    }
+}
+
+struct PeriodicDiagonalPreconditioner {
+    inverse_diagonal: Vec<Complex64>,
+}
+
+impl PeriodicDiagonalPreconditioner {
+    fn try_build(operator: &PeriodicConversionOperator<'_>) -> Result<Self, HbError> {
+        let size = operator
+            .num_nodes
+            .checked_mul(operator.num_sidebands)
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic diagonal-preconditioner dimension overflows usize".to_string(),
+                )
+            })?;
+        let mut diagonal = Vec::new();
+        diagonal.try_reserve_exact(size).map_err(|error| {
+            HbError::InvalidCircuit(format!(
+                "periodic diagonal-preconditioner allocation failed: {error}"
+            ))
+        })?;
+        diagonal.resize(size, Complex64::new(0.0, 0.0));
+
+        let mut invalid_entry = None;
+        operator.visit_entries(|row, column, value| {
+            if row >= size || column >= size {
+                invalid_entry.get_or_insert((row, column));
+            } else if row == column {
+                diagonal[row] += value;
+            }
+        });
+        if let Some((row, column)) = invalid_entry {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic preconditioner entry ({row}, {column}) is outside its {size}x{size} operator"
+            )));
+        }
+        if let Some((index, value)) = diagonal
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, value)| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic diagonal-preconditioner entry {index} is non-finite after stamp accumulation ({:+.6e}{:+.6e}j)",
+                value.re, value.im
+            )));
+        }
+
+        let one = Complex64::new(1.0, 0.0);
+        for value in &mut diagonal {
+            let inverse = if *value == Complex64::new(0.0, 0.0) {
+                one
+            } else {
+                let candidate = one / *value;
+                if candidate.re.is_finite() && candidate.im.is_finite() {
+                    candidate
+                } else {
+                    one
+                }
+            };
+            *value = inverse;
+        }
+        Ok(Self {
+            inverse_diagonal: diagonal,
+        })
+    }
+}
+
+impl super::krylov::KrylovPreconditioner for PeriodicDiagonalPreconditioner {
+    fn apply(&self, residual: &[Complex64]) -> Vec<Complex64> {
+        if residual.len() != self.inverse_diagonal.len() {
+            return residual.to_vec();
+        }
+        residual
+            .iter()
+            .zip(&self.inverse_diagonal)
+            .map(|(&value, &inverse)| {
+                let scaled = value * inverse;
+                if scaled.re.is_finite() && scaled.im.is_finite() {
+                    scaled
+                } else {
+                    value
+                }
+            })
+            .collect()
+    }
+}
+
+enum PeriodicPreconditioner {
+    Block(PeriodicBlockPreconditioner),
+    Diagonal(PeriodicDiagonalPreconditioner),
+}
+
+impl PeriodicPreconditioner {
+    fn build(operator: &PeriodicConversionOperator<'_>, transpose: bool) -> Result<Self, HbError> {
+        let block_entries = operator
+            .num_nodes
+            .checked_mul(operator.num_nodes)
+            .and_then(|per_block| per_block.checked_mul(operator.num_sidebands));
+        let dense_entry_limit = super::krylov::KRYLOV_AUTO_THRESHOLD
+            .checked_mul(super::krylov::KRYLOV_AUTO_THRESHOLD)
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic preconditioner dense-entry limit overflows usize".to_string(),
+                )
+            })?;
+        if block_entries.is_some_and(|entries| entries < dense_entry_limit) {
+            return PeriodicBlockPreconditioner::try_build(operator, transpose).map(Self::Block);
+        }
+        PeriodicDiagonalPreconditioner::try_build(operator).map(Self::Diagonal)
+    }
+}
+
+impl super::krylov::KrylovPreconditioner for PeriodicPreconditioner {
+    fn apply(&self, residual: &[Complex64]) -> Vec<Complex64> {
+        match self {
+            Self::Block(preconditioner) => preconditioner.apply(residual),
+            Self::Diagonal(preconditioner) => preconditioner.apply(residual),
+        }
     }
 }
 
@@ -569,8 +726,11 @@ impl HbSolver {
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
-        let preconditioner =
-            try_krylov.then(|| PeriodicBlockPreconditioner::build(&operator, false));
+        let preconditioner = if try_krylov {
+            Some(PeriodicPreconditioner::build(&operator, false)?)
+        } else {
+            None
+        };
 
         let mut results = Vec::with_capacity(excitations.len());
         for excitation in excitations {
@@ -589,7 +749,7 @@ impl HbSolver {
             }
 
             let solution = if let Some(preconditioner) = &preconditioner {
-                let restart = self.config.gmres_restart.clamp(8, size.max(8));
+                let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
                 let outcome = super::krylov::gmres(
                     &|input| operator.apply(input),
                     preconditioner,
@@ -749,6 +909,74 @@ impl HbSolver {
             .collect()
     }
 
+    /// Accept a matrix-free PNoise adjoint only after an independent
+    /// componentwise backward-error check.
+    ///
+    /// GMRES reports a normwise residual.  That criterion can hide a failed
+    /// low-scale equation beside a well-scaled row, so convergence alone is
+    /// not publication evidence.  Small systems may recover through the
+    /// independently certified dense solver; an automatic dense fallback is
+    /// forbidden at and above the Krylov threshold because its quadratic
+    /// allocation is precisely what the matrix-free route is meant to avoid.
+    fn qualify_periodic_noise_adjoint(
+        &self,
+        operator: &PeriodicConversionOperator<'_>,
+        rhs: &[Complex64],
+        outcome: super::krylov::GmresOutcome,
+    ) -> Result<Vec<Complex64>, HbError> {
+        let size = rhs.len();
+        let qualification = if outcome.converged {
+            rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+                size,
+                size,
+                &outcome.solution,
+                rhs,
+                |visitor| {
+                    operator.visit_entries(|row, column, value| {
+                        visitor(row, column, value);
+                    });
+                },
+            )
+        } else {
+            Err(rspice_matrix::SolverError::ConvergenceFailed(
+                outcome.iterations,
+            ))
+        };
+
+        match qualification {
+            Ok(()) => {
+                if self.config.verbose {
+                    log::debug!(
+                        "PNoise matrix-free adjoint: {} iterations, componentwise certified \
+                         (reported normwise relative residual {:.2e})",
+                        outcome.iterations,
+                        outcome.relative_residual
+                    );
+                }
+                Ok(outcome.solution)
+            }
+            Err(
+                error @ rspice_matrix::SolverError::ConvergenceFailed(_)
+                | error @ rspice_matrix::SolverError::InaccurateSolution(_),
+            ) if size < super::krylov::KRYLOV_AUTO_THRESHOLD => {
+                log::debug!(
+                    "PNoise matrix-free adjoint was not certified after {} iterations \
+                     (reported relative residual {:.2e}: {}); using bounded dense recovery",
+                    outcome.iterations,
+                    outcome.relative_residual,
+                    error
+                );
+                let transpose = operator.to_dense_transpose();
+                self.solve_complex_linear_system(&transpose, rhs)
+            }
+            Err(error) => Err(HbError::InvalidCircuit(format!(
+                "PNoise adjoint {size}x{size} iterative linear solve is uncertified after {} \
+                 iterations (reported normwise relative residual {:.3e}): {error}",
+                outcome.iterations, outcome.relative_residual
+            ))),
+        }
+    }
+
     /// Per-source output noise power spectral densities (V^2/Hz) at one
     /// offset frequency; the total is the sum (sources are independent).
     ///
@@ -839,7 +1067,7 @@ impl HbSolver {
 
         let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
         let span = (sideband_max - sideband_min).unsigned_abs() as usize;
-        let (spectra, cap_spectra) = if try_krylov && self.has_nonlinear_devices() {
+        let (spectra, cap_spectra) = if self.has_nonlinear_devices() {
             (
                 self.conductance_spectra(state, span.max(self.num_harmonics))?,
                 self.capacitance_spectra(state, span.max(self.num_harmonics)),
@@ -870,8 +1098,8 @@ impl HbSolver {
             e[r * s + out_idx] -= Complex64::new(1.0, 0.0);
         }
         let adjoint = if try_krylov {
-            let preconditioner = PeriodicBlockPreconditioner::build(&operator, true);
-            let restart = self.config.gmres_restart.clamp(8, size.max(8));
+            let preconditioner = PeriodicPreconditioner::build(&operator, true)?;
+            let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
             let outcome = super::krylov::gmres(
                 &|input| operator.apply_transpose(input),
                 &preconditioner,
@@ -879,41 +1107,10 @@ impl HbSolver {
                 restart,
                 6,
             );
-            if outcome.converged {
-                if self.config.verbose {
-                    log::debug!(
-                        "PNoise matrix-free adjoint: {} iterations, relative residual {:.2e}",
-                        outcome.iterations,
-                        outcome.relative_residual
-                    );
-                }
-                outcome.solution
-            } else {
-                log::debug!(
-                    "PNoise matrix-free adjoint stagnated after {} iterations (relative residual \
-                     {:.2e}); falling back to dense elimination",
-                    outcome.iterations,
-                    outcome.relative_residual
-                );
-                let y = operator.to_dense();
-                let mut yt = vec![vec![Complex64::new(0.0, 0.0); size]; size];
-                for r in 0..size {
-                    for c in 0..size {
-                        yt[c][r] = y[r][c];
-                    }
-                }
-                self.solve_complex_linear_system(&yt, &e)?
-            }
+            self.qualify_periodic_noise_adjoint(&operator, &e, outcome)?
         } else {
-            let y =
-                self.assemble_conversion_matrix(state, offset_hz, sideband_min, sideband_max)?;
-            let mut yt = vec![vec![Complex64::new(0.0, 0.0); size]; size];
-            for r in 0..size {
-                for c in 0..size {
-                    yt[c][r] = y[r][c];
-                }
-            }
-            self.solve_complex_linear_system(&yt, &e)?
+            let transpose = operator.to_dense_transpose();
+            self.solve_complex_linear_system(&transpose, &e)?
         };
 
         let mut contributions = Vec::with_capacity(sources.len());
@@ -1101,6 +1298,14 @@ pub struct PeriodicNoiseSource {
 #[cfg(test)]
 mod matrix_free_tests {
     use super::*;
+
+    struct IdentityPreconditioner;
+
+    impl super::super::krylov::KrylovPreconditioner for IdentityPreconditioner {
+        fn apply(&self, residual: &[Complex64]) -> Vec<Complex64> {
+            residual.to_vec()
+        }
+    }
 
     fn test_operator<'a>(
         g: &'a [(usize, usize, Value)],
@@ -1330,6 +1535,7 @@ mod matrix_free_tests {
         )];
         let operator = test_operator(&g, &c, &spectra, &cap_spectra);
         let dense = operator.to_dense();
+        let dense_transpose = operator.to_dense_transpose();
         let x = (0..10)
             .map(|index| Complex64::new(index as Value * 0.13 - 0.4, 0.2 - index as Value * 0.07))
             .collect::<Vec<_>>();
@@ -1340,7 +1546,214 @@ mod matrix_free_tests {
             let expected_transpose = (0..10).map(|col| dense[col][row] * x[col]).sum();
             assert_close(forward[row], expected_forward);
             assert_close(transpose[row], expected_transpose);
+            for column in 0..10 {
+                assert_eq!(dense_transpose[row][column], dense[column][row]);
+            }
         }
+    }
+
+    #[test]
+    fn pnoise_adjoint_rejects_normwise_false_convergence_and_recovers_when_small() {
+        // For nonsymmetric A = [[1, eps], [0, 1]], b = [1, 0], x = [1, 0]
+        // is the exact NORMAL solution but a false TRANSPOSE solution.  Its
+        // transpose residual has norm eps < GMRES_REL_TOL, while its second
+        // equation has componentwise backward error eps/(eps*1) = 1.
+        let eps = 1.0e-12;
+        assert!(eps < super::super::krylov::GMRES_REL_TOL);
+        let g = vec![(0, 0, 1.0), (0, 1, eps), (1, 1, 1.0)];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 2,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            omega_floor: 2.0 * PI * 1.0e-12,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), 2);
+        let rhs = vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+        let false_convergence = super::super::krylov::gmres(
+            &|input| operator.apply_transpose(input),
+            &IdentityPreconditioner,
+            &rhs,
+            2,
+            1,
+        );
+        assert!(false_convergence.converged);
+        assert!(false_convergence.relative_residual < super::super::krylov::GMRES_REL_TOL);
+        assert_eq!(
+            false_convergence.solution[1],
+            Complex64::new(0.0, 0.0),
+            "the normwise GMRES criterion did not resolve the low-scale equation"
+        );
+
+        let recovered = solver
+            .qualify_periodic_noise_adjoint(&operator, &rhs, false_convergence)
+            .expect("a small uncertified Krylov solution uses bounded dense recovery");
+        assert_close(recovered[0], Complex64::new(1.0, 0.0));
+        assert!(
+            recovered[1].re < 0.0,
+            "the transpose correction has the wrong sign"
+        );
+        assert_eq!(recovered[1].im, 0.0);
+        let expected_correction = -eps;
+        assert!(
+            (recovered[1].re + eps).abs() <= 8.0 * Value::EPSILON * eps,
+            "transpose correction {} differs from {} at its own scale",
+            recovered[1].re,
+            expected_correction
+        );
+    }
+
+    #[test]
+    fn pnoise_adjoint_never_materializes_dense_fallback_at_krylov_threshold() {
+        let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let eps = 1.0e-12;
+        let mut g = (0..dimension)
+            .map(|index| (index, index, 1.0))
+            .collect::<Vec<_>>();
+        g.push((0, 1, eps));
+        let operator = PeriodicConversionOperator {
+            num_nodes: dimension,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            omega_floor: 2.0 * PI * 1.0e-12,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), dimension);
+        let mut rhs = vec![Complex64::new(0.0, 0.0); dimension];
+        rhs[0] = Complex64::new(1.0, 0.0);
+        let mut false_solution = vec![Complex64::new(0.0, 0.0); dimension];
+        false_solution[0] = Complex64::new(1.0, 0.0);
+        let false_convergence = super::super::krylov::GmresOutcome {
+            solution: false_solution,
+            iterations: 1,
+            relative_residual: eps,
+            converged: true,
+        };
+
+        let error = solver
+            .qualify_periodic_noise_adjoint(&operator, &rhs, false_convergence)
+            .expect_err("large uncertified Krylov solutions must fail without dense allocation");
+        let HbError::InvalidCircuit(message) = error else {
+            panic!("unexpected error: {error}");
+        };
+        assert!(message.contains("PNoise adjoint 256x256"), "{message}");
+        assert!(message.contains("after 1 iterations"), "{message}");
+        assert!(message.contains("backward-error"), "{message}");
+    }
+
+    #[test]
+    fn periodic_preconditioner_uses_linear_storage_at_dense_entry_boundary() {
+        let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let g = (0..dimension)
+            .map(|index| (index, index, 2.0))
+            .collect::<Vec<_>>();
+        let operator = PeriodicConversionOperator {
+            num_nodes: dimension,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            omega_floor: 2.0 * PI * 1.0e-12,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+
+        let preconditioner = PeriodicPreconditioner::build(&operator, true)
+            .expect("threshold-size production preconditioner builds");
+        assert!(
+            matches!(&preconditioner, PeriodicPreconditioner::Diagonal(_)),
+            "dense block entries equal to the strict limit must use O(system-size) storage"
+        );
+        let residual = vec![Complex64::new(4.0, -2.0); dimension];
+        let scaled = super::super::krylov::KrylovPreconditioner::apply(&preconditioner, &residual);
+        assert_eq!(scaled, vec![Complex64::new(2.0, -1.0); dimension]);
+    }
+
+    #[test]
+    fn periodic_diagonal_preconditioner_rejects_nonfinite_accumulation() {
+        let dimension = super::super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let mut g = (0..dimension)
+            .map(|index| (index, index, 2.0))
+            .collect::<Vec<_>>();
+        g.push((0, 0, Value::MAX));
+        g.push((0, 0, Value::MAX));
+        let operator = PeriodicConversionOperator {
+            num_nodes: dimension,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            omega_floor: 2.0 * PI * 1.0e-12,
+            g_matrix: &g,
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &[],
+            c_spectra: &[],
+        };
+
+        let error = match PeriodicPreconditioner::build(&operator, true) {
+            Err(error) => error,
+            Ok(_) => panic!("overflowed diagonal accumulation must fail before iteration"),
+        };
+        let HbError::InvalidCircuit(message) = error else {
+            panic!("unexpected error: {error}");
+        };
+        assert!(message.contains("entry 0"), "{message}");
+        assert!(
+            message.contains("non-finite after stamp accumulation"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn pnoise_adjoint_never_dense_fallbacks_after_structural_certificate_failure() {
+        let invalid_spectra = vec![(1, 0, vec![Complex64::new(1.0, 0.0)])];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 1,
+            num_sidebands: 1,
+            sideband_min: 0,
+            offset_hz: 1.0,
+            omega0: 2.0 * PI,
+            omega_floor: 2.0 * PI * 1.0e-12,
+            g_matrix: &[],
+            c_matrix: &[],
+            l_matrix: &[],
+            g_spectra: &invalid_spectra,
+            c_spectra: &[],
+        };
+        let solver = HbSolver::new(HbConfig::new(1.0).with_harmonics(1), 1);
+        let outcome = super::super::krylov::GmresOutcome {
+            solution: vec![Complex64::new(1.0, 0.0)],
+            iterations: 1,
+            relative_residual: 0.0,
+            converged: true,
+        };
+
+        let error = solver
+            .qualify_periodic_noise_adjoint(&operator, &[Complex64::new(1.0, 0.0)], outcome)
+            .expect_err("structural certificate failures must bypass dense recovery");
+        let HbError::InvalidCircuit(message) = error else {
+            panic!("unexpected error: {error}");
+        };
+        assert!(
+            message.contains("outside native 1x1 matrix"),
+            "message={message}"
+        );
     }
 
     #[test]
@@ -1375,7 +1788,9 @@ mod matrix_free_tests {
         let rhs = (0..10)
             .map(|index| Complex64::new(0.1 + index as Value * 0.03, -0.02 * index as Value))
             .collect::<Vec<_>>();
-        let preconditioner = PeriodicBlockPreconditioner::build(&operator, false);
+        let preconditioner = PeriodicPreconditioner::build(&operator, false)
+            .expect("small matrix-free conversion preconditioner builds");
+        assert!(matches!(&preconditioner, PeriodicPreconditioner::Block(_)));
         let outcome = super::super::krylov::gmres(
             &|input| operator.apply(input),
             &preconditioner,

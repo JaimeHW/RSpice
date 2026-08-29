@@ -1381,7 +1381,7 @@ impl HbSolver {
                 .iter()
                 .map(|&value| Complex64::new(value, 0.0))
                 .collect::<Vec<_>>();
-            let restart = self.config.gmres_restart.clamp(8, size.max(8));
+            let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
             let outcome = super::krylov::gmres(
                 &|input| operator.apply(input),
                 &preconditioner,
@@ -1574,7 +1574,7 @@ impl HbSolver {
                 .collect()
         };
 
-        let restart = self.config.gmres_restart.clamp(8, rhs.len().max(8));
+        let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, rhs.len());
         let outcome = gmres(&matvec, &preconditioner, rhs, restart, 4);
 
         if outcome.converged {

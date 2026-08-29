@@ -3429,6 +3429,202 @@ fn complex_dd_subtract(
     );
 }
 
+/// Whether a finite scalar product is safe to use in a componentwise
+/// certificate at the IEEE-754 underflow boundary.
+///
+/// FMA-based error transforms are reliable for normal products because any
+/// unrepresented tail is bounded by ordinary relative rounding error. A
+/// subnormal product has no such relative bound: both the rounded product and
+/// its FMA tail can lose an order-one fraction of the exact value. Decompose
+/// the operands as dyadic integers so an exact subnormal product is accepted
+/// only when it is itself representable as binary64.
+#[inline]
+fn scalar_product_is_certificate_safe(left: Value, right: Value) -> bool {
+    const FRACTION_MASK: u64 = (1_u64 << 52) - 1;
+
+    let decompose = |value: Value| -> Option<(u64, i32)> {
+        let bits = value.to_bits() & 0x7fff_ffff_ffff_ffff;
+        let fraction = bits & FRACTION_MASK;
+        let biased_exponent = ((bits >> 52) & 0x7ff) as i32;
+        if biased_exponent == 0 {
+            (fraction != 0).then_some((fraction, -1074))
+        } else {
+            Some(((1_u64 << 52) | fraction, biased_exponent - 1023 - 52))
+        }
+    };
+
+    let (left_significand, left_exponent) = match decompose(left) {
+        Some(parts) => parts,
+        None => return true,
+    };
+    let (right_significand, right_exponent) = match decompose(right) {
+        Some(parts) => parts,
+        None => return true,
+    };
+    let product = u128::from(left_significand) * u128::from(right_significand);
+    let trailing_zeros = product.trailing_zeros();
+    let odd_significand = product >> trailing_zeros;
+    let significand_bits = (u128::BITS - odd_significand.leading_zeros()) as i32;
+    let lowest_exponent = left_exponent + right_exponent + trailing_zeros as i32;
+    let highest_exponent = lowest_exponent + significand_bits - 1;
+
+    highest_exponent >= -1022 || (lowest_exponent >= -1074 && significand_bits <= 53)
+}
+
+fn try_filled_vec<T: Clone>(len: usize, value: T) -> Result<Vec<T>, SolverError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| SolverError::OutOfMemory)?;
+    values.resize(len, value);
+    Ok(values)
+}
+
+/// Certify a complex transpose solution from caller-owned matrix entries.
+///
+/// `equations` and `unknowns` describe the native shape of `A`, and every
+/// entry is `(row, column, value)` in that native orientation. This function
+/// certifies `A^T*x=b` without conjugating entries, so the candidate contains
+/// `equations` values and the right-hand side contains `unknowns` values.
+///
+/// The certificate uses the same strict, floor-free componentwise
+/// backward-error tolerance as RSpice's sparse complex solves. Entries with
+/// duplicate coordinates deliberately remain separate physical
+/// contributions: each nonzero contribution participates independently in
+/// `|A|*|x|` and the per-equation rounding budget. Callers requiring the
+/// backward error of a coalesced algebraic matrix must coalesce entries before
+/// invoking this function.
+///
+/// # Errors
+///
+/// Returns [`SolverError::InvalidCircuit`] for dimension or entry-index
+/// mismatches, [`SolverError::Overflow`] for any non-finite input or
+/// intermediate accumulation, [`SolverError::OutOfMemory`] if the linear
+/// certificate workspace cannot be allocated, and
+/// [`SolverError::InaccurateSolution`] when the candidate fails the shared
+/// componentwise criterion.
+#[doc(hidden)]
+pub fn certify_complex_transpose_solution_by_entry_visitor(
+    equations: usize,
+    unknowns: usize,
+    solution: &[Complex64],
+    rhs: &[Complex64],
+    visit: impl FnOnce(&mut dyn FnMut(usize, usize, Complex64)),
+) -> Result<(), SolverError> {
+    if solution.len() != equations || rhs.len() != unknowns {
+        return Err(SolverError::InvalidCircuit(format!(
+            "Complex entry-stream certification dimension mismatch: native matrix is {equations}x{unknowns}, solution has {}, RHS has {}",
+            solution.len(),
+            rhs.len()
+        )));
+    }
+    if solution
+        .iter()
+        .copied()
+        .any(|value| !complex_is_finite(value))
+        || rhs.iter().copied().any(|value| !complex_is_finite(value))
+    {
+        return Err(SolverError::Overflow);
+    }
+
+    let certificate_equations = rhs.len();
+    let mut residual = try_filled_vec(certificate_equations, Complex64::new(0.0, 0.0))?;
+    residual.copy_from_slice(rhs);
+    let mut compensation = try_filled_vec(certificate_equations, Complex64::new(0.0, 0.0))?;
+    let mut denominator = try_filled_vec(certificate_equations, 0.0)?;
+    let mut row_nnz = try_filled_vec(certificate_equations, 0usize)?;
+    for (row, &value) in rhs.iter().enumerate() {
+        denominator[row] = complex_abs1(value);
+    }
+
+    let mut entry_error = None;
+    let mut certify_entry = |row: usize, column: usize, native_value: Complex64| {
+        if entry_error.is_some() {
+            return;
+        }
+        let result = (|| -> Result<(), SolverError> {
+            if row >= equations || column >= unknowns {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "Complex entry-stream certification index ({row}, {column}) is outside native {equations}x{unknowns} matrix"
+                )));
+            }
+            if !complex_is_finite(native_value) {
+                return Err(SolverError::Overflow);
+            }
+            let equation = column;
+            let x_index = row;
+            let value = native_value;
+            let x = solution[x_index];
+            if [
+                (value.re, x.re),
+                (value.im, x.im),
+                (value.re, x.im),
+                (value.im, x.re),
+            ]
+            .into_iter()
+            .any(|(left, right)| !scalar_product_is_certificate_safe(left, right))
+            {
+                return Err(SolverError::InaccurateSolution(Value::MAX));
+            }
+            let magnitude = complex_abs1(value) * complex_abs1(x);
+            if !magnitude.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            denominator[equation] = (denominator[equation] + magnitude).min(Value::MAX);
+            if value != Complex64::new(0.0, 0.0) {
+                row_nnz[equation] = row_nnz[equation].saturating_add(1);
+            }
+            complex_dd_subtract(
+                &mut residual[equation],
+                &mut compensation[equation],
+                value,
+                x,
+            );
+            if !complex_is_finite(residual[equation]) || !complex_is_finite(compensation[equation])
+            {
+                return Err(SolverError::Overflow);
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            entry_error = Some(error);
+        }
+    };
+    visit(&mut certify_entry);
+    if let Some(error) = entry_error {
+        return Err(error);
+    }
+
+    let mut componentwise_error: Value = 0.0;
+    let mut accepted = true;
+    for equation in 0..certificate_equations {
+        residual[equation] += compensation[equation];
+        let residual_abs = complex_abs1(residual[equation]);
+        let scale = denominator[equation];
+        if !complex_is_finite(residual[equation])
+            || !residual_abs.is_finite()
+            || !scale.is_finite()
+            || scale < 0.0
+        {
+            return Err(SolverError::Overflow);
+        }
+        let row_error = if residual_abs == 0.0 {
+            0.0
+        } else if scale == 0.0 {
+            Value::MAX
+        } else {
+            (residual_abs / scale).min(Value::MAX)
+        };
+        componentwise_error = componentwise_error.max(row_error);
+        accepted &= row_error <= backward_error_tolerance(row_nnz[equation]);
+    }
+    if accepted {
+        Ok(())
+    } else {
+        Err(SolverError::InaccurateSolution(componentwise_error))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn complex_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
@@ -7109,6 +7305,206 @@ mod tests {
                 (0, 2, Complex64::new(-3.0, 0.5)),
             ]
         );
+    }
+
+    #[test]
+    fn transpose_entry_visitor_certificate_maps_and_rejects_false_convergence() {
+        let entries = [
+            (0, 0, Complex64::new(2.0, 1.0)),
+            (0, 1, Complex64::new(-1.0, 2.0)),
+            (1, 0, Complex64::new(0.5, -1.0)),
+            (1, 2, Complex64::new(3.0, -0.25)),
+        ];
+        let visit = |visitor: &mut dyn FnMut(usize, usize, Complex64)| {
+            for &(row, column, value) in &entries {
+                visitor(row, column, value);
+            }
+        };
+        let transposed_solution = [Complex64::new(1.0, -0.25), Complex64::new(-0.5, 2.0)];
+        let mut transpose_rhs = [Complex64::new(0.0, 0.0); 3];
+        for &(row, column, value) in &entries {
+            transpose_rhs[column] += value * transposed_solution[row];
+        }
+        certify_complex_transpose_solution_by_entry_visitor(
+            2,
+            3,
+            &transposed_solution,
+            &transpose_rhs,
+            visit,
+        )
+        .expect("the transposed entry stream must certify");
+
+        let epsilon = 1.0e-12;
+        let weak_entries = [
+            (0, 0, Complex64::new(1.0, 0.0)),
+            (0, 1, Complex64::new(epsilon, 0.0)),
+            (1, 0, Complex64::new(epsilon, 0.0)),
+            (1, 1, Complex64::new(1.0, 0.0)),
+        ];
+        let visit_weak_entries = |visitor: &mut dyn FnMut(usize, usize, Complex64)| {
+            for &(row, column, value) in &weak_entries {
+                visitor(row, column, value);
+            }
+        };
+        let rhs = [Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+        let false_solution = [Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)];
+        let error = certify_complex_transpose_solution_by_entry_visitor(
+            2,
+            2,
+            &false_solution,
+            &rhs,
+            visit_weak_entries,
+        )
+        .expect_err("a globally tiny residual must not hide a wholly wrong equation");
+        let SolverError::InaccurateSolution(componentwise_error) = error else {
+            panic!("expected componentwise rejection, got {error}");
+        };
+        assert_eq!(componentwise_error, 1.0);
+
+        let denominator = 1.0 - epsilon * epsilon;
+        let analytic_solution = [
+            Complex64::new(1.0 / denominator, 0.0),
+            Complex64::new(-epsilon / denominator, 0.0),
+        ];
+        certify_complex_transpose_solution_by_entry_visitor(
+            2,
+            2,
+            &analytic_solution,
+            &rhs,
+            visit_weak_entries,
+        )
+        .expect("the analytic weak-coupling solution must certify");
+    }
+
+    #[test]
+    fn transpose_entry_visitor_certificate_retains_duplicate_contributions_at_max_scale() {
+        let duplicate_entries = [
+            (0, 0, Complex64::new(2.0, 0.0)),
+            (0, 0, Complex64::new(-1.0, 0.0)),
+        ];
+        certify_complex_transpose_solution_by_entry_visitor(
+            1,
+            1,
+            &[Complex64::new(3.0, 0.0)],
+            &[Complex64::new(3.0, 0.0)],
+            |visitor| {
+                for &(row, column, value) in &duplicate_entries {
+                    visitor(row, column, value);
+                }
+            },
+        )
+        .expect("duplicate physical contributions must remain certifiable");
+
+        certify_complex_transpose_solution_by_entry_visitor(
+            1,
+            1,
+            &[Complex64::new(1.0, 0.0)],
+            &[Complex64::new(0.0, 0.0)],
+            |visitor| {
+                visitor(0, 0, Complex64::new(Value::MAX, 0.0));
+                visitor(0, 0, Complex64::new(-Value::MAX, 0.0));
+            },
+        )
+        .expect("a finite MAX-scale cancellation must survive denominator saturation");
+    }
+
+    #[test]
+    fn transpose_entry_visitor_certificate_rejects_subnormal_weak_equation() {
+        let min_subnormal = Value::from_bits(1);
+        let full_scale_result = certify_complex_transpose_solution_by_entry_visitor(
+            2,
+            2,
+            &[Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)],
+            &[Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            |visitor| {
+                visitor(0, 0, Complex64::new(1.0, 0.0));
+                visitor(1, 1, Complex64::new(min_subnormal, 0.0));
+            },
+        );
+
+        assert!(matches!(
+            full_scale_result,
+            Err(SolverError::InaccurateSolution(error)) if error == 1.0
+        ));
+
+        let rounded_to_zero_result = certify_complex_transpose_solution_by_entry_visitor(
+            2,
+            2,
+            &[Complex64::new(1.0, 0.0), Complex64::new(0.5, 0.0)],
+            &[Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            |visitor| {
+                visitor(0, 0, Complex64::new(1.0, 0.0));
+                visitor(1, 1, Complex64::new(min_subnormal, 0.0));
+            },
+        );
+        assert!(matches!(
+            rounded_to_zero_result,
+            Err(SolverError::InaccurateSolution(error)) if error == Value::MAX
+        ));
+
+        let rounded_to_rhs_result = certify_complex_transpose_solution_by_entry_visitor(
+            2,
+            2,
+            &[Complex64::new(1.0, 0.0), Complex64::new(0.75, 0.0)],
+            &[Complex64::new(1.0, 0.0), Complex64::new(min_subnormal, 0.0)],
+            |visitor| {
+                visitor(0, 0, Complex64::new(1.0, 0.0));
+                visitor(1, 1, Complex64::new(min_subnormal, 0.0));
+            },
+        );
+        assert!(matches!(
+            rounded_to_rhs_result,
+            Err(SolverError::InaccurateSolution(error)) if error == Value::MAX
+        ));
+    }
+
+    #[test]
+    fn transpose_entry_visitor_certificate_fails_closed_on_invalid_or_nonfinite_data() {
+        let zero = Complex64::new(0.0, 0.0);
+        let one = Complex64::new(1.0, 0.0);
+        assert!(matches!(
+            certify_complex_transpose_solution_by_entry_visitor(1, 1, &[], &[zero], |_| {},),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            certify_complex_transpose_solution_by_entry_visitor(
+                1,
+                1,
+                &[Complex64::new(Value::NAN, 0.0)],
+                &[zero],
+                |_| {},
+            ),
+            Err(SolverError::Overflow)
+        ));
+        assert!(matches!(
+            certify_complex_transpose_solution_by_entry_visitor(
+                1,
+                1,
+                &[one],
+                &[Complex64::new(Value::INFINITY, 0.0)],
+                |_| {},
+            ),
+            Err(SolverError::Overflow)
+        ));
+        assert!(matches!(
+            certify_complex_transpose_solution_by_entry_visitor(1, 1, &[one], &[zero], |visitor| {
+                visitor(1, 0, one)
+            },),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            certify_complex_transpose_solution_by_entry_visitor(1, 1, &[one], &[zero], |visitor| {
+                visitor(0, 0, Complex64::new(Value::NEG_INFINITY, 0.0))
+            },),
+            Err(SolverError::Overflow)
+        ));
+        assert!(matches!(
+            certify_complex_transpose_solution_by_entry_visitor(1, 1, &[one], &[zero], |visitor| {
+                visitor(0, 0, Complex64::new(Value::MAX, 0.0));
+                visitor(0, 0, Complex64::new(Value::MAX, 0.0));
+            },),
+            Err(SolverError::Overflow)
+        ));
     }
 
     #[test]
