@@ -1,5 +1,19 @@
 use super::*;
 
+/// Divide a signed stability numerator by a non-negative magnitude without
+/// inventing a favorable result at an exact zero denominator.
+fn signed_stability_ratio(numerator: Value, denominator: Value) -> Value {
+    if denominator != 0.0 {
+        numerator / denominator
+    } else if numerator > 0.0 {
+        Value::INFINITY
+    } else if numerator < 0.0 {
+        Value::NEG_INFINITY
+    } else {
+        Value::NAN
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct StabilityAnalysis {
     /// Rollett stability factor K (unconditionally stable if K > 1 and |Δ| < 1)
@@ -52,66 +66,62 @@ impl StabilityAnalysis {
 
         // Δ = S11*S22 - S12*S21
         let delta = s11 * s22 - s12 * s21;
-        let delta_mag = delta.norm();
+        let delta_mag_sq = delta.norm_sqr();
+        let delta_mag = delta_mag_sq.sqrt();
 
         // K = (1 - |S11|² - |S22|² + |Δ|²) / (2|S12*S21|)
         let s11_mag_sq = s11.norm().powi(2);
         let s22_mag_sq = s22.norm().powi(2);
         let s12s21_mag = (s12 * s21).norm();
 
-        let k_factor = if s12s21_mag > 1e-15 {
-            (1.0 - s11_mag_sq - s22_mag_sq + delta_mag.powi(2)) / (2.0 * s12s21_mag)
-        } else {
-            f64::INFINITY // No feedback = unconditionally stable
-        };
+        let k_numerator = 1.0 - s11_mag_sq - s22_mag_sq + delta_mag_sq;
+        let k_factor = signed_stability_ratio(k_numerator, 2.0 * s12s21_mag);
 
         // μ = (1 - |S11|²) / (|S22 - Δ*S11*| + |S12*S21|)
         let s11_conj = s11.conj();
         let s22_minus_delta_s11_conj = s22 - delta * s11_conj;
         let denom_mu = s22_minus_delta_s11_conj.norm() + s12s21_mag;
 
-        let mu_factor = if denom_mu > 1e-15 {
-            (1.0 - s11_mag_sq) / denom_mu
-        } else {
-            f64::INFINITY
-        };
+        let mu_factor = signed_stability_ratio(1.0 - s11_mag_sq, denom_mu);
 
         // μ' = (1 - |S22|²) / (|S11 - Δ*S22*| + |S12*S21|)
         let s22_conj = s22.conj();
         let s11_minus_delta_s22_conj = s11 - delta * s22_conj;
         let denom_mu_prime = s11_minus_delta_s22_conj.norm() + s12s21_mag;
 
-        let mu_prime = if denom_mu_prime > 1e-15 {
-            (1.0 - s22_mag_sq) / denom_mu_prime
-        } else {
-            f64::INFINITY
-        };
+        let mu_prime = signed_stability_ratio(1.0 - s22_mag_sq, denom_mu_prime);
 
         // Stability circles (for potentially unstable devices)
         // Input stability circle: center Cs, radius rs
         // Cs = (S11 - Δ*S22*)* / (|S11|² - |Δ|²)
         // rs = |S12*S21| / ||S11|² - |Δ|²|
-        let denom_input = s11_mag_sq - delta_mag.powi(2);
-        let (input_center, input_radius) = if denom_input.abs() > 1e-15 {
+        let denom_input = s11_mag_sq - delta_mag_sq;
+        let (input_center, input_radius) = if denom_input != 0.0 {
             let center_num = s11 - delta * s22.conj();
             let center = center_num.conj() / denom_input;
             let radius = s12s21_mag / denom_input.abs();
             (center, radius)
         } else {
-            (Complex64::ZERO, 0.0)
+            (
+                Complex64::new(Value::NAN, Value::NAN),
+                signed_stability_ratio(s12s21_mag, 0.0),
+            )
         };
 
         // Output stability circle: center CL, radius rL
         // CL = (S22 - Δ*S11*)* / (|S22|² - |Δ|²)
         // rL = |S12*S21| / ||S22|² - |Δ|²|
-        let denom_output = s22_mag_sq - delta_mag.powi(2);
-        let (output_center, output_radius) = if denom_output.abs() > 1e-15 {
+        let denom_output = s22_mag_sq - delta_mag_sq;
+        let (output_center, output_radius) = if denom_output != 0.0 {
             let center_num = s22 - delta * s11.conj();
             let center = center_num.conj() / denom_output;
             let radius = s12s21_mag / denom_output.abs();
             (center, radius)
         } else {
-            (Complex64::ZERO, 0.0)
+            (
+                Complex64::new(Value::NAN, Value::NAN),
+                signed_stability_ratio(s12s21_mag, 0.0),
+            )
         };
 
         // Determine if stable region is inside or outside the circle
@@ -138,6 +148,54 @@ impl StabilityAnalysis {
             input_stable_inside,
             output_stable_inside,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn two_port(s11: Value, s12: Value, s21: Value, s22: Value) -> SMatrix {
+        let mut matrix = SMatrix::new(1.0e9, 2);
+        matrix.set(1, 1, Complex64::new(s11, 0.0));
+        matrix.set(1, 2, Complex64::new(s12, 0.0));
+        matrix.set(2, 1, Complex64::new(s21, 0.0));
+        matrix.set(2, 2, Complex64::new(s22, 0.0));
+        matrix
+    }
+
+    #[test]
+    fn tiny_reverse_product_cannot_turn_negative_k_into_infinity() {
+        let analysis = StabilityAnalysis::from_s_matrix(&two_port(1.01, 1.0e-8, 1.0e-8, 0.98));
+
+        assert!(analysis.k_factor.is_finite());
+        assert!(analysis.k_factor < 0.0, "K={}", analysis.k_factor);
+        assert!(!analysis.unconditionally_stable);
+        assert!(analysis.potentially_unstable);
+    }
+
+    #[test]
+    fn stability_classification_is_independent_of_an_absolute_feedback_floor() {
+        let analysis = StabilityAnalysis::from_s_matrix(&two_port(0.2, 1.0e-10, 1.0e-10, 0.3));
+
+        assert!(analysis.k_factor.is_finite());
+        assert!(analysis.k_factor > 1.0);
+        assert!(analysis.unconditionally_stable);
+    }
+
+    #[test]
+    fn exact_unilateral_limits_retain_the_numerator_sign() {
+        let stable = StabilityAnalysis::from_s_matrix(&two_port(0.5, 0.0, 2.0, 0.5));
+        assert_eq!(stable.k_factor, Value::INFINITY);
+        assert!(stable.unconditionally_stable);
+
+        let unstable = StabilityAnalysis::from_s_matrix(&two_port(1.01, 0.0, 2.0, 0.5));
+        assert_eq!(unstable.k_factor, Value::NEG_INFINITY);
+        assert!(!unstable.unconditionally_stable);
+
+        let boundary = StabilityAnalysis::from_s_matrix(&two_port(1.0, 0.0, 2.0, 0.5));
+        assert!(boundary.k_factor.is_nan());
+        assert!(!boundary.unconditionally_stable);
     }
 }
 
