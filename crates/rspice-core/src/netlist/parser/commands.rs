@@ -226,6 +226,7 @@ pub(super) fn parse_command(
                 models,
                 false,
                 model_bare_ident_deferrals,
+                diagnostics,
             )?;
             models.push(model);
         }

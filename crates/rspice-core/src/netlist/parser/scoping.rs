@@ -28,6 +28,7 @@ pub(super) fn parse_model_definition(
     known_models: &[ModelDef],
     defer_expression_params: bool,
     bare_ident_deferrals: &mut Vec<(String, String, usize)>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Result<ModelDef, ParseError> {
     let name = expect_model_name(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;
@@ -104,6 +105,14 @@ pub(super) fn parse_model_definition(
         &name,
         origin,
     )?;
+    push_unknown_xyce_diode_model_parameter_warnings(
+        params,
+        model_type_hint,
+        &name,
+        &model_params,
+        origin,
+        diagnostics,
+    );
     bare_ident_deferrals.append(&mut model_params.bare_ident_deferrals);
 
     let Some(base_name) = ako_base else {
@@ -229,6 +238,50 @@ pub(super) fn parse_model_definition(
         real_vector_expr_params: real_vector_expr,
         integer_vector_params: integer_vector,
     })
+}
+
+fn push_unknown_xyce_diode_model_parameter_warnings(
+    params: &ParamContext,
+    model_type: Option<&str>,
+    model_name: &str,
+    model_params: &ParsedModelParams,
+    origin: &NetlistSourceLocation,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) {
+    if params.expression_dialect() != ExpressionDialect::Xyce
+        || !model_type.is_some_and(|kind| {
+            kind.eq_ignore_ascii_case("D") || kind.eq_ignore_ascii_case("DIODE")
+        })
+    {
+        return;
+    }
+
+    let names = model_params
+        .numeric
+        .iter()
+        .map(|(name, _)| name)
+        .chain(model_params.expr.iter().map(|(name, _)| name))
+        .chain(model_params.string.iter().map(|(name, _)| name))
+        .chain(model_params.string_vector.iter().map(|(name, _)| name))
+        .chain(model_params.real_vector.iter().map(|(name, _)| name))
+        .chain(model_params.real_vector_expr.iter().map(|(name, _)| name))
+        .chain(model_params.integer_vector.iter().map(|(name, _)| name));
+
+    for name in names {
+        if crate::device::Diode::supports_model_parameter(name) {
+            continue;
+        }
+        let canonical_name = name.to_ascii_uppercase();
+        let message = format!(
+            "No model parameter {canonical_name} found for model {model_name} of type D, parameter ignored"
+        );
+        log::warn!("{origin}: {message}");
+        diagnostics.push(ParseDiagnostic::warning_at(
+            origin.clone(),
+            "xyce-unknown-diode-model-parameter",
+            message,
+        ));
+    }
 }
 
 pub(super) fn rewrite_scoped_references(

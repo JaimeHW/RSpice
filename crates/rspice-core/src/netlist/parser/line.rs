@@ -283,6 +283,7 @@ pub(super) fn process_line(
         if upper.starts_with(".MODEL") {
             let models = &mut state.models;
             let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
+            let diagnostics = &mut state.diagnostics;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -298,6 +299,7 @@ pub(super) fn process_line(
                 models,
                 true,
                 model_bare_ident_deferrals,
+                diagnostics,
             )?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);

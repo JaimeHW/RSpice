@@ -698,6 +698,100 @@ impl Diode {
         self
     }
 
+    /// Return whether a `.MODEL ... D` parameter is consumed by the native
+    /// diode implementation.
+    ///
+    /// Keep this namespace next to [`Self::with_model_params`]: the Xyce
+    /// parser uses it to diagnose ignored model-card fields, while the engine
+    /// remains authoritative about which fields have electrical meaning. The
+    /// geometry names are consumed by the circuit builder after the lumped
+    /// junction parameters have been applied.
+    pub(crate) fn supports_model_parameter(name: &str) -> bool {
+        matches!(
+            name.to_ascii_uppercase().as_str(),
+            "LEVEL"
+                | "IS"
+                | "JS"
+                | "N"
+                | "RS"
+                | "KF"
+                | "AF"
+                | "BV"
+                | "VB"
+                | "VRB"
+                | "VAR"
+                | "IBV"
+                | "IB"
+                | "IKF"
+                | "IK"
+                | "IKR"
+                | "ISR"
+                | "NR"
+                | "CJO"
+                | "CJ0"
+                | "CJ"
+                | "VJ"
+                | "PB"
+                | "M"
+                | "MJ"
+                | "TT"
+                | "FC"
+                | "JSW"
+                | "ISW"
+                | "IKP"
+                | "NS"
+                | "CJSW"
+                | "CJP"
+                | "PHP"
+                | "VJSW"
+                | "MJSW"
+                | "FCS"
+                | "NBV"
+                | "NZ"
+                | "XTI"
+                | "EG"
+                | "TNOM"
+                | "TREF"
+                | "T_MEASURED"
+                | "JTUN"
+                | "JTUNSW"
+                | "NTUN"
+                | "XTITUN"
+                | "KEG"
+                | "TLEV"
+                | "TLEVC"
+                | "GAP1"
+                | "GAP2"
+                | "TCV"
+                | "TPB"
+                | "TVJ"
+                | "TPHP"
+                | "CTA"
+                | "CTC"
+                | "CTP"
+                | "TRS"
+                | "TRS1"
+                | "TRS2"
+                | "TM1"
+                | "TM2"
+                | "TTT1"
+                | "TTT2"
+                | "TBV1"
+                | "TBV2"
+                | "AREA"
+                | "PJ"
+                | "XW"
+                | "WM"
+                | "LM"
+                | "WP"
+                | "LP"
+                | "XOM"
+                | "XOI"
+                | "XM"
+                | "XP"
+        )
+    }
+
     /// Set model parameters from a HashMap (for .MODEL statement parsing)
     pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         self.level = params
