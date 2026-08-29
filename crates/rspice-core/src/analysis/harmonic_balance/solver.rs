@@ -250,7 +250,7 @@ mod solver_state_qualification_tests {
 ///
 /// In Modified Nodal Analysis, voltage sources require branch current
 /// variables to properly enforce voltage constraints.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VoltageSourceBranch {
     /// Positive terminal node (1-indexed, 0 = ground)
     pub node_pos: usize,
@@ -266,20 +266,22 @@ pub struct VoltageSourceBranch {
     pub ac_harmonics: Vec<(usize, Complex64)>,
 }
 
-/// One exact MNA branch retained by the periodic small-signal operator.
+/// One canonical exact MNA branch shared by linear HB and the periodic
+/// small-signal operators.
 ///
-/// Large-signal nonlinear HB still uses its node-only continuation system,
-/// but PAC and PNoise must not replace ideal voltage constraints or the DC
-/// inductor equation with an arbitrary large conductance.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum PeriodicMnaBranch {
-    /// Zero-valued small-signal voltage constraint. `source_index` preserves
-    /// the authored independent-source ordering for PAC excitation lookup.
+/// A large-signal registration retains the authored voltage-source spectrum
+/// directly. A PAC/PNoise-only registration has `source == None`, because its
+/// independent voltage-source row is a zero-valued small-signal constraint.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ExactMnaBranch {
+    /// Ideal voltage constraint. `source_index` preserves authored
+    /// independent-source ordering for PAC excitation lookup.
     VoltageSource {
         branch_ordinal: usize,
         node_pos: usize,
         node_neg: usize,
         source_index: usize,
+        source: Option<VoltageSourceBranch>,
     },
     /// Exact `Vpos - Vneg - j*omega*L*I = 0` branch equation.
     Inductor {
@@ -368,7 +370,7 @@ pub struct HbSolver {
     voltage_source_branch_names: Vec<String>,
 
     /// Exact branch equations used by PAC and PNoise conversion systems.
-    periodic_mna_branches: Vec<PeriodicMnaBranch>,
+    periodic_mna_branches: Vec<ExactMnaBranch>,
 
     /// Authored names aligned with `periodic_mna_branches` in the circuit's
     /// canonical one-based MNA branch order.

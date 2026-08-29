@@ -511,7 +511,7 @@ struct PeriodicConversionOperator<'a> {
     g_matrix: &'a [(usize, usize, Value)],
     c_matrix: &'a [(usize, usize, Value)],
     l_matrix: &'a [(usize, usize, Value)],
-    mna_branches: &'a [PeriodicMnaBranch],
+    mna_branches: &'a [ExactMnaBranch],
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
 }
@@ -567,7 +567,7 @@ impl PeriodicConversionOperator<'_> {
             && self
                 .mna_branches
                 .iter()
-                .any(|branch| matches!(branch, PeriodicMnaBranch::Inductor { .. }))
+                .any(|branch| matches!(branch, ExactMnaBranch::Inductor { .. }))
         {
             return Err(HbError::InvalidCircuit(format!(
                 "{context} mixes nodal inductor admittances with exact inductor MNA branches"
@@ -644,19 +644,19 @@ impl PeriodicConversionOperator<'_> {
                     "{context} MNA branch ordinal exceeds this platform"
                 ))
             })?;
-            let (branch_ordinal, node_pos, node_neg, inductance) = match *branch {
-                PeriodicMnaBranch::VoltageSource {
+            let (branch_ordinal, node_pos, node_neg, inductance) = match branch {
+                ExactMnaBranch::VoltageSource {
                     branch_ordinal,
                     node_pos,
                     node_neg,
                     ..
-                } => (branch_ordinal, node_pos, node_neg, None),
-                PeriodicMnaBranch::Inductor {
+                } => (*branch_ordinal, *node_pos, *node_neg, None),
+                ExactMnaBranch::Inductor {
                     branch_ordinal,
                     node_pos,
                     node_neg,
                     inductance,
-                } => (branch_ordinal, node_pos, node_neg, Some(inductance)),
+                } => (*branch_ordinal, *node_pos, *node_neg, Some(*inductance)),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -782,13 +782,13 @@ impl PeriodicConversionOperator<'_> {
 
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
             let branch_unknown = n + branch_index;
-            let (node_pos, node_neg) = match *branch {
-                PeriodicMnaBranch::VoltageSource {
+            let (node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
                     node_pos, node_neg, ..
                 }
-                | PeriodicMnaBranch::Inductor {
+                | ExactMnaBranch::Inductor {
                     node_pos, node_neg, ..
-                } => (node_pos, node_neg),
+                } => (*node_pos, *node_neg),
             };
             for k_idx in 0..s {
                 let branch_coordinate = branch_unknown * s + k_idx;
@@ -810,11 +810,11 @@ impl PeriodicConversionOperator<'_> {
                         Complex64::new(-1.0, 0.0),
                     );
                 }
-                if let PeriodicMnaBranch::Inductor { inductance, .. } = *branch {
+                if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                     visitor(
                         branch_coordinate,
                         branch_coordinate,
-                        Complex64::new(0.0, -self.omega(k_idx) * inductance),
+                        Complex64::new(0.0, -self.omega(k_idx) * *inductance),
                     );
                 }
             }
@@ -951,13 +951,13 @@ impl PeriodicConversionOperator<'_> {
         }
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
             let row = node_count + branch_index;
-            let (node_pos, node_neg) = match *branch {
-                PeriodicMnaBranch::VoltageSource {
+            let (node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
                     node_pos, node_neg, ..
                 }
-                | PeriodicMnaBranch::Inductor {
+                | ExactMnaBranch::Inductor {
                     node_pos, node_neg, ..
-                } => (node_pos, node_neg),
+                } => (*node_pos, *node_neg),
             };
             if node_pos > 0 {
                 let node = node_pos - 1;
@@ -969,8 +969,8 @@ impl PeriodicConversionOperator<'_> {
                 block[node * n + row] -= Complex64::new(1.0, 0.0);
                 block[row * n + node] -= Complex64::new(1.0, 0.0);
             }
-            if let PeriodicMnaBranch::Inductor { inductance, .. } = *branch {
-                block[row * n + row] -= jw * inductance;
+            if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                block[row * n + row] -= jw * *inductance;
             }
         }
         if transpose {
@@ -2861,13 +2861,14 @@ mod matrix_free_tests {
             ],
         )];
         let branches = [
-            PeriodicMnaBranch::VoltageSource {
+            ExactMnaBranch::VoltageSource {
                 branch_ordinal: 1,
                 node_pos: 1,
                 node_neg: 0,
                 source_index: 0,
+                source: None,
             },
-            PeriodicMnaBranch::Inductor {
+            ExactMnaBranch::Inductor {
                 branch_ordinal: 2,
                 node_pos: 2,
                 node_neg: 0,

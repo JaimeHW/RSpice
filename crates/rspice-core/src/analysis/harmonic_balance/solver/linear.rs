@@ -133,6 +133,117 @@ impl HbSolver {
         branch_idx
     }
 
+    /// Fallibly register one authored ideal voltage source for an exact MNA
+    /// solve. Unlike the compatibility helpers above, this production
+    /// boundary rejects malformed topology, names, spectra, and allocation
+    /// failures before mutating the solver.
+    pub(crate) fn try_add_named_voltage_source_branch_harmonics(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        dc_voltage: Value,
+        harmonics: &[(usize, Value, Value)],
+        name: &str,
+    ) -> Result<usize, HbError> {
+        if node_pos > self.num_nodes || node_neg > self.num_nodes || node_pos == node_neg {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage source '{name}' has invalid terminal pair ({node_pos}, {node_neg}) for {} non-ground nodes",
+                self.num_nodes
+            )));
+        }
+        if name.is_empty() || name.trim() != name {
+            return Err(HbError::InvalidCircuit(
+                "ideal voltage-source names must be nonempty and have no surrounding whitespace"
+                    .to_string(),
+            ));
+        }
+        if self
+            .voltage_source_branch_names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage-source name '{name}' is duplicated"
+            )));
+        }
+        if !dc_voltage.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage source '{name}' has non-finite DC value {dc_voltage:e}"
+            )));
+        }
+
+        let mut seen_harmonics = std::collections::HashSet::new();
+        seen_harmonics
+            .try_reserve(harmonics.len())
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' harmonic-map allocation failed: {error}"
+                ))
+            })?;
+        let mut branch =
+            VoltageSourceBranch::new(node_pos, node_neg, self.num_branches, dc_voltage);
+        branch
+            .ac_harmonics
+            .try_reserve_exact(harmonics.len())
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' spectrum allocation failed: {error}"
+                ))
+            })?;
+        for &(harmonic, magnitude, phase) in harmonics {
+            if harmonic == 0 || harmonic > self.num_harmonics {
+                return Err(HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' references harmonic {harmonic}; expected 1..={}",
+                    self.num_harmonics
+                )));
+            }
+            if !magnitude.is_finite() || !phase.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' harmonic {harmonic} has a non-finite magnitude or phase"
+                )));
+            }
+            if !seen_harmonics.insert(harmonic) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' defines harmonic {harmonic} more than once"
+                )));
+            }
+            branch.set_harmonic_component(harmonic, Complex64::from_polar(magnitude, phase));
+        }
+        branch
+            .ac_harmonics
+            .sort_unstable_by_key(|(harmonic, _)| *harmonic);
+
+        let branch_idx = self.num_branches;
+        let next_branch_count = branch_idx.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit("ideal voltage-source count exceeds this platform".to_string())
+        })?;
+        let mut owned_name = String::new();
+        owned_name.try_reserve_exact(name.len()).map_err(|error| {
+            HbError::InvalidCircuit(format!(
+                "ideal voltage-source name allocation failed for '{name}': {error}"
+            ))
+        })?;
+        owned_name.push_str(name);
+        self.voltage_source_branches
+            .try_reserve(1)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "ideal voltage-source allocation failed for '{name}': {error}"
+                ))
+            })?;
+        self.voltage_source_branch_names
+            .try_reserve(1)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "ideal voltage-source name-table allocation failed for '{name}': {error}"
+                ))
+            })?;
+        self.voltage_source_branches.push(branch);
+        self.voltage_source_branch_names.push(owned_name);
+        self.num_branches = next_branch_count;
+        Ok(branch_idx)
+    }
+
     /// Preserve the authored name for an already-added MNA branch.
     pub fn set_voltage_source_branch_name(&mut self, branch_idx: usize, name: impl Into<String>) {
         if let Some(slot) = self.voltage_source_branch_names.get_mut(branch_idx) {
@@ -196,7 +307,7 @@ impl HbSolver {
 
     fn try_push_periodic_mna_branch(
         &mut self,
-        branch: PeriodicMnaBranch,
+        branch: ExactMnaBranch,
         name: &str,
     ) -> Result<(), HbError> {
         let mut owned_name = String::new();
@@ -239,7 +350,7 @@ impl HbSolver {
             )));
         }
         self.try_push_periodic_mna_branch(
-            PeriodicMnaBranch::Inductor {
+            ExactMnaBranch::Inductor {
                 branch_ordinal,
                 node_pos,
                 node_neg,
@@ -262,18 +373,20 @@ impl HbSolver {
     ) -> Result<(), HbError> {
         self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
         if self.periodic_mna_branches.iter().any(
-            |branch| matches!(branch, PeriodicMnaBranch::VoltageSource { source_index: index, .. } if *index == source_index),
+            |branch| matches!(branch, ExactMnaBranch::VoltageSource { source_index: index, .. } if *index == source_index),
         ) {
             return Err(HbError::InvalidCircuit(format!(
                 "periodic voltage-source branch '{name}' duplicates source index {source_index}"
             )));
         }
+        let source = self.voltage_source_branches.get(source_index).cloned();
         self.try_push_periodic_mna_branch(
-            PeriodicMnaBranch::VoltageSource {
+            ExactMnaBranch::VoltageSource {
                 branch_ordinal,
                 node_pos,
                 node_neg,
                 source_index,
+                source,
             },
             name,
         )
@@ -313,7 +426,311 @@ impl HbSolver {
     pub(crate) fn periodic_voltage_source_branch(&self, source_index: usize) -> Option<usize> {
         self.periodic_mna_branches
             .iter()
-            .position(|branch| matches!(branch, PeriodicMnaBranch::VoltageSource { source_index: index, .. } if *index == source_index))
+            .position(|branch| matches!(branch, ExactMnaBranch::VoltageSource { source_index: index, .. } if *index == source_index))
+    }
+
+    /// Canonical exact MNA descriptors shared by the large-signal and lifted
+    /// periodic systems. The slice is in one-based circuit branch order.
+    pub(crate) fn exact_mna_branches(&self) -> &[ExactMnaBranch] {
+        &self.periodic_mna_branches
+    }
+
+    /// Names aligned exactly with [`Self::exact_mna_branches`].
+    pub(crate) fn exact_mna_branch_names(&self) -> &[String] {
+        &self.periodic_mna_branch_names
+    }
+
+    fn validate_linear_storage(&self, state: &HbSolverState) -> Result<(), HbError> {
+        if !self.config.fundamental_freq.is_finite() || self.config.fundamental_freq <= 0.0 {
+            return Err(HbError::InvalidCircuit(
+                "linear HB fundamental frequency must be finite and positive".to_string(),
+            ));
+        }
+        if !self.config.tolerance.is_finite() || self.config.tolerance < 0.0 {
+            return Err(HbError::InvalidCircuit(
+                "linear HB tolerance must be finite and nonnegative".to_string(),
+            ));
+        }
+        let harmonic_count = self.num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit("linear HB harmonic count exceeds this platform".to_string())
+        })?;
+        if self.node_names.len() != self.num_nodes {
+            return Err(HbError::InvalidCircuit(format!(
+                "linear HB has {} node names for {} nodal unknowns",
+                self.node_names.len(),
+                self.num_nodes
+            )));
+        }
+        if state.x.len() != self.num_nodes
+            || state.residual.len() != self.num_nodes
+            || state.residual_scale.len() != self.num_nodes
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "linear HB state has {} voltage, {} residual, and {} scale rows; expected {} of each",
+                state.x.len(),
+                state.residual.len(),
+                state.residual_scale.len(),
+                self.num_nodes
+            )));
+        }
+        for (row, ((spectrum, residual), scale)) in state
+            .x
+            .iter()
+            .zip(&state.residual)
+            .zip(&state.residual_scale)
+            .enumerate()
+        {
+            if spectrum.len() != harmonic_count
+                || residual.len() != harmonic_count
+                || scale.len() != harmonic_count
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "linear HB state row {row} has voltage/residual/scale lengths {}/{}/{}; expected {harmonic_count}",
+                    spectrum.len(),
+                    residual.len(),
+                    scale.len()
+                )));
+            }
+        }
+        if self.source_spectra.len() != self.num_nodes {
+            return Err(HbError::InvalidCircuit(format!(
+                "linear HB has {} source-spectrum rows for {} nodes",
+                self.source_spectra.len(),
+                self.num_nodes
+            )));
+        }
+        for (node, spectrum) in self.source_spectra.iter().enumerate() {
+            if spectrum.len() != harmonic_count {
+                return Err(HbError::InvalidCircuit(format!(
+                    "linear HB source-spectrum row {node} has {} coefficients; expected {harmonic_count}",
+                    spectrum.len()
+                )));
+            }
+            if spectrum
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "linear HB source-spectrum row {node} contains a non-finite coefficient"
+                )));
+            }
+        }
+        for (kind, entries) in [
+            ("conductance", &self.g_matrix),
+            ("capacitance", &self.c_matrix),
+            ("legacy inductance", &self.l_matrix),
+        ] {
+            for (entry, &(row, column, value)) in entries.iter().enumerate() {
+                if row >= self.num_nodes || column >= self.num_nodes {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "linear HB {kind} entry #{entry} ({row}, {column}) is outside its {}-node operator",
+                        self.num_nodes
+                    )));
+                }
+                if !value.is_finite() {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "linear HB {kind} entry #{entry} ({row}, {column}) is non-finite"
+                    )));
+                }
+            }
+        }
+        if self.voltage_source_branches.len() != self.num_branches
+            || self.voltage_source_branch_names.len() != self.num_branches
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "linear HB voltage-source storage has {} descriptors and {} names for {} source branches",
+                self.voltage_source_branches.len(),
+                self.voltage_source_branch_names.len(),
+                self.num_branches
+            )));
+        }
+        for (index, (branch, name)) in self
+            .voltage_source_branches
+            .iter()
+            .zip(&self.voltage_source_branch_names)
+            .enumerate()
+        {
+            Self::validate_voltage_source_descriptor(
+                branch,
+                name,
+                index,
+                self.num_nodes,
+                self.num_harmonics,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_voltage_source_descriptor(
+        branch: &VoltageSourceBranch,
+        name: &str,
+        expected_index: usize,
+        num_nodes: usize,
+        num_harmonics: usize,
+    ) -> Result<(), HbError> {
+        if branch.branch_idx != expected_index {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage source '{name}' has source index {}; expected {expected_index}",
+                branch.branch_idx
+            )));
+        }
+        if name.is_empty() || name.trim() != name {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage source index {expected_index} has a non-canonical name"
+            )));
+        }
+        if branch.node_pos > num_nodes
+            || branch.node_neg > num_nodes
+            || branch.node_pos == branch.node_neg
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage source '{name}' has invalid terminal pair ({}, {}) for {num_nodes} non-ground nodes",
+                branch.node_pos, branch.node_neg
+            )));
+        }
+        if !branch.dc_voltage.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "ideal voltage source '{name}' has a non-finite DC coefficient"
+            )));
+        }
+        let mut previous_harmonic = 0;
+        for &(harmonic, coefficient) in &branch.ac_harmonics {
+            if harmonic == 0 || harmonic > num_harmonics || harmonic <= previous_harmonic {
+                return Err(HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' has non-canonical harmonic index {harmonic}; entries must be unique, ascending, and within 1..={num_harmonics}"
+                )));
+            }
+            if !coefficient.re.is_finite() || !coefficient.im.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "ideal voltage source '{name}' harmonic {harmonic} is non-finite"
+                )));
+            }
+            previous_harmonic = harmonic;
+        }
+        Ok(())
+    }
+
+    fn validate_exact_linear_mna(&self) -> Result<(), HbError> {
+        if self.periodic_mna_branches.len() != self.periodic_mna_branch_names.len() {
+            return Err(HbError::InvalidCircuit(format!(
+                "exact linear MNA has {} descriptors for {} names",
+                self.periodic_mna_branches.len(),
+                self.periodic_mna_branch_names.len()
+            )));
+        }
+        if !self.periodic_mna_branches.is_empty() && !self.l_matrix.is_empty() {
+            return Err(HbError::InvalidCircuit(
+                "exact linear MNA cannot combine inductor branch equations with legacy nodal inductor admittances"
+                    .to_string(),
+            ));
+        }
+        let mut seen_sources = vec![false; self.voltage_source_branches.len()];
+        for (index, (branch, name)) in self
+            .periodic_mna_branches
+            .iter()
+            .zip(&self.periodic_mna_branch_names)
+            .enumerate()
+        {
+            let expected_ordinal = index.checked_add(1).ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "exact linear MNA branch ordinal exceeds this platform".to_string(),
+                )
+            })?;
+            if name.is_empty() || name.trim() != name {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact linear MNA branch ordinal {expected_ordinal} has a non-canonical name"
+                )));
+            }
+            let (branch_ordinal, node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    source_index,
+                    source,
+                } => {
+                    let source = source.as_ref().ok_or_else(|| {
+                        HbError::InvalidCircuit(format!(
+                            "exact linear MNA voltage-source branch '{name}' has no authored large-signal spectrum"
+                        ))
+                    })?;
+                    let source_name = self
+                        .voltage_source_branch_names
+                        .get(*source_index)
+                        .ok_or_else(|| {
+                            HbError::InvalidCircuit(format!(
+                                "exact linear MNA voltage-source branch '{name}' references missing source index {source_index}"
+                            ))
+                        })?;
+                    Self::validate_voltage_source_descriptor(
+                        source,
+                        source_name,
+                        *source_index,
+                        self.num_nodes,
+                        self.num_harmonics,
+                    )?;
+                    if source_name != name
+                        || source.node_pos != *node_pos
+                        || source.node_neg != *node_neg
+                    {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "exact linear MNA branch '{name}' does not match its authored voltage-source descriptor"
+                        )));
+                    }
+                    let seen = seen_sources.get_mut(*source_index).ok_or_else(|| {
+                        HbError::InvalidCircuit(format!(
+                            "exact linear MNA voltage-source branch '{name}' has out-of-range source index {source_index}"
+                        ))
+                    })?;
+                    if std::mem::replace(seen, true) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "exact linear MNA voltage source '{name}' is registered more than once"
+                        )));
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg)
+                }
+                ExactMnaBranch::Inductor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    inductance,
+                } => {
+                    if !inductance.is_finite() || *inductance == 0.0 {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "exact linear MNA inductor '{name}' must have finite nonzero inductance"
+                        )));
+                    }
+                    let omega0 = 2.0 * PI * self.config.fundamental_freq;
+                    for harmonic in 1..=self.num_harmonics {
+                        let impedance = omega0 * harmonic as Value * *inductance;
+                        if !impedance.is_finite() || impedance == 0.0 {
+                            return Err(HbError::InvalidCircuit(format!(
+                                "exact linear MNA inductor '{name}' has non-representable impedance at harmonic {harmonic}"
+                            )));
+                        }
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg)
+                }
+            };
+            if branch_ordinal != expected_ordinal {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact linear MNA branch '{name}' has ordinal {branch_ordinal}; expected {expected_ordinal}"
+                )));
+            }
+            if node_pos > self.num_nodes || node_neg > self.num_nodes || node_pos == node_neg {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact linear MNA branch '{name}' has invalid terminal pair ({node_pos}, {node_neg}) for {} non-ground nodes",
+                    self.num_nodes
+                )));
+            }
+        }
+        if seen_sources.iter().any(|seen| !seen) {
+            return Err(HbError::InvalidCircuit(
+                "exact linear MNA does not register every authored ideal voltage source"
+                    .to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Add DC source current contribution at a node
@@ -475,103 +892,161 @@ impl HbSolver {
         &self,
         state: &mut HbSolverState,
         branch_currents: &[Vec<Complex64>],
-    ) -> Value {
+        exact_mna: bool,
+    ) -> Result<Value, HbError> {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let h = self.num_harmonics + 1;
 
         for node_res in &mut state.residual {
-            for c in node_res.iter_mut() {
-                *c = Complex64::new(0.0, 0.0);
-            }
+            node_res.fill(Complex64::new(0.0, 0.0));
+        }
+        for node_scale in &mut state.residual_scale {
+            node_scale.fill(0.0);
         }
 
         // Start with nodal current source spectra.
         for (node, source) in self.source_spectra.iter().enumerate() {
-            if node < state.residual.len() {
-                for (k, &s) in source.iter().enumerate() {
-                    if k < state.residual[node].len() {
-                        state.residual[node][k] += s;
-                    }
-                }
+            for (k, &value) in source.iter().enumerate() {
+                state.residual[node][k] += value;
+                state.residual_scale[node][k] += value.norm();
             }
         }
 
         // Subtract linear passive contributions.
         for &(i, j, g) in &self.g_matrix {
-            if i < state.x.len() && j < state.x.len() {
-                for k in 0..h {
-                    if k < state.x[j].len() && k < state.residual[i].len() {
-                        state.residual[i][k] -= g * state.x[j][k];
-                    }
-                }
+            for k in 0..h {
+                let contribution = g * state.x[j][k];
+                state.residual[i][k] -= contribution;
+                state.residual_scale[i][k] += contribution.norm();
             }
         }
         for &(i, j, c) in &self.c_matrix {
-            if i < state.x.len() && j < state.x.len() {
-                for k in 0..h {
-                    if k < state.x[j].len() && k < state.residual[i].len() {
-                        let omega_k = (k as f64) * omega0;
-                        state.residual[i][k] -= Complex64::new(0.0, omega_k) * c * state.x[j][k];
-                    }
-                }
+            for k in 0..h {
+                let omega_k = (k as f64) * omega0;
+                let contribution = Complex64::new(0.0, omega_k) * c * state.x[j][k];
+                state.residual[i][k] -= contribution;
+                state.residual_scale[i][k] += contribution.norm();
             }
         }
         for &(i, j, l) in &self.l_matrix {
-            if i < state.x.len() && j < state.x.len() && l.abs() > 1e-30 {
+            if l.abs() > 1e-30 {
                 for k in 0..h {
-                    if k < state.x[j].len() && k < state.residual[i].len() {
-                        if k == 0 {
-                            state.residual[i][k] -= inductor_dc_short_admittance(l) * state.x[j][k];
-                        } else {
-                            let omega_k = (k as f64) * omega0;
-                            let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
-                            state.residual[i][k] -= y_l * state.x[j][k];
-                        }
-                    }
+                    let contribution = if k == 0 {
+                        inductor_dc_short_admittance(l) * state.x[j][k]
+                    } else {
+                        let omega_k = (k as f64) * omega0;
+                        Complex64::new(0.0, -1.0 / (omega_k * l)) * state.x[j][k]
+                    };
+                    state.residual[i][k] -= contribution;
+                    state.residual_scale[i][k] += contribution.norm();
                 }
             }
         }
 
         // Subtract MNA branch current coupling in nodal equations.
-        for branch in &self.voltage_source_branches {
-            let Some(currents) = branch_currents.get(branch.branch_idx) else {
-                continue;
-            };
-            for k in 0..h {
-                let ib = currents.get(k).copied().unwrap_or_default();
-                if branch.node_pos > 0 && branch.node_pos - 1 < state.residual.len() {
-                    state.residual[branch.node_pos - 1][k] -= ib;
+        if exact_mna {
+            for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
+                let currents = &branch_currents[branch_index];
+                let (node_pos, node_neg) = match branch {
+                    ExactMnaBranch::VoltageSource {
+                        node_pos, node_neg, ..
+                    }
+                    | ExactMnaBranch::Inductor {
+                        node_pos, node_neg, ..
+                    } => (*node_pos, *node_neg),
+                };
+                for (k, &current) in currents.iter().enumerate() {
+                    if node_pos > 0 {
+                        state.residual[node_pos - 1][k] -= current;
+                        state.residual_scale[node_pos - 1][k] += current.norm();
+                    }
+                    if node_neg > 0 {
+                        state.residual[node_neg - 1][k] += current;
+                        state.residual_scale[node_neg - 1][k] += current.norm();
+                    }
                 }
-                if branch.node_neg > 0 && branch.node_neg - 1 < state.residual.len() {
-                    state.residual[branch.node_neg - 1][k] += ib;
+            }
+        } else {
+            for branch in &self.voltage_source_branches {
+                let currents = &branch_currents[branch.branch_idx];
+                for (k, &current) in currents.iter().enumerate() {
+                    if branch.node_pos > 0 {
+                        state.residual[branch.node_pos - 1][k] -= current;
+                        state.residual_scale[branch.node_pos - 1][k] += current.norm();
+                    }
+                    if branch.node_neg > 0 {
+                        state.residual[branch.node_neg - 1][k] += current;
+                        state.residual_scale[branch.node_neg - 1][k] += current.norm();
+                    }
                 }
             }
         }
 
-        let mut residual_sum: Value = state
+        let mut residual_norm = state
             .residual
             .iter()
             .flat_map(|node| node.iter())
-            .map(|c| c.norm_sqr())
-            .sum();
+            .fold(0.0_f64, |norm, value| norm.hypot(value.re).hypot(value.im));
 
         // Include branch KVL residuals in the overall convergence norm.
-        for branch in &self.voltage_source_branches {
-            for k in 0..h {
-                let mut v_drop = Complex64::new(0.0, 0.0);
-                if branch.node_pos > 0 && branch.node_pos - 1 < state.x.len() {
-                    v_drop += state.x[branch.node_pos - 1][k];
+        if exact_mna {
+            for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
+                let (node_pos, node_neg) = match branch {
+                    ExactMnaBranch::VoltageSource {
+                        node_pos, node_neg, ..
+                    }
+                    | ExactMnaBranch::Inductor {
+                        node_pos, node_neg, ..
+                    } => (*node_pos, *node_neg),
+                };
+                for k in 0..h {
+                    let mut voltage_drop = Complex64::new(0.0, 0.0);
+                    if node_pos > 0 {
+                        voltage_drop += state.x[node_pos - 1][k];
+                    }
+                    if node_neg > 0 {
+                        voltage_drop -= state.x[node_neg - 1][k];
+                    }
+                    let residual = match branch {
+                        ExactMnaBranch::VoltageSource { source, .. } => {
+                            let source = source.as_ref().ok_or_else(|| {
+                                HbError::InvalidCircuit(
+                                    "exact linear MNA voltage source lost its authored spectrum"
+                                        .to_string(),
+                                )
+                            })?;
+                            Self::voltage_source_value_at_harmonic(source, k) - voltage_drop
+                        }
+                        ExactMnaBranch::Inductor { inductance, .. } => {
+                            Complex64::new(0.0, (k as Value) * omega0 * *inductance)
+                                * branch_currents[branch_index][k]
+                                - voltage_drop
+                        }
+                    };
+                    residual_norm = residual_norm.hypot(residual.re).hypot(residual.im);
                 }
-                if branch.node_neg > 0 && branch.node_neg - 1 < state.x.len() {
-                    v_drop -= state.x[branch.node_neg - 1][k];
+            }
+        } else {
+            for branch in &self.voltage_source_branches {
+                for k in 0..h {
+                    let mut voltage_drop = Complex64::new(0.0, 0.0);
+                    if branch.node_pos > 0 {
+                        voltage_drop += state.x[branch.node_pos - 1][k];
+                    }
+                    if branch.node_neg > 0 {
+                        voltage_drop -= state.x[branch.node_neg - 1][k];
+                    }
+                    let residual = Self::voltage_source_value_at_harmonic(branch, k) - voltage_drop;
+                    residual_norm = residual_norm.hypot(residual.re).hypot(residual.im);
                 }
-                let source_v = Self::voltage_source_value_at_harmonic(branch, k);
-                let branch_residual = source_v - v_drop;
-                residual_sum += branch_residual.norm_sqr();
             }
         }
-
-        residual_sum.sqrt()
+        if !residual_norm.is_finite() {
+            return Err(HbError::InvalidCircuit(
+                "linear HB residual contains a non-finite value".to_string(),
+            ));
+        }
+        Ok(residual_norm)
     }
 
     /// Solve for linear circuit (direct solve for diagonal harmonic blocks).
@@ -579,11 +1054,22 @@ impl HbSolver {
     /// Builds Y = G + jωC + 1/(jωL) and augments with MNA branch equations for
     /// ideal voltage sources when present.
     pub fn solve_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
+        self.validate_linear_storage(state)?;
+        let exact_mna = !self.periodic_mna_branches.is_empty();
+        if exact_mna {
+            self.validate_exact_linear_mna()?;
+        }
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let n = self.num_nodes;
         let h = self.num_harmonics + 1;
-        let m = self.num_branches;
-        let total_unknowns = n + m;
+        let m = if exact_mna {
+            self.periodic_mna_branches.len()
+        } else {
+            self.num_branches
+        };
+        let total_unknowns = n.checked_add(m).ok_or_else(|| {
+            HbError::InvalidCircuit("linear HB MNA dimension exceeds this platform".to_string())
+        })?;
 
         let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; m];
 
@@ -625,39 +1111,76 @@ impl HbSolver {
                     .unwrap_or_default();
             }
 
-            // MNA branch equations for ideal voltage sources.
-            for branch in &self.voltage_source_branches {
-                let row = n + branch.branch_idx;
-                if row >= total_unknowns {
-                    continue;
+            if exact_mna {
+                for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
+                    let row = n + branch_index;
+                    let (node_pos, node_neg) = match branch {
+                        ExactMnaBranch::VoltageSource {
+                            node_pos, node_neg, ..
+                        }
+                        | ExactMnaBranch::Inductor {
+                            node_pos, node_neg, ..
+                        } => (*node_pos, *node_neg),
+                    };
+                    if node_pos > 0 {
+                        let node = node_pos - 1;
+                        y_matrix[node][row] += Complex64::new(1.0, 0.0);
+                        y_matrix[row][node] += Complex64::new(1.0, 0.0);
+                    }
+                    if node_neg > 0 {
+                        let node = node_neg - 1;
+                        y_matrix[node][row] -= Complex64::new(1.0, 0.0);
+                        y_matrix[row][node] -= Complex64::new(1.0, 0.0);
+                    }
+                    match branch {
+                        ExactMnaBranch::VoltageSource { source, .. } => {
+                            let source = source.as_ref().ok_or_else(|| {
+                                HbError::InvalidCircuit(
+                                    "exact linear MNA voltage source lost its authored spectrum"
+                                        .to_string(),
+                                )
+                            })?;
+                            rhs[row] = Self::voltage_source_value_at_harmonic(source, k);
+                        }
+                        ExactMnaBranch::Inductor { inductance, .. } => {
+                            y_matrix[row][row] -= Complex64::new(0.0, omega_k * *inductance);
+                        }
+                    }
                 }
-
-                if branch.node_pos > 0 && branch.node_pos - 1 < n {
-                    let np = branch.node_pos - 1;
-                    y_matrix[np][row] += Complex64::new(1.0, 0.0);
-                    y_matrix[row][np] += Complex64::new(1.0, 0.0);
+            } else {
+                for branch in &self.voltage_source_branches {
+                    let row = n + branch.branch_idx;
+                    if branch.node_pos > 0 {
+                        let node = branch.node_pos - 1;
+                        y_matrix[node][row] += Complex64::new(1.0, 0.0);
+                        y_matrix[row][node] += Complex64::new(1.0, 0.0);
+                    }
+                    if branch.node_neg > 0 {
+                        let node = branch.node_neg - 1;
+                        y_matrix[node][row] -= Complex64::new(1.0, 0.0);
+                        y_matrix[row][node] -= Complex64::new(1.0, 0.0);
+                    }
+                    rhs[row] = Self::voltage_source_value_at_harmonic(branch, k);
                 }
-                if branch.node_neg > 0 && branch.node_neg - 1 < n {
-                    let nn = branch.node_neg - 1;
-                    y_matrix[nn][row] -= Complex64::new(1.0, 0.0);
-                    y_matrix[row][nn] -= Complex64::new(1.0, 0.0);
-                }
-
-                rhs[row] = Self::voltage_source_value_at_harmonic(branch, k);
             }
 
             let solution = self.solve_complex_linear_system(&y_matrix, &rhs)?;
+            if solution.len() != total_unknowns
+                || solution
+                    .iter()
+                    .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "linear HB harmonic {k} produced a malformed or non-finite MNA solution"
+                )));
+            }
 
             for node in 0..n {
-                if node < state.x.len() && k < state.x[node].len() {
-                    state.x[node][k] = solution[node];
-                }
+                state.x[node][k] = solution[node];
             }
             for branch_idx in 0..m {
                 let col = n + branch_idx;
-                if col < solution.len() && branch_idx < branch_currents.len() {
-                    branch_currents[branch_idx][k] = solution[col];
-                }
+                branch_currents[branch_idx][k] = solution[col];
             }
         }
 
@@ -665,7 +1188,7 @@ impl HbSolver {
             self.compute_linear_residual(state);
             state.residual_norm
         } else {
-            self.compute_linear_residual_with_branches(state, &branch_currents)
+            self.compute_linear_residual_with_branches(state, &branch_currents, exact_mna)?
         };
         state.converged = state.residual_norm < self.config.tolerance;
         state.mna_branch_currents = branch_currents;
