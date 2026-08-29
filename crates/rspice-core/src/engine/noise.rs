@@ -2444,9 +2444,20 @@ impl Engine {
                 true,
             )?;
 
-            ac_matrix
-                .solve_into(&ac_excitation_rhs, ac_solution)
-                .map_err(SimulationError::Solver)?;
+            match ac_matrix.solve_into(&ac_excitation_rhs, ac_solution) {
+                Ok(()) => {}
+                Err(crate::solver::SolverError::InaccurateSolution(_))
+                    if ac_excitation_rhs.len() <= 64 =>
+                {
+                    log::debug!(
+                        "sparse noise forward solve failed strict backward-error certification; retrying the small complex system with extended precision"
+                    );
+                    *ac_solution = ac_matrix
+                        .solve_dense_extended(&ac_excitation_rhs)
+                        .map_err(SimulationError::Solver)?;
+                }
+                Err(error) => return Err(SimulationError::Solver(error)),
+            }
             let input_gain_sq = if has_input_source {
                 let gain =
                     Self::differential_noise_output(ac_solution, output_pos, output_neg, num_nodes);
