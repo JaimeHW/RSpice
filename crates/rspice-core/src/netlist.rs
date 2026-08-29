@@ -96,6 +96,45 @@ pub(crate) use xspice_parser::{
     xspice_param_preserves_numeric_string,
 };
 
+impl crate::io::xyce_prn::XycePrnDelimiterSource for PrintDelimiter {
+    fn xyce_prn_delimiter(&self) -> crate::io::xyce_prn::XycePrnDelimiter<'_> {
+        match self {
+            Self::Whitespace => crate::io::xyce_prn::XycePrnDelimiter::Whitespace,
+            _ => crate::io::xyce_prn::XycePrnDelimiter::Separated(self.separator()),
+        }
+    }
+}
+
+impl crate::io::xyce_prn::XycePrnRequest for OutputRequest {
+    fn xyce_prn_is_print_request(&self) -> bool {
+        self.directive == OutputDirectiveKind::Print
+    }
+
+    fn xyce_prn_delimiter(&self) -> Option<crate::io::xyce_prn::XycePrnDelimiter<'_>> {
+        self.print_delimiter.as_ref().map(|delimiter| {
+            crate::io::xyce_prn::XycePrnDelimiterSource::xyce_prn_delimiter(delimiter)
+        })
+    }
+
+    fn xyce_prn_precision(&self) -> Option<i32> {
+        self.print_precision
+    }
+
+    fn xyce_prn_width(&self) -> Option<i32> {
+        self.print_width
+    }
+}
+
+impl crate::io::xyce_prn::XycePrnOutputOptions for SimulationOptions {
+    fn xyce_prn_print_header(&self) -> Option<bool> {
+        self.output_print_header
+    }
+
+    fn xyce_prn_print_footer(&self) -> Option<bool> {
+        self.output_print_footer
+    }
+}
+
 use thiserror::Error;
 
 use crate::Value;
@@ -3277,6 +3316,41 @@ mod tests {
             "{name}={}, expected {expected}; params={params:?}",
             matches[0].1
         );
+    }
+
+    #[test]
+    fn parsed_xyce_print_contract_drives_prn_adapter_end_to_end() {
+        use crate::io::xyce_prn::{
+            XycePrnFooter, XycePrnLimits, XycePrnTable, serialize_xyce_prn_sequence,
+        };
+
+        let netlist = Netlist::parse(
+            "typed Xyce PRN adapter\n\
+             V1 out 0 1\n\
+             .OPTIONS OUTPUT PRINTHEADER=off PRINTFOOTER=off\n\
+             .PRINT TRAN DELIMITER=COMMA PRECISION=12 WIDTH=21 V(out)\n\
+             .TRAN 1n 1n\n\
+             .END\n",
+        )
+        .expect("typed print contract parses");
+        let [request] = netlist.output_requests.as_slice() else {
+            panic!("expected one typed output request");
+        };
+        let table = XycePrnTable {
+            columns: vec!["Index".into(), "TIME".into(), "V(OUT)".into()],
+            rows: vec![vec![0.0, 1.0e-9, 1.0]],
+        };
+
+        let text = serialize_xyce_prn_sequence(
+            &[table],
+            request,
+            &netlist.options,
+            XycePrnFooter::Simulation,
+            XycePrnLimits::new(1, 1_000),
+        )
+        .expect("parsed request serializes through its lower-layer adapter");
+
+        assert_eq!(text, "0,1.000000000000e-09,1.000000000000e+00\n");
     }
 
     #[test]

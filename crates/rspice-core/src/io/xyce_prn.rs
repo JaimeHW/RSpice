@@ -7,13 +7,78 @@
 //! renumbering independently executed parameter-sweep runs.
 
 use crate::Value;
-use crate::netlist::{
-    NetlistSourceLocation, OutputDirectiveKind, OutputRequest, PrintDelimiter, SimulationOptions,
-};
 use thiserror::Error;
 
 const DEFAULT_SCIENTIFIC_PRECISION: i32 = 8;
 const DEFAULT_FIELD_WIDTH: i32 = 17;
+
+/// Low-level delimiter view consumed by the PRN byte serializer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XycePrnDelimiter<'a> {
+    /// Xyce's fixed-width, whitespace-delimited table layout.
+    Whitespace,
+    /// An unpadded field separator, including tab and authored custom text.
+    Separated(&'a str),
+}
+
+impl XycePrnDelimiter<'_> {
+    fn separator(&self) -> &str {
+        match self {
+            Self::Whitespace => " ",
+            Self::Separated(separator) => separator,
+        }
+    }
+
+    fn is_padded(self) -> bool {
+        matches!(self, Self::Whitespace)
+    }
+}
+
+/// Adapter implemented by typed delimiter owners above the byte-I/O layer.
+pub trait XycePrnDelimiterSource {
+    /// Borrow the exact delimiter semantics needed by the serializer.
+    fn xyce_prn_delimiter(&self) -> XycePrnDelimiter<'_>;
+}
+
+impl XycePrnDelimiterSource for XycePrnDelimiter<'_> {
+    fn xyce_prn_delimiter(&self) -> XycePrnDelimiter<'_> {
+        *self
+    }
+}
+
+/// Minimal typed `.PRINT` contract consumed by the PRN byte serializer.
+///
+/// Netlist parsing owns the source-level request. This lower-layer trait keeps
+/// serialization independent of that AST while preserving direct calls with
+/// the public netlist request type.
+pub trait XycePrnRequest {
+    /// Whether this is a `.PRINT` request.
+    fn xyce_prn_is_print_request(&self) -> bool;
+    /// Effective delimiter, absent only for a non-print request.
+    fn xyce_prn_delimiter(&self) -> Option<XycePrnDelimiter<'_>>;
+    /// Authored signed scientific precision.
+    fn xyce_prn_precision(&self) -> Option<i32>;
+    /// Authored signed field width.
+    fn xyce_prn_width(&self) -> Option<i32>;
+}
+
+/// Minimal output-policy contract consumed by the PRN byte serializer.
+pub trait XycePrnOutputOptions {
+    /// Optional header policy; absence means enabled.
+    fn xyce_prn_print_header(&self) -> Option<bool>;
+    /// Optional footer policy; absence means enabled.
+    fn xyce_prn_print_footer(&self) -> Option<bool>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XycePrnFormat<'a> {
+    is_print_request: bool,
+    delimiter: Option<XycePrnDelimiter<'a>>,
+    precision: Option<i32>,
+    width: Option<i32>,
+    print_header: Option<bool>,
+    print_footer: Option<bool>,
+}
 
 /// One projected real-valued Xyce STD `.prn` table.
 #[derive(Debug, Clone, PartialEq)]
@@ -203,29 +268,28 @@ fn push_field_separator(
 /// or interchange. It exists only for established in-process conformance
 /// relations. `limits` is mandatory so callers cannot restore an unbounded
 /// formatter.
-pub fn serialize_legacy_compact_prn_for_comparison(
+pub fn serialize_legacy_compact_prn_for_comparison<D: XycePrnDelimiterSource + ?Sized>(
     table: &XycePrnTable,
-    delimiter: &PrintDelimiter,
+    delimiter: &D,
     limits: XycePrnLimits,
 ) -> Result<String, XycePrnError> {
     // Whitespace selects authored WIDTH in the sequence API. Represent one
     // ASCII space as a custom separator to retain this convenience function's
     // deliberately compact layout while sharing the production engine.
-    let compact_delimiter = match delimiter {
-        PrintDelimiter::Whitespace => PrintDelimiter::Custom(" ".to_string()),
-        other => other.clone(),
+    let compact_delimiter = match delimiter.xyce_prn_delimiter() {
+        XycePrnDelimiter::Whitespace => XycePrnDelimiter::Separated(" "),
+        other => other,
     };
-    let request = OutputRequest::from_source(
-        OutputDirectiveKind::Print,
-        NetlistSourceLocation::in_memory(0),
-        "TRAN",
-        Vec::new(),
-    )
-    .with_print_delimiter(compact_delimiter);
     serialize_xyce_prn_sequence_with_style(
         std::slice::from_ref(table),
-        &request,
-        &SimulationOptions::default(),
+        XycePrnFormat {
+            is_print_request: true,
+            delimiter: Some(compact_delimiter),
+            precision: None,
+            width: None,
+            print_header: None,
+            print_footer: None,
+        },
         XycePrnFooter::Simulation,
         limits,
         XycePrnScientificStyle::LegacyRspiceComparison,
@@ -239,17 +303,27 @@ pub fn serialize_legacy_compact_prn_for_comparison(
 /// every append. Scientific precision is bounded by `max_output_bytes` before
 /// Rust's formatter is invoked, so even an extreme authored precision cannot
 /// trigger an unbounded intermediate allocation.
-pub fn serialize_xyce_prn_sequence(
+pub fn serialize_xyce_prn_sequence<R, O>(
     tables: &[XycePrnTable],
-    request: &OutputRequest,
-    options: &SimulationOptions,
+    request: &R,
+    options: &O,
     footer: XycePrnFooter,
     limits: XycePrnLimits,
-) -> Result<String, XycePrnError> {
+) -> Result<String, XycePrnError>
+where
+    R: XycePrnRequest + ?Sized,
+    O: XycePrnOutputOptions + ?Sized,
+{
     serialize_xyce_prn_sequence_with_style(
         tables,
-        request,
-        options,
+        XycePrnFormat {
+            is_print_request: request.xyce_prn_is_print_request(),
+            delimiter: request.xyce_prn_delimiter(),
+            precision: request.xyce_prn_precision(),
+            width: request.xyce_prn_width(),
+            print_header: options.xyce_prn_print_header(),
+            print_footer: options.xyce_prn_print_footer(),
+        },
         footer,
         limits,
         XycePrnScientificStyle::Canonical,
@@ -258,20 +332,16 @@ pub fn serialize_xyce_prn_sequence(
 
 fn serialize_xyce_prn_sequence_with_style(
     tables: &[XycePrnTable],
-    request: &OutputRequest,
-    options: &SimulationOptions,
+    format: XycePrnFormat<'_>,
     footer: XycePrnFooter,
     limits: XycePrnLimits,
     scientific_style: XycePrnScientificStyle,
 ) -> Result<String, XycePrnError> {
-    if request.directive != OutputDirectiveKind::Print {
+    if !format.is_print_request {
         return Err(XycePrnError::NotPrintRequest);
     }
-    let delimiter = request
-        .print_delimiter
-        .as_ref()
-        .ok_or(XycePrnError::MissingDelimiter)?;
-    if matches!(delimiter, PrintDelimiter::Custom(value) if value.is_empty()) {
+    let delimiter = format.delimiter.ok_or(XycePrnError::MissingDelimiter)?;
+    if matches!(delimiter, XycePrnDelimiter::Separated(value) if value.is_empty()) {
         return Err(XycePrnError::EmptyCustomDelimiter);
     }
     let [first, ..] = tables else {
@@ -281,12 +351,10 @@ fn serialize_xyce_prn_sequence_with_style(
         return Err(XycePrnError::EmptySchema);
     }
 
-    let precision_raw = request
-        .print_precision
-        .unwrap_or(DEFAULT_SCIENTIFIC_PRECISION);
+    let precision_raw = format.precision.unwrap_or(DEFAULT_SCIENTIFIC_PRECISION);
     let precision = usize::try_from(precision_raw)
         .map_err(|_| XycePrnError::NegativePrecision(precision_raw))?;
-    let width_raw = request.print_width.unwrap_or(DEFAULT_FIELD_WIDTH);
+    let width_raw = format.width.unwrap_or(DEFAULT_FIELD_WIDTH);
     let effective_width = if i64::from(width_raw) - i64::from(precision_raw) < 9 {
         i64::from(precision_raw)
             .checked_add(9)
@@ -305,7 +373,7 @@ fn serialize_xyce_prn_sequence_with_style(
             maximum: limits.max_output_bytes,
         });
     }
-    if matches!(delimiter, PrintDelimiter::Whitespace) && width > limits.max_output_bytes {
+    if delimiter.is_padded() && width > limits.max_output_bytes {
         return Err(XycePrnError::WidthLimit {
             width,
             maximum: limits.max_output_bytes,
@@ -329,9 +397,9 @@ fn serialize_xyce_prn_sequence_with_style(
     }
 
     let separator = delimiter.separator();
-    let padded = matches!(delimiter, PrintDelimiter::Whitespace);
+    let padded = delimiter.is_padded();
     let mut output = String::new();
-    if options.output_print_header.unwrap_or(true) {
+    if format.print_header.unwrap_or(true) {
         for (column_index, name) in first.columns.iter().enumerate() {
             let name = if column_index == 0 && name.eq_ignore_ascii_case("Index") {
                 "Index"
@@ -419,7 +487,7 @@ fn serialize_xyce_prn_sequence_with_style(
         }
     }
 
-    if options.output_print_footer.unwrap_or(true) {
+    if format.print_footer.unwrap_or(true) {
         let marker = match footer {
             XycePrnFooter::None => None,
             XycePrnFooter::Simulation => Some("End of Xyce(TM) Simulation\n"),
@@ -435,14 +503,59 @@ fn serialize_xyce_prn_sequence_with_style(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::netlist::Netlist;
 
-    fn request() -> (OutputRequest, SimulationOptions) {
-        let netlist = Netlist::parse(
-            "Xyce PRN production writer\nV1 a 0 1\n.PRINT TRAN PRECISION=12 WIDTH=21 V(a)\n.TRAN 1n 1n\n.END\n",
+    #[derive(Debug, Clone)]
+    struct TestRequest {
+        is_print: bool,
+        delimiter: Option<XycePrnDelimiter<'static>>,
+        print_precision: Option<i32>,
+        print_width: Option<i32>,
+    }
+
+    impl XycePrnRequest for TestRequest {
+        fn xyce_prn_is_print_request(&self) -> bool {
+            self.is_print
+        }
+
+        fn xyce_prn_delimiter(&self) -> Option<XycePrnDelimiter<'_>> {
+            self.delimiter
+        }
+
+        fn xyce_prn_precision(&self) -> Option<i32> {
+            self.print_precision
+        }
+
+        fn xyce_prn_width(&self) -> Option<i32> {
+            self.print_width
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct TestOptions {
+        output_print_header: Option<bool>,
+        output_print_footer: Option<bool>,
+    }
+
+    impl XycePrnOutputOptions for TestOptions {
+        fn xyce_prn_print_header(&self) -> Option<bool> {
+            self.output_print_header
+        }
+
+        fn xyce_prn_print_footer(&self) -> Option<bool> {
+            self.output_print_footer
+        }
+    }
+
+    fn request() -> (TestRequest, TestOptions) {
+        (
+            TestRequest {
+                is_print: true,
+                delimiter: Some(XycePrnDelimiter::Whitespace),
+                print_precision: Some(12),
+                print_width: Some(21),
+            },
+            TestOptions::default(),
         )
-        .expect("typed Xyce print deck parses");
-        (netlist.output_requests[0].clone(), netlist.options)
     }
 
     fn table() -> XycePrnTable {
@@ -479,17 +592,17 @@ mod tests {
         for spelling in ["INDEX", "index"] {
             for (delimiter, expected_header, expected_row) in [
                 (
-                    PrintDelimiter::Whitespace,
+                    XycePrnDelimiter::Whitespace,
                     "Index TIME V(A)",
                     "0 0.00000000e0 1.00000000e0",
                 ),
                 (
-                    PrintDelimiter::Comma,
+                    XycePrnDelimiter::Separated(","),
                     "Index,TIME,V(A)",
                     "0,0.00000000e0,1.00000000e0",
                 ),
                 (
-                    PrintDelimiter::Custom("|".to_string()),
+                    XycePrnDelimiter::Separated("|"),
                     "Index|TIME|V(A)",
                     "0|0.00000000e0|1.00000000e0",
                 ),
