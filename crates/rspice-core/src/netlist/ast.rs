@@ -3397,6 +3397,11 @@ pub struct SimulationOptions {
     /// verbosity. Negative values conventionally suppress diagnostic output.
     /// This metadata does not alter compact-model equations or solver policy.
     pub device_debug_level: Option<i64>,
+    /// Xyce `.OPTIONS DEVICE SEPARATELOAD`: permit the loader to cache the
+    /// linear portion of device contributions separately from nonlinear
+    /// contributions. RSpice's full-assembly path remains mathematically
+    /// equivalent to the disabled Xyce path.
+    pub device_separate_load: Option<bool>,
     /// Xyce `.OPTIONS LINSOL TR_PARTITION`: requested transform partitioning.
     /// Serial Xyce 7.10 forces this value to zero, but retaining the authored
     /// option keeps parsing lossless and prevents it from becoming a probe or
@@ -3638,6 +3643,9 @@ impl SimulationOptions {
         }
         if other.device_debug_level.is_some() {
             self.device_debug_level = other.device_debug_level;
+        }
+        if other.device_separate_load.is_some() {
+            self.device_separate_load = other.device_separate_load;
         }
         if other.linsol_tr_partition.is_some() {
             self.linsol_tr_partition = other.linsol_tr_partition;

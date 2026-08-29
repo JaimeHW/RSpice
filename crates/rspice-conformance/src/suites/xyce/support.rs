@@ -2464,6 +2464,7 @@ impl XyceTestRunner {
             device_min_capacitance: _,
             device_voltage_limiting,
             device_debug_level,
+            device_separate_load,
             linsol_tr_partition,
             b3soi_gmin_scaling,
             device_try_to_compact,
@@ -2505,6 +2506,7 @@ impl XyceTestRunner {
             && timeint_debug_level.is_none()
             && device_voltage_limiting.is_none()
             && device_debug_level.is_none()
+            && device_separate_load.is_none()
             && linsol_tr_partition.is_none()
             && nonlin_transient_reltol.is_none()
             && nonlin_transient_abstol.is_none()

@@ -655,7 +655,7 @@ fn semantic_netlist_identity(netlist: &Netlist, domain: &[u8]) -> String {
 pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     Some(semantic_netlist_identity(
         netlist,
-        b"rspice-transient-elaborated-netlist-v6\0",
+        b"rspice-transient-elaborated-netlist-v7\0",
     ))
 }
 
@@ -677,7 +677,7 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     normalized.options.restart = None;
     Some(semantic_netlist_identity(
         &normalized,
-        b"rspice-transient-restart-compatible-netlist-v1\0",
+        b"rspice-transient-restart-compatible-netlist-v2\0",
     ))
 }
 
@@ -4273,6 +4273,39 @@ mod tests {
         assert!(
             err.contains("collision-resistant netlist identity"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn separate_load_policy_changes_semantic_and_restart_identities() {
+        let disabled = Netlist::parse(
+            "separate-load identity\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .OPTIONS DEVICE SEPARATELOAD=0\n\
+             .END\n",
+        )
+        .expect("disabled separate-load deck parses");
+        let enabled = Netlist::parse(
+            "separate-load identity\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .OPTIONS DEVICE SEPARATELOAD=1\n\
+             .END\n",
+        )
+        .expect("enabled separate-load deck parses");
+
+        assert_ne!(
+            netlist_checkpoint_identity(&disabled),
+            netlist_checkpoint_identity(&enabled),
+            "authored loader policy must participate in semantic identity"
+        );
+        assert_ne!(
+            restart_checkpoint_identity(&disabled),
+            restart_checkpoint_identity(&enabled),
+            "authored loader policy must participate in restart compatibility"
         );
     }
 

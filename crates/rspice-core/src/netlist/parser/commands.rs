@@ -1736,6 +1736,10 @@ pub(super) fn parse_options_command(
                 options.device_debug_level =
                     Some(parse_i64_option("DEVICE.DEBUGLEVEL", value, line_num)?);
             }
+            (Some("DEVICE"), "SEPARATELOAD" | "SEPARATE_LOAD") => {
+                options.device_separate_load =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (Some("TIMEINT"), "DEBUGLEVEL" | "DEBUG_LEVEL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.timeint_debug_level = Some(parse_xyce_i32_option(
@@ -8169,6 +8173,40 @@ mod tests {
             Netlist::parse(&fractional).is_err(),
             "fractional DEVICE.DEBUGLEVEL must be rejected"
         );
+    }
+
+    #[test]
+    fn xyce_device_separate_load_is_typed_and_merges_last_value() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options device separateload=0 separate_load=1",
+        ))
+        .expect("Xyce DEVICE.SEPARATELOAD parses");
+        assert_eq!(netlist.options.device_separate_load, Some(true));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option"),
+            "typed DEVICE.SEPARATELOAD must not be diagnosed as unknown: {:?}",
+            netlist.diagnostics
+        );
+
+        let disabled = Netlist::parse(&deck_with_options(
+            ".options device separateload=true\n.options device separateload=0",
+        ))
+        .expect("repeated Xyce DEVICE.SEPARATELOAD cards merge");
+        assert_eq!(disabled.options.device_separate_load, Some(false));
+
+        let bare = Netlist::parse(&deck_with_options(".options device separateload"))
+            .expect("bare Xyce DEVICE.SEPARATELOAD means enabled");
+        assert_eq!(bare.options.device_separate_load, Some(true));
+
+        let mut merged = crate::netlist::SimulationOptions {
+            device_separate_load: Some(true),
+            ..Default::default()
+        };
+        merged.merge(&disabled.options);
+        assert_eq!(merged.device_separate_load, Some(false));
     }
 
     #[test]
