@@ -219,12 +219,14 @@ enum PeriodicMnaBranch {
     /// Zero-valued small-signal voltage constraint. `source_index` preserves
     /// the authored independent-source ordering for PAC excitation lookup.
     VoltageSource {
+        branch_ordinal: usize,
         node_pos: usize,
         node_neg: usize,
         source_index: usize,
     },
     /// Exact `Vpos - Vneg - j*omega*L*I = 0` branch equation.
     Inductor {
+        branch_ordinal: usize,
         node_pos: usize,
         node_neg: usize,
         inductance: Value,
@@ -310,6 +312,10 @@ pub struct HbSolver {
 
     /// Exact branch equations used by PAC and PNoise conversion systems.
     periodic_mna_branches: Vec<PeriodicMnaBranch>,
+
+    /// Authored names aligned with `periodic_mna_branches` in the circuit's
+    /// canonical one-based MNA branch order.
+    periodic_mna_branch_names: Vec<String>,
 
     /// Node names
     node_names: Vec<String>,

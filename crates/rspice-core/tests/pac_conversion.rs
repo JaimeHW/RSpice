@@ -250,6 +250,64 @@ r1 out 0 1k
 }
 
 #[test]
+fn pac_retains_interleaved_canonical_branch_currents_and_orientation() {
+    let deck = "\
+* interleaved canonical MNA branches
+VDRIVE in 0 dc 0
+R1 in mid 100
+LSERIES mid out 1m
+VCLAMP out 0 dc 0
+.end
+";
+    let offset = 1.0e4;
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(offset, offset, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("VDRIVE")
+        .with_output_node("in");
+
+    let analysis = run_pac(deck, config);
+    let result = &analysis.result;
+    assert_eq!(result.branch_names, ["VDRIVE", "LSERIES", "VCLAMP"]);
+    let impedance = Complex64::new(100.0, std::f64::consts::TAU * offset * 1.0e-3);
+    let path_current = Complex64::new(1.0, 0.0) / impedance;
+
+    for sideband in -1..=1 {
+        let data = result
+            .get_sideband_data(0, sideband)
+            .expect("every configured sideband is retained");
+        assert_eq!(data.branch_currents.len(), result.branch_names.len());
+        assert!(
+            data.branch_currents
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
+        if sideband == 0 {
+            for (actual, expected) in data.branch_currents.iter().copied().zip([
+                -path_current,
+                path_current,
+                path_current,
+            ]) {
+                assert!(
+                    (actual - expected).norm() <= 1.0e-10 * expected.norm().max(1.0),
+                    "retained branch current {actual} differs from {expected}"
+                );
+            }
+        } else {
+            assert!(
+                data.branch_currents
+                    .iter()
+                    .all(|value| value.norm() <= 1.0e-12),
+                "an LTI circuit must not create off-sideband branch current: {:?}",
+                data.branch_currents
+            );
+        }
+    }
+}
+
+#[test]
 fn pac_exact_mna_fails_closed_for_unrepresented_branch_coupling() {
     let cases = [
         (

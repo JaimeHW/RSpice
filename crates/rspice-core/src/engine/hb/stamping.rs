@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy)]
+enum PeriodicMnaRegistration {
+    VoltageSource(usize),
+    Inductor(usize),
+}
+
 impl Engine {
     pub(in crate::engine::hb) fn hb_stamp_supported_nonlinear_devices(
         &self,
@@ -264,23 +270,185 @@ impl Engine {
         }
     }
 
-    /// Register inductors as exact periodic MNA branches.
+    /// Register every supported exact periodic-MNA branch in the circuit's
+    /// canonical one-based branch order.
     ///
-    /// Unlike the node-admittance HB stamp, this remains well-defined at a
-    /// zero-frequency sideband: the branch equation becomes `Vpos - Vneg = 0`
-    /// and the branch current remains an independent unknown.
-    pub(in crate::engine::hb) fn hb_stamp_periodic_inductor_branches(
+    /// PAC/PNoise currently support only independent voltage-source and
+    /// inductor branch equations. The caller rejects all other branch
+    /// families before this boundary; this routine independently verifies
+    /// that the supported storage rows form a complete, unique ordinal map.
+    pub(in crate::engine::hb) fn hb_stamp_periodic_mna_branches(
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
-    ) {
-        for i in 0..circuit.inductors.len() {
-            solver.add_periodic_inductor_branch(
-                circuit.inductors.node_pos[i],
-                circuit.inductors.node_neg[i],
-                circuit.inductors.inductances[i],
-            );
+    ) -> Result<(), SimulationError> {
+        let branch_count = circuit.num_branches();
+        let represented_count = circuit
+            .voltage_sources
+            .len()
+            .checked_add(circuit.inductors.len())
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "periodic MNA supported-branch count overflows this platform".to_string(),
+                )
+            })?;
+        if represented_count != branch_count {
+            return Err(SimulationError::Circuit(format!(
+                "periodic MNA supports {represented_count} voltage-source/inductor branches, but the circuit declares {branch_count} canonical branches"
+            )));
         }
+
+        let mut registrations = Vec::new();
+        registrations
+            .try_reserve_exact(branch_count)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA canonical branch-map allocation failed: {error}"
+                ))
+            })?;
+        registrations.resize(branch_count, None);
+
+        for source_index in 0..circuit.voltage_sources.len() {
+            let name = circuit
+                .voltage_sources
+                .names
+                .get(source_index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA voltage-source storage is missing name row {source_index}"
+                    ))
+                })?;
+            circuit
+                .voltage_sources
+                .node_pos
+                .get(source_index)
+                .zip(circuit.voltage_sources.node_neg.get(source_index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA voltage source '{name}' has incomplete terminal storage"
+                    ))
+                })?;
+            let branch_ordinal = *circuit
+                .voltage_sources
+                .branch_indices
+                .get(source_index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA voltage source '{name}' is missing its canonical branch ordinal"
+                    ))
+                })?;
+            let slot_index = branch_ordinal.checked_sub(1).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA voltage source '{name}' has invalid branch ordinal 0"
+                ))
+            })?;
+            let slot = registrations.get_mut(slot_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA voltage source '{name}' has branch ordinal {branch_ordinal}, outside 1..={branch_count}"
+                ))
+            })?;
+            if slot
+                .replace(PeriodicMnaRegistration::VoltageSource(source_index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA branch ordinal {branch_ordinal} is assigned more than once"
+                )));
+            }
+        }
+
+        for inductor_index in 0..circuit.inductors.len() {
+            let name = circuit.inductors.names.get(inductor_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA inductor storage is missing name row {inductor_index}"
+                ))
+            })?;
+            circuit
+                .inductors
+                .node_pos
+                .get(inductor_index)
+                .zip(circuit.inductors.node_neg.get(inductor_index))
+                .zip(circuit.inductors.inductances.get(inductor_index))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA inductor '{name}' has incomplete terminal/value storage"
+                    ))
+                })?;
+            let branch_ordinal = *circuit
+                .inductors
+                .branch_indices
+                .get(inductor_index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "periodic MNA inductor '{name}' is missing its canonical branch ordinal"
+                    ))
+                })?;
+            let slot_index = branch_ordinal.checked_sub(1).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA inductor '{name}' has invalid branch ordinal 0"
+                ))
+            })?;
+            let slot = registrations.get_mut(slot_index).ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA inductor '{name}' has branch ordinal {branch_ordinal}, outside 1..={branch_count}"
+                ))
+            })?;
+            if slot
+                .replace(PeriodicMnaRegistration::Inductor(inductor_index))
+                .is_some()
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "periodic MNA branch ordinal {branch_ordinal} is assigned more than once"
+                )));
+            }
+        }
+
+        for (slot_index, registration) in registrations.into_iter().enumerate() {
+            let branch_ordinal = slot_index.checked_add(1).ok_or_else(|| {
+                SimulationError::Circuit(
+                    "periodic MNA branch ordinal exceeds this platform".to_string(),
+                )
+            })?;
+            match registration.ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "periodic MNA canonical branch ordinal {branch_ordinal} is unassigned"
+                ))
+            })? {
+                PeriodicMnaRegistration::VoltageSource(source_index) => {
+                    let name = &circuit.voltage_sources.names[source_index];
+                    solver
+                        .try_add_periodic_voltage_source_branch(
+                            circuit.voltage_sources.node_pos[source_index],
+                            circuit.voltage_sources.node_neg[source_index],
+                            source_index,
+                            branch_ordinal,
+                            name,
+                        )
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA voltage-source registration failed: {error}"
+                            ))
+                        })?;
+                }
+                PeriodicMnaRegistration::Inductor(inductor_index) => {
+                    let name = &circuit.inductors.names[inductor_index];
+                    solver
+                        .try_add_periodic_inductor_branch(
+                            circuit.inductors.node_pos[inductor_index],
+                            circuit.inductors.node_neg[inductor_index],
+                            circuit.inductors.inductances[inductor_index],
+                            branch_ordinal,
+                            name,
+                        )
+                        .map_err(|error| {
+                            SimulationError::Circuit(format!(
+                                "periodic MNA inductor registration failed: {error}"
+                            ))
+                        })?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Stamp a two-terminal inductance into HB solver L matrix
@@ -363,23 +531,6 @@ impl Engine {
             solver.set_voltage_source_branch_name(branch, source_name);
         }
         Ok(())
-    }
-
-    /// Register independent voltage sources as zero-valued periodic MNA
-    /// constraints. The large-signal waveform belongs to the operating point;
-    /// PAC supplies the selected unit small-signal source on the branch RHS.
-    pub(in crate::engine::hb) fn hb_stamp_periodic_voltage_source_branches(
-        &self,
-        circuit: &CircuitData,
-        solver: &mut HbSolver,
-    ) {
-        for i in 0..circuit.voltage_sources.len() {
-            solver.add_periodic_voltage_source_branch(
-                circuit.voltage_sources.node_pos[i],
-                circuit.voltage_sources.node_neg[i],
-                i,
-            );
-        }
     }
 
     /// Stamp ideal voltage sources as stiff Norton equivalents for nonlinear HB.

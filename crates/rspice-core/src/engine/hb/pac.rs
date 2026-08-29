@@ -196,11 +196,13 @@ impl Engine {
             ))
         })?;
         self.ensure_matrix_unknowns(lifted_unknowns)?;
-        let spectra_complex_values = result_record_count.checked_mul(num_nodes).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "PAC retained node grid {result_record_count} records x {num_nodes} nodes overflows this platform"
-            ))
-        })?;
+        let spectra_complex_values = result_record_count
+            .checked_mul(periodic_unknowns)
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "PAC retained MNA grid {result_record_count} records x {periodic_unknowns} node/branch unknowns overflows this platform"
+                ))
+            })?;
         let conversion_values = if config.output_node.is_some() {
             frequency_count
                 .checked_mul(sideband_count)
@@ -302,10 +304,20 @@ impl Engine {
         solver.set_node_names(node_names.clone());
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_periodic_voltage_source_branches(&circuit, &mut solver);
-        self.hb_stamp_periodic_inductor_branches(&circuit, &mut solver);
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         if has_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+        }
+        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
+            SimulationError::Circuit(format!(
+                "PAC branch-result metadata construction failed: {error}"
+            ))
+        })?;
+        let branch_count = branch_names.len();
+        if num_nodes.checked_add(branch_count) != Some(periodic_unknowns) {
+            return Err(SimulationError::Circuit(format!(
+                "PAC periodic solver exposes {num_nodes} nodes and {branch_count} branches, but resource qualification used {periodic_unknowns} MNA unknowns"
+            )));
         }
 
         // Resolve the named source to an exact unit small-signal excitation.
@@ -388,7 +400,7 @@ impl Engine {
                 config.sideband_min,
                 config.sideband_max,
                 node_names.clone(),
-                Vec::new(),
+                branch_names,
             )
         } else {
             PacResult::new_without_conversion_matrix(
@@ -397,7 +409,7 @@ impl Engine {
                 config.sideband_min,
                 config.sideband_max,
                 node_names.clone(),
-                Vec::new(),
+                branch_names,
             )
         }
         .map_err(|error| SimulationError::Circuit(error.to_string()))?;
@@ -478,6 +490,23 @@ impl Engine {
                         if abort.is_aborted() {
                             return Err(AnalysisHbError::Aborted);
                         }
+                        if solution.len() != lifted_unknowns {
+                            return Err(AnalysisHbError::InvalidCircuit(format!(
+                                "PAC solver returned {} values for a {lifted_unknowns}-value lifted MNA system",
+                                solution.len()
+                            )));
+                        }
+                        if let Some((index, value)) = solution
+                            .iter()
+                            .copied()
+                            .enumerate()
+                            .find(|(_, value)| !value.re.is_finite() || !value.im.is_finite())
+                        {
+                            return Err(AnalysisHbError::InvalidCircuit(format!(
+                                "PAC solver returned a non-finite value at lifted MNA index {index} ({:+.6e}{:+.6e}j)",
+                                value.re, value.im
+                            )));
+                        }
                         let m = *excitation_sidebands.get(col).ok_or_else(|| {
                             AnalysisHbError::InvalidCircuit(format!(
                                 "PAC returned unexpected excitation column {col}"
@@ -503,12 +532,60 @@ impl Engine {
                                         AnalysisHbError::InvalidCircuit(format!(
                                             "PAC result is missing frequency {freq_idx}, sideband {k}"
                                         ))
-                                })?;
+                                    })?;
+                                if data.node_voltages.len() != num_nodes
+                                    || data.branch_currents.len() != branch_count
+                                {
+                                    return Err(AnalysisHbError::InvalidCircuit(format!(
+                                        "PAC sideband result cardinality differs at frequency {freq_idx}, sideband {k}: {} nodes/{} branches; expected {num_nodes}/{branch_count}",
+                                        data.node_voltages.len(),
+                                        data.branch_currents.len()
+                                    )));
+                                }
                                 for node in 0..num_nodes {
-                                    let value = solution[node * sideband_count + k_idx];
+                                    let index = node
+                                        .checked_mul(sideband_count)
+                                        .and_then(|row| row.checked_add(k_idx))
+                                        .ok_or_else(|| {
+                                            AnalysisHbError::InvalidCircuit(
+                                                "PAC node-spectrum index overflows usize"
+                                                    .to_string(),
+                                            )
+                                        })?;
+                                    let value = *solution.get(index).ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC solution is missing node {node}, sideband {k}"
+                                        ))
+                                    })?;
                                     data.set_voltage(node, value).map_err(|error| {
                                         AnalysisHbError::InvalidCircuit(format!(
                                             "PAC node-spectrum publication failed: {error}"
+                                        ))
+                                    })?;
+                                }
+                                for branch in 0..branch_count {
+                                    let row = num_nodes.checked_add(branch).ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC branch-row index overflows usize".to_string(),
+                                        )
+                                    })?;
+                                    let index = row
+                                        .checked_mul(sideband_count)
+                                        .and_then(|row| row.checked_add(k_idx))
+                                        .ok_or_else(|| {
+                                            AnalysisHbError::InvalidCircuit(
+                                                "PAC branch-spectrum index overflows usize"
+                                                    .to_string(),
+                                            )
+                                        })?;
+                                    let value = *solution.get(index).ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC solution is missing branch {branch}, sideband {k}"
+                                        ))
+                                    })?;
+                                    data.set_current(branch, value).map_err(|error| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC branch-spectrum publication failed: {error}"
                                         ))
                                     })?;
                                 }

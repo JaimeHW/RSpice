@@ -639,16 +639,30 @@ impl PeriodicConversionOperator<'_> {
             }
         }
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
-            let (node_pos, node_neg, inductance) = match *branch {
+            let expected_ordinal = branch_index.checked_add(1).ok_or_else(|| {
+                HbError::InvalidCircuit(format!(
+                    "{context} MNA branch ordinal exceeds this platform"
+                ))
+            })?;
+            let (branch_ordinal, node_pos, node_neg, inductance) = match *branch {
                 PeriodicMnaBranch::VoltageSource {
-                    node_pos, node_neg, ..
-                } => (node_pos, node_neg, None),
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    ..
+                } => (branch_ordinal, node_pos, node_neg, None),
                 PeriodicMnaBranch::Inductor {
+                    branch_ordinal,
                     node_pos,
                     node_neg,
                     inductance,
-                } => (node_pos, node_neg, Some(inductance)),
+                } => (branch_ordinal, node_pos, node_neg, Some(inductance)),
             };
+            if branch_ordinal != expected_ordinal {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} MNA branch slot {branch_index} carries canonical ordinal {branch_ordinal}; expected {expected_ordinal}"
+                )));
+            }
             if node_pos > self.num_nodes || node_neg > self.num_nodes {
                 return Err(HbError::InvalidCircuit(format!(
                     "{context} MNA branch #{branch_index} references node pair ({node_pos}, {node_neg}) outside 0..={}",
@@ -2848,11 +2862,13 @@ mod matrix_free_tests {
         )];
         let branches = [
             PeriodicMnaBranch::VoltageSource {
+                branch_ordinal: 1,
                 node_pos: 1,
                 node_neg: 0,
                 source_index: 0,
             },
             PeriodicMnaBranch::Inductor {
+                branch_ordinal: 2,
                 node_pos: 2,
                 node_neg: 0,
                 inductance: 1.0e-6,
@@ -2895,7 +2911,9 @@ mod matrix_free_tests {
         config.use_krylov = true;
         let mut solver = HbSolver::new(config, 1);
         solver.add_conductance(0, 0, 2.0);
-        solver.add_periodic_voltage_source_branch(1, 0, 0);
+        solver
+            .try_add_periodic_voltage_source_branch(1, 0, 0, 1, "V1")
+            .expect("the first canonical branch registers");
         let mut state = HbSolverState::new(1, 1);
         state.converged = true;
         let excitation = PeriodicAcExcitation {
@@ -2922,6 +2940,53 @@ mod matrix_free_tests {
         assert_eq!(solution.len(), 2);
         assert_close(solution[0], Complex64::new(1.0, 0.0));
         assert_close(solution[1], Complex64::new(-2.0, 0.0));
+    }
+
+    #[test]
+    fn zero_frequency_inductor_branch_preserves_positive_to_negative_current() {
+        let mut config = HbConfig::new(1.0e6).with_harmonics(1);
+        config.use_krylov = true;
+        let mut solver = HbSolver::new(config, 1);
+        solver
+            .try_add_periodic_inductor_branch(1, 0, 1.0e-3, 1, "L1")
+            .expect("the canonical inductor branch registers");
+        let mut state = HbSolverState::new(1, 1);
+        state.converged = true;
+        let excitation = PeriodicAcExcitation {
+            sideband: 0,
+            injections: vec![(0, Complex64::new(2.0, 0.0))],
+        };
+        let mut retained = None;
+        solver
+            .solve_periodic_ac_each(&state, 0.0, 0, 0, &[excitation], |_, solution| {
+                retained = Some(solution);
+                Ok(())
+            })
+            .expect("the zero-frequency exact inductor system is certified");
+        let solution = retained.expect("one PAC column is returned");
+        assert_eq!(solution.len(), 2);
+        assert_close(solution[0], Complex64::new(0.0, 0.0));
+        assert_close(solution[1], Complex64::new(2.0, 0.0));
+    }
+
+    #[test]
+    fn periodic_mna_registration_rejects_noncanonical_identity_order() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
+        assert!(
+            solver
+                .try_add_periodic_voltage_source_branch(1, 0, 0, 2, "V1")
+                .is_err(),
+            "the first periodic branch cannot claim canonical ordinal two"
+        );
+        solver
+            .try_add_periodic_voltage_source_branch(1, 0, 0, 1, "V1")
+            .expect("the first canonical branch registers");
+        assert!(
+            solver
+                .try_add_periodic_inductor_branch(1, 0, 1.0e-3, 2, "v1")
+                .is_err(),
+            "case-insensitive duplicate branch identities must fail closed"
+        );
     }
 
     #[test]

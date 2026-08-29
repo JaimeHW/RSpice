@@ -24,6 +24,7 @@ impl HbSolver {
             voltage_source_branches: Vec::new(),
             voltage_source_branch_names: Vec::new(),
             periodic_mna_branches: Vec::new(),
+            periodic_mna_branch_names: Vec::new(),
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
@@ -102,19 +103,12 @@ impl HbSolver {
         node_neg: usize,
         dc_voltage: Value,
     ) -> usize {
-        let source_index = self.voltage_source_branches.len();
         let branch_idx = self.num_branches;
         self.voltage_source_branches.push(VoltageSourceBranch::new(
             node_pos, node_neg, branch_idx, dc_voltage,
         ));
         self.voltage_source_branch_names
             .push(format!("V{}", branch_idx + 1));
-        self.periodic_mna_branches
-            .push(PeriodicMnaBranch::VoltageSource {
-                node_pos,
-                node_neg,
-                source_index,
-            });
         self.num_branches += 1;
         branch_idx
     }
@@ -127,7 +121,6 @@ impl HbSolver {
         dc_voltage: Value,
         harmonics: &[(usize, Value, Value)],
     ) -> usize {
-        let source_index = self.voltage_source_branches.len();
         let branch_idx = self.num_branches;
         let mut branch = VoltageSourceBranch::new(node_pos, node_neg, branch_idx, dc_voltage);
         for (harmonic, magnitude, phase) in harmonics {
@@ -136,12 +129,6 @@ impl HbSolver {
         self.voltage_source_branches.push(branch);
         self.voltage_source_branch_names
             .push(format!("V{}", branch_idx + 1));
-        self.periodic_mna_branches
-            .push(PeriodicMnaBranch::VoltageSource {
-                node_pos,
-                node_neg,
-                source_index,
-            });
         self.num_branches += 1;
         branch_idx
     }
@@ -158,36 +145,168 @@ impl HbSolver {
         self.num_branches
     }
 
+    fn validate_periodic_mna_branch_identity(
+        &self,
+        node_pos: usize,
+        node_neg: usize,
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        let expected_ordinal =
+            self.periodic_mna_branches
+                .len()
+                .checked_add(1)
+                .ok_or_else(|| {
+                    HbError::InvalidCircuit(
+                        "periodic MNA branch ordinal exceeds this platform".to_string(),
+                    )
+                })?;
+        if branch_ordinal != expected_ordinal {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch '{name}' has canonical ordinal {branch_ordinal}; expected {expected_ordinal}"
+            )));
+        }
+        if name.is_empty() || name.trim() != name {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch ordinal {branch_ordinal} must have a nonempty name without surrounding whitespace"
+            )));
+        }
+        if self
+            .periodic_mna_branch_names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch name '{name}' is duplicated"
+            )));
+        }
+        if node_pos > self.num_nodes || node_neg > self.num_nodes {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch '{name}' references node pair ({node_pos}, {node_neg}) outside 0..={}",
+                self.num_nodes
+            )));
+        }
+        if node_pos == node_neg {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA branch '{name}' has identical terminals"
+            )));
+        }
+        Ok(())
+    }
+
+    fn try_push_periodic_mna_branch(
+        &mut self,
+        branch: PeriodicMnaBranch,
+        name: &str,
+    ) -> Result<(), HbError> {
+        let mut owned_name = String::new();
+        owned_name.try_reserve_exact(name.len()).map_err(|error| {
+            HbError::InvalidCircuit(format!(
+                "periodic MNA branch-name allocation failed for '{name}': {error}"
+            ))
+        })?;
+        owned_name.push_str(name);
+        self.periodic_mna_branches.try_reserve(1).map_err(|error| {
+            HbError::InvalidCircuit(format!(
+                "periodic MNA branch allocation failed for '{name}': {error}"
+            ))
+        })?;
+        self.periodic_mna_branch_names
+            .try_reserve(1)
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic MNA branch-name table allocation failed for '{name}': {error}"
+                ))
+            })?;
+        self.periodic_mna_branches.push(branch);
+        self.periodic_mna_branch_names.push(owned_name);
+        Ok(())
+    }
+
     /// Add an exact inductor branch for periodic small-signal MNA.
-    pub(crate) fn add_periodic_inductor_branch(
+    pub(crate) fn try_add_periodic_inductor_branch(
         &mut self,
         node_pos: usize,
         node_neg: usize,
         inductance: Value,
-    ) {
-        self.periodic_mna_branches
-            .push(PeriodicMnaBranch::Inductor {
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
+        if !inductance.is_finite() || inductance == 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic inductor branch '{name}' must have finite nonzero inductance"
+            )));
+        }
+        self.try_push_periodic_mna_branch(
+            PeriodicMnaBranch::Inductor {
+                branch_ordinal,
                 node_pos,
                 node_neg,
                 inductance,
-            });
+            },
+            name,
+        )
     }
 
     /// Register a voltage constraint only in the periodic small-signal MNA
     /// system. This avoids adding a zero-valued source to a large-signal
     /// operating-point solve that is intentionally using a Norton continuation.
-    pub(crate) fn add_periodic_voltage_source_branch(
+    pub(crate) fn try_add_periodic_voltage_source_branch(
         &mut self,
         node_pos: usize,
         node_neg: usize,
         source_index: usize,
-    ) {
-        self.periodic_mna_branches
-            .push(PeriodicMnaBranch::VoltageSource {
+        branch_ordinal: usize,
+        name: &str,
+    ) -> Result<(), HbError> {
+        self.validate_periodic_mna_branch_identity(node_pos, node_neg, branch_ordinal, name)?;
+        if self.periodic_mna_branches.iter().any(
+            |branch| matches!(branch, PeriodicMnaBranch::VoltageSource { source_index: index, .. } if *index == source_index),
+        ) {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic voltage-source branch '{name}' duplicates source index {source_index}"
+            )));
+        }
+        self.try_push_periodic_mna_branch(
+            PeriodicMnaBranch::VoltageSource {
+                branch_ordinal,
                 node_pos,
                 node_neg,
                 source_index,
-            });
+            },
+            name,
+        )
+    }
+
+    /// Fallibly copy the canonical periodic MNA names for retained results.
+    pub(crate) fn try_periodic_mna_branch_names(&self) -> Result<Vec<String>, HbError> {
+        if self.periodic_mna_branches.len() != self.periodic_mna_branch_names.len() {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic MNA descriptor/name cardinality differs ({} branches, {} names)",
+                self.periodic_mna_branches.len(),
+                self.periodic_mna_branch_names.len()
+            )));
+        }
+        let mut names = Vec::new();
+        names
+            .try_reserve_exact(self.periodic_mna_branch_names.len())
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic MNA result-name allocation failed: {error}"
+                ))
+            })?;
+        for name in &self.periodic_mna_branch_names {
+            let mut copy = String::new();
+            copy.try_reserve_exact(name.len()).map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "periodic MNA result-name allocation failed for '{name}': {error}"
+                ))
+            })?;
+            copy.push_str(name);
+            names.push(copy);
+        }
+        Ok(names)
     }
 
     /// Resolve a circuit voltage-source ordinal to its periodic MNA branch.

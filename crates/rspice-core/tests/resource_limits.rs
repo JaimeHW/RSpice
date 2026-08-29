@@ -351,6 +351,36 @@ fn periodic_small_signal_analyses_enforce_lifted_unknown_budget() {
 }
 
 #[test]
+fn pac_result_budget_counts_retained_branch_current_spectra() {
+    let netlist = Netlist::parse(
+        "retained PAC branch current budget\n\
+         VIN out 0 0\n\
+         R1 out 0 1k\n\
+         .end",
+    )
+    .expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_result_values = 3),
+        ..SimulationConfig::default()
+    };
+    let pac = PacConfig::new()
+        .with_fundamental(1.0e6)
+        .with_sweep(1.0e3, 1.0e3, 1)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(0, 0)
+        .with_input_source("VIN");
+
+    assert!(matches!(
+        Engine::new(config).run_pac(&netlist, pac),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::ResultValues,
+            requested: 4,
+            limit: 3,
+        }))
+    ));
+}
+
+#[test]
 fn locked_time_grid_is_rejected_during_configuration_validation() {
     let config = SimulationConfig {
         resource_limits: limits_with(|limits| limits.max_analysis_points = 2),

@@ -20,6 +20,25 @@ fn try_zeroed_complex_values(count: usize, context: &str) -> Result<Vec<Complex6
     Ok(values)
 }
 
+fn validate_result_names(names: &[String], kind: &str) -> Result<(), PacError> {
+    for (index, name) in names.iter().enumerate() {
+        if name.is_empty() || name.trim() != name {
+            return Err(PacError::InvalidResult(format!(
+                "PAC {kind} name at index {index} must be nonempty and have no surrounding whitespace"
+            )));
+        }
+        if let Some(duplicate) = names[..index]
+            .iter()
+            .position(|existing| existing.eq_ignore_ascii_case(name))
+        {
+            return Err(PacError::InvalidResult(format!(
+                "PAC {kind} name '{name}' at index {index} duplicates index {duplicate}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 //=============================================================================
 // Per-Sideband Data
 //=============================================================================
@@ -39,7 +58,8 @@ pub struct PacSidebandData {
     /// Complex voltage at each node: node_index -> complex voltage
     pub node_voltages: Vec<Complex64>,
 
-    /// Complex current at each branch (for sources/inductors)
+    /// Complex current at each exact MNA branch for the unit input excitation
+    /// at input sideband zero, oriented positive terminal to negative terminal.
     pub branch_currents: Vec<Complex64>,
 }
 
@@ -159,8 +179,9 @@ impl PacSidebandData {
 
 /// Complete result of PAC analysis
 ///
-/// Contains the full conversion matrix and per-node voltage spectra at all
-/// analyzed frequency points and sidebands.
+/// Contains the full output-voltage conversion matrix plus per-node voltage
+/// and canonical MNA branch-current spectra at all analyzed frequency points
+/// and sidebands.
 #[derive(Debug, Clone)]
 pub struct PacResult {
     /// Fundamental frequency from PSS (Hz)
@@ -176,7 +197,10 @@ pub struct PacResult {
     /// Node names for voltage lookup
     pub node_names: Vec<String>,
 
-    /// Branch names for current lookup
+    /// Branch names in canonical circuit MNA order. Every sideband record has
+    /// exactly one current entry per name for the unit input excitation at
+    /// input sideband zero, oriented from the authored positive terminal to
+    /// the authored negative terminal.
     pub branch_names: Vec<String>,
 
     /// Full conversion matrix
@@ -257,6 +281,7 @@ impl PacResult {
     ) -> Result<Self, PacError> {
         let num_nodes = node_names.len();
         let num_branches = branch_names.len();
+        validate_result_names(&branch_names, "branch")?;
 
         let mut conversion_frequencies = Vec::new();
         conversion_frequencies

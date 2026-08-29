@@ -537,8 +537,7 @@ impl Engine {
         solver.set_node_names(node_names.clone());
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_periodic_voltage_source_branches(&circuit, &mut solver);
-        self.hb_stamp_periodic_inductor_branches(&circuit, &mut solver);
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         if has_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
