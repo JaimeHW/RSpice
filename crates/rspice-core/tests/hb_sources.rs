@@ -144,3 +144,41 @@ i1 0 out sin(0 1m 1meg)
         "1 mA through the 1 kOhm RSHUNT must produce a 1 V peak, got {fundamental}"
     );
 }
+
+#[test]
+fn high_impedance_linear_hb_response_is_not_discarded_as_a_tiny_pivot() {
+    let deck = "\
+* 1 A through 1 EOhm is a valid, deliberately scaled HB problem
+i1 0 out sin(0 1 1meg)
+r1 out 0 1e18
+.end
+";
+    let result = run_hb(deck, 1.0e6, 2);
+    let fundamental = coefficient(&result, "out", 1);
+
+    assert!(result.converged, "high-impedance HB solve must converge");
+    assert!(
+        (fundamental.norm() - 1.0e18).abs() <= 1.0e3,
+        "1 A through 1 EOhm must produce a 1e18 V amplitude, got {fundamental}"
+    );
+}
+
+#[test]
+fn floating_linear_hb_component_is_reported_as_singular() {
+    let deck = "\
+* The driven component is grounded; f1-f2 is a separate floating island.
+v1 driven 0 ac 1
+r1 driven 0 1k
+rfloat f1 f2 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
+        .expect_err("a non-unique floating HB component must fail closed");
+
+    assert!(
+        error.to_string().to_ascii_lowercase().contains("singular"),
+        "HB must surface the singular solve instead of publishing zeros: {error}"
+    );
+}

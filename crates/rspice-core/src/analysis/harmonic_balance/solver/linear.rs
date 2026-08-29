@@ -495,6 +495,13 @@ impl HbSolver {
         state.converged = state.residual_norm < self.config.tolerance;
         state.mna_branch_currents = branch_currents;
 
-        Ok(())
+        if state.converged {
+            Ok(())
+        } else {
+            Err(HbError::ConvergenceFailed {
+                iterations: 0,
+                residual: state.residual_norm,
+            })
+        }
     }
 }

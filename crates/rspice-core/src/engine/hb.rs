@@ -534,7 +534,19 @@ impl Engine {
             // Solve linear HB system
             solver
                 .solve_linear(&mut state)
-                .map_err(|_| SimulationError::Circuit("HB linear solve failed".to_string()))?;
+                .map_err(|error| match error {
+                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                    crate::analysis::HbError::ConvergenceFailed {
+                        iterations,
+                        residual,
+                    } => HbError::ConvergenceFailed {
+                        iterations,
+                        residual,
+                    }
+                    .into(),
+                    crate::analysis::HbError::SingularMatrix => HbError::SingularMatrix.into(),
+                    other => SimulationError::Circuit(format!("HB linear solve failed: {other}")),
+                })?;
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
