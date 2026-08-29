@@ -709,13 +709,13 @@ impl Engine {
             sideband: 0,
             injections: port.node_injections.clone(),
         });
-        let input_branch_voltages = input_port
+        let input_branch_voltage = input_port
             .as_ref()
             .and_then(|port| port.voltage_source_index)
             .map(|source_index| {
                 solver
                     .periodic_voltage_source_branch(source_index)
-                    .map(|branch| vec![vec![(branch, Complex64::new(1.0, 0.0))]])
+                    .map(|branch| (branch, Complex64::new(1.0, 0.0)))
                     .ok_or_else(|| {
                         SimulationError::Circuit(format!(
                             "pnoise input voltage source '{}' has no periodic MNA branch",
@@ -723,8 +723,10 @@ impl Engine {
                         ))
                     })
             })
-            .transpose()?
-            .unwrap_or_default();
+            .transpose()?;
+        let input_branch_voltage_column = input_branch_voltage.as_ref().map(std::slice::from_ref);
+        let input_branch_voltages: &[&[(usize, Complex64)]] =
+            input_branch_voltage_column.as_slice();
 
         let mut result_frequencies = Vec::new();
         result_frequencies
@@ -813,7 +815,7 @@ impl Engine {
                         -max_sideband,
                         max_sideband,
                         std::slice::from_ref(excitation),
-                        &input_branch_voltages,
+                        input_branch_voltages,
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(

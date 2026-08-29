@@ -433,12 +433,19 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let mut excitations = Vec::new();
-            let mut branch_excitations = Vec::new();
+            let mut branch_excitations: Vec<&[(usize, Complex64)]> = Vec::new();
             excitations
                 .try_reserve_exact(excitation_sidebands.len())
                 .map_err(|error| {
                     SimulationError::Circuit(format!(
                         "PAC excitation-column allocation failed: {error}"
+                    ))
+                })?;
+            branch_excitations
+                .try_reserve_exact(excitation_sidebands.len())
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "PAC branch-excitation-column allocation failed: {error}"
                     ))
                 })?;
             for &m in &excitation_sidebands {
@@ -455,7 +462,7 @@ impl Engine {
                     sideband: m,
                     injections: column_injections,
                 });
-                branch_excitations.push(branch_voltage.clone());
+                branch_excitations.push(branch_voltage.as_slice());
             }
 
             let sideband_count = result.num_sidebands();

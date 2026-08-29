@@ -287,6 +287,17 @@ rout out 0 1
 ",
             "controlled-source equations",
         ),
+        (
+            "\
+* solution-dependent capacitance requires its charge linearization
+iin 0 out dc 0
+vctrl ctrl 0 dc 0.5
+c1 out 0 C={1p*(1+V(ctrl))}
+r1 out 0 1k
+.end
+",
+            "solution-dependent capacitor",
+        ),
     ];
     for (deck, expected) in cases {
         let netlist = Netlist::parse(deck).expect("unsupported deck still parses");

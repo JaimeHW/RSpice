@@ -618,6 +618,9 @@ impl Engine {
         if !circuit.jiles_atherton_inductors.is_empty() || !circuit.xyce_core_groups.is_empty() {
             kinds.push("nonlinear magnetic-core branch equations");
         }
+        if circuit.capacitors.has_solution_dependent_values() {
+            kinds.push("solution-dependent capacitor charge linearizations");
+        }
         if !circuit.behavioral_sources.is_empty() {
             kinds.push("behavioral-source equations");
         }

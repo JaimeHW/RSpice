@@ -1501,7 +1501,7 @@ impl HbSolver {
         sideband_min: i32,
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
-        branch_voltages: &[Vec<(usize, Complex64)>],
+        branch_voltages: &[&[(usize, Complex64)]],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
         let num_nodes = self.num_nodes;
         let num_unknowns = num_nodes
@@ -1594,7 +1594,7 @@ impl HbSolver {
         sideband_min: i32,
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
-        branch_voltages: &[Vec<(usize, Complex64)>],
+        branch_voltages: &[&[(usize, Complex64)]],
         mut consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
         let n = self.num_nodes;
@@ -1696,7 +1696,7 @@ impl HbSolver {
                 }
             }
             if let Some(branch_column) = branch_voltages.get(excitation_index) {
-                for &(branch, amplitude) in branch_column {
+                for &(branch, amplitude) in *branch_column {
                     if branch >= self.periodic_mna_branches.len() {
                         return Err(HbError::InvalidCircuit(format!(
                             "PAC excitation at sideband {} references MNA branch {branch}, outside the {}-branch solver",
@@ -2902,6 +2902,7 @@ mod matrix_free_tests {
             sideband: 0,
             injections: Vec::new(),
         };
+        let branch_voltage = [(0, Complex64::new(1.0, 0.0))];
         let mut retained = None;
         solver
             .solve_periodic_ac_each_with_branch_voltages(
@@ -2910,7 +2911,7 @@ mod matrix_free_tests {
                 0,
                 0,
                 &[excitation],
-                &[vec![(0, Complex64::new(1.0, 0.0))]],
+                &[&branch_voltage],
                 |_, solution| {
                     retained = Some(solution);
                     Ok(())
