@@ -462,15 +462,17 @@ pub(super) fn quick_fft_plot(
         "FFT source waveform",
     ))?;
     let data = crate::analysis::fft::data::FftData::from_time_domain_with_normalization(
-        &format!("FFT({})", waveform.name),
+        &waveform.name,
         &input.samples,
         input.sample_rate,
         presentation.fft.window,
         presentation.fft.normalization,
-    );
-    if data.points.is_empty() {
-        return Err(HardcopySourceError::MissingViewerEvidence("FFT spectrum"));
-    }
+    )
+    .map_err(|error| {
+        HardcopySourceError::InvalidVisualizationSource(format!(
+            "FFT spectrum construction failed: {error}"
+        ))
+    })?;
     // The spectrum sheet is a decibel instrument: it plots `magnitude_db`
     // against a reference-aware level unit, and the harmonic table beside it
     // is in dBc. The page took the linear magnitude instead, so a printed

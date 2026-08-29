@@ -472,15 +472,18 @@ mod tests {
         eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
         state.analysis.eye_diagram_state.load_data(eye);
 
-        state
-            .analysis
-            .fft_state
-            .load_data(FftData::from_time_domain(
+        state.analysis.fft_state.load_data(
+            FftData::from_time_domain(
                 "old fft",
-                &[0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0],
-                8.0,
+                &[
+                    0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0,
+                    -1.0,
+                ],
+                16.0,
                 WindowFunction::Rectangular,
-            ));
+            )
+            .expect("finite qualified prior FFT fixture"),
+        );
 
         let provenance = state
             .active_specialized_viewer_cache_provenance()

@@ -240,10 +240,24 @@ impl SimulationController {
         if let Some(loaded) = self.transient_post.fft_loaded
             && loaded.analysis == active_analysis
         {
-            return match loaded.availability {
-                DerivedViewAvailability::Ready => DerivedViewerLoadState::Ready,
-                DerivedViewAvailability::Unavailable => DerivedViewerLoadState::Unavailable,
-            };
+            match loaded.availability {
+                DerivedViewAvailability::Ready => {
+                    // `has_data` was false above, so this marker became stale
+                    // after an in-place viewer recompute or explicit clear.
+                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                    if state.analysis.fft_state.last_error.is_some() {
+                        self.transient_post.fft_loaded = Some(LoadedDerivedView {
+                            analysis: active_analysis,
+                            availability: DerivedViewAvailability::Unavailable,
+                        });
+                        return DerivedViewerLoadState::Unavailable;
+                    }
+                    self.transient_post.fft_loaded = None;
+                }
+                DerivedViewAvailability::Unavailable => {
+                    return DerivedViewerLoadState::Unavailable;
+                }
+            }
         }
         if self
             .transient_post
@@ -319,11 +333,21 @@ impl SimulationController {
             }
             (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(result)) => {
                 if let Some(prepared) = result {
-                    state.analysis.fft_state.load_prepared_input(prepared);
-                    state.bind_specialized_viewer_cache(ActiveViewer::Fft, message.analysis);
+                    let available = state
+                        .analysis
+                        .fft_state
+                        .load_prepared_input(prepared)
+                        .is_ok();
+                    if available {
+                        state.bind_specialized_viewer_cache(ActiveViewer::Fft, message.analysis);
+                    }
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
-                        availability: DerivedViewAvailability::Ready,
+                        availability: if available {
+                            DerivedViewAvailability::Ready
+                        } else {
+                            DerivedViewAvailability::Unavailable
+                        },
                     });
                 } else {
                     state.analysis.fft_state.clear();
@@ -564,7 +588,9 @@ fn build_fft_prepared_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::fft::{WindowFunction, data::FftBuildError};
     use crate::product::{AnalysisInstanceId, DatasetId};
+    use crate::state::{AnalysisResult, SimulationRun};
 
     /// Trapezoidal 1010 clock at 1 ns, 20-80 % edge of 50 ps.
     fn clock(bits: usize, t_start: f64) -> (Vec<f64>, Vec<f64>) {
@@ -610,6 +636,56 @@ mod tests {
             DatasetId::new(),
             AnalysisInstanceId::new(),
         )
+    }
+
+    #[test]
+    fn failed_fft_recompute_cannot_leave_the_coordinator_ready() {
+        let mut state = AppState::default();
+        let mut run = SimulationRun::new(1);
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        state.simulation.runs = vec![run];
+        assert!(state.simulation.select_run(0));
+
+        state.analysis.fft_state.window = WindowFunction::Rectangular;
+        let mut samples = vec![0.0; 16];
+        samples[0] = 1.0;
+        samples[1] = f64::from_bits(1);
+        state
+            .analysis
+            .fft_state
+            .load_prepared_input(PreparedFftInput {
+                name: "V(out)".to_owned(),
+                samples,
+                sample_rate: 16.0,
+                original_count: 16,
+                decimation_factor: 1,
+            })
+            .expect("the rectangular window preserves every authored sample");
+
+        let mut controller = SimulationController::new();
+        controller.mark_transient_view_ready(&mut state, ActiveViewer::Fft);
+        assert_eq!(
+            controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
+            DerivedViewerLoadState::Ready
+        );
+        assert!(state.analysis.cache_authority.fft.is_some());
+
+        assert!(matches!(
+            state.analysis.fft_state.set_window(WindowFunction::Hanning),
+            Err(FftBuildError::ErasedWindowedSample { index: 1, .. })
+        ));
+        assert!(!state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.last_error.is_some());
+
+        assert_eq!(
+            controller.ensure_transient_viewer_data(&mut state, ActiveViewer::Fft),
+            DerivedViewerLoadState::Unavailable
+        );
+        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(matches!(
+            state.analysis.fft_state.last_error,
+            Some(FftBuildError::ErasedWindowedSample { index: 1, .. })
+        ));
     }
 
     /// A stated rate is the rate. The builder must fold at it rather than at

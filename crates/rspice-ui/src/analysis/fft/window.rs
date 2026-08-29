@@ -3,7 +3,7 @@
 //! Commercial-grade windowing functions used in spectral analysis.
 //! Each window trades off between frequency resolution and spectral leakage.
 
-use std::f64::consts::PI;
+use std::{collections::TryReserveError, f64::consts::PI};
 
 // =============================================================================
 // Window Function Types
@@ -65,8 +65,11 @@ impl WindowFunction {
 // Window Generation
 // =============================================================================
 
-/// Generate window coefficients
-pub fn generate_window(window_type: WindowFunction, length: usize) -> Vec<f64> {
+/// Generate window coefficients after reserving their complete storage.
+pub(super) fn try_generate_window(
+    window_type: WindowFunction,
+    length: usize,
+) -> Result<Vec<f64>, TryReserveError> {
     match window_type {
         WindowFunction::Rectangular => rectangular_window(length),
         WindowFunction::Hanning => hanning_window(length),
@@ -79,139 +82,106 @@ pub fn generate_window(window_type: WindowFunction, length: usize) -> Vec<f64> {
     }
 }
 
+#[cfg(test)]
+fn generate_window(window_type: WindowFunction, length: usize) -> Vec<f64> {
+    try_generate_window(window_type, length).expect("window test fixture allocation")
+}
+
 // =============================================================================
 // Window Implementations
 // =============================================================================
 
-fn rectangular_window(length: usize) -> Vec<f64> {
-    vec![1.0; length]
+fn coefficient_vector(length: usize) -> Result<Vec<f64>, TryReserveError> {
+    let mut coefficients = Vec::new();
+    coefficients.try_reserve_exact(length)?;
+    Ok(coefficients)
 }
 
-fn hanning_window(length: usize) -> Vec<f64> {
-    if length == 0 {
-        return Vec::new();
-    }
-    if length == 1 {
-        return vec![1.0];
-    }
-    let n = length as f64;
-    (0..length)
-        .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f64 / (n - 1.0)).cos()))
-        .collect()
+fn rectangular_window(length: usize) -> Result<Vec<f64>, TryReserveError> {
+    let mut coefficients = coefficient_vector(length)?;
+    coefficients.resize(length, 1.0);
+    Ok(coefficients)
 }
 
-fn hamming_window(length: usize) -> Vec<f64> {
+fn symmetric_window(
+    length: usize,
+    mut coefficient_at: impl FnMut(f64) -> f64,
+) -> Result<Vec<f64>, TryReserveError> {
+    let mut coefficients = coefficient_vector(length)?;
     if length == 0 {
-        return Vec::new();
+        return Ok(coefficients);
     }
     if length == 1 {
-        return vec![1.0];
+        coefficients.push(1.0);
+        return Ok(coefficients);
     }
-    let n = length as f64;
-    (0..length)
-        .map(|i| 0.54 - 0.46 * (2.0 * PI * i as f64 / (n - 1.0)).cos())
-        .collect()
+
+    let denominator = (length - 1) as f64;
+    for index in 0..length {
+        coefficients.push(coefficient_at(index as f64 / denominator));
+    }
+    Ok(coefficients)
 }
 
-fn blackman_window(length: usize) -> Vec<f64> {
-    if length == 0 {
-        return Vec::new();
-    }
-    if length == 1 {
-        return vec![1.0];
-    }
-    let n = length as f64;
+fn hanning_window(length: usize) -> Result<Vec<f64>, TryReserveError> {
+    symmetric_window(length, |position| 0.5 * (1.0 - (2.0 * PI * position).cos()))
+}
+
+fn hamming_window(length: usize) -> Result<Vec<f64>, TryReserveError> {
+    symmetric_window(length, |position| 0.54 - 0.46 * (2.0 * PI * position).cos())
+}
+
+fn blackman_window(length: usize) -> Result<Vec<f64>, TryReserveError> {
     let a0 = 0.42;
     let a1 = 0.5;
     let a2 = 0.08;
 
-    (0..length)
-        .map(|i| {
-            let x = i as f64 / (n - 1.0);
-            a0 - a1 * (2.0 * PI * x).cos() + a2 * (4.0 * PI * x).cos()
-        })
-        .collect()
+    symmetric_window(length, |position| {
+        a0 - a1 * (2.0 * PI * position).cos() + a2 * (4.0 * PI * position).cos()
+    })
 }
 
-fn blackman_harris_window(length: usize) -> Vec<f64> {
-    if length == 0 {
-        return Vec::new();
-    }
-    if length == 1 {
-        return vec![1.0];
-    }
-    let n = length as f64;
+fn blackman_harris_window(length: usize) -> Result<Vec<f64>, TryReserveError> {
     let a0 = 0.35875;
     let a1 = 0.48829;
     let a2 = 0.14128;
     let a3 = 0.01168;
 
-    (0..length)
-        .map(|i| {
-            let x = i as f64 / (n - 1.0);
-            a0 - a1 * (2.0 * PI * x).cos() + a2 * (4.0 * PI * x).cos() - a3 * (6.0 * PI * x).cos()
-        })
-        .collect()
+    symmetric_window(length, |position| {
+        a0 - a1 * (2.0 * PI * position).cos() + a2 * (4.0 * PI * position).cos()
+            - a3 * (6.0 * PI * position).cos()
+    })
 }
 
-fn flat_top_window(length: usize) -> Vec<f64> {
-    if length == 0 {
-        return Vec::new();
-    }
-    if length == 1 {
-        return vec![1.0];
-    }
-    let n = length as f64;
+fn flat_top_window(length: usize) -> Result<Vec<f64>, TryReserveError> {
     let a0 = 0.21557895;
     let a1 = 0.41663158;
     let a2 = 0.277263158;
     let a3 = 0.083578947;
     let a4 = 0.006947368;
 
-    (0..length)
-        .map(|i| {
-            let x = i as f64 / (n - 1.0);
-            a0 - a1 * (2.0 * PI * x).cos() + a2 * (4.0 * PI * x).cos() - a3 * (6.0 * PI * x).cos()
-                + a4 * (8.0 * PI * x).cos()
-        })
-        .collect()
+    symmetric_window(length, |position| {
+        a0 - a1 * (2.0 * PI * position).cos() + a2 * (4.0 * PI * position).cos()
+            - a3 * (6.0 * PI * position).cos()
+            + a4 * (8.0 * PI * position).cos()
+    })
 }
 
-fn kaiser_window(length: usize, beta: f64) -> Vec<f64> {
-    if length == 0 {
-        return Vec::new();
-    }
-    if length == 1 {
-        return vec![1.0];
-    }
-    let n = length as f64;
+fn kaiser_window(length: usize, beta: f64) -> Result<Vec<f64>, TryReserveError> {
     let denom = bessel_i0(beta);
 
-    (0..length)
-        .map(|i| {
-            let x = 2.0 * i as f64 / (n - 1.0) - 1.0;
-            let arg = beta * (1.0 - x * x).sqrt();
-            bessel_i0(arg) / denom
-        })
-        .collect()
+    symmetric_window(length, |position| {
+        let centered = 2.0 * position - 1.0;
+        let argument = beta * (1.0 - centered * centered).sqrt();
+        bessel_i0(argument) / denom
+    })
 }
 
-fn gaussian_window(length: usize, sigma: f64) -> Vec<f64> {
-    if length == 0 {
-        return Vec::new();
-    }
-    if length == 1 {
-        return vec![1.0];
-    }
-    let n = length as f64;
-    let center = (n - 1.0) / 2.0;
-
-    (0..length)
-        .map(|i| {
-            let x = (i as f64 - center) / (sigma * center);
-            (-0.5 * x * x).exp()
-        })
-        .collect()
+fn gaussian_window(length: usize, sigma: f64) -> Result<Vec<f64>, TryReserveError> {
+    symmetric_window(length, |position| {
+        let normalized = (2.0 * position - 1.0) / sigma;
+        (-0.5 * normalized * normalized).exp()
+    })
 }
 
 /// Modified Bessel function of first kind, order 0

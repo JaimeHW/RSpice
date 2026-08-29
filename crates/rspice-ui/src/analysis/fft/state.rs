@@ -2,7 +2,7 @@
 //!
 //! Viewer state for FFT/spectrum display.
 
-use super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
+use super::data::{FftBuildError, FftData, SpectrumAnalysis, SpectrumNormalization};
 use super::window::WindowFunction;
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
     pub name: String,
-    pub samples: Arc<[f64]>,
+    pub samples: Arc<Vec<f64>>,
     pub sample_rate: f64,
 }
 
@@ -33,6 +33,8 @@ pub struct FftState {
     pub analysis: Option<SpectrumAnalysis>,
     /// Cached source used to derive current FFT data.
     pub source_cache: Option<FftSourceCache>,
+    /// Most recent typed construction failure, cleared by a successful build.
+    pub last_error: Option<FftBuildError>,
     /// User-selected source trace name preference.
     pub selected_source: Option<String>,
     /// Amplitude normalization mode for FFT magnitudes.
@@ -77,6 +79,7 @@ impl Default for FftState {
             data: None,
             analysis: None,
             source_cache: None,
+            last_error: None,
             selected_source: None,
             normalization: SpectrumNormalization::Rms,
             window: WindowFunction::Hanning,

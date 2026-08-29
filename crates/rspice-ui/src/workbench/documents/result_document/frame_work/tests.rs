@@ -454,15 +454,15 @@ fn large_state() -> AppState {
                 + 0.1 * (2.0 * std::f64::consts::PI * 192.0 * t).sin()
         })
         .collect();
-    state
-        .analysis
-        .fft_state
-        .load_data(crate::analysis::fft::FftData::from_time_domain(
+    state.analysis.fft_state.load_data(
+        crate::analysis::fft::FftData::from_time_domain(
             "V(n0)",
             &samples,
             FFT_SAMPLES as f64,
             crate::analysis::fft::WindowFunction::Hanning,
-        ));
+        )
+        .expect("finite qualified FFT frame fixture"),
+    );
 
     let (frequency, real, imaginary) = (0..NYQUIST_POINTS).fold(
         (Vec::new(), Vec::new(), Vec::new()),

@@ -12,7 +12,7 @@
 use std::f64::consts::PI;
 
 /// Minimum usable sample count for FFT processing.
-pub const MIN_FFT_SAMPLES: usize = 16;
+pub const MIN_FFT_SAMPLES: usize = super::data::MIN_FFT_DATA_SAMPLES;
 
 /// Default point cap for interactive FFT computation.
 pub const DEFAULT_MAX_FFT_POINTS: usize = 65_536;

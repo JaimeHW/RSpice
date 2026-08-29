@@ -12,27 +12,30 @@ impl FftState {
     /// Load FFT data and analyze
     #[cfg(test)]
     pub fn load_data(&mut self, mut data: FftData) {
-        data.convert_normalization(self.normalization);
+        data.convert_normalization(self.normalization)
+            .expect("finite imported FFT fixture normalization");
         let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
         self.data = Some(data);
         self.analysis = Some(analysis);
         self.source_cache = None;
+        self.last_error = None;
         self.mark_spectrum_changed();
         self.update_auto_scale();
     }
 
     /// Load prepared uniformly sampled source and compute FFT using current settings.
-    pub fn load_prepared_input(&mut self, input: PreparedFftInput) {
+    pub fn load_prepared_input(&mut self, input: PreparedFftInput) -> Result<(), FftBuildError> {
         if self.selected_source.is_none() {
             self.selected_source = Some(input.name.clone());
         }
         self.source_cache = Some(FftSourceCache {
             name: input.name,
-            samples: Arc::from(input.samples),
+            // Moving the existing Vec avoids Arc<[T]>'s second large copy.
+            samples: Arc::new(input.samples),
             sample_rate: input.sample_rate,
         });
         self.sync_sample_count_control_value();
-        self.recompute_from_source();
+        self.recompute_from_source()
     }
 
     /// Select preferred source trace name.
@@ -43,22 +46,36 @@ impl FftState {
     /// Change the displayed amplitude convention and recompute all dependent
     /// metrics from the same prepared time-domain source. Imported test data
     /// without a retained source is converted in place instead.
-    pub fn set_normalization(&mut self, normalization: SpectrumNormalization) {
+    pub fn set_normalization(
+        &mut self,
+        normalization: SpectrumNormalization,
+    ) -> Result<(), FftBuildError> {
         if self.normalization == normalization {
-            return;
+            return Ok(());
         }
         self.normalization = normalization;
         if self.source_cache.is_some() {
-            self.recompute_from_source();
-            return;
+            return self.recompute_from_source();
         }
         let Some(data) = self.data.as_mut() else {
-            return;
+            return Ok(());
         };
-        data.convert_normalization(normalization);
-        self.analysis = Some(SpectrumAnalysis::analyze(data, self.num_harmonics));
-        self.mark_spectrum_changed();
-        self.update_auto_scale();
+        match data.convert_normalization(normalization) {
+            Ok(()) => {
+                self.analysis = Some(SpectrumAnalysis::analyze(data, self.num_harmonics));
+                self.last_error = None;
+                self.mark_spectrum_changed();
+                self.update_auto_scale();
+                Ok(())
+            }
+            Err(error) => {
+                self.data = None;
+                self.analysis = None;
+                self.last_error = Some(error.clone());
+                self.mark_spectrum_changed();
+                Err(error)
+            }
+        }
     }
 
     /// Active FFT input pipeline policy.
@@ -134,28 +151,35 @@ impl FftState {
     }
 
     /// Recompute FFT data from cached source using current window.
-    pub fn recompute_from_source(&mut self) {
+    pub fn recompute_from_source(&mut self) -> Result<(), FftBuildError> {
         let Some(source) = self.source_cache.as_ref() else {
-            return;
+            return Ok(());
         };
-        let mut data = FftData::from_time_domain(
-            &format!("FFT({})", source.name),
+        let result = FftData::from_time_domain_with_normalization(
+            &source.name,
             &source.samples,
             source.sample_rate,
             self.window,
+            self.normalization,
         );
-        data.convert_normalization(self.normalization);
-        if data.is_empty() {
-            self.data = None;
-            self.analysis = None;
-            self.mark_spectrum_changed();
-            return;
+        match result {
+            Ok(data) => {
+                let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
+                self.data = Some(data);
+                self.analysis = Some(analysis);
+                self.last_error = None;
+                self.mark_spectrum_changed();
+                self.update_auto_scale();
+                Ok(())
+            }
+            Err(error) => {
+                self.data = None;
+                self.analysis = None;
+                self.last_error = Some(error.clone());
+                self.mark_spectrum_changed();
+                Err(error)
+            }
         }
-        let analysis = SpectrumAnalysis::analyze(&data, self.num_harmonics);
-        self.data = Some(data);
-        self.analysis = Some(analysis);
-        self.mark_spectrum_changed();
-        self.update_auto_scale();
     }
 
     /// Clear data
@@ -163,6 +187,7 @@ impl FftState {
         self.data = None;
         self.analysis = None;
         self.source_cache = None;
+        self.last_error = None;
         self.marker_frequencies.clear();
         self.mark_spectrum_changed();
     }
@@ -201,7 +226,9 @@ mod tests {
             decimation_factor: 1,
         };
         let mut state = FftState::default();
-        state.load_prepared_input(input);
+        state
+            .load_prepared_input(input)
+            .expect("finite qualified normalization fixture");
         let rms_level = state
             .analysis
             .as_ref()
@@ -209,7 +236,9 @@ mod tests {
             .unwrap();
         let revision = state.spectrum_revision();
 
-        state.set_normalization(SpectrumNormalization::Peak);
+        state
+            .set_normalization(SpectrumNormalization::Peak)
+            .expect("representable normalization change");
 
         let peak_level = state
             .analysis
@@ -222,5 +251,44 @@ mod tests {
         );
         assert!(state.spectrum_revision() > revision);
         assert!((peak_level - rms_level - 3.010_299_956_639_812).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn failed_rebuild_clears_stale_spectrum_and_retains_typed_diagnostic() {
+        let valid = PreparedFftInput {
+            name: "V(valid)".to_owned(),
+            samples: vec![0.0; 16],
+            sample_rate: 16.0,
+            original_count: 16,
+            decimation_factor: 1,
+        };
+        let mut state = FftState::default();
+        state
+            .load_prepared_input(valid.clone())
+            .expect("finite qualified source");
+        assert!(state.data.is_some());
+        assert!(state.analysis.is_some());
+        assert!(state.last_error.is_none());
+
+        let mut invalid = valid.clone();
+        invalid.name = "V(invalid)".to_owned();
+        invalid.samples[7] = f64::NAN;
+        assert!(matches!(
+            state.load_prepared_input(invalid),
+            Err(FftBuildError::NonFiniteInputSample { index: 7, .. })
+        ));
+        assert!(state.data.is_none());
+        assert!(state.analysis.is_none());
+        assert!(matches!(
+            state.last_error,
+            Some(FftBuildError::NonFiniteInputSample { index: 7, .. })
+        ));
+
+        state
+            .load_prepared_input(valid)
+            .expect("a later valid build recovers");
+        assert!(state.data.is_some());
+        assert!(state.analysis.is_some());
+        assert!(state.last_error.is_none());
     }
 }

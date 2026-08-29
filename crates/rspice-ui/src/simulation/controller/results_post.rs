@@ -78,11 +78,14 @@ impl SimulationController {
             time,
             values,
             input_options,
-        ) {
-            state.analysis.fft_state.load_prepared_input(prepared);
-            if let Some(provenance) = provenance {
-                state.bind_specialized_viewer_cache(ActiveViewer::Fft, provenance);
-            }
+        ) && state
+            .analysis
+            .fft_state
+            .load_prepared_input(prepared)
+            .is_ok()
+            && let Some(provenance) = provenance
+        {
+            state.bind_specialized_viewer_cache(ActiveViewer::Fft, provenance);
         }
     }
 

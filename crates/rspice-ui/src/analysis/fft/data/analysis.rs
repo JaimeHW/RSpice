@@ -319,7 +319,8 @@ mod tests {
                 1e6,
                 window,
                 SpectrumNormalization::Peak,
-            );
+            )
+            .expect("finite qualified spectrum-analysis fixture");
             let analysis = SpectrumAnalysis::analyze(&fft, 1);
             let snr = analysis.snr_db.expect("a noisy tone has an SNR");
             assert!(
@@ -340,7 +341,8 @@ mod tests {
             1e6,
             WindowFunction::BlackmanHarris,
             SpectrumNormalization::Peak,
-        );
+        )
+        .expect("finite qualified SINAD fixture");
         let analysis = SpectrumAnalysis::analyze(&fft, 1);
         let snr = analysis.snr_db.expect("SNR");
         let sinad = analysis.sinad_db.expect("SINAD");

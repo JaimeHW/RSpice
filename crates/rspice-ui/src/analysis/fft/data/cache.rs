@@ -7,9 +7,11 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use once_cell::sync::Lazy;
+use rspice_core::numerics::rustfft_qualification::qualify_rustfft_forward_length;
 use rustfft::{Fft, FftPlanner};
 
-use crate::analysis::fft::window::{WindowFunction, generate_window};
+use super::{FftAllocationStage, FftBuildError};
+use crate::analysis::fft::window::{WindowFunction, try_generate_window};
 
 const MAX_RETAINED_WINDOW_ENTRIES: usize = 16;
 // 2,097,152 f64 coefficients retain at most 16 MiB of cache-owned coefficient
@@ -22,7 +24,7 @@ const MAX_RETAINED_FFT_PLAN_WEIGHT: usize = 2_097_152;
 
 #[derive(Debug, Clone)]
 pub(super) struct WindowCacheEntry {
-    pub(super) coefficients: Arc<[f64]>,
+    pub(super) coefficients: Arc<Vec<f64>>,
     pub(super) coherent_gain: f64,
     pub(super) equivalent_noise_bandwidth_bins: f64,
 }
@@ -67,8 +69,8 @@ impl WindowCache {
         &mut self,
         window: WindowFunction,
         length: usize,
-        generate: impl FnOnce() -> WindowCacheEntry,
-    ) -> WindowCacheEntry {
+        generate: impl FnOnce() -> Result<WindowCacheEntry, FftBuildError>,
+    ) -> Result<WindowCacheEntry, FftBuildError> {
         let access = self.next_access();
         let key = (window, length);
         if let Some(retained) = self
@@ -78,13 +80,13 @@ impl WindowCache {
             .find(|retained| retained.key == key)
         {
             retained.last_used = access;
-            return retained.entry.clone();
+            return Ok(retained.entry.clone());
         }
 
-        let entry = generate();
+        let entry = generate()?;
         let coefficient_count = entry.coefficients.len();
         if coefficient_count > self.coefficient_limit {
-            return entry;
+            return Ok(entry);
         }
         while self.entry_count() == MAX_RETAINED_WINDOW_ENTRIES
             || self.retained_coefficients > self.coefficient_limit - coefficient_count
@@ -102,7 +104,7 @@ impl WindowCache {
             entry: entry.clone(),
         });
         self.retained_coefficients += coefficient_count;
-        entry
+        Ok(entry)
     }
 
     fn next_access(&mut self) -> u64 {
@@ -315,43 +317,73 @@ fn lock_fft_plan_cache(cache: &Mutex<FftPlanCache>) -> MutexGuard<'_, FftPlanCac
     }
 }
 
-fn generate_window_entry(window: WindowFunction, length: usize) -> WindowCacheEntry {
-    let coefficients = generate_window(window, length);
-    let coefficient_sum = coefficients.iter().sum::<f64>();
+fn generate_window_entry(
+    window: WindowFunction,
+    length: usize,
+) -> Result<WindowCacheEntry, FftBuildError> {
+    let coefficients =
+        try_generate_window(window, length).map_err(|_| FftBuildError::Allocation {
+            stage: FftAllocationStage::WindowCoefficients,
+            requested: length,
+        })?;
+    let coefficient_sum = compensated_sum(coefficients.iter().copied());
     let coherent_gain = if length == 0 {
         0.0
     } else {
         coefficient_sum / length as f64
     };
-    let sum_squares = coefficients
-        .iter()
-        .map(|coefficient| coefficient * coefficient)
-        .sum::<f64>();
+    let sum_squares = compensated_sum(
+        coefficients
+            .iter()
+            .map(|coefficient| coefficient * coefficient),
+    );
     let equivalent_noise_bandwidth_bins = if coefficient_sum.abs() <= f64::EPSILON {
         0.0
     } else {
         length as f64 * sum_squares / (coefficient_sum * coefficient_sum)
     };
-    WindowCacheEntry {
-        coefficients: Arc::from(coefficients),
+    Ok(WindowCacheEntry {
+        // Moving the Vec into an Arc avoids Arc<[T]>'s second large
+        // infallible allocation/copy. Only the small Arc control block remains
+        // outside stable Rust's fallible-allocation surface.
+        coefficients: Arc::new(coefficients),
         coherent_gain,
         equivalent_noise_bandwidth_bins,
-    }
+    })
 }
 
-pub(super) fn cached_window(window: WindowFunction, length: usize) -> WindowCacheEntry {
+fn compensated_sum(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut sum = 0.0;
+    let mut correction = 0.0;
+    for value in values {
+        let next = sum + value;
+        correction += if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        sum = next;
+    }
+    sum + correction
+}
+
+pub(super) fn cached_window(
+    window: WindowFunction,
+    length: usize,
+) -> Result<WindowCacheEntry, FftBuildError> {
     // Generation remains under the lock so concurrent misses cannot multiply
     // the largest retained allocation. Returned Arc data outlives eviction.
     lock_window_cache(&WINDOW_CACHE)
         .get_or_generate(window, length, || generate_window_entry(window, length))
 }
 
-pub(super) fn cached_fft_plan(length: usize) -> Arc<dyn Fft<f64>> {
+pub(super) fn cached_fft_plan(length: usize) -> Result<Arc<dyn Fft<f64>>, FftBuildError> {
+    qualify_rustfft_forward_length(length)?;
     // Planning remains under the lock to prevent duplicate infallible rustfft
     // allocations. The Arc is returned after the guard drops, so transforms
     // never execute while holding the cache lock.
-    lock_fft_plan_cache(&FFT_PLAN_CACHE)
-        .get_or_plan(length, || FftPlanner::new().plan_fft_forward(length))
+    Ok(lock_fft_plan_cache(&FFT_PLAN_CACHE)
+        .get_or_plan(length, || FftPlanner::new().plan_fft_forward(length)))
 }
 
 #[cfg(test)]
@@ -364,7 +396,9 @@ mod tests {
         window: WindowFunction,
         length: usize,
     ) -> WindowCacheEntry {
-        cache.get_or_generate(window, length, || generate_window_entry(window, length))
+        cache
+            .get_or_generate(window, length, || generate_window_entry(window, length))
+            .expect("qualified local window fixture")
     }
 
     fn local_plan(cache: &mut FftPlanCache, length: usize) -> Arc<dyn Fft<f64>> {
@@ -523,7 +557,7 @@ mod tests {
         assert_eq!(windows.entry_count(), 1);
         assert!(!windows.contains(WindowFunction::Rectangular, 8));
         assert!(windows.contains(WindowFunction::Rectangular, 9));
-        assert_eq!(old_window.coefficients.as_ref(), &[1.0; 8]);
+        assert_eq!(old_window.coefficients.as_slice(), &[1.0; 8]);
 
         let mut plans = FftPlanCache::default();
         let old_plan = local_plan(&mut plans, 8);

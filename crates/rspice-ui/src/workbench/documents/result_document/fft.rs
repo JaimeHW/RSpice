@@ -177,7 +177,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let c = t.color;
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let Some(model) = build_model(state) else {
-        well_hint(ui, "No spectrum yet — the FFT runs on the active transient");
+        if let Some(error) = state.analysis.fft_state.last_error.as_ref() {
+            well_hint(ui, &format!("Spectrum unavailable — {error}"));
+        } else {
+            well_hint(ui, "No spectrum yet — the FFT runs on the active transient");
+        }
         return;
     };
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
@@ -224,8 +228,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         if ui
                             .selectable_label(window == current, window.display_name())
                             .clicked()
+                            && state.analysis.fft_state.set_window(window).is_err()
                         {
-                            state.analysis.fft_state.set_window(window);
+                            state.clear_specialized_viewer_cache_authority(
+                                crate::workbench::app_state::ActiveViewer::Fft,
+                            );
                         }
                     }
                 });
@@ -247,8 +254,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     if ui
                         .selectable_label(normalization == current, normalization.display_name())
                         .clicked()
+                        && state
+                            .analysis
+                            .fft_state
+                            .set_normalization(normalization)
+                            .is_err()
                     {
-                        state.analysis.fft_state.set_normalization(normalization);
+                        state.clear_specialized_viewer_cache_authority(
+                            crate::workbench::app_state::ActiveViewer::Fft,
+                        );
                     }
                 }
             });
@@ -460,7 +474,8 @@ mod tests {
             6_400.0,
             WindowFunction::Rectangular,
             SpectrumNormalization::Rms,
-        );
+        )
+        .expect("finite qualified rectangular FFT fixture");
         assert!((resolution_bandwidth(&data).unwrap() - 100.0).abs() < 1.0e-12);
     }
 
@@ -488,7 +503,8 @@ mod tests {
             8192.0,
             WindowFunction::BlackmanHarris,
             SpectrumNormalization::Rms,
-        );
+        )
+        .expect("finite qualified window FFT fixture");
         let a = [0.35875_f64, 0.48829, 0.14128, 0.01168];
         let enbw_bins =
             (a[0] * a[0] + 0.5 * a[1..].iter().map(|c| c * c).sum::<f64>()) / (a[0] * a[0]);
@@ -560,6 +576,7 @@ mod tests {
             fft_size: 1024,
             window: WindowFunction::Hanning,
             normalization: SpectrumNormalization::Peak,
+            equivalent_noise_bandwidth_bins: 1.0,
         });
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);

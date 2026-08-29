@@ -6374,12 +6374,21 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             app.state.ui.results.clear_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
             );
-            // The eye can be unavailable for a reason the reader can act on
-            // — no consistent bit period, too few transitions — and saying
-            // only "no usable source" hides the rate control that fixes it.
-            let hint = (viewer == ActiveViewer::EyeDiagram)
-                .then(|| eye::unavailable_hint(&app.state))
-                .flatten();
+            // Derived viewers can be unavailable for reasons the reader can
+            // act on. Preserve the FFT builder's typed diagnostic and the
+            // eye's timebase guidance at this outer gate: the individual
+            // viewer is not rendered when loading reports `Unavailable`.
+            let hint = match viewer {
+                ActiveViewer::Fft => app
+                    .state
+                    .analysis
+                    .fft_state
+                    .last_error
+                    .as_ref()
+                    .map(|error| format!("Spectrum unavailable — {error}")),
+                ActiveViewer::EyeDiagram => eye::unavailable_hint(&app.state),
+                _ => None,
+            };
             well_hint(
                 ui,
                 hint.as_deref()

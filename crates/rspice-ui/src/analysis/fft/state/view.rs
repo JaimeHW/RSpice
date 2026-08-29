@@ -45,12 +45,12 @@ impl FftState {
     }
 
     /// Set window function
-    pub fn set_window(&mut self, window: WindowFunction) {
+    pub fn set_window(&mut self, window: WindowFunction) -> Result<(), FftBuildError> {
         if self.window == window {
-            return;
+            return Ok(());
         }
         self.window = window;
-        self.recompute_from_source();
+        self.recompute_from_source()
     }
 
     /// Monotonic revision of the displayed spectrum; bumped on every
