@@ -82,6 +82,30 @@ c1 out 0 159.154943091895p
 }
 
 #[test]
+fn pac_preserves_a_high_impedance_physical_transfer() {
+    let deck = "\
+* PAC must not place an implicit shunt across this 100 TOhm load
+iin 0 out dc 0
+r1 out 0 1e14
+.end
+";
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(0, 0)
+        .with_input_source("iin")
+        .with_output_node("out");
+
+    let analysis = run_pac(deck, config);
+    let transfer = analysis.result.conversion_matrix.get(0, 0, 0);
+    assert!(
+        (transfer.norm() - 1.0e14).abs() <= 1.0e2,
+        "a unit PAC current through 100 TOhm must produce 1e14 V, got {transfer}"
+    );
+}
+
+#[test]
 fn pac_conversion_matrix_measures_the_configured_differential_output() {
     let deck = "\
 * unequal dividers produce a known differential output

@@ -97,13 +97,6 @@ impl PeriodicConversionOperator<'_> {
                     visitor(i * s + k_idx, j * s + k_idx, admittance);
                 }
             }
-            for node in 0..n {
-                visitor(
-                    node * s + k_idx,
-                    node * s + k_idx,
-                    Complex64::new(1e-12, 0.0),
-                );
-            }
         }
 
         for &(i, j, ref spectrum) in self.g_spectra {
@@ -191,9 +184,6 @@ impl PeriodicConversionOperator<'_> {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };
                 }
-            }
-            for node in 0..n {
-                block[node * n + node] += 1e-12;
             }
             for &(i, j, ref spectrum) in self.g_spectra {
                 if let Some(&coefficient) = spectrum.first() {
@@ -904,6 +894,19 @@ mod matrix_free_tests {
             let expected_transpose = (0..10).map(|col| dense[col][row] * x[col]).sum();
             assert_close(forward[row], expected_forward);
             assert_close(transpose[row], expected_transpose);
+        }
+    }
+
+    #[test]
+    fn conversion_operator_contains_only_physical_conductance() {
+        let g = vec![(0, 0, 1.0e-18), (1, 1, 2.0e-18)];
+        let operator = test_operator(&g, &[], &[], &[]);
+        let dense = operator.to_dense();
+
+        for sideband in 0..operator.num_sidebands {
+            assert_eq!(dense[sideband][sideband], Complex64::new(1.0e-18, 0.0));
+            let node_1 = operator.num_sidebands + sideband;
+            assert_eq!(dense[node_1][node_1], Complex64::new(2.0e-18, 0.0));
         }
     }
 

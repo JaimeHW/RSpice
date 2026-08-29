@@ -17,6 +17,27 @@ const K_B: f64 = 1.380649e-23;
 const T_REF: f64 = 300.15;
 
 #[test]
+fn high_resistance_pnoise_is_exactly_four_k_t_r() {
+    let resistance = 1.0e12;
+    let deck = "\
+* An implicit 1 pS shunt would suppress this result by four.
+r1 out 0 1e12
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("pnoise completes");
+    let expected = 4.0 * K_B * T_REF * resistance;
+
+    assert!(
+        (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
+        "resistor output noise must be 4kTR: got {:.6e}, want {expected:.6e}",
+        result.output_noise[0]
+    );
+}
+
+#[test]
 fn pnoise_without_large_signal_drive_matches_stationary_noise() {
     // Forward-biased diode divider: thermal (R1) plus shot (D1) noise with
     // frequency shaping from the 1 nF capacitor.
