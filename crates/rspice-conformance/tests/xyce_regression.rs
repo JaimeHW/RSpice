@@ -11478,6 +11478,59 @@ fn test_xyce_bug1284_transient_restart_relational_oracles() {
 }
 
 #[test]
+fn test_xyce_bug442_packed_unpacked_tline_restart_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, expected_exclusion) in [
+        (
+            "Netlists/Certification_Tests/BUG_442/bug_442.cir",
+            "bug442_packed_unpacked_tline_restart_wrapper_owner",
+            None,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_442/bug_442_baseline.cir",
+            "bug442_packed_unpacked_tline_restart_worker",
+            Some("Netlists/Certification_Tests/BUG_442/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_442/bug_442_baseline_unpacked.cir",
+            "bug442_packed_unpacked_tline_restart_worker",
+            Some("Netlists/Certification_Tests/BUG_442/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_442/bug_442_restarted.cir",
+            "bug442_packed_unpacked_tline_restart_worker",
+            Some("Netlists/Certification_Tests/BUG_442/exclude"),
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_442/bug_442_restarted_unpacked.cir",
+            "bug442_packed_unpacked_tline_restart_worker",
+            Some("Netlists/Certification_Tests/BUG_442/exclude"),
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            expected_exclusion.is_none(),
+            "only the zero-byte BUG442 owner owns the removed wrapper"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{relative} should satisfy both restart codecs and all three historical relations, got {result:?}"
+        );
+        assert_eq!(result.contract, expected_contract);
+        assert_eq!(
+            result.upstream_exclusion_source.as_deref(),
+            expected_exclusion
+        );
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+}
+
+#[test]
 fn test_xyce_classic_level1_mos_dtemp_relational_oracles() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
