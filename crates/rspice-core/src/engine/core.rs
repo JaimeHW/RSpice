@@ -147,10 +147,11 @@ impl Engine {
     ///
     /// Reports what the solver had to do to get an answer, as distinct from
     /// whether it got one: how often it fell back to gmin or source stepping,
-    /// how many transient points were force-accepted without converging, and
+    /// how many Newton-converged transient points were accepted despite an LTE
+    /// rejection, and
     /// how many steps were rejected and retried. A run that returns clean
     /// numbers while reporting force-accepted points is telling you the
-    /// waveform is not trustworthy at those points.
+    /// waveform did not meet its requested local-error tolerance at those points.
     ///
     /// Each analysis entry point clears this first, so the value describes one
     /// run. Read it before starting the next.

@@ -26,7 +26,7 @@ use std::fmt;
 pub enum DiagnosticLevel {
     /// Informational message (e.g., "Using GMIN stepping")
     Info,
-    /// Warning that may affect accuracy (e.g., "Force-accepted non-converged point")
+    /// Warning that may affect accuracy (e.g., "Force-accepted LTE-rejected point")
     Warning,
     /// Error that indicates a problem (e.g., "Convergence failed for node X")
     Error,
@@ -255,9 +255,9 @@ pub struct ConvergenceQuality {
     pub gmin_stepping_count: usize,
     /// Number of times source stepping was used
     pub source_stepping_count: usize,
-    /// Number of force-accepted non-converged points (transient only)
+    /// Number of Newton-converged transient points accepted despite LTE rejection.
     pub force_accepted_points: usize,
-    /// Indices of force-accepted points (for highlighting in plots)
+    /// Indices of force-accepted LTE-rejected points (for highlighting in plots).
     pub force_accepted_indices: Vec<usize>,
     /// Maximum residual across all converged points
     pub max_residual: Value,

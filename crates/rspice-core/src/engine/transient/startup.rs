@@ -1028,8 +1028,8 @@ impl Engine {
 
         // Quiet startup points must be allowed to shrink/retry normally. A
         // synthetic floor there is indistinguishable from a true minimum step
-        // to the retry controller, which can force-accept nonconverged BJT
-        // charge states and poison the transient history before any source
+        // to the retry controller, which can force-accept LTE-rejected BJT
+        // charge states and degrade the transient history before any source
         // transition occurs. Keep the floor only for active source edges, where
         // it prevents pathological recovery-sized steps while still resolving
         // the waveform.
