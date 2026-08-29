@@ -23215,6 +23215,41 @@ fn ac_comparator_preserves_strict_boundaries_and_signed_frequency_quirks() {
 }
 
 #[test]
+fn hb_startup_projection_is_typed_local_and_non_mutating() {
+    let source = "typed HB startup projection\n\
+                  V1 out 0 SIN(0 1 100k)\n\
+                  R1 out 0 1k\n\
+                  .HB 100k\n\
+                  .PRINT HB VM(out)\n\
+                  .END\n";
+    let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("typed-hb.cir"))
+        .expect("typed HB fixture parses");
+    let projected = XyceTestRunner::hb_startup_transient_netlist(&netlist)
+        .expect("typed HB print projects into startup transient capture");
+
+    assert_eq!(
+        netlist.output_requests[0].analysis,
+        Some(OutputAnalysisKind::Hb),
+        "the authored HB netlist must remain unchanged"
+    );
+    assert_eq!(
+        projected.output_requests[0].analysis,
+        Some(OutputAnalysisKind::Tran),
+        "only the private startup capture clone owns transient semantics"
+    );
+
+    let mut without_hb_print = netlist.clone();
+    without_hb_print.output_requests[0].analysis = Some(OutputAnalysisKind::Ac);
+    assert!(XyceTestRunner::hb_startup_transient_netlist(&without_hb_print).is_err());
+
+    let mut duplicate_hb_print = netlist.clone();
+    duplicate_hb_print
+        .output_requests
+        .push(netlist.output_requests[0].clone());
+    assert!(XyceTestRunner::hb_startup_transient_netlist(&duplicate_hb_print).is_err());
+}
+
+#[test]
 fn diode_model_alias_family_is_strict_and_fail_closed() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

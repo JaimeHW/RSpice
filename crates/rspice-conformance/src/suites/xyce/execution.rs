@@ -40,6 +40,28 @@ use super::contracts_tr_tran::TrTranRole;
 use super::*;
 
 impl XyceTestRunner {
+    /// Build the private transient capture used for Xyce's `hb_ic` oracle.
+    /// The authored netlist remains typed as HB; only this clone projects its
+    /// single validated HB print request into the transient capture domain.
+    pub(super) fn hb_startup_transient_netlist(netlist: &Netlist) -> Result<Netlist, String> {
+        let mut startup = netlist.clone();
+        let mut projected_prints = 0usize;
+        for request in &mut startup.output_requests {
+            if request.directive == OutputDirectiveKind::Print
+                && request.analysis == Some(OutputAnalysisKind::Hb)
+            {
+                request.analysis = Some(OutputAnalysisKind::Tran);
+                projected_prints += 1;
+            }
+        }
+        if projected_prints != 1 {
+            return Err(format!(
+                "HB startup projection requires exactly one typed .PRINT HB request, found {projected_prints}"
+            ));
+        }
+        Ok(startup)
+    }
+
     /// Run every discovered vendored `.cir` through the Xyce corpus contract.
     pub fn run_all(&self) -> Vec<XyceTestResult> {
         self.discover_tests()
@@ -2627,19 +2649,31 @@ impl XyceTestRunner {
         startup_config.integration_method =
             rspice_core::numerics::integration::IntegrationMethod::BackwardEuler;
         startup_config.transient_initial_timestep = Some(period / 1.0e6);
-        let startup = match Engine::new(startup_config).run_tran(&netlist, period, period / 1000.0)
-        {
-            Ok(result) => result,
+        let startup_netlist = match Self::hb_startup_transient_netlist(&netlist) {
+            Ok(netlist) => netlist,
             Err(err) => {
                 return self.failure_result(
                     deck,
                     start,
                     contract,
-                    format!("HB startup transient failed: {err}"),
+                    format!("HB startup projection failed: {err}"),
                     Vec::new(),
                 );
             }
         };
+        let startup =
+            match Engine::new(startup_config).run_tran(&startup_netlist, period, period / 1000.0) {
+                Ok(result) => result,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("HB startup transient failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
         let ic_actual =
             match Self::hb_transient_result_to_prn_table(&plan.print, &netlist, &startup) {
                 Ok(table) => table,
