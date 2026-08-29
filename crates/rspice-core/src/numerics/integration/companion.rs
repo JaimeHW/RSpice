@@ -86,7 +86,7 @@ impl CompanionCoefficients {
     /// fail-closed even when a caller constructs a netlist without going
     /// through the parser's validation.
     #[inline]
-    pub fn trapezoidal_with_xmu(xmu: Value) -> Option<Self> {
+    pub(crate) fn trapezoidal_with_xmu(xmu: Value) -> Option<Self> {
         if !xmu.is_finite() || !(0.0..=0.5).contains(&xmu) {
             return None;
         }

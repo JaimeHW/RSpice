@@ -9,20 +9,20 @@
 //! quietly regenerated to match it.
 
 /// 20–80 % edge time of the generated trapezoid.
-pub const RISE_2080: f64 = 50e-12;
+pub(super) const RISE_2080: f64 = 50e-12;
 /// Sample step of the generated record.
-pub const DT: f64 = 10e-12;
+pub(super) const DT: f64 = 10e-12;
 /// Nominal unit interval of the generated patterns.
-pub const UI: f64 = 1e-9;
+pub(super) const UI: f64 = 1e-9;
 
 /// Full 0–100 % ramp width that yields [`RISE_2080`] between the 20 % and
 /// 80 % levels of a linear edge.
-pub fn ramp_width(rise_2080: f64) -> f64 {
+pub(super) fn ramp_width(rise_2080: f64) -> f64 {
     rise_2080 / 0.6
 }
 
 /// A level change: the time of the 50 % crossing and the level held after it.
-pub type LevelEvent = (f64, f64);
+pub(super) type LevelEvent = (f64, f64);
 
 /// Sample a trapezoidal waveform defined by its level changes.
 ///
@@ -30,7 +30,7 @@ pub type LevelEvent = (f64, f64);
 /// [`ramp_width`] wide, so the 50 % crossing lands exactly on the event time
 /// and the measured 20–80 % edge is exactly `rise_2080`. Events must be
 /// ascending and separated by more than one ramp width.
-pub fn trapezoid(
+pub(super) fn trapezoid(
     initial: f64,
     events: &[LevelEvent],
     t_end: f64,
@@ -72,7 +72,7 @@ pub fn trapezoid(
 ///
 /// `jitter(n)` displaces bit `n`'s crossing; pass `|_| 0.0` for an ideal
 /// clock.
-pub fn clock_events(
+pub(super) fn clock_events(
     bits: usize,
     t_start: f64,
     ui: f64,
@@ -97,7 +97,7 @@ pub fn clock_events(
 /// the rising family reaches the crossing level on a steeper ramp than the
 /// falling family leaves it, so the two edge families intersect above the
 /// half-amplitude point.
-pub fn overshooting_clock_events(
+pub(super) fn overshooting_clock_events(
     bits: usize,
     t_start: f64,
     ui: f64,
@@ -120,7 +120,7 @@ pub fn overshooting_clock_events(
 }
 
 /// NRZ level changes for a bit pattern, one bit per unit interval.
-pub fn nrz_events(
+pub(super) fn nrz_events(
     bits: &[bool],
     t_start: f64,
     ui: f64,
@@ -142,7 +142,7 @@ pub fn nrz_events(
 
 /// Duty-cycle-distorted clock: the high phase takes `duty_high` of each
 /// two-unit-interval clock cycle instead of half.
-pub fn dcd_clock_events(
+pub(super) fn dcd_clock_events(
     cycles: usize,
     t_start: f64,
     ui: f64,
@@ -161,7 +161,7 @@ pub fn dcd_clock_events(
 }
 
 /// PRBS-7 (`x^7 + x^6 + 1`) bit sequence, seeded to the all-ones state.
-pub fn prbs7_bits(count: usize) -> Vec<bool> {
+pub(super) fn prbs7_bits(count: usize) -> Vec<bool> {
     let mut state: u8 = 0x7f;
     (0..count)
         .map(|_| {
@@ -175,7 +175,7 @@ pub fn prbs7_bits(count: usize) -> Vec<bool> {
 /// Level changes for a waveform that toggles at the union of two square
 /// waves' edges — the classic two-incommensurate-clocks case, which has no
 /// single bit period to find.
-pub fn beating_toggle_events(
+pub(super) fn beating_toggle_events(
     period_a: f64,
     period_b: f64,
     t_end: f64,

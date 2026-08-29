@@ -1,8 +1,8 @@
 //! The crate's public surface may shrink, never grow.
 //!
-//! `rspice-core` exports 4,831 public items. Its five frontends — the CLI,
-//! the GUI, the Python and WASM bindings, and the conformance suite — name
-//! roughly two hundred distinct paths between them. The rest is internal
+//! `rspice-core` exports 4,256 public item statements. Its five frontends —
+//! the CLI, the GUI, the Python and WASM bindings, and the conformance suite —
+//! name roughly two hundred distinct paths between them. The rest is internal
 //! machinery that happens to be spelled `pub`.
 //!
 //! That has a cost even though the crate is `publish = false` and carries no
@@ -84,7 +84,17 @@ use std::path::{Path, PathBuf};
 /// there is no netlist for `resolved_for_netlist` to resolve against, and the
 /// bridge was falling back to `try_new_with_resolved_config` — which is why
 /// the one analysis that names non-converged conductors never reported one.
-const MAX_PUBLIC_ITEMS: usize = 4253;
+///
+/// The current raise is +3, from 4,253 to 4,256, after narrowing 22
+/// test-fixture and transient-numerics declarations that were never frontend
+/// API. The remaining net growth is deliberate: the conformance frontend
+/// calls the bounded Xyce PRN serializer; the CLI calls bounded sweep,
+/// checkpoint/restart and abort-aware result APIs; and the GUI and Python
+/// bindings consume the authenticated pole-zero and Floquet evidence. The GUI
+/// also calls the unit-interval estimator. Larger deletions of unused device
+/// APIs offset most of those additions, so +3 is the statement-count delta,
+/// not the number of frontend paths added.
+const MAX_PUBLIC_ITEMS: usize = 4256;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

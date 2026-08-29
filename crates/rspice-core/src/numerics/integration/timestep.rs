@@ -42,9 +42,9 @@ impl TransientErrorControl {
 }
 
 /// Xyce 7.10 `TIMEINT` defaults used by `ERROPTION=1` step control.
-pub const XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT: usize = 10;
-pub const XYCE_DEFAULT_NLMIN: usize = 3;
-pub const XYCE_DEFAULT_NLMAX: usize = 8;
+pub(crate) const XYCE_DEFAULT_MIN_TIME_STEPS_BREAKPOINT: usize = 10;
+pub(crate) const XYCE_DEFAULT_NLMIN: usize = 3;
+pub(crate) const XYCE_DEFAULT_NLMAX: usize = 8;
 
 /// Fixed ceiling for one Xyce breakpoint span.
 ///
@@ -53,13 +53,13 @@ pub const XYCE_DEFAULT_NLMAX: usize = 8;
 /// distance on every step would shrink geometrically and never reproduce the
 /// source algorithm.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct XyceBreakpointSpanCeiling {
+pub(crate) struct XyceBreakpointSpanCeiling {
     min_steps: Option<usize>,
     max_dt: Option<Value>,
 }
 
 impl XyceBreakpointSpanCeiling {
-    pub fn new(min_steps: Option<usize>) -> Self {
+    pub(crate) fn new(min_steps: Option<usize>) -> Self {
         Self {
             min_steps: min_steps.filter(|steps| *steps > 0),
             max_dt: None,
@@ -70,7 +70,7 @@ impl XyceBreakpointSpanCeiling {
     /// breakpoint. Merely discovering a runtime stop must not change the
     /// current span: the breakpoint manager first limits the step to that stop,
     /// then the accepted landing anchors the following span.
-    pub fn anchor(
+    pub(crate) fn anchor(
         &mut self,
         current_time: Value,
         next_breakpoint: Option<Value>,
@@ -92,14 +92,18 @@ impl XyceBreakpointSpanCeiling {
         self.max_dt
     }
 
-    pub const fn ceiling(&self) -> Option<Value> {
+    pub(crate) const fn ceiling(&self) -> Option<Value> {
         self.max_dt
     }
 }
 
 /// Xyce `ERROPTION=1` accepted-step multiplier.
 #[inline]
-pub const fn xyce_iteration_step_scale(iterations: usize, nlmin: usize, nlmax: usize) -> Value {
+pub(crate) const fn xyce_iteration_step_scale(
+    iterations: usize,
+    nlmin: usize,
+    nlmax: usize,
+) -> Value {
     if iterations <= nlmin {
         2.0
     } else if iterations > nlmax {
@@ -112,7 +116,7 @@ pub const fn xyce_iteration_step_scale(iterations: usize, nlmin: usize, nlmax: u
 /// Whether an otherwise converged `ERROPTION=1` attempt passes Xyce's
 /// optional timestep-reversal test.
 #[inline]
-pub const fn xyce_iteration_step_accepts(
+pub(crate) const fn xyce_iteration_step_accepts(
     iterations: usize,
     nlmax: usize,
     timesteps_reversal: bool,

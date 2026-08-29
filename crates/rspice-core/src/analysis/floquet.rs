@@ -1,7 +1,7 @@
 //! Shared evidence and stability contracts for Floquet spectra.
 
 use crate::Value;
-pub use crate::numerics::FloquetSpectrumCertificate;
+pub use crate::numerics::eigenspectrum::FloquetSpectrumCertificate;
 use num_complex::Complex64;
 
 /// Numerical half-width used around the physical unit-circle boundary.
