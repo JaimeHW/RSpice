@@ -11933,6 +11933,39 @@ fn bug412_transient_cross_measurement_wrapper_owner_is_publicly_qualified() {
 }
 
 #[test]
+fn bug440_ready_lead_current_measurement_wrapper_owners_are_publicly_qualified() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let family = "Netlists/Certification_Tests/BUG_440_SON";
+    for (owner, contract) in [
+        (
+            "bug440a.cir",
+            "bug440a_resistor_lead_current_measurement_wrapper_owner",
+        ),
+        (
+            "bug440b.cir",
+            "bug440b_behavioral_source_lead_current_measurement_wrapper_owner",
+        ),
+    ] {
+        let path = format!("{family}/{owner}");
+        assert!(runner.requires_upstream_wrapper(&path));
+        let result = runner.run_test(root.join(&path));
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "BUG440 {owner} failed its public qualification: {:?}",
+            result.error
+        );
+        assert_eq!(result.contract, contract);
+        assert_eq!(result.upstream_exclusion_source, None);
+        assert!(result.error.is_none());
+        assert!(result.mismatches.is_empty());
+    }
+
+    let deferred = runner.run_test(root.join(family).join("bug440.cir"));
+    assert!(deferred.passed && deferred.expected_unsupported && !deferred.upstream_excluded);
+}
+
+#[test]
 fn bug372_native_mos_multiplicity_wrapper_owners_are_publicly_qualified() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
