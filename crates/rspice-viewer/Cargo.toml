@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 rspice-publication-contract.workspace = true
 egui = "0.35.0"
 serde_json.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

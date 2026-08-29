@@ -5052,7 +5052,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.20",
  "uuid",
@@ -5114,7 +5114,7 @@ dependencies = [
  "rspice-cloud-contract",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "time",
  "tokio",
  "tokio-util",
@@ -5143,7 +5143,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "uuid",
 ]
@@ -5160,7 +5160,7 @@ dependencies = [
  "rustix 1.1.4",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "tempfile",
  "windows-sys 0.61.2",
 ]
@@ -5201,7 +5201,7 @@ dependencies = [
  "ed25519-dalek",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "unicode-normalization",
  "uuid",
@@ -5215,7 +5215,7 @@ dependencies = [
  "rspice-core",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "uuid",
 ]
@@ -5241,7 +5241,7 @@ dependencies = [
  "miniz_oxide",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
 ]
 
@@ -5262,7 +5262,7 @@ dependencies = [
  "clap",
  "rspice-publication-contract",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
 ]
 
@@ -5335,7 +5335,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "similar",
  "thiserror 2.0.20",
  "tiff",
@@ -5756,7 +5756,7 @@ dependencies = [
  "rspice-publication-contract",
  "rspice-publish",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "wasm-bindgen",
  "wasm-bindgen-futures",

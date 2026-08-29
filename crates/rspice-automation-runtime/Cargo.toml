@@ -15,7 +15,7 @@ rspice-automation-protocol = { path = "../rspice-automation-protocol", version =
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 thiserror.workspace = true
 uuid.workspace = true
 

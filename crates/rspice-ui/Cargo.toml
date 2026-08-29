@@ -63,7 +63,7 @@ arrow-array = "59"
 arrow-schema = "59"
 parquet = { version = "59", default-features = false, features = ["arrow"] }
 thiserror.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 regex = "1.12"
 similar = "2.7"
 # Signed PDK callbacks run in a deterministic, fuel-metered interpreter on
