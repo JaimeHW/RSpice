@@ -144,6 +144,27 @@ fn resample_includes_endpoints_and_propagates_every_linear_value() {
 }
 
 #[test]
+fn resample_preserves_multiple_exact_interior_samples_across_unequal_segments() {
+    let source = waveform(&[0.0, 1.0, 3.0, 4.0, 8.0], &[0.0, 2.0, 6.0, 4.0, 12.0]);
+    let resampled = source
+        .resample(9)
+        .expect("uniform cursor traversal across unequal source segments qualifies");
+
+    assert_samples(
+        &resampled,
+        &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        &[0.0, 2.0, 4.0, 6.0, 4.0, 6.0, 8.0, 10.0, 12.0],
+    );
+    for (destination_index, source_index) in [(1, 1), (3, 2), (4, 3)] {
+        assert_eq!(
+            resampled.value_at(destination_index).map(f64::to_bits),
+            source.value_at(source_index).map(f64::to_bits),
+            "an exact authored interior sample must be copied bit-for-bit"
+        );
+    }
+}
+
+#[test]
 fn resample_handles_extreme_finite_endpoints_without_silent_fill() {
     let source = waveform(&[-f64::MAX, f64::MAX], &[-f64::MAX, f64::MAX]);
     let resampled = source

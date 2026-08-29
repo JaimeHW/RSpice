@@ -1434,26 +1434,59 @@ impl Waveform {
             )));
         }
 
-        let t0 = self.time[idx - 1];
-        let t1 = self.time[idx];
-        let v0 = self.values[idx - 1];
-        let v1 = self.values[idx];
+        self.interpolate_in_segment(t, idx - 1).map(Some)
+    }
+
+    fn interpolate_in_segment(&self, t: Value, segment: usize) -> Result<Value, MeasurementError> {
+        let t0 = self.time[segment];
+        let t1 = self.time[segment + 1];
+        let v0 = self.values[segment];
+        let v1 = self.values[segment + 1];
         let fraction_numerator =
-            scaled_positive_difference(t, t0, idx - 1, "interpolation query offset")?;
-        let time_span = scaled_positive_difference(t1, t0, idx - 1, "interpolation time span")?;
+            scaled_positive_difference(t, t0, segment, "interpolation query offset")?;
+        let time_span = scaled_positive_difference(t1, t0, segment, "interpolation time span")?;
         let fraction = scaled_positive_ratio(
             fraction_numerator,
             time_span,
-            idx - 1,
+            segment,
             "interpolation fraction",
         )?;
         if !fraction.is_finite() || fraction <= 0.0 || fraction >= 1.0 {
             return Err(MeasurementError::CalculationError(format!(
                 "interior interpolation fraction at segment {} is not representable strictly inside (0, 1): {fraction}",
-                idx - 1
+                segment
             )));
         }
-        qualified_affine_value(v0, v1, fraction, "waveform interpolation").map(Some)
+        qualified_affine_value(v0, v1, fraction, "waveform interpolation")
+    }
+
+    fn interpolate_with_monotonic_cursor(
+        &self,
+        t: Value,
+        source_upper: &mut usize,
+    ) -> Result<Value, MeasurementError> {
+        while *source_upper < self.time.len() && self.time[*source_upper] < t {
+            *source_upper = source_upper.checked_add(1).ok_or_else(|| {
+                MeasurementError::CalculationError(
+                    "resampling source cursor exceeds this platform".to_string(),
+                )
+            })?;
+        }
+        if *source_upper >= self.time.len() {
+            return Err(MeasurementError::CalculationError(format!(
+                "resampling could not bracket in-range destination time {t}"
+            )));
+        }
+        if self.time[*source_upper] == t {
+            return Ok(self.values[*source_upper]);
+        }
+        if *source_upper == 0 {
+            return Err(MeasurementError::CalculationError(format!(
+                "resampling destination time {t} precedes the source grid"
+            )));
+        }
+        let segment = *source_upper - 1;
+        self.interpolate_in_segment(t, segment)
     }
 
     /// Resample the waveform onto an inclusive uniform time grid.
@@ -1501,6 +1534,7 @@ impl Waveform {
             )));
         }
 
+        let mut source_upper = 0usize;
         for i in 0..num_points {
             let t = if i == 0 {
                 self.min_time
@@ -1533,11 +1567,7 @@ impl Waveform {
                     "resampling time point {i} is not representable after its predecessor ({t} <= {previous})"
                 )));
             }
-            let value = self.interpolate(t)?.ok_or_else(|| {
-                MeasurementError::CalculationError(format!(
-                    "resampling time point {i} unexpectedly lies outside the source grid ({t})"
-                ))
-            })?;
+            let value = self.interpolate_with_monotonic_cursor(t, &mut source_upper)?;
             new_time.push(t);
             new_values.push(value);
         }
@@ -1956,7 +1986,9 @@ fn interpolate_crossing_time(
         )));
     }
 
-    let mut interpolation = ExactFloatSum::default();
+    // Three weighted time terms each generate at most one rounded product and
+    // one residual, so six expansion slots are sufficient without allocation.
+    let mut interpolation = BoundedExactFloatSum::<6>::new();
     for (weight, time) in [
         (complement, start),
         (complement_residual, start),
