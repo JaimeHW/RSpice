@@ -37,7 +37,8 @@
 
 use crate::Value;
 use crate::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError};
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 //=============================================================================
 // Constants
@@ -51,6 +52,13 @@ pub const THRESHOLD_HIGH: Value = 0.9;
 pub const MIN_FFT_SAMPLES: usize = 8;
 /// Bound FFT planning before entering `rustfft`'s infallible plan allocations.
 const MAX_QUALIFIED_FFT_SAMPLES: usize = 1_048_576;
+/// Bound any Bluestein convolution selected inside `rustfft` planning.
+const MAX_QUALIFIED_BLUESTEIN_INNER_LEN: usize = 524_288;
+/// Bound the number of process-wide forward FFT plans retained for reuse.
+const MAX_RETAINED_FFT_PLANS: usize = 8;
+/// Bound retained plan input plus reported in-place scratch lengths.
+/// This is a point-count proxy because rustfft does not expose plan heap usage.
+const MAX_RETAINED_FFT_PLAN_WEIGHT: usize = 2_097_152;
 /// Bound resampling before allocating both the output grid and values.
 const MAX_QUALIFIED_RESAMPLE_POINTS: usize = 1_048_576;
 /// Default number of harmonics for THD calculation
@@ -1343,6 +1351,7 @@ impl Waveform {
                 "FFT amplitude normalization cannot be represented in logarithmic form ({log10_normalization})"
             )));
         }
+        validate_rustfft_bluestein_working_set(sample_count)?;
 
         let mut buffer = Vec::new();
         buffer.try_reserve_exact(sample_count).map_err(|error| {
@@ -1357,7 +1366,7 @@ impl Waveform {
                 qualified_fft_scaling(centered, centered_scale, index, "centered scaling")?;
             buffer.push(Complex::new(transform_sample, 0.0));
         }
-        let fft = FftPlanner::<Value>::new().plan_fft_forward(sample_count);
+        let fft = cached_forward_fft_plan(sample_count);
         let scratch_len = fft.get_inplace_scratch_len();
         let mut scratch = Vec::new();
         scratch.try_reserve_exact(scratch_len).map_err(|error| {
@@ -2288,6 +2297,163 @@ fn scaled_moment_result(
     if result == 0.0 { Ok(0.0) } else { Ok(result) }
 }
 
+struct RetainedFftPlan {
+    len: usize,
+    weight: usize,
+    last_used: u64,
+    plan: Arc<dyn Fft<Value>>,
+}
+
+struct ForwardFftPlanCache {
+    entries: [Option<RetainedFftPlan>; MAX_RETAINED_FFT_PLANS],
+    retained_weight: usize,
+    access_clock: u64,
+    weight_limit: usize,
+}
+
+impl Default for ForwardFftPlanCache {
+    fn default() -> Self {
+        Self::with_weight_limit(MAX_RETAINED_FFT_PLAN_WEIGHT)
+    }
+}
+
+impl ForwardFftPlanCache {
+    fn with_weight_limit(weight_limit: usize) -> Self {
+        Self {
+            entries: std::array::from_fn(|_| None),
+            retained_weight: 0,
+            access_clock: 0,
+            weight_limit,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries = std::array::from_fn(|_| None);
+        self.retained_weight = 0;
+        self.access_clock = 0;
+    }
+
+    fn next_access(&mut self) -> u64 {
+        let Some(next) = self.access_clock.checked_add(1) else {
+            // Losing reuse once per u64::MAX accesses is preferable to
+            // allowing a wrapped age to corrupt deterministic LRU ordering.
+            self.clear();
+            self.access_clock = 1;
+            return 1;
+        };
+        self.access_clock = next;
+        next
+    }
+
+    fn get_or_plan(&mut self, len: usize) -> Arc<dyn Fft<Value>> {
+        let access = self.next_access();
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .flatten()
+            .find(|entry| entry.len == len)
+        {
+            entry.last_used = access;
+            return Arc::clone(&entry.plan);
+        }
+
+        // A fresh planner is intentional. Retaining FftPlanner would retain
+        // rustfft's own unbounded recipe and algorithm HashMaps across lengths.
+        let plan = FftPlanner::<Value>::new().plan_fft_forward(len);
+        let Some(weight) = len.checked_add(plan.get_inplace_scratch_len()) else {
+            return plan;
+        };
+        if weight > self.weight_limit {
+            return plan;
+        }
+
+        while self.entry_count() == MAX_RETAINED_FFT_PLANS
+            || self.retained_weight > self.weight_limit - weight
+        {
+            if !self.evict_least_recently_used() {
+                self.clear();
+                break;
+            }
+        }
+
+        let insertion_index = self
+            .entries
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or_else(|| {
+                self.clear();
+                0
+            });
+        self.entries[insertion_index] = Some(RetainedFftPlan {
+            len,
+            weight,
+            last_used: access,
+            plan: Arc::clone(&plan),
+        });
+        self.retained_weight += weight;
+        plan
+    }
+
+    fn evict_least_recently_used(&mut self) -> bool {
+        let Some(index) = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| entry.as_ref().map(|entry| (index, entry.last_used)))
+            .min_by_key(|(_, last_used)| *last_used)
+            .map(|(index, _)| index)
+        else {
+            return false;
+        };
+        self.entries[index] = None;
+        self.retained_weight = self
+            .entries
+            .iter()
+            .flatten()
+            .map(|entry| entry.weight)
+            .sum();
+        true
+    }
+
+    fn entry_count(&self) -> usize {
+        self.entries.iter().flatten().count()
+    }
+
+    #[cfg(test)]
+    fn contains(&self, len: usize) -> bool {
+        self.entries.iter().flatten().any(|entry| entry.len == len)
+    }
+}
+
+fn forward_fft_plan_cache() -> &'static Mutex<ForwardFftPlanCache> {
+    static CACHE: OnceLock<Mutex<ForwardFftPlanCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(ForwardFftPlanCache::default()))
+}
+
+fn lock_forward_fft_plan_cache(
+    cache: &Mutex<ForwardFftPlanCache>,
+) -> MutexGuard<'_, ForwardFftPlanCache> {
+    match cache.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            // A panic may have interrupted an insertion between bookkeeping
+            // updates. Reset instead of authenticating partially updated LRU
+            // or weight state, then allow later calls to lock normally.
+            let mut guard = poisoned.into_inner();
+            *guard = ForwardFftPlanCache::default();
+            cache.clear_poison();
+            guard
+        }
+    }
+}
+
+fn cached_forward_fft_plan(len: usize) -> Arc<dyn Fft<Value>> {
+    // Planning stays under this short-lived lock so concurrent misses cannot
+    // multiply rustfft's infallible temporary allocations. The returned Arc
+    // lets all scratch allocation and transform work happen after unlock.
+    lock_forward_fft_plan_cache(forward_fft_plan_cache()).get_or_plan(len)
+}
+
 struct LinearSpectrum {
     frequencies: Vec<Value>,
     /// Unnormalized one-sided coefficient norms. Keeping the common `1/N`
@@ -2309,6 +2475,184 @@ fn validate_fft_sample_count(sample_count: usize) -> Result<(), MeasurementError
         )));
     }
     Ok(())
+}
+
+fn validate_rustfft_bluestein_working_set(sample_count: usize) -> Result<(), MeasurementError> {
+    // Scalar, SSE, and Neon planners decompose composite records and may use
+    // Bluestein for a prime base above the built-in butterflies when Rader's
+    // p-1 transform itself contains a prime factor above 23.
+    for_each_distinct_prime_factor(sample_count, |prime| {
+        if prime > 31 && has_prime_factor_above_23(prime - 1) {
+            validate_bluestein_base(sample_count, prime, "prime factor")?;
+        }
+        Ok(())
+    })?;
+
+    // AVX strips its fast 2/3/5/7/11 radixes and plans the entire remaining
+    // product as one base. A composite base can therefore reach Bluestein even
+    // when every individual prime factor was harmless above.
+    let mut avx_other = sample_count;
+    for factor in [2, 3, 5, 7, 11] {
+        while avx_other.is_multiple_of(factor) {
+            avx_other /= factor;
+        }
+    }
+    let avx_butterfly = matches!(avx_other, 1 | 13 | 17 | 19 | 23 | 29 | 31);
+    let portable_rader = is_prime(avx_other) && has_only_two_and_three_factors(avx_other - 1);
+    if !avx_butterfly && !portable_rader {
+        validate_bluestein_base(sample_count, avx_other, "AVX other-factor product")?;
+    }
+    Ok(())
+}
+
+fn validate_bluestein_base(
+    sample_count: usize,
+    base: usize,
+    route: &str,
+) -> Result<(), MeasurementError> {
+    let minimum_inner = base
+        .checked_mul(2)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| {
+            MeasurementError::FftError(format!(
+                "rustfft {route} Bluestein minimum overflowed for base {base} in a {sample_count}-sample record"
+            ))
+        })?;
+    let power_of_two = minimum_inner.checked_next_power_of_two().ok_or_else(|| {
+        MeasurementError::FftError(format!(
+            "rustfft {route} Bluestein power-of-two candidate overflowed for base {base} in a {sample_count}-sample record"
+        ))
+    })?;
+    let three_quarters = power_of_two
+        .checked_div(4)
+        .and_then(|value| value.checked_mul(3))
+        .ok_or_else(|| {
+            MeasurementError::FftError(format!(
+                "rustfft {route} Bluestein three-quarter candidate overflowed for base {base} in a {sample_count}-sample record"
+            ))
+        })?;
+    let scalar_inner = if three_quarters >= minimum_inner {
+        three_quarters
+    } else {
+        power_of_two
+    };
+    let avx_f64_inner =
+        rustfft_avx_f64_bluestein_inner(sample_count, base, route, minimum_inner, power_of_two)?;
+    let largest_inner = scalar_inner.max(avx_f64_inner);
+    if largest_inner > MAX_QUALIFIED_BLUESTEIN_INNER_LEN {
+        return Err(MeasurementError::FftError(format!(
+            "rustfft planning for a {sample_count}-sample record may route {route} {base} through Bluestein with minimum inner length {minimum_inner}, scalar/SSE candidate {scalar_inner}, and AVX f64 candidate {avx_f64_inner}; candidate {largest_inner} exceeds the qualified inner limit {MAX_QUALIFIED_BLUESTEIN_INNER_LEN}"
+        )));
+    }
+    Ok(())
+}
+
+fn rustfft_avx_f64_bluestein_inner(
+    sample_count: usize,
+    base: usize,
+    route: &str,
+    minimum_inner: usize,
+    power_of_two: usize,
+) -> Result<usize, MeasurementError> {
+    // Mirror rustfft 6.4.1's AVX-f64 2^n*3^m candidate generator and
+    // benchmark filter, retaining only its smallest accepted candidate.
+    let mut candidate = power_of_two;
+    let mut factor_two = candidate.trailing_zeros();
+    let mut factor_three = 0u32;
+    let mut chosen = None;
+    while factor_two >= 2 {
+        let rejected =
+            (factor_three < 1 && factor_two > 13) || (factor_three < 4 && factor_two > 14);
+        if candidate >= minimum_inner && !rejected {
+            chosen = Some(chosen.map_or(candidate, |prior: usize| prior.min(candidate)));
+        }
+        if candidate >= power_of_two {
+            candidate >>= 1;
+            factor_two -= 1;
+        } else {
+            candidate = candidate.checked_mul(3).ok_or_else(|| {
+                MeasurementError::FftError(format!(
+                    "rustfft AVX f64 {route} Bluestein candidate overflowed for base {base} in a {sample_count}-sample record"
+                ))
+            })?;
+            factor_three = factor_three.checked_add(1).ok_or_else(|| {
+                MeasurementError::FftError(format!(
+                    "rustfft AVX f64 {route} Bluestein factor count overflowed for base {base} in a {sample_count}-sample record"
+                ))
+            })?;
+        }
+    }
+    chosen.ok_or_else(|| {
+        MeasurementError::FftError(format!(
+            "rustfft AVX f64 found no qualified {route} Bluestein candidate for base {base} in a {sample_count}-sample record"
+        ))
+    })
+}
+
+fn for_each_distinct_prime_factor(
+    mut value: usize,
+    mut visit: impl FnMut(usize) -> Result<(), MeasurementError>,
+) -> Result<(), MeasurementError> {
+    if value.is_multiple_of(2) {
+        visit(2)?;
+        while value.is_multiple_of(2) {
+            value /= 2;
+        }
+    }
+    let mut divisor = 3usize;
+    while divisor <= value / divisor {
+        if value.is_multiple_of(divisor) {
+            visit(divisor)?;
+            while value.is_multiple_of(divisor) {
+                value /= divisor;
+            }
+        }
+        divisor = divisor.checked_add(2).ok_or_else(|| {
+            MeasurementError::FftError("FFT prime-factor scan exceeded this platform".to_string())
+        })?;
+    }
+    if value > 1 {
+        visit(value)?;
+    }
+    Ok(())
+}
+
+fn has_prime_factor_above_23(mut value: usize) -> bool {
+    for factor in [2, 3, 5, 7, 11, 13, 17, 19, 23] {
+        while value.is_multiple_of(factor) {
+            value /= factor;
+        }
+    }
+    value > 1
+}
+
+fn has_only_two_and_three_factors(mut value: usize) -> bool {
+    for factor in [2, 3] {
+        while value.is_multiple_of(factor) {
+            value /= factor;
+        }
+    }
+    value == 1
+}
+
+fn is_prime(value: usize) -> bool {
+    if value < 2 {
+        return false;
+    }
+    if value.is_multiple_of(2) {
+        return value == 2;
+    }
+    let mut divisor = 3usize;
+    while divisor <= value / divisor {
+        if value.is_multiple_of(divisor) {
+            return false;
+        }
+        let Some(next) = divisor.checked_add(2) else {
+            return false;
+        };
+        divisor = next;
+    }
+    true
 }
 
 fn scaled_amplitude_db(
@@ -2539,10 +2883,199 @@ mod tests {
     #[test]
     fn fft_resource_limit_fails_before_planning() {
         assert!(validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES).is_ok());
+        assert!(validate_fft_sample_count(786_432).is_ok());
         assert!(matches!(
             validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES + 1),
             Err(MeasurementError::FftError(_))
         ));
+    }
+
+    #[test]
+    fn fft_preflight_rejects_large_prime_and_composite_bluestein_routes() {
+        validate_rustfft_bluestein_working_set(MAX_QUALIFIED_FFT_SAMPLES)
+            .expect("the maximum power-of-two record has no Bluestein base");
+        validate_rustfft_bluestein_working_set(786_432)
+            .expect("the large smooth 3*2^18 record has no Bluestein base");
+
+        let prime_error = validate_rustfft_bluestein_working_set(1_048_573)
+            .expect_err("the large prime requires an over-budget Bluestein transform");
+        assert!(prime_error.to_string().contains("Bluestein"));
+
+        // Scalar planners see two individually manageable prime bases, while
+        // AVX combines the non-fast 521 and 523 factors into one Bluestein base.
+        let composite_error = validate_rustfft_bluestein_working_set(521 * 523)
+            .expect_err("the composite AVX other-factor base must be bounded");
+        assert!(
+            composite_error
+                .to_string()
+                .contains("AVX other-factor product")
+        );
+
+        let avx_rader_error = validate_rustfft_bluestein_working_set(267_037)
+            .expect_err("the prime has no portable AVX Rader route");
+        assert!(
+            avx_rader_error
+                .to_string()
+                .contains("AVX other-factor product")
+        );
+
+        let avx_filter_error = validate_rustfft_bluestein_working_set(248_839)
+            .expect_err("AVX f64 rejects the otherwise bounded pure-power-of-two candidate");
+        assert!(
+            avx_filter_error
+                .to_string()
+                .contains("AVX f64 candidate 559872")
+        );
+    }
+
+    #[test]
+    fn fft_plan_cache_reuses_lru_entries_and_preserves_evicted_arcs() {
+        let mut cache = ForwardFftPlanCache::default();
+        let first = cache.get_or_plan(8);
+        let reused = cache.get_or_plan(8);
+        assert!(Arc::ptr_eq(&first, &reused));
+
+        let evicted_but_live = cache.get_or_plan(9);
+        for len in 10..=15 {
+            cache.get_or_plan(len);
+        }
+        cache.get_or_plan(8); // Make 8 newer than 9 before the ninth insertion.
+        cache.get_or_plan(16);
+        assert!(cache.contains(8));
+        assert!(!cache.contains(9));
+        assert_eq!(cache.entry_count(), MAX_RETAINED_FFT_PLANS);
+        assert!(cache.retained_weight <= MAX_RETAINED_FFT_PLAN_WEIGHT);
+        assert_eq!(
+            cache.retained_weight,
+            cache
+                .entries
+                .iter()
+                .flatten()
+                .map(|entry| entry.weight)
+                .sum()
+        );
+
+        let mut buffer = vec![Complex::new(0.0, 0.0); 9];
+        buffer[1].re = 1.0;
+        let mut scratch = vec![Complex::new(0.0, 0.0); evicted_but_live.get_inplace_scratch_len()];
+        evicted_but_live.process_with_scratch(&mut buffer, &mut scratch);
+        assert!(
+            buffer
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
+    }
+
+    #[test]
+    fn fft_plan_cache_serializes_concurrent_same_length_misses() {
+        const THREAD_COUNT: usize = 8;
+        const PLAN_LEN: usize = 37;
+        let cache = Arc::new(Mutex::new(ForwardFftPlanCache::default()));
+        let barrier = Arc::new(std::sync::Barrier::new(THREAD_COUNT));
+        let handles: Vec<_> = (0..THREAD_COUNT)
+            .map(|_| {
+                let cache = Arc::clone(&cache);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    lock_forward_fft_plan_cache(&cache).get_or_plan(PLAN_LEN)
+                })
+            })
+            .collect();
+        let plans: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("cache worker must not panic"))
+            .collect();
+
+        assert!(
+            plans
+                .iter()
+                .skip(1)
+                .all(|plan| Arc::ptr_eq(&plans[0], plan))
+        );
+        let cache = lock_forward_fft_plan_cache(&cache);
+        assert_eq!(cache.entry_count(), 1);
+        assert!(cache.contains(PLAN_LEN));
+        assert_eq!(
+            cache.retained_weight,
+            PLAN_LEN + plans[0].get_inplace_scratch_len()
+        );
+    }
+
+    #[test]
+    fn fft_plan_cache_enforces_retained_weight_and_skips_oversized_entries() {
+        let plan8 = FftPlanner::<Value>::new().plan_fft_forward(8);
+        let plan9 = FftPlanner::<Value>::new().plan_fft_forward(9);
+        let weight8 = 8 + plan8.get_inplace_scratch_len();
+        let weight9 = 9 + plan9.get_inplace_scratch_len();
+        let mut cache = ForwardFftPlanCache::with_weight_limit(weight8.max(weight9));
+        cache.get_or_plan(8);
+        cache.get_or_plan(9);
+        assert!(cache.retained_weight <= cache.weight_limit);
+        assert!(cache.entry_count() <= 1);
+        assert!(cache.contains(9));
+
+        let mut over_budget = ForwardFftPlanCache::with_weight_limit(weight8 - 1);
+        let uncached = over_budget.get_or_plan(8);
+        assert_eq!(uncached.len(), 8);
+        assert_eq!(over_budget.entry_count(), 0);
+    }
+
+    #[test]
+    fn cached_and_fresh_fft_plans_are_bit_identical() {
+        let mut cache = ForwardFftPlanCache::default();
+        let cached = cache.get_or_plan(37);
+        let fresh = FftPlanner::<Value>::new().plan_fft_forward(37);
+        let authored: Vec<_> = (0..37)
+            .map(|index| {
+                Complex::new(
+                    (index as Value - 5.0) / 7.0,
+                    ((index * 7 % 13) as Value - 6.0) / 11.0,
+                )
+            })
+            .collect();
+
+        let transform = |plan: Arc<dyn Fft<Value>>| {
+            let mut buffer = authored.clone();
+            let mut scratch = vec![Complex::new(0.0, 0.0); plan.get_inplace_scratch_len()];
+            plan.process_with_scratch(&mut buffer, &mut scratch);
+            buffer
+        };
+        let cached_output = transform(cached);
+        let fresh_output = transform(fresh);
+        for (cached, fresh) in cached_output.iter().zip(fresh_output) {
+            assert_eq!(cached.re.to_bits(), fresh.re.to_bits());
+            assert_eq!(cached.im.to_bits(), fresh.im.to_bits());
+        }
+    }
+
+    #[test]
+    fn fft_plan_cache_recovers_from_mutex_poisoning() {
+        let cache = Mutex::new(ForwardFftPlanCache::default());
+        let poisoned = std::panic::catch_unwind(|| {
+            let mut guard = cache.lock().expect("fresh cache lock");
+            guard.get_or_plan(8);
+            panic!("intentional cache poison");
+        });
+        assert!(poisoned.is_err());
+        let guard = lock_forward_fft_plan_cache(&cache);
+        assert_eq!(guard.entry_count(), 0);
+        drop(guard);
+        assert!(!cache.is_poisoned());
+
+        let recovered = lock_forward_fft_plan_cache(&cache).get_or_plan(37);
+        let mut buffer = vec![Complex::new(0.0, 0.0); 37];
+        buffer[1] = Complex::new(1.0, -0.5);
+        let mut scratch = vec![Complex::new(0.0, 0.0); recovered.get_inplace_scratch_len()];
+        recovered.process_with_scratch(&mut buffer, &mut scratch);
+        assert!(
+            buffer
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
+        let guard = lock_forward_fft_plan_cache(&cache);
+        assert!(guard.contains(37));
+        assert_eq!(guard.entry_count(), 1);
     }
 
     #[test]
