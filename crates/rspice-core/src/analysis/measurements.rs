@@ -1282,12 +1282,18 @@ impl Waveform {
             0.0
         };
         let mut centered_scale = 0.0_f64;
-        for value in &self.values {
-            let centered = *value / source_scale - normalized_mean;
+        for (index, value) in self.values.iter().enumerate() {
+            let normalized = qualified_fft_scaling(*value, source_scale, index, "source scaling")?;
+            let centered = normalized - normalized_mean;
             if !centered.is_finite() {
                 return Err(MeasurementError::FftError(
                     "mean removal produced a non-finite FFT sample".to_string(),
                 ));
+            }
+            if normalized != normalized_mean && centered == 0.0 {
+                return Err(MeasurementError::FftError(format!(
+                    "mean removal erased a nonzero normalized difference at sample {index}"
+                )));
             }
             centered_scale = centered_scale.max(centered.abs());
         }
@@ -1312,9 +1318,12 @@ impl Waveform {
                 "failed to allocate {sample_count} FFT samples: {error}"
             ))
         })?;
-        for value in &self.values {
-            let centered = *value / source_scale - normalized_mean;
-            buffer.push(Complex::new(centered / centered_scale, 0.0));
+        for (index, value) in self.values.iter().enumerate() {
+            let normalized = qualified_fft_scaling(*value, source_scale, index, "source scaling")?;
+            let centered = normalized - normalized_mean;
+            let transform_sample =
+                qualified_fft_scaling(centered, centered_scale, index, "centered scaling")?;
+            buffer.push(Complex::new(transform_sample, 0.0));
         }
         let fft = FftPlanner::<Value>::new().plan_fft_forward(sample_count);
         let scratch_len = fft.get_inplace_scratch_len();
@@ -2274,24 +2283,67 @@ fn value_ulp(value: Value) -> Value {
 }
 
 fn normalized_mean(values: &[Value], scale: Value) -> Result<Value, MeasurementError> {
+    if values.is_empty() {
+        return Err(MeasurementError::FftError(
+            "cannot compute an FFT mean for an empty record".to_string(),
+        ));
+    }
     let count = values.len() as Value;
-    let mut sum = 0.0;
-    let mut compensation = 0.0;
-    for value in values {
-        let term = (*value / scale) / count;
-        let corrected = term - compensation;
-        let next = sum + corrected;
-        compensation = (next - sum) - corrected;
-        sum = next;
+    if !count.is_finite() || count as usize != values.len() {
+        return Err(MeasurementError::FftError(format!(
+            "FFT sample count {} cannot be represented exactly",
+            values.len()
+        )));
     }
-    let mean = sum.clamp(-1.0, 1.0);
-    if mean.is_finite() {
-        Ok(mean)
-    } else {
-        Err(MeasurementError::FftError(
-            "scale-safe waveform mean is non-finite".to_string(),
-        ))
+    let mut sum = ExactFloatSum::default();
+    for (index, value) in values.iter().enumerate() {
+        let normalized = qualified_fft_scaling(*value, scale, index, "mean source scaling")?;
+        sum.add(normalized).map_err(|error| {
+            MeasurementError::FftError(format!(
+                "failed to accumulate normalized FFT mean at sample {index}: {error}"
+            ))
+        })?;
     }
+    let total = sum.finish().map_err(|error| {
+        MeasurementError::FftError(format!("failed to finalize normalized FFT mean: {error}"))
+    })?;
+    let mean = total / count;
+    if total != 0.0 && mean == 0.0 {
+        return Err(MeasurementError::FftError(
+            "dividing the nonzero normalized FFT sum by the sample count underflowed".to_string(),
+        ));
+    }
+    if !mean.is_finite() || !(-1.0..=1.0).contains(&mean) {
+        return Err(MeasurementError::FftError(format!(
+            "scale-safe waveform mean is outside [-1, 1] ({mean})"
+        )));
+    }
+    Ok(if mean == 0.0 { 0.0 } else { mean })
+}
+
+fn qualified_fft_scaling(
+    value: Value,
+    scale: Value,
+    index: usize,
+    stage: &str,
+) -> Result<Value, MeasurementError> {
+    if !value.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        return Err(MeasurementError::FftError(format!(
+            "FFT {stage} at sample {index} requires a finite value and positive finite scale, got {value} and {scale}"
+        )));
+    }
+    let normalized = value / scale;
+    if !normalized.is_finite() {
+        return Err(MeasurementError::FftError(format!(
+            "FFT {stage} produced a non-finite value at sample {index} ({normalized})"
+        )));
+    }
+    if value != 0.0 && normalized == 0.0 {
+        return Err(MeasurementError::FftError(format!(
+            "FFT {stage} erased nonzero sample {index} ({value} / {scale})"
+        )));
+    }
+    Ok(normalized)
 }
 
 fn map_fourier_measurement_error(error: FourierError) -> MeasurementError {
@@ -2422,6 +2474,18 @@ mod tests {
             validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES + 1),
             Err(MeasurementError::FftError(_))
         ));
+    }
+
+    #[test]
+    fn normalized_fft_mean_preserves_a_subnormal_cancellation_residual() {
+        let minimum_subnormal = Value::from_bits(1);
+        let values = [0.125, minimum_subnormal, -0.125, 0.0, 0.0, 0.0, 0.0, 0.0];
+
+        assert_eq!(
+            normalized_mean(&values, 0.125)
+                .expect("the exact normalized cancellation residual is representable"),
+            minimum_subnormal
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use std::f64::consts::PI;
 
-use rspice_core::analysis::measurements::Waveform;
+use rspice_core::analysis::measurements::{MeasurementError, Waveform};
 
 fn uniform_time(sample_count: usize, sample_rate: f64) -> Vec<f64> {
     (0..sample_count)
@@ -14,6 +14,31 @@ fn fft_waveform(sample_count: usize, sample_rate: f64, value: impl Fn(usize) -> 
     let time = uniform_time(sample_count, sample_rate);
     let values: Vec<_> = (0..sample_count).map(value).collect();
     Waveform::new(&time, &values).expect("finite uniform FFT fixture is valid")
+}
+
+#[test]
+fn fft_rejects_a_nonzero_coefficient_lost_during_input_normalization() {
+    let minimum_subnormal = f64::from_bits(1);
+    let values = [
+        f64::MAX,
+        -f64::MAX,
+        8.0 * minimum_subnormal,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ];
+    let waveform = fft_waveform(values.len(), values.len() as f64, |index| values[index]);
+
+    // The exact DC peak amplitude is sum(values) / N = minimum_subnormal.
+    // The current double-valued FFT API cannot publish a smaller evidence
+    // representation, so it must fail rather than report negative infinity.
+    assert!(matches!(waveform.fft(), Err(MeasurementError::FftError(_))));
+    assert!(matches!(
+        waveform.dominant_frequency(),
+        Err(MeasurementError::FftError(_))
+    ));
 }
 
 fn periodic_waveform(
