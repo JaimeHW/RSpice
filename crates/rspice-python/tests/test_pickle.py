@@ -793,6 +793,7 @@ class TestPeriodicResults:
             "sideband_max",
             "sidebands",
             "node_names",
+            "branch_names",
             "input_source",
             "output_node",
             "converged",
@@ -819,6 +820,14 @@ class TestPeriodicResults:
                     restored.conversion_gain_db(source, output),
                     original.conversion_gain_db(source, output),
                     err_msg=f"{source} -> {output} in dB",
+                )
+        assert original.branch_names, "PAC branch-current pickle coverage is non-vacuous"
+        for branch in original.branch_names:
+            for sideband in original.sidebands:
+                np.testing.assert_array_equal(
+                    restored.branch_current(branch, sideband),
+                    original.branch_current(branch, sideband),
+                    err_msg=f"{branch}, sideband {sideband}",
                 )
         assert repr(restored) == repr(original)
 
@@ -960,9 +969,49 @@ class TestDistortionResult:
         state[4] = []
         malformed.append((state, "missing its conversion grid"))
 
+        state = list(copy.deepcopy(valid_state))
+        state[6][0].pop()
+        malformed.append((state, "branch-current grid"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[6][0][0].append((0.0, 0.0))
+        malformed.append((state, "branch-current grid"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[6][0][0][0] = (float("inf"), 0.0)
+        malformed.append((state, "non-finite"))
+
         for state, message in malformed:
             with pytest.raises(ValueError, match=message):
                 rspice.PacResult._unpickle(*state)
+
+    def test_pac_legacy_pickle_requires_honest_empty_branch_identity(
+        self, engine, mixer_netlist
+    ):
+        original = engine.run_pac(
+            mixer_netlist, RF_FUNDAMENTAL, 1e3, 1e5, 2, "V1", "out", sideband_max=1
+        )
+        state = list(copy.deepcopy(original.__reduce__()[1]))
+        assert state[2][1]
+
+        with pytest.raises(ValueError, match="without branch-current evidence"):
+            rspice.PacResult._unpickle(*state[:6])
+
+        node_names, _ = state[2]
+        state[2] = (node_names, [])
+        legacy = rspice.PacResult._unpickle(*state[:6])
+        assert legacy.branch_names == []
+        np.testing.assert_array_equal(
+            legacy.voltage("out", 0), original.voltage("out", 0)
+        )
+        migrated_state = legacy.__reduce__()[1]
+        assert len(migrated_state) == 7
+        assert migrated_state[6] is not None
+        assert all(
+            currents == []
+            for per_frequency in migrated_state[6]
+            for currents in per_frequency
+        )
 
     def test_two_tone_products_survive(self, engine):
         deck = DISTORTION_DECK.replace("DISTOF1 1m 0", "DISTOF1 1m 0 DISTOF2 2m 0")

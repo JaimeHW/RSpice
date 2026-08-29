@@ -194,6 +194,40 @@ C1 out 0 159.154943091895p
         result.voltage("missing", 0)
 
 
+def test_pac_exposes_exact_mna_branch_currents():
+    netlist = parse(
+        """
+VIN out 0 DC 0 AC 9 27
+R1 out 0 2k
+.end
+"""
+    )
+    result = rspice.Engine().run_pac(
+        netlist,
+        F0,
+        1.0e5,
+        2.0e5,
+        2,
+        "VIN",
+        "out",
+        variation="lin",
+        sideband_min=-1,
+        sideband_max=1,
+    )
+
+    assert result.branch_names == ["VIN"]
+    direct = result.branch_current("vin", 0)
+    assert direct.dtype == np.complex128
+    np.testing.assert_allclose(direct, -5.0e-4, rtol=1e-12, atol=1e-15)
+    np.testing.assert_array_equal(
+        result.branch_current("VIN", -1), np.zeros(2, dtype=np.complex128)
+    )
+    with pytest.raises(IndexError):
+        result.branch_current("VIN", 2)
+    with pytest.raises(KeyError):
+        result.branch_current("missing", 0)
+
+
 def test_pnoise_reports_psd_density_and_contributor_identity():
     netlist = parse(
         """

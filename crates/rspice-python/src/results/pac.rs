@@ -135,6 +135,11 @@ impl PyPacResult {
     }
 
     #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.inner.branch_names.clone()
+    }
+
+    #[getter]
     fn input_source(&self) -> Option<String> {
         self.inner.input_source.clone()
     }
@@ -159,6 +164,49 @@ impl PyPacResult {
             .map(|frequency_index| self.inner.voltage(node_index, frequency_index, sideband))
             .collect::<Result<Vec<_>, _>>()
             .map_err(pac_value_error)?;
+        Ok(values.to_pyarray(py))
+    }
+
+    /// Return branch current with the core MNA convention: positive from the
+    /// branch's authored positive terminal toward its negative terminal.
+    fn branch_current<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+        sideband: i32,
+    ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        self.validate_sideband(sideband)?;
+        let branch = self
+            .inner
+            .branch_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .ok_or_else(|| crate::errors::key_error(format!("unknown branch '{name}'")))?;
+        let values = (0..self.inner.frequencies.len())
+            .map(|frequency_index| {
+                let data = self
+                    .inner
+                    .get_sideband_data(frequency_index, sideband)
+                    .ok_or_else(|| {
+                        pac_value_error(format!(
+                            "PAC branch-current coordinate (frequency {frequency_index}, sideband {sideband}) is outside the result axes"
+                        ))
+                    })?;
+                let current = data.branch_currents.get(branch).copied().ok_or_else(|| {
+                    pac_value_error(format!(
+                        "branch index {branch} is outside this {}-branch PAC sideband record",
+                        data.branch_currents.len()
+                    ))
+                })?;
+                if !current.re.is_finite() || !current.im.is_finite() {
+                    return Err(pac_value_error(format!(
+                        "PAC branch-current coordinate (frequency {frequency_index}, sideband {sideband}, branch {branch}) is non-finite ({:+.6e}{:+.6e}j)",
+                        current.re, current.im
+                    )));
+                }
+                Ok(current)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
         Ok(values.to_pyarray(py))
     }
 
@@ -211,10 +259,10 @@ impl PyPacResult {
 
     /// Rebuild from pickled state. Not part of the public API.
     ///
-    /// Branch currents have no accessor on this class and are not carried.
     /// Each sideband's absolute frequency is recomputed by `PacResult::new`
     /// from the same `sideband * f0 + offset` relation that produced it.
     #[staticmethod]
+    #[pyo3(signature = (sweep, frequencies, names, node_voltages, conversion_matrix, sources, branch_currents=None))]
     fn _unpickle(
         sweep: (f64, i32, i32, usize, f64, bool),
         frequencies: Vec<f64>,
@@ -222,6 +270,7 @@ impl PyPacResult {
         node_voltages: ComplexGridState,
         conversion_matrix: ComplexGridState,
         sources: (Option<String>, Option<String>),
+        branch_currents: Option<ComplexGridState>,
     ) -> PyResult<Self> {
         let (fundamental_frequency, sideband_min, sideband_max, iterations, residual, converged) =
             sweep;
@@ -272,6 +321,20 @@ impl PyPacResult {
             sideband_count,
             "conversion grid",
         )?;
+        if branch_currents.is_none() && !branch_names.is_empty() {
+            return Err(pac_value_error(
+                "PAC pickle has nonempty branch identities without branch-current evidence",
+            ));
+        }
+        if let Some(grid) = branch_currents.as_ref() {
+            validate_pickle_grid(
+                grid,
+                frequencies.len(),
+                sideband_count,
+                branch_names.len(),
+                "branch-current grid",
+            )?;
+        }
         let mut inner = rspice_core::analysis::PacResult::new(
             fundamental_frequency,
             frequencies,
@@ -293,6 +356,24 @@ impl PyPacResult {
                     })?;
                 for (slot, (re, im)) in data.node_voltages.iter_mut().zip(voltages) {
                     *slot = Complex64::new(re, im);
+                }
+            }
+        }
+        if let Some(branch_currents) = branch_currents {
+            for (freq_idx, per_frequency) in branch_currents.into_iter().enumerate() {
+                for (offset, currents) in per_frequency.into_iter().enumerate() {
+                    let sideband = checked_pickle_sideband(sideband_min, offset)?;
+                    let data = inner
+                        .get_sideband_data_mut(freq_idx, sideband)
+                        .ok_or_else(|| {
+                            pac_value_error(format!(
+                                "PAC pickle branch-current coordinate ({freq_idx}, {sideband}) is outside the constructed result"
+                            ))
+                        })?;
+                    for (branch, (re, im)) in currents.into_iter().enumerate() {
+                        data.set_current(branch, Complex64::new(re, im))
+                            .map_err(pac_value_error)?;
+                    }
                 }
             }
         }
@@ -333,6 +414,7 @@ impl PyPacResult {
             ComplexGridState,
             ComplexGridState,
             (Option<String>, Option<String>),
+            Option<ComplexGridState>,
         ),
     )> {
         let sidebands: Vec<i32> = (self.inner.sideband_min..=self.inner.sideband_max).collect();
@@ -368,6 +450,21 @@ impl PyPacResult {
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(pac_value_error)?;
+        let branch_currents = Some(
+            (0..self.inner.frequencies.len())
+                .map(|freq_idx| {
+                    sidebands
+                        .iter()
+                        .map(|&sideband| {
+                            self.inner
+                                .get_sideband_data(freq_idx, sideband)
+                                .map(|data| complex_state(&data.branch_currents))
+                                .unwrap_or_default()
+                        })
+                        .collect()
+                })
+                .collect(),
+        );
         Ok((
             unpickler::<Self>(py)?,
             (
@@ -390,6 +487,7 @@ impl PyPacResult {
                     self.inner.input_source.clone(),
                     self.inner.output_node.clone(),
                 ),
+                branch_currents,
             ),
         ))
     }
