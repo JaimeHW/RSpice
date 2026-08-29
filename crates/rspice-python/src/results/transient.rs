@@ -302,9 +302,14 @@ impl PyTransientResult {
         }
         let analysis =
             FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(num_harmonics));
-        Ok(PyFourierResult::from_core(
-            &analysis.analyze(&self.inner.time, waveform),
-        ))
+        let result = analysis
+            .analyze(&self.inner.time, waveform)
+            .map_err(|error| {
+                crate::errors::value_error(format!(
+                    "Fourier waveform could not be analyzed: {error}"
+                ))
+            })?;
+        Ok(PyFourierResult::from_core(&result))
     }
 }
 
@@ -431,15 +436,16 @@ impl PyTransientResult {
     ///     num_harmonics: Number of harmonics to compute (default 9)
     ///
     /// Returns:
-    ///     FourierResult: DC component, harmonics, and THD
+    ///     FourierResult: DC component, harmonics, and optional THD. THD is
+    ///     None when the fundamental magnitude is exactly zero.
     ///
     /// Raises:
-    ///     ValueError: If fundamental is not a positive finite number
+    ///     ValueError: If the Fourier configuration or waveform evidence is invalid
     ///     IndexError / KeyError: For invalid nodes
     ///
     /// Example:
     ///     >>> four = tran.fourier("out", fundamental=1e3)
-    ///     >>> print(f"THD = {four.thd_percent:.2f}%")
+    ///     >>> print("undefined" if four.thd_percent is None else f"{four.thd_percent:.2f}%")
     ///     >>> diff = tran.fourier("outp", 1e3, reference="outn")
     #[pyo3(signature = (node, fundamental, num_harmonics=9, *, reference=None))]
     fn fourier(

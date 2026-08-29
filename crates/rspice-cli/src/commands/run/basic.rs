@@ -1126,6 +1126,19 @@ pub(super) fn run_fourier(
 ) -> Result<(), CliError> {
     use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 
+    if !fundamental.is_finite() || fundamental <= 0.0 {
+        return Err(CliError::simulation_error_in(
+            format!("invalid Fourier fundamental frequency {fundamental}"),
+            "Fourier",
+        ));
+    }
+    if num_harmonics == 0 {
+        return Err(CliError::simulation_error_in(
+            "Fourier harmonic count must be at least one",
+            "Fourier",
+        ));
+    }
+
     if !ctx.quiet {
         println!(
             "Running Fourier analysis: fundamental = {} Hz, {} harmonics",
@@ -1137,8 +1150,21 @@ pub(super) fn run_fourier(
     }
 
     let period = 1.0 / fundamental;
-    let analysis_time = period * (num_harmonics + 2) as f64;
-    let tstep = period / 100.0;
+    let analysis_periods = num_harmonics.checked_add(2).ok_or_else(|| {
+        CliError::simulation_error_in("Fourier harmonic count is too large", "Fourier")
+    })?;
+    let analysis_time = period * analysis_periods as f64;
+    let harmonic_intervals = num_harmonics.checked_mul(8).ok_or_else(|| {
+        CliError::simulation_error_in("Fourier harmonic count is too large", "Fourier")
+    })?;
+    let sample_intervals = 100usize.max(harmonic_intervals);
+    let tstep = period / sample_intervals as f64;
+    if !analysis_time.is_finite() || analysis_time <= 0.0 || !tstep.is_finite() || tstep <= 0.0 {
+        return Err(CliError::simulation_error_in(
+            "Fourier transient schedule is not finite and positive",
+            "Fourier",
+        ));
+    }
 
     let tran_result = ctx
         .engine
@@ -1164,7 +1190,13 @@ pub(super) fn run_fourier(
                     .map(|(vp, vn)| vp - vn)
                     .collect();
                 fourier.analyze(&tran_result.time, &diff_waveform)
-            };
+            }
+            .map_err(|error| {
+                CliError::simulation_error_in(
+                    format!("Fourier output `{output}` could not be analyzed: {error}"),
+                    "Fourier",
+                )
+            })?;
             analyzed.push((output.clone(), result));
         } else if !ctx.quiet {
             println!("Warning: Could not find node for output '{}'", output);
@@ -1194,10 +1226,11 @@ pub(super) fn run_fourier(
             }
 
             println!("├────────────────────────────────────────────────────────────────┤");
-            println!(
-                "│  THD:            {:10.4} %                                  │",
-                result.thd
-            );
+            if let Some(thd) = result.thd {
+                println!("│  THD:            {thd:10.4} %                                  │");
+            } else {
+                println!("│  THD:             undefined                                  │");
+            }
             println!("└────────────────────────────────────────────────────────────────┘");
         }
     }
@@ -1268,10 +1301,14 @@ fn write_fourier_output(
             )
             .map_err(io_err)?;
             for (output, result) in analyzed {
+                let thd_percent = result
+                    .thd
+                    .map(|value| format!("{value:.6}"))
+                    .unwrap_or_default();
                 for harmonic in &result.harmonics {
                     writeln!(
                         file,
-                        "{1}{0}{2}{0}{3:.17e}{0}{4:.17e}{0}{5:.6}{0}{6:.17e}{0}{7:.6}",
+                        "{1}{0}{2}{0}{3:.17e}{0}{4:.17e}{0}{5:.6}{0}{6:.17e}{0}{7}",
                         sep,
                         output,
                         harmonic.harmonic_number,
@@ -1279,7 +1316,7 @@ fn write_fourier_output(
                         harmonic.magnitude,
                         harmonic.phase,
                         result.dc_component,
-                        result.thd,
+                        thd_percent,
                     )
                     .map_err(io_err)?;
                 }
@@ -1291,11 +1328,12 @@ fn write_fourier_output(
             let results: Vec<serde_json::Value> = analyzed
                 .iter()
                 .map(|(output, result)| {
+                    let thd_ratio = result.thd.map(|value| value / 100.0);
                     serde_json::json!({
                         "output": output,
                         "dc_component": result.dc_component,
                         // Core's thd field is already a percentage.
-                        "thd": result.thd / 100.0,
+                        "thd": thd_ratio,
                         "thd_percent": result.thd,
                         "harmonics": result
                             .harmonics

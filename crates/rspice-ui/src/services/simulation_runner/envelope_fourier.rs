@@ -1327,22 +1327,14 @@ fn analyze_fourier_with_abort(
 
     let t_end = *time.last().expect("length checked");
     let t_start = (t_end - 1.0 / fundamental_freq).max(time[0]);
-    let mut start_idx = 0;
-    for (idx, sample_time) in time.iter().enumerate() {
-        poll_periodically(abort, idx)?;
-        if *sample_time >= t_start {
-            start_idx = idx;
-            break;
-        }
-    }
-    let end_idx = time.len() - 1;
-    if end_idx <= start_idx.saturating_add(1) {
+    let (window_time, window_values) = exact_fourier_window(time, values, t_start, t_end, abort)?;
+    if window_time.len() < 3 {
         return Err(ServiceRunError::Failure(
             "Fourier analysis period has insufficient samples".to_string(),
         ));
     }
-    let time = &time[start_idx..=end_idx];
-    let values = &values[start_idx..=end_idx];
+    let time = window_time.as_slice();
+    let values = window_values.as_slice();
     let origin = time[0];
     let duration = time[time.len() - 1] - origin;
     if !duration.is_finite() || duration <= 0.0 {
@@ -1767,7 +1759,8 @@ mod tests {
             })
             .collect();
         let expected = FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(6))
-            .analyze(&time, &values);
+            .analyze(&time, &values)
+            .expect("qualified waveform should have a core Fourier decomposition");
 
         let actual = analyze_fourier_with_abort(&time, &values, fundamental, 6, &NoAbort)
             .expect("cancellable decomposition should succeed");
@@ -1778,8 +1771,10 @@ mod tests {
             (actual
                 .thd_percent
                 .expect("nonzero fundamental has defined THD")
-                - expected.thd)
-                .abs()
+                - expected
+                    .thd
+                    .expect("nonzero core fundamental has defined THD"))
+            .abs()
                 < 1.0e-9
         );
         for (value, harmonic) in actual.response.iter().zip(&expected.harmonics) {

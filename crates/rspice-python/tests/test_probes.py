@@ -84,6 +84,13 @@ class TestFourier:
         with pytest.raises(ValueError):
             tran.fourier("in", 1e3, 0)
 
+    def test_ground_has_a_zero_spectrum_with_undefined_thd(self, tran):
+        result = tran.fourier("0", 1e3)
+
+        assert result.thd is None
+        assert result.thd_percent is None
+        assert all(harmonic.magnitude == 0.0 for harmonic in result.harmonics)
+
 
 class TestFourDirective:
     """`.FOUR` in a deck reaches the same quantities as the direct calls."""
@@ -129,3 +136,13 @@ class TestFourDirective:
         assert len(four) == 1
         assert four[0].skipped
         assert "tran" in four[0].reason
+
+    def test_four_with_too_short_a_transient_is_recorded_as_skipped(self, engine):
+        deck = SINE.replace(".end", ".tran 2u 100u\n.four 1k V(in)\n.end")
+        report = engine.run(rspice.Netlist.parse(deck))
+
+        assert report.fourier == []
+        four = [record for record in report.records if record.kind == "four"]
+        assert len(four) == 1
+        assert four[0].skipped
+        assert "shorter than the required Fourier window" in four[0].reason

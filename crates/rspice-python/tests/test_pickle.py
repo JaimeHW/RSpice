@@ -198,7 +198,9 @@ class TestResults:
         assert restored.branch_current("V1") == original.branch_current("V1")
 
     def test_transient_result_including_derived_analyses(self, engine, analysis_netlist):
-        original = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=2e-5)
+        # The default nine-harmonic decomposition requires at least eight
+        # samples per highest-harmonic period.
+        original = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=1e-5)
         restored = round_trip(original)
 
         assert restored.num_points == original.num_points
@@ -320,7 +322,8 @@ class TestResults:
             )
 
     def test_fourier_result(self, engine, analysis_netlist):
-        tran = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=2e-5)
+        # Retain enough transient evidence for the default nine harmonics.
+        tran = engine.run_tran(analysis_netlist, stop_time=2e-3, max_step=1e-5)
         original = tran.fourier("out", 1e3)
         restored = round_trip(original)
 

@@ -626,12 +626,24 @@ fn evaluate_pending_fourier(py: Python<'_>, out: &mut DirectiveOutcomes) {
                                 rspice_core::analysis::FourierConfig::new(fundamental)
                                     .with_harmonics(num_harmonics),
                             );
-                            let result = analysis.analyze(&tran_ref.inner.time, &waveform);
-                            out.fourier.push(PyFourierResult::from_core(&result));
-                            out.records.push(PyAnalysisRecord::executed(
-                                "four",
-                                format!(".four {fundamental} {output}"),
-                            ));
+                            match analysis.analyze(&tran_ref.inner.time, &waveform) {
+                                Ok(result) => {
+                                    out.fourier.push(PyFourierResult::from_core(&result));
+                                    out.records.push(PyAnalysisRecord::executed(
+                                        "four",
+                                        format!(".four {fundamental} {output}"),
+                                    ));
+                                }
+                                Err(error) => {
+                                    out.records.push(PyAnalysisRecord::skipped(
+                                        "four",
+                                        format!(".four {fundamental} {output}"),
+                                        &format!(
+                                            "Fourier output `{output}` could not be analyzed: {error}"
+                                        ),
+                                    ));
+                                }
+                            }
                         }
                         Err(err) => {
                             out.records.push(PyAnalysisRecord::skipped(

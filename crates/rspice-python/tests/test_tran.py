@@ -272,5 +272,7 @@ class TestFourier:
             tran.fourier("out", fundamental=-1.0)
         with pytest.raises(ValueError):
             tran.fourier("out", fundamental=1e3, num_harmonics=0)
+        with pytest.raises(ValueError, match="shorter than the required Fourier window"):
+            tran.fourier("out", fundamental=1e3)
         with pytest.raises(KeyError):
             tran.fourier("nonexistent", fundamental=1e3)

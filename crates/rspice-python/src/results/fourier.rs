@@ -67,11 +67,11 @@ impl PyHarmonic {
     }
 }
 
-/// Fourier analysis result (harmonic decomposition + THD)
+/// Fourier analysis result (harmonic decomposition + optional THD)
 ///
 /// Example:
 ///     >>> four = tran.fourier("out", fundamental=1e3)
-///     >>> print(f"THD = {four.thd_percent:.3f}%")
+///     >>> print("undefined" if four.thd_percent is None else f"{four.thd_percent:.3f}%")
 ///     >>> for h in four.harmonics:
 ///     ...     print(h)
 #[pyclass(name = "FourierResult", module = "rspice", from_py_object)]
@@ -80,9 +80,10 @@ pub struct PyFourierResult {
     /// DC component of the waveform
     #[pyo3(get)]
     pub dc_component: f64,
-    /// Total harmonic distortion as a ratio (0-1)
+    /// Total harmonic distortion as a ratio (0-1), or `None` when the
+    /// fundamental magnitude is exactly zero.
     #[pyo3(get)]
-    pub thd: f64,
+    pub thd: Option<f64>,
     harmonics: Vec<PyHarmonic>,
 }
 
@@ -106,7 +107,7 @@ impl PyFourierResult {
         Self {
             dc_component: result.dc_component,
             // Core reports THD in percent already.
-            thd: result.thd / 100.0,
+            thd: result.thd.map(|value| value / 100.0),
             harmonics,
         }
     }
@@ -116,8 +117,8 @@ impl PyFourierResult {
 impl PyFourierResult {
     /// Total harmonic distortion in percent
     #[getter]
-    fn thd_percent(&self) -> f64 {
-        self.thd * 100.0
+    fn thd_percent(&self) -> Option<f64> {
+        self.thd.map(|value| value * 100.0)
     }
 
     /// All harmonic components (index 0 = fundamental)
@@ -140,17 +141,21 @@ impl PyFourierResult {
     }
 
     fn __repr__(&self) -> String {
+        let thd = self
+            .thd
+            .map(|value| format!("{:.4}%", value * 100.0))
+            .unwrap_or_else(|| "undefined".to_owned());
         format!(
-            "FourierResult(harmonics={}, dc={:.4e}, thd={:.4}%)",
+            "FourierResult(harmonics={}, dc={:.4e}, thd={})",
             self.harmonics.len(),
             self.dc_component,
-            self.thd * 100.0
+            thd
         )
     }
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
-    fn _unpickle(dc_component: f64, thd: f64, harmonics: Vec<PyHarmonic>) -> Self {
+    fn _unpickle(dc_component: f64, thd: Option<f64>, harmonics: Vec<PyHarmonic>) -> Self {
         Self {
             dc_component,
             thd,
@@ -162,7 +167,7 @@ impl PyFourierResult {
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<(Bound<'py, PyAny>, (f64, f64, Vec<PyHarmonic>))> {
+    ) -> PyResult<(Bound<'py, PyAny>, (f64, Option<f64>, Vec<PyHarmonic>))> {
         Ok((
             unpickler::<Self>(py)?,
             (self.dc_component, self.thd, self.harmonics.clone()),

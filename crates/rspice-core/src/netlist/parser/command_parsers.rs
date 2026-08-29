@@ -409,6 +409,14 @@ pub(super) fn parse_four_command(
     params: &ParamContext,
 ) -> Result<(Value, usize, Vec<String>), ParseError> {
     let fundamental = expect_value(stream, line_num, params)?;
+    if !fundamental.is_finite() || fundamental <= 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                ".FOUR fundamental frequency must be positive and finite, found {fundamental}"
+            ),
+        });
+    }
     let num_harmonics = match try_value(stream, params) {
         Some(value) => parse_four_harmonic_count(value, line_num)?,
         None => 9,
