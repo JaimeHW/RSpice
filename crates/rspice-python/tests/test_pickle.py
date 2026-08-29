@@ -858,6 +858,13 @@ class TestDistortionResult:
         original = engine.run_distortion(distortion_netlist, [1e3, 2e3])
         assert original.available_products == ["2f1", "3f1"]
 
+        thermal_voltage = 300.15 * 1.380649e-23 / 1.602176634e-19
+        diode_bias_current = 1e-12 * np.exp(0.5 / thermal_voltage)
+        expected_currents = {
+            "2f1": diode_bias_current * 1e-6 / (4.0 * thermal_voltage**2),
+            "3f1": diode_bias_current * 1e-9 / (24.0 * thermal_voltage**3),
+        }
+
         restored = round_trip(original)
         assert restored.is_two_tone == original.is_two_tone
         assert restored.f2_frequency == original.f2_frequency
@@ -874,15 +881,37 @@ class TestDistortionResult:
             original.fundamental_f1.voltage_complex("out"),
         )
         for product in original.available_products:
-            assert np.count_nonzero(original.product(product).voltage_complex("out"))
+            original_product = original.product(product)
+            restored_product = restored.product(product)
+            # V1 is an ideal source directly across `out`: it physically
+            # clamps every un-driven harmonic voltage to zero.  The diode's
+            # nonzero distortion products flow through the V1 MNA branch.
             np.testing.assert_array_equal(
-                restored.product(product).voltage_complex("out"),
-                original.product(product).voltage_complex("out"),
+                original_product.voltage_complex("out"), np.zeros(2, dtype=complex)
+            )
+            np.testing.assert_allclose(
+                np.abs(original_product.branch_current_complex("V1")),
+                expected_currents[product],
+                rtol=2e-5 if product == "2f1" else 2e-3,
+            )
+            np.testing.assert_array_equal(
+                restored_product.voltage_complex("out"),
+                original_product.voltage_complex("out"),
                 err_msg=product,
             )
             np.testing.assert_array_equal(
                 restored.voltage_db_relative(product, "out"),
                 original.voltage_db_relative(product, "out"),
+                err_msg=product,
+            )
+            np.testing.assert_array_equal(
+                restored_product.branch_current_complex("V1"),
+                original_product.branch_current_complex("V1"),
+                err_msg=product,
+            )
+            np.testing.assert_array_equal(
+                restored.branch_current_db_relative(product, "V1"),
+                original.branch_current_db_relative(product, "V1"),
                 err_msg=product,
             )
         assert repr(restored) == repr(original)
@@ -893,6 +922,16 @@ class TestDistortionResult:
             rspice.Netlist.parse(deck), [1e3, 2e3], f2_over_f1=0.9
         )
         assert original.available_products == ["f1+f2", "f1-f2", "2f1-f2"]
+        thermal_voltage = 300.15 * 1.380649e-23 / 1.602176634e-19
+        diode_bias_current = 1e-12 * np.exp(0.5 / thermal_voltage)
+        expected_currents = {
+            "f1+f2": diode_bias_current * 1e-3 * 2e-3 / (2.0 * thermal_voltage**2),
+            "f1-f2": diode_bias_current * 1e-3 * 2e-3 / (2.0 * thermal_voltage**2),
+            "2f1-f2": diode_bias_current
+            * (1e-3) ** 2
+            * 2e-3
+            / (8.0 * thermal_voltage**3),
+        }
 
         restored = round_trip(original)
         assert restored.is_two_tone
@@ -903,10 +942,29 @@ class TestDistortionResult:
             restored.fundamental_f2.voltage_complex("out"),
             original.fundamental_f2.voltage_complex("out"),
         )
+        np.testing.assert_array_equal(
+            restored.fundamental_f2.branch_current_complex("V1"),
+            original.fundamental_f2.branch_current_complex("V1"),
+        )
         for product in original.available_products:
+            original_product = original.product(product)
+            restored_product = restored.product(product)
             np.testing.assert_array_equal(
-                restored.product(product).voltage_complex("out"),
-                original.product(product).voltage_complex("out"),
+                original_product.voltage_complex("out"), np.zeros(2, dtype=complex)
+            )
+            np.testing.assert_allclose(
+                np.abs(original_product.branch_current_complex("V1")),
+                expected_currents[product],
+                rtol=2e-5 if product in ("f1+f2", "f1-f2") else 2e-3,
+            )
+            np.testing.assert_array_equal(
+                restored_product.voltage_complex("out"),
+                original_product.voltage_complex("out"),
+                err_msg=product,
+            )
+            np.testing.assert_array_equal(
+                restored_product.branch_current_complex("V1"),
+                original_product.branch_current_complex("V1"),
                 err_msg=product,
             )
 

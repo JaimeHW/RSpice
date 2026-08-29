@@ -81,6 +81,20 @@ def test_harmonic_products_are_actual_phasors(engine) -> None:
     )
 
 
+def test_harmonic_product_order_scaling_reaches_python(engine) -> None:
+    base = engine.run_distortion(
+        rspice.Netlist.parse(HARMONIC_DIODE.replace("DISTOF1 1m", "DISTOF1 0.5m")),
+        [1e3],
+    )
+    scaled = engine.run_distortion(rspice.Netlist.parse(HARMONIC_DIODE), [1e3])
+
+    for product, expected_ratio in [("2f1", 4.0), ("3f1", 8.0)]:
+        base_current = np.abs(base.product(product).branch_current_complex("V1"))[0]
+        scaled_current = np.abs(scaled.product(product).branch_current_complex("V1"))[0]
+        assert base_current > 0.0
+        assert scaled_current / base_current == pytest.approx(expected_ratio, rel=3e-12)
+
+
 def test_two_tone_products_and_fixed_f2_contract(engine) -> None:
     result = engine.run_distortion(
         rspice.Netlist.parse(TWO_TONE_DIODE), [1e3, 2e3], f2_over_f1=0.9
