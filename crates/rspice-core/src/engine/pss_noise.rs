@@ -422,14 +422,15 @@ impl Engine {
                     let amplitudes = evaluation_frequencies
                         .iter()
                         .map(|&frequency| {
-                            let density = source.spectral_density(frequency, temperature);
-                            if density.is_finite() && density > 0.0 {
+                            let density =
+                                Self::evaluated_noise_density(source, frequency, temperature)?;
+                            Ok(if density > 0.0 {
                                 projected * density.sqrt()
                             } else {
                                 0.0
-                            }
+                            })
                         })
-                        .collect();
+                        .collect::<Result<Vec<_>, SimulationError>>()?;
                     let identity = PssNoiseIdentity::from(source);
                     let occurrence = colored_occurrences.entry(identity.clone()).or_default();
                     let key = PssNoiseKey {
@@ -439,11 +440,22 @@ impl Engine {
                     *occurrence += 1;
                     colored.insert(key, amplitudes);
                 } else {
-                    let density = source.spectral_density(0.0, temperature);
-                    if density.is_finite() && density > 0.0 {
+                    let density = Self::evaluated_noise_density(source, 0.0, temperature)?;
+                    if density > 0.0 {
                         let contribution = density * projected * projected;
+                        if !contribution.is_finite() {
+                            return Err(SimulationError::Circuit(format!(
+                                "PSS noise projection produced a non-finite density for '{}'",
+                                source.identity.device
+                            )));
+                        }
                         for value in &mut white {
                             *value += contribution;
+                            if !value.is_finite() {
+                                return Err(SimulationError::Circuit(
+                                    "PSS white-noise density overflowed".to_string(),
+                                ));
+                            }
                         }
                     }
                 }
@@ -460,21 +472,28 @@ impl Engine {
                 let first = projection(source.first.node_pos, source.first.node_neg)?;
                 let second = projection(source.second.node_pos, source.second.node_neg)?;
                 for (index, &frequency) in evaluation_frequencies.iter().enumerate() {
-                    let Some(densities) = source.spectral_densities(frequency, temperature) else {
+                    let Some(densities) =
+                        Self::evaluated_correlated_noise_densities(source, frequency, temperature)?
+                    else {
                         continue;
                     };
-                    if !densities.first_psd.is_finite()
-                        || !densities.second_psd.is_finite()
-                        || densities.first_psd < 0.0
-                        || densities.second_psd < 0.0
-                    {
-                        continue;
-                    }
                     let first_amplitude = first * densities.first_psd.sqrt();
                     let second_amplitude = second * densities.second_psd.sqrt();
-                    white[index] += first_amplitude * first_amplitude
+                    let contribution = first_amplitude * first_amplitude
                         + second_amplitude * second_amplitude
                         + 2.0 * first_amplitude * second_amplitude * densities.phase_rad.cos();
+                    if !contribution.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "PSS correlated-noise projection produced a non-finite density for '{}'",
+                            source.identity.device
+                        )));
+                    }
+                    white[index] += contribution;
+                    if !white[index].is_finite() {
+                        return Err(SimulationError::Circuit(
+                            "PSS correlated-noise density overflowed".to_string(),
+                        ));
+                    }
                 }
             }
 

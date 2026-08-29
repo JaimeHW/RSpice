@@ -304,6 +304,22 @@ pub struct CorrelatedNoiseDensities {
     pub phase_rad: Value,
 }
 
+/// Failure to evaluate a device-noise source into physical PSD evidence.
+#[derive(Debug, Clone, Copy, thiserror::Error, PartialEq)]
+#[non_exhaustive]
+pub(crate) enum NoiseEvaluationError {
+    /// Source parameters or analysis conditions cannot describe a physical
+    /// noise density.
+    #[error("invalid noise-source state: {0}")]
+    InvalidSource(&'static str),
+    /// Evaluation overflowed or otherwise produced NaN/Inf.
+    #[error("noise spectral density is non-finite")]
+    NonFiniteDensity,
+    /// A PSD must be nonnegative by definition.
+    #[error("noise spectral density is negative ({0})")]
+    NegativeDensity(Value),
+}
+
 #[derive(Debug, Clone)]
 enum CorrelatedNoisePairModel {
     Bsim4Tnoi2 {
@@ -403,8 +419,8 @@ impl CorrelatedNoisePair {
                 let scale = 4.0
                     * self.physical_constants.boltzmann
                     * (temperature + self.temperature_offset);
-                let first_psd = (scale * first_g).max(0.0);
-                let second_psd = (scale * second_g).max(0.0);
+                let first_psd = scale * first_g;
+                let second_psd = scale * second_g;
                 if first_psd <= 0.0 && second_psd <= 0.0 {
                     return None;
                 }
@@ -415,6 +431,81 @@ impl CorrelatedNoisePair {
                 })
             }
         }
+    }
+
+    /// Evaluate and validate correlated PSD evidence without converting an
+    /// invalid device state into an inactive source.
+    pub(crate) fn try_spectral_densities(
+        &self,
+        frequency: Value,
+        temperature: Value,
+    ) -> Result<Option<CorrelatedNoiseDensities>, NoiseEvaluationError> {
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err(NoiseEvaluationError::InvalidSource(
+                "frequency must be finite and nonnegative",
+            ));
+        }
+        let source_temperature = temperature + self.temperature_offset;
+        if !temperature.is_finite()
+            || !self.temperature_offset.is_finite()
+            || !source_temperature.is_finite()
+            || source_temperature <= 0.0
+        {
+            return Err(NoiseEvaluationError::InvalidSource(
+                "absolute source temperature must be finite and positive",
+            ));
+        }
+        if !self.physical_constants.boltzmann.is_finite()
+            || self.physical_constants.boltzmann <= 0.0
+        {
+            return Err(NoiseEvaluationError::InvalidSource(
+                "Boltzmann constant must be finite and positive",
+            ));
+        }
+
+        match self.model {
+            CorrelatedNoisePairModel::Bsim4Tnoi2 {
+                gamma_gd0,
+                ctnoi,
+                sigrat,
+                multiplier,
+            } => {
+                if !gamma_gd0.is_finite()
+                    || !ctnoi.is_finite()
+                    || !sigrat.is_finite()
+                    || !multiplier.is_finite()
+                {
+                    return Err(NoiseEvaluationError::InvalidSource(
+                        "BSIM4 correlated-noise parameters must be finite",
+                    ));
+                }
+                if gamma_gd0 < 0.0 || multiplier < 0.0 {
+                    return Err(NoiseEvaluationError::InvalidSource(
+                        "BSIM4 correlated-noise conductance and multiplier must be nonnegative",
+                    ));
+                }
+                if gamma_gd0 == 0.0 || multiplier == 0.0 {
+                    return Ok(None);
+                }
+            }
+        }
+
+        let Some(densities) = self.spectral_densities(frequency, temperature) else {
+            return Ok(None);
+        };
+        if !densities.first_psd.is_finite()
+            || !densities.second_psd.is_finite()
+            || !densities.phase_rad.is_finite()
+        {
+            return Err(NoiseEvaluationError::NonFiniteDensity);
+        }
+        if densities.first_psd < 0.0 {
+            return Err(NoiseEvaluationError::NegativeDensity(densities.first_psd));
+        }
+        if densities.second_psd < 0.0 {
+            return Err(NoiseEvaluationError::NegativeDensity(densities.second_psd));
+        }
+        Ok(Some(densities))
     }
 }
 
@@ -792,7 +883,11 @@ impl NoiseSource {
         }
     }
 
-    /// Compute current noise spectral density (A²/Hz) at given frequency
+    /// Compute current noise spectral density (A²/Hz) at given frequency.
+    ///
+    /// Invalid source state is represented by NaN. Production analyses use
+    /// [`Self::try_spectral_density`] so it becomes a typed failure rather
+    /// than an apparently inactive source.
     pub fn spectral_density(&self, frequency: Value, temperature: Value) -> Value {
         match self.noise_type {
             NoiseSourceType::Thermal => {
@@ -804,7 +899,7 @@ impl NoiseSource {
                         * (temperature + self.temperature_offset)
                         / self.parameter
                 } else {
-                    0.0
+                    Value::NAN
                 }
             }
             NoiseSourceType::Shot => {
@@ -829,26 +924,44 @@ impl NoiseSource {
                 kb * self.current.abs().powf(ab) / (1.0 + f_ratio * f_ratio)
             }
             // Explicit spectral density evaluated at the operating point
-            NoiseSourceType::White => self.parameter.max(0.0),
+            NoiseSourceType::White => self.parameter,
             // Interpolated table, clamped to the endpoints outside the
             // covered range; log-log when flagged
             NoiseSourceType::Table => {
-                let Some(table) = &self.table else { return 0.0 };
+                let Some(table) = &self.table else {
+                    return Value::NAN;
+                };
                 let (points, log_interp) = (&table.0, table.1);
-                (self.parameter * Self::interpolate_table(points, log_interp, frequency)).max(0.0)
+                self.parameter * Self::interpolate_table(points, log_interp, frequency)
             }
             NoiseSourceType::Bsim4Flicker => self
                 .bsim4_flicker
                 .as_ref()
                 .map(|model| model.spectral_density(frequency, temperature))
-                .unwrap_or(0.0),
+                .unwrap_or(Value::NAN),
             NoiseSourceType::Bsim3Flicker => self
                 .bsim3_flicker
                 .as_ref()
                 .map(|model| model.spectral_density(frequency, temperature))
-                .unwrap_or(0.0),
+                .unwrap_or(Value::NAN),
             NoiseSourceType::Bsim4CorrelatedThermal => 0.0,
         }
+    }
+
+    /// Evaluate a source and require finite, nonnegative PSD evidence.
+    pub(crate) fn try_spectral_density(
+        &self,
+        frequency: Value,
+        temperature: Value,
+    ) -> Result<Value, NoiseEvaluationError> {
+        let density = self.spectral_density(frequency, temperature);
+        if !density.is_finite() {
+            return Err(NoiseEvaluationError::NonFiniteDensity);
+        }
+        if density < 0.0 {
+            return Err(NoiseEvaluationError::NegativeDensity(density));
+        }
+        Ok(density)
     }
 
     /// Interpolate a sorted (f, p) table at `frequency`, clamping to the
@@ -1346,6 +1459,63 @@ impl IntegratedNoise {
 #[cfg(test)]
 mod mechanism_tests {
     use super::*;
+
+    #[test]
+    fn invalid_elementary_psd_evidence_is_not_converted_to_zero() {
+        for invalid in [Value::NAN, Value::INFINITY, -1.0] {
+            let source = NoiseSource::white("B1".to_string(), 1, 0, invalid);
+            assert!(source.try_spectral_density(1.0e3, 300.15).is_err());
+        }
+
+        let missing_table = NoiseSource {
+            table: None,
+            ..NoiseSource::tabulated("B2".to_string(), 1, 0, 1.0, vec![(1.0, 1.0)], false)
+        };
+        assert!(missing_table.try_spectral_density(1.0e3, 300.15).is_err());
+
+        let inactive = NoiseSource::white("B3".to_string(), 1, 0, 0.0);
+        assert_eq!(inactive.try_spectral_density(1.0e3, 300.15), Ok(0.0));
+    }
+
+    #[test]
+    fn invalid_correlated_psd_evidence_is_not_reported_as_inactive() {
+        let source = CorrelatedNoisePair::bsim4_tnoi2(
+            NoiseSourceIdentity::mechanism("M1", "CORL"),
+            NoisePort {
+                node_pos: 1,
+                node_neg: 0,
+            },
+            NoisePort {
+                node_pos: 2,
+                node_neg: 0,
+            },
+            Value::NAN,
+            0.5,
+            1.0e-12,
+            1.0,
+        );
+        assert!(source.try_spectral_densities(1.0e3, 300.15).is_err());
+
+        let inactive = CorrelatedNoisePair::bsim4_tnoi2(
+            NoiseSourceIdentity::mechanism("M2", "CORL"),
+            NoisePort {
+                node_pos: 1,
+                node_neg: 0,
+            },
+            NoisePort {
+                node_pos: 2,
+                node_neg: 0,
+            },
+            0.0,
+            0.5,
+            1.0e-12,
+            1.0,
+        );
+        assert!(matches!(
+            inactive.try_spectral_densities(1.0e3, 300.15),
+            Ok(None)
+        ));
+    }
 
     /// A contribution with no mechanism identity is named after its broad
     /// source type instead, so those labels are persisted on the same terms.

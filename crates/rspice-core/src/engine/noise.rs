@@ -43,6 +43,47 @@ impl Engine {
         }
     }
 
+    fn noise_source_label(identity: &crate::analysis::NoiseSourceIdentity) -> String {
+        identity.mechanism.as_ref().map_or_else(
+            || identity.device.clone(),
+            |mechanism| format!("{}:{mechanism}", identity.device),
+        )
+    }
+
+    /// Evaluate one elementary PSD without allowing invalid numerical
+    /// evidence to masquerade as an inactive source.
+    pub(in crate::engine) fn evaluated_noise_density(
+        source: &NoiseSource,
+        frequency: Value,
+        temperature: Value,
+    ) -> Result<Value, SimulationError> {
+        source
+            .try_spectral_density(frequency, temperature)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "Noise source '{}' failed at {frequency} Hz: {error}",
+                    Self::noise_source_label(&source.identity)
+                ))
+            })
+    }
+
+    /// Evaluate a correlated device-noise mechanism with the same fail-closed
+    /// contract as elementary sources.
+    pub(in crate::engine) fn evaluated_correlated_noise_densities(
+        source: &CorrelatedNoisePair,
+        frequency: Value,
+        temperature: Value,
+    ) -> Result<Option<crate::analysis::noise::CorrelatedNoiseDensities>, SimulationError> {
+        source
+            .try_spectral_densities(frequency, temperature)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "Correlated noise source '{}' failed at {frequency} Hz: {error}",
+                    Self::noise_source_label(&source.identity)
+                ))
+            })
+    }
+
     #[inline]
     pub(in crate::engine) fn noise_node_voltage(voltages: &[Value], node: usize) -> Value {
         if node == 0 {
@@ -2009,8 +2050,8 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let density = source.spectral_density(frequency, temperature);
-                if !density.is_finite() || density <= 0.0 {
+                let density = Self::evaluated_noise_density(source, frequency, temperature)?;
+                if density == 0.0 {
                     continue;
                 }
                 let scale = density.sqrt();
@@ -2025,16 +2066,11 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let Some(densities) = source.spectral_densities(frequency, temperature) else {
+                let Some(densities) =
+                    Self::evaluated_correlated_noise_densities(source, frequency, temperature)?
+                else {
                     continue;
                 };
-                if !densities.first_psd.is_finite()
-                    || !densities.second_psd.is_finite()
-                    || densities.first_psd < 0.0
-                    || densities.second_psd < 0.0
-                {
-                    continue;
-                }
                 let first = solve_transfer(source.first.node_pos, source.first.node_neg)?;
                 let second = solve_transfer(source.second.node_pos, source.second.node_neg)?;
                 let first_scale = densities.first_psd.sqrt();
@@ -2500,8 +2536,8 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let si = source.spectral_density(freq, temperature);
-                let output_v2 = if si.is_finite() && si > 0.0 {
+                let si = Self::evaluated_noise_density(source, freq, temperature)?;
+                let output_v2 = if si > 0.0 {
                     let transfer = Self::noise_transfer_from_adjoint(
                         transfer_solution,
                         source.node_pos,
@@ -2511,14 +2547,25 @@ impl Engine {
                 } else {
                     0.0
                 };
-                if output_v2.is_finite() && output_v2 > 0.0 {
+                if !output_v2.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Noise source '{}' produced non-finite output density at {freq} Hz",
+                        Self::noise_source_label(&source.identity)
+                    )));
+                }
+                if output_v2 > 0.0 {
                     total_noise_v2_hz += output_v2;
+                    if !total_noise_v2_hz.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Total output-noise density overflowed at {freq} Hz"
+                        )));
+                    }
                 }
                 contributions.push(NoiseContribution {
                     identity: source.identity.clone(),
                     noise_type: source.noise_type,
-                    output_contribution: output_v2.max(0.0),
-                    input_contribution: output_v2.max(0.0) / input_gain_sq,
+                    output_contribution: output_v2,
+                    input_contribution: output_v2 / input_gain_sq,
                     percentage: 0.0,
                 });
             }
@@ -2527,16 +2574,11 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let Some(densities) = source.spectral_densities(freq, temperature) else {
+                let Some(densities) =
+                    Self::evaluated_correlated_noise_densities(source, freq, temperature)?
+                else {
                     continue;
                 };
-                if !densities.first_psd.is_finite()
-                    || !densities.second_psd.is_finite()
-                    || densities.first_psd < 0.0
-                    || densities.second_psd < 0.0
-                {
-                    continue;
-                }
 
                 let first_gain = Self::noise_transfer_from_adjoint(
                     transfer_solution,
@@ -2553,8 +2595,19 @@ impl Engine {
                 let second_amp = second_gain
                     * Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
                 let output_v2 = (first_amp + second_amp).norm_sqr();
-                if output_v2.is_finite() && output_v2 > 0.0 {
+                if !output_v2.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "Correlated noise source '{}' produced non-finite output density at {freq} Hz",
+                        Self::noise_source_label(&source.identity)
+                    )));
+                }
+                if output_v2 > 0.0 {
                     total_noise_v2_hz += output_v2;
+                    if !total_noise_v2_hz.is_finite() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Total output-noise density overflowed at {freq} Hz"
+                        )));
+                    }
                     contributions.push(NoiseContribution {
                         identity: source.identity.clone(),
                         noise_type: source.noise_type,
@@ -2685,6 +2738,70 @@ mod tests {
             crate::engine::SimulationConfig::default()
                 .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
         )
+    }
+
+    #[test]
+    fn production_noise_evaluators_fail_closed_on_invalid_psd_evidence() {
+        let elementary = crate::analysis::NoiseSource::white("B1".to_string(), 1, 0, f64::NAN)
+            .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                "B1", "WHITE",
+            ));
+        let error = Engine::evaluated_noise_density(&elementary, 1.0e3, 300.15)
+            .expect_err("NaN elementary PSD must fail");
+        assert!(
+            error.to_string().contains("B1:WHITE"),
+            "the failing mechanism must be diagnosable: {error}"
+        );
+
+        let correlated = crate::analysis::noise::CorrelatedNoisePair::bsim4_tnoi2(
+            crate::analysis::NoiseSourceIdentity::mechanism("M1", "CORL"),
+            crate::analysis::noise::NoisePort {
+                node_pos: 1,
+                node_neg: 0,
+            },
+            crate::analysis::noise::NoisePort {
+                node_pos: 2,
+                node_neg: 0,
+            },
+            f64::INFINITY,
+            0.5,
+            1.0e-12,
+            1.0,
+        );
+        let error = Engine::evaluated_correlated_noise_densities(&correlated, 1.0e3, 300.15)
+            .expect_err("infinite correlated PSD state must fail");
+        assert!(
+            error.to_string().contains("M1:CORL"),
+            "the failing correlated mechanism must be diagnosable: {error}"
+        );
+    }
+
+    #[test]
+    fn noise_analyses_reject_nonphysical_instance_temperature_psd() {
+        let netlist = Netlist::parse(
+            "Invalid resistor noise temperature\n\
+             VPORT p 0 0 AC 1\n\
+             R1 p 0 1k DTEMP=-400\n\
+             .END\n",
+        )
+        .expect("invalid-noise-state deck still parses");
+        let engine = Engine::default();
+
+        let error = engine
+            .run_noise(&netlist, 1, &[1.0e3], 300.15)
+            .expect_err("negative absolute source temperature must fail noise");
+        assert!(
+            error.to_string().contains("R1"),
+            "ordinary noise must identify the invalid source: {error}"
+        );
+
+        let error = engine
+            .run_port_noise_correlation(&netlist, &["VPORT".to_string()], &[1.0e3], 300.15)
+            .expect_err("negative absolute source temperature must fail port noise");
+        assert!(
+            error.to_string().contains("R1"),
+            "port noise must identify the invalid source: {error}"
+        );
     }
 
     #[test]
