@@ -276,21 +276,172 @@ impl Waveform {
         self.max_value - self.min_value
     }
 
-    /// Get average (DC component)
-    pub fn average(&self) -> Value {
-        if self.values.is_empty() {
-            return 0.0;
-        }
-        self.values.iter().sum::<Value>() / self.values.len() as Value
+    /// Calculate the time-weighted average using trapezoidal integration.
+    ///
+    /// At least two samples spanning a finite positive duration are required.
+    /// Nonuniform sample intervals are weighted by their duration.
+    ///
+    /// Returns an error when the time span is invalid or the qualified
+    /// floating-point result cannot be represented without losing evidence.
+    pub fn average(&self) -> Result<Value, MeasurementError> {
+        let (scale, normalized_moment) = self.normalized_time_weighted_moment(false)?;
+        scaled_moment_result(scale, normalized_moment, "average")
     }
 
-    /// Get RMS (Root Mean Square) value
-    pub fn rms(&self) -> Value {
-        if self.values.is_empty() {
-            return 0.0;
+    /// Calculate the time-weighted RMS using trapezoidal integration.
+    ///
+    /// At least two samples spanning a finite positive duration are required.
+    /// Nonuniform sample intervals are weighted by their duration. Each stored
+    /// endpoint is squared before trapezoidal integration; this is not the
+    /// analytic integral of a squared piecewise-linear interpolant.
+    ///
+    /// Returns an error when the time span is invalid or the qualified
+    /// floating-point result cannot be represented without losing evidence.
+    pub fn rms(&self) -> Result<Value, MeasurementError> {
+        let (scale, normalized_mean_square) = self.normalized_time_weighted_moment(true)?;
+        if !(0.0..=1.0).contains(&normalized_mean_square) {
+            return Err(MeasurementError::CalculationError(format!(
+                "normalized RMS moment is outside [0, 1] ({normalized_mean_square})"
+            )));
         }
-        let sum_sq: Value = self.values.iter().map(|v| v * v).sum();
-        (sum_sq / self.values.len() as Value).sqrt()
+        let normalized_rms = normalized_mean_square.sqrt();
+        if !normalized_rms.is_finite() {
+            return Err(MeasurementError::CalculationError(format!(
+                "normalized RMS is non-finite ({normalized_rms})"
+            )));
+        }
+        scaled_moment_result(scale, normalized_rms, "RMS")
+    }
+
+    fn normalized_time_weighted_moment(
+        &self,
+        square_values: bool,
+    ) -> Result<(Value, Value), MeasurementError> {
+        let sample_count = self.time.len();
+        if sample_count != self.values.len() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "time and values must have the same length (got {sample_count} time point(s), {} value(s))",
+                self.values.len()
+            )));
+        }
+        if sample_count < 2 {
+            return Err(MeasurementError::InsufficientData(format!(
+                "time-weighted statistics require at least 2 samples, got {sample_count}"
+            )));
+        }
+
+        let duration = self.time[sample_count - 1] - self.time[0];
+        if !duration.is_finite() {
+            return Err(MeasurementError::CalculationError(format!(
+                "derived time-weighted statistics duration is non-finite ({duration})"
+            )));
+        }
+        if duration <= 0.0 {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "time-weighted statistics require a positive duration, got {duration}"
+            )));
+        }
+
+        let mut scale = 0.0_f64;
+        for (index, &value) in self.values.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(MeasurementError::InvalidWaveform(format!(
+                    "values[{index}] must be finite"
+                )));
+            }
+            scale = scale.max(value.abs());
+        }
+
+        let mut weight_sum = 0.0;
+        let mut weight_compensation = 0.0;
+        let mut moment_sum = ExactFloatSum::default();
+        for index in 1..sample_count {
+            let interval = self.time[index] - self.time[index - 1];
+            if !interval.is_finite() {
+                return Err(MeasurementError::CalculationError(format!(
+                    "derived segment width {} is non-finite ({interval})",
+                    index - 1
+                )));
+            }
+            if interval <= 0.0 {
+                return Err(MeasurementError::InvalidWaveform(format!(
+                    "time-weighted statistics require positive segment widths: segment {} has width {interval}",
+                    index - 1
+                )));
+            }
+            let weight = interval / duration;
+            if !weight.is_finite() || weight <= 0.0 {
+                return Err(MeasurementError::CalculationError(format!(
+                    "normalized interval weight for segment {} is not representable ({weight})",
+                    index - 1
+                )));
+            }
+            if weight > 1.0 {
+                return Err(MeasurementError::CalculationError(format!(
+                    "normalized interval weight for segment {} exceeds one ({weight})",
+                    index - 1
+                )));
+            }
+
+            let left = if scale == 0.0 {
+                0.0
+            } else {
+                self.values[index - 1] / scale
+            };
+            let right = if scale == 0.0 {
+                0.0
+            } else {
+                self.values[index] / scale
+            };
+            if self.values[index - 1] != 0.0 && left == 0.0 {
+                return Err(MeasurementError::CalculationError(format!(
+                    "normalizing values[{}] underflowed a nonzero sample",
+                    index - 1
+                )));
+            }
+            if self.values[index] != 0.0 && right == 0.0 {
+                return Err(MeasurementError::CalculationError(format!(
+                    "normalizing values[{index}] underflowed a nonzero sample"
+                )));
+            }
+            compensated_add(
+                &mut weight_sum,
+                &mut weight_compensation,
+                weight,
+                "normalized interval weights",
+            )?;
+
+            if square_values {
+                accumulate_rms_segment(&mut moment_sum, left, right, weight, index - 1)?;
+            } else {
+                accumulate_average_segment(&mut moment_sum, left, right, weight, index - 1)?;
+            }
+        }
+        let weight_sum = compensated_total(
+            weight_sum,
+            weight_compensation,
+            "normalized interval weights",
+        )?;
+        if weight_sum <= 0.0 {
+            return Err(MeasurementError::CalculationError(format!(
+                "normalized interval weight sum is invalid ({weight_sum})"
+            )));
+        }
+
+        let moment_sum = moment_sum.finish()?;
+        let normalized_moment = moment_sum / weight_sum;
+        if moment_sum != 0.0 && normalized_moment == 0.0 {
+            return Err(MeasurementError::CalculationError(
+                "normalizing the accumulated waveform moment underflowed".to_string(),
+            ));
+        }
+        let moment_bound = if square_values { 0.0..=1.0 } else { -1.0..=1.0 };
+        if !normalized_moment.is_finite() || !moment_bound.contains(&normalized_moment) {
+            return Err(MeasurementError::CalculationError(format!(
+                "normalized time-weighted moment is invalid ({normalized_moment})"
+            )));
+        }
+        Ok((scale, normalized_moment))
     }
 
     /// Calculate overshoot as percentage of final value
@@ -929,6 +1080,286 @@ impl Waveform {
 
         Self::from_validated_parts(&new_time, &new_values)
     }
+}
+
+#[derive(Default)]
+struct ExactFloatSum {
+    partials: Vec<Value>,
+}
+
+impl ExactFloatSum {
+    fn add(&mut self, mut value: Value) -> Result<(), MeasurementError> {
+        if !value.is_finite() {
+            return Err(MeasurementError::CalculationError(
+                "time-weighted moment expansion received a non-finite component".to_string(),
+            ));
+        }
+        if value == 0.0 {
+            return Ok(());
+        }
+
+        let existing_count = self.partials.len();
+        let mut retained_count = 0usize;
+        for index in 0..existing_count {
+            let mut partial = self.partials[index];
+            if value.abs() < partial.abs() {
+                std::mem::swap(&mut value, &mut partial);
+            }
+            let high = value + partial;
+            if !high.is_finite() {
+                return Err(MeasurementError::CalculationError(
+                    "time-weighted moment expansion accumulation became non-finite".to_string(),
+                ));
+            }
+            let low = partial - (high - value);
+            if low != 0.0 {
+                self.partials[retained_count] = low;
+                retained_count += 1;
+            }
+            value = high;
+        }
+        self.partials.truncate(retained_count);
+        if value != 0.0 {
+            self.partials.try_reserve(1).map_err(|error| {
+                MeasurementError::CalculationError(format!(
+                    "failed to retain a time-weighted moment residual: {error}"
+                ))
+            })?;
+            self.partials.push(value);
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<Value, MeasurementError> {
+        if self.partials.is_empty() {
+            return Ok(0.0);
+        }
+        let mut result = 0.0;
+        for partial in self.partials {
+            let next = result + partial;
+            if !next.is_finite() {
+                return Err(MeasurementError::CalculationError(
+                    "time-weighted moment expansion became non-finite".to_string(),
+                ));
+            }
+            result = next;
+        }
+        if result == 0.0 {
+            return Err(MeasurementError::CalculationError(
+                "time-weighted moment residual cannot be represented".to_string(),
+            ));
+        }
+        Ok(result)
+    }
+}
+
+fn accumulate_average_segment(
+    accumulator: &mut ExactFloatSum,
+    left: Value,
+    right: Value,
+    weight: Value,
+    segment: usize,
+) -> Result<(), MeasurementError> {
+    let (sample_sum, sample_residual) = error_free_sum(left, right, segment)?;
+    for endpoint_component in [sample_sum, sample_residual] {
+        accumulate_half_weighted_component(
+            accumulator,
+            endpoint_component,
+            weight,
+            segment,
+            "endpoint average",
+        )?;
+    }
+    Ok(())
+}
+
+fn accumulate_rms_segment(
+    accumulator: &mut ExactFloatSum,
+    left: Value,
+    right: Value,
+    weight: Value,
+    segment: usize,
+) -> Result<(), MeasurementError> {
+    for sample in [left, right] {
+        let (square, square_residual) =
+            error_free_product(sample, sample, segment, "normalized RMS square")?;
+        for square_component in [square, square_residual] {
+            accumulate_half_weighted_component(
+                accumulator,
+                square_component,
+                weight,
+                segment,
+                "RMS trapezoidal scaling",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn accumulate_half_weighted_component(
+    accumulator: &mut ExactFloatSum,
+    component: Value,
+    weight: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<(), MeasurementError> {
+    let (half_component, half_residual) = error_free_product(0.5, component, segment, quantity)?;
+    for moment_component in [half_component, half_residual] {
+        let (weighted_component, product_residual) =
+            error_free_product(weight, moment_component, segment, "interval weighting")?;
+        accumulator.add(weighted_component)?;
+        accumulator.add(product_residual)?;
+    }
+    Ok(())
+}
+
+fn error_free_sum(
+    left: Value,
+    right: Value,
+    segment: usize,
+) -> Result<(Value, Value), MeasurementError> {
+    let sum = left + right;
+    if !sum.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "normalized endpoint sum for segment {segment} is non-finite"
+        )));
+    }
+    let right_virtual = sum - left;
+    let residual = (left - (sum - right_virtual)) + (right - right_virtual);
+    if !residual.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "normalized endpoint residual for segment {segment} is non-finite"
+        )));
+    }
+    Ok((sum, residual))
+}
+
+fn error_free_product(
+    left: Value,
+    right: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<(Value, Value), MeasurementError> {
+    let product = left * right;
+    if !product.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} product for segment {segment} is non-finite"
+        )));
+    }
+    if left != 0.0 && right != 0.0 && product == 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} product for segment {segment} underflowed"
+        )));
+    }
+    let residual = left.mul_add(right, -product);
+    if !residual.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} residual for segment {segment} is non-finite"
+        )));
+    }
+    if !product_is_exact(left, right, product) && (residual == 0.0 || residual.is_subnormal()) {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} product for segment {segment} has an uncertified underflow-scale residual"
+        )));
+    }
+    Ok((product, residual))
+}
+
+fn product_is_exact(left: Value, right: Value, product: Value) -> bool {
+    if left == 0.0 || right == 0.0 {
+        return product == 0.0;
+    }
+    let (left_significand, left_exponent) = finite_binary_components(left);
+    let (right_significand, right_exponent) = finite_binary_components(right);
+    let exact_significand = u128::from(left_significand) * u128::from(right_significand);
+    let exact_exponent = left_exponent + right_exponent;
+    let (rounded_significand, rounded_exponent) = finite_binary_components(product);
+    canonical_dyadic(exact_significand, exact_exponent)
+        == canonical_dyadic(u128::from(rounded_significand), rounded_exponent)
+}
+
+fn canonical_dyadic(significand: u128, exponent: i32) -> (u128, i32) {
+    debug_assert!(significand != 0);
+    let trailing_zeros = significand.trailing_zeros();
+    (
+        significand >> trailing_zeros,
+        exponent + trailing_zeros as i32,
+    )
+}
+
+fn finite_binary_components(value: Value) -> (u64, i32) {
+    const FRACTION_BITS: u64 = (1_u64 << 52) - 1;
+    let bits = value.to_bits() & !(1_u64 << 63);
+    let exponent_bits = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & FRACTION_BITS;
+    if exponent_bits == 0 {
+        (fraction, -1074)
+    } else {
+        ((1_u64 << 52) | fraction, exponent_bits - 1023 - 52)
+    }
+}
+
+fn compensated_add(
+    sum: &mut Value,
+    compensation: &mut Value,
+    term: Value,
+    quantity: &str,
+) -> Result<(), MeasurementError> {
+    let corrected = term - *compensation;
+    let next = *sum + corrected;
+    let next_compensation = (next - *sum) - corrected;
+    if !corrected.is_finite() || !next.is_finite() || !next_compensation.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "compensated accumulation of {quantity} became non-finite"
+        )));
+    }
+    *sum = next;
+    *compensation = next_compensation;
+    Ok(())
+}
+
+fn compensated_total(
+    sum: Value,
+    compensation: Value,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    let (high, low) = error_free_sum(sum, -compensation, usize::MAX)?;
+    let total = high + low;
+    if !total.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "compensated total for {quantity} is non-finite"
+        )));
+    }
+    if total == 0.0 && (high != 0.0 || low != 0.0) {
+        return Err(MeasurementError::CalculationError(format!(
+            "compensated total for {quantity} underflowed"
+        )));
+    }
+    Ok(total)
+}
+
+fn scaled_moment_result(
+    scale: Value,
+    normalized_result: Value,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    if !scale.is_finite() || scale < 0.0 || !normalized_result.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} normalization is invalid (scale {scale}, normalized result {normalized_result})"
+        )));
+    }
+    let result = scale * normalized_result;
+    if !result.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} result is non-finite ({result})"
+        )));
+    }
+    if scale > 0.0 && normalized_result != 0.0 && result == 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} result underflowed the representable range"
+        )));
+    }
+    if result == 0.0 { Ok(0.0) } else { Ok(result) }
 }
 
 struct LinearSpectrum {
