@@ -240,6 +240,13 @@ pub(crate) fn action_export_csv_with_io(
     // on the payload alone handed back the transient samples the spectrum was
     // computed from and called it the result.
     if let Some(derived) = prepare_active_derived_view_csv(state, &displayed) {
+        let derived = match derived {
+            Ok(derived) => derived,
+            Err(reason) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(reason));
+                return;
+            }
+        };
         match export_format {
             EngineeringExportFormat::Csv => export_typed_result_csv(state, io, &derived),
             EngineeringExportFormat::Tsv => export_typed_result_tsv(state, io, &derived),
@@ -471,20 +478,55 @@ fn prepare_active_sheet_csv(
 fn prepare_active_derived_view_csv(
     state: &AppState,
     displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
-) -> Option<PreparedTypedResultCsv> {
+) -> Option<Result<PreparedTypedResultCsv, String>> {
     match displayed.viewer {
-        crate::workbench::ResultViewer::Fft => fft_spectrum_csv(state),
-        crate::workbench::ResultViewer::Hist => histogram_bins_csv(state),
-        crate::workbench::ResultViewer::Eye => eye_measurements_csv(state),
+        crate::workbench::ResultViewer::Fft => Some(fft_spectrum_csv(state, displayed)),
+        crate::workbench::ResultViewer::Hist => Some(histogram_bins_csv(state).ok_or_else(|| {
+            "Distribution export is unavailable because the active derived histogram is incomplete"
+                .to_owned()
+        })),
+        crate::workbench::ResultViewer::Eye => Some(eye_measurements_csv(state).ok_or_else(|| {
+            "Eye export is unavailable because the active derived eye diagram is incomplete"
+                .to_owned()
+        })),
         _ => None,
     }
 }
 
-fn fft_spectrum_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
+fn fft_spectrum_csv(
+    state: &AppState,
+    displayed: &crate::workbench::documents::result_document::view_context::ResolvedResultView,
+) -> Result<PreparedTypedResultCsv, String> {
+    let displayed_analysis = displayed.primary_analysis(state).ok_or_else(|| {
+        "FFT spectrum export is unavailable because the displayed analysis identity is no longer retained"
+            .to_owned()
+    })?;
+    let expected_authority =
+        crate::workbench::app_state::SpecializedViewerCacheProvenance::for_analysis(
+            displayed.dataset_id,
+            displayed_analysis,
+        );
+    if state.analysis.cache_authority.fft != Some(expected_authority) {
+        return Err(
+            "FFT spectrum export is unavailable because the derived spectrum does not belong to the displayed result"
+                .to_owned(),
+        );
+    }
     let fft = &state.analysis.fft_state;
-    let data = fft.data.as_ref()?;
+    if !fft.has_data() {
+        return Err(fft.last_error.as_ref().map_or_else(
+            || {
+                "FFT spectrum export is unavailable because the derived analysis is incomplete"
+                    .to_owned()
+            },
+            |error| format!("FFT spectrum export is unavailable — {error}"),
+        ));
+    }
+    let data = fft.data.as_ref().ok_or_else(|| {
+        "FFT spectrum export is unavailable because the transformed curve is missing".to_owned()
+    })?;
     if data.points.is_empty() {
-        return None;
+        return Err("FFT spectrum export is unavailable because it has no points".to_owned());
     }
     let source = fft
         .source_cache
@@ -519,7 +561,7 @@ fn fft_spectrum_csv(state: &AppState) -> Option<PreparedTypedResultCsv> {
             point.phase
         ));
     }
-    Some(PreparedTypedResultCsv {
+    Ok(PreparedTypedResultCsv {
         default_name: "rspice-spectrum.csv",
         detail: format!("{} spectrum points", data.points.len()),
         contents,

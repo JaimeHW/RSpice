@@ -198,6 +198,24 @@ fn activate_result_document(state: &mut AppState, viewer: crate::workbench::Resu
     state.ui.results.viewer = viewer;
 }
 
+fn bind_active_fft_authority(state: &mut AppState) {
+    let authority = {
+        let run = state
+            .simulation
+            .active_run()
+            .expect("test retains an active result run");
+        let analysis = state
+            .simulation
+            .active_analysis()
+            .expect("test retains an active result analysis");
+        crate::workbench::app_state::SpecializedViewerCacheProvenance::for_analysis(
+            run.dataset_id,
+            analysis,
+        )
+    };
+    state.bind_specialized_viewer_cache(crate::workbench::app_state::ActiveViewer::Fft, authority);
+}
+
 #[test]
 fn report_and_table_sheets_export_the_evidence_they_render() {
     let mut manifest_state = state_with_typed_result(
@@ -283,14 +301,19 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
     let mut state = state_with_typed_result(transient);
-    state.analysis.fft_state.data = Some(FftData::from_spectrum_with_normalization(
-        "V(out)",
-        &[0.0, 1.0e3, 2.0e3],
-        &[1.0, 0.5, 0.25],
-        &[0.0, 0.1, 0.2],
-        8_192.0,
-        SpectrumNormalization::Peak,
-    ));
+    state.analysis.fft_state.normalization = SpectrumNormalization::Peak;
+    state
+        .analysis
+        .fft_state
+        .load_data(FftData::from_spectrum_with_normalization(
+            "V(out)",
+            &[0.0, 1.0e3, 2.0e3],
+            &[1.0, 0.5, 0.25],
+            &[0.0, 0.1, 0.2],
+            4_000.0,
+            SpectrumNormalization::Peak,
+        ));
+    bind_active_fft_authority(&mut state);
     state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
@@ -345,6 +368,75 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
         "{}",
         files[0].1
     );
+}
+
+#[test]
+fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
+    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+
+    let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+        .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
+    let mut state = state_with_typed_result(transient);
+    // A data-only partial transaction must not count as an exportable FFT.
+    state.analysis.fft_state.data = Some(FftData::from_spectrum_with_normalization(
+        "partial",
+        &[0.0, 1.0e3, 2.0e3],
+        &[1.0, 0.5, 0.25],
+        &[0.0, 0.1, 0.2],
+        4_000.0,
+        SpectrumNormalization::Peak,
+    ));
+    bind_active_fft_authority(&mut state);
+    state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
+    let io = MockExportWorkflowIo::default();
+
+    action_export_csv_with_io(&mut state, &io);
+
+    assert!(io.text_files.borrow().is_empty());
+    assert!(io.datasets.borrow().is_empty());
+    assert!(last_log_message(&state).contains("derived analysis is incomplete"));
+}
+
+#[test]
+fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
+    use crate::analysis::fft::data::{FftData, SpectrumNormalization};
+
+    for stale in [false, true] {
+        let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_waveforms(vec![waveform("V(out)", vec![0.0, 1.0e-6], vec![0.0, 1.0])]);
+        let mut state = state_with_typed_result(transient);
+        state
+            .analysis
+            .fft_state
+            .load_data(FftData::from_spectrum_with_normalization(
+                "V(stale)",
+                &[0.0, 1.0e3, 2.0e3],
+                &[1.0, 0.5, 0.25],
+                &[0.0, 0.1, 0.2],
+                4_000.0,
+                SpectrumNormalization::Peak,
+            ));
+        if stale {
+            let dataset_id = state.simulation.active_run().unwrap().dataset_id;
+            let foreign = AnalysisResult::new(999, AnalysisType::Transient, "FOREIGN");
+            let authority =
+                crate::workbench::app_state::SpecializedViewerCacheProvenance::for_analysis(
+                    dataset_id, &foreign,
+                );
+            state.bind_specialized_viewer_cache(
+                crate::workbench::app_state::ActiveViewer::Fft,
+                authority,
+            );
+        }
+        state.ui.results.viewer = crate::workbench::ResultViewer::Fft;
+        let io = MockExportWorkflowIo::default();
+
+        action_export_csv_with_io(&mut state, &io);
+
+        assert!(io.text_files.borrow().is_empty());
+        assert!(io.datasets.borrow().is_empty());
+        assert!(last_log_message(&state).contains("does not belong to the displayed result"));
+    }
 }
 
 /// A sheet that plots a retained vector keeps the payload path: its
