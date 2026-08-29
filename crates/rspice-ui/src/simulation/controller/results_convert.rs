@@ -1635,17 +1635,17 @@ mod floquet_payload_conversion_tests {
         let mode_indices = (0..display_count)
             .map(|index| index as f64 + 1.0)
             .collect::<Vec<_>>();
-        let waveforms = (!mode_indices.is_empty())
-            .then(|| {
-                let waveform = crate::simulation::results::WaveformData::new_time_domain_in_unit(
-                    "Floquet |lambda|",
-                    mode_indices.clone(),
-                    multipliers[..display_count].to_vec(),
-                    "",
-                );
-                HashMap::from([("Floquet |lambda|".to_owned(), waveform)])
-            })
-            .unwrap_or_default();
+        let waveforms = if mode_indices.is_empty() {
+            HashMap::new()
+        } else {
+            let waveform = crate::simulation::results::WaveformData::new_time_domain_in_unit(
+                "Floquet |lambda|",
+                mode_indices.clone(),
+                multipliers[..display_count].to_vec(),
+                "",
+            );
+            HashMap::from([("Floquet |lambda|".to_owned(), waveform)])
+        };
         let max_multiplier_magnitude = multipliers.first().copied().unwrap_or(0.0);
         SimulationResult::Pstb {
             period,

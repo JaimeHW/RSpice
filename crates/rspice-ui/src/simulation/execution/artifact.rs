@@ -1746,7 +1746,7 @@ impl ResolvedExecutionDependencies {
                             &mut buffers,
                             periodic.operating_point.shooting_state(),
                         );
-                        ExecutionArtifactPayloadTransferMetadata::PeriodicState(
+                        ExecutionArtifactPayloadTransferMetadata::PeriodicState(Box::new(
                             PeriodicStateTransferMetadata {
                                 config_fundamental_freq: config.fundamental_freq,
                                 config_num_harmonics: config.num_harmonics,
@@ -1797,7 +1797,7 @@ impl ResolvedExecutionDependencies {
                                 analysis_is_stable: periodic.analysis_is_stable,
                                 shooting_state,
                             },
-                        )
+                        ))
                     }
                     ExecutionArtifactPayload::HbState(state) => {
                         let spectra = state
@@ -2265,7 +2265,7 @@ struct DcOperatingPointSeedTransferMetadata {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum ExecutionArtifactPayloadTransferMetadata {
     TransientTrajectory(TransientTrajectoryTransferMetadata),
-    PeriodicState(PeriodicStateTransferMetadata),
+    PeriodicState(Box<PeriodicStateTransferMetadata>),
     HbState(HbStateTransferMetadata),
     DcOperatingPointSeed(DcOperatingPointSeedTransferMetadata),
 }
