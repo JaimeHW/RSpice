@@ -2805,11 +2805,6 @@ impl Engine {
             }
         }
         breakpoints.discard_through(resume_time);
-        let initial_remaining_breakpoints = breakpoints
-            .times()
-            .iter()
-            .filter(|&&time| time > resume_time)
-            .count();
         let configured_initial_step = self
             .config
             .transient_initial_timestep
@@ -3521,7 +3516,7 @@ impl Engine {
         // accepted.  Keep that integration-state counter separate from the
         // broader recovery budget used by the native/ngspice paths.
         let mut xyce_step_failure_count = 0_usize;
-        let mut total_iterations = 0;
+        let mut total_step_attempts = 0_usize;
         let mut stale_accept_count = 0;
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
         let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
@@ -3532,14 +3527,6 @@ impl Engine {
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
-        const MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT: usize = 16;
-        let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
-        let max_total_iterations = estimated_steps
-            .saturating_mul(400)
-            .saturating_add(
-                initial_remaining_breakpoints.saturating_mul(MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT),
-            )
-            .max(50_000);
         let progress_logging_enabled = log::log_enabled!(log::Level::Info);
         let mut last_progress_log = progress_logging_enabled.then(crate::time_compat::Instant::now);
         let mut rhs = vec![0.0; size];
@@ -3749,7 +3736,12 @@ impl Engine {
             }};
         }
 
-        while t < tstop && total_iterations < max_total_iterations {
+        // Adaptive integration may legitimately take far more attempts than
+        // `TSTOP / DELMAX`: rejected local trials and accepted steps below the
+        // ceiling are numerical work, not retained results. Termination is
+        // governed by the per-point retry/minimum-step/livelock policies,
+        // cooperative abort, and the explicit analysis/result resource limits.
+        while t < tstop {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
             capacitor_accepted_states_valid = false;
@@ -3778,40 +3770,40 @@ impl Engine {
                 .is_some_and(|started| started.elapsed().as_secs() >= 2)
             {
                 log::info!(
-                    "Transient progress: t={:.12e}s / {:.3e}s ({:.1}%), dt={:.3e}, retries={}, order={}, {} iterations",
+                    "Transient progress: t={:.12e}s / {:.3e}s ({:.1}%), dt={:.3e}, retries={}, order={}, {} step attempts",
                     t,
                     tstop,
                     (t / tstop) * 100.0,
                     timestep.dt(),
                     retry_count,
                     trap_order,
-                    total_iterations
+                    total_step_attempts
                 );
                 last_progress_log = Some(crate::time_compat::Instant::now());
             }
 
-            // Abort check - check every ABORT_CHECK_INTERVAL iterations for minimal overhead
-            if total_iterations % ABORT_CHECK_INTERVAL == 0 {
+            // Abort check every few step attempts for minimal overhead.
+            if total_step_attempts % ABORT_CHECK_INTERVAL == 0 {
                 if tstop > 0.0 {
                     abort.observe_progress((t / tstop).clamp(0.0, 1.0));
                 }
                 let is_aborted = abort.is_aborted();
-                if total_iterations == 0 {
+                if total_step_attempts == 0 {
                     log::debug!("First abort check, is_aborted={}", is_aborted);
                 }
                 if is_aborted {
                     log::info!(
-                        "Transient simulation aborted at t={:.3e}s ({:.1}% complete, {} iterations)",
+                        "Transient simulation aborted at t={:.3e}s ({:.1}% complete, {} step attempts)",
                         t,
                         (t / tstop) * 100.0,
-                        total_iterations
+                        total_step_attempts
                     );
                     // Return error indicating abort - partial results are lost
                     return Err(SimulationError::Aborted);
                 }
             }
 
-            total_iterations += 1;
+            total_step_attempts = total_step_attempts.saturating_add(1);
             if locked_grid.is_none() {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 timestep.set_max_dt(
@@ -4340,10 +4332,10 @@ impl Engine {
                 }
                 if _iter % ABORT_CHECK_INTERVAL == 0 && abort.is_aborted() {
                     log::info!(
-                        "Transient simulation aborted during Newton solve at t={:.3e}s ({:.1}% complete, {} iterations)",
+                        "Transient simulation aborted during Newton solve at t={:.3e}s ({:.1}% complete, {} step attempts)",
                         t,
                         (t / tstop) * 100.0,
-                        total_iterations
+                        total_step_attempts
                     );
                     return Err(SimulationError::Aborted);
                 }
@@ -4499,10 +4491,10 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 40 {
                         log::warn!(
-                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
+                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, step_attempt={}, elapsed={:.3?}",
                             t + dt,
                             dt,
-                            total_iterations,
+                            total_step_attempts,
                             newton_stamp_elapsed,
                         );
                     }
@@ -4754,10 +4746,10 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 40 {
                         log::warn!(
-                            "Slow transient Newton solve at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
+                            "Slow transient Newton solve at t={:.6e}, dt={:.3e}, step_attempt={}, elapsed={:.3?}",
                             t,
                             dt,
-                            total_iterations,
+                            total_step_attempts,
                             newton_solve_elapsed,
                         );
                     }
@@ -5414,7 +5406,7 @@ impl Engine {
                         r_conv,
                         update_norm,
                         max_dv,
-                        total_iterations
+                        total_step_attempts
                     );
                 }
 
@@ -5517,11 +5509,11 @@ impl Engine {
                     failed_voltage_conv += 1;
                 }
                 // Diagnostic logging for debugging timestep issues
-                if total_iterations < 100 || total_iterations % 10000 == 0 {
+                if total_step_attempts < 100 || total_step_attempts % 10000 == 0 {
                     log::debug!(
-                        "Newton non-convergence at t={:.3e}s, iter={}, dt={:.3e}s, reducing to {:.3e}s",
+                        "Newton non-convergence at t={:.3e}s, step_attempt={}, dt={:.3e}s, reducing to {:.3e}s",
                         t,
-                        total_iterations,
+                        total_step_attempts,
                         dt,
                         Self::nonconvergence_retry_timestep(dt, max_step)
                     );
@@ -5559,7 +5551,7 @@ impl Engine {
                             dt,
                             retry_count
                         );
-                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                        return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                     }
                     restore_rejected_transient_nonlinear_state!();
                     total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
@@ -5607,7 +5599,7 @@ impl Engine {
                         retry_count
                     );
                     restore_rejected_transient_nonlinear_state!();
-                    return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                 }
                 restore_rejected_transient_nonlinear_state!();
                 rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
@@ -6215,7 +6207,7 @@ impl Engine {
                             retry_count
                         );
                         restore_rejected_transient_nonlinear_state!();
-                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                        return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                     }
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
                         &circuit,
@@ -6307,7 +6299,7 @@ impl Engine {
                                     t
                                 );
                             }
-                            return Err(SimulationError::ConvergenceFailed(total_iterations));
+                            return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                         }
                         restore_rejected_transient_nonlinear_state!();
                         continue;
@@ -6819,7 +6811,7 @@ impl Engine {
                         "Transient stalled near t={:.6e}s: repeated stale accepted steps with active sources",
                         t
                     );
-                    return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                 }
                 trap_order = native_order_after_restart(current_method);
                 restore_rejected_transient_nonlinear_state!();
@@ -7287,12 +7279,12 @@ impl Engine {
 
         if t < tstop {
             log::error!(
-                "Transient terminated early at t={:.6e}s / {:.6e}s after {} iterations",
+                "Transient terminated early at t={:.6e}s / {:.6e}s after {} step attempts",
                 t,
                 tstop,
-                total_iterations
+                total_step_attempts
             );
-            return Err(SimulationError::ConvergenceFailed(total_iterations));
+            return Err(SimulationError::ConvergenceFailed(total_step_attempts));
         }
 
         log::info!(
@@ -7306,8 +7298,8 @@ impl Engine {
         }
         let transient_wall = transient_wall_start.elapsed();
         log::debug!(
-            "Transient Newton phases: {} iterations, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
-            total_iterations,
+            "Transient Newton phases: {} step attempts, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            total_step_attempts,
             total_merit_trials,
             total_failed_attempts,
             failed_voltage_conv,
