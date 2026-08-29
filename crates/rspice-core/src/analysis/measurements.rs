@@ -24,20 +24,20 @@
 //! - Slew rate at crossing
 //!
 //! # Spectral Analysis
-//! - FFT (Fast Fourier Transform)
-//! - THD (Total Harmonic Distortion)
-//! - SFDR (Spurious-Free Dynamic Range)
-//! - Fundamental frequency detection
+//! - Qualified one-sided FFT peak-amplitude spectra
+//! - Explicit-fundamental THD (Total Harmonic Distortion)
+//! - Dominant non-DC frequency estimation
 //!
 //! # Usage
 //! ```ignore
 //! let waveform = Waveform::new(&time_points, &voltage_values)?;
 //! let rise_time = waveform.rise_time(0.1, 0.9)?;
-//! let thd = waveform.thd(fundamental_freq)?;
+//! let thd = waveform.thd(fundamental_freq, DEFAULT_THD_HARMONICS)?;
 //! ```
 
 use crate::Value;
-use std::f64::consts::PI;
+use crate::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError};
+use rustfft::{FftPlanner, num_complex::Complex};
 
 //=============================================================================
 // Constants
@@ -49,6 +49,8 @@ pub const THRESHOLD_LOW: Value = 0.1;
 pub const THRESHOLD_HIGH: Value = 0.9;
 /// Minimum number of samples for FFT
 pub const MIN_FFT_SAMPLES: usize = 8;
+/// Bound FFT planning before entering `rustfft`'s infallible plan allocations.
+const MAX_QUALIFIED_FFT_SAMPLES: usize = 1_048_576;
 /// Default number of harmonics for THD calculation
 pub const DEFAULT_THD_HARMONICS: usize = 10;
 
@@ -586,166 +588,297 @@ impl Waveform {
     // Spectral Analysis
     //=========================================================================
 
-    /// Compute FFT of waveform
+    /// Compute the qualified one-sided FFT peak-amplitude spectrum.
     ///
-    /// Returns (frequencies, magnitudes) where magnitudes are in dB
+    /// Returns `(frequencies, magnitudes_db)`. DC and, for even-length
+    /// records, Nyquist are not doubled; every other positive-frequency bin
+    /// is doubled. Magnitudes are normalized to the authored record length.
+    /// Decibels are relative to a peak amplitude of one signal unit; an
+    /// exactly zero magnitude is represented by negative infinity.
+    ///
+    /// The time axis must contain at least [`MIN_FFT_SAMPLES`] samples on a
+    /// uniform grid whose interval and timestamp resolution can be qualified.
+    /// The authored record is analyzed with a rectangular window, so a tone
+    /// that is not centered on a returned bin exhibits spectral leakage.
     pub fn fft(&self) -> Result<(Vec<Value>, Vec<Value>), MeasurementError> {
-        let n = self.values.len();
-        if n < MIN_FFT_SAMPLES {
+        let spectrum = self.one_sided_linear_spectrum(false)?;
+        let mut magnitudes_db = Vec::new();
+        magnitudes_db
+            .try_reserve_exact(spectrum.spectral_weights.len())
+            .map_err(|error| {
+                MeasurementError::FftError(format!("failed to allocate FFT dB spectrum: {error}"))
+            })?;
+        for spectral_weight in spectrum.spectral_weights {
+            magnitudes_db.push(scaled_amplitude_db(
+                spectral_weight,
+                spectrum.log10_normalization,
+            )?);
+        }
+        Ok((spectrum.frequencies, magnitudes_db))
+    }
+
+    /// Calculate Total Harmonic Distortion (THD) for an explicit fundamental.
+    ///
+    /// `highest_harmonic` is inclusive and must be at least two. The retained
+    /// waveform must cover a complete period and resolve every requested
+    /// harmonic; unavailable harmonics are errors, never silently omitted.
+    /// Coefficients are integrated over the trailing exact fundamental period.
+    /// `Ok(None)` means the measured fundamental magnitude is exactly zero.
+    pub fn thd(
+        &self,
+        fundamental_frequency: Value,
+        highest_harmonic: usize,
+    ) -> Result<Option<Value>, MeasurementError> {
+        if highest_harmonic < 2 {
+            return Err(MeasurementError::CalculationError(
+                "THD highest harmonic must be at least 2".to_string(),
+            ));
+        }
+        let analysis = FourierAnalysis::new(
+            FourierConfig::new(fundamental_frequency).with_harmonics(highest_harmonic),
+        );
+        analysis
+            .analyze(&self.time, &self.values)
+            .map(|result| result.thd)
+            .map_err(map_fourier_measurement_error)
+    }
+
+    /// Estimate the dominant non-DC frequency from the mean-removed FFT.
+    ///
+    /// This is a dominant-bin estimate, not proof that a weaker physical
+    /// fundamental is absent. Exact constant or zero waveforms return
+    /// `Ok(None)`. Equal-amplitude ties choose the lowest positive bin.
+    pub fn dominant_frequency(&self) -> Result<Option<Value>, MeasurementError> {
+        let spectrum = self.one_sided_linear_spectrum(true)?;
+        let Some((&first, remaining)) = spectrum.spectral_weights.split_first() else {
+            return Err(MeasurementError::FftError(
+                "FFT produced no spectral bins".to_string(),
+            ));
+        };
+        let _dc = first;
+        let Some((&first_positive, remaining)) = remaining.split_first() else {
+            return Err(MeasurementError::FftError(
+                "FFT produced no positive-frequency bins".to_string(),
+            ));
+        };
+        let mut dominant_index = 1usize;
+        let mut dominant_amplitude = first_positive;
+        for (offset, &amplitude) in remaining.iter().enumerate() {
+            if amplitude > dominant_amplitude {
+                dominant_amplitude = amplitude;
+                dominant_index = offset + 2;
+            }
+        }
+        if dominant_amplitude == 0.0 {
+            Ok(None)
+        } else {
+            Ok(Some(spectrum.frequencies[dominant_index]))
+        }
+    }
+
+    fn qualified_sample_interval(&self) -> Result<Value, MeasurementError> {
+        let sample_count = self.time.len();
+        validate_fft_sample_count(sample_count)?;
+        let duration = self.time[sample_count - 1] - self.time[0];
+        if !duration.is_finite() || duration <= 0.0 {
             return Err(MeasurementError::FftError(format!(
-                "Need at least {} samples, got {}",
-                MIN_FFT_SAMPLES, n
+                "spectral analysis requires a finite positive time span, got {duration}"
+            )));
+        }
+        let interval = duration / (sample_count - 1) as Value;
+        if !interval.is_finite() || interval <= 0.0 {
+            return Err(MeasurementError::FftError(format!(
+                "spectral analysis sample interval is invalid ({interval})"
+            )));
+        }
+        // Permit negligible authored roundoff while bounding the admitted
+        // sample-rate error to one part per billion. Timestamp ULPs are
+        // qualified separately: a large absolute time origin must not hide
+        // material interval uncertainty behind a permissive tolerance.
+        const GRID_RELATIVE_TOLERANCE: Value = 1.0e-9;
+        let grid_budget = GRID_RELATIVE_TOLERANCE * interval;
+        if !grid_budget.is_finite() || grid_budget <= 0.0 {
+            return Err(MeasurementError::FftError(format!(
+                "uniform-grid tolerance cannot be represented for sample interval {interval}"
+            )));
+        }
+        let interval_ulp = value_ulp(interval);
+        for (index, pair) in self.time.windows(2).enumerate() {
+            let timestamp_resolution = value_ulp(pair[0]).max(value_ulp(pair[1]));
+            if !timestamp_resolution.is_finite() || timestamp_resolution > grid_budget {
+                return Err(MeasurementError::FftError(format!(
+                    "timestamp resolution {timestamp_resolution} s at interval {index} cannot qualify nominal sample interval {interval} s"
+                )));
+            }
+            let actual = pair[1] - pair[0];
+            let arithmetic_slack = 4.0 * (value_ulp(actual) + interval_ulp);
+            let tolerance = grid_budget + arithmetic_slack;
+            if !actual.is_finite()
+                || actual <= 0.0
+                || !tolerance.is_finite()
+                || (actual - interval).abs() > tolerance
+            {
+                return Err(MeasurementError::FftError(format!(
+                    "spectral analysis requires uniform sampling: interval {index} is {actual}, expected {interval} within {tolerance}"
+                )));
+            }
+        }
+        let sample_rate = interval.recip();
+        if !sample_rate.is_finite() || sample_rate <= 0.0 {
+            return Err(MeasurementError::FftError(format!(
+                "spectral analysis sample rate is invalid ({sample_rate})"
+            )));
+        }
+        Ok(interval)
+    }
+
+    fn one_sided_linear_spectrum(
+        &self,
+        remove_dc: bool,
+    ) -> Result<LinearSpectrum, MeasurementError> {
+        let interval = self.qualified_sample_interval()?;
+        let sample_count = self.values.len();
+        let bin_count = sample_count
+            .checked_div(2)
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| {
+                MeasurementError::FftError(
+                    "one-sided FFT bin count exceeds this platform".to_string(),
+                )
+            })?;
+        let sample_rate = interval.recip();
+        let bin_spacing = sample_rate / sample_count as Value;
+        if !bin_spacing.is_finite() || bin_spacing <= 0.0 {
+            return Err(MeasurementError::FftError(format!(
+                "FFT bin spacing is invalid ({bin_spacing})"
             )));
         }
 
-        // Find next power of 2
-        let n_fft = n.next_power_of_two();
-
-        // Zero-pad input
-        let mut real: Vec<Value> = self.values.clone();
-        real.resize(n_fft, 0.0);
-        let mut imag: Vec<Value> = vec![0.0; n_fft];
-
-        // In-place FFT (Cooley-Tukey)
-        self.fft_in_place(&mut real, &mut imag);
-
-        // Calculate sample rate
-        let fs = self.sample_rate();
-        let df = fs / n_fft as Value;
-
-        // Calculate magnitudes and frequencies (positive half only)
-        let n_bins = n_fft / 2 + 1;
-        let mut freqs = Vec::with_capacity(n_bins);
-        let mut mags = Vec::with_capacity(n_bins);
-
-        for i in 0..n_bins {
-            freqs.push(i as Value * df);
-            let mag = (real[i].powi(2) + imag[i].powi(2)).sqrt() / n_fft as Value;
-            // Convert to dB, with floor to avoid log(0)
-            let mag_db = 20.0 * (mag.max(1e-15)).log10();
-            mags.push(mag_db);
-        }
-
-        Ok((freqs, mags))
-    }
-
-    /// In-place FFT using Cooley-Tukey algorithm
-    fn fft_in_place(&self, real: &mut [Value], imag: &mut [Value]) {
-        let n = real.len();
-        if n <= 1 {
-            return;
-        }
-
-        // Bit-reversal permutation
-        let mut j = 0;
-        for i in 0..n {
-            if i < j {
-                real.swap(i, j);
-                imag.swap(i, j);
+        let mut frequencies = Vec::new();
+        frequencies.try_reserve_exact(bin_count).map_err(|error| {
+            MeasurementError::FftError(format!(
+                "failed to allocate {bin_count} FFT frequencies: {error}"
+            ))
+        })?;
+        let mut spectral_weights = Vec::new();
+        spectral_weights
+            .try_reserve_exact(bin_count)
+            .map_err(|error| {
+                MeasurementError::FftError(format!(
+                    "failed to allocate {bin_count} FFT amplitudes: {error}"
+                ))
+            })?;
+        for index in 0..bin_count {
+            let frequency = index as Value * bin_spacing;
+            if !frequency.is_finite() {
+                return Err(MeasurementError::FftError(format!(
+                    "FFT frequency at bin {index} is non-finite"
+                )));
             }
-            let mut m = n >> 1;
-            while m >= 1 && j >= m {
-                j -= m;
-                m >>= 1;
+            frequencies.push(frequency);
+            spectral_weights.push(0.0);
+        }
+
+        let is_constant = self.values.iter().all(|value| *value == self.values[0]);
+        if is_constant {
+            let scale = self.values[0].abs();
+            if !remove_dc && scale > 0.0 {
+                spectral_weights[0] = 1.0;
             }
-            j += m;
+            return Ok(LinearSpectrum {
+                frequencies,
+                spectral_weights,
+                log10_normalization: (scale > 0.0 && !remove_dc).then(|| scale.log10()),
+            });
         }
 
-        // Cooley-Tukey FFT
-        let mut len = 2;
-        while len <= n {
-            let half_len = len / 2;
-            let angle_step = -2.0 * PI / len as Value;
-
-            for i in (0..n).step_by(len) {
-                for k in 0..half_len {
-                    let angle = angle_step * k as Value;
-                    let wr = angle.cos();
-                    let wi = angle.sin();
-
-                    let idx1 = i + k;
-                    let idx2 = i + k + half_len;
-
-                    let tr = real[idx2] * wr - imag[idx2] * wi;
-                    let ti = real[idx2] * wi + imag[idx2] * wr;
-
-                    real[idx2] = real[idx1] - tr;
-                    imag[idx2] = imag[idx1] - ti;
-                    real[idx1] += tr;
-                    imag[idx1] += ti;
-                }
+        let source_scale = self
+            .values
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0, Value::max);
+        if !source_scale.is_finite() || source_scale <= 0.0 {
+            return Err(MeasurementError::FftError(format!(
+                "FFT input scale is invalid ({source_scale})"
+            )));
+        }
+        let normalized_mean = if remove_dc {
+            normalized_mean(&self.values, source_scale)?
+        } else {
+            0.0
+        };
+        let mut centered_scale = 0.0_f64;
+        for value in &self.values {
+            let centered = *value / source_scale - normalized_mean;
+            if !centered.is_finite() {
+                return Err(MeasurementError::FftError(
+                    "mean removal produced a non-finite FFT sample".to_string(),
+                ));
             }
-            len <<= 1;
+            centered_scale = centered_scale.max(centered.abs());
         }
-    }
-
-    /// Calculate Total Harmonic Distortion (THD)
-    ///
-    /// THD = sqrt(V2² + V3² + ... + Vn²) / V1 × 100%
-    pub fn thd(&self, num_harmonics: usize) -> Result<Value, MeasurementError> {
-        let (freqs, mags) = self.fft()?;
-
-        if freqs.len() < 2 {
-            return Err(MeasurementError::FftError(
-                "Insufficient FFT bins".to_string(),
-            ));
+        if centered_scale == 0.0 {
+            return Ok(LinearSpectrum {
+                frequencies,
+                spectral_weights,
+                log10_normalization: None,
+            });
+        }
+        let log10_normalization =
+            source_scale.log10() + centered_scale.log10() - (sample_count as Value).log10();
+        if !log10_normalization.is_finite() {
+            return Err(MeasurementError::FftError(format!(
+                "FFT amplitude normalization cannot be represented in logarithmic form ({log10_normalization})"
+            )));
         }
 
-        // Find fundamental (largest magnitude, excluding DC)
-        let mut fund_idx = 1;
-        let mut fund_mag = mags[1];
+        let mut buffer = Vec::new();
+        buffer.try_reserve_exact(sample_count).map_err(|error| {
+            MeasurementError::FftError(format!(
+                "failed to allocate {sample_count} FFT samples: {error}"
+            ))
+        })?;
+        for value in &self.values {
+            let centered = *value / source_scale - normalized_mean;
+            buffer.push(Complex::new(centered / centered_scale, 0.0));
+        }
+        let fft = FftPlanner::<Value>::new().plan_fft_forward(sample_count);
+        let scratch_len = fft.get_inplace_scratch_len();
+        let mut scratch = Vec::new();
+        scratch.try_reserve_exact(scratch_len).map_err(|error| {
+            MeasurementError::FftError(format!(
+                "failed to allocate {scratch_len} FFT scratch samples: {error}"
+            ))
+        })?;
+        scratch.resize(scratch_len, Complex::new(0.0, 0.0));
+        fft.process_with_scratch(&mut buffer, &mut scratch);
+        if let Some((index, value)) = buffer
+            .iter()
+            .enumerate()
+            .find(|(_, value)| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(MeasurementError::FftError(format!(
+                "FFT produced non-finite coefficient {value} at bin {index}"
+            )));
+        }
 
-        for (i, &mag) in mags.iter().enumerate().skip(2) {
-            if mag > fund_mag {
-                fund_mag = mag;
-                fund_idx = i;
+        for index in 0..bin_count {
+            let is_nyquist = sample_count.is_multiple_of(2) && index == sample_count / 2;
+            let one_sided_scale = if index == 0 || is_nyquist { 1.0 } else { 2.0 };
+            let spectral_weight = buffer[index].norm() * one_sided_scale;
+            if !spectral_weight.is_finite() {
+                return Err(MeasurementError::FftError(format!(
+                    "FFT one-sided spectral weight at bin {index} is non-finite ({spectral_weight})"
+                )));
             }
+            spectral_weights[index] = spectral_weight;
         }
 
-        // Convert fundamental from dB to linear
-        let fund_linear = 10.0_f64.powf(fund_mag / 20.0);
-
-        // Sum harmonics
-        let mut harmonic_sum_sq = 0.0;
-        for h in 2..=num_harmonics {
-            let harmonic_idx = fund_idx * h;
-            if harmonic_idx < mags.len() {
-                let harmonic_linear = 10.0_f64.powf(mags[harmonic_idx] / 20.0);
-                harmonic_sum_sq += harmonic_linear * harmonic_linear;
-            }
-        }
-
-        if fund_linear < 1e-15 {
-            return Err(MeasurementError::CalculationError(
-                "Fundamental too small".to_string(),
-            ));
-        }
-
-        Ok(harmonic_sum_sq.sqrt() / fund_linear * 100.0)
-    }
-
-    /// Detect fundamental frequency from FFT
-    pub fn fundamental_frequency(&self) -> Result<Value, MeasurementError> {
-        let (freqs, mags) = self.fft()?;
-
-        if freqs.len() < 2 {
-            return Err(MeasurementError::FftError(
-                "Insufficient FFT bins".to_string(),
-            ));
-        }
-
-        // Find peak (excluding DC)
-        let mut max_idx = 1;
-        let mut max_mag = mags[1];
-
-        for (i, &mag) in mags.iter().enumerate().skip(2) {
-            if mag > max_mag {
-                max_mag = mag;
-                max_idx = i;
-            }
-        }
-
-        Ok(freqs[max_idx])
+        Ok(LinearSpectrum {
+            frequencies,
+            spectral_weights,
+            log10_normalization: Some(log10_normalization),
+        })
     }
 
     //=========================================================================
@@ -795,6 +928,117 @@ impl Waveform {
         }
 
         Self::from_validated_parts(&new_time, &new_values)
+    }
+}
+
+struct LinearSpectrum {
+    frequencies: Vec<Value>,
+    /// Unnormalized one-sided coefficient norms. Keeping the common `1/N`
+    /// factor logarithmic prevents a nonzero subnormal norm from underflowing
+    /// to a fabricated exact zero.
+    spectral_weights: Vec<Value>,
+    log10_normalization: Option<Value>,
+}
+
+fn validate_fft_sample_count(sample_count: usize) -> Result<(), MeasurementError> {
+    if sample_count < MIN_FFT_SAMPLES {
+        return Err(MeasurementError::FftError(format!(
+            "spectral analysis requires at least {MIN_FFT_SAMPLES} samples, got {sample_count}"
+        )));
+    }
+    if sample_count > MAX_QUALIFIED_FFT_SAMPLES {
+        return Err(MeasurementError::FftError(format!(
+            "spectral analysis record has {sample_count} samples; the qualified FFT limit is {MAX_QUALIFIED_FFT_SAMPLES}"
+        )));
+    }
+    Ok(())
+}
+
+fn scaled_amplitude_db(
+    spectral_weight: Value,
+    log10_normalization: Option<Value>,
+) -> Result<Value, MeasurementError> {
+    if spectral_weight == 0.0 {
+        return Ok(Value::NEG_INFINITY);
+    }
+    if !spectral_weight.is_finite() || spectral_weight < 0.0 {
+        return Err(MeasurementError::FftError(format!(
+            "FFT spectral weight is invalid ({spectral_weight})"
+        )));
+    }
+    let Some(log10_normalization) = log10_normalization else {
+        return Err(MeasurementError::FftError(
+            "nonzero FFT coefficient has no amplitude normalization".to_string(),
+        ));
+    };
+    let value = 20.0 * (spectral_weight.log10() + log10_normalization);
+    if !value.is_finite() {
+        return Err(MeasurementError::FftError(format!(
+            "FFT spectral weight {spectral_weight} cannot be represented in dB"
+        )));
+    }
+    Ok(value)
+}
+
+fn value_ulp(value: Value) -> Value {
+    if !value.is_finite() {
+        return Value::INFINITY;
+    }
+    (value.next_up() - value)
+        .abs()
+        .max((value - value.next_down()).abs())
+}
+
+fn normalized_mean(values: &[Value], scale: Value) -> Result<Value, MeasurementError> {
+    let count = values.len() as Value;
+    let mut sum = 0.0;
+    let mut compensation = 0.0;
+    for value in values {
+        let term = (*value / scale) / count;
+        let corrected = term - compensation;
+        let next = sum + corrected;
+        compensation = (next - sum) - corrected;
+        sum = next;
+    }
+    let mean = sum.clamp(-1.0, 1.0);
+    if mean.is_finite() {
+        Ok(mean)
+    } else {
+        Err(MeasurementError::FftError(
+            "scale-safe waveform mean is non-finite".to_string(),
+        ))
+    }
+}
+
+fn map_fourier_measurement_error(error: FourierError) -> MeasurementError {
+    let message = format!("THD qualification failed: {error}");
+    match error {
+        FourierError::EmptyWaveform
+        | FourierError::LengthMismatch { .. }
+        | FourierError::NonFiniteTime { .. }
+        | FourierError::NonFiniteValue { .. }
+        | FourierError::NonIncreasingTime { .. }
+        | FourierError::InvalidTimeSpan { .. } => MeasurementError::InvalidWaveform(message),
+        FourierError::InsufficientSamples { .. }
+        | FourierError::InsufficientDuration { .. }
+        | FourierError::InsufficientWindowSamples { .. }
+        | FourierError::InsufficientSampleRate { .. } => {
+            MeasurementError::InsufficientData(message)
+        }
+        FourierError::HarmonicCapacity { .. }
+        | FourierError::WindowCapacity { .. }
+        | FourierError::InvalidFundamentalFrequency { .. }
+        | FourierError::NoHarmonics
+        | FourierError::NoPeriods
+        | FourierError::InvalidWindowDuration { .. }
+        | FourierError::NonFiniteHarmonicFrequency { .. }
+        | FourierError::NonFiniteCoefficient { .. }
+        | FourierError::NonFiniteThd { .. }
+        | FourierError::InvalidMagnitude { .. }
+        | FourierError::InvalidThd { .. }
+        | FourierError::UnrepresentableRelativeSpectrum { .. } => {
+            MeasurementError::CalculationError(message)
+        }
     }
 }
 
@@ -877,5 +1121,34 @@ mod tests {
             err.to_string().contains("strictly increasing"),
             "error should explain the time ordering problem: {err}"
         );
+    }
+
+    #[test]
+    fn logarithmic_fft_normalization_preserves_a_nonzero_subnormal_weight() {
+        let db = scaled_amplitude_db(Value::from_bits(1), Some(0.0))
+            .expect("a nonzero subnormal spectral weight has a finite logarithm");
+        assert!(db.is_finite());
+        assert!(db < -6_000.0);
+    }
+
+    #[test]
+    fn fft_resource_limit_fails_before_planning() {
+        assert!(validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES).is_ok());
+        assert!(matches!(
+            validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES + 1),
+            Err(MeasurementError::FftError(_))
+        ));
+    }
+
+    #[test]
+    fn thd_capacity_failure_is_not_mislabeled_as_an_fft_failure() {
+        let time: Vec<_> = (0..8).map(|index| index as Value).collect();
+        let values = vec![0.0; time.len()];
+        let waveform = Waveform::new(&time, &values).expect("fixture is valid");
+        let error = waveform
+            .thd(1.0, usize::MAX)
+            .expect_err("unrepresentable harmonic capacity must fail");
+        assert!(matches!(error, MeasurementError::CalculationError(_)));
+        assert!(error.to_string().contains("allocate"));
     }
 }
