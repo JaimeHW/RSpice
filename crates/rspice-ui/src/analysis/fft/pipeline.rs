@@ -17,7 +17,7 @@ pub const MIN_FFT_SAMPLES: usize = 16;
 /// Default point cap for interactive FFT computation.
 pub const DEFAULT_MAX_FFT_POINTS: usize = 65_536;
 
-/// Maximum reference-quality nonuniform resample point count.
+/// Maximum reference-quality FFT preparation point count.
 ///
 /// This keeps memory/time bounded while still preserving far more detail than
 /// the interactive cap when users need analysis-grade fidelity.
@@ -28,8 +28,8 @@ const UNIFORMITY_REL_TOL: f64 = 1e-6;
 
 /// FFT input preparation policy.
 ///
-/// - `Reference`: preserve available time-domain detail (no post-resample
-///   decimation), bounded only by `MAX_REFERENCE_RESAMPLE_POINTS` for safety.
+/// - `Reference`: preserve available time-domain detail (no implicit
+///   decimation), bounded by `MAX_REFERENCE_RESAMPLE_POINTS` for safety.
 /// - `Interactive`: enforce a hard point cap for responsiveness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FftInputPolicy {
@@ -51,7 +51,9 @@ impl FftInputPolicy {
     fn point_cap(self) -> Option<usize> {
         match self {
             Self::Reference => None,
-            Self::Interactive { max_points } => Some(max_points.max(MIN_FFT_SAMPLES)),
+            Self::Interactive { max_points } => {
+                Some(max_points.clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS))
+            }
         }
     }
 }
@@ -147,6 +149,10 @@ pub fn prepare_fft_input_with_options(
     values: &[f64],
     options: FftInputOptions,
 ) -> Option<PreparedFftInput> {
+    let source_count = time.len().min(values.len());
+    if reference_source_exceeds_limit(options, source_count) {
+        return None;
+    }
     let point_cap = options.policy.point_cap();
     let target_samples = options
         .target_samples
@@ -189,7 +195,10 @@ pub fn prepare_fft_input_with_options(
         }
     }
 
-    if uniform.samples.len() < MIN_FFT_SAMPLES || !uniform.sample_rate.is_finite() {
+    if uniform.samples.len() < MIN_FFT_SAMPLES
+        || uniform.samples.len() > MAX_REFERENCE_RESAMPLE_POINTS
+        || !uniform.sample_rate.is_finite()
+    {
         return None;
     }
 
@@ -203,6 +212,13 @@ pub fn prepare_fft_input_with_options(
         original_count,
         decimation_factor,
     })
+}
+
+fn reference_source_exceeds_limit(options: FftInputOptions, source_count: usize) -> bool {
+    matches!(options.policy, FftInputPolicy::Reference)
+        && options.target_samples.is_none()
+        && options.time_window.is_none()
+        && source_count > MAX_REFERENCE_RESAMPLE_POINTS
 }
 
 fn clean_time_series(time: &[f64], values: &[f64]) -> Vec<(f64, f64)> {
@@ -546,5 +562,43 @@ fn remove_dc_offset(samples: &mut [f64]) {
     }
     for sample in samples {
         *sample -= mean;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fft_reference_policy_bounds_uniform_and_resampled_records() {
+        let reference = FftInputOptions::with_policy(FftInputPolicy::Reference);
+        assert!(!reference_source_exceeds_limit(
+            reference,
+            MAX_REFERENCE_RESAMPLE_POINTS
+        ));
+        assert!(reference_source_exceeds_limit(
+            reference,
+            MAX_REFERENCE_RESAMPLE_POINTS + 1
+        ));
+
+        let explicit_resample = reference.with_target_samples(Some(MAX_REFERENCE_RESAMPLE_POINTS));
+        assert!(!reference_source_exceeds_limit(
+            explicit_resample,
+            MAX_REFERENCE_RESAMPLE_POINTS + 1
+        ));
+
+        let explicit_window = reference.with_time_window(Some(FftTimeWindow::new(1.0, 2.0)));
+        assert!(!reference_source_exceeds_limit(
+            explicit_window,
+            MAX_REFERENCE_RESAMPLE_POINTS + 1
+        ));
+
+        assert_eq!(
+            FftInputPolicy::Interactive {
+                max_points: usize::MAX
+            }
+            .point_cap(),
+            Some(MAX_REFERENCE_RESAMPLE_POINTS)
+        );
     }
 }
