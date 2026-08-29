@@ -3080,7 +3080,7 @@ pub enum XyceHbTimeDomainMode {
 
 impl XyceHbTimeDomainMode {
     /// Integer spelling accepted by Xyce 7.10's `TAHB` option.
-    pub const fn xyce_value(self) -> usize {
+    pub(crate) const fn xyce_value(self) -> usize {
         match self {
             Self::Direct => 0,
             Self::TransientAssisted => 1,

@@ -1,6 +1,6 @@
 //! The crate's public surface may shrink, never grow.
 //!
-//! `rspice-core` exports 4,256 public item statements. Its five frontends —
+//! `rspice-core` exports 4,257 public item statements. Its five frontends —
 //! the CLI, the GUI, the Python and WASM bindings, and the conformance suite —
 //! name roughly two hundred distinct paths between them. The rest is internal
 //! machinery that happens to be spelled `pub`.
@@ -94,7 +94,11 @@ use std::path::{Path, PathBuf};
 /// also calls the unit-interval estimator. Larger deletions of unused device
 /// APIs offset most of those additions, so +3 is the statement-count delta,
 /// not the number of frontend paths added.
-const MAX_PUBLIC_ITEMS: usize = 4256;
+///
+/// The latest raise is +1 for `XyceHbTimeDomainMode`, which the conformance
+/// frontend reads from parsed netlists to prove that authored `HBINT.TAHB`
+/// controls remain typed. Its numeric rendering helper stays crate-private.
+const MAX_PUBLIC_ITEMS: usize = 4257;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
