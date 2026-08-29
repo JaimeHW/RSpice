@@ -685,53 +685,74 @@ impl Waveform {
     /// # Returns
     /// Rise time in seconds
     pub fn rise_time(&self, low_pct: Value, high_pct: Value) -> Result<Value, MeasurementError> {
-        if low_pct >= high_pct {
-            return Err(MeasurementError::InvalidThreshold(
-                "Low threshold must be less than high threshold".to_string(),
-            ));
-        }
-        if low_pct < 0.0 || high_pct > 1.0 {
-            return Err(MeasurementError::InvalidThreshold(
-                "Thresholds must be between 0 and 1".to_string(),
-            ));
+        let (low_level, high_level) =
+            qualified_timing_levels(self.min_value, self.max_value, low_pct, high_pct)?;
+        let mut low_arrival = None;
+
+        for segment in 0..self.values.len().saturating_sub(1) {
+            if low_arrival.is_none() {
+                low_arrival = self.crossing_event(segment, low_level, EdgeDirection::Rising)?;
+            }
+            if let Some(low) = low_arrival.as_ref() {
+                if let Some(high) =
+                    self.crossing_event(segment, high_level, EdgeDirection::Rising)?
+                {
+                    return representable_positive_difference(
+                        high.time,
+                        low.time,
+                        segment,
+                        "rise time",
+                    );
+                }
+                if self
+                    .crossing_event(segment, low_level, EdgeDirection::Falling)?
+                    .is_some()
+                    || self.values[segment + 1] < low_level
+                {
+                    low_arrival = None;
+                }
+            }
         }
 
-        let amplitude = self.peak_to_peak();
-        let low_level = self.min_value + low_pct * amplitude;
-        let high_level = self.min_value + high_pct * amplitude;
-
-        let low_cross = self.first_crossing(low_level, EdgeDirection::Rising)?;
-        let high_cross = self.first_crossing(high_level, EdgeDirection::Rising)?;
-
-        match (low_cross, high_cross) {
-            (Some(low), Some(high)) if high.time > low.time => Ok(high.time - low.time),
-            _ => Err(MeasurementError::ThresholdNotCrossed(
-                "Could not find rising edge".to_string(),
-            )),
-        }
+        Err(MeasurementError::ThresholdNotCrossed(
+            "no complete low-to-high rising excursion was found".to_string(),
+        ))
     }
 
-    /// Calculate fall time between two threshold levels
+    /// Calculate fall time between two threshold levels within one excursion.
     pub fn fall_time(&self, high_pct: Value, low_pct: Value) -> Result<Value, MeasurementError> {
-        if low_pct >= high_pct {
-            return Err(MeasurementError::InvalidThreshold(
-                "Low threshold must be less than high threshold".to_string(),
-            ));
+        let (low_level, high_level) =
+            qualified_timing_levels(self.min_value, self.max_value, low_pct, high_pct)?;
+        let mut high_arrival = None;
+
+        for segment in 0..self.values.len().saturating_sub(1) {
+            if high_arrival.is_none() {
+                high_arrival = self.crossing_event(segment, high_level, EdgeDirection::Falling)?;
+            }
+            if let Some(high) = high_arrival.as_ref() {
+                if let Some(low) =
+                    self.crossing_event(segment, low_level, EdgeDirection::Falling)?
+                {
+                    return representable_positive_difference(
+                        low.time,
+                        high.time,
+                        segment,
+                        "fall time",
+                    );
+                }
+                if self
+                    .crossing_event(segment, high_level, EdgeDirection::Rising)?
+                    .is_some()
+                    || self.values[segment + 1] > high_level
+                {
+                    high_arrival = None;
+                }
+            }
         }
 
-        let amplitude = self.peak_to_peak();
-        let low_level = self.min_value + low_pct * amplitude;
-        let high_level = self.min_value + high_pct * amplitude;
-
-        let high_cross = self.first_crossing(high_level, EdgeDirection::Falling)?;
-        let low_cross = self.first_crossing(low_level, EdgeDirection::Falling)?;
-
-        match (high_cross, low_cross) {
-            (Some(high), Some(low)) if low.time > high.time => Ok(low.time - high.time),
-            _ => Err(MeasurementError::ThresholdNotCrossed(
-                "Could not find falling edge".to_string(),
-            )),
-        }
+        Err(MeasurementError::ThresholdNotCrossed(
+            "no complete high-to-low falling excursion was found".to_string(),
+        ))
     }
 
     /// Calculate delay between this waveform and a reference
@@ -752,60 +773,97 @@ impl Waveform {
             .first_crossing(self_threshold, direction)?
             .ok_or_else(|| MeasurementError::ThresholdNotCrossed("Target signal".to_string()))?;
 
-        Ok(self_cross.time - ref_cross.time)
+        representable_signed_difference(
+            self_cross.time,
+            ref_cross.time,
+            self_cross.index,
+            "propagation delay",
+        )
     }
 
-    /// Calculate period from consecutive crossings
+    /// Calculate period from the first two consecutive authored rising arrivals.
     pub fn period(&self, threshold: Value) -> Result<Value, MeasurementError> {
-        let crossings = self.find_crossings(threshold, EdgeDirection::Rising)?;
-
-        if crossings.len() < 2 {
-            return Err(MeasurementError::ThresholdNotCrossed(
-                "Need at least 2 rising edges".to_string(),
-            ));
+        validate_crossing_threshold(threshold)?;
+        let mut first_rising: Option<CrossingEvent> = None;
+        for segment in 0..self.values.len().saturating_sub(1) {
+            let Some(rising) = self.crossing_event(segment, threshold, EdgeDirection::Rising)?
+            else {
+                continue;
+            };
+            if let Some(first) = first_rising.as_ref() {
+                return representable_positive_difference(
+                    rising.time,
+                    first.time,
+                    rising.index,
+                    "period",
+                );
+            }
+            first_rising = Some(rising);
         }
 
-        Ok(crossings[1].time - crossings[0].time)
+        Err(MeasurementError::ThresholdNotCrossed(
+            "Need at least 2 rising edges".to_string(),
+        ))
     }
 
-    /// Calculate frequency from period
+    /// Calculate frequency from a representable period and reciprocal.
     pub fn frequency(&self, threshold: Value) -> Result<Value, MeasurementError> {
         let period = self.period(threshold)?;
-        if period <= 0.0 {
+        let frequency = 1.0 / period;
+        if !frequency.is_finite() || frequency <= 0.0 {
             return Err(MeasurementError::CalculationError(
-                "Invalid period".to_string(),
+                "period reciprocal is not representable as a positive finite frequency".to_string(),
             ));
         }
-        Ok(1.0 / period)
+        Ok(frequency)
     }
 
-    /// Calculate pulse width (time above threshold)
+    /// Calculate the first complete authored rising-to-falling pulse width.
+    ///
+    /// A record that begins above the threshold does not imply a rising event,
+    /// and no wrap across the record boundary is inferred.
     pub fn pulse_width(&self, threshold: Value) -> Result<Value, MeasurementError> {
-        let rising = self.first_crossing(threshold, EdgeDirection::Rising)?;
-        let falling = self.first_crossing(threshold, EdgeDirection::Falling)?;
-
-        match (rising, falling) {
-            (Some(r), Some(f)) if f.time > r.time => Ok(f.time - r.time),
-            (Some(r), Some(f)) => {
-                // Falling before rising - measure from falling to end + start to rising
-                let width = (self.max_time - f.time) + (r.time - self.min_time);
-                Ok(width)
-            }
-            _ => Err(MeasurementError::ThresholdNotCrossed(
-                "Need both rising and falling edges".to_string(),
-            )),
-        }
+        let (rising, falling) = self.first_complete_pulse(threshold)?.ok_or_else(|| {
+            MeasurementError::ThresholdNotCrossed(
+                "no complete authored rising-to-falling pulse was found".to_string(),
+            )
+        })?;
+        representable_positive_difference(falling.time, rising.time, falling.index, "pulse width")
     }
 
-    /// Calculate duty cycle as percentage
+    /// Calculate duty cycle from one coherent rising-falling-rising cycle.
     pub fn duty_cycle(&self, threshold: Value) -> Result<Value, MeasurementError> {
-        let period = self.period(threshold)?;
-        let pulse_width = self.pulse_width(threshold)?;
+        let (rising, falling, next_rising) =
+            self.first_complete_pulse_cycle(threshold)?.ok_or_else(|| {
+                MeasurementError::ThresholdNotCrossed(
+                    "no complete authored rising-to-falling-to-rising cycle was found".to_string(),
+                )
+            })?;
+        let width = scaled_positive_difference(
+            falling.time,
+            rising.time,
+            falling.index,
+            "duty-cycle pulse width",
+        )?;
+        let period = scaled_positive_difference(
+            next_rising.time,
+            rising.time,
+            next_rising.index,
+            "duty-cycle period",
+        )?;
+        let fraction =
+            scaled_positive_ratio(width, period, next_rising.index, "duty-cycle fraction")?;
+        let duty_cycle = fraction * 100.0;
+        if !duty_cycle.is_finite() || duty_cycle <= 0.0 || duty_cycle >= 100.0 {
+            return Err(MeasurementError::CalculationError(format!(
+                "duty cycle is not representable strictly inside (0, 100): {duty_cycle}"
+            )));
+        }
 
-        Ok(pulse_width / period * 100.0)
+        Ok(duty_cycle)
     }
 
-    /// Calculate slew rate (max dV/dt)
+    /// Calculate the maximum absolute slew over every positive sample interval.
     pub fn slew_rate(&self) -> Result<Value, MeasurementError> {
         if self.time.len() < 2 {
             return Err(MeasurementError::InsufficientData(
@@ -815,16 +873,99 @@ impl Waveform {
 
         let mut max_slew = 0.0_f64;
 
-        for i in 0..self.time.len() - 1 {
-            let dt = self.time[i + 1] - self.time[i];
-            if dt > 1e-15 {
-                let dv = (self.values[i + 1] - self.values[i]).abs();
-                let slew = dv / dt;
+        for segment in 0..self.time.len() - 1 {
+            let time_span = scaled_positive_difference(
+                self.time[segment + 1],
+                self.time[segment],
+                segment,
+                "slew time span",
+            )?;
+            let left = self.values[segment];
+            let right = self.values[segment + 1];
+            if left != right {
+                let (high, low) = if left > right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                let value_span = scaled_positive_difference(high, low, segment, "slew value span")?;
+                let slew =
+                    scaled_positive_ratio(value_span, time_span, segment, "absolute slew rate")?;
                 max_slew = max_slew.max(slew);
             }
         }
 
         Ok(max_slew)
+    }
+
+    fn first_complete_pulse(
+        &self,
+        threshold: Value,
+    ) -> Result<Option<(CrossingEvent, CrossingEvent)>, MeasurementError> {
+        validate_crossing_threshold(threshold)?;
+        let mut rising_arrival = None;
+        for segment in 0..self.values.len().saturating_sub(1) {
+            if rising_arrival.is_none() {
+                rising_arrival = self.crossing_event(segment, threshold, EdgeDirection::Rising)?;
+            } else if let Some(falling) =
+                self.crossing_event(segment, threshold, EdgeDirection::Falling)?
+            {
+                return Ok(rising_arrival.map(|rising| (rising, falling)));
+            }
+
+            if rising_arrival.is_some() && self.values[segment + 1] < threshold {
+                rising_arrival = None;
+            }
+        }
+        Ok(None)
+    }
+
+    fn first_complete_pulse_cycle(
+        &self,
+        threshold: Value,
+    ) -> Result<Option<(CrossingEvent, CrossingEvent, CrossingEvent)>, MeasurementError> {
+        validate_crossing_threshold(threshold)?;
+        let mut rising_arrival = None;
+        let mut falling_arrival = None;
+
+        for segment in 0..self.values.len().saturating_sub(1) {
+            if rising_arrival.is_none() {
+                rising_arrival = self.crossing_event(segment, threshold, EdgeDirection::Rising)?;
+                continue;
+            }
+
+            if falling_arrival.is_none() {
+                if let Some(falling) =
+                    self.crossing_event(segment, threshold, EdgeDirection::Falling)?
+                {
+                    falling_arrival = Some(falling);
+                } else if self.values[segment + 1] < threshold {
+                    rising_arrival = None;
+                }
+                continue;
+            }
+
+            if let Some(next_rising) =
+                self.crossing_event(segment, threshold, EdgeDirection::Rising)?
+            {
+                let rising = rising_arrival.take().ok_or_else(|| {
+                    MeasurementError::CalculationError(
+                        "duty-cycle state lost its initial rising event".to_string(),
+                    )
+                })?;
+                let falling = falling_arrival.take().ok_or_else(|| {
+                    MeasurementError::CalculationError(
+                        "duty-cycle state lost its falling event".to_string(),
+                    )
+                })?;
+                return Ok(Some((rising, falling, next_rising)));
+            }
+            if self.values[segment + 1] > threshold {
+                rising_arrival = None;
+                falling_arrival = None;
+            }
+        }
+        Ok(None)
     }
 
     //=========================================================================
@@ -1184,6 +1325,84 @@ fn validate_crossing_threshold(threshold: Value) -> Result<(), MeasurementError>
     }
 }
 
+fn qualified_timing_levels(
+    minimum: Value,
+    maximum: Value,
+    low_fraction: Value,
+    high_fraction: Value,
+) -> Result<(Value, Value), MeasurementError> {
+    if !low_fraction.is_finite() || !high_fraction.is_finite() {
+        return Err(MeasurementError::InvalidThreshold(format!(
+            "timing threshold fractions must be finite, got {low_fraction} and {high_fraction}"
+        )));
+    }
+    if !(0.0..=1.0).contains(&low_fraction)
+        || !(0.0..=1.0).contains(&high_fraction)
+        || low_fraction >= high_fraction
+    {
+        return Err(MeasurementError::InvalidThreshold(format!(
+            "timing threshold fractions must satisfy 0 <= low < high <= 1, got {low_fraction} and {high_fraction}"
+        )));
+    }
+    if !minimum.is_finite() || !maximum.is_finite() || minimum >= maximum {
+        return Err(MeasurementError::CalculationError(format!(
+            "timing threshold levels require a finite nonzero waveform range, got [{minimum}, {maximum}]"
+        )));
+    }
+
+    let low = qualified_convex_level(minimum, maximum, low_fraction, "low timing threshold")?;
+    let high = qualified_convex_level(minimum, maximum, high_fraction, "high timing threshold")?;
+    if low >= high {
+        return Err(MeasurementError::CalculationError(format!(
+            "qualified timing thresholds are not distinct and ordered ({low}, {high})"
+        )));
+    }
+    Ok((low, high))
+}
+
+fn qualified_convex_level(
+    minimum: Value,
+    maximum: Value,
+    fraction: Value,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    if fraction == 0.0 {
+        return Ok(minimum);
+    }
+    if fraction == 1.0 {
+        return Ok(maximum);
+    }
+    let calculation_error = || {
+        MeasurementError::CalculationError(format!(
+            "{quantity} cannot be represented without losing interpolation evidence"
+        ))
+    };
+    let (complement, complement_residual) =
+        error_free_sum(1.0, -fraction, 0).map_err(|_| calculation_error())?;
+    if complement + complement_residual <= 0.0 {
+        return Err(calculation_error());
+    }
+
+    let mut level = ExactFloatSum::default();
+    for (weight, endpoint) in [
+        (complement, minimum),
+        (complement_residual, minimum),
+        (fraction, maximum),
+    ] {
+        let (product, residual) =
+            error_free_product(weight, endpoint, 0, quantity).map_err(|_| calculation_error())?;
+        level.add(product).map_err(|_| calculation_error())?;
+        level.add(residual).map_err(|_| calculation_error())?;
+    }
+    let level = level.finish().map_err(|_| calculation_error())?;
+    if !level.is_finite() || level <= minimum || level >= maximum {
+        return Err(MeasurementError::CalculationError(format!(
+            "interior {quantity} is not representable strictly inside ({minimum}, {maximum}): {level}"
+        )));
+    }
+    Ok(level)
+}
+
 #[derive(Clone, Copy)]
 struct ScaledPositiveDifference {
     mantissa: Value,
@@ -1241,6 +1460,51 @@ fn scaled_positive_ratio(
         )));
     }
     Ok(ratio)
+}
+
+fn representable_positive_difference(
+    later: Value,
+    earlier: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    let difference = scaled_positive_difference(later, earlier, segment, quantity)?;
+    let value = libm::scalbn(difference.mantissa, difference.exponent);
+    if !value.is_finite() || value <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} for segment {segment} is not representable as a positive finite value ({value})"
+        )));
+    }
+    Ok(value)
+}
+
+fn representable_signed_difference(
+    left: Value,
+    right: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    if !left.is_finite() || !right.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} requires finite event times, got {left} and {right}"
+        )));
+    }
+    if left == right {
+        return Ok(0.0);
+    }
+    let (high, low, sign) = if left > right {
+        (left, right, 1.0)
+    } else {
+        (right, left, -1.0)
+    };
+    let magnitude = representable_positive_difference(high, low, segment, quantity)?;
+    let result = sign * magnitude;
+    if !result.is_finite() {
+        return Err(MeasurementError::CalculationError(format!(
+            "signed {quantity} is not representable ({result})"
+        )));
+    }
+    Ok(result)
 }
 
 fn interpolate_crossing_time(
