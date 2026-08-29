@@ -317,6 +317,19 @@ fn upstream_exclusion_manifest_rejects_noncanonical_text_bytes() {
 }
 
 #[test]
+fn upstream_exclusion_manifest_enforces_bounded_read_envelope() {
+    let root = tempfile::tempdir().expect("create oversized-manifest fixture");
+    fs::write(
+        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
+        vec![b'x'; MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES + 1],
+    )
+    .expect("write oversized exclusions manifest");
+    let error = XyceTestRunner::load_upstream_exclusions(root.path())
+        .expect_err("oversized exclusions manifest must fail before parsing");
+    assert!(error.contains("exceeds its"), "unexpected error: {error}");
+}
+
+#[test]
 fn vendored_corpus_marker_requires_the_complete_exclusion_manifest() {
     let root = tempfile::tempdir().expect("create missing-manifest fixture");
     fs::write(root.path().join("RSPICE-VENDORING.md"), "vendored corpus\n")

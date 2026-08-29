@@ -5,6 +5,7 @@
 //! unchanged; private ones are `pub(super)` so siblings can reach them.
 
 use super::*;
+use std::io::Read as _;
 
 impl XyceTestRunner {
     pub(super) fn parse_xyce_netlist(
@@ -5439,12 +5440,38 @@ impl XyceTestRunner {
                 manifest_path.display()
             ));
         }
-        let bytes = fs::read(&manifest_path).map_err(|error| {
-            format!(
-                "failed to read upstream-exclusions manifest {}: {error}",
-                manifest_path.display()
-            )
-        })?;
+        if metadata.len() > MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES as u64 {
+            return Err(format!(
+                "upstream-exclusions manifest {} exceeds its {}-byte envelope",
+                manifest_path.display(),
+                MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES
+            ));
+        }
+        let mut bytes = Vec::with_capacity(
+            (metadata.len() as usize).min(MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES),
+        );
+        fs::File::open(&manifest_path)
+            .map_err(|error| {
+                format!(
+                    "failed to open upstream-exclusions manifest {}: {error}",
+                    manifest_path.display()
+                )
+            })?
+            .take((MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|error| {
+                format!(
+                    "failed to read upstream-exclusions manifest {}: {error}",
+                    manifest_path.display()
+                )
+            })?;
+        if bytes.len() > MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES {
+            return Err(format!(
+                "upstream-exclusions manifest {} grew beyond its {}-byte envelope",
+                manifest_path.display(),
+                MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES
+            ));
+        }
         if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
             return Err("upstream-exclusions manifest must not contain a UTF-8 BOM".to_string());
         }

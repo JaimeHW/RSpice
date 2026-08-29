@@ -76,6 +76,7 @@ const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
     "3e282e0b3f54c9c191995e4f39584b4a93a31ac4e92478bddcdce49b66edc424";
 const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
     "0ac70319d4688ce6058dfdcfcd1a6ccf7bf7bd1fbe8c00f4ef8c52ccd26b442f";
+const MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES: usize = 1_048_576;
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
