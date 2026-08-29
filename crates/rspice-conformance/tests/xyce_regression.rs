@@ -11842,6 +11842,28 @@ fn bug340_stepped_hb_fd_wrapper_owner_is_publicly_qualified() {
 }
 
 #[test]
+fn bug389_global_parameter_hb_wrapper_owner_is_publicly_qualified() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let family = "Netlists/Certification_Tests/BUG_389_SON";
+    let owner = runner.run_test(root.join(family).join("bug389.cir"));
+    assert!(
+        owner.passed && !owner.expected_unsupported && !owner.upstream_excluded,
+        "BUG389 failed its public qualification: {:?}",
+        owner.error
+    );
+    assert_eq!(owner.contract, "bug389_global_parameter_hb_wrapper_owner");
+
+    for control in ["global_param.cir", "local_param.cir"] {
+        let result = runner.run_test(root.join(family).join(control));
+        assert!(
+            result.upstream_excluded && result.contract == "upstream_excluded",
+            "BUG389 control {control} changed disposition: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn bug372_native_mos_multiplicity_wrapper_owners_are_publicly_qualified() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
