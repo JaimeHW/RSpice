@@ -17,6 +17,29 @@ const K_B: f64 = 1.380649e-23;
 const T_REF: f64 = 300.15;
 
 #[test]
+fn pnoise_preserves_dc_and_rejects_negative_or_nonfinite_offsets() {
+    let netlist = Netlist::parse("r1 out 0 1k\n.end\n").expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let dc = engine
+        .run_pnoise(&netlist, 1.0e6, &[0.0], "out", None, None, 0)
+        .expect("driven pnoise supports the DC offset used by linear sweeps");
+    assert_eq!(dc.frequencies, vec![0.0]);
+    assert!(dc.output_noise[0].is_finite() && dc.output_noise[0] >= 0.0);
+
+    for offset in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let error = engine
+            .run_pnoise(&netlist, 1.0e6, &[offset], "out", None, None, 0)
+            .expect_err("an invalid offset must fail before a periodic solve");
+        let message = error.to_string();
+        assert!(
+            message.contains("offsets[0]") && message.contains("finite and non-negative"),
+            "invalid-offset failure must identify the value and contract: {message}"
+        );
+    }
+}
+
+#[test]
 fn high_resistance_pnoise_is_exactly_four_k_t_r() {
     let resistance = 1.0e12;
     let deck = "\
@@ -33,6 +56,42 @@ r1 out 0 1e12
     assert!(
         (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
         "resistor output noise must be 4kTR: got {:.6e}, want {expected:.6e}",
+        result.output_noise[0]
+    );
+}
+
+#[test]
+fn pnoise_resistor_thermal_density_preserves_extreme_scaling() {
+    let resistance = 1.0e154;
+    let temperature = 1.0e-150;
+    let netlist = Netlist::parse("r1 out 0 1e154\n.end\n").expect("deck parses");
+    let mut config = SimulationConfig::default();
+    config.temperature = temperature;
+    let result = Engine::new(config)
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("scaled thermal source and transfer remain representable");
+    let expected = 4.0 * K_B * temperature * resistance;
+
+    assert!(
+        (result.output_noise[0] - expected).abs() <= 2.0e-12 * expected,
+        "scaled 4kTR must survive an unrepresentable current-source PSD: got {:.6e}, want {expected:.6e}",
+        result.output_noise[0]
+    );
+}
+
+#[test]
+fn pnoise_resistor_dtemp_matches_its_absolute_noise_temperature() {
+    let resistance = 10.0e3;
+    let dtemp = 150.0;
+    let netlist = Netlist::parse("r1 out 0 10k dtemp=150\n.end\n").expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("resistor DTEMP pnoise completes");
+    let expected = 4.0 * K_B * (T_REF + dtemp) * resistance;
+
+    assert!(
+        (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
+        "resistor DTEMP must heat periodic thermal noise: got {:.6e}, want {expected:.6e}",
         result.output_noise[0]
     );
 }
@@ -171,6 +230,11 @@ c1 mid 0 1n
         "thermal and shot contributors must be reported"
     );
     for (i, &total) in result.output_noise.iter().enumerate() {
+        assert!(total.is_finite() && total >= 0.0);
+        for (_, psds) in &result.contributors {
+            assert_eq!(psds.len(), offsets.len());
+            assert!(psds.iter().all(|value| value.is_finite() && *value >= 0.0));
+        }
         let sum: f64 = result.contributors.iter().map(|(_, psds)| psds[i]).sum();
         assert!(
             (sum - total).abs() <= 1e-12 * total.max(1e-300),
@@ -217,6 +281,24 @@ c1 mid 0 1n
             input_noise[i]
         );
     }
+}
+
+#[test]
+fn input_referred_pnoise_rejects_an_exact_transfer_null() {
+    let deck = "\
+* disconnected input and noisy output
+vin in 0 dc 0
+rout out 0 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, Some("vin"), 0)
+        .expect_err("input referral is undefined at a zero input-to-output transfer");
+    assert!(
+        error.to_string().contains("zero input-transfer"),
+        "transfer-null failure must identify the undefined input referral: {error}"
+    );
 }
 
 #[test]

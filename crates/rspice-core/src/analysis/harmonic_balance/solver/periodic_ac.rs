@@ -17,6 +17,139 @@ use std::f64::consts::PI;
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
+fn scaled_complex_product3(
+    first: Complex64,
+    second: Complex64,
+    third: Complex64,
+    binary_scale_exponent: i32,
+) -> Result<Complex64, &'static str> {
+    let factors = [first, second, third];
+    if factors
+        .iter()
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err("a factor is non-finite");
+    }
+    if factors
+        .iter()
+        .any(|value| value.re == 0.0 && value.im == 0.0)
+    {
+        return Ok(Complex64::new(0.0, 0.0));
+    }
+
+    let mut scaled = [Complex64::new(0.0, 0.0); 3];
+    let mut exponent = binary_scale_exponent;
+    for (slot, value) in scaled.iter_mut().zip(factors) {
+        let scale = value.re.abs().max(value.im.abs());
+        let factor_exponent = libm::ilogb(scale);
+        exponent = exponent
+            .checked_add(factor_exponent)
+            .ok_or("the product exponent exceeds this platform")?;
+        *slot = Complex64::new(
+            libm::scalbn(value.re, -factor_exponent),
+            libm::scalbn(value.im, -factor_exponent),
+        );
+    }
+
+    let mantissa = scaled[0] * scaled[1] * scaled[2];
+    if !mantissa.re.is_finite() || !mantissa.im.is_finite() {
+        return Err("the normalized product is non-finite");
+    }
+    let mantissa_scale = mantissa.re.abs().max(mantissa.im.abs());
+    if mantissa_scale == 0.0 {
+        return Err("a nonzero product vanished during normalized multiplication");
+    }
+    let mantissa_exponent = libm::ilogb(mantissa_scale);
+    exponent = exponent
+        .checked_add(mantissa_exponent)
+        .ok_or("the normalized product exponent exceeds this platform")?;
+    let normalized = Complex64::new(
+        libm::scalbn(mantissa.re, -mantissa_exponent),
+        libm::scalbn(mantissa.im, -mantissa_exponent),
+    );
+    let product = Complex64::new(
+        libm::scalbn(normalized.re, exponent),
+        libm::scalbn(normalized.im, exponent),
+    );
+    if !product.re.is_finite() || !product.im.is_finite() {
+        return Err("the product is not representable as finite complex components");
+    }
+    if product.re == 0.0 && product.im == 0.0 {
+        return Err("the nonzero product is below the representable complex range");
+    }
+    Ok(product)
+}
+
+fn scaled_flicker_density(
+    gain: Complex64,
+    coefficient: Value,
+    coefficient_binary_exponent: i32,
+    frequency: Value,
+    exponent: Value,
+) -> Result<Value, &'static str> {
+    if !gain.re.is_finite()
+        || !gain.im.is_finite()
+        || !coefficient.is_finite()
+        || coefficient < 0.0
+        || !frequency.is_finite()
+        || frequency < 0.0
+        || !exponent.is_finite()
+    {
+        return Err("a flicker-density factor is invalid");
+    }
+    let gain_scale = gain.re.abs().max(gain.im.abs());
+    if coefficient == 0.0 || gain_scale == 0.0 {
+        return Ok(0.0);
+    }
+    let gain_exponent = libm::ilogb(gain_scale);
+    let normalized_gain = Complex64::new(
+        libm::scalbn(gain.re, -gain_exponent),
+        libm::scalbn(gain.im, -gain_exponent),
+    );
+    let normalized_magnitude = normalized_gain.norm();
+    if !normalized_magnitude.is_finite() || normalized_magnitude <= 0.0 {
+        return Err("the normalized flicker transfer magnitude is invalid");
+    }
+    let gain_log2 = Value::from(gain_exponent) + libm::log2(normalized_magnitude);
+    if frequency == 0.0 {
+        return if exponent < 0.0 {
+            Ok(0.0)
+        } else if exponent == 0.0 {
+            scaled_flicker_density(
+                gain,
+                coefficient,
+                coefficient_binary_exponent,
+                1.0,
+                exponent,
+            )
+        } else {
+            Err("positive-exponent flicker density is singular at zero frequency")
+        };
+    }
+
+    let frequency_term = if exponent == 0.0 {
+        0.0
+    } else {
+        exponent * libm::log2(frequency)
+    };
+    let log2_density =
+        2.0 * gain_log2 + libm::log2(coefficient) + Value::from(coefficient_binary_exponent)
+            - frequency_term;
+    if !log2_density.is_finite() {
+        return Err("the flicker-density exponent is non-finite");
+    }
+    let binary_exponent = libm::floor(log2_density);
+    if binary_exponent < i32::MIN as Value || binary_exponent > i32::MAX as Value {
+        return Err("the flicker-density exponent exceeds this platform");
+    }
+    let mantissa = libm::exp2(log2_density - binary_exponent);
+    let density = libm::scalbn(mantissa, binary_exponent as i32);
+    if !density.is_finite() || density <= 0.0 {
+        return Err("the nonzero flicker density is not representable");
+    }
+    Ok(density)
+}
+
 /// One small-signal excitation column: current injections applied at a single
 /// input sideband.
 #[derive(Debug, Clone)]
@@ -609,6 +742,7 @@ impl HbSolver {
                     node_pos: p,
                     node_neg: q,
                     psd,
+                    binary_scale_exponent: 0,
                     flicker: None,
                 }
             })
@@ -638,6 +772,11 @@ impl HbSolver {
         sources: &[PeriodicNoiseSource],
     ) -> Result<Vec<Value>, HbError> {
         let n = self.num_nodes;
+        if !offset_hz.is_finite() || offset_hz < 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "pnoise offset frequency must be finite and non-negative, got {offset_hz}"
+            )));
+        }
         if output_node >= n {
             return Err(HbError::InvalidCircuit(
                 "pnoise output node out of range".to_string(),
@@ -654,6 +793,46 @@ impl HbSolver {
             return Err(HbError::InvalidCircuit(
                 "pnoise sideband range must include 0 (the analysis frequency)".to_string(),
             ));
+        }
+        for source in sources {
+            if source.psd.is_empty() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' has no periodic PSD coefficients",
+                    source.name
+                )));
+            }
+            if source
+                .psd
+                .iter()
+                .any(|coefficient| !coefficient.re.is_finite() || !coefficient.im.is_finite())
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' contains a non-finite periodic PSD coefficient",
+                    source.name
+                )));
+            }
+            let coefficient_scale = source
+                .psd
+                .iter()
+                .map(|coefficient| coefficient.norm())
+                .fold(0.0, Value::max);
+            let dc_tolerance =
+                coefficient_scale * Value::EPSILON * 32.0 * source.psd.len() as Value;
+            let dc = source.psd[0];
+            if !dc_tolerance.is_finite() || dc.re < -dc_tolerance || dc.im.abs() > dc_tolerance {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' has an invalid DC PSD coefficient ({:+.6e}{:+.6e}j)",
+                    source.name, dc.re, dc.im
+                )));
+            }
+            if let Some((coefficient, exponent)) = source.flicker
+                && (!coefficient.is_finite() || coefficient < 0.0 || !exponent.is_finite())
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' has invalid flicker parameters ({coefficient}, {exponent})",
+                    source.name
+                )));
+            }
         }
         let s = (sideband_max - sideband_min + 1) as usize;
         let size = n * s;
@@ -749,10 +928,19 @@ impl HbSolver {
                 if source.node_neg < n {
                     a -= adjoint[source.node_neg * s + k_idx];
                 }
+                if !a.re.is_finite() || !a.im.is_finite() {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "pnoise source '{}' has a non-finite adjoint gain at sideband {}",
+                        source.name,
+                        sideband_min + k_idx as i32
+                    )));
+                }
                 *gain = a;
             }
 
             let mut contribution = Complex64::new(0.0, 0.0);
+            let mut absolute_sum = 0.0;
+            let mut term_count = 0usize;
             for k_idx in 0..s {
                 for m_idx in 0..s {
                     let d = (k_idx as i32) - (m_idx as i32);
@@ -765,7 +953,33 @@ impl HbSolver {
                     } else {
                         source.psd[d_abs].conj()
                     };
-                    contribution += gains[k_idx] * gains[m_idx].conj() * s_d;
+                    let term = scaled_complex_product3(
+                        gains[k_idx],
+                        gains[m_idx].conj(),
+                        s_d,
+                        source.binary_scale_exponent,
+                    )
+                    .map_err(|reason| {
+                        HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' white-noise term is invalid: {reason}",
+                            source.name
+                        ))
+                    })?;
+                    contribution += term;
+                    if !contribution.re.is_finite() || !contribution.im.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' white-noise accumulation became non-finite",
+                            source.name
+                        )));
+                    }
+                    absolute_sum += term.norm();
+                    if !absolute_sum.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' white-noise error bound became non-finite",
+                            source.name
+                        )));
+                    }
+                    term_count = term_count.saturating_add(1);
                 }
             }
 
@@ -775,14 +989,84 @@ impl HbSolver {
             if let Some((coeff, ef)) = source.flicker {
                 let omega0_hz = self.config.fundamental_freq;
                 for (k_idx, gain) in gains.iter().enumerate() {
+                    if coeff == 0.0 {
+                        continue;
+                    }
                     let k = sideband_min + k_idx as i32;
-                    let f_abs = (offset_hz + (k as f64) * omega0_hz).abs().max(1e-3);
-                    contribution += gain.norm_sqr() * coeff / f_abs.powf(ef);
+                    let sideband_frequency = offset_hz + (k as f64) * omega0_hz;
+                    if !sideband_frequency.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' has a non-finite sideband frequency at k={k}",
+                            source.name
+                        )));
+                    }
+                    let f_abs = sideband_frequency.abs();
+                    if f_abs == 0.0 && ef > 0.0 {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' has singular 1/f noise at the zero-frequency sideband k={k}",
+                            source.name
+                        )));
+                    }
+                    let term = scaled_flicker_density(
+                        *gain,
+                        coeff,
+                        source.binary_scale_exponent,
+                        f_abs,
+                        ef,
+                    )
+                    .map_err(|reason| {
+                        HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' produced an invalid flicker-noise density at sideband {k}: {reason}",
+                            source.name
+                        ))
+                    })?;
+                    contribution.re += term;
+                    if !contribution.re.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' flicker-noise accumulation became non-finite",
+                            source.name
+                        )));
+                    }
+                    absolute_sum += term;
+                    if !absolute_sum.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "pnoise source '{}' flicker-noise error bound became non-finite",
+                            source.name
+                        )));
+                    }
+                    term_count = term_count.saturating_add(1);
                 }
             }
             // The double sum is Hermitian by construction; numerical
-            // round-off leaves a vanishing imaginary part.
-            contributions.push(contribution.re.max(0.0));
+            // round-off leaves a vanishing imaginary part and can place an
+            // exact zero a few ulps below zero. Do not let max(0) silently
+            // turn NaN or a materially non-physical PSD into a successful
+            // result.
+            let roundoff_tolerance =
+                absolute_sum * Value::EPSILON * 32.0 * (term_count.max(1) as Value);
+            if !roundoff_tolerance.is_finite() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' roundoff bound is non-finite",
+                    source.name
+                )));
+            }
+            if contribution.im.abs() > roundoff_tolerance {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' produced a non-Hermitian density ({:+.6e}{:+.6e}j)",
+                    source.name, contribution.re, contribution.im
+                )));
+            }
+            if contribution.re < -roundoff_tolerance {
+                return Err(HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' produced a negative output-noise density {:.6e}",
+                    source.name, contribution.re
+                )));
+            }
+            contributions.push(if contribution.re > 0.0 {
+                contribution.re
+            } else {
+                0.0
+            });
         }
 
         Ok(contributions)
@@ -802,6 +1086,10 @@ pub struct PeriodicNoiseSource {
     /// Fourier coefficients of the intensity s(t) >= 0 in A^2/Hz, indexed by
     /// harmonic (c-convention; negative harmonics by conjugation).
     pub psd: Vec<Complex64>,
+    /// Shared base-2 exponent applied to the PSD coefficients and flicker
+    /// coefficient. This preserves physically representable folded results
+    /// when an elementary source density lies outside the direct `f64` range.
+    pub binary_scale_exponent: i32,
     /// Stationary flicker term `(coefficient, frequency exponent)`: adds
     /// `coefficient / |f|^exponent` evaluated at each sideband's absolute
     /// frequency. The coefficient already folds the bias dependence
@@ -841,6 +1129,164 @@ mod matrix_free_tests {
             (actual - expected).norm() <= 2e-12 * scale,
             "actual={actual:?}, expected={expected:?}"
         );
+    }
+
+    #[test]
+    fn periodic_noise_rejects_invalid_source_densities_instead_of_zero_filling() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        solver.add_conductance(0, 0, 1.0);
+        let state = HbSolverState::new(1, 1);
+        let invalid_source = |density| PeriodicNoiseSource {
+            name: "invalid source".to_string(),
+            node_pos: 0,
+            node_neg: usize::MAX,
+            psd: vec![Complex64::new(density, 0.0)],
+            binary_scale_exponent: 0,
+            flicker: None,
+        };
+
+        let non_finite = solver
+            .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[invalid_source(Value::NAN)])
+            .expect_err("NaN source density must fail closed");
+        assert!(non_finite.to_string().contains("non-finite"));
+
+        let negative = solver
+            .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[invalid_source(-1.0)])
+            .expect_err("negative source density must not be clamped to zero");
+        assert!(negative.to_string().contains("invalid DC"));
+
+        for (source, expected) in [
+            (
+                PeriodicNoiseSource {
+                    name: "infinite source".to_string(),
+                    node_pos: 0,
+                    node_neg: usize::MAX,
+                    psd: vec![Complex64::new(Value::INFINITY, 0.0)],
+                    binary_scale_exponent: 0,
+                    flicker: None,
+                },
+                "non-finite",
+            ),
+            (
+                PeriodicNoiseSource {
+                    name: "complex DC source".to_string(),
+                    node_pos: 0,
+                    node_neg: usize::MAX,
+                    psd: vec![Complex64::new(1.0, 1.0)],
+                    binary_scale_exponent: 0,
+                    flicker: None,
+                },
+                "invalid DC",
+            ),
+            (
+                PeriodicNoiseSource {
+                    name: "empty source".to_string(),
+                    node_pos: 0,
+                    node_neg: usize::MAX,
+                    psd: Vec::new(),
+                    binary_scale_exponent: 0,
+                    flicker: None,
+                },
+                "no periodic PSD",
+            ),
+            (
+                PeriodicNoiseSource {
+                    name: "invalid flicker source".to_string(),
+                    node_pos: 0,
+                    node_neg: usize::MAX,
+                    psd: vec![Complex64::new(0.0, 0.0)],
+                    binary_scale_exponent: 0,
+                    flicker: Some((Value::NAN, 1.0)),
+                },
+                "invalid flicker",
+            ),
+        ] {
+            let error = solver
+                .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[source])
+                .expect_err("invalid source evidence must fail closed");
+            assert!(
+                error.to_string().contains(expected),
+                "unexpected error: {error}"
+            );
+        }
+
+        for density in [0.0, 1.0] {
+            let valid = solver
+                .solve_periodic_noise(&state, 1.0e3, 0, 0, 0, None, &[invalid_source(density)])
+                .expect("finite non-negative DC density remains valid");
+            assert_eq!(valid, vec![density]);
+        }
+
+        let flicker = PeriodicNoiseSource {
+            name: "flicker source".to_string(),
+            node_pos: 0,
+            node_neg: usize::MAX,
+            psd: vec![Complex64::new(0.0, 0.0)],
+            binary_scale_exponent: 0,
+            flicker: Some((1.0, 1.0)),
+        };
+        let singular = solver
+            .solve_periodic_noise(&state, 0.0, 0, 0, 0, None, &[flicker.clone()])
+            .expect_err("1/f noise at an exact zero-frequency sideband is singular");
+        assert!(singular.to_string().contains("singular 1/f"));
+
+        let below_legacy_floor = solver
+            .solve_periodic_noise(&state, 1.0e-6, 0, 0, 0, None, &[flicker])
+            .expect("nonzero sub-millihertz flicker density remains physical");
+        assert!((below_legacy_floor[0] - 1.0e6).abs() <= 4.0 * Value::EPSILON * 1.0e6);
+    }
+
+    #[test]
+    fn periodic_noise_term_materialization_preserves_representable_extremes() {
+        let large_white = scaled_complex_product3(
+            Complex64::new(1.0e200, 0.0),
+            Complex64::new(1.0e200, 0.0),
+            Complex64::new(1.0e-200, 0.0),
+            0,
+        )
+        .expect("scaled white-noise product remains representable");
+        assert!((large_white.re - 1.0e200).abs() <= 8.0 * Value::EPSILON * 1.0e200);
+        assert_eq!(large_white.im, 0.0);
+
+        let small_white = scaled_complex_product3(
+            Complex64::new(1.0e-200, 0.0),
+            Complex64::new(1.0e-200, 0.0),
+            Complex64::new(1.0e200, 0.0),
+            0,
+        )
+        .expect("scaled white-noise product must not underflow prematurely");
+        assert!((small_white.re - 1.0e-200).abs() <= 8.0 * Value::EPSILON * 1.0e-200);
+
+        let externally_scaled = scaled_complex_product3(
+            Complex64::new(libm::scalbn(1.0, 500), 0.0),
+            Complex64::new(libm::scalbn(1.0, 500), 0.0),
+            Complex64::new(1.0, 0.0),
+            -1100,
+        )
+        .expect("an out-of-range elementary PSD scale can fold to a finite result");
+        assert_eq!(
+            externally_scaled,
+            Complex64::new(libm::scalbn(1.0, -100), 0.0)
+        );
+
+        let folded =
+            scaled_flicker_density(Complex64::new(1.0e-100, 0.0), 1.0e-200, 0, 1.0e-200, 2.0)
+                .expect("scaled flicker product and ratio remain representable");
+        assert!((folded - 1.0).abs() <= 2.0e-12, "got {folded:.16e}");
+
+        let maximum = Value::MAX;
+        let maximum_mantissa = libm::scalbn(maximum, -1023);
+        let extreme_gain = scaled_flicker_density(
+            Complex64::new(maximum, maximum),
+            libm::scalbn(1.0, -1022),
+            0,
+            libm::scalbn(1.0, 500),
+            2.0,
+        )
+        .expect("finite complex components need not have a materialized finite norm");
+        let expected = maximum_mantissa * maximum_mantissa * libm::scalbn(1.0, 25);
+        assert!((extreme_gain - expected).abs() <= 2.0e-12 * expected);
     }
 
     #[test]

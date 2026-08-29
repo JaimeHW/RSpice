@@ -41,6 +41,229 @@ enum PnoiseOperatingPoint<'a> {
     HarmonicBalance(&'a HbOperatingPoint),
 }
 
+#[derive(Clone, Copy)]
+struct ScaledPositive {
+    mantissa: Value,
+    exponent: i32,
+}
+
+fn checked_scaled_positive_product(
+    factors: &[Value],
+    quantity: &str,
+) -> Result<ScaledPositive, SimulationError> {
+    let mut mantissa = 1.0;
+    let mut exponent = 0i32;
+    for &factor in factors {
+        if !factor.is_finite() || factor < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "{quantity} contains an invalid factor {factor}"
+            )));
+        }
+        if factor == 0.0 {
+            return Ok(ScaledPositive {
+                mantissa: 0.0,
+                exponent: 0,
+            });
+        }
+        let factor_exponent = libm::ilogb(factor);
+        let factor_mantissa = libm::scalbn(factor, -factor_exponent);
+        mantissa *= factor_mantissa;
+        let mantissa_exponent = libm::ilogb(mantissa);
+        mantissa = libm::scalbn(mantissa, -mantissa_exponent);
+        exponent = exponent
+            .checked_add(factor_exponent)
+            .and_then(|value| value.checked_add(mantissa_exponent))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!("{quantity} exponent exceeds this platform"))
+            })?;
+    }
+    if !mantissa.is_finite() || mantissa <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} normalized mantissa is invalid ({mantissa})"
+        )));
+    }
+    Ok(ScaledPositive { mantissa, exponent })
+}
+
+fn checked_scaled_positive_power_product(
+    coefficient: Value,
+    base: Value,
+    power: Value,
+    quantity: &str,
+) -> Result<ScaledPositive, SimulationError> {
+    if !coefficient.is_finite()
+        || coefficient < 0.0
+        || !base.is_finite()
+        || base < 0.0
+        || !power.is_finite()
+    {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} has invalid coefficient/base/power ({coefficient}, {base}, {power})"
+        )));
+    }
+    if coefficient == 0.0 {
+        return Ok(ScaledPositive {
+            mantissa: 0.0,
+            exponent: 0,
+        });
+    }
+    if base == 0.0 {
+        return if power > 0.0 {
+            Ok(ScaledPositive {
+                mantissa: 0.0,
+                exponent: 0,
+            })
+        } else if power == 0.0 {
+            checked_scaled_positive_product(&[coefficient], quantity)
+        } else {
+            Err(SimulationError::Circuit(format!(
+                "{quantity} is singular for a zero base and negative power"
+            )))
+        };
+    }
+
+    let log2_value = libm::log2(coefficient) + power * libm::log2(base);
+    if !log2_value.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} exponent is non-finite"
+        )));
+    }
+    let binary_exponent = libm::floor(log2_value);
+    if binary_exponent < i32::MIN as Value || binary_exponent > i32::MAX as Value {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} exponent exceeds this platform"
+        )));
+    }
+    let mantissa = libm::exp2(log2_value - binary_exponent);
+    if !mantissa.is_finite() || mantissa <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "{quantity} normalized mantissa is invalid ({mantissa})"
+        )));
+    }
+    Ok(ScaledPositive {
+        mantissa,
+        exponent: binary_exponent as i32,
+    })
+}
+
+fn checked_pnoise_total(
+    per_source: &[Value],
+    sources: &[PeriodicNoiseSource],
+    offset: Value,
+) -> Result<Value, SimulationError> {
+    if per_source.len() != sources.len() {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise solver returned {} contributions for {} sources at offset {offset:.6e} Hz",
+            per_source.len(),
+            sources.len()
+        )));
+    }
+
+    // Neumaier compensation preserves contributors far below the largest
+    // source without reordering the public contributor list.
+    let mut sum = 0.0;
+    let mut compensation = 0.0;
+    for (source, &value) in sources.iter().zip(per_source) {
+        if !value.is_finite() || value < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "pnoise source '{}' produced invalid output-noise density {value} at offset {offset:.6e} Hz",
+                source.name
+            )));
+        }
+        let next = sum + value;
+        if !next.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "pnoise total output-noise density overflowed at offset {offset:.6e} Hz"
+            )));
+        }
+        let correction = if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        compensation += correction;
+        if !compensation.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "pnoise output-noise accumulation became non-finite at offset {offset:.6e} Hz"
+            )));
+        }
+        sum = next;
+    }
+
+    let total = sum + compensation;
+    if !total.is_finite() || total < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise total output-noise density is invalid ({total}) at offset {offset:.6e} Hz"
+        )));
+    }
+    Ok(total)
+}
+
+fn checked_input_referred_pnoise(
+    output_noise: Value,
+    transfer: Complex64,
+    offset: Value,
+) -> Result<Value, SimulationError> {
+    if !output_noise.is_finite() || output_noise < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise output-noise density is invalid ({output_noise}) before input referral at offset {offset:.6e} Hz"
+        )));
+    }
+    if !transfer.re.is_finite() || !transfer.im.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise input transfer is non-finite at offset {offset:.6e} Hz"
+        )));
+    }
+    let gain = transfer.norm();
+    if !gain.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise input-transfer magnitude is non-finite at offset {offset:.6e} Hz"
+        )));
+    }
+    if gain == 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise input-referred density is undefined at the zero input-transfer magnitude at offset {offset:.6e} Hz"
+        )));
+    }
+    if output_noise == 0.0 {
+        return Ok(0.0);
+    }
+
+    // Form output_noise / |H|^2 in normalized binary parts. Direct norm_sqr
+    // can overflow for a finite H or underflow before the division, and two
+    // sequential divisions can round a representable subnormal to zero.
+    let numerator_exponent = libm::ilogb(output_noise);
+    let numerator_mantissa = libm::scalbn(output_noise, -numerator_exponent);
+    let gain_exponent = libm::ilogb(gain);
+    let gain_mantissa = libm::scalbn(gain, -gain_exponent);
+    let squared_mantissa = gain_mantissa * gain_mantissa;
+    let mantissa_exponent = libm::ilogb(squared_mantissa);
+    let denominator_mantissa = libm::scalbn(squared_mantissa, -mantissa_exponent);
+    let denominator_exponent = gain_exponent
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(mantissa_exponent))
+        .ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "pnoise input-transfer exponent exceeds this platform at offset {offset:.6e} Hz"
+            ))
+        })?;
+    let exponent = numerator_exponent
+        .checked_sub(denominator_exponent)
+        .ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "pnoise input-referred-noise exponent exceeds this platform at offset {offset:.6e} Hz"
+            ))
+        })?;
+    let mantissa = numerator_mantissa / denominator_mantissa;
+    let input_noise = libm::scalbn(mantissa, exponent);
+    if !input_noise.is_finite() || input_noise <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise input-referred density is not representable ({input_noise}) at offset {offset:.6e} Hz"
+        )));
+    }
+    Ok(input_noise)
+}
+
 impl Engine {
     /// Run periodic noise analysis at `output_node` (optionally referenced
     /// to `output_ref` for a differential output) over `offsets`.
@@ -112,6 +335,12 @@ impl Engine {
         operating_point: &super::super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        if operating_point.config().is_autonomous() {
+            return Err(SimulationError::Circuit(
+                "driven pnoise cannot consume an autonomous PSS operating point; use oscillator pnoise"
+                    .to_string(),
+            ));
+        }
         self.run_pnoise_impl(
             netlist,
             operating_point.analysis().result.frequency,
@@ -178,6 +407,16 @@ impl Engine {
             return Err(SimulationError::Circuit(
                 "pnoise frequency sweep is empty".to_string(),
             ));
+        }
+        if let Some((index, offset)) = offsets
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(_, offset)| !offset.is_finite() || *offset < 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "pnoise offset frequencies must be finite and non-negative, got offsets[{index}]={offset}"
+            )));
         }
         if max_sideband < 0 {
             return Err(SimulationError::Circuit(
@@ -328,11 +567,22 @@ impl Engine {
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| format!("R#{i}"));
+            let source_temperature = temperature + circuit.resistors.noise_temperature_offset(i);
+            if !source_temperature.is_finite() || source_temperature <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "pnoise resistor '{name}' absolute noise temperature must be finite and positive, got {source_temperature} K"
+                )));
+            }
+            let thermal_density = checked_scaled_positive_product(
+                &[4.0, K_BOLTZMANN, source_temperature, g],
+                &format!("pnoise resistor '{name}' thermal-noise density"),
+            )?;
             sources.push(PeriodicNoiseSource {
                 name: format!("{name} thermal"),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
-                psd: vec![Complex64::new(4.0 * K_BOLTZMANN * temperature * g, 0.0)],
+                psd: vec![Complex64::new(thermal_density.mantissa, 0.0)],
+                binary_scale_exponent: thermal_density.exponent,
                 flicker: None,
             });
 
@@ -340,13 +590,25 @@ impl Engine {
             // matching the stationary .noise treatment.
             if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
                 let i_dc = g * (hb_dc_voltage(np) - hb_dc_voltage(nn));
-                if i_dc.abs() > 1e-18 {
+                if !i_dc.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "pnoise resistor '{name}' has a non-finite DC current for flicker noise"
+                    )));
+                }
+                let flicker_density = checked_scaled_positive_power_product(
+                    coefficient,
+                    i_dc.abs(),
+                    af,
+                    &format!("pnoise resistor '{name}' flicker coefficient"),
+                )?;
+                if flicker_density.mantissa > 0.0 {
                     sources.push(PeriodicNoiseSource {
                         name: format!("{name} flicker"),
                         node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                         node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
                         psd: vec![Complex64::new(0.0, 0.0)],
-                        flicker: Some((coefficient * i_dc.abs().powf(af), ef)),
+                        binary_scale_exponent: flicker_density.exponent,
+                        flicker: Some((flicker_density.mantissa, ef)),
                     });
                 }
             }
@@ -359,13 +621,26 @@ impl Engine {
                 let vc = hb_dc_voltage(diode.node_cathode);
                 let arg = ((va - vc) / (diode.n * diode.vt)).min(40.0);
                 let i_dc = diode.is * (arg.exp() - 1.0);
-                if i_dc.abs() > 1e-18 {
+                if !i_dc.is_finite() {
+                    return Err(SimulationError::Circuit(format!(
+                        "pnoise diode '{}' has a non-finite DC current for flicker noise",
+                        diode.name
+                    )));
+                }
+                let flicker_density = checked_scaled_positive_power_product(
+                    diode.kf,
+                    i_dc.abs(),
+                    diode.af,
+                    &format!("pnoise diode '{}' flicker coefficient", diode.name),
+                )?;
+                if flicker_density.mantissa > 0.0 {
                     sources.push(PeriodicNoiseSource {
                         name: format!("{} flicker", diode.name),
                         node_pos: Self::hb_node_to_solver_index(diode.node_anode, num_nodes),
                         node_neg: Self::hb_node_to_solver_index(diode.node_cathode, num_nodes),
                         psd: vec![Complex64::new(0.0, 0.0)],
-                        flicker: Some((diode.kf * i_dc.abs().powf(diode.af), 1.0)),
+                        binary_scale_exponent: flicker_density.exponent,
+                        flicker: Some((flicker_density.mantissa, 1.0)),
                     });
                 }
             }
@@ -384,12 +659,16 @@ impl Engine {
         // Input transfer for input-referred noise: the conversion transfer
         // from the named source (unit excitation at sideband 0) to the
         // output at the analysis frequency.
-        let input_injections = input_source
+        let input_excitation = input_source
             .map(|name| Self::pac_input_injections(&circuit, name, num_nodes))
-            .transpose()?;
+            .transpose()?
+            .map(|injections| PeriodicAcExcitation {
+                sideband: 0,
+                injections,
+            });
 
         let mut output_noise = Vec::with_capacity(offsets.len());
-        let mut input_noise: Option<Vec<Value>> = input_injections
+        let mut input_noise: Option<Vec<Value>> = input_excitation
             .as_ref()
             .map(|_| Vec::with_capacity(offsets.len()));
         let mut contributors: Vec<(String, Vec<Value>)> = sources
@@ -418,25 +697,21 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let total: Value = per_source.iter().sum();
+            let total = checked_pnoise_total(&per_source, &sources, offset)?;
             output_noise.push(total);
             for (slot, &value) in contributors.iter_mut().zip(&per_source) {
                 slot.1.push(value);
             }
 
-            if let (Some(injections), Some(acc)) = (input_injections.as_ref(), input_noise.as_mut())
+            if let (Some(excitation), Some(acc)) = (input_excitation.as_ref(), input_noise.as_mut())
             {
-                let excitation = PeriodicAcExcitation {
-                    sideband: 0,
-                    injections: injections.clone(),
-                };
                 let response = solver
                     .solve_periodic_ac(
                         &state,
                         offset,
                         -max_sideband,
                         max_sideband,
-                        std::slice::from_ref(&excitation),
+                        std::slice::from_ref(excitation),
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(
@@ -444,13 +719,47 @@ impl Engine {
                         ))
                     })?;
                 let zero_idx = max_sideband as usize; // k = 0 with range -K..K
-                let mut h = response[0][out_idx][zero_idx];
+                let response_for_excitation = response.first().ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "pnoise input transfer returned no excitation response at offset {offset:.6e} Hz"
+                    ))
+                })?;
+                let mut h = response_for_excitation
+                    .get(out_idx)
+                    .and_then(|sidebands| sidebands.get(zero_idx))
+                    .copied()
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "pnoise input transfer returned an incomplete output response at offset {offset:.6e} Hz"
+                        ))
+                    })?;
                 if let Some(r) = ref_idx {
-                    h -= response[0][r][zero_idx];
+                    h -= response_for_excitation
+                        .get(r)
+                        .and_then(|sidebands| sidebands.get(zero_idx))
+                        .copied()
+                        .ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "pnoise input transfer returned an incomplete reference response at offset {offset:.6e} Hz"
+                            ))
+                        })?;
                 }
-                let h2 = h.norm_sqr().max(1e-300);
-                acc.push(total / h2);
+                acc.push(checked_input_referred_pnoise(total, h, offset)?);
             }
+        }
+
+        if output_noise.len() != offsets.len()
+            || contributors
+                .iter()
+                .any(|(_, values)| values.len() != offsets.len())
+            || input_noise
+                .as_ref()
+                .is_some_and(|values| values.len() != offsets.len())
+            || input_source.is_some() != input_noise.is_some()
+        {
+            return Err(SimulationError::Circuit(
+                "pnoise result publication is incomplete".to_string(),
+            ));
         }
 
         Ok(PnoiseAnalysisResult {
@@ -461,5 +770,78 @@ impl Engine {
             fundamental_freq,
             converged: state.converged,
         })
+    }
+}
+
+#[cfg(test)]
+mod publication_tests {
+    use super::*;
+
+    #[test]
+    fn input_referral_is_scale_safe_and_rejects_a_transfer_null() {
+        let large = checked_input_referred_pnoise(1.0e-200, Complex64::new(1.0e-200, 0.0), 1.0e3)
+            .expect("small nonzero gain has a representable input-referred result");
+        assert!((large - 1.0e200).abs() <= 4.0 * Value::EPSILON * 1.0e200);
+
+        let small = checked_input_referred_pnoise(1.0e200, Complex64::new(1.0e200, 0.0), 1.0e3)
+            .expect("large finite gain has a representable input-referred result");
+        assert!((small - 1.0e-200).abs() <= 4.0 * Value::EPSILON * 1.0e-200);
+
+        let null = checked_input_referred_pnoise(1.0, Complex64::new(0.0, 0.0), 1.0e3)
+            .expect_err("input referral is undefined at an exact transfer null");
+        assert!(null.to_string().contains("zero input-transfer"));
+    }
+
+    #[test]
+    fn contributor_publication_rejects_shape_and_range_failures() {
+        let source = |name: &str| PeriodicNoiseSource {
+            name: name.to_string(),
+            node_pos: 0,
+            node_neg: usize::MAX,
+            psd: vec![Complex64::new(0.0, 0.0)],
+            binary_scale_exponent: 0,
+            flicker: None,
+        };
+
+        let mismatch = checked_pnoise_total(&[], &[source("one")], 1.0e3)
+            .expect_err("a truncated solver result must fail publication");
+        assert!(mismatch.to_string().contains("1 sources"));
+
+        let overflow = checked_pnoise_total(
+            &[Value::MAX, Value::MAX],
+            &[source("one"), source("two")],
+            1.0e3,
+        )
+        .expect_err("an unrepresentable total must fail publication");
+        assert!(overflow.to_string().contains("overflowed"));
+
+        let minimum = Value::from_bits(1);
+        let subnormal =
+            checked_pnoise_total(&[minimum, minimum], &[source("one"), source("two")], 1.0e3)
+                .expect("a representable subnormal total must remain published");
+        assert_eq!(subnormal, Value::from_bits(2));
+    }
+
+    #[test]
+    fn source_power_products_preserve_out_of_range_flicker_coefficients() {
+        let scaled = checked_scaled_positive_power_product(
+            1.0e-200,
+            1.0e-200,
+            2.0,
+            "test flicker coefficient",
+        )
+        .expect("an out-of-range elementary coefficient remains scaled");
+        assert!(scaled.mantissa.is_finite() && scaled.mantissa > 0.0);
+        assert!(scaled.exponent < -1074);
+
+        let representable = checked_scaled_positive_power_product(
+            1.0e200,
+            1.0e-200,
+            2.0,
+            "test flicker coefficient",
+        )
+        .expect("a representable power product remains accurate");
+        let value = libm::scalbn(representable.mantissa, representable.exponent);
+        assert!((value - 1.0e-200).abs() <= 2.0e-12 * 1.0e-200);
     }
 }
