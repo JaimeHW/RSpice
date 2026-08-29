@@ -21,7 +21,8 @@ pub const DEFAULT_MAX_FFT_POINTS: usize = 65_536;
 ///
 /// This keeps memory/time bounded while still preserving far more detail than
 /// the interactive cap when users need analysis-grade fidelity.
-pub const MAX_REFERENCE_RESAMPLE_POINTS: usize = 1_048_576;
+pub const MAX_REFERENCE_RESAMPLE_POINTS: usize =
+    rspice_core::numerics::rustfft_qualification::MAX_QUALIFIED_RUSTFFT_LENGTH;
 
 const NONUNIFORM_OVERSAMPLE_FACTOR: usize = 4;
 const UNIFORMITY_REL_TOL: f64 = 1e-6;

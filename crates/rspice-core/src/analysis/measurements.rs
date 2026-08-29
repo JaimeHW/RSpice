@@ -37,6 +37,9 @@
 
 use crate::Value;
 use crate::analysis::fourier::{FourierAnalysis, FourierConfig, FourierError};
+use crate::numerics::rustfft_qualification::{
+    MAX_QUALIFIED_RUSTFFT_LENGTH, qualify_rustfft_forward_length,
+};
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
@@ -50,10 +53,6 @@ pub const THRESHOLD_LOW: Value = 0.1;
 pub const THRESHOLD_HIGH: Value = 0.9;
 /// Minimum number of samples for FFT
 pub const MIN_FFT_SAMPLES: usize = 8;
-/// Bound FFT planning before entering `rustfft`'s infallible plan allocations.
-const MAX_QUALIFIED_FFT_SAMPLES: usize = 1_048_576;
-/// Bound any Bluestein convolution selected inside `rustfft` planning.
-const MAX_QUALIFIED_BLUESTEIN_INNER_LEN: usize = 524_288;
 /// Bound the number of process-wide forward FFT plans retained for reuse.
 const MAX_RETAINED_FFT_PLANS: usize = 8;
 /// Bound retained plan input plus reported in-place scratch lengths.
@@ -1351,7 +1350,9 @@ impl Waveform {
                 "FFT amplitude normalization cannot be represented in logarithmic form ({log10_normalization})"
             )));
         }
-        validate_rustfft_bluestein_working_set(sample_count)?;
+        qualify_rustfft_forward_length(sample_count).map_err(|error| {
+            MeasurementError::FftError(format!("rustfft planning qualification failed: {error}"))
+        })?;
 
         let mut buffer = Vec::new();
         buffer.try_reserve_exact(sample_count).map_err(|error| {
@@ -2469,190 +2470,12 @@ fn validate_fft_sample_count(sample_count: usize) -> Result<(), MeasurementError
             "spectral analysis requires at least {MIN_FFT_SAMPLES} samples, got {sample_count}"
         )));
     }
-    if sample_count > MAX_QUALIFIED_FFT_SAMPLES {
+    if sample_count > MAX_QUALIFIED_RUSTFFT_LENGTH {
         return Err(MeasurementError::FftError(format!(
-            "spectral analysis record has {sample_count} samples; the qualified FFT limit is {MAX_QUALIFIED_FFT_SAMPLES}"
+            "spectral analysis record has {sample_count} samples; the qualified FFT limit is {MAX_QUALIFIED_RUSTFFT_LENGTH}"
         )));
     }
     Ok(())
-}
-
-fn validate_rustfft_bluestein_working_set(sample_count: usize) -> Result<(), MeasurementError> {
-    // Scalar, SSE, and Neon planners decompose composite records and may use
-    // Bluestein for a prime base above the built-in butterflies when Rader's
-    // p-1 transform itself contains a prime factor above 23.
-    for_each_distinct_prime_factor(sample_count, |prime| {
-        if prime > 31 && has_prime_factor_above_23(prime - 1) {
-            validate_bluestein_base(sample_count, prime, "prime factor")?;
-        }
-        Ok(())
-    })?;
-
-    // AVX strips its fast 2/3/5/7/11 radixes and plans the entire remaining
-    // product as one base. A composite base can therefore reach Bluestein even
-    // when every individual prime factor was harmless above.
-    let mut avx_other = sample_count;
-    for factor in [2, 3, 5, 7, 11] {
-        while avx_other.is_multiple_of(factor) {
-            avx_other /= factor;
-        }
-    }
-    let avx_butterfly = matches!(avx_other, 1 | 13 | 17 | 19 | 23 | 29 | 31);
-    let portable_rader = is_prime(avx_other) && has_only_two_and_three_factors(avx_other - 1);
-    if !avx_butterfly && !portable_rader {
-        validate_bluestein_base(sample_count, avx_other, "AVX other-factor product")?;
-    }
-    Ok(())
-}
-
-fn validate_bluestein_base(
-    sample_count: usize,
-    base: usize,
-    route: &str,
-) -> Result<(), MeasurementError> {
-    let minimum_inner = base
-        .checked_mul(2)
-        .and_then(|value| value.checked_sub(1))
-        .ok_or_else(|| {
-            MeasurementError::FftError(format!(
-                "rustfft {route} Bluestein minimum overflowed for base {base} in a {sample_count}-sample record"
-            ))
-        })?;
-    let power_of_two = minimum_inner.checked_next_power_of_two().ok_or_else(|| {
-        MeasurementError::FftError(format!(
-            "rustfft {route} Bluestein power-of-two candidate overflowed for base {base} in a {sample_count}-sample record"
-        ))
-    })?;
-    let three_quarters = power_of_two
-        .checked_div(4)
-        .and_then(|value| value.checked_mul(3))
-        .ok_or_else(|| {
-            MeasurementError::FftError(format!(
-                "rustfft {route} Bluestein three-quarter candidate overflowed for base {base} in a {sample_count}-sample record"
-            ))
-        })?;
-    let scalar_inner = if three_quarters >= minimum_inner {
-        three_quarters
-    } else {
-        power_of_two
-    };
-    let avx_f64_inner =
-        rustfft_avx_f64_bluestein_inner(sample_count, base, route, minimum_inner, power_of_two)?;
-    let largest_inner = scalar_inner.max(avx_f64_inner);
-    if largest_inner > MAX_QUALIFIED_BLUESTEIN_INNER_LEN {
-        return Err(MeasurementError::FftError(format!(
-            "rustfft planning for a {sample_count}-sample record may route {route} {base} through Bluestein with minimum inner length {minimum_inner}, scalar/SSE candidate {scalar_inner}, and AVX f64 candidate {avx_f64_inner}; candidate {largest_inner} exceeds the qualified inner limit {MAX_QUALIFIED_BLUESTEIN_INNER_LEN}"
-        )));
-    }
-    Ok(())
-}
-
-fn rustfft_avx_f64_bluestein_inner(
-    sample_count: usize,
-    base: usize,
-    route: &str,
-    minimum_inner: usize,
-    power_of_two: usize,
-) -> Result<usize, MeasurementError> {
-    // Mirror rustfft 6.4.1's AVX-f64 2^n*3^m candidate generator and
-    // benchmark filter, retaining only its smallest accepted candidate.
-    let mut candidate = power_of_two;
-    let mut factor_two = candidate.trailing_zeros();
-    let mut factor_three = 0u32;
-    let mut chosen = None;
-    while factor_two >= 2 {
-        let rejected =
-            (factor_three < 1 && factor_two > 13) || (factor_three < 4 && factor_two > 14);
-        if candidate >= minimum_inner && !rejected {
-            chosen = Some(chosen.map_or(candidate, |prior: usize| prior.min(candidate)));
-        }
-        if candidate >= power_of_two {
-            candidate >>= 1;
-            factor_two -= 1;
-        } else {
-            candidate = candidate.checked_mul(3).ok_or_else(|| {
-                MeasurementError::FftError(format!(
-                    "rustfft AVX f64 {route} Bluestein candidate overflowed for base {base} in a {sample_count}-sample record"
-                ))
-            })?;
-            factor_three = factor_three.checked_add(1).ok_or_else(|| {
-                MeasurementError::FftError(format!(
-                    "rustfft AVX f64 {route} Bluestein factor count overflowed for base {base} in a {sample_count}-sample record"
-                ))
-            })?;
-        }
-    }
-    chosen.ok_or_else(|| {
-        MeasurementError::FftError(format!(
-            "rustfft AVX f64 found no qualified {route} Bluestein candidate for base {base} in a {sample_count}-sample record"
-        ))
-    })
-}
-
-fn for_each_distinct_prime_factor(
-    mut value: usize,
-    mut visit: impl FnMut(usize) -> Result<(), MeasurementError>,
-) -> Result<(), MeasurementError> {
-    if value.is_multiple_of(2) {
-        visit(2)?;
-        while value.is_multiple_of(2) {
-            value /= 2;
-        }
-    }
-    let mut divisor = 3usize;
-    while divisor <= value / divisor {
-        if value.is_multiple_of(divisor) {
-            visit(divisor)?;
-            while value.is_multiple_of(divisor) {
-                value /= divisor;
-            }
-        }
-        divisor = divisor.checked_add(2).ok_or_else(|| {
-            MeasurementError::FftError("FFT prime-factor scan exceeded this platform".to_string())
-        })?;
-    }
-    if value > 1 {
-        visit(value)?;
-    }
-    Ok(())
-}
-
-fn has_prime_factor_above_23(mut value: usize) -> bool {
-    for factor in [2, 3, 5, 7, 11, 13, 17, 19, 23] {
-        while value.is_multiple_of(factor) {
-            value /= factor;
-        }
-    }
-    value > 1
-}
-
-fn has_only_two_and_three_factors(mut value: usize) -> bool {
-    for factor in [2, 3] {
-        while value.is_multiple_of(factor) {
-            value /= factor;
-        }
-    }
-    value == 1
-}
-
-fn is_prime(value: usize) -> bool {
-    if value < 2 {
-        return false;
-    }
-    if value.is_multiple_of(2) {
-        return value == 2;
-    }
-    let mut divisor = 3usize;
-    while divisor <= value / divisor {
-        if value.is_multiple_of(divisor) {
-            return false;
-        }
-        let Some(next) = divisor.checked_add(2) else {
-            return false;
-        };
-        divisor = next;
-    }
-    true
 }
 
 fn scaled_amplitude_db(
@@ -2882,50 +2705,12 @@ mod tests {
 
     #[test]
     fn fft_resource_limit_fails_before_planning() {
-        assert!(validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES).is_ok());
+        assert!(validate_fft_sample_count(MAX_QUALIFIED_RUSTFFT_LENGTH).is_ok());
         assert!(validate_fft_sample_count(786_432).is_ok());
         assert!(matches!(
-            validate_fft_sample_count(MAX_QUALIFIED_FFT_SAMPLES + 1),
+            validate_fft_sample_count(MAX_QUALIFIED_RUSTFFT_LENGTH + 1),
             Err(MeasurementError::FftError(_))
         ));
-    }
-
-    #[test]
-    fn fft_preflight_rejects_large_prime_and_composite_bluestein_routes() {
-        validate_rustfft_bluestein_working_set(MAX_QUALIFIED_FFT_SAMPLES)
-            .expect("the maximum power-of-two record has no Bluestein base");
-        validate_rustfft_bluestein_working_set(786_432)
-            .expect("the large smooth 3*2^18 record has no Bluestein base");
-
-        let prime_error = validate_rustfft_bluestein_working_set(1_048_573)
-            .expect_err("the large prime requires an over-budget Bluestein transform");
-        assert!(prime_error.to_string().contains("Bluestein"));
-
-        // Scalar planners see two individually manageable prime bases, while
-        // AVX combines the non-fast 521 and 523 factors into one Bluestein base.
-        let composite_error = validate_rustfft_bluestein_working_set(521 * 523)
-            .expect_err("the composite AVX other-factor base must be bounded");
-        assert!(
-            composite_error
-                .to_string()
-                .contains("AVX other-factor product")
-        );
-
-        let avx_rader_error = validate_rustfft_bluestein_working_set(267_037)
-            .expect_err("the prime has no portable AVX Rader route");
-        assert!(
-            avx_rader_error
-                .to_string()
-                .contains("AVX other-factor product")
-        );
-
-        let avx_filter_error = validate_rustfft_bluestein_working_set(248_839)
-            .expect_err("AVX f64 rejects the otherwise bounded pure-power-of-two candidate");
-        assert!(
-            avx_filter_error
-                .to_string()
-                .contains("AVX f64 candidate 559872")
-        );
     }
 
     #[test]

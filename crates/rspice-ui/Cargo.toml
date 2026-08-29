@@ -75,7 +75,7 @@ wasmi = { version = "1.1.0", default-features = false, features = ["std", "extra
 log = "0.4"
 
 # FFT for frequency analysis
-rustfft = "6.2"
+rustfft.workspace = true
 
 # Complex number support
 num-complex = "0.4"

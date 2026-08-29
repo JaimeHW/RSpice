@@ -11,6 +11,7 @@
 
 pub(crate) mod eigenspectrum;
 pub mod integration;
+pub mod rustfft_qualification;
 
 use crate::Value;
 
