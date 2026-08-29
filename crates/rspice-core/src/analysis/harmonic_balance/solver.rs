@@ -145,19 +145,24 @@ impl HbSolverState {
 
     /// Compute residual norm (L2 over all nodes and harmonics)
     pub fn compute_residual_norm(&mut self) {
-        let sum: Value = self
+        // Accumulating squared magnitudes can overflow even when every
+        // residual component is finite (for example, two values near
+        // sqrt(f64::MAX)). `hypot` performs a scale-safe L2 accumulation and
+        // still propagates non-finite input to a non-finite diagnostic norm.
+        self.residual_norm = self
             .residual
             .iter()
             .flat_map(|node| node.iter())
-            .map(|c| c.norm_sqr())
-            .sum();
-        self.residual_norm = sum.sqrt();
+            .fold(0.0, |norm, value| norm.hypot(value.re).hypot(value.im));
     }
 
     /// SPICE-style per-row KCL convergence: every residual entry must
     /// satisfy |res| <= abstol + reltol * (sum of |contribution| into the
     /// row), using the scale accumulated during residual assembly.
     pub fn rows_converged(&self, reltol: Value, abstol: Value) -> bool {
+        if !reltol.is_finite() || reltol < 0.0 || !abstol.is_finite() || abstol < 0.0 {
+            return false;
+        }
         self.residual
             .iter()
             .zip(self.residual_scale.iter())
@@ -165,19 +170,22 @@ impl HbSolverState {
                 res_row
                     .iter()
                     .zip(scale_row.iter())
-                    .all(|(r, s)| r.norm() <= abstol + reltol * s)
+                    .all(|(r, s)| residual_entry_converged(*r, *s, reltol, abstol))
             })
     }
 
     /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
     /// the DC operating-point pre-solve which only assembles harmonic 0.
     pub fn dc_rows_converged(&self, reltol: Value, abstol: Value) -> bool {
+        if !reltol.is_finite() || reltol < 0.0 || !abstol.is_finite() || abstol < 0.0 {
+            return false;
+        }
         self.residual
             .iter()
             .zip(self.residual_scale.iter())
             .all(
                 |(res_row, scale_row)| match (res_row.first(), scale_row.first()) {
-                    (Some(r), Some(s)) => r.norm() <= abstol + reltol * s,
+                    (Some(r), Some(s)) => residual_entry_converged(*r, *s, reltol, abstol),
                     _ => true,
                 },
             )
@@ -186,6 +194,55 @@ impl HbSolverState {
     /// Total number of unknowns
     pub fn total_unknowns(&self) -> usize {
         self.x.len() * self.x.first().map(|v| v.len()).unwrap_or(0)
+    }
+}
+
+#[inline]
+fn residual_entry_converged(
+    residual: Complex64,
+    scale: Value,
+    reltol: Value,
+    abstol: Value,
+) -> bool {
+    if !residual.re.is_finite() || !residual.im.is_finite() || !scale.is_finite() || scale < 0.0 {
+        return false;
+    }
+    let tolerance = abstol + reltol * scale;
+    tolerance.is_finite() && residual.norm() <= tolerance
+}
+
+#[cfg(test)]
+mod solver_state_qualification_tests {
+    use super::*;
+
+    #[test]
+    fn residual_norm_remains_finite_for_finite_large_components() {
+        let mut state = HbSolverState::new(1, 1);
+        state.residual[0][0] = Complex64::new(1.0e308, 0.0);
+        state.residual[0][1] = Complex64::new(0.0, 1.0e308);
+
+        state.compute_residual_norm();
+
+        assert!(state.residual_norm.is_finite());
+        assert!((state.residual_norm / 1.0e308 - 2.0_f64.sqrt()).abs() <= 4.0e-15);
+    }
+
+    #[test]
+    fn row_certificate_rejects_nonfinite_residuals_scales_and_tolerances() {
+        let mut state = HbSolverState::new(1, 0);
+        state.residual[0][0] = Complex64::new(1.0, 0.0);
+        state.residual_scale[0][0] = Value::INFINITY;
+        assert!(!state.rows_converged(1.0, Value::INFINITY));
+        assert!(!state.dc_rows_converged(1.0, Value::INFINITY));
+
+        state.residual[0][0] = Complex64::new(Value::INFINITY, 0.0);
+        state.residual_scale[0][0] = 1.0;
+        assert!(!state.rows_converged(1.0, 0.0));
+        assert!(!state.dc_rows_converged(1.0, 0.0));
+
+        state.residual[0][0] = Complex64::new(0.0, 0.0);
+        assert!(!state.rows_converged(Value::NAN, 0.0));
+        assert!(!state.dc_rows_converged(-1.0, 0.0));
     }
 }
 
