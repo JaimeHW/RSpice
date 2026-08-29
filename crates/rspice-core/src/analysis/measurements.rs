@@ -196,21 +196,27 @@ impl Waveform {
     /// Create a new waveform from time and value arrays.
     pub fn try_new(time: &[Value], values: &[Value]) -> Result<Self, MeasurementError> {
         validate_waveform_input(time, values)?;
-        Ok(Self::from_validated_parts(time, values))
-    }
+        let mut owned_time = Vec::new();
+        owned_time.try_reserve_exact(time.len()).map_err(|error| {
+            MeasurementError::CalculationError(format!(
+                "failed to allocate {} waveform time points: {error}",
+                time.len()
+            ))
+        })?;
+        owned_time.extend_from_slice(time);
 
-    fn from_validated_parts(time: &[Value], values: &[Value]) -> Self {
-        let min_value = values.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_value = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let mut owned_values = Vec::new();
+        owned_values
+            .try_reserve_exact(values.len())
+            .map_err(|error| {
+                MeasurementError::CalculationError(format!(
+                    "failed to allocate {} waveform values: {error}",
+                    values.len()
+                ))
+            })?;
+        owned_values.extend_from_slice(values);
 
-        Self {
-            time: time.to_vec(),
-            values: values.to_vec(),
-            min_value,
-            max_value,
-            min_time: time[0],
-            max_time: time[time.len() - 1],
-        }
+        Ok(Self::from_owned_validated_parts(owned_time, owned_values))
     }
 
     fn from_owned_validated_parts(time: Vec<Value>, values: Vec<Value>) -> Self {
