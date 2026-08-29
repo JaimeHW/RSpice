@@ -307,7 +307,7 @@ impl CornerSimResult {
         Self {
             corner,
             outputs: HashMap::new(),
-            converged: true,
+            converged: false,
         }
     }
 
@@ -357,15 +357,23 @@ impl CornerResult {
     }
 
     /// Add a corner result
-    pub fn add(&mut self, result: CornerSimResult) {
+    pub fn add(&mut self, mut result: CornerSimResult) {
+        if result.converged
+            && (result.outputs.is_empty()
+                || result.outputs.values().any(|value| !value.is_finite()))
+        {
+            result.converged = false;
+            result.outputs.clear();
+        }
         self.corners.push(result);
     }
 
     /// Compute summary statistics
     pub fn compute_summary(&mut self) {
+        self.summary.clear();
         // Collect all output names
         let mut output_names: Vec<String> = Vec::new();
-        for result in &self.corners {
+        for result in self.corners.iter().filter(|result| result.converged) {
             for name in result.outputs.keys() {
                 if !output_names.contains(name) {
                     output_names.push(name.clone());
@@ -378,8 +386,8 @@ impl CornerResult {
             let values: Vec<(String, Value)> = self
                 .corners
                 .iter()
+                .filter(|result| result.converged)
                 .filter_map(|r| r.outputs.get(&name).map(|&v| (r.corner.name(), v)))
-                .filter(|(_, value)| value.is_finite())
                 .collect();
 
             if values.is_empty() {
@@ -419,6 +427,7 @@ impl CornerResult {
         if minimize {
             self.corners
                 .iter()
+                .filter(|result| result.converged)
                 .filter_map(|result| {
                     result
                         .outputs
@@ -432,6 +441,7 @@ impl CornerResult {
         } else {
             self.corners
                 .iter()
+                .filter(|result| result.converged)
                 .filter_map(|result| {
                     result
                         .outputs
@@ -481,14 +491,27 @@ impl CornerRunner {
     {
         let corners = self.config.generate_corners();
         let mut result = CornerResult::new();
+        let mut output_schema: Option<Vec<String>> = None;
 
         for corner in corners {
             let mut sim_result = CornerSimResult::new(corner.clone());
 
             match run_simulation(&corner) {
                 Ok(outputs) => {
-                    sim_result.outputs = outputs;
-                    sim_result.converged = true;
+                    let mut names = outputs.keys().cloned().collect::<Vec<_>>();
+                    names.sort();
+                    let valid = !names.is_empty()
+                        && outputs.values().all(|value| value.is_finite())
+                        && output_schema
+                            .as_ref()
+                            .is_none_or(|expected| expected == &names);
+                    if valid {
+                        if output_schema.is_none() {
+                            output_schema = Some(names);
+                        }
+                        sim_result.outputs = outputs;
+                        sim_result.converged = true;
+                    }
                 }
                 Err(_) => {
                     sim_result.converged = false;
@@ -511,3 +534,61 @@ impl CornerRunner {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unrun_corner_is_not_converged() {
+        assert!(!CornerSimResult::new(CornerPoint::default()).converged);
+    }
+
+    #[test]
+    fn corner_runner_rejects_nonfinite_and_schema_drift_outputs() {
+        let config = CornerConfig::new().with_voltages(vec![0.9, 1.0, 1.1]);
+        let runner = CornerRunner::new(config);
+        let mut run = 0;
+        let result = runner.run::<_, ()>(|_| {
+            let outputs = match run {
+                0 => HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)]),
+                1 => HashMap::from([
+                    ("gain".to_string(), Value::INFINITY),
+                    ("offset".to_string(), 9.0),
+                ]),
+                _ => HashMap::from([("gain".to_string(), 3.0)]),
+            };
+            run += 1;
+            Ok(outputs)
+        });
+
+        assert!(result.corners[0].converged);
+        assert!(!result.corners[1].converged);
+        assert!(!result.corners[2].converged);
+        assert!(result.corners[1].outputs.is_empty());
+        assert!(result.corners[2].outputs.is_empty());
+        assert_eq!(result.summary["gain"].mean, 1.0);
+        assert_eq!(result.summary["offset"].mean, 2.0);
+        assert_eq!(
+            result
+                .worst_case("gain", false)
+                .map(|corner| corner.corner.voltage),
+            Some(0.9)
+        );
+    }
+
+    #[test]
+    fn manually_added_invalid_corner_cannot_enter_summary() {
+        let mut result = CornerResult::new();
+        let mut invalid = CornerSimResult::new(CornerPoint::default());
+        invalid.converged = true;
+        invalid.outputs.insert("gain".to_string(), Value::NAN);
+        result.add(invalid);
+        result.compute_summary();
+
+        assert!(!result.corners[0].converged);
+        assert!(result.corners[0].outputs.is_empty());
+        assert!(result.summary.is_empty());
+        assert!(result.worst_case("gain", false).is_none());
+    }
+}

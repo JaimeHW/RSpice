@@ -200,17 +200,16 @@ pub struct VariableStatistics {
 impl VariableStatistics {
     /// Create from samples
     pub fn from_samples(name: &str, samples: Vec<Value>, num_bins: usize) -> Self {
-        let samples: Vec<Value> = samples.into_iter().filter(|v| v.is_finite()).collect();
-        if samples.is_empty() {
+        if samples.is_empty() || samples.iter().any(|value| !value.is_finite()) {
             return Self {
                 name: name.to_string(),
                 samples,
-                mean: 0.0,
-                std_dev: 0.0,
-                min: 0.0,
-                max: 0.0,
-                histogram: vec![0],
-                bin_edges: vec![0.0, 0.0],
+                mean: Value::NAN,
+                std_dev: Value::NAN,
+                min: Value::NAN,
+                max: Value::NAN,
+                histogram: Vec::new(),
+                bin_edges: Vec::new(),
             };
         }
 
@@ -268,9 +267,6 @@ impl VariableStatistics {
             .collect();
 
         for &sample in samples {
-            if !sample.is_finite() {
-                continue;
-            }
             let bin_position = ((sample - min) / bin_width).floor();
             if !bin_position.is_finite() {
                 continue;
@@ -285,19 +281,14 @@ impl VariableStatistics {
 
     /// Get percentile value (0-100)
     pub fn percentile(&self, pct: Value) -> Value {
-        if !pct.is_finite() {
-            return 0.0;
+        if !pct.is_finite()
+            || self.samples.is_empty()
+            || self.samples.iter().any(|value| !value.is_finite())
+        {
+            return Value::NAN;
         }
 
-        let mut sorted: Vec<Value> = self
-            .samples
-            .iter()
-            .copied()
-            .filter(|value| value.is_finite())
-            .collect();
-        if sorted.is_empty() {
-            return 0.0;
-        }
+        let mut sorted = self.samples.clone();
         sorted.sort_by(f64::total_cmp);
 
         let pct = pct.clamp(0.0, 100.0);
@@ -538,6 +529,7 @@ impl MonteCarloRunner {
 
         let mut rng = Xorshift128Plus::new(seed);
         let mut all_outputs: HashMap<String, Vec<Value>> = HashMap::new();
+        let mut output_schema: Option<Vec<String>> = None;
         let mut num_failures = 0;
 
         for _run in 0..self.config.num_runs {
@@ -550,7 +542,25 @@ impl MonteCarloRunner {
             // Run simulation
             match run_simulation(&variations) {
                 Ok(outputs) => {
-                    for (name, value) in outputs {
+                    let mut names = outputs.keys().cloned().collect::<Vec<_>>();
+                    names.sort();
+                    let valid = !names.is_empty()
+                        && outputs.values().all(|value| value.is_finite())
+                        && output_schema
+                            .as_ref()
+                            .is_none_or(|expected| expected == &names);
+                    if !valid {
+                        num_failures += 1;
+                        continue;
+                    }
+                    if output_schema.is_none() {
+                        output_schema = Some(names.clone());
+                    }
+                    for name in names {
+                        // The schema came directly from this map, so lookup
+                        // cannot fail. Keeping insertion after whole-run
+                        // validation preserves equal sample cardinality.
+                        let value = outputs[&name];
                         all_outputs.entry(name).or_default().push(value);
                     }
                 }
@@ -582,3 +592,62 @@ impl MonteCarloRunner {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variable_statistics_preserve_invalid_evidence_as_invalid() {
+        let statistics = VariableStatistics::from_samples("gain", vec![1.0, Value::NAN], 10);
+        assert_eq!(statistics.samples.len(), 2);
+        assert!(statistics.mean.is_nan());
+        assert!(statistics.std_dev.is_nan());
+        assert!(statistics.min.is_nan());
+        assert!(statistics.max.is_nan());
+        assert!(statistics.histogram.is_empty());
+        assert!(statistics.bin_edges.is_empty());
+        assert!(statistics.percentile(50.0).is_nan());
+    }
+
+    #[test]
+    fn monte_carlo_rejects_a_whole_nonfinite_trial_without_shortening_variables() {
+        let runner = MonteCarloRunner::new(MonteCarloConfig::new(3).with_seed(7));
+        let mut run = 0;
+        let result = runner.run::<_, ()>(|_| {
+            let outputs = match run {
+                0 => HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)]),
+                1 => HashMap::from([
+                    ("gain".to_string(), Value::NAN),
+                    ("offset".to_string(), 99.0),
+                ]),
+                _ => HashMap::from([("gain".to_string(), 3.0), ("offset".to_string(), 4.0)]),
+            };
+            run += 1;
+            Ok(outputs)
+        });
+
+        assert_eq!(result.num_failures, 1);
+        assert!(!result.all_converged);
+        assert_eq!(result.variables["gain"].samples, vec![1.0, 3.0]);
+        assert_eq!(result.variables["offset"].samples, vec![2.0, 4.0]);
+    }
+
+    #[test]
+    fn monte_carlo_rejects_output_schema_drift_as_a_failed_trial() {
+        let runner = MonteCarloRunner::new(MonteCarloConfig::new(2).with_seed(9));
+        let mut run = 0;
+        let result = runner.run::<_, ()>(|_| {
+            run += 1;
+            Ok(if run == 1 {
+                HashMap::from([("gain".to_string(), 1.0), ("offset".to_string(), 2.0)])
+            } else {
+                HashMap::from([("gain".to_string(), 3.0)])
+            })
+        });
+
+        assert_eq!(result.num_failures, 1);
+        assert_eq!(result.variables["gain"].samples, vec![1.0]);
+        assert_eq!(result.variables["offset"].samples, vec![2.0]);
+    }
+}
