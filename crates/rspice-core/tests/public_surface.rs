@@ -103,7 +103,10 @@ use std::path::{Path, PathBuf};
 /// eight bounded packed-checkpoint APIs used by the CLI and conformance suite,
 /// three RustFFT planning-qualification items shared with the GUI, and the
 /// typed duplicate-model-parameter error exposed by the Python binding.
-const MAX_PUBLIC_ITEMS: usize = 4269;
+///
+/// The latest +1 is `NetlistDiagnostic::xyce_legacy_warning_lines`, which the
+/// CLI calls to render the byte-stable two-line Xyce compatibility warning.
+const MAX_PUBLIC_ITEMS: usize = 4270;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
