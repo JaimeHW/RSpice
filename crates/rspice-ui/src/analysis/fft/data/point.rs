@@ -30,7 +30,7 @@ impl FftPoint {
     pub fn from_complex(frequency: f64, real: f64, imag: f64) -> Self {
         Self {
             frequency,
-            magnitude: (real * real + imag * imag).sqrt(),
+            magnitude: real.hypot(imag),
             phase: imag.atan2(real),
         }
     }
@@ -42,5 +42,18 @@ impl FftPoint {
         } else {
             20.0 * self.magnitude.log10()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complex_magnitude_avoids_intermediate_overflow() {
+        let point = FftPoint::from_complex(1.0, f64::MAX / 4.0, f64::MAX / 4.0);
+
+        assert!(point.magnitude.is_finite());
+        assert_eq!(point.magnitude, (f64::MAX / 4.0).hypot(f64::MAX / 4.0));
     }
 }
