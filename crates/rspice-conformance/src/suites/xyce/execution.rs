@@ -5,6 +5,7 @@
 //! unchanged; private ones are `pub(super)` so siblings can reach them.
 
 use super::contracts_bug28::Bug28Role;
+use super::contracts_bug42_son::Bug42SonRole;
 use super::contracts_bug113::Bug113Role;
 use super::contracts_bug141::Bug141Role;
 use super::contracts_bug306_son::Bug306SonRole;
@@ -1073,6 +1074,23 @@ impl XyceTestRunner {
         if let Some(role) = Bug411Role::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug411_oracle(deck, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(role) = Bug42SonRole::for_record(&deck.relative_path) {
+            let contract = role.contract();
+            let result = match self.validate_bug42_oracle(deck, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
