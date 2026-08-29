@@ -201,17 +201,19 @@ fn global_slew_handles_sub_femtosecond_and_extreme_finite_segments() {
 }
 
 #[test]
-fn overflowing_period_and_frequency_fail_as_calculation_errors() {
+fn unrepresentable_period_can_have_a_representable_frequency() {
     let overflowing_period = waveform(&[-1.5e308, -1.0e308, 0.0, 1.0e308], &[-1.0, 0.0, -1.0, 0.0]);
 
     assert!(matches!(
         overflowing_period.period(0.0),
         Err(MeasurementError::CalculationError(_))
     ));
-    assert!(matches!(
-        overflowing_period.frequency(0.0),
-        Err(MeasurementError::CalculationError(_))
-    ));
+    assert_eq!(
+        overflowing_period
+            .frequency(0.0)
+            .expect("the reciprocal of the unrepresentable period is finite"),
+        0.5 / 1.0e308
+    );
 
     let overflowing_width = waveform(&[-1.5e308, -1.0e308, 0.0, 1.0e308], &[-1.0, 0.0, 1.0, 0.0]);
     assert!(matches!(
@@ -239,6 +241,36 @@ fn overflowing_period_and_frequency_fail_as_calculation_errors() {
         reciprocal_overflow.frequency(0.0),
         Err(MeasurementError::CalculationError(_))
     ));
+}
+
+#[test]
+fn duty_cycle_applies_percentage_scaling_before_subnormal_rounding() {
+    let minimum_subnormal = f64::from_bits(1);
+    let waveform = waveform(
+        &[
+            0.0,
+            minimum_subnormal,
+            2.0 * minimum_subnormal,
+            3.0 * minimum_subnormal,
+            4.0 * minimum_subnormal,
+            64.0,
+        ],
+        &[
+            -minimum_subnormal,
+            0.0,
+            minimum_subnormal,
+            0.0,
+            -64.0 * minimum_subnormal,
+            0.0,
+        ],
+    );
+
+    assert_eq!(
+        waveform
+            .duty_cycle(0.0)
+            .expect("percentage scaling makes the tiny duty cycle representable"),
+        3.0 * minimum_subnormal
+    );
 }
 
 #[test]

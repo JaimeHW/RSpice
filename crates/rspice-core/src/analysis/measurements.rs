@@ -410,17 +410,12 @@ impl Waveform {
             )));
         }
 
-        let duration = self.time[sample_count - 1] - self.time[0];
-        if !duration.is_finite() {
-            return Err(MeasurementError::CalculationError(format!(
-                "derived time-weighted statistics duration is non-finite ({duration})"
-            )));
-        }
-        if duration <= 0.0 {
-            return Err(MeasurementError::InvalidWaveform(format!(
-                "time-weighted statistics require a positive duration, got {duration}"
-            )));
-        }
+        let duration = scaled_positive_difference(
+            self.time[sample_count - 1],
+            self.time[0],
+            sample_count - 2,
+            "time-weighted statistics duration",
+        )?;
 
         let mut scale = 0.0_f64;
         for (index, &value) in self.values.iter().enumerate() {
@@ -436,26 +431,14 @@ impl Waveform {
         let mut weight_compensation = 0.0;
         let mut moment_sum = ExactFloatSum::default();
         for index in 1..sample_count {
-            let interval = self.time[index] - self.time[index - 1];
-            if !interval.is_finite() {
-                return Err(MeasurementError::CalculationError(format!(
-                    "derived segment width {} is non-finite ({interval})",
-                    index - 1
-                )));
-            }
-            if interval <= 0.0 {
-                return Err(MeasurementError::InvalidWaveform(format!(
-                    "time-weighted statistics require positive segment widths: segment {} has width {interval}",
-                    index - 1
-                )));
-            }
-            let weight = interval / duration;
-            if !weight.is_finite() || weight <= 0.0 {
-                return Err(MeasurementError::CalculationError(format!(
-                    "normalized interval weight for segment {} is not representable ({weight})",
-                    index - 1
-                )));
-            }
+            let interval = scaled_positive_difference(
+                self.time[index],
+                self.time[index - 1],
+                index - 1,
+                "time-weighted segment width",
+            )?;
+            let weight =
+                scaled_positive_ratio(interval, duration, index - 1, "normalized interval weight")?;
             if weight > 1.0 {
                 return Err(MeasurementError::CalculationError(format!(
                     "normalized interval weight for segment {} exceeds one ({weight})",
@@ -884,6 +867,14 @@ impl Waveform {
 
     /// Calculate period from the first two consecutive authored rising arrivals.
     pub fn period(&self, threshold: Value) -> Result<Value, MeasurementError> {
+        let (span, segment) = self.first_rising_period_span(threshold)?;
+        materialize_scaled_positive(span, segment, "period")
+    }
+
+    fn first_rising_period_span(
+        &self,
+        threshold: Value,
+    ) -> Result<(ScaledPositiveDifference, usize), MeasurementError> {
         validate_crossing_threshold(threshold)?;
         let mut first_rising: Option<CrossingEvent> = None;
         for segment in 0..self.values.len().saturating_sub(1) {
@@ -892,12 +883,9 @@ impl Waveform {
                 continue;
             };
             if let Some(first) = first_rising.as_ref() {
-                return representable_positive_difference(
-                    rising.time,
-                    first.time,
-                    rising.index,
-                    "period",
-                );
+                let span =
+                    scaled_positive_difference(rising.time, first.time, rising.index, "period")?;
+                return Ok((span, rising.index));
             }
             first_rising = Some(rising);
         }
@@ -907,16 +895,13 @@ impl Waveform {
         ))
     }
 
-    /// Calculate frequency from a representable period and reciprocal.
+    /// Calculate frequency from the scaled separation of rising arrivals.
+    ///
+    /// The reciprocal may be representable even when the period itself is not.
     pub fn frequency(&self, threshold: Value) -> Result<Value, MeasurementError> {
-        let period = self.period(threshold)?;
-        let frequency = 1.0 / period;
-        if !frequency.is_finite() || frequency <= 0.0 {
-            return Err(MeasurementError::CalculationError(
-                "period reciprocal is not representable as a positive finite frequency".to_string(),
-            ));
-        }
-        Ok(frequency)
+        let (period, segment) = self.first_rising_period_span(threshold)?;
+        let unity = scaled_positive_value(1.0, segment, "frequency numerator")?;
+        scaled_positive_ratio(unity, period, segment, "frequency")
     }
 
     /// Calculate the first complete authored rising-to-falling pulse width.
@@ -952,9 +937,13 @@ impl Waveform {
             next_rising.index,
             "duty-cycle period",
         )?;
-        let fraction =
-            scaled_positive_ratio(width, period, next_rising.index, "duty-cycle fraction")?;
-        let duty_cycle = fraction * 100.0;
+        let duty_cycle = scaled_positive_ratio_with_factor(
+            width,
+            period,
+            100.0,
+            next_rising.index,
+            "duty cycle",
+        )?;
         if !duty_cycle.is_finite() || duty_cycle <= 0.0 || duty_cycle >= 100.0 {
             return Err(MeasurementError::CalculationError(format!(
                 "duty cycle is not representable strictly inside (0, 100): {duty_cycle}"
@@ -1856,7 +1845,15 @@ fn representable_positive_difference(
     quantity: &str,
 ) -> Result<Value, MeasurementError> {
     let difference = scaled_positive_difference(later, earlier, segment, quantity)?;
-    let value = libm::scalbn(difference.mantissa, difference.exponent);
+    materialize_scaled_positive(difference, segment, quantity)
+}
+
+fn materialize_scaled_positive(
+    value: ScaledPositiveDifference,
+    segment: usize,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    let value = libm::scalbn(value.mantissa, value.exponent);
     if !value.is_finite() || value <= 0.0 {
         return Err(MeasurementError::CalculationError(format!(
             "{quantity} for segment {segment} is not representable as a positive finite value ({value})"

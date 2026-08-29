@@ -177,21 +177,46 @@ fn one_point_waveform_statistics_report_insufficient_data() {
 }
 
 #[test]
-fn overflowing_finite_time_span_fails_statistics_closed() {
-    let waveform = waveform(&[-f64::MAX, f64::MAX], &[1.0, 1.0]);
-
-    let average_error: MeasurementError = waveform
-        .average()
-        .expect_err("overflowing duration must not return an average");
-    let rms_error: MeasurementError = waveform
-        .rms()
-        .expect_err("overflowing duration must not return an RMS");
-    assert!(
-        average_error.to_string().contains("duration"),
-        "average error should identify the invalid duration: {average_error}"
+fn statistics_normalize_an_unrepresentable_total_time_span() {
+    let constant = waveform(&[-f64::MAX, f64::MAX], &[1.0, 1.0]);
+    assert_eq!(
+        constant
+            .average()
+            .expect("constant average does not require a materialized duration"),
+        1.0
     );
-    assert!(
-        rms_error.to_string().contains("duration"),
-        "RMS error should identify the invalid duration: {rms_error}"
+    assert_eq!(
+        constant
+            .rms()
+            .expect("constant RMS does not require a materialized duration"),
+        1.0
+    );
+
+    let triangular = waveform(&[-f64::MAX, 0.0, f64::MAX], &[0.0, 1.0, 0.0]);
+    assert_eq!(
+        triangular
+            .average()
+            .expect("scaled interval weights define the extreme-span average"),
+        0.5
+    );
+    assert_eq!(
+        triangular
+            .rms()
+            .expect("scaled interval weights define the extreme-span RMS"),
+        0.5_f64.sqrt()
+    );
+
+    let unequal = waveform(&[-f64::MAX, -f64::MAX / 2.0, f64::MAX], &[0.0, 0.0, 8.0]);
+    assert_eq!(
+        unequal
+            .average()
+            .expect("unequal scaled interval weights define the average"),
+        3.0
+    );
+    assert_eq!(
+        unequal
+            .rms()
+            .expect("unequal scaled interval weights define the RMS"),
+        24.0_f64.sqrt()
     );
 }
