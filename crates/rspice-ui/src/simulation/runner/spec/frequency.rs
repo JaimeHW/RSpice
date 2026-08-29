@@ -305,8 +305,12 @@ fn run_pac(
         )
     })?;
 
+    let traces = data
+        .traces
+        .into_iter()
+        .map(|trace| (trace.name, trace.unit, trace.values));
     Ok(SimulationResult::Ac {
-        waveforms: spectra_to_complex_waveforms(&data.frequencies, data.spectra, abort)?,
+        waveforms: pac_traces_to_complex_waveforms(&data.frequencies, traces, abort)?,
         frequencies: data.frequencies,
         measurements: Vec::new(),
     })
@@ -663,9 +667,9 @@ fn run_pstb(
     })
 }
 
-fn spectra_to_complex_waveforms(
+fn pac_traces_to_complex_waveforms(
     expected_frequencies: &[f64],
-    spectra: impl IntoIterator<Item = (String, Vec<(f64, f64, f64)>)>,
+    traces: impl IntoIterator<Item = (String, &'static str, Vec<num_complex::Complex64>)>,
     abort: &dyn AbortSignal,
 ) -> Result<HashMap<String, WaveformData>, SimulationError> {
     if expected_frequencies.is_empty()
@@ -681,54 +685,130 @@ fn spectra_to_complex_waveforms(
         ));
     }
     let mut waveforms = HashMap::new();
-    for (spectrum_index, (name, spectrum)) in spectra.into_iter().enumerate() {
+    for (trace_index, (name, unit, values)) in traces.into_iter().enumerate() {
         super::ensure_not_aborted(abort)?;
-        if name.trim().is_empty() || spectrum.len() != expected_frequencies.len() {
+        if name.trim().is_empty() || unit.is_empty() || values.len() != expected_frequencies.len() {
             return Err(SimulationError::SolverError(format!(
-                "periodic frequency spectrum {} has an invalid identity or sample count",
-                spectrum_index + 1
+                "PAC trace {} has an invalid identity, unit, or sample count",
+                trace_index + 1
             )));
         }
-        let mut frequencies = Vec::with_capacity(spectrum.len());
-        let mut real = Vec::with_capacity(spectrum.len());
-        let mut imaginary = Vec::with_capacity(spectrum.len());
-        for (point_index, (frequency, magnitude, phase_degrees)) in spectrum.into_iter().enumerate()
-        {
+        let mut frequencies = Vec::new();
+        let mut real = Vec::new();
+        let mut imaginary = Vec::new();
+        frequencies
+            .try_reserve_exact(values.len())
+            .map_err(|error| {
+                SimulationError::SolverError(format!(
+                    "PAC trace '{name}' frequency allocation failed: {error}"
+                ))
+            })?;
+        real.try_reserve_exact(values.len()).map_err(|error| {
+            SimulationError::SolverError(format!(
+                "PAC trace '{name}' real-component allocation failed: {error}"
+            ))
+        })?;
+        imaginary.try_reserve_exact(values.len()).map_err(|error| {
+            SimulationError::SolverError(format!(
+                "PAC trace '{name}' imaginary-component allocation failed: {error}"
+            ))
+        })?;
+        for (point_index, value) in values.into_iter().enumerate() {
             super::ensure_not_aborted(abort)?;
-            if frequency.to_bits() != expected_frequencies[point_index].to_bits()
-                || !magnitude.is_finite()
-                || magnitude < 0.0
-                || !phase_degrees.is_finite()
-            {
+            if !value.re.is_finite() || !value.im.is_finite() {
                 return Err(SimulationError::SolverError(format!(
-                    "periodic frequency spectrum '{}' contains invalid data at point {}",
+                    "PAC trace '{}' contains a non-finite complex value at point {}",
                     name,
                     point_index + 1
                 )));
             }
-            let phase = phase_degrees.to_radians();
-            frequencies.push(frequency);
-            real.push(magnitude * phase.cos());
-            imaginary.push(magnitude * phase.sin());
+            frequencies.push(expected_frequencies[point_index]);
+            real.push(value.re);
+            imaginary.push(value.im);
         }
-        if waveforms
-            .insert(
-                name.clone(),
-                WaveformData::new_complex(name, frequencies, real, imaginary),
-            )
-            .is_some()
-        {
+        let waveform = WaveformData {
+            name: name.clone(),
+            x_values: frequencies,
+            y_values: real,
+            y_unit: unit.to_owned(),
+            is_complex: true,
+            y_imag: Some(imaginary),
+        };
+        if waveforms.insert(name, waveform).is_some() {
             return Err(SimulationError::SolverError(
-                "periodic frequency result contains duplicate signal names".to_owned(),
+                "PAC result contains duplicate trace names".to_owned(),
             ));
         }
     }
     if waveforms.is_empty() {
         return Err(SimulationError::SolverError(
-            "periodic frequency result contains no solved spectra".to_owned(),
+            "PAC result contains no solved traces".to_owned(),
         ));
     }
     Ok(waveforms)
+}
+
+#[cfg(test)]
+mod pac_trace_tests {
+    use super::*;
+    use num_complex::Complex64;
+    use rspice_core::abort_signal::NoAbort;
+
+    #[test]
+    fn exact_pac_components_and_current_unit_reach_waveform_transport() {
+        let real = f64::from_bits(1);
+        let imag = -f64::from_bits(2);
+        let waveforms = pac_traces_to_complex_waveforms(
+            &[1.0e3],
+            [(
+                "I(V1)[sb=+0]".to_owned(),
+                "A",
+                vec![Complex64::new(real, imag)],
+            )],
+            &NoAbort,
+        )
+        .expect("exact current trace converts");
+        let current = &waveforms["I(V1)[sb=+0]"];
+        assert_eq!(current.y_unit, "A");
+        assert!(current.is_complex);
+        assert_eq!(current.y_values[0].to_bits(), real.to_bits());
+        assert_eq!(
+            current.y_imag.as_ref().expect("imaginary data retained")[0].to_bits(),
+            imag.to_bits()
+        );
+    }
+
+    #[test]
+    fn malformed_pac_trace_fails_closed() {
+        let nonfinite = pac_traces_to_complex_waveforms(
+            &[1.0e3],
+            [(
+                "I(V1)[sb=+0]".to_owned(),
+                "A",
+                vec![Complex64::new(f64::NAN, 0.0)],
+            )],
+            &NoAbort,
+        );
+        assert!(matches!(nonfinite, Err(SimulationError::SolverError(_))));
+
+        let duplicate = pac_traces_to_complex_waveforms(
+            &[1.0e3],
+            [
+                (
+                    "I(V1)[sb=+0]".to_owned(),
+                    "A",
+                    vec![Complex64::new(1.0, 0.0)],
+                ),
+                (
+                    "I(V1)[sb=+0]".to_owned(),
+                    "A",
+                    vec![Complex64::new(2.0, 0.0)],
+                ),
+            ],
+            &NoAbort,
+        );
+        assert!(matches!(duplicate, Err(SimulationError::SolverError(_))));
+    }
 }
 
 fn insert_group_delay(

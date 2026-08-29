@@ -1072,6 +1072,8 @@ fn csv_export_ignores_divergent_axes_owned_by_an_inactive_analysis() {
 
 #[test]
 fn csv_export_includes_complex_real_and_imaginary_columns() {
+    let current_real = f64::from_bits(1);
+    let current_imag = -f64::from_bits(2);
     let ac = AnalysisResult::new(1, AnalysisType::Ac, "AC Analysis").with_waveforms(vec![
         complex_waveform(
             "|V(out)|",
@@ -1081,6 +1083,15 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
             vec![0.8, 1.6],
             vec![0.6, 1.2],
         ),
+        complex_waveform(
+            "|I(V1)[sb=+0]|",
+            "I(V1)[sb=+0]",
+            vec![1.0e3, 1.0e4],
+            vec![5.0e-4, current_real],
+            vec![-5.0e-4, current_real],
+            vec![0.0, current_imag],
+        )
+        .with_unit("A"),
     ]);
 
     let mut run = SimulationRun::new(7);
@@ -1104,7 +1115,14 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     );
     assert_eq!(
         dataset.signal_names(),
-        vec!["|V(out)|", "re(V(out))", "im(V(out))"]
+        vec![
+            "|V(out)|",
+            "re(V(out))",
+            "im(V(out))",
+            "|I(V1)[sb=+0]|",
+            "re(I(V1)[sb=+0])",
+            "im(I(V1)[sb=+0])",
+        ]
     );
     assert_eq!(
         dataset
@@ -1117,6 +1135,22 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
             .get_signal("im(V(out))")
             .map(|signal| signal.data.as_slice()),
         Some(&[0.6, 1.2][..])
+    );
+    let current_real_signal = dataset
+        .get_signal("re(I(V1)[sb=+0])")
+        .expect("exact current real components are exported");
+    let current_imag_signal = dataset
+        .get_signal("im(I(V1)[sb=+0])")
+        .expect("exact current imaginary components are exported");
+    assert_eq!(current_real_signal.unit, "A");
+    assert_eq!(current_imag_signal.unit, "A");
+    assert_eq!(
+        current_real_signal.data[1].to_bits(),
+        current_real.to_bits()
+    );
+    assert_eq!(
+        current_imag_signal.data[1].to_bits(),
+        current_imag.to_bits()
     );
 }
 

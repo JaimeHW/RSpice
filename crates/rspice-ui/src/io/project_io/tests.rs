@@ -1163,7 +1163,6 @@ fn project_file_round_trips_persisted_simulation_results() {
     assert_eq!(analysis.measurements[0].name, "gain");
     assert_eq!(analysis.waveforms[0].complex.as_ref().unwrap().imag[2], 0.3);
     assert_eq!(restored.waveforms[0].name, "|V(out)|");
-
     let mut unversioned_value: serde_json::Value =
         serde_json::from_str(&json).expect("current project parses as JSON");
     let legacy_results = unversioned_value["simulation_results"]
@@ -1217,6 +1216,59 @@ fn project_file_round_trips_persisted_simulation_results() {
         migrated_run.lifecycle,
         Some(SimulationRunLifecycle::LegacyUnknown)
     );
+}
+
+#[test]
+fn project_file_round_trips_exact_pac_branch_current_trace() {
+    let mut libraries = LibraryManager::with_primitives();
+    let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+    let mut simulation = SimulationState::default();
+    let exact_real = f64::from_bits(1);
+    let exact_imag = -f64::from_bits(2);
+    let current = WaveformData::new(
+        "|I(V1)[sb=+0]|",
+        vec![1.0, 10.0],
+        vec![5.0e-4, exact_real],
+        "#ffaa00",
+    )
+    .with_unit("A")
+    .with_complex_components(
+        "I(V1)[sb=+0]",
+        vec![-5.0e-4, exact_real],
+        vec![0.0, exact_imag],
+    );
+    let mut run = SimulationRun::new(13);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(8, AnalysisType::Ac, "PAC fixture").with_waveforms(vec![current]),
+    );
+    seal_legacy_unattributed(&mut run);
+    simulation.runs = vec![run];
+    simulation.active_run_idx = Some(0);
+    simulation.active_analysis_idx = Some(0);
+
+    let project = ProjectFile::new_with_simulation_results(
+        workspace,
+        libraries,
+        ProjectSimulationResults::from_state(&simulation),
+    );
+    let json = serialize_project_file(&project).expect("project serializes with PAC current");
+    let loaded = load_project_text(&json, None).expect("project reloads");
+    let restored = loaded
+        .simulation_results
+        .into_simulation_state()
+        .expect("validated project results restore");
+    let current = &restored
+        .active_analysis()
+        .expect("PAC analysis is active")
+        .waveforms[0];
+    assert_eq!(current.unit.as_deref(), Some("A"));
+    let complex = current.complex.as_ref().expect("complex current retained");
+    assert_eq!(complex.source_name, "I(V1)[sb=+0]");
+    assert_eq!(complex.real[1].to_bits(), exact_real.to_bits());
+    assert_eq!(complex.imag[1].to_bits(), exact_imag.to_bits());
 }
 
 #[test]

@@ -393,12 +393,27 @@ fn worker_result_round_trip() {
         other => panic!("expected pole-zero result, got {other:?}"),
     }
 
+    let mut pac_current = WaveformData::new_complex(
+        "I(V1)[sb=+0]",
+        vec![1.0, 10.0],
+        vec![-5.0e-4, f64::from_bits(1)],
+        vec![0.0, -f64::from_bits(2)],
+    );
+    pac_current.y_unit = "A".to_owned();
     let ac = SimulationResult::Ac {
         frequencies: vec![1.0, 10.0],
-        waveforms: HashMap::from([(
-            "V(out)".to_string(),
-            WaveformData::new_complex("V(out)", vec![1.0, 10.0], vec![0.5, 0.25], vec![-0.1, -0.2]),
-        )]),
+        waveforms: HashMap::from([
+            (
+                "V(out)".to_string(),
+                WaveformData::new_complex(
+                    "V(out)",
+                    vec![1.0, 10.0],
+                    vec![0.5, 0.25],
+                    vec![-0.1, -0.2],
+                ),
+            ),
+            ("I(V1)[sb=+0]".to_owned(), pac_current),
+        ]),
         measurements: vec![rspice_core::MeasureResult::success("gain", 0.5)],
     };
     let ac = round_trip_result(ac);
@@ -413,6 +428,15 @@ fn worker_result_round_trip() {
             assert!(waveform.is_complex);
             assert_eq!(waveform.y_values, vec![0.5, 0.25]);
             assert_eq!(waveform.y_imag.as_deref(), Some(&[-0.1, -0.2][..]));
+            let current = waveforms
+                .get("I(V1)[sb=+0]")
+                .expect("PAC branch current is preserved");
+            assert_eq!(current.y_unit, "A");
+            assert_eq!(current.y_values[1].to_bits(), f64::from_bits(1).to_bits());
+            assert_eq!(
+                current.y_imag.as_ref().expect("current remains complex")[1].to_bits(),
+                (-f64::from_bits(2)).to_bits()
+            );
             assert_eq!(measurements[0].name, "gain");
             assert_eq!(measurements[0].value, Some(0.5));
             assert!(measurements[0].passed);
