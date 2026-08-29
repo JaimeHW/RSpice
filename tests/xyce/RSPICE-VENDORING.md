@@ -60,7 +60,7 @@ reported separately from `expected_unsupported`.
 
 Some upstream exclusions are helper, baseline, or control decks tested by an
 upstream wrapper owner. RSpice has independently reconstructed and qualified
-exact native contracts for 250 such decks. Those rows use
+exact native contracts for 279 such decks. Those rows use
 `rspice_independently_qualified` and name the exact expected native contract.
 The adapter executes them, preserves their upstream provenance on the result,
 and fails closed if execution becomes unsupported, fails, or selects a
@@ -384,6 +384,18 @@ deck directory, five wrapper owners, historical exclusion and wrapper
 evidence, authored PRINT projections, and absence of numerical gold are
 provenance-bound.
 
+Certification BUG 442 reconstructs the Release-7.10 packed/unpacked
+transmission-line restart wrapper. RSpice independently integrates both
+baselines through the exact 0, 5, and 10 ns checkpoint schedule, round-trips
+the 10 ns transmission-line history through genuinely distinct packed and
+unpacked encodings, resumes both histories to 50 ns, and preserves all three
+historical directional `xyce_verify` comparisons: each baseline is GOOD
+against its corresponding restart TEST, followed by packed restart GOOD
+against unpacked restart TEST. The zero-byte wrapper owner, all four
+independently qualified workers, complete six-file retained family, removed
+wrapper and verifier, exclusion evidence, and absence of OutputData gold are
+provenance-bound; no numerical gold is invented.
+
 Where a native relational contract depends on behavior from a removed
 upstream wrapper, the contract also binds the canonical historical wrapper
 and verifier identities. The PARAMS1, PARSER nakedAlgebra, and Certification
@@ -404,8 +416,9 @@ owner is GOODFILE, the corresponding `.AC DATA` control is TESTFILE, and the
 comparison uses the exact upstream absolute, relative, zero, and frequency
 tolerances.
 
-The complete inventory and promotions are reproduced by
-`tools/xyce/sync_upstream_exclusions.py`. The checked-in manifest pins the
-source tree, the clean RSpice qualification commit, and the qualification
-report digest; the Rust loader also pins its exact path, promotion, record,
-and file identities.
+The complete exclusion inventory and canonical promotion ledger are audited
+and reproduced by `tools/xyce/sync_upstream_exclusions.py`. The checked-in
+manifest pins the source tree and the historical clean-RSpice qualification
+baseline through its commit and report digest. Later independently reviewed
+promotions are retained as versioned manifest changes; the Rust loader also
+pins the exact path, promotion, record, and file identities.

@@ -2,9 +2,9 @@
 """Reproduce RSpice's retained Xyce upstream-exclusion manifest.
 
 The exclusion inventory comes from the exact Git tree immediately before the
-vendored Xyce harness files were trimmed. Promotion contracts come from a
-clean-HEAD classification report, or from the checked-in manifest when the
-tool is used in audit mode without ``--classification-report``.
+vendored Xyce harness files were trimmed. The optional classification report
+validates the pinned historical qualification baseline. Later independently
+reviewed promotions are retained from the checked-in manifest.
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ QUALIFICATION_REPORT_SHA256 = (
     "d3b13fdd9245d9911366984f46330e46e50a202c2776d989a6b310e83a29ca6b"
 )
 RETAINED_RECORD_COUNT = 1_143
-QUALIFIED_RECORD_COUNT = 251
+QUALIFICATION_REPORT_PROMOTION_COUNT = 246
+MANIFEST_QUALIFIED_RECORD_COUNT = 279
 TOTAL_RETAINED_CIRCUIT_COUNT = 4_055
 MANIFEST_RELATIVE_PATH = Path("tests/xyce/RSPICE-UPSTREAM-EXCLUSIONS.tsv")
 CONTRACT_RE = re.compile(r"^[a-z0-9_]+$")
@@ -238,21 +239,38 @@ def parse_classification_report(
         for key, (passed, unsupported, contract) in classified.items()
         if passed and not unsupported
     }
-    if len(promotions) != QUALIFIED_RECORD_COUNT:
+    if len(promotions) != QUALIFICATION_REPORT_PROMOTION_COUNT:
         raise RuntimeError(
             f"classification produced {len(promotions)} promotions; "
-            f"expected {QUALIFIED_RECORD_COUNT}"
+            f"expected {QUALIFICATION_REPORT_PROMOTION_COUNT}"
         )
     return promotions
+
+
+def validate_classification_baseline(
+    current: dict[str, str], baseline: dict[str, str]
+) -> None:
+    missing = set(baseline).difference(current)
+    changed = {
+        key
+        for key, contract in baseline.items()
+        if key in current and current[key] != contract
+    }
+    if missing or changed:
+        raise RuntimeError(
+            "checked-in manifest differs from pinned classification baseline: "
+            f"missing={len(missing)}, changed={len(changed)}"
+        )
 
 
 def render_manifest(exclusions: list[Exclusion], promotions: dict[str, str]) -> str:
     unknown = set(promotions).difference(row.deck.casefold() for row in exclusions)
     if unknown:
         raise RuntimeError(f"manifest contains {len(unknown)} promotions for unknown decks")
-    if len(promotions) != QUALIFIED_RECORD_COUNT:
+    if len(promotions) != MANIFEST_QUALIFIED_RECORD_COUNT:
         raise RuntimeError(
-            f"manifest contains {len(promotions)} promotions; expected {QUALIFIED_RECORD_COUNT}"
+            "manifest contains "
+            f"{len(promotions)} promotions; expected {MANIFEST_QUALIFIED_RECORD_COUNT}"
         )
     lines = [
         "# RSpice Xyce upstream-exclusion provenance and qualification manifest",
@@ -314,7 +332,7 @@ def main() -> int:
     parser.add_argument(
         "--classification-report",
         type=Path,
-        help="clean-HEAD census TSV used to refresh exact promotion contracts",
+        help="pinned historical census TSV used to validate baseline promotion contracts",
     )
     parser.add_argument(
         "--check",
@@ -326,11 +344,12 @@ def main() -> int:
     repo = args.repo_root.resolve()
     manifest_path = repo / MANIFEST_RELATIVE_PATH
     exclusions = recover_exclusions(repo)
-    promotions = (
-        parse_classification_report(args.classification_report.resolve(), exclusions)
-        if args.classification_report
-        else parse_existing_promotions(manifest_path)
-    )
+    promotions = parse_existing_promotions(manifest_path)
+    if args.classification_report:
+        baseline = parse_classification_report(
+            args.classification_report.resolve(), exclusions
+        )
+        validate_classification_baseline(promotions, baseline)
     expected = render_manifest(exclusions, promotions)
     if args.check:
         verify_manifest_bytes(manifest_path, expected)

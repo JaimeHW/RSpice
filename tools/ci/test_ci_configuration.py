@@ -93,6 +93,26 @@ class CiConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "SHA-256"):
                 module.parse_classification_report(path, exclusions)
 
+    def test_xyce_upstream_exclusion_historical_baseline_is_an_exact_subset(self) -> None:
+        module, _, _, _ = xyce_exclusion_fixture()
+        current = {
+            "netlists/old.cir": "historical_contract",
+            "netlists/new.cir": "later_reviewed_contract",
+        }
+        module.validate_classification_baseline(
+            current, {"netlists/old.cir": "historical_contract"}
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "missing=1, changed=0"):
+            module.validate_classification_baseline(
+                {"netlists/new.cir": "later_reviewed_contract"},
+                {"netlists/old.cir": "historical_contract"},
+            )
+        with self.assertRaisesRegex(RuntimeError, "missing=0, changed=1"):
+            module.validate_classification_baseline(
+                current, {"netlists/old.cir": "changed_contract"}
+            )
+
     def test_rust_workflows_install_pinned_toolchain_without_toolchain_action(self) -> None:
         workflows = [
             ".github/workflows/ci.yml",
