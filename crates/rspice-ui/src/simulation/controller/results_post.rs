@@ -4,6 +4,7 @@
 //! — transient traces, AC magnitude and phase, and the specialized viewers
 //! behind the analysis workspace.
 
+use super::transient_post::{DerivedViewAvailability, LoadedDerivedView};
 use super::*;
 
 use crate::simulation::results::STB_NYQUIST_CONTOUR_WAVEFORM;
@@ -26,10 +27,12 @@ impl SimulationController {
     }
 
     pub(super) fn populate_transient_post_views(
-        &self,
+        &mut self,
         state: &mut AppState,
         analysis: &crate::state::AnalysisResult,
     ) {
+        self.transient_post.eye_loaded = None;
+        self.transient_post.fft_loaded = None;
         if !analysis.success || analysis.analysis_type != crate::state::AnalysisType::Transient {
             state.clear_transient_specialized_viewer_data();
             return;
@@ -46,9 +49,14 @@ impl SimulationController {
             state.clear_transient_specialized_viewer_data();
             return;
         };
-        let sample_count = waveform.x.len().min(waveform.y.len());
-        let time = &waveform.x[..sample_count];
-        let values = &waveform.y[..sample_count];
+        // Eye folding retains its historical paired-prefix behavior. FFT
+        // preparation receives the authored arrays whole so its strict shape
+        // contract can diagnose a mismatch instead of inheriting truncation.
+        let paired_count = waveform.x.len().min(waveform.y.len());
+        let eye_time = &waveform.x[..paired_count];
+        let eye_values = &waveform.y[..paired_count];
+        let time = waveform.x.as_slice();
+        let values = waveform.y.as_slice();
 
         state
             .analysis
@@ -63,7 +71,7 @@ impl SimulationController {
         let timebase = provenance
             .map(|owner| state.eye_timebase_for(owner))
             .unwrap_or_default();
-        let (eye_data, eye_provenance) = build_eye_from_waveform(time, values, timebase);
+        let (eye_data, eye_provenance) = build_eye_from_waveform(eye_time, eye_values, timebase);
         let folded = eye_data.is_some();
         state
             .analysis
@@ -73,19 +81,39 @@ impl SimulationController {
             state.bind_specialized_viewer_cache(ActiveViewer::EyeDiagram, provenance);
         }
 
-        if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
+        let availability = match crate::analysis::fft::prepare_fft_input_with_options(
             &waveform_key,
             time,
             values,
             input_options,
-        ) && state
-            .analysis
-            .fft_state
-            .load_prepared_input(prepared)
-            .is_ok()
-            && let Some(provenance) = provenance
-        {
-            state.bind_specialized_viewer_cache(ActiveViewer::Fft, provenance);
+        ) {
+            Ok(prepared) => {
+                if state
+                    .analysis
+                    .fft_state
+                    .load_prepared_input(prepared)
+                    .is_ok()
+                {
+                    if let Some(provenance) = provenance {
+                        state.bind_specialized_viewer_cache(ActiveViewer::Fft, provenance);
+                    }
+                    DerivedViewAvailability::Ready
+                } else {
+                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                    DerivedViewAvailability::Unavailable
+                }
+            }
+            Err(error) => {
+                state.analysis.fft_state.record_input_error(error);
+                state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                DerivedViewAvailability::Unavailable
+            }
+        };
+        if let Some(analysis) = provenance {
+            self.transient_post.fft_loaded = Some(LoadedDerivedView {
+                analysis,
+                availability,
+            });
         }
     }
 
@@ -187,10 +215,10 @@ impl SimulationController {
     ) -> Option<(String, &'a crate::state::WaveformData)> {
         let mut candidates: Vec<&crate::state::WaveformData> = waveforms
             .iter()
-            .filter(|wf| {
-                let len = wf.x.len().min(wf.y.len());
-                len >= crate::analysis::fft::MIN_FFT_SAMPLES
-            })
+            // Keep malformed or short authored traces selectable so the
+            // typed preparation boundary can explain their exact defect.
+            // Only a record with no evidence at all is not a candidate.
+            .filter(|waveform| !waveform.x.is_empty() || !waveform.y.is_empty())
             .collect();
         candidates.sort_by(|a, b| a.name.cmp(&b.name));
 

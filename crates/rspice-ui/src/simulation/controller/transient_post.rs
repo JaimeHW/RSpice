@@ -8,7 +8,7 @@ use crate::analysis::eye_diagram::{
     EyeData, EyeDataBuilder, EyeTimebase, EyeTimebaseProvenance, crossing_phase_at,
     estimate_unit_interval, fold_anchor,
 };
-use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
+use crate::analysis::fft::{FftInputError, FftInputOptions, PreparedFftInput};
 use crate::state::{AnalysisType, SharedWaveformValues};
 use crate::workbench::app_state::{ActiveViewer, AppState, SpecializedViewerCacheProvenance};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,15 +28,15 @@ enum DerivedViewKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DerivedViewAvailability {
+pub(super) enum DerivedViewAvailability {
     Ready,
     Unavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LoadedDerivedView {
-    analysis: SpecializedViewerCacheProvenance,
-    availability: DerivedViewAvailability,
+pub(super) struct LoadedDerivedView {
+    pub(super) analysis: SpecializedViewerCacheProvenance,
+    pub(super) availability: DerivedViewAvailability,
 }
 
 #[derive(Debug)]
@@ -67,7 +67,7 @@ struct EyeBuild {
 #[derive(Debug)]
 enum DerivedViewResultPayload {
     Eye(EyeBuild),
-    Fft(Option<PreparedFftInput>),
+    Fft(Result<PreparedFftInput, FftInputError>),
 }
 
 #[derive(Debug)]
@@ -80,8 +80,8 @@ struct DerivedViewTaskResult {
 pub(super) struct TransientPostCoordinator {
     eye_task: Option<PendingDerivedViewTask>,
     fft_task: Option<PendingDerivedViewTask>,
-    eye_loaded: Option<LoadedDerivedView>,
-    fft_loaded: Option<LoadedDerivedView>,
+    pub(super) eye_loaded: Option<LoadedDerivedView>,
+    pub(super) fft_loaded: Option<LoadedDerivedView>,
 }
 
 impl SimulationController {
@@ -299,7 +299,20 @@ impl SimulationController {
             Ok(message) => message,
             Err(mpsc::TryRecvError::Empty) => return,
             Err(mpsc::TryRecvError::Disconnected) => {
+                let disconnected_analysis = task.analysis;
                 *task_slot = None;
+                // Cancellation removes the task slot before setting its flag,
+                // so a disconnected receiver that is still installed is an
+                // unexpected worker termination, not cancellation. Attribute
+                // it only to the still-active FFT provenance.
+                if view == DerivedViewKind::Fft && Some(disconnected_analysis) == active_analysis {
+                    state.analysis.fft_state.record_worker_disconnect();
+                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
+                    self.transient_post.fft_loaded = Some(LoadedDerivedView {
+                        analysis: disconnected_analysis,
+                        availability: DerivedViewAvailability::Unavailable,
+                    });
+                }
                 return;
             }
         };
@@ -331,8 +344,8 @@ impl SimulationController {
                     },
                 });
             }
-            (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(result)) => {
-                if let Some(prepared) = result {
+            (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(result)) => match result {
+                Ok(prepared) => {
                     let available = state
                         .analysis
                         .fft_state
@@ -340,6 +353,8 @@ impl SimulationController {
                         .is_ok();
                     if available {
                         state.bind_specialized_viewer_cache(ActiveViewer::Fft, message.analysis);
+                    } else {
+                        state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
                     }
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
@@ -349,14 +364,16 @@ impl SimulationController {
                             DerivedViewAvailability::Unavailable
                         },
                     });
-                } else {
-                    state.analysis.fft_state.clear();
+                }
+                Err(error) => {
+                    state.analysis.fft_state.record_input_error(error);
+                    state.clear_specialized_viewer_cache_authority(ActiveViewer::Fft);
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Unavailable,
                     });
                 }
-            }
+            },
             _ => {}
         }
     }
@@ -378,7 +395,10 @@ impl SimulationController {
                     DerivedViewResultPayload::Eye(build_eye_diagram_data(&task_source))
                 }
                 DerivedViewKind::Fft => {
-                    let prepared = build_fft_prepared_input(&task_source, &task_cancel_flag);
+                    if task_cancel_flag.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let prepared = build_fft_prepared_input(&task_source);
                     DerivedViewResultPayload::Fft(prepared)
                 }
             };
@@ -572,11 +592,7 @@ fn build_eye_diagram_data(source: &DerivedWaveformSource) -> EyeBuild {
 
 fn build_fft_prepared_input(
     source: &DerivedWaveformSource,
-    cancel_flag: &AtomicBool,
-) -> Option<PreparedFftInput> {
-    if cancel_flag.load(Ordering::Relaxed) {
-        return None;
-    }
+) -> Result<PreparedFftInput, FftInputError> {
     crate::analysis::fft::prepare_fft_input_with_options(
         &source.source_name,
         &source.time,
@@ -588,7 +604,7 @@ fn build_fft_prepared_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::fft::{WindowFunction, data::FftBuildError};
+    use crate::analysis::fft::{FftFailure, WindowFunction, data::FftBuildError};
     use crate::product::{AnalysisInstanceId, DatasetId};
     use crate::state::{AnalysisResult, SimulationRun};
 
@@ -638,6 +654,157 @@ mod tests {
         )
     }
 
+    fn seed_fft(state: &mut AppState, analysis: SpecializedViewerCacheProvenance) {
+        state.analysis.fft_state.window = WindowFunction::Rectangular;
+        state
+            .analysis
+            .fft_state
+            .load_prepared_input(PreparedFftInput {
+                name: "V(out)".to_owned(),
+                samples: vec![0.0; 16],
+                sample_rate: 16.0,
+                original_count: 16,
+                decimation_factor: 1,
+            })
+            .expect("qualified FFT ownership fixture");
+        state.bind_specialized_viewer_cache(ActiveViewer::Fft, analysis);
+    }
+
+    fn install_fft_task(
+        controller: &mut SimulationController,
+        analysis: SpecializedViewerCacheProvenance,
+    ) -> (mpsc::Sender<DerivedViewTaskResult>, Arc<AtomicBool>) {
+        let (sender, receiver) = mpsc::channel();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        controller.transient_post.fft_task = Some(PendingDerivedViewTask {
+            analysis,
+            receiver,
+            cancel_flag: Arc::clone(&cancel_flag),
+        });
+        (sender, cancel_flag)
+    }
+
+    #[test]
+    fn matching_fft_input_failure_owns_and_clears_only_its_active_cache() {
+        let analysis = owner();
+        let mut state = AppState::default();
+        seed_fft(&mut state, analysis);
+        let mut controller = SimulationController::new();
+        let (sender, _) = install_fft_task(&mut controller, analysis);
+        sender
+            .send(DerivedViewTaskResult {
+                analysis,
+                payload: DerivedViewResultPayload::Fft(Err(FftInputError::LengthMismatch {
+                    time_count: 17,
+                    value_count: 16,
+                })),
+            })
+            .expect("installed local receiver");
+
+        controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(analysis));
+
+        assert!(!state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.source_cache.is_none());
+        assert!(state.analysis.cache_authority.fft.is_none());
+        assert!(matches!(
+            state.analysis.fft_state.last_error,
+            Some(FftFailure::Input(FftInputError::LengthMismatch {
+                time_count: 17,
+                value_count: 16
+            }))
+        ));
+        assert_eq!(
+            controller.transient_post.fft_loaded,
+            Some(LoadedDerivedView {
+                analysis,
+                availability: DerivedViewAvailability::Unavailable,
+            })
+        );
+    }
+
+    #[test]
+    fn stale_fft_input_failure_cannot_mutate_the_active_cache() {
+        let active = owner();
+        let stale = owner();
+        let mut state = AppState::default();
+        seed_fft(&mut state, active);
+        let mut controller = SimulationController::new();
+        let (sender, _) = install_fft_task(&mut controller, stale);
+        sender
+            .send(DerivedViewTaskResult {
+                analysis: stale,
+                payload: DerivedViewResultPayload::Fft(Err(FftInputError::LengthMismatch {
+                    time_count: 17,
+                    value_count: 16,
+                })),
+            })
+            .expect("installed local receiver");
+
+        controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(active));
+
+        assert!(state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.source_cache.is_some());
+        assert!(state.analysis.fft_state.last_error.is_none());
+        assert_eq!(state.analysis.cache_authority.fft, Some(active));
+        assert!(controller.transient_post.fft_loaded.is_none());
+    }
+
+    #[test]
+    fn cancelling_an_fft_task_is_silent_and_drops_its_result_channel() {
+        let analysis = owner();
+        let mut state = AppState::default();
+        seed_fft(&mut state, analysis);
+        let mut controller = SimulationController::new();
+        let (sender, cancel_flag) = install_fft_task(&mut controller, analysis);
+
+        controller.cancel_task_slot(DerivedViewKind::Fft);
+
+        assert!(cancel_flag.load(Ordering::Relaxed));
+        assert!(controller.transient_post.fft_task.is_none());
+        assert!(
+            sender
+                .send(DerivedViewTaskResult {
+                    analysis,
+                    payload: DerivedViewResultPayload::Fft(Err(FftInputError::LengthMismatch {
+                        time_count: 17,
+                        value_count: 16,
+                    })),
+                })
+                .is_err()
+        );
+        assert!(state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.last_error.is_none());
+        assert_eq!(state.analysis.cache_authority.fft, Some(analysis));
+        assert!(controller.transient_post.fft_loaded.is_none());
+    }
+
+    #[test]
+    fn active_fft_worker_disconnect_fails_closed_with_typed_ownership() {
+        let analysis = owner();
+        let mut state = AppState::default();
+        seed_fft(&mut state, analysis);
+        let mut controller = SimulationController::new();
+        let (sender, _) = install_fft_task(&mut controller, analysis);
+        drop(sender);
+
+        controller.poll_transient_task(&mut state, DerivedViewKind::Fft, Some(analysis));
+
+        assert!(!state.analysis.fft_state.has_data());
+        assert!(state.analysis.fft_state.source_cache.is_none());
+        assert_eq!(
+            state.analysis.fft_state.last_error,
+            Some(FftFailure::WorkerDisconnected)
+        );
+        assert!(state.analysis.cache_authority.fft.is_none());
+        assert_eq!(
+            controller.transient_post.fft_loaded,
+            Some(LoadedDerivedView {
+                analysis,
+                availability: DerivedViewAvailability::Unavailable,
+            })
+        );
+    }
+
     #[test]
     fn failed_fft_recompute_cannot_leave_the_coordinator_ready() {
         let mut state = AppState::default();
@@ -684,7 +851,10 @@ mod tests {
         assert!(state.analysis.cache_authority.fft.is_none());
         assert!(matches!(
             state.analysis.fft_state.last_error,
-            Some(FftBuildError::ErasedWindowedSample { index: 1, .. })
+            Some(FftFailure::Build(FftBuildError::ErasedWindowedSample {
+                index: 1,
+                ..
+            }))
         ));
     }
 

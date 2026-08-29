@@ -14,7 +14,7 @@ use std::path::Path;
 
 #[test]
 fn transient_specialized_views_never_outlive_their_retained_source() {
-    let controller = SimulationController::new();
+    let mut controller = SimulationController::new();
     let mut state = AppState::default();
     let x = (0..32)
         .map(|index| index as f64 * 1.0e-9)
@@ -33,6 +33,60 @@ fn transient_specialized_views_never_outlive_their_retained_source() {
     controller.populate_transient_post_views(&mut state, &no_outputs);
     assert!(!state.analysis.fft_state.has_data());
     assert!(state.analysis.cache_authority.fft.is_none());
+}
+
+#[test]
+fn malformed_eager_fft_input_clears_the_prior_spectrum_and_keeps_the_typed_failure() {
+    let mut controller = SimulationController::new();
+    let mut state = AppState::default();
+    let run_sequence = state.simulation.start_run().id;
+    controller.current_run_id = Some(run_sequence);
+    controller.current_provenance = Some(synthetic_result_provenance());
+    let expected_owner = controller
+        .in_flight_specialized_viewer_provenance(&state)
+        .expect("the active prepared analysis owns specialized-viewer caches");
+    let valid_time = (0..17).map(|index| index as f64).collect::<Vec<_>>();
+    let valid_values = (0..17)
+        .map(|index| (index as f64 * 0.25).sin())
+        .collect::<Vec<_>>();
+    let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        crate::state::WaveformData::new("V(out)", valid_time.clone(), valid_values, "#ffffff"),
+    ]);
+    controller.populate_transient_post_views(&mut state, &valid);
+    assert!(state.analysis.fft_state.has_data());
+    assert_eq!(state.analysis.cache_authority.fft, Some(expected_owner));
+    assert!(controller.transient_post.fft_loaded.is_some_and(|loaded| {
+        loaded.analysis == expected_owner
+            && matches!(
+                loaded.availability,
+                super::transient_post::DerivedViewAvailability::Ready
+            )
+    }));
+
+    let malformed = AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+        crate::state::WaveformData::new("V(out)", valid_time, vec![0.0; 16], "#ffffff"),
+    ]);
+    controller.populate_transient_post_views(&mut state, &malformed);
+
+    assert!(!state.analysis.fft_state.has_data());
+    assert!(state.analysis.fft_state.source_cache.is_none());
+    assert!(state.analysis.cache_authority.fft.is_none());
+    assert!(controller.transient_post.fft_loaded.is_some_and(|loaded| {
+        loaded.analysis == expected_owner
+            && matches!(
+                loaded.availability,
+                super::transient_post::DerivedViewAvailability::Unavailable
+            )
+    }));
+    assert!(matches!(
+        state.analysis.fft_state.last_error,
+        Some(crate::analysis::fft::FftFailure::Input(
+            crate::analysis::fft::FftInputError::LengthMismatch {
+                time_count: 17,
+                value_count: 16
+            }
+        ))
+    ));
 }
 
 #[test]

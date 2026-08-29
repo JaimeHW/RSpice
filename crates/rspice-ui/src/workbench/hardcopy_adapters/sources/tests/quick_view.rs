@@ -206,6 +206,25 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
 }
 
 #[test]
+fn fft_quick_view_reports_unqualified_retained_evidence_as_invalid() {
+    let mut time = (0..16).map(|index| index as f64).collect::<Vec<_>>();
+    time[8] = time[7];
+    let analysis =
+        AnalysisResult::new(7, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(unqualified)", time, vec![0.0; 16], "#00ffff"),
+        ]);
+    let mut state = quick_view_state(analysis, ResultViewer::Fft);
+    state.analysis.fft_state.selected_source = Some("V(unqualified)".to_owned());
+
+    assert!(matches!(
+        resolve_quick_view(&state),
+        Err(HardcopySourceError::InvalidVisualizationSource(reason))
+            if reason.contains("FFT input preparation failed")
+                && reason.contains("increase strictly")
+    ));
+}
+
+#[test]
 fn eye_quick_view_reconstructs_the_interactive_source_contract() {
     let time = (0..161)
         .map(|index| index as f64 * 0.25)

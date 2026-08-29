@@ -3,8 +3,10 @@
 //! Viewer state for FFT/spectrum display.
 
 use super::data::{FftBuildError, FftData, SpectrumAnalysis, SpectrumNormalization};
+use super::pipeline::FftInputError;
 use super::window::WindowFunction;
 use std::sync::Arc;
+use thiserror::Error;
 
 mod data_ops;
 mod modes;
@@ -12,6 +14,22 @@ mod view;
 
 pub use modes::InputFidelity;
 const DEFAULT_MANUAL_SAMPLE_COUNT: usize = 4096;
+
+/// Typed failure from either FFT input preparation or spectrum construction.
+#[derive(Debug, Clone, PartialEq, Error)]
+#[non_exhaustive]
+pub enum FftFailure {
+    /// Raw transient evidence could not be prepared without alteration.
+    #[error("{0}")]
+    Input(#[from] FftInputError),
+    /// A prepared uniform record could not be transformed safely.
+    #[error("{0}")]
+    Build(#[from] FftBuildError),
+    /// The asynchronous preparation worker stopped without returning either
+    /// prepared input or a typed input failure.
+    #[error("FFT preparation worker stopped before returning a result")]
+    WorkerDisconnected,
+}
 
 #[derive(Debug, Clone)]
 pub struct FftSourceCache {
@@ -33,8 +51,8 @@ pub struct FftState {
     pub analysis: Option<SpectrumAnalysis>,
     /// Cached source used to derive current FFT data.
     pub source_cache: Option<FftSourceCache>,
-    /// Most recent typed construction failure, cleared by a successful build.
-    pub last_error: Option<FftBuildError>,
+    /// Most recent typed preparation or construction failure.
+    pub last_error: Option<FftFailure>,
     /// User-selected source trace name preference.
     pub selected_source: Option<String>,
     /// Amplitude normalization mode for FFT magnitudes.

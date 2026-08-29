@@ -458,9 +458,11 @@ pub(super) fn quick_fft_plot(
         &waveform.y,
         presentation.fft.input_options_for_waveform(&waveform.x),
     )
-    .ok_or(HardcopySourceError::MissingViewerEvidence(
-        "FFT source waveform",
-    ))?;
+    .map_err(|error| {
+        HardcopySourceError::InvalidVisualizationSource(format!(
+            "FFT input preparation failed: {error}"
+        ))
+    })?;
     let data = crate::analysis::fft::data::FftData::from_time_domain_with_normalization(
         &waveform.name,
         &input.samples,

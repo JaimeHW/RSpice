@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use super::super::data::{FftData, SpectrumAnalysis};
 use super::super::pipeline::{
-    FftInputOptions, FftInputPolicy, FftTimeWindow, MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
-    PreparedFftInput,
+    FftInputError, FftInputOptions, FftInputPolicy, FftTimeWindow, MAX_REFERENCE_RESAMPLE_POINTS,
+    MIN_FFT_SAMPLES, PreparedFftInput,
 };
 use super::*;
 impl FftState {
@@ -71,7 +71,7 @@ impl FftState {
             Err(error) => {
                 self.data = None;
                 self.analysis = None;
-                self.last_error = Some(error.clone());
+                self.last_error = Some(error.clone().into());
                 self.mark_spectrum_changed();
                 Err(error)
             }
@@ -84,44 +84,25 @@ impl FftState {
     }
 
     /// Build pipeline input options for a source timeline.
-    pub fn input_options_for_waveform(&self, source_time: &[f64]) -> FftInputOptions {
-        self.input_options_for_bounds(finite_time_bounds(source_time))
+    pub fn input_options_for_waveform(&self, _source_time: &[f64]) -> FftInputOptions {
+        self.input_options_for_bounds(None)
     }
 
     /// Build pipeline input options from source bounds.
-    pub fn input_options_for_bounds(&self, source_bounds: Option<(f64, f64)>) -> FftInputOptions {
+    pub fn input_options_for_bounds(&self, _source_bounds: Option<(f64, f64)>) -> FftInputOptions {
         let time_window = if self.time_window_auto {
             None
-        } else if let Some((min_t, max_t)) = source_bounds {
-            let (mut start, mut end) =
-                if self.time_window_start.is_finite() && self.time_window_end.is_finite() {
-                    (
-                        self.time_window_start.clamp(min_t, max_t),
-                        self.time_window_end.clamp(min_t, max_t),
-                    )
-                } else {
-                    (min_t, max_t)
-                };
-            if end <= start {
-                start = min_t;
-                end = max_t;
-            }
-            if end > start {
-                Some(FftTimeWindow::new(start, end))
-            } else {
-                None
-            }
         } else {
-            None
+            Some(FftTimeWindow::new(
+                self.time_window_start,
+                self.time_window_end,
+            ))
         };
 
         let target_samples = if self.sample_count_auto {
             None
         } else {
-            Some(
-                self.sample_count
-                    .clamp(MIN_FFT_SAMPLES, MAX_REFERENCE_RESAMPLE_POINTS),
-            )
+            Some(self.sample_count)
         };
 
         FftInputOptions::with_policy(self.input_policy())
@@ -175,11 +156,29 @@ impl FftState {
             Err(error) => {
                 self.data = None;
                 self.analysis = None;
-                self.last_error = Some(error.clone());
+                self.last_error = Some(error.clone().into());
                 self.mark_spectrum_changed();
                 Err(error)
             }
         }
+    }
+
+    /// Record a fail-closed input-preparation error transactionally.
+    pub fn record_input_error(&mut self, error: FftInputError) {
+        self.data = None;
+        self.analysis = None;
+        self.source_cache = None;
+        self.last_error = Some(error.into());
+        self.mark_spectrum_changed();
+    }
+
+    /// Record an unexpected asynchronous worker termination transactionally.
+    pub fn record_worker_disconnect(&mut self) {
+        self.data = None;
+        self.analysis = None;
+        self.source_cache = None;
+        self.last_error = Some(FftFailure::WorkerDisconnected);
+        self.mark_spectrum_changed();
     }
 
     /// Clear data
@@ -195,16 +194,6 @@ impl FftState {
     /// Has data?
     pub fn has_data(&self) -> bool {
         self.data.is_some()
-    }
-}
-
-fn finite_time_bounds(time: &[f64]) -> Option<(f64, f64)> {
-    let start = time.iter().copied().find(|t| t.is_finite())?;
-    let end = time.iter().copied().rfind(|t| t.is_finite())?;
-    if end > start {
-        Some((start, end))
-    } else {
-        None
     }
 }
 
@@ -281,7 +270,10 @@ mod tests {
         assert!(state.analysis.is_none());
         assert!(matches!(
             state.last_error,
-            Some(FftBuildError::NonFiniteInputSample { index: 7, .. })
+            Some(FftFailure::Build(FftBuildError::NonFiniteInputSample {
+                index: 7,
+                ..
+            }))
         ));
 
         state
@@ -289,6 +281,36 @@ mod tests {
             .expect("a later valid build recovers");
         assert!(state.data.is_some());
         assert!(state.analysis.is_some());
+        assert!(state.last_error.is_none());
+    }
+
+    #[test]
+    fn input_failure_is_transactional_and_a_valid_retry_clears_it() {
+        let mut state = FftState::default();
+        state.record_input_error(FftInputError::LengthMismatch {
+            time_count: 17,
+            value_count: 16,
+        });
+        assert!(!state.has_data());
+        assert!(state.source_cache.is_none());
+        assert!(matches!(
+            state.last_error,
+            Some(FftFailure::Input(FftInputError::LengthMismatch {
+                time_count: 17,
+                value_count: 16
+            }))
+        ));
+
+        state
+            .load_prepared_input(PreparedFftInput {
+                name: "V(recovered)".to_owned(),
+                samples: vec![0.0; 16],
+                sample_rate: 16.0,
+                original_count: 16,
+                decimation_factor: 1,
+            })
+            .expect("valid preparation recovers after an input failure");
+        assert!(state.has_data());
         assert!(state.last_error.is_none());
     }
 }
