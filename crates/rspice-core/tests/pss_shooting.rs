@@ -304,6 +304,65 @@ fn rc_steady_state_matches_the_analytic_solution() {
     );
 }
 
+/// A shooting period is evidence about the authored circuit, so the
+/// integrator may not stabilize each time point with an implicit nodal
+/// conductance.  In this deliberately high-impedance RC, a 1 pS numerical
+/// shunt would double the physical conductance and suppress the exact
+/// 0.847 V response to about 0.477 V.
+#[test]
+fn high_impedance_pss_preserves_the_authored_parallel_rc_response() {
+    const CURRENT: f64 = 1.0e-12;
+    const RESISTANCE: f64 = 1.0e12;
+    const CAPACITANCE: f64 = 1.0e-19;
+
+    let deck = format!(
+        "\
+* high-impedance current-driven rc
+i1 0 out sin(0 {CURRENT} {F0})
+r1 out 0 {RESISTANCE}
+c1 out 0 {CAPACITANCE}
+.end
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("high-impedance deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_tstab_periods(8)
+                .with_points_per_period(256)
+                .with_tolerance(1.0e-8),
+        )
+        .expect("high-impedance PSS converges without an artificial shunt");
+
+    let pss = &result.result;
+    let out_idx = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node present");
+    let values = &pss.waveforms[out_idx].values;
+    let amplitude = 0.5
+        * (values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            - values.iter().copied().fold(f64::INFINITY, f64::min));
+    let omega_rc = std::f64::consts::TAU * F0 * RESISTANCE * CAPACITANCE;
+    let expected = CURRENT * RESISTANCE / (1.0 + omega_rc * omega_rc).sqrt();
+    assert!(
+        (amplitude - expected).abs() <= 0.02 * expected,
+        "physical high-impedance response must be retained: got {amplitude:.6e}, want {expected:.6e}"
+    );
+
+    assert_eq!(result.floquet_multipliers.len(), 1);
+    let expected_multiplier = (-(1.0 / F0) / (RESISTANCE * CAPACITANCE)).exp();
+    let multiplier = result.floquet_multipliers[0];
+    assert!(
+        (multiplier.re - expected_multiplier).abs() <= 0.05 * expected_multiplier,
+        "physical RC decay must determine the period map: got {:.6e}, want {expected_multiplier:.6e}",
+        multiplier.re
+    );
+    assert!(multiplier.im.abs() <= 1.0e-8);
+}
+
 #[test]
 fn rc_floquet_multiplier_matches_exp_minus_t_over_rc() {
     let result = run_rc_pss();

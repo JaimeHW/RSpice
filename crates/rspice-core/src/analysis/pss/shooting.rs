@@ -238,7 +238,7 @@ impl ShootingNewtonSolver {
         self.solve_linear_system(&jacobian, &state.residual)
     }
 
-    /// Solve linear system using direct method (for small to medium systems)
+    /// Solve and certify `J * delta = -F` without changing the Jacobian.
     fn solve_linear_system(
         &self,
         jacobian: &[Vec<Value>],
@@ -247,30 +247,54 @@ impl ShootingNewtonSolver {
         let n = rhs.len();
 
         if n == 0 {
-            return Ok(Vec::new());
+            return if jacobian.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(SolverError::InvalidCircuit(format!(
+                    "Shooting Newton system has {} matrix rows but an empty RHS",
+                    jacobian.len()
+                )))
+            };
+        }
+        if jacobian.len() != n {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Shooting Newton dimension mismatch: matrix has {} rows, RHS has {n}",
+                jacobian.len()
+            )));
+        }
+        if rhs.iter().any(|value| !value.is_finite()) {
+            return Err(SolverError::Overflow);
         }
 
-        // Convert to triplets for sparse solver
-        let mut triplets = Vec::with_capacity(n * n);
-        for (i, row) in jacobian.iter().enumerate() {
-            for (j, &val) in row.iter().enumerate() {
-                if val.abs() > 1e-15 {
-                    triplets.push((i, j, val));
+        // Retain exact-zero diagonal entries structurally so factorization,
+        // rather than sparse assembly, owns the singularity diagnosis.
+        let mut triplets = Vec::with_capacity(n.saturating_mul(n));
+        for (row_index, row) in jacobian.iter().enumerate() {
+            if row.len() != n {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "Shooting Newton row {row_index} has {} columns; expected {n}",
+                    row.len()
+                )));
+            }
+            for (col_index, &value) in row.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+                if row_index == col_index || value != 0.0 {
+                    triplets.push((row_index, col_index, value));
                 }
             }
         }
 
-        // Add small diagonal regularization for stability
-        for i in 0..n {
-            triplets.push((i, i, 1e-12));
-        }
-
         let mut matrix = StaticMatrix::from_triplets(n, n, &triplets)?;
-
-        // Negate RHS because we solve J*delta = -F
         let neg_rhs: Vec<Value> = rhs.iter().map(|r| -r).collect();
-
-        matrix.solve(&neg_rhs)
+        match matrix.solve(&neg_rhs) {
+            Ok(solution) => Ok(solution),
+            Err(SolverError::InaccurateSolution(_)) if n <= 64 => {
+                matrix.solve_dense_extended(&neg_rhs)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Extract Floquet multipliers from Monodromy matrix
@@ -339,6 +363,41 @@ impl Default for ShootingNewtonSolver {
 mod tests {
     use super::*;
     use crate::abort_signal::ImmediateAbort;
+
+    #[test]
+    fn shooting_newton_linear_solve_fails_closed_on_singular_system() {
+        let solver = ShootingNewtonSolver::default();
+        assert!(matches!(
+            solver.solve_linear_system(&[vec![0.0]], &[1.0]),
+            Err(SolverError::SingularMatrix)
+        ));
+    }
+
+    #[test]
+    fn shooting_newton_linear_solve_preserves_tiny_physical_scale() {
+        let solver = ShootingNewtonSolver::default();
+        let solution = solver
+            .solve_linear_system(&[vec![1.0e-18]], &[-1.0])
+            .expect("a finite tiny coefficient is nonsingular");
+        assert!((solution[0] / 1.0e18 - 1.0).abs() <= 4.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn shooting_newton_linear_solve_rejects_malformed_and_nonfinite_inputs() {
+        let solver = ShootingNewtonSolver::default();
+        assert!(matches!(
+            solver.solve_linear_system(&[vec![1.0], vec![2.0]], &[1.0]),
+            Err(SolverError::InvalidCircuit(_))
+        ));
+        assert!(matches!(
+            solver.solve_linear_system(&[vec![Value::NAN]], &[1.0]),
+            Err(SolverError::Overflow)
+        ));
+        assert!(matches!(
+            solver.solve_linear_system(&[vec![1.0]], &[Value::INFINITY]),
+            Err(SolverError::Overflow)
+        ));
+    }
 
     #[test]
     fn floquet_spectrum_rejects_empty_ragged_and_nonfinite_monodromy() {

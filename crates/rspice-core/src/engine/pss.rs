@@ -32,7 +32,7 @@ use crate::numerics::integration::IntegrationMethod;
 use crate::numerics::integration::{
     BreakpointManager, LteEstimator, TimestepController, TrapGearController,
 };
-use crate::solver::StaticMatrix;
+use crate::solver::{SolverError, StaticMatrix};
 use crate::{Netlist, Value};
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
@@ -2311,7 +2311,12 @@ impl Engine {
         Ok(monodromy)
     }
 
-    /// Solve linear system using Gaussian elimination
+    /// Solve and certify a shooting-Newton linear system.
+    ///
+    /// The residual convention is `A * step = -b`. No diagonal
+    /// regularization is permitted here: a singular shooting Jacobian means
+    /// the requested Newton step is not uniquely supported by the physical
+    /// period map and must fail closed.
     pub(in crate::engine) fn pss_solve_linear_system(
         &self,
         a: &[Vec<Value>],
@@ -2319,59 +2324,58 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let n = b.len();
         if n == 0 {
-            return Ok(vec![]);
+            return if a.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Err(SolverError::InvalidCircuit(format!(
+                    "PSS Newton system has {} matrix rows but an empty RHS",
+                    a.len()
+                ))
+                .into())
+            };
+        }
+        if a.len() != n {
+            return Err(SolverError::InvalidCircuit(format!(
+                "PSS Newton dimension mismatch: matrix has {} rows, RHS has {n}",
+                a.len()
+            ))
+            .into());
+        }
+        if b.iter().any(|value| !value.is_finite()) {
+            return Err(SolverError::Overflow.into());
         }
 
-        // Augmented matrix
-        let mut aug: Vec<Vec<Value>> = a
-            .iter()
-            .zip(b.iter())
-            .map(|(row, &bi)| {
-                let mut r = row.clone();
-                r.push(-bi); // Solve Ax = -b (Newton step)
-                r
-            })
-            .collect();
-
-        // Forward elimination with partial pivoting
-        for col in 0..n {
-            // Find pivot
-            let mut max_row = col;
-            for row in (col + 1)..n {
-                if aug[row][col].abs() > aug[max_row][col].abs() {
-                    max_row = row;
+        // Retain every diagonal structurally, including exact zeros, so an
+        // empty physical equation reaches factorization and is diagnosed as
+        // singular instead of disappearing from the sparse pattern.
+        let mut triplets = Vec::with_capacity(n.saturating_mul(n));
+        for (row_index, row) in a.iter().enumerate() {
+            if row.len() != n {
+                return Err(SolverError::InvalidCircuit(format!(
+                    "PSS Newton row {row_index} has {} columns; expected {n}",
+                    row.len()
+                ))
+                .into());
+            }
+            for (col_index, &value) in row.iter().enumerate() {
+                if !value.is_finite() {
+                    return Err(SolverError::Overflow.into());
+                }
+                if row_index == col_index || value != 0.0 {
+                    triplets.push((row_index, col_index, value));
                 }
             }
-            aug.swap(col, max_row);
-
-            let pivot = aug[col][col];
-            if pivot.abs() < 1e-15 {
-                // Near-singular, use regularization
-                continue;
-            }
-
-            // Eliminate
-            for row in (col + 1)..n {
-                let factor = aug[row][col] / pivot;
-                for k in col..=n {
-                    aug[row][k] -= factor * aug[col][k];
-                }
-            }
         }
 
-        // Back substitution
-        let mut x = vec![0.0; n];
-        for i in (0..n).rev() {
-            let mut sum = aug[i][n];
-            for j in (i + 1)..n {
-                sum -= aug[i][j] * x[j];
+        let mut matrix = StaticMatrix::from_triplets(n, n, &triplets)?;
+        let rhs = b.iter().map(|value| -*value).collect::<Vec<_>>();
+        match matrix.solve(&rhs) {
+            Ok(solution) => Ok(solution),
+            Err(SolverError::InaccurateSolution(_)) if n <= 64 => {
+                matrix.solve_dense_extended(&rhs).map_err(Into::into)
             }
-            if aug[i][i].abs() > 1e-15 {
-                x[i] = sum / aug[i][i];
-            }
+            Err(error) => Err(error.into()),
         }
-
-        Ok(x)
     }
 
     /// One companion-stamped Newton solve at `t_next` with step `dt`.
@@ -2452,11 +2456,6 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         matrix.clear_values();
         rhs.fill(0.0);
-
-        // PSS needs a nodal conductance floor, not a perturbation of dynamic
-        // branch equations. In particular, adding 1e-12 to a scaled capacitor
-        // branch diagonal can cancel its physical -1/geq coefficient.
-        Self::stamp_nodal_gmin(circuit, matrix, 1e-12);
 
         circuit.stamp_transient_linear_direct(matrix, rhs);
 
@@ -2817,6 +2816,25 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SimulationConfig;
+
+    #[test]
+    fn engine_shooting_newton_linear_solve_fails_closed_on_singular_system() {
+        let engine = Engine::new(SimulationConfig::default());
+        assert!(matches!(
+            engine.pss_solve_linear_system(&[vec![0.0]], &[1.0]),
+            Err(SimulationError::Solver(SolverError::SingularMatrix))
+        ));
+    }
+
+    #[test]
+    fn engine_shooting_newton_linear_solve_preserves_tiny_physical_scale() {
+        let engine = Engine::new(SimulationConfig::default());
+        let solution = engine
+            .pss_solve_linear_system(&[vec![1.0e-18]], &[-1.0])
+            .expect("a finite tiny coefficient is nonsingular");
+        assert!((solution[0] / 1.0e18 - 1.0).abs() <= 4.0 * Value::EPSILON);
+    }
 
     #[test]
     fn shooting_gmres_matches_direct_lu_with_stale_jacobian_preconditioner() {
