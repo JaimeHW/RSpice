@@ -955,24 +955,45 @@ mod tests {
     }
 
     #[test]
-    fn bug1692_models_reject_duplicate_level_and_soimod() {
+    fn bug1692_model_selector_repetition_and_parameter_duplicates_are_distinguished() {
         let path = corpus_root().join(Bug1692Role::Braced.path());
         let source = fs::read_to_string(&path).expect("read BUG1692 worker");
-        for (needle, replacement, param_name) in [
-            ("LEVEL   = 10", "LEVEL   = 10 LEVEL = 10", "LEVEL"),
-            ("SOIMOD  = 0", "SOIMOD  = 0 SOIMOD = 0", "SOIMOD"),
-        ] {
-            let duplicate = source.replacen(needle, replacement, 1);
-            assert_ne!(duplicate, source, "fixture contains {param_name}");
-            let netlist = XyceTestRunner::parse_xyce_netlist(&duplicate, &path)
-                .unwrap_or_else(|error| panic!("parse duplicate {param_name}: {error}"));
-            let error = XyceTestRunner::validate_bug1692_model(&netlist, "MP", "PMOS")
-                .expect_err("duplicate model parameter must fail closed");
-            assert!(
-                error.contains(&format!("exactly one {param_name}")),
-                "unexpected {param_name} diagnostic: {error}"
-            );
-        }
+        let repeated_selector = source.replacen("LEVEL   = 10", "LEVEL   = 10 LEVEL = 10", 1);
+        assert_ne!(repeated_selector, source, "fixture contains LEVEL");
+        let netlist = XyceTestRunner::parse_xyce_netlist(&repeated_selector, &path)
+            .expect("Xyce permits repeated LEVEL model selectors");
+        let error = XyceTestRunner::validate_bug1692_model(&netlist, "MP", "PMOS")
+            .expect_err("the sealed BUG1692 worker still rejects source drift");
+        assert!(
+            error.contains("exactly one LEVEL"),
+            "unexpected LEVEL drift diagnostic: {error}"
+        );
+
+        let duplicate_parameter = source.replacen("SOIMOD  = 0", "SOIMOD  = 0 SOIMOD = 0", 1);
+        assert_ne!(duplicate_parameter, source, "fixture contains SOIMOD");
+        let options = NetlistParseOptions {
+            statistical_mode: StatisticalParamMode::Nominal,
+            expression_dialect: ExpressionDialect::Xyce,
+            parameter_redefinition_policy: ParameterRedefinitionPolicy::UseLast,
+            ..NetlistParseOptions::default()
+        };
+        let error = Netlist::parse_with_path_and_options(&duplicate_parameter, &path, options)
+            .expect_err("duplicate Xyce device parameter must fail during parsing");
+        let ParseError::DuplicateModelParameter(error) = error else {
+            panic!("unexpected SOIMOD duplicate error: {error:?}");
+        };
+        assert_eq!(error.model_name, "MP");
+        assert_eq!(error.canonical_model_name, "MP");
+        assert_eq!(error.parameter_name, "SOIMOD");
+        assert_eq!(error.canonical_parameter_name, "SOIMOD");
+        assert_eq!(error.model_origin.line, 32);
+        assert!(
+            error
+                .model_origin
+                .path
+                .as_deref()
+                .is_some_and(|origin| XyceTestRunner::same_path(origin, &path))
+        );
     }
 
     #[test]

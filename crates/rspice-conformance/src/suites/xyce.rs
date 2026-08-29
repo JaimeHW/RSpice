@@ -12600,6 +12600,7 @@ mod contracts_bug38;
 mod contracts_bug389;
 mod contracts_bug39;
 mod contracts_bug402;
+mod contracts_bug411;
 mod contracts_bug412;
 mod contracts_bug48;
 mod contracts_bug519;

@@ -1029,17 +1029,37 @@ mod tests {
         let root = corpus_root();
         let role = MosfetParamAliasRole::Level1Owner;
         let source = fs::read_to_string(root.join(role.path())).expect("read owner");
-        for mutated in [
-            source.replacen("UO = 310", "U0 = 310 UO = 310", 1),
-            source.replacen("UO = 310", "UO = 310 UO = 310", 1),
-            source.replacen("VTO = -1.6", "VTH0 = -1.6", 1),
+        for (mutated, duplicate_parameter) in [
+            (source.replacen("UO = 310", "U0 = 310 UO = 310", 1), None),
+            (
+                source.replacen("UO = 310", "UO = 310 UO = 310", 1),
+                Some("UO"),
+            ),
+            (source.replacen("VTO = -1.6", "VTH0 = -1.6", 1), None),
         ] {
-            let netlist = XyceTestRunner::parse_xyce_netlist(&mutated, &root.join(role.path()))
-                .expect("mutation remains syntactically valid");
-            assert!(
-                XyceTestRunner::normalized_mosfet_param_alias_models(&netlist, role).is_err(),
-                "mixed, duplicate, and non-Release aliases must remain outside this contract"
-            );
+            match duplicate_parameter {
+                Some(expected) => {
+                    let error =
+                        XyceTestRunner::parse_xyce_netlist(&mutated, &root.join(role.path()))
+                            .expect_err("duplicate Xyce model parameter must fail during parsing");
+                    let ParseError::DuplicateModelParameter(error) = error else {
+                        panic!("unexpected duplicate-model failure: {error:?}");
+                    };
+                    assert_eq!(error.canonical_model_name, "CD4012_PMOS");
+                    assert_eq!(error.canonical_parameter_name, expected);
+                    assert_eq!(error.model_origin.line, 20);
+                }
+                None => {
+                    let netlist =
+                        XyceTestRunner::parse_xyce_netlist(&mutated, &root.join(role.path()))
+                            .expect("non-duplicate alias mutation remains syntactically valid");
+                    assert!(
+                        XyceTestRunner::normalized_mosfet_param_alias_models(&netlist, role)
+                            .is_err(),
+                        "mixed and non-Release aliases must remain outside this contract"
+                    );
+                }
+            }
         }
     }
 

@@ -17221,7 +17221,7 @@ V1 bias 0 0
         .replace("(TC1=1m TC2=2u TNOM=27)", "(TC1=-1m TC2=-2u TNOM=27)");
     let snapshot = |source: &str| {
         let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("member.cir"))
-            .expect("passive temperature snapshot fixture parses");
+            .map_err(|error| error.to_string())?;
         XyceTestRunner::passive_temperature_override_snapshot(&netlist, &print)
     };
     let baseline = snapshot(baseline_source).expect("model-coefficient baseline qualifies");
@@ -22082,24 +22082,54 @@ M1 3 4 2 0 IRF130 W=0.386 L=2.5u
         }
     );
 
-    for invalid in [
-        source.replace("+ M=3", "+ M=4"),
-        source.replace("+ CVE=1", "+ CVE=0"),
-        source.replace("+ TOX=50nm", "+ UNKNOWN=1\n+ TOX=50nm"),
-        source.replace("+ UO=230", "+ UO=230\n+ UO=231"),
-        source.replace(
-            "M1 3 4 2 0 IRF130 W=0.386 L=2.5u",
-            "M1 3 4 2 IRF130 W=0.386 L=2.5u",
+    for (invalid, duplicate_parameter) in [
+        (source.replace("+ M=3", "+ M=4"), None),
+        (source.replace("+ CVE=1", "+ CVE=0"), None),
+        (
+            source.replace("+ TOX=50nm", "+ UNKNOWN=1\n+ TOX=50nm"),
+            None,
         ),
-        source.replace(".options timeint", ".options gmin=1e-12 timeint"),
+        (source.replace("+ UO=230", "+ UO=230\n+ UO=231"), Some("UO")),
+        (
+            source.replace(
+                "M1 3 4 2 0 IRF130 W=0.386 L=2.5u",
+                "M1 3 4 2 IRF130 W=0.386 L=2.5u",
+            ),
+            None,
+        ),
+        (
+            source.replace(".options timeint", ".options gmin=1e-12 timeint"),
+            None,
+        ),
     ] {
-        let invalid_netlist =
-            XyceTestRunner::parse_xyce_netlist(&invalid, Path::new("invalid_vdmos_level18.cir"))
-                .expect("invalid VDMOS fixture remains structurally parseable");
-        assert!(
-            !XyceTestRunner::netlist_is_native_absolute_transient_vdmos_level18(&invalid_netlist),
-            "invalid VDMOS variation must remain outside the integrated-RMS envelope"
-        );
+        match duplicate_parameter {
+            Some(expected) => {
+                let error = XyceTestRunner::parse_xyce_netlist(
+                    &invalid,
+                    Path::new("invalid_vdmos_level18.cir"),
+                )
+                .expect_err("duplicate Xyce model parameter must fail during parsing");
+                let ParseError::DuplicateModelParameter(error) = error else {
+                    panic!("unexpected duplicate-model failure: {error:?}");
+                };
+                assert_eq!(error.canonical_model_name, "IRF130");
+                assert_eq!(error.canonical_parameter_name, expected);
+                assert_eq!(error.model_origin.line, 7);
+            }
+            None => {
+                let invalid_netlist = XyceTestRunner::parse_xyce_netlist(
+                    &invalid,
+                    Path::new("invalid_vdmos_level18.cir"),
+                )
+                .expect("non-duplicate VDMOS mutation remains structurally parseable");
+                assert!(
+                    !XyceTestRunner::netlist_is_native_absolute_transient_vdmos_level18(
+                        &invalid_netlist,
+                    ),
+                    "invalid VDMOS variation must remain outside the integrated-RMS envelope"
+                );
+            }
+        }
     }
 }
 
