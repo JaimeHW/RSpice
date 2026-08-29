@@ -519,3 +519,80 @@ impl Engine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SimulationConfig;
+    use crate::analysis::harmonic_balance::DC_SHORT_CONDUCTANCE;
+
+    #[test]
+    fn hb_engine_stamps_dangling_series_rl_as_a_dc_short() {
+        let netlist = Netlist::parse(
+            "HB dangling series R-L DC topology\n\
+             V1 source 0 1\n\
+             Rsource source line 50\n\
+             Cline line 0 420p\n\
+             Rcable line internal 0.12\n\
+             Lcable internal dangling 1.2u\n\
+             .end\n",
+        )
+        .expect("R-L fixture parses");
+        let analysis = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(1))
+            .expect("native HB R-L fixture solves");
+        let result = &analysis.result;
+
+        assert!(analysis.converged && result.is_valid());
+        assert!(
+            result.residual_norm <= 1.0e-9,
+            "HB residual was {:.17e}",
+            result.residual_norm
+        );
+        let dc = |name: &str| {
+            result
+                .spectral_voltages
+                .iter()
+                .find(|voltage| voltage.node_name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing HB node {name}"))
+                .dc()
+        };
+        let source = dc("source");
+        let line = dc("line");
+        let internal = dc("internal");
+        let dangling = dc("dangling");
+        for (name, voltage) in [
+            ("source", source),
+            ("line", line),
+            ("internal", internal),
+            ("dangling", dangling),
+        ] {
+            assert!(
+                (voltage - 1.0).abs() <= 1.0e-8,
+                "{name} DC voltage was {voltage:.17e}"
+            );
+        }
+
+        let source_resistor_current = (source - line) / 50.0;
+        let cable_resistor_current = (line - internal) / 0.12;
+        let inductor_current = DC_SHORT_CONDUCTANCE * (internal - dangling);
+        assert!(source_resistor_current.abs() <= 1.0e-9);
+        assert!(cable_resistor_current.abs() <= 1.0e-9);
+        assert!(inductor_current.abs() <= 1.0e-9);
+        assert!((cable_resistor_current - inductor_current).abs() <= 1.0e-9);
+
+        let source_branch = result
+            .mna_branch_currents
+            .iter()
+            .find(|branch| branch.device_name.eq_ignore_ascii_case("V1"))
+            .expect("source MNA branch is retained");
+        assert!(source_branch.coefficients[0].norm() <= 1.0e-9);
+        let inductor = result
+            .reactive_spectra
+            .iter()
+            .find(|reactive| reactive.device_name.eq_ignore_ascii_case("Lcable"))
+            .expect("inductor spectrum is retained");
+        assert!(inductor.voltage_coefficients[0].norm() <= 1.0e-9);
+        assert!(inductor.current_coefficients[0].norm() <= 1.0e-9);
+    }
+}

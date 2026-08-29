@@ -90,7 +90,7 @@ impl PeriodicConversionOperator<'_> {
             for &(i, j, l) in self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     let admittance = if omega_k.abs() <= self.omega_floor {
-                        Complex64::new(1e6, 0.0)
+                        Complex64::new(inductor_dc_short_admittance(l), 0.0)
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };
@@ -179,7 +179,7 @@ impl PeriodicConversionOperator<'_> {
             for &(i, j, l) in self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     block[i * n + j] += if omega_k.abs() <= self.omega_floor {
-                        Complex64::new(1e6, 0.0)
+                        Complex64::new(inductor_dc_short_admittance(l), 0.0)
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };

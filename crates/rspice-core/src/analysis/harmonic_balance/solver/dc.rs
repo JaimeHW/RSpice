@@ -226,7 +226,7 @@ impl HbSolver {
         // with the operating point of a different circuit.
         for &(row, col, l) in &self.l_matrix {
             if row < n && col < n && l.abs() > 1e-30 {
-                g_dc[row][col] += DC_SHORT_CONDUCTANCE;
+                g_dc[row][col] += inductor_dc_short_admittance(l);
             }
         }
 
@@ -362,8 +362,9 @@ impl HbSolver {
         // Inductor DC shorts, consistent with the full-spectrum residual.
         for &(row, col, l) in &self.l_matrix {
             if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
-                state.residual[row][0] -= Complex64::new(DC_SHORT_CONDUCTANCE * v_dc[col], 0.0);
-                state.residual_scale[row][0] += DC_SHORT_CONDUCTANCE * v_dc[col].abs();
+                let y_l = inductor_dc_short_admittance(l);
+                state.residual[row][0] -= Complex64::new(y_l * v_dc[col], 0.0);
+                state.residual_scale[row][0] += y_l.abs() * v_dc[col].abs();
             }
         }
 
@@ -443,7 +444,7 @@ impl HbSolver {
         // Inductor DC shorts, matching compute_dc_residual.
         for &(row, col, l) in &self.l_matrix {
             if row < n && col < n && l.abs() > 1e-30 {
-                jacobian[row][col] -= DC_SHORT_CONDUCTANCE;
+                jacobian[row][col] -= inductor_dc_short_admittance(l);
             }
         }
 

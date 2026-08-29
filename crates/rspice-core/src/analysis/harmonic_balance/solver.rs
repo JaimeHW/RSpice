@@ -31,6 +31,17 @@ pub use periodic_ac::{PeriodicAcExcitation, PeriodicNoiseSource};
 /// circuit.
 pub(crate) const DC_SHORT_CONDUCTANCE: Value = 1e6;
 
+/// Return the DC-short surrogate admittance for one signed inductor-matrix
+/// entry. The magnitude of an authored inductance is irrelevant at DC, but
+/// the sign still carries the two-terminal topology: diagonal entries are
+/// positive and off-diagonal entries are negative. Dropping that sign turns
+/// `[+L, -L; -L, +L]` into an all-positive matrix and enforces `V+ = -V-`
+/// instead of the physical short-circuit constraint `V+ = V-`.
+#[inline]
+fn inductor_dc_short_admittance(signed_inductance: Value) -> Value {
+    signed_inductance.signum() * DC_SHORT_CONDUCTANCE
+}
+
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
 pub enum HbError {

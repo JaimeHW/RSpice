@@ -280,7 +280,7 @@ impl ExactHbOperator<'_> {
             for &(i, j, l) in self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     let admittance = if k == 0 {
-                        Complex64::new(DC_SHORT_CONDUCTANCE, 0.0)
+                        Complex64::new(inductor_dc_short_admittance(l), 0.0)
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };
@@ -388,7 +388,7 @@ impl ExactHbOperator<'_> {
             for &(i, j, l) in self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     let admittance = if k == 0 {
-                        Complex64::new(DC_SHORT_CONDUCTANCE, 0.0)
+                        Complex64::new(inductor_dc_short_admittance(l), 0.0)
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };
@@ -1098,7 +1098,7 @@ impl HbSolver {
                     let col = j * h + k;
                     if k == 0 {
                         // DC: short circuit
-                        jac[row][col] -= DC_SHORT_CONDUCTANCE;
+                        jac[row][col] -= inductor_dc_short_admittance(l);
                     } else {
                         // AC: Y_L = -j/(ωL)
                         jac[row][col] -= Complex64::new(0.0, -1.0 / (omega_k * l));

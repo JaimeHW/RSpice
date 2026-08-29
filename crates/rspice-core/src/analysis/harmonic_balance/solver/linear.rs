@@ -258,10 +258,11 @@ impl HbSolver {
                         let omega_k = (k as f64) * omega0;
                         if k == 0 {
                             // DC: inductor is short circuit
-                            // Add very large conductance to force V_i = V_j
-                            state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
-                            state.residual_scale[i][k] +=
-                                DC_SHORT_CONDUCTANCE * state.x[j][k].norm();
+                            // Preserve the signed matrix topology so the
+                            // four entries enforce V_i = V_j.
+                            let y_l = inductor_dc_short_admittance(l);
+                            state.residual[i][k] -= y_l * state.x[j][k];
+                            state.residual_scale[i][k] += y_l.abs() * state.x[j][k].norm();
                         } else {
                             // AC: Y_L = 1/(jωL) = -j/(ωL)
                             let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
@@ -346,7 +347,7 @@ impl HbSolver {
                 for k in 0..h {
                     if k < state.x[j].len() && k < state.residual[i].len() {
                         if k == 0 {
-                            state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
+                            state.residual[i][k] -= inductor_dc_short_admittance(l) * state.x[j][k];
                         } else {
                             let omega_k = (k as f64) * omega0;
                             let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
@@ -433,7 +434,7 @@ impl HbSolver {
             for &(i, j, l) in &self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     if k == 0 {
-                        y_matrix[i][j] += DC_SHORT_CONDUCTANCE;
+                        y_matrix[i][j] += inductor_dc_short_admittance(l);
                     } else {
                         let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                         y_matrix[i][j] += y_l;
@@ -503,5 +504,99 @@ impl HbSolver {
                 residual: state.residual_norm,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stamp_two_terminal_inductor(
+        solver: &mut HbSolver,
+        node_pos: usize,
+        node_neg: usize,
+        inductance: Value,
+    ) {
+        solver.add_inductance(node_pos, node_pos, inductance);
+        solver.add_inductance(node_pos, node_neg, -inductance);
+        solver.add_inductance(node_neg, node_pos, -inductance);
+        solver.add_inductance(node_neg, node_neg, inductance);
+    }
+
+    #[test]
+    fn dc_inductor_residual_preserves_off_diagonal_topology_sign() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 2);
+        stamp_two_terminal_inductor(&mut solver, 0, 1, 1.2e-6);
+
+        let mut state = HbSolverState::new(2, 1);
+        state.x[0][0] = Complex64::new(2.0, 0.0);
+        state.x[1][0] = Complex64::new(3.0, 0.0);
+        solver.compute_linear_residual(&mut state);
+
+        let expected = DC_SHORT_CONDUCTANCE;
+        assert_eq!(state.residual[0][0], Complex64::new(expected, 0.0));
+        assert_eq!(state.residual[1][0], Complex64::new(-expected, 0.0));
+        assert_eq!(
+            state.residual[0][0] + state.residual[1][0],
+            Complex64::new(0.0, 0.0),
+            "a two-terminal inductor stamp must conserve current"
+        );
+        assert_eq!(state.residual_scale[0][0], 5.0 * expected);
+        assert_eq!(state.residual_scale[1][0], 5.0 * expected);
+    }
+
+    #[test]
+    fn dangling_series_rl_dc_solution_has_equal_nodes_and_zero_kcl() {
+        const SOURCE_R: Value = 50.0;
+        const CABLE_R: Value = 0.12;
+
+        // V1--50R--line--0.12R--internal--1.2uH--dangling. The capacitor
+        // loads `line` only at nonzero harmonics. At DC every node must equal
+        // the 1 V source and the dangling R-L branch must carry zero current.
+        let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 4);
+        solver.add_voltage_source_branch(1, 0, 1.0);
+        solver.add_resistor(0, 1, SOURCE_R);
+        solver.add_capacitance(1, 1, 420.0e-12);
+        solver.add_resistor(1, 2, CABLE_R);
+        stamp_two_terminal_inductor(&mut solver, 2, 3, 1.2e-6);
+
+        let mut state = HbSolverState::new(4, 1);
+        solver
+            .solve_linear(&mut state)
+            .expect("floating series R-L HB system must solve");
+
+        let dc = state.x.iter().map(|node| node[0].re).collect::<Vec<_>>();
+        for (index, voltage) in dc.iter().copied().enumerate() {
+            assert!(
+                (voltage - 1.0).abs() <= 1.0e-8,
+                "DC node {index} was {voltage:.17e}, expected the 1 V source"
+            );
+        }
+
+        let source_resistor_current = (dc[0] - dc[1]) / SOURCE_R;
+        let cable_resistor_current = (dc[1] - dc[2]) / CABLE_R;
+        let inductor_short_current = DC_SHORT_CONDUCTANCE * (dc[2] - dc[3]);
+        let source_branch_current = state.mna_branch_currents[0][0].re;
+        for (label, current) in [
+            ("source resistor", source_resistor_current),
+            ("cable resistor", cable_resistor_current),
+            ("inductor short surrogate", inductor_short_current),
+            ("source MNA branch", source_branch_current),
+        ] {
+            assert!(
+                current.abs() <= 1.0e-9,
+                "{label} carried nonzero DC current {current:.17e}"
+            );
+        }
+        assert!(
+            (cable_resistor_current - inductor_short_current).abs() <= 1.0e-9,
+            "internal R-L node violates KCL"
+        );
+        assert!(
+            state.residual.iter().all(|row| row[0].norm() <= 1.0e-9),
+            "solved DC KCL residuals were {:?}",
+            state.residual.iter().map(|row| row[0]).collect::<Vec<_>>()
+        );
+        assert!(state.converged, "linear HB solve must report convergence");
     }
 }
