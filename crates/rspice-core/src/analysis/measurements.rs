@@ -511,52 +511,29 @@ impl Waveform {
     /// * `direction` - Filter by edge direction
     ///
     /// # Returns
-    /// Vector of crossing events
-    pub fn find_crossings(&self, threshold: Value, direction: EdgeDirection) -> Vec<CrossingEvent> {
+    /// Vector of crossing events, or an error if the threshold, crossing time,
+    /// slew rate, or event storage cannot be represented.
+    pub fn find_crossings(
+        &self,
+        threshold: Value,
+        direction: EdgeDirection,
+    ) -> Result<Vec<CrossingEvent>, MeasurementError> {
+        validate_crossing_threshold(threshold)?;
         let mut crossings = Vec::new();
 
         for i in 0..self.values.len().saturating_sub(1) {
-            let v0 = self.values[i];
-            let v1 = self.values[i + 1];
-            let t0 = self.time[i];
-            let t1 = self.time[i + 1];
-
-            let is_rising = v0 < threshold && v1 >= threshold;
-            let is_falling = v0 >= threshold && v1 < threshold;
-
-            let should_include = match direction {
-                EdgeDirection::Rising => is_rising,
-                EdgeDirection::Falling => is_falling,
-                EdgeDirection::Either => is_rising || is_falling,
-            };
-
-            if should_include {
-                // Interpolate crossing time
-                let dv = v1 - v0;
-                let dt = t1 - t0;
-                let fraction = if dv.abs() > 1e-15 {
-                    (threshold - v0) / dv
-                } else {
-                    0.5
-                };
-                let cross_time = t0 + fraction * dt;
-                let slew_rate = if dt > 1e-15 { dv / dt } else { 0.0 };
-
-                crossings.push(CrossingEvent {
-                    time: cross_time,
-                    index: i,
-                    direction: if is_rising {
-                        EdgeDirection::Rising
-                    } else {
-                        EdgeDirection::Falling
-                    },
-                    slew_rate,
-                    value: threshold,
-                });
+            if let Some(event) = self.crossing_event(i, threshold, direction)? {
+                crossings.try_reserve(1).map_err(|error| {
+                    MeasurementError::CalculationError(format!(
+                        "failed to allocate crossing event {} at segment {i}: {error}",
+                        crossings.len()
+                    ))
+                })?;
+                crossings.push(event);
             }
         }
 
-        crossings
+        Ok(crossings)
     }
 
     /// Find first crossing of threshold
@@ -564,20 +541,135 @@ impl Waveform {
         &self,
         threshold: Value,
         direction: EdgeDirection,
-    ) -> Option<CrossingEvent> {
-        self.find_crossings(threshold, direction).into_iter().next()
+    ) -> Result<Option<CrossingEvent>, MeasurementError> {
+        validate_crossing_threshold(threshold)?;
+        for segment in 0..self.values.len().saturating_sub(1) {
+            if let Some(event) = self.crossing_event(segment, threshold, direction)? {
+                return Ok(Some(event));
+            }
+        }
+        Ok(None)
     }
 
-    /// Find time of nth crossing
+    /// Find the time of a crossing by zero-based event index.
+    ///
+    /// This is an idiomatic Rust index. SPICE deck crossing ordinals are a
+    /// separate one-based user-facing convention.
     pub fn cross_time(
         &self,
         threshold: Value,
         direction: EdgeDirection,
-        n: usize,
-    ) -> Option<Value> {
-        self.find_crossings(threshold, direction)
-            .get(n)
-            .map(|c| c.time)
+        event_index: usize,
+    ) -> Result<Option<Value>, MeasurementError> {
+        validate_crossing_threshold(threshold)?;
+        let mut matched_events = 0usize;
+        for segment in 0..self.values.len().saturating_sub(1) {
+            if let Some(event) = self.crossing_event(segment, threshold, direction)? {
+                if matched_events == event_index {
+                    return Ok(Some(event.time));
+                }
+                matched_events = matched_events.checked_add(1).ok_or_else(|| {
+                    MeasurementError::CalculationError(
+                        "crossing event index exceeds this platform".to_string(),
+                    )
+                })?;
+            }
+        }
+        Ok(None)
+    }
+
+    fn crossing_event(
+        &self,
+        segment: usize,
+        threshold: Value,
+        requested_direction: EdgeDirection,
+    ) -> Result<Option<CrossingEvent>, MeasurementError> {
+        let v0 = self.values[segment];
+        let v1 = self.values[segment + 1];
+        let t0 = self.time[segment];
+        let t1 = self.time[segment + 1];
+        if !v0.is_finite() || !v1.is_finite() || !t0.is_finite() || !t1.is_finite() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "crossing segment {segment} contains a non-finite sample"
+            )));
+        }
+        if t1 <= t0 {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "crossing segment {segment} has non-increasing time ({t0} then {t1})"
+            )));
+        }
+
+        let arrival_direction = if v0 < threshold && v1 >= threshold {
+            Some(EdgeDirection::Rising)
+        } else if v0 > threshold && v1 <= threshold {
+            Some(EdgeDirection::Falling)
+        } else {
+            None
+        };
+        let Some(arrival_direction) = arrival_direction else {
+            return Ok(None);
+        };
+        if requested_direction != EdgeDirection::Either && requested_direction != arrival_direction
+        {
+            return Ok(None);
+        }
+
+        let (fraction_numerator, voltage_span, signed_slew) = match arrival_direction {
+            EdgeDirection::Rising => (
+                scaled_positive_difference(threshold, v0, segment, "crossing numerator")?,
+                scaled_positive_difference(v1, v0, segment, "voltage span")?,
+                1.0,
+            ),
+            EdgeDirection::Falling => (
+                scaled_positive_difference(v0, threshold, segment, "crossing numerator")?,
+                scaled_positive_difference(v0, v1, segment, "voltage span")?,
+                -1.0,
+            ),
+            EdgeDirection::Either => {
+                return Err(MeasurementError::CalculationError(
+                    "crossing event has no concrete arrival direction".to_string(),
+                ));
+            }
+        };
+        let fraction = scaled_positive_ratio(
+            fraction_numerator,
+            voltage_span,
+            segment,
+            "crossing fraction",
+        )?;
+        if fraction > 1.0 {
+            return Err(MeasurementError::CalculationError(format!(
+                "crossing fraction for segment {segment} is outside (0, 1] ({fraction})"
+            )));
+        }
+        if fraction == 0.0 && v0 != threshold {
+            return Err(MeasurementError::CalculationError(format!(
+                "crossing fraction for segment {segment} falsely resolves to the prior sample"
+            )));
+        }
+        if fraction == 1.0 && v1 != threshold {
+            return Err(MeasurementError::CalculationError(format!(
+                "crossing fraction for segment {segment} falsely resolves to the arrival sample"
+            )));
+        }
+        let time = interpolate_crossing_time(t0, t1, fraction, segment)?;
+        let time_span = scaled_positive_difference(t1, t0, segment, "time span")?;
+        let slew_magnitude =
+            scaled_positive_ratio(voltage_span, time_span, segment, "crossing slew rate")?;
+        let slew_rate = signed_slew * slew_magnitude;
+        if !slew_rate.is_finite() || slew_rate == 0.0 {
+            return Err(MeasurementError::CalculationError(format!(
+                "signed crossing slew rate for segment {segment} is not representable ({slew_rate})"
+            )));
+        }
+
+        Ok(Some(CrossingEvent {
+            time,
+            index: segment,
+            direction: arrival_direction,
+            slew_rate,
+            value: threshold,
+        }))
     }
 
     //=========================================================================
@@ -608,8 +700,8 @@ impl Waveform {
         let low_level = self.min_value + low_pct * amplitude;
         let high_level = self.min_value + high_pct * amplitude;
 
-        let low_cross = self.first_crossing(low_level, EdgeDirection::Rising);
-        let high_cross = self.first_crossing(high_level, EdgeDirection::Rising);
+        let low_cross = self.first_crossing(low_level, EdgeDirection::Rising)?;
+        let high_cross = self.first_crossing(high_level, EdgeDirection::Rising)?;
 
         match (low_cross, high_cross) {
             (Some(low), Some(high)) if high.time > low.time => Ok(high.time - low.time),
@@ -631,8 +723,8 @@ impl Waveform {
         let low_level = self.min_value + low_pct * amplitude;
         let high_level = self.min_value + high_pct * amplitude;
 
-        let high_cross = self.first_crossing(high_level, EdgeDirection::Falling);
-        let low_cross = self.first_crossing(low_level, EdgeDirection::Falling);
+        let high_cross = self.first_crossing(high_level, EdgeDirection::Falling)?;
+        let low_cross = self.first_crossing(low_level, EdgeDirection::Falling)?;
 
         match (high_cross, low_cross) {
             (Some(high), Some(low)) if low.time > high.time => Ok(low.time - high.time),
@@ -653,11 +745,11 @@ impl Waveform {
         direction: EdgeDirection,
     ) -> Result<Value, MeasurementError> {
         let ref_cross = reference
-            .first_crossing(ref_threshold, direction)
+            .first_crossing(ref_threshold, direction)?
             .ok_or_else(|| MeasurementError::ThresholdNotCrossed("Reference signal".to_string()))?;
 
         let self_cross = self
-            .first_crossing(self_threshold, direction)
+            .first_crossing(self_threshold, direction)?
             .ok_or_else(|| MeasurementError::ThresholdNotCrossed("Target signal".to_string()))?;
 
         Ok(self_cross.time - ref_cross.time)
@@ -665,7 +757,7 @@ impl Waveform {
 
     /// Calculate period from consecutive crossings
     pub fn period(&self, threshold: Value) -> Result<Value, MeasurementError> {
-        let crossings = self.find_crossings(threshold, EdgeDirection::Rising);
+        let crossings = self.find_crossings(threshold, EdgeDirection::Rising)?;
 
         if crossings.len() < 2 {
             return Err(MeasurementError::ThresholdNotCrossed(
@@ -689,8 +781,8 @@ impl Waveform {
 
     /// Calculate pulse width (time above threshold)
     pub fn pulse_width(&self, threshold: Value) -> Result<Value, MeasurementError> {
-        let rising = self.first_crossing(threshold, EdgeDirection::Rising);
-        let falling = self.first_crossing(threshold, EdgeDirection::Falling);
+        let rising = self.first_crossing(threshold, EdgeDirection::Rising)?;
+        let falling = self.first_crossing(threshold, EdgeDirection::Falling)?;
 
         match (rising, falling) {
             (Some(r), Some(f)) if f.time > r.time => Ok(f.time - r.time),
@@ -1082,6 +1174,119 @@ impl Waveform {
     }
 }
 
+fn validate_crossing_threshold(threshold: Value) -> Result<(), MeasurementError> {
+    if threshold.is_finite() {
+        Ok(())
+    } else {
+        Err(MeasurementError::InvalidThreshold(format!(
+            "crossing threshold must be finite, got {threshold}"
+        )))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ScaledPositiveDifference {
+    mantissa: Value,
+    exponent: i32,
+}
+
+fn scaled_positive_difference(
+    high: Value,
+    low: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<ScaledPositiveDifference, MeasurementError> {
+    if !high.is_finite() || !low.is_finite() || high <= low {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} for segment {segment} requires finite ordered endpoints, got {high} and {low}"
+        )));
+    }
+    let scale = high.abs().max(low.abs());
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} scale for segment {segment} is invalid ({scale})"
+        )));
+    }
+    let exponent = libm::ilogb(scale);
+    let high_scaled = libm::scalbn(high, -exponent);
+    let low_scaled = libm::scalbn(low, -exponent);
+    let mantissa = high_scaled - low_scaled;
+    if !mantissa.is_finite() || mantissa <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "scaled {quantity} for segment {segment} is not representable ({mantissa})"
+        )));
+    }
+    Ok(ScaledPositiveDifference { mantissa, exponent })
+}
+
+fn scaled_positive_ratio(
+    numerator: ScaledPositiveDifference,
+    denominator: ScaledPositiveDifference,
+    segment: usize,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    let mantissa_ratio = numerator.mantissa / denominator.mantissa;
+    let exponent_delta = numerator
+        .exponent
+        .checked_sub(denominator.exponent)
+        .ok_or_else(|| {
+            MeasurementError::CalculationError(format!(
+                "{quantity} exponent for segment {segment} exceeds this platform"
+            ))
+        })?;
+    let ratio = libm::scalbn(mantissa_ratio, exponent_delta);
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} for segment {segment} is not representable ({ratio})"
+        )));
+    }
+    Ok(ratio)
+}
+
+fn interpolate_crossing_time(
+    start: Value,
+    end: Value,
+    fraction: Value,
+    segment: usize,
+) -> Result<Value, MeasurementError> {
+    if !fraction.is_finite() || fraction <= 0.0 || fraction > 1.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "crossing fraction for segment {segment} is invalid ({fraction})"
+        )));
+    }
+    if fraction == 1.0 {
+        return Ok(end);
+    }
+    let (complement, complement_residual) = error_free_sum(1.0, -fraction, segment)?;
+    if !complement.is_finite()
+        || !complement_residual.is_finite()
+        || complement + complement_residual <= 0.0
+    {
+        return Err(MeasurementError::CalculationError(format!(
+            "crossing interpolation complement for segment {segment} is invalid ({complement} + {complement_residual})"
+        )));
+    }
+
+    let mut interpolation = ExactFloatSum::default();
+    for (weight, time) in [
+        (complement, start),
+        (complement_residual, start),
+        (fraction, end),
+    ] {
+        let (product, residual) =
+            error_free_product(weight, time, segment, "crossing time interpolation")?;
+        interpolation.add(product)?;
+        interpolation.add(residual)?;
+    }
+    let time = interpolation.finish()?;
+    if !time.is_finite() || time <= start || time >= end {
+        return Err(MeasurementError::CalculationError(format!(
+            "interpolated crossing time for interior segment fraction {fraction} at segment {segment} is not strictly inside ({start}, {end}): {time}"
+        )));
+    }
+    Ok(time)
+}
+
 #[derive(Default)]
 struct ExactFloatSum {
     partials: Vec<Value>,
@@ -1091,7 +1296,7 @@ impl ExactFloatSum {
     fn add(&mut self, mut value: Value) -> Result<(), MeasurementError> {
         if !value.is_finite() {
             return Err(MeasurementError::CalculationError(
-                "time-weighted moment expansion received a non-finite component".to_string(),
+                "floating-point expansion received a non-finite component".to_string(),
             ));
         }
         if value == 0.0 {
@@ -1108,7 +1313,7 @@ impl ExactFloatSum {
             let high = value + partial;
             if !high.is_finite() {
                 return Err(MeasurementError::CalculationError(
-                    "time-weighted moment expansion accumulation became non-finite".to_string(),
+                    "floating-point expansion accumulation became non-finite".to_string(),
                 ));
             }
             let low = partial - (high - value);
@@ -1122,7 +1327,7 @@ impl ExactFloatSum {
         if value != 0.0 {
             self.partials.try_reserve(1).map_err(|error| {
                 MeasurementError::CalculationError(format!(
-                    "failed to retain a time-weighted moment residual: {error}"
+                    "failed to retain a floating-point residual: {error}"
                 ))
             })?;
             self.partials.push(value);
@@ -1139,14 +1344,14 @@ impl ExactFloatSum {
             let next = result + partial;
             if !next.is_finite() {
                 return Err(MeasurementError::CalculationError(
-                    "time-weighted moment expansion became non-finite".to_string(),
+                    "floating-point expansion became non-finite".to_string(),
                 ));
             }
             result = next;
         }
         if result == 0.0 {
             return Err(MeasurementError::CalculationError(
-                "time-weighted moment residual cannot be represented".to_string(),
+                "floating-point expansion residual cannot be represented".to_string(),
             ));
         }
         Ok(result)
