@@ -582,10 +582,6 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        self.ensure_result_shape(
-            config.num_harmonics.saturating_add(1),
-            num_nodes.saturating_mul(2),
-        )?;
 
         // No reactive-element gate: junction devices carry their own charge
         // storage, and HB on a resistive nonlinear circuit is legitimate
@@ -594,6 +590,52 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        if !has_supported_nonlinear
+            && let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "exact linear HB MNA is unavailable because the circuit contains {summary}"
+            )));
+        }
+        let mna_unknowns = num_nodes
+            .checked_add(circuit.num_branches())
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB node and canonical branch count overflows this platform".to_string(),
+                )
+            })?;
+        let one_sided_scalar_coordinates = config
+            .num_harmonics
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB realified spectral coordinate count overflows this platform".to_string(),
+                )
+            })?;
+        let matrix_unknowns = mna_unknowns
+            .checked_mul(one_sided_scalar_coordinates)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB realified MNA dimension overflows this platform".to_string(),
+                )
+            })?;
+        self.ensure_matrix_unknowns(matrix_unknowns)?;
+        let retained_complex_values = config
+            .num_harmonics
+            .checked_add(1)
+            .and_then(|harmonics| harmonics.checked_mul(mna_unknowns))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB retained complex-value count overflows this platform".to_string(),
+                )
+            })?;
+        let retained_scalar_values = retained_complex_values.checked_mul(2).ok_or_else(|| {
+            SimulationError::Circuit(
+                "HB retained scalar-value count overflows this platform".to_string(),
+            )
+        })?;
+        self.ensure_result_values(retained_scalar_values)?;
         let dc_seed_policy = Self::hb_dc_seed_policy(netlist)?;
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
@@ -608,11 +650,12 @@ impl Engine {
         // Stamp linear circuit elements into HB solver
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_inductors(&circuit, &mut solver);
         if has_supported_nonlinear {
+            self.hb_stamp_inductors(&circuit, &mut solver);
             self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &config, &drive_tones)?;
         } else {
             self.hb_stamp_voltage_sources(&circuit, &mut solver, &config, &drive_tones)?;
+            self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         }
         self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
@@ -692,13 +735,26 @@ impl Engine {
         }
 
         // Build result
-        let mut result = solver.build_result(&state);
+        let mut result = solver.build_result(&state).map_err(|error| {
+            SimulationError::Circuit(format!("HB result construction failed: {error}"))
+        })?;
         self.hb_attach_periodic_state(&circuit, &mut result, has_supported_nonlinear);
 
-        let operating_point = HbOperatingPoint::try_from_parts(
+        let mna_branch_names = if solver.exact_mna_branches().is_empty() {
+            Vec::new()
+        } else {
+            solver.try_periodic_mna_branch_names().map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "HB operating-point branch metadata construction failed: {error}"
+                ))
+            })?
+        };
+        let operating_point = HbOperatingPoint::try_from_parts_with_mna_branches(
             config.clone(),
             result.node_names.clone(),
             state.x.clone(),
+            mna_branch_names,
+            state.mna_branch_currents.clone(),
             state.total_iterations.max(state.iteration),
             state.residual_norm,
         )?;

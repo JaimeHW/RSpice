@@ -710,6 +710,7 @@ impl Engine {
             });
         }
 
+        let mut used_inductor_dc_surrogate = false;
         for index in 0..circuit.inductors.len() {
             let voltage_coefficients = Self::hb_terminal_voltage_spectrum(
                 result,
@@ -717,28 +718,41 @@ impl Engine {
                 circuit.inductors.node_neg[index],
             );
             let inductance = circuit.inductors.inductances[index];
-            let current_coefficients = voltage_coefficients
-                .iter()
-                .enumerate()
-                .map(|(harmonic, &voltage)| {
-                    if harmonic == 0 {
-                        voltage * DC_SHORT_CONDUCTANCE
-                    } else {
-                        let omega = harmonic as Value * omega0;
-                        voltage / Complex64::new(0.0, omega * inductance)
-                    }
-                })
-                .collect();
+            let exact_current = result.mna_branch_currents.iter().find(|branch| {
+                branch
+                    .device_name
+                    .eq_ignore_ascii_case(&circuit.inductors.names[index])
+            });
+            let (current_coefficients, dc_current_is_exact) = if let Some(branch) = exact_current {
+                (branch.coefficients.clone(), true)
+            } else {
+                used_inductor_dc_surrogate = true;
+                (
+                    voltage_coefficients
+                        .iter()
+                        .enumerate()
+                        .map(|(harmonic, &voltage)| {
+                            if harmonic == 0 {
+                                voltage * DC_SHORT_CONDUCTANCE
+                            } else {
+                                let omega = harmonic as Value * omega0;
+                                voltage / Complex64::new(0.0, omega * inductance)
+                            }
+                        })
+                        .collect(),
+                    false,
+                )
+            };
             result.reactive_spectra.push(HbReactiveSpectrum {
                 device_name: circuit.inductors.names[index].clone(),
                 kind: HbReactiveKind::Inductor,
                 voltage_coefficients,
                 current_coefficients,
-                dc_current_is_exact: false,
+                dc_current_is_exact,
             });
         }
 
-        if !circuit.inductors.is_empty() {
+        if used_inductor_dc_surrogate {
             result
                 .continuation_limitations
                 .push(HbContinuationLimitation::InductorDcCurrentUsesShortSurrogate);

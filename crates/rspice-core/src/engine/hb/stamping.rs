@@ -270,13 +270,15 @@ impl Engine {
         }
     }
 
-    /// Register every supported exact periodic-MNA branch in the circuit's
+    /// Register every supported exact HB MNA branch in the circuit's
     /// canonical one-based branch order.
     ///
-    /// PAC/PNoise currently support only independent voltage-source and
-    /// inductor branch equations. The caller rejects all other branch
-    /// families before this boundary; this routine independently verifies
-    /// that the supported storage rows form a complete, unique ordinal map.
+    /// Linear HB, PAC, and PNoise support independent voltage-source and
+    /// uncoupled-inductor branch equations. If authored voltage-source spectra
+    /// were registered first, the exact descriptors retain them for the
+    /// large-signal solve; otherwise they describe zero-valued small-signal
+    /// constraints. The caller rejects other branch families before this
+    /// boundary, and this routine independently proves a complete unique map.
     pub(in crate::engine::hb) fn hb_stamp_periodic_mna_branches(
         &self,
         circuit: &CircuitData,
@@ -517,18 +519,19 @@ impl Engine {
             let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
             let spectrum =
                 Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
-            if spectrum.harmonics.is_empty() {
-                let branch = solver.add_voltage_source_branch(np, nn, spectrum.dc);
-                solver.set_voltage_source_branch_name(branch, source_name);
-                continue;
-            }
-            let branch = solver.add_voltage_source_branch_harmonics(
-                np,
-                nn,
-                spectrum.dc,
-                &spectrum.harmonics,
-            );
-            solver.set_voltage_source_branch_name(branch, source_name);
+            solver
+                .try_add_named_voltage_source_branch_harmonics(
+                    np,
+                    nn,
+                    spectrum.dc,
+                    &spectrum.harmonics,
+                    source_name,
+                )
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "HB voltage-source registration failed: {error}"
+                    ))
+                })?;
         }
         Ok(())
     }
