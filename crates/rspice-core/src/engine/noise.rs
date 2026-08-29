@@ -2030,9 +2030,23 @@ impl Engine {
             // One adjoint solve per observed port replaces one forward solve
             // per device-noise source. Port count is normally tiny while a
             // transistor-level circuit can contain thousands of sources.
-            ac_matrix
-                .solve_many_transpose_into(&port_rhs, num_ports, &mut port_adjoint)
-                .map_err(SimulationError::Solver)?;
+            match ac_matrix.solve_many_transpose_into(&port_rhs, num_ports, &mut port_adjoint) {
+                Ok(()) => {}
+                Err(crate::solver::SolverError::InaccurateSolution(_)) if size <= 64 => {
+                    log::debug!(
+                        "sparse port-noise transpose solve failed strict backward-error certification; retrying the small complex systems with extended precision"
+                    );
+                    port_adjoint.clear();
+                    for port in 0..num_ports {
+                        let start = port * size;
+                        let extended = ac_matrix
+                            .solve_dense_extended_transpose(&port_rhs[start..start + size])
+                            .map_err(SimulationError::Solver)?;
+                        port_adjoint.extend_from_slice(&extended);
+                    }
+                }
+                Err(error) => return Err(SimulationError::Solver(error)),
+            }
 
             let solve_transfer =
                 |node_pos: usize, node_neg: usize| -> Result<Vec<Complex64>, SimulationError> {
@@ -2528,9 +2542,18 @@ impl Engine {
             {
                 rhs[node - 1] -= Complex64::new(1.0, 0.0);
             }
-            ac_matrix
-                .solve_transpose_into(rhs, transfer_solution)
-                .map_err(SimulationError::Solver)?;
+            match ac_matrix.solve_transpose_into(rhs, transfer_solution) {
+                Ok(()) => {}
+                Err(crate::solver::SolverError::InaccurateSolution(_)) if rhs.len() <= 64 => {
+                    log::debug!(
+                        "sparse noise transpose solve failed strict backward-error certification; retrying the small complex system with extended precision"
+                    );
+                    *transfer_solution = ac_matrix
+                        .solve_dense_extended_transpose(rhs)
+                        .map_err(SimulationError::Solver)?;
+                }
+                Err(error) => return Err(SimulationError::Solver(error)),
+            }
 
             for source in &noise_sources {
                 if abort.is_aborted() {
@@ -3268,6 +3291,94 @@ r1 a 0 rmod
                 (noise_point.input_referred_density - expected_input_density).abs()
                     <= 1e-13 * expected_input_density.max(f64::MIN_POSITIVE),
                 "input-referred density must use the full ordinary AC output phasor"
+            );
+        }
+    }
+
+    #[test]
+    fn noise_recovers_a_certified_transpose_for_the_physical_chebyshev_operator() {
+        let netlist = Netlist::parse(
+            "Physical Chebyshev noise transpose\n\
+             .PARAM scaleFactor=10\n\
+             V1 1 0 DC 5 AC 1\n\
+             R1 1 2 100K\n\
+             R2 2 0 100K\n\
+             EAMP 3 0 2 0 2\n\
+             RS 3 b 1\n\
+             C1 b 0 {2.865/scaleFactor}\n\
+             L2 b c {0.912/scaleFactor}\n\
+             C3 c 0 {3.8774/scaleFactor}\n\
+             L4 c d {0.9537/scaleFactor}\n\
+             C5 d 0 {3.8774/scaleFactor}\n\
+             L6 d e {0.912/scaleFactor}\n\
+             C7 e 0 {2.8650/scaleFactor}\n\
+             RL e 0 1\n\
+             .END\n",
+        )
+        .expect("physical Chebyshev noise deck parses");
+
+        let engine = Engine::default();
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("physical Chebyshev circuit builds");
+        let mut dc_matrix = engine
+            .build_matrix(&circuit)
+            .expect("physical Chebyshev matrix builds");
+        circuit.link_indices(&dc_matrix);
+        let dc_solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut dc_matrix)
+            .expect("physical Chebyshev operating point solves");
+        let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&dc_matrix);
+        Engine::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            &circuit,
+            &mut ac_matrix,
+            &dc_solution,
+            2.0 * std::f64::consts::PI * 1.0e-2,
+            true,
+            true,
+        )
+        .expect("physical Chebyshev AC operator stamps");
+        let output = circuit
+            .node_names_sorted()
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("e"))
+            .expect("output node exists");
+        let mut transpose_rhs = vec![num_complex::Complex64::new(0.0, 0.0); circuit.matrix_size()];
+        transpose_rhs[output] = num_complex::Complex64::new(1.0, 0.0);
+        let mut transpose_solution = Vec::new();
+        ac_matrix
+            .solve_transpose_into(&transpose_rhs, &mut transpose_solution)
+            .expect("strict sparse transpose solve canonicalizes its exact singleton zero");
+
+        let frequencies = [1.0e-2, 1.0e-1, 1.0, 10.0];
+        let results = engine
+            .run_noise_named_with_input_source(&netlist, "e", None, "V1", &frequencies, 300.15)
+            .expect("physical Chebyshev noise operator remains solvable without a shunt");
+
+        assert_eq!(results.len(), frequencies.len());
+        for (result, &frequency) in results.iter().zip(&frequencies) {
+            assert_eq!(result.frequency, frequency);
+            assert!(result.output_noise_density.is_finite());
+            assert!(result.output_noise_density > 0.0);
+            assert!(result.input_referred_density.is_finite());
+            assert!(result.input_gain_squared.is_finite());
+            assert!(result.input_gain_squared > 0.0);
+            assert!(
+                result
+                    .voltages
+                    .iter()
+                    .chain(&result.currents)
+                    .all(|value| value.re.is_finite() && value.im.is_finite())
+            );
+            let contribution_sum = result
+                .contributions
+                .iter()
+                .map(|contribution| contribution.output_contribution)
+                .sum::<f64>();
+            assert!(
+                (contribution_sum - result.output_noise_density).abs()
+                    <= 64.0 * f64::EPSILON * result.output_noise_density,
+                "noise contribution ledger must close at {frequency} Hz"
             );
         }
     }
