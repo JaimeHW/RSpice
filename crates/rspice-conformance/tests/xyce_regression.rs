@@ -11864,6 +11864,26 @@ fn bug389_global_parameter_hb_wrapper_owner_is_publicly_qualified() {
 }
 
 #[test]
+fn bug412_transient_cross_measurement_wrapper_owner_is_publicly_qualified() {
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let owner = "Netlists/Certification_Tests/BUG_412_SON/bug412.cir";
+    assert!(runner.requires_upstream_wrapper(owner));
+    let result = runner.run_test(root.join(owner));
+    assert!(
+        result.passed && !result.expected_unsupported && !result.upstream_excluded,
+        "BUG412 failed its public qualification: {:?}",
+        result.error
+    );
+    assert_eq!(
+        result.contract,
+        "bug412_transient_cross_measurement_wrapper_owner"
+    );
+    assert!(result.error.is_none());
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn bug372_native_mos_multiplicity_wrapper_owners_are_publicly_qualified() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
