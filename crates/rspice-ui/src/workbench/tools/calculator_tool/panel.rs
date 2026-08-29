@@ -302,10 +302,25 @@ impl CalculatorPanel {
                 } else {
                     "result"
                 };
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        format!("Copy exact {what}: {exact}"),
+                    )
+                });
+                theme::paint_focus_ring_outset(ui, &response, response.rect);
                 let response = response
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(format!("Click to copy the exact {what}: {exact}"));
-                if response.clicked() {
+                    .on_hover_text(format!(
+                        "Click or press Enter/Space to copy the exact {what}: {exact}"
+                    ));
+                let keyboard_activate = response.has_focus()
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+                    });
+                if response.clicked() || keyboard_activate {
                     copy = Some(exact);
                 }
             }

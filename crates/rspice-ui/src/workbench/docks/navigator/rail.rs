@@ -4,8 +4,8 @@
 //! vertical list of rows, and a reader without a pointer moves through it the
 //! way a reader of any other production tree does: Up and Down step, Home and
 //! End reach the ends, Right and Left unfold and fold, Enter and Space
-//! activate. egui gives none of that on its own — a stack of `Sense::click()`
-//! rows is a Tab ring and nothing more — so the rails publish what they paint
+//! activate. egui gives none of that on its own — a stack using `Sense::click`
+//! is a Tab ring and nothing more — so the rails publish what they paint
 //! and this module answers the keys over it.
 //!
 //! # Why an index rather than a widget

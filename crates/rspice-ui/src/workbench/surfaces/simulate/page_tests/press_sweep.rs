@@ -526,8 +526,8 @@ const PRESSED_FLOOR: usize = 263;
 /// tally.
 ///
 /// It held twelve entries when the sweep was first measured, and all twelve
-/// were one defect rather than twelve. `page_kit::ledger_row` allocated
-/// `Sense::click()` and published
+/// were one defect rather than twelve. `page_kit::ledger_row` used
+/// `Sense::click` and published
 /// `WidgetInfo::selected(WidgetType::SelectableLabel, …)` for every row it
 /// drew, whether or not the caller read the click — so nine solver policy rows,
 /// a refused advanced option, the capture ledger's fallback group and the
