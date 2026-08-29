@@ -26,6 +26,7 @@ impl HbSolver {
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
+            nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
             veriloga_nonlinear_devices: Vec::new(),
         }

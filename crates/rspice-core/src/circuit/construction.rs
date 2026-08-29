@@ -25,6 +25,7 @@ impl CircuitData {
             num_branches: 0,
             hidden_state_count: 0,
             resistors: Resistors::new(),
+            resistor_absolute_noise_temperatures: Vec::new(),
             resistor_branches: ResistorBranches::new(),
             capacitors: Capacitors::new(),
             inductors: Inductors::new(),
@@ -120,6 +121,49 @@ impl CircuitData {
         self.num_nodes += 1;
         self.node_map.insert(name.to_string(), self.num_nodes);
         self.num_nodes
+    }
+
+    /// Apply an ambient-relative resistor-noise temperature to the newest
+    /// resistor while clearing any absolute `TEMP` provenance for that slot.
+    pub(crate) fn set_last_resistor_noise_temperature_offset(&mut self, offset_kelvin: Value) {
+        self.resistors
+            .set_last_noise_temperature_offset(offset_kelvin);
+        let Some(index) = self.resistors.len().checked_sub(1) else {
+            return;
+        };
+        self.resistor_absolute_noise_temperatures
+            .resize(self.resistors.len(), None);
+        self.resistor_absolute_noise_temperatures[index] = None;
+    }
+
+    /// Retain authored resistor `TEMP` exactly rather than reconstructing it
+    /// from an ambient-relative difference that can lose all low bits.
+    pub(crate) fn set_last_resistor_absolute_noise_temperature(&mut self, temperature: Value) {
+        self.resistors.set_last_noise_temperature_offset(0.0);
+        let Some(index) = self.resistors.len().checked_sub(1) else {
+            return;
+        };
+        self.resistor_absolute_noise_temperatures
+            .resize(self.resistors.len(), None);
+        self.resistor_absolute_noise_temperatures[index] = Some(temperature);
+    }
+
+    /// Authored absolute resistor-noise temperature, when the instance used
+    /// `TEMP` rather than the analysis temperature plus `DTEMP`.
+    #[inline]
+    pub(crate) fn resistor_absolute_noise_temperature(&self, index: usize) -> Option<Value> {
+        self.resistor_absolute_noise_temperatures
+            .get(index)
+            .copied()
+            .flatten()
+    }
+
+    /// Resolve a resistor's physical noise temperature without a lossy
+    /// subtract-then-add round trip through an extreme analysis temperature.
+    #[inline]
+    pub(crate) fn resistor_noise_temperature(&self, index: usize, ambient: Value) -> Value {
+        self.resistor_absolute_noise_temperature(index)
+            .unwrap_or_else(|| ambient + self.resistors.noise_temperature_offset(index))
     }
 
     /// Tighten the circuit-level transient max-step hint.
@@ -883,6 +927,18 @@ impl CircuitData {
 mod tests {
     use super::*;
     use crate::device::Vdmos;
+
+    #[test]
+    fn resistor_absolute_noise_temperature_survives_extreme_ambient() {
+        let mut circuit = CircuitData::new();
+        circuit.resistors.add("R1".to_string(), 1, 0, 1.0);
+        circuit.set_last_resistor_absolute_noise_temperature(300.15);
+        assert_eq!(
+            circuit.resistor_noise_temperature(0, 1.0e20).to_bits(),
+            300.15_f64.to_bits()
+        );
+        assert_eq!(circuit.resistors.noise_temperature_offset(0), 0.0);
+    }
 
     #[test]
     fn current_switch_rejects_capacitor_lead_current_control() {

@@ -214,13 +214,8 @@ fn checked_input_referred_pnoise(
             "pnoise input transfer is non-finite at offset {offset:.6e} Hz"
         )));
     }
-    let gain = transfer.norm();
-    if !gain.is_finite() {
-        return Err(SimulationError::Circuit(format!(
-            "pnoise input-transfer magnitude is non-finite at offset {offset:.6e} Hz"
-        )));
-    }
-    if gain == 0.0 {
+    let transfer_scale = transfer.re.abs().max(transfer.im.abs());
+    if transfer_scale == 0.0 {
         return Err(SimulationError::Circuit(format!(
             "pnoise input-referred density is undefined at the zero input-transfer magnitude at offset {offset:.6e} Hz"
         )));
@@ -234,12 +229,18 @@ fn checked_input_referred_pnoise(
     // sequential divisions can round a representable subnormal to zero.
     let numerator_exponent = libm::ilogb(output_noise);
     let numerator_mantissa = libm::scalbn(output_noise, -numerator_exponent);
-    let gain_exponent = libm::ilogb(gain);
-    let gain_mantissa = libm::scalbn(gain, -gain_exponent);
-    let squared_mantissa = gain_mantissa * gain_mantissa;
+    let transfer_exponent = libm::ilogb(transfer_scale);
+    let scaled_real = libm::scalbn(transfer.re, -transfer_exponent);
+    let scaled_imag = libm::scalbn(transfer.im, -transfer_exponent);
+    let squared_mantissa = scaled_real * scaled_real + scaled_imag * scaled_imag;
+    if !squared_mantissa.is_finite() || squared_mantissa <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "pnoise normalized input-transfer magnitude is invalid at offset {offset:.6e} Hz"
+        )));
+    }
     let mantissa_exponent = libm::ilogb(squared_mantissa);
     let denominator_mantissa = libm::scalbn(squared_mantissa, -mantissa_exponent);
-    let denominator_exponent = gain_exponent
+    let denominator_exponent = transfer_exponent
         .checked_mul(2)
         .and_then(|value| value.checked_add(mantissa_exponent))
         .ok_or_else(|| {
@@ -567,7 +568,7 @@ impl Engine {
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| format!("R#{i}"));
-            let source_temperature = temperature + circuit.resistors.noise_temperature_offset(i);
+            let source_temperature = circuit.resistor_noise_temperature(i, temperature);
             if !source_temperature.is_finite() || source_temperature <= 0.0 {
                 return Err(SimulationError::Circuit(format!(
                     "pnoise resistor '{name}' absolute noise temperature must be finite and positive, got {source_temperature} K"
@@ -647,7 +648,15 @@ impl Engine {
         }
 
         // Cyclostationary device sources from the converged waveforms.
-        sources.extend(solver.device_noise_sources(&state, temperature));
+        sources.extend(
+            solver
+                .device_noise_sources(&state, temperature)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "pnoise nonlinear-device source construction failed: {error}"
+                    ))
+                })?,
+        );
         self.ensure_result_shape(
             offsets.len(),
             sources
@@ -786,6 +795,15 @@ mod publication_tests {
         let small = checked_input_referred_pnoise(1.0e200, Complex64::new(1.0e200, 0.0), 1.0e3)
             .expect("large finite gain has a representable input-referred result");
         assert!((small - 1.0e-200).abs() <= 4.0 * Value::EPSILON * 1.0e-200);
+
+        let maximum_components = checked_input_referred_pnoise(
+            Value::MAX,
+            Complex64::new(Value::MAX, Value::MAX),
+            1.0e3,
+        )
+        .expect("finite gain components need not have a materialized finite magnitude");
+        let expected = 0.5 / Value::MAX;
+        assert_eq!(maximum_components.to_bits(), expected.to_bits());
 
         let null = checked_input_referred_pnoise(1.0, Complex64::new(0.0, 0.0), 1.0e3)
             .expect_err("input referral is undefined at an exact transfer null");

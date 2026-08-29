@@ -4,7 +4,44 @@ use super::*;
 impl HbSolver {
     /// Add a nonlinear device for Newton iteration
     pub fn add_nonlinear_device(&mut self, device: NonlinearDeviceInstance) {
+        self.add_nonlinear_device_with_noise_temperature(
+            device,
+            NonlinearNoiseTemperature::Ambient,
+        );
+    }
+
+    /// Add an engine-resolved nonlinear device while retaining its
+    /// instance-specific thermal-noise temperature offset.
+    pub(crate) fn add_nonlinear_device_with_noise_temperature_offset(
+        &mut self,
+        device: NonlinearDeviceInstance,
+        noise_temperature_offset: Value,
+    ) {
+        self.add_nonlinear_device_with_noise_temperature(
+            device,
+            NonlinearNoiseTemperature::Offset(noise_temperature_offset),
+        );
+    }
+
+    /// Add an engine-resolved nonlinear device with an absolute instance TEMP.
+    pub(crate) fn add_nonlinear_device_with_absolute_noise_temperature(
+        &mut self,
+        device: NonlinearDeviceInstance,
+        noise_temperature: Value,
+    ) {
+        self.add_nonlinear_device_with_noise_temperature(
+            device,
+            NonlinearNoiseTemperature::Absolute(noise_temperature),
+        );
+    }
+
+    fn add_nonlinear_device_with_noise_temperature(
+        &mut self,
+        device: NonlinearDeviceInstance,
+        noise_temperature: NonlinearNoiseTemperature,
+    ) {
         self.nonlinear_devices.push(device);
+        self.nonlinear_noise_temperatures.push(noise_temperature);
     }
 
     /// Add a diode for Newton iteration

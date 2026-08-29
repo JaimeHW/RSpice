@@ -18,7 +18,7 @@ const T_REF: f64 = 300.15;
 
 #[test]
 fn pnoise_preserves_dc_and_rejects_negative_or_nonfinite_offsets() {
-    let netlist = Netlist::parse("r1 out 0 1k\n.end\n").expect("deck parses");
+    let netlist = Netlist::parse("* offset validation\nr1 out 0 1k\n.end\n").expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
     let dc = engine
@@ -64,9 +64,12 @@ r1 out 0 1e12
 fn pnoise_resistor_thermal_density_preserves_extreme_scaling() {
     let resistance = 1.0e154;
     let temperature = 1.0e-150;
-    let netlist = Netlist::parse("r1 out 0 1e154\n.end\n").expect("deck parses");
-    let mut config = SimulationConfig::default();
-    config.temperature = temperature;
+    let netlist =
+        Netlist::parse("* scaled resistor density\nr1 out 0 1e154\n.end\n").expect("deck parses");
+    let config = SimulationConfig {
+        temperature,
+        ..SimulationConfig::default()
+    };
     let result = Engine::new(config)
         .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
         .expect("scaled thermal source and transfer remain representable");
@@ -83,7 +86,8 @@ fn pnoise_resistor_thermal_density_preserves_extreme_scaling() {
 fn pnoise_resistor_dtemp_matches_its_absolute_noise_temperature() {
     let resistance = 10.0e3;
     let dtemp = 150.0;
-    let netlist = Netlist::parse("r1 out 0 10k dtemp=150\n.end\n").expect("deck parses");
+    let netlist =
+        Netlist::parse("* resistor DTEMP\nr1 out 0 10k dtemp=150\n.end\n").expect("deck parses");
     let result = Engine::new(SimulationConfig::default())
         .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
         .expect("resistor DTEMP pnoise completes");
@@ -94,6 +98,207 @@ fn pnoise_resistor_dtemp_matches_its_absolute_noise_temperature() {
         "resistor DTEMP must heat periodic thermal noise: got {:.6e}, want {expected:.6e}",
         result.output_noise[0]
     );
+}
+
+#[test]
+fn pnoise_resistor_temp_survives_extreme_ambient_and_outranks_dtemp() {
+    let resistance = 10.0e3;
+    let deck = "\
+* Resistor TEMP provenance under extreme ambient
+.options tnom=27
+r1 out 0 10k rm temp=27 dtemp=-1000
+.model rm R (tnom=100)
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let run = |temperature| {
+        Engine::new(SimulationConfig {
+            temperature,
+            ..SimulationConfig::default()
+        })
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("resistor TEMP pnoise completes")
+        .output_noise[0]
+    };
+    let ordinary = run(T_REF);
+    let extreme = run(1.0e20);
+    // ngspice resnoise.c resolves authored TEMP as TEMP_K + model TNOM_C.
+    let expected = 4.0 * K_B * (T_REF + 100.0) * resistance;
+    assert!(
+        (ordinary - expected).abs() <= 1.0e-12 * expected,
+        "resistor TEMP must retain ngspice's resolved absolute source temperature: got {ordinary:.6e}, want {expected:.6e}"
+    );
+    assert_eq!(
+        extreme.to_bits(),
+        ordinary.to_bits(),
+        "resistor TEMP must not be reconstructed through a lossy ambient-relative offset"
+    );
+}
+
+#[test]
+fn pnoise_mos_and_jfet_dtemp_match_equivalent_ambient_temperature() {
+    let run_contributors = |deck: &str, temperature: f64| {
+        let netlist = Netlist::parse(deck).expect("device deck parses");
+        let config = SimulationConfig {
+            temperature,
+            ..SimulationConfig::default()
+        };
+        let result = Engine::new(config)
+            .run_pnoise(&netlist, 1.0e6, &[1.0e4], "d", None, None, 0)
+            .expect("stationary device pnoise completes");
+        result.contributors
+    };
+    let contribution = |contributors: &[(String, Vec<f64>)], label: &str| {
+        let value = contributors
+            .iter()
+            .find(|(name, _)| name.contains(label))
+            .map(|(_, values)| values[0])
+            .unwrap_or_else(|| panic!("missing channel contributor '{label}': {:?}", contributors));
+        assert!(
+            value.is_finite() && value > 0.0,
+            "channel contributor '{label}' must be finite and strictly positive, got {value:.6e}"
+        );
+        value
+    };
+
+    let mos_ambient = "\
+* MOS periodic-noise temperature equivalence
+vdd vdd 0 dc 5
+vg g 0 dc 1.5
+rd vdd d 10k
+m1 d g 0 0 nm w=20u l=2u
+.model nm nmos level=1 vto=1 kp=60u lambda=0.02 rd=75 rs=50
+.end
+";
+    let mos_dtemp = mos_ambient.replace(
+        "m1 d g 0 0 nm w=20u l=2u",
+        "m1 d g 0 0 nm w=20u l=2u dtemp=150",
+    );
+    let mos_hot_contributors = run_contributors(mos_ambient, T_REF + 150.0);
+    let mos_offset_contributors = run_contributors(&mos_dtemp, T_REF);
+    let mos_hot = contribution(&mos_hot_contributors, "Nmos#0 channel thermal");
+    let mos_offset = contribution(&mos_offset_contributors, "Nmos#0 channel thermal");
+    assert!(
+        (mos_offset - mos_hot).abs() <= 1.0e-10 * mos_hot,
+        "MOS DTEMP channel noise must equal the same absolute ambient temperature: {mos_offset:.6e} vs {mos_hot:.6e}"
+    );
+    let mos_temp_priority = mos_ambient.replace(
+        "m1 d g 0 0 nm w=20u l=2u",
+        "m1 d g 0 0 nm w=20u l=2u temp=150 dtemp=-1000",
+    );
+    let mos_absolute_contributors = run_contributors(mos_ambient, 423.15);
+    let mos_priority_contributors = run_contributors(&mos_temp_priority, T_REF);
+    let mos_extreme_contributors = run_contributors(&mos_temp_priority, 1.0e20);
+    let mos_absolute = contribution(&mos_absolute_contributors, "Nmos#0 channel thermal");
+    let mos_priority = contribution(&mos_priority_contributors, "Nmos#0 channel thermal");
+    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "Nmos#0 channel thermal");
+    assert!(
+        (mos_priority - mos_absolute).abs() <= 1.0e-10 * mos_absolute,
+        "MOS TEMP must set the absolute channel-noise temperature and outrank DTEMP: {mos_priority:.6e} vs {mos_absolute:.6e}"
+    );
+    assert_eq!(
+        mos_extreme_ambient.to_bits(),
+        mos_priority.to_bits(),
+        "MOS TEMP must not be reconstructed through a lossy ambient-relative offset"
+    );
+    for label in ["m1.__rd thermal", "m1.__rs thermal"] {
+        let ordinary = contribution(&mos_priority_contributors, label);
+        let extreme = contribution(&mos_extreme_contributors, label);
+        assert_eq!(
+            extreme.to_bits(),
+            ordinary.to_bits(),
+            "MOS {label} must retain the parent device's absolute TEMP"
+        );
+    }
+
+    let jfet_ambient = "\
+* JFET periodic-noise temperature equivalence
+vdd vdd 0 dc 12
+vg g 0 dc -0.5
+rd vdd d 2k
+j1 d g 0 jn
+.model jn njf vto=-2 beta=1m lambda=0.01 rd=75 rs=50
+.end
+";
+    let jfet_dtemp = jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn dtemp=150");
+    let jfet_hot_contributors = run_contributors(jfet_ambient, T_REF + 150.0);
+    let jfet_offset_contributors = run_contributors(&jfet_dtemp, T_REF);
+    let jfet_hot = contribution(&jfet_hot_contributors, "Njfet#0 channel thermal");
+    let jfet_offset = contribution(&jfet_offset_contributors, "Njfet#0 channel thermal");
+    assert!(
+        (jfet_offset - jfet_hot).abs() <= 1.0e-10 * jfet_hot,
+        "JFET DTEMP channel noise must equal the same absolute ambient temperature: {jfet_offset:.6e} vs {jfet_hot:.6e}"
+    );
+    let jfet_temp_priority =
+        jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn temp=150 dtemp=-1000");
+    let jfet_absolute_contributors = run_contributors(jfet_ambient, 423.15);
+    let jfet_priority_contributors = run_contributors(&jfet_temp_priority, T_REF);
+    let jfet_extreme_contributors = run_contributors(&jfet_temp_priority, 1.0e20);
+    let jfet_absolute = contribution(&jfet_absolute_contributors, "Njfet#0 channel thermal");
+    let jfet_priority = contribution(&jfet_priority_contributors, "Njfet#0 channel thermal");
+    let jfet_extreme_ambient = contribution(&jfet_extreme_contributors, "Njfet#0 channel thermal");
+    assert!(
+        (jfet_priority - jfet_absolute).abs() <= 1.0e-10 * jfet_absolute,
+        "JFET TEMP must set the absolute channel-noise temperature and outrank DTEMP: {jfet_priority:.6e} vs {jfet_absolute:.6e}"
+    );
+    assert_eq!(
+        jfet_extreme_ambient.to_bits(),
+        jfet_priority.to_bits(),
+        "JFET TEMP must not be reconstructed through a lossy ambient-relative offset"
+    );
+    for label in ["j1.__rd thermal", "j1.__rs thermal"] {
+        let ordinary = contribution(&jfet_priority_contributors, label);
+        let extreme = contribution(&jfet_extreme_contributors, label);
+        assert_eq!(
+            extreme.to_bits(),
+            ordinary.to_bits(),
+            "JFET {label} must retain the parent device's absolute TEMP"
+        );
+    }
+}
+
+#[test]
+fn pnoise_rejects_nonphysical_mos_and_jfet_instance_temperatures() {
+    let decks = [
+        (
+            "MOSFET",
+            "M1",
+            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 nm temp=-273.15\n.model nm nmos level=1 vto=1 kp=60u\n.end\n",
+        ),
+        (
+            "JFET",
+            "J1",
+            "vdd vdd 0 12\nvg g 0 -0.5\nrd vdd d 2k\nj1 d g 0 jn temp=-273.15\n.model jn njf vto=-2 beta=1m\n.end\n",
+        ),
+        (
+            "MOSFET",
+            "M1",
+            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 nm dtemp=-400\n.model nm nmos level=1 vto=1 kp=60u\n.end\n",
+        ),
+        (
+            "JFET",
+            "J1",
+            "vdd vdd 0 12\nvg g 0 -0.5\nrd vdd d 2k\nj1 d g 0 jn dtemp=-400\n.model jn njf vto=-2 beta=1m\n.end\n",
+        ),
+        (
+            "MESFET",
+            "Z1",
+            "vdd vdd 0 12\nvg g 0 -0.5\nrd vdd d 2k\nz1 d g 0 zm temp=-273.15\n.model zm nmf vto=-2 beta=1m\n.end\n",
+        ),
+    ];
+    for (kind, device_name, deck) in decks {
+        let netlist = Netlist::parse(deck).expect("invalid-temperature deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .run_pnoise(&netlist, 1.0e6, &[1.0e4], "d", None, None, 0)
+            .expect_err("non-positive absolute device temperature must fail");
+        let message = error.to_string();
+        assert!(
+            message.contains(kind)
+                && message.contains(device_name)
+                && message.contains("finite and positive"),
+            "invalid {kind} temperature failure must be contextual: {message}"
+        );
+    }
 }
 
 #[test]

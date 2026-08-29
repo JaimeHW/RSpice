@@ -86,17 +86,24 @@ impl Engine {
             // Intrinsic channel charge: total oxide capacitance over the
             // effective (lateral-diffusion-shortened) channel.
             let leff = (mos.l - 2.0 * mos.ld).max(1e-12);
-            solver.add_nonlinear_device(
-                instance
-                    .with_body_effect(mos.gamma, mos.phi)
-                    .with_intrinsic_gate(mos.cox * mos.w * leff)
-                    .with_bulk_junctions(
-                        DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
-                        DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
-                        is_s,
-                        is_d,
-                    ),
-            );
+            let instance = instance
+                .with_thermal_voltage(mos.vt)
+                .with_body_effect(mos.gamma, mos.phi)
+                .with_intrinsic_gate(mos.cox * mos.w * leff)
+                .with_bulk_junctions(
+                    DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
+                    DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
+                    is_s,
+                    is_d,
+                );
+            if let Some(temp_k) = mos.noise_absolute_temperature {
+                solver.add_nonlinear_device_with_absolute_noise_temperature(instance, temp_k);
+            } else {
+                solver.add_nonlinear_device_with_noise_temperature_offset(
+                    instance,
+                    mos.noise_temperature_offset,
+                );
+            }
 
             // Gate overlap capacitances are bias-independent in level 1:
             // stamp them as ordinary linear capacitors.
@@ -139,14 +146,20 @@ impl Engine {
                     jfet.params.is,
                 ),
             };
-            let vt_jfet = crate::constants::K_BOLTZMANN * self.config.temperature
+            let vt_jfet = crate::constants::K_BOLTZMANN * jfet.resolved_instance_temperature()
                 / crate::constants::Q_ELECTRON;
-            solver.add_nonlinear_device(instance.with_thermal_voltage(vt_jfet).with_junction_caps(
+            let instance = instance.with_thermal_voltage(vt_jfet).with_junction_caps(
                 DepletionCap::new(jfet.params.cgs, jfet.params.pb, jfet.params.m, 0.5),
                 DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
                 0.0,
                 0.0,
-            ));
+            );
+            if let Some(temp_k) = jfet.noise_absolute_temperature {
+                solver.add_nonlinear_device_with_absolute_noise_temperature(instance, temp_k);
+            } else {
+                solver
+                    .add_nonlinear_device_with_noise_temperature_offset(instance, jfet.noise_dtemp);
+            }
         }
 
         for sw in &circuit.vswitches {

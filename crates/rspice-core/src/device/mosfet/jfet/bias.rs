@@ -34,6 +34,13 @@ impl Jfet {
         }
     }
 
+    /// Builder-resolved absolute instance temperature used by analyses that
+    /// construct a compact JFET representation outside this device runtime.
+    #[inline]
+    pub(crate) fn resolved_instance_temperature(&self) -> Value {
+        self.resolved_temperatures(self.analysis_temperature()).0
+    }
+
     #[inline]
     pub(super) fn resolved_temperatures(&self, ambient: Value) -> (Value, Value, Value) {
         let mut base = if ambient.is_finite() && ambient > 0.0 {

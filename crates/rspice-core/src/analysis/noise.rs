@@ -954,6 +954,18 @@ impl NoiseSource {
         frequency: Value,
         temperature: Value,
     ) -> Result<Value, NoiseEvaluationError> {
+        if self.noise_type == NoiseSourceType::Thermal {
+            let source_temperature = temperature + self.temperature_offset;
+            if !temperature.is_finite()
+                || !self.temperature_offset.is_finite()
+                || !source_temperature.is_finite()
+                || source_temperature <= 0.0
+            {
+                return Err(NoiseEvaluationError::InvalidSource(
+                    "absolute source temperature must be finite and positive",
+                ));
+            }
+        }
         let density = self.spectral_density(frequency, temperature);
         if !density.is_finite() {
             return Err(NoiseEvaluationError::NonFiniteDensity);

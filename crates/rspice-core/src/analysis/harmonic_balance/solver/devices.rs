@@ -6,6 +6,70 @@ use super::*;
 /// continued linearly so the current keeps responding to the voltage.
 const MAX_EXP_ARG: Value = 40.0;
 
+/// A non-negative value represented as `mantissa * 2^exponent` without
+/// forcing the physical value through binary64's direct exponent range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ScaledNonnegative {
+    pub(super) mantissa: Value,
+    pub(super) exponent: i32,
+}
+
+impl ScaledNonnegative {
+    pub(super) const ZERO: Self = Self {
+        mantissa: 0.0,
+        exponent: 0,
+    };
+
+    fn checked_product(factors: &[Value]) -> Result<Self, &'static str> {
+        if factors
+            .iter()
+            .any(|factor| !factor.is_finite() || *factor < 0.0)
+        {
+            return Err("a noise-intensity factor is non-finite or negative");
+        }
+        if factors.contains(&0.0) {
+            return Ok(Self::ZERO);
+        }
+
+        let mut value = Self {
+            mantissa: 1.0,
+            exponent: 0,
+        };
+        value.checked_multiply(factors)?;
+        Ok(value)
+    }
+
+    fn checked_multiply(&mut self, factors: &[Value]) -> Result<(), &'static str> {
+        if factors
+            .iter()
+            .any(|factor| !factor.is_finite() || *factor < 0.0)
+        {
+            return Err("a noise-intensity factor is non-finite or negative");
+        }
+        if self.mantissa == 0.0 || factors.contains(&0.0) {
+            *self = Self::ZERO;
+            return Ok(());
+        }
+
+        for &factor in factors {
+            let factor_exponent = libm::ilogb(factor);
+            let factor_mantissa = libm::scalbn(factor, -factor_exponent);
+            self.mantissa *= factor_mantissa;
+            let mantissa_exponent = libm::ilogb(self.mantissa);
+            self.mantissa = libm::scalbn(self.mantissa, -mantissa_exponent);
+            self.exponent = self
+                .exponent
+                .checked_add(factor_exponent)
+                .and_then(|value| value.checked_add(mantissa_exponent))
+                .ok_or("a noise-intensity product exponent exceeds this platform")?;
+        }
+        if !self.mantissa.is_finite() || !(1.0..2.0).contains(&self.mantissa) {
+            return Err("a normalized noise-intensity product mantissa is invalid");
+        }
+        Ok(())
+    }
+}
+
 /// Ideal-junction current and conductance `Is*(exp(v/nvt) - 1)`.
 ///
 /// Above `MAX_EXP_ARG` the exponential is replaced by its tangent line, which
@@ -384,59 +448,100 @@ impl NonlinearDeviceInstance {
     /// Instantaneous white-noise intensities s(t) >= 0 in A^2/Hz for each
     /// branch of `noise_branches`, evaluated at one time sample: shot noise
     /// `2q|I|` for junction and transport currents, channel thermal
-    /// `(8/3)kT(|gm| + gds)` for FETs, and `4kT g(t)` for switch resistance.
-    pub(crate) fn noise_intensities(
+    /// `(8/3)kT|gm|` for legacy MOS/JFET channels, and `4kT g(t)` for switch
+    /// resistance. Numerical conductance floors and output conductance are not
+    /// physical channel-noise generators in these Level-1 models.
+    pub(super) fn noise_intensities(
         &self,
         node_voltages: &[Value],
         temperature: Value,
         q_e: Value,
         k_b: Value,
-    ) -> Vec<Value> {
-        let kt = k_b * temperature;
+    ) -> Result<Vec<ScaledNonnegative>, &'static str> {
         match self.device_type {
             NonlinearDeviceType::Diode => {
                 let v_a = self.get_terminal_voltage(node_voltages, 0);
                 let v_c = self.get_terminal_voltage(node_voltages, 1);
                 let (id, _) =
                     junction_current(self.params.is, v_a - v_c, self.params.n * self.params.vt);
-                vec![2.0 * q_e * id.abs()]
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    2.0,
+                    q_e,
+                    id.abs(),
+                ])?])
             }
             NonlinearDeviceType::NpnBjt => {
                 let op = self.bjt_core(1.0, node_voltages);
-                vec![2.0 * q_e * op.ic.abs(), 2.0 * q_e * op.ib.abs()]
+                Ok(vec![
+                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ic.abs()])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ib.abs()])?,
+                ])
             }
             NonlinearDeviceType::PnpBjt => {
                 let op = self.bjt_core(-1.0, node_voltages);
-                vec![2.0 * q_e * op.ic.abs(), 2.0 * q_e * op.ib.abs()]
+                Ok(vec![
+                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ic.abs()])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, op.ib.abs()])?,
+                ])
             }
             NonlinearDeviceType::Nmos => {
-                let (_, _, _, gm, gds, _) = self.mos_operating_point(1.0, node_voltages);
-                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+                let (_, _, _, gm, _, _) = self.mos_operating_point(1.0, node_voltages);
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    8.0 / 3.0,
+                    k_b,
+                    temperature,
+                    gm.abs(),
+                ])?])
             }
             NonlinearDeviceType::Pmos => {
-                let (_, _, _, gm, gds, _) = self.mos_operating_point(-1.0, node_voltages);
-                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+                let (_, _, _, gm, _, _) = self.mos_operating_point(-1.0, node_voltages);
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    8.0 / 3.0,
+                    k_b,
+                    temperature,
+                    gm.abs(),
+                ])?])
             }
             NonlinearDeviceType::Njfet => {
-                let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, 1.0);
-                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+                let (_, gm, _) = self.jfet_ids_gm_gds(node_voltages, 1.0);
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    8.0 / 3.0,
+                    k_b,
+                    temperature,
+                    gm.abs(),
+                ])?])
             }
             NonlinearDeviceType::Pjfet => {
-                let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, -1.0);
-                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+                let (_, gm, _) = self.jfet_ids_gm_gds(node_voltages, -1.0);
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    8.0 / 3.0,
+                    k_b,
+                    temperature,
+                    gm.abs(),
+                ])?])
             }
             NonlinearDeviceType::VoltageSwitch => {
                 let vcp = self.get_terminal_voltage(node_voltages, 2);
                 let vcn = self.get_terminal_voltage(node_voltages, 3);
                 let (g, _) = self.switch_conductance_and_derivative(vcp - vcn);
-                vec![4.0 * kt * g]
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    4.0,
+                    k_b,
+                    temperature,
+                    g,
+                ])?])
             }
             NonlinearDeviceType::CurrentSwitch => {
                 let vcp = self.get_terminal_voltage(node_voltages, 2);
                 let vcn = self.get_terminal_voltage(node_voltages, 3);
                 let ictrl = self.params.control_gain * (vcp - vcn);
                 let (g, _) = self.switch_conductance_and_derivative(ictrl);
-                vec![4.0 * kt * g]
+                Ok(vec![ScaledNonnegative::checked_product(&[
+                    4.0,
+                    k_b,
+                    temperature,
+                    g,
+                ])?])
             }
         }
     }
@@ -1402,6 +1507,48 @@ mod tests {
 
     type DeliveredNodeQuantityFn<'a> = dyn Fn(&[Value]) -> Vec<(usize, Value)> + 'a;
     type StampEntriesFn<'a> = dyn Fn(&[Value]) -> Vec<((usize, usize), Value)> + 'a;
+
+    #[test]
+    fn nonlinear_noise_scaling_preserves_extremes_and_rejects_invalid_factors() {
+        let below_range = ScaledNonnegative::checked_product(&[Value::from_bits(1), 0.5]).unwrap();
+        assert_eq!(below_range.mantissa.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(below_range.exponent, -1075);
+
+        let above_range = ScaledNonnegative::checked_product(&[Value::MAX, Value::MAX]).unwrap();
+        assert!(above_range.mantissa >= 1.0 && above_range.mantissa < 2.0);
+        assert!(above_range.exponent > 1023);
+
+        let exact_zero = ScaledNonnegative::checked_product(&[0.0, Value::MAX]).unwrap();
+        assert_eq!(exact_zero, ScaledNonnegative::ZERO);
+        for invalid in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY, -1.0] {
+            assert!(ScaledNonnegative::checked_product(&[0.0, invalid]).is_err());
+        }
+    }
+
+    #[test]
+    fn legacy_fet_channel_noise_uses_transconductance_without_gds_floors() {
+        const TEMPERATURE: Value = 300.15;
+        const K_B: Value = 1.380_649e-23;
+
+        // Deep triode operation makes gds about one thousand times gm. The
+        // Level-1 channel source is nevertheless (8/3)kT*gm, matching
+        // mos1noi.c rather than treating output conductance as another source.
+        let mos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.0, 1.0, 0.0);
+        let mos_noise = mos
+            .noise_intensities(&[1.0e-3, 1.0, 0.0, 0.0], TEMPERATURE, 1.0, K_B)
+            .unwrap()[0];
+        let actual = libm::scalbn(mos_noise.mantissa, mos_noise.exponent);
+        let expected = (8.0 / 3.0) * K_B * TEMPERATURE * 1.0e-3;
+        assert!((actual - expected).abs() <= 8.0 * Value::EPSILON * expected);
+
+        // The runtime keeps a tiny JFET gds floor for matrix conditioning.
+        // Cutoff has gm=0 and must therefore retain an exact zero noise source.
+        let jfet = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1.0e-3, 0.0, 1.0e-14);
+        let cutoff = jfet
+            .noise_intensities(&[1.0, -3.0, 0.0], TEMPERATURE, 1.0, K_B)
+            .unwrap();
+        assert_eq!(cutoff, vec![ScaledNonnegative::ZERO]);
+    }
 
     /// Deterministic uniform sample in [lo, hi).
     fn lcg(seed: &mut u64, lo: Value, hi: Value) -> Value {

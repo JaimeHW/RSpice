@@ -613,6 +613,8 @@ pub struct ResolvedResistorParameters {
     pub tc1: f64,
     pub tc2: f64,
     pub temperature_celsius: f64,
+    /// Resolved model nominal temperature after model-card TNOM precedence.
+    pub tnom_celsius: f64,
 }
 
 /// Resolve the effective scalar parameters of a native resistor instance.
@@ -821,6 +823,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         ("TC2", tc2),
         ("TEMP", reported_temp_c),
         ("effective TEMP", current_temp_c),
+        ("TNOM", tnom_c),
     ] {
         if !value.is_finite() {
             return Err(SimulationError::Circuit(format!(
@@ -865,6 +868,7 @@ pub(in crate::engine::builder) fn resolve_resistor_effective_parameters(
         tc1,
         tc2,
         temperature_celsius: reported_temp_c,
+        tnom_celsius: tnom_c,
     })
 }
 

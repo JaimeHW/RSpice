@@ -266,13 +266,15 @@ impl Jfet {
         (igs, igd)
     }
 
-    /// Thermal-noise temperature offset in kelvin, jfetnoi.c semantics:
-    /// DTEMP directly, or with an absolute instance TEMP given,
-    /// temp − CKTtemp + tnom in Celsius terms (ngspice's quirk, mirrored).
-    pub fn noise_temperature_offset(&self, analysis_temp_k: Value, tnom_c: Value) -> Value {
-        match self.instance_temp.filter(|v| v.is_finite() && *v > 0.0) {
-            Some(temp_k) => temp_k - analysis_temp_k + tnom_c,
-            None => self.instance_dtemp,
+    /// Thermal-noise temperature offset in kelvin. An explicit instance TEMP
+    /// is an absolute temperature and therefore outranks DTEMP; without TEMP,
+    /// DTEMP offsets the analysis temperature. TNOM affects parameter scaling,
+    /// not the physical source temperature.
+    pub fn noise_temperature_offset(&self, _analysis_temp_k: Value, _tnom_c: Value) -> Value {
+        if self.instance_temp.is_some() {
+            0.0
+        } else {
+            self.instance_dtemp
         }
     }
 

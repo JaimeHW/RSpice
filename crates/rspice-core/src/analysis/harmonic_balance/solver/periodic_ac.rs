@@ -17,12 +17,78 @@ use std::f64::consts::PI;
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ScaledComplex {
+    mantissa: Complex64,
+    exponent: i32,
+}
+
+impl ScaledComplex {
+    const ZERO: Self = Self {
+        mantissa: Complex64::new(0.0, 0.0),
+        exponent: 0,
+    };
+
+    fn is_zero(self) -> bool {
+        self.mantissa.re == 0.0 && self.mantissa.im == 0.0
+    }
+}
+
+fn normalize_scaled_noise_waveform(
+    waveform: &[super::devices::ScaledNonnegative],
+) -> Result<(Vec<Value>, i32), &'static str> {
+    if waveform
+        .iter()
+        .any(|sample| !sample.mantissa.is_finite() || sample.mantissa < 0.0)
+    {
+        return Err("a scaled waveform sample has an invalid mantissa");
+    }
+    let Some(common_exponent) = waveform
+        .iter()
+        .filter(|sample| sample.mantissa > 0.0)
+        .map(|sample| sample.exponent)
+        .max()
+    else {
+        return Ok((vec![0.0; waveform.len()], 0));
+    };
+
+    let mut normalized = Vec::with_capacity(waveform.len());
+    for sample in waveform {
+        if sample.mantissa == 0.0 {
+            normalized.push(0.0);
+            continue;
+        }
+        if !(1.0..2.0).contains(&sample.mantissa) {
+            return Err("a nonzero scaled waveform mantissa is not normalized");
+        }
+        let shift = sample
+            .exponent
+            .checked_sub(common_exponent)
+            .ok_or("a scaled waveform exponent range exceeds this platform")?;
+        let value = libm::scalbn(sample.mantissa, shift);
+        if !value.is_finite() || value <= 0.0 {
+            return Err("a nonzero waveform sample is not representable at the common scale");
+        }
+        if value < Value::MIN_POSITIVE {
+            let reverse_shift = shift
+                .checked_neg()
+                .ok_or("a scaled waveform reverse exponent exceeds this platform")?;
+            let recovered = libm::scalbn(value, reverse_shift);
+            if recovered.to_bits() != sample.mantissa.to_bits() {
+                return Err("a nonzero waveform sample would round at the common scale");
+            }
+        }
+        normalized.push(value);
+    }
+    Ok((normalized, common_exponent))
+}
+
 fn scaled_complex_product3(
     first: Complex64,
     second: Complex64,
     third: Complex64,
     binary_scale_exponent: i32,
-) -> Result<Complex64, &'static str> {
+) -> Result<ScaledComplex, &'static str> {
     let factors = [first, second, third];
     if factors
         .iter()
@@ -34,7 +100,7 @@ fn scaled_complex_product3(
         .iter()
         .any(|value| value.re == 0.0 && value.im == 0.0)
     {
-        return Ok(Complex64::new(0.0, 0.0));
+        return Ok(ScaledComplex::ZERO);
     }
 
     let mut scaled = [Complex64::new(0.0, 0.0); 3];
@@ -67,17 +133,205 @@ fn scaled_complex_product3(
         libm::scalbn(mantissa.re, -mantissa_exponent),
         libm::scalbn(mantissa.im, -mantissa_exponent),
     );
-    let product = Complex64::new(
-        libm::scalbn(normalized.re, exponent),
-        libm::scalbn(normalized.im, exponent),
-    );
-    if !product.re.is_finite() || !product.im.is_finite() {
-        return Err("the product is not representable as finite complex components");
+    Ok(ScaledComplex {
+        mantissa: normalized,
+        exponent,
+    })
+}
+
+fn scale_complex_component_exactly(component: Value, shift: i32) -> Result<Value, &'static str> {
+    if component == 0.0 {
+        return Ok(0.0);
     }
-    if product.re == 0.0 && product.im == 0.0 {
-        return Err("the nonzero product is below the representable complex range");
+    let scaled = libm::scalbn(component, shift);
+    if !scaled.is_finite() || scaled == 0.0 {
+        return Err("a nonzero term component is not representable at the common scale");
     }
-    Ok(product)
+    if scaled.abs() < Value::MIN_POSITIVE {
+        let reverse_shift = shift
+            .checked_neg()
+            .ok_or("a scaled-term reverse exponent exceeds this platform")?;
+        if libm::scalbn(scaled, reverse_shift).to_bits() != component.to_bits() {
+            return Err("a nonzero term component would round at the common scale");
+        }
+    }
+    Ok(scaled)
+}
+
+fn compensated_add(
+    sum: &mut Value,
+    compensation: &mut Value,
+    value: Value,
+) -> Result<(), &'static str> {
+    let next = *sum + value;
+    if !next.is_finite() {
+        return Err("a common-scale accumulation became non-finite");
+    }
+    let correction = if sum.abs() >= value.abs() {
+        (*sum - next) + value
+    } else {
+        (value - next) + *sum
+    };
+    *compensation += correction;
+    if !compensation.is_finite() {
+        return Err("a common-scale compensation became non-finite");
+    }
+    *sum = next;
+    Ok(())
+}
+
+fn validate_scaled_complex(term: ScaledComplex) -> Result<(), &'static str> {
+    if !term.mantissa.re.is_finite() || !term.mantissa.im.is_finite() {
+        return Err("a scaled term has a non-finite mantissa");
+    }
+    if !term.is_zero() {
+        let scale = term.mantissa.re.abs().max(term.mantissa.im.abs());
+        if !(1.0..2.0).contains(&scale) {
+            return Err("a nonzero scaled term mantissa is not normalized");
+        }
+    }
+    Ok(())
+}
+
+struct ScaledComplexAccumulator {
+    common_exponent: i32,
+    real_sum: Value,
+    real_compensation: Value,
+    imag_sum: Value,
+    imag_compensation: Value,
+    absolute_sum: Value,
+    absolute_compensation: Value,
+}
+
+impl ScaledComplexAccumulator {
+    fn new(common_exponent: i32) -> Self {
+        Self {
+            common_exponent,
+            real_sum: 0.0,
+            real_compensation: 0.0,
+            imag_sum: 0.0,
+            imag_compensation: 0.0,
+            absolute_sum: 0.0,
+            absolute_compensation: 0.0,
+        }
+    }
+
+    fn add(&mut self, term: ScaledComplex) -> Result<(), &'static str> {
+        validate_scaled_complex(term)?;
+        if term.is_zero() {
+            return Ok(());
+        }
+        let shift = term
+            .exponent
+            .checked_sub(self.common_exponent)
+            .ok_or("a scaled-term exponent range exceeds this platform")?;
+        let real = scale_complex_component_exactly(term.mantissa.re, shift)?;
+        let imag = scale_complex_component_exactly(term.mantissa.im, shift)?;
+        compensated_add(&mut self.real_sum, &mut self.real_compensation, real)?;
+        compensated_add(&mut self.imag_sum, &mut self.imag_compensation, imag)?;
+        let magnitude = Complex64::new(real, imag).norm();
+        if !magnitude.is_finite() || magnitude <= 0.0 {
+            return Err("a nonzero common-scale term has an invalid magnitude");
+        }
+        compensated_add(
+            &mut self.absolute_sum,
+            &mut self.absolute_compensation,
+            magnitude,
+        )?;
+        Ok(())
+    }
+
+    fn finish(self) -> Result<(Complex64, Value), &'static str> {
+        let normalized = Complex64::new(
+            self.real_sum + self.real_compensation,
+            self.imag_sum + self.imag_compensation,
+        );
+        let normalized_absolute_sum = self.absolute_sum + self.absolute_compensation;
+        if !normalized.re.is_finite()
+            || !normalized.im.is_finite()
+            || !normalized_absolute_sum.is_finite()
+            || normalized_absolute_sum <= 0.0
+        {
+            return Err("the completed common-scale white-noise sum is invalid");
+        }
+
+        let contribution = Complex64::new(
+            libm::scalbn(normalized.re, self.common_exponent),
+            libm::scalbn(normalized.im, self.common_exponent),
+        );
+        let physical_absolute_sum = libm::scalbn(normalized_absolute_sum, self.common_exponent);
+        if !contribution.re.is_finite()
+            || !contribution.im.is_finite()
+            || !physical_absolute_sum.is_finite()
+            || physical_absolute_sum <= 0.0
+        {
+            return Err("the completed white-noise sum is outside the finite binary64 range");
+        }
+        if (normalized.re != 0.0 && contribution.re == 0.0)
+            || (normalized.im != 0.0 && contribution.im == 0.0)
+        {
+            return Err("a nonzero completed white-noise component is below the binary64 range");
+        }
+        Ok((contribution, physical_absolute_sum))
+    }
+}
+
+/// Sum scaled white-noise terms before crossing binary64's physical exponent
+/// range. This avoids separately rounding or underflowing terms whose complete
+/// Hermitian sum is representable. Terms that cannot be aligned exactly are
+/// rejected rather than silently discarded.
+#[cfg(test)]
+fn materialize_scaled_complex_sum(
+    terms: &[ScaledComplex],
+) -> Result<(Complex64, Value), &'static str> {
+    for &term in terms {
+        validate_scaled_complex(term)?;
+    }
+    let Some(common_exponent) = terms
+        .iter()
+        .copied()
+        .filter(|term| !term.is_zero())
+        .map(|term| term.exponent)
+        .max()
+    else {
+        return Ok((Complex64::new(0.0, 0.0), 0.0));
+    };
+    let mut accumulator = ScaledComplexAccumulator::new(common_exponent);
+    for &term in terms {
+        accumulator.add(term)?;
+    }
+    accumulator.finish()
+}
+
+fn visit_white_noise_terms(
+    gains: &[Complex64],
+    psd: &[Complex64],
+    binary_scale_exponent: i32,
+    mut visit: impl FnMut(ScaledComplex) -> Result<(), &'static str>,
+) -> Result<usize, &'static str> {
+    let mut term_count = 0usize;
+    for (k_idx, &gain_k) in gains.iter().enumerate() {
+        for (m_idx, &gain_m) in gains.iter().enumerate() {
+            let d = (k_idx as i32) - (m_idx as i32);
+            let d_abs = d.unsigned_abs() as usize;
+            if d_abs >= psd.len() {
+                continue;
+            }
+            let s_d = if d >= 0 {
+                psd[d_abs]
+            } else {
+                psd[d_abs].conj()
+            };
+            visit(scaled_complex_product3(
+                gain_k,
+                gain_m.conj(),
+                s_d,
+                binary_scale_exponent,
+            )?)?;
+            term_count = term_count.saturating_add(1);
+        }
+    }
+    Ok(term_count)
 }
 
 fn scaled_flicker_density(
@@ -854,7 +1108,7 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         temperature: Value,
-    ) -> Vec<PeriodicNoiseSource> {
+    ) -> Result<Vec<PeriodicNoiseSource>, HbError> {
         use crate::constants::K_BOLTZMANN as K_B;
         use crate::constants::Q_ELECTRON as Q_E;
 
@@ -865,10 +1119,41 @@ impl HbSolver {
             .collect();
 
         // Accumulate per-source intensity waveforms keyed by node pair.
-        let mut intensities: Vec<((usize, usize), String, Vec<Value>)> = Vec::new();
+        let mut intensities: Vec<(
+            (usize, usize),
+            String,
+            Vec<super::devices::ScaledNonnegative>,
+        )> = Vec::new();
         let mut node_voltages = vec![0.0; n];
 
         for (d_idx, device) in self.nonlinear_devices.iter().enumerate() {
+            let temperature_metadata = self
+                .nonlinear_noise_temperatures
+                .get(d_idx)
+                .copied()
+                .ok_or_else(|| {
+                    HbError::InvalidCircuit(format!(
+                        "nonlinear device {d_idx} has no aligned noise-temperature metadata"
+                    ))
+                })?;
+            let source_temperature = temperature_metadata.resolve(temperature);
+            let temperature_dependent = matches!(
+                device.device_type,
+                NonlinearDeviceType::Nmos
+                    | NonlinearDeviceType::Pmos
+                    | NonlinearDeviceType::Njfet
+                    | NonlinearDeviceType::Pjfet
+                    | NonlinearDeviceType::VoltageSwitch
+                    | NonlinearDeviceType::CurrentSwitch
+            );
+            if temperature_dependent
+                && (!source_temperature.is_finite() || source_temperature <= 0.0)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "periodic noise source {:?}#{d_idx} absolute temperature must be finite and positive, got {source_temperature} K",
+                    device.device_type
+                )));
+            }
             let branches = device.noise_branches();
             if branches.is_empty() {
                 continue;
@@ -880,33 +1165,65 @@ impl HbSolver {
                     device.device_type,
                     device.noise_branch_label(b)
                 );
-                intensities.push(((p, q), label, vec![0.0; n_time]));
+                intensities.push((
+                    (p, q),
+                    label,
+                    vec![super::devices::ScaledNonnegative::ZERO; n_time],
+                ));
             }
             for t in 0..n_time {
                 for node in 0..n {
                     node_voltages[node] = v_time[node][t];
                 }
-                let values = device.noise_intensities(&node_voltages, temperature, Q_E, K_B);
+                let values = device
+                    .noise_intensities(&node_voltages, source_temperature, Q_E, K_B)
+                    .map_err(|reason| {
+                        HbError::InvalidCircuit(format!(
+                            "periodic noise source {:?}#{d_idx} is invalid at time sample {t}: {reason}",
+                            device.device_type
+                        ))
+                    })?;
+                if values.len() != branches.len() {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "periodic noise source {:?}#{d_idx} produced {} intensities for {} branches",
+                        device.device_type,
+                        values.len(),
+                        branches.len()
+                    )));
+                }
                 for (b, value) in values.iter().enumerate() {
                     intensities[base + b].2[t] = *value;
                 }
             }
         }
 
-        intensities
-            .into_iter()
-            .map(|((p, q), name, waveform)| {
-                let psd = self.fft.to_frequency_domain(&waveform);
-                PeriodicNoiseSource {
-                    name,
-                    node_pos: p,
-                    node_neg: q,
-                    psd,
-                    binary_scale_exponent: 0,
-                    flicker: None,
-                }
-            })
-            .collect()
+        let mut sources = Vec::with_capacity(intensities.len());
+        for ((p, q), name, waveform) in intensities {
+            let (normalized, binary_scale_exponent) = normalize_scaled_noise_waveform(&waveform)
+                .map_err(|reason| {
+                    HbError::InvalidCircuit(format!(
+                        "periodic noise source '{name}' cannot share a safe binary scale: {reason}"
+                    ))
+                })?;
+            let psd = self.fft.to_frequency_domain(&normalized);
+            if psd
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "periodic noise source '{name}' Fourier coefficients are non-finite"
+                )));
+            }
+            sources.push(PeriodicNoiseSource {
+                name,
+                node_pos: p,
+                node_neg: q,
+                psd,
+                binary_scale_exponent,
+                flicker: None,
+            });
+        }
+        Ok(sources)
     }
 
     /// Accept a matrix-free PNoise adjoint only after an independent
@@ -1135,50 +1452,54 @@ impl HbSolver {
                 *gain = a;
             }
 
-            let mut contribution = Complex64::new(0.0, 0.0);
-            let mut absolute_sum = 0.0;
-            let mut term_count = 0usize;
-            for k_idx in 0..s {
-                for m_idx in 0..s {
-                    let d = (k_idx as i32) - (m_idx as i32);
-                    let d_abs = d.unsigned_abs() as usize;
-                    if d_abs >= source.psd.len() {
-                        continue;
+            // Pass one determines the common binary exponent without retaining
+            // O(sidebands^2) terms. Pass two streams the same deterministic
+            // products into the compensated accumulator.
+            let mut common_exponent = None;
+            let mut term_count = visit_white_noise_terms(
+                &gains,
+                &source.psd,
+                source.binary_scale_exponent,
+                |term| {
+                    validate_scaled_complex(term)?;
+                    if !term.is_zero() {
+                        common_exponent = Some(
+                            common_exponent
+                                .map_or(term.exponent, |current: i32| current.max(term.exponent)),
+                        );
                     }
-                    let s_d = if d >= 0 {
-                        source.psd[d_abs]
-                    } else {
-                        source.psd[d_abs].conj()
-                    };
-                    let term = scaled_complex_product3(
-                        gains[k_idx],
-                        gains[m_idx].conj(),
-                        s_d,
-                        source.binary_scale_exponent,
-                    )
-                    .map_err(|reason| {
-                        HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' white-noise term is invalid: {reason}",
-                            source.name
-                        ))
-                    })?;
-                    contribution += term;
-                    if !contribution.re.is_finite() || !contribution.im.is_finite() {
-                        return Err(HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' white-noise accumulation became non-finite",
-                            source.name
-                        )));
-                    }
-                    absolute_sum += term.norm();
-                    if !absolute_sum.is_finite() {
-                        return Err(HbError::InvalidCircuit(format!(
-                            "pnoise source '{}' white-noise error bound became non-finite",
-                            source.name
-                        )));
-                    }
-                    term_count = term_count.saturating_add(1);
-                }
-            }
+                    Ok(())
+                },
+            )
+            .map_err(|reason| {
+                HbError::InvalidCircuit(format!(
+                    "pnoise source '{}' white-noise term is invalid: {reason}",
+                    source.name
+                ))
+            })?;
+            let (mut contribution, mut absolute_sum) = if let Some(exponent) = common_exponent {
+                let mut accumulator = ScaledComplexAccumulator::new(exponent);
+                visit_white_noise_terms(
+                    &gains,
+                    &source.psd,
+                    source.binary_scale_exponent,
+                    |term| accumulator.add(term),
+                )
+                .map_err(|reason| {
+                    HbError::InvalidCircuit(format!(
+                        "pnoise source '{}' white-noise accumulation is invalid: {reason}",
+                        source.name
+                    ))
+                })?;
+                accumulator.finish().map_err(|reason| {
+                    HbError::InvalidCircuit(format!(
+                        "pnoise source '{}' white-noise accumulation is invalid: {reason}",
+                        source.name
+                    ))
+                })?
+            } else {
+                (Complex64::new(0.0, 0.0), 0.0)
+            };
 
             // Stationary flicker folding: the colored density is sampled at
             // each sideband's absolute frequency and folds through |A_k|^2
@@ -1337,6 +1658,185 @@ mod matrix_free_tests {
     }
 
     #[test]
+    fn nonlinear_noise_waveform_normalization_is_scaled_and_fail_closed() {
+        let exact_subnormal_exponent = 2000 - 1074;
+        let waveform = [
+            super::devices::ScaledNonnegative::ZERO,
+            super::devices::ScaledNonnegative {
+                mantissa: 1.5,
+                exponent: 2000,
+            },
+            super::devices::ScaledNonnegative {
+                mantissa: 1.0,
+                exponent: exact_subnormal_exponent,
+            },
+        ];
+        let (normalized, exponent) = normalize_scaled_noise_waveform(&waveform).unwrap();
+        assert_eq!(exponent, 2000);
+        assert_eq!(normalized[0], 0.0);
+        assert_eq!(normalized[1], 1.5);
+        assert_eq!(normalized[2].to_bits(), Value::from_bits(1).to_bits());
+
+        let vanished = [
+            super::devices::ScaledNonnegative {
+                mantissa: 1.0,
+                exponent: 2000,
+            },
+            super::devices::ScaledNonnegative {
+                mantissa: 1.0,
+                exponent: 2000 - 1075,
+            },
+        ];
+        assert!(normalize_scaled_noise_waveform(&vanished).is_err());
+
+        let rounded = [
+            super::devices::ScaledNonnegative {
+                mantissa: 1.0,
+                exponent: 2000,
+            },
+            super::devices::ScaledNonnegative {
+                mantissa: 1.5,
+                exponent: exact_subnormal_exponent,
+            },
+        ];
+        assert!(normalize_scaled_noise_waveform(&rounded).is_err());
+
+        for invalid in [Value::NAN, -1.0, 0.5, 2.0] {
+            assert!(
+                normalize_scaled_noise_waveform(&[super::devices::ScaledNonnegative {
+                    mantissa: invalid,
+                    exponent: 0,
+                },])
+                .is_err()
+            );
+        }
+
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        let maximum_sample = super::devices::ScaledNonnegative {
+            mantissa: libm::scalbn(Value::MAX, -1023),
+            exponent: 1023,
+        };
+        let maximum_waveform = vec![maximum_sample; solver.fft.size()];
+        let (normalized_maximum, maximum_exponent) =
+            normalize_scaled_noise_waveform(&maximum_waveform).unwrap();
+        let maximum_spectrum = solver.fft.to_frequency_domain(&normalized_maximum);
+        assert!(
+            maximum_spectrum
+                .iter()
+                .all(|value| value.re.is_finite() && value.im.is_finite())
+        );
+        let reconstructed_dc = libm::scalbn(maximum_spectrum[0].re, maximum_exponent);
+        assert_eq!(reconstructed_dc.to_bits(), Value::MAX.to_bits());
+        assert!(
+            maximum_spectrum
+                .iter()
+                .skip(1)
+                .all(|value| value.norm() <= 16.0 * Value::EPSILON)
+        );
+
+        let zero_waveform = vec![super::devices::ScaledNonnegative::ZERO; solver.fft.size()];
+        let (normalized_zero, zero_exponent) =
+            normalize_scaled_noise_waveform(&zero_waveform).unwrap();
+        assert_eq!(zero_exponent, 0);
+        assert!(normalized_zero.iter().all(|value| *value == 0.0));
+        assert!(
+            solver
+                .fft
+                .to_frequency_domain(&normalized_zero)
+                .iter()
+                .all(|value| *value == Complex64::new(0.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn nonlinear_noise_temperature_metadata_stays_aligned_and_defaults_to_ambient() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut offset_solver = HbSolver::new(config.clone(), 4);
+        offset_solver.add_diode(2, 3, 1.0e-14, 1.0);
+        offset_solver.add_nonlinear_device_with_noise_temperature_offset(
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
+            150.0,
+        );
+
+        let mut ambient_solver = HbSolver::new(config.clone(), 4);
+        ambient_solver.add_diode(2, 3, 1.0e-14, 1.0);
+        ambient_solver
+            .add_nonlinear_device(NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04));
+
+        let mut state = HbSolverState::new(4, 1);
+        state.x[0][0] = Complex64::new(2.0, 0.0);
+        state.x[1][0] = Complex64::new(2.0, 0.0);
+        let channel_source = |sources: Vec<PeriodicNoiseSource>| {
+            sources
+                .into_iter()
+                .find(|source| source.name.contains("Nmos#1 channel thermal"))
+                .expect("the MOS source stays aligned after an earlier diode")
+        };
+        let offset = channel_source(offset_solver.device_noise_sources(&state, 300.15).unwrap());
+        let ambient = channel_source(ambient_solver.device_noise_sources(&state, 450.15).unwrap());
+        assert!(
+            offset.psd[0].re.is_finite() && offset.psd[0].re > 0.0,
+            "offset-temperature MOS source must exercise a nonzero PSD"
+        );
+        assert!(
+            ambient.psd[0].re.is_finite() && ambient.psd[0].re > 0.0,
+            "ambient-temperature MOS source must exercise a nonzero PSD"
+        );
+        assert_eq!(offset.binary_scale_exponent, ambient.binary_scale_exponent);
+        assert_eq!(offset.psd, ambient.psd);
+
+        let mut absolute_solver = HbSolver::new(config.clone(), 4);
+        absolute_solver.add_diode(2, 3, 1.0e-14, 1.0);
+        absolute_solver.add_nonlinear_device_with_absolute_noise_temperature(
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
+            300.15,
+        );
+        let mut reference_solver = HbSolver::new(config.clone(), 4);
+        reference_solver.add_diode(2, 3, 1.0e-14, 1.0);
+        reference_solver
+            .add_nonlinear_device(NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04));
+        let absolute = channel_source(
+            absolute_solver
+                .device_noise_sources(&state, 1.0e20)
+                .expect("absolute TEMP survives an extreme ambient temperature"),
+        );
+        let reference = channel_source(
+            reference_solver
+                .device_noise_sources(&state, 300.15)
+                .unwrap(),
+        );
+        assert_eq!(
+            absolute.binary_scale_exponent,
+            reference.binary_scale_exponent
+        );
+        assert_eq!(absolute.psd, reference.psd);
+
+        let mut invalid_solver = HbSolver::new(config.clone(), 4);
+        invalid_solver.add_nonlinear_device_with_noise_temperature_offset(
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
+            -300.15,
+        );
+        let error = invalid_solver
+            .device_noise_sources(&state, 300.15)
+            .expect_err("zero absolute channel-noise temperature must fail");
+        let message = error.to_string();
+        assert!(message.contains("Nmos#0") && message.contains("finite and positive"));
+
+        for invalid_offset in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+            let mut invalid_solver = HbSolver::new(config.clone(), 4);
+            invalid_solver.add_nonlinear_device_with_noise_temperature_offset(
+                NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
+                invalid_offset,
+            );
+            let error = invalid_solver
+                .device_noise_sources(&state, 300.15)
+                .expect_err("non-finite channel-noise temperature must fail");
+            assert!(error.to_string().contains("finite and positive"));
+        }
+    }
+
+    #[test]
     fn periodic_noise_rejects_invalid_source_densities_instead_of_zero_filling() {
         let config = HbConfig::new(1.0e6).with_harmonics(1);
         let mut solver = HbSolver::new(config, 1);
@@ -1432,7 +1932,7 @@ mod matrix_free_tests {
             flicker: Some((1.0, 1.0)),
         };
         let singular = solver
-            .solve_periodic_noise(&state, 0.0, 0, 0, 0, None, &[flicker.clone()])
+            .solve_periodic_noise(&state, 0.0, 0, 0, 0, None, std::slice::from_ref(&flicker))
             .expect_err("1/f noise at an exact zero-frequency sideband is singular");
         assert!(singular.to_string().contains("singular 1/f"));
 
@@ -1444,32 +1944,36 @@ mod matrix_free_tests {
 
     #[test]
     fn periodic_noise_term_materialization_preserves_representable_extremes() {
-        let large_white = scaled_complex_product3(
+        let materialize_product = |first, second, third, exponent| {
+            let term = scaled_complex_product3(first, second, third, exponent)
+                .expect("scaled white-noise product remains valid");
+            materialize_scaled_complex_sum(&[term])
+                .expect("scaled white-noise product remains representable")
+                .0
+        };
+        let large_white = materialize_product(
             Complex64::new(1.0e200, 0.0),
             Complex64::new(1.0e200, 0.0),
             Complex64::new(1.0e-200, 0.0),
             0,
-        )
-        .expect("scaled white-noise product remains representable");
+        );
         assert!((large_white.re - 1.0e200).abs() <= 8.0 * Value::EPSILON * 1.0e200);
         assert_eq!(large_white.im, 0.0);
 
-        let small_white = scaled_complex_product3(
+        let small_white = materialize_product(
             Complex64::new(1.0e-200, 0.0),
             Complex64::new(1.0e-200, 0.0),
             Complex64::new(1.0e200, 0.0),
             0,
-        )
-        .expect("scaled white-noise product must not underflow prematurely");
+        );
         assert!((small_white.re - 1.0e-200).abs() <= 8.0 * Value::EPSILON * 1.0e-200);
 
-        let externally_scaled = scaled_complex_product3(
+        let externally_scaled = materialize_product(
             Complex64::new(libm::scalbn(1.0, 500), 0.0),
             Complex64::new(libm::scalbn(1.0, 500), 0.0),
             Complex64::new(1.0, 0.0),
             -1100,
-        )
-        .expect("an out-of-range elementary PSD scale can fold to a finite result");
+        );
         assert_eq!(
             externally_scaled,
             Complex64::new(libm::scalbn(1.0, -100), 0.0)
@@ -1492,6 +1996,18 @@ mod matrix_free_tests {
         .expect("finite complex components need not have a materialized finite norm");
         let expected = maximum_mantissa * maximum_mantissa * libm::scalbn(1.0, 25);
         assert!((extreme_gain - expected).abs() <= 2.0e-12 * expected);
+    }
+
+    #[test]
+    fn white_noise_terms_are_rounded_only_after_the_complete_sum() {
+        let below_range_term = ScaledComplex {
+            mantissa: Complex64::new(1.5, 0.0),
+            exponent: -1075,
+        };
+        let (sum, absolute_sum) = materialize_scaled_complex_sum(&[below_range_term; 3]).unwrap();
+        assert_eq!(sum.re.to_bits(), Value::from_bits(2).to_bits());
+        assert_eq!(sum.im, 0.0);
+        assert_eq!(absolute_sum.to_bits(), Value::from_bits(2).to_bits());
     }
 
     #[test]

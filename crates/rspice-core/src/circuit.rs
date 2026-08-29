@@ -423,6 +423,10 @@ pub struct CircuitData {
 
     // Linear device storage (SoA for cache efficiency)
     pub(crate) resistors: Resistors,
+    /// Authored absolute resistor-noise temperatures indexed like `resistors`.
+    /// Kept outside the public [`Resistors`] storage so absolute `TEMP`
+    /// provenance does not change that exhaustively constructible API.
+    resistor_absolute_noise_temperatures: Vec<Option<Value>>,
     pub(crate) resistor_branches: ResistorBranches,
     pub(crate) capacitors: Capacitors,
     pub(crate) inductors: Inductors,

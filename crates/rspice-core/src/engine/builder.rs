@@ -5353,21 +5353,22 @@ impl Engine {
                         circuit.resistors.set_last_thermal(thermal_state);
                     }
                     // Per-instance thermal-noise temperature, resnoise.c
-                    // semantics: with TEMP given the offset is
-                    // temp − CKTtemp + tnom (in Celsius terms, ngspice's
-                    // own quirk); otherwise DTEMP is the offset directly.
-                    let noise_dtemp = if let Some(temp) = instance_param(instance_params, &["TEMP"])
-                    {
+                    // semantics: with TEMP given ngspice passes
+                    // `TEMP - CKTtemp + (TNOM - CtoK)` to the primitive, so
+                    // its resolved source temperature is `TEMP + TNOM_C`.
+                    // Retain that resolved absolute value directly: forming
+                    // the ambient-relative difference first loses all low
+                    // bits when CKTtemp is extreme. Without TEMP, DTEMP stays
+                    // an ordinary ambient-relative offset.
+                    if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
                         let temp_k = crate::constants::celsius_to_kelvin(temp);
-                        let tnom_c = netlist.options.tnom.unwrap_or(27.0);
-                        temp_k - self.config.temperature + tnom_c
-                    } else {
-                        instance_param(instance_params, &["DTEMP"]).unwrap_or(0.0)
-                    };
-                    if noise_dtemp != 0.0 {
-                        circuit
-                            .resistors
-                            .set_last_noise_temperature_offset(noise_dtemp);
+                        circuit.set_last_resistor_absolute_noise_temperature(
+                            temp_k + resolved.tnom_celsius,
+                        );
+                    } else if let Some(noise_dtemp) = instance_param(instance_params, &["DTEMP"])
+                        && noise_dtemp != 0.0
+                    {
+                        circuit.set_last_resistor_noise_temperature_offset(noise_dtemp);
                     }
                     // ngspice `noisy` instance switch (default on): a quiet
                     // resistor produces no noise at all.
@@ -6732,24 +6733,32 @@ impl Engine {
                                 netlist.options.tnom.unwrap_or(27.0),
                             )
                         });
-                    let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
-                        crate::constants::celsius_to_kelvin(t)
+                    let explicit_temp_k = instance_param(instance_params, &["TEMP"])
+                        .map(crate::constants::celsius_to_kelvin);
+                    let temp_k = if let Some(temp_k) = explicit_temp_k {
+                        temp_k
                     } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
                         self.config.temperature + dt
                     } else {
                         self.config.temperature
                     };
+                    if !temp_k.is_finite() || temp_k <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "MOSFET '{}' absolute instance temperature must be finite and positive, got {temp_k} K",
+                            element.name
+                        )));
+                    }
                     mosfet.set_temperature(temp_k, tnom_k);
 
-                    // mos1noi.c heats every thermal source by the instance
-                    // offset: DTEMP directly, or temp − CKTtemp + tnom in
-                    // Celsius terms when TEMP is given (ngspice's quirk).
-                    mosfet.noise_temperature_offset =
-                        if instance_param(instance_params, &["TEMP"]).is_some() {
-                            temp_k - self.config.temperature + netlist.options.tnom.unwrap_or(27.0)
-                        } else {
-                            temp_k - self.config.temperature
-                        };
+                    // The physical source temperature is the resolved
+                    // instance temperature. TNOM only anchors model-parameter
+                    // scaling and must not heat an explicit TEMP a second time.
+                    mosfet.noise_absolute_temperature = explicit_temp_k;
+                    mosfet.noise_temperature_offset = if explicit_temp_k.is_some() {
+                        0.0
+                    } else {
+                        temp_k - self.config.temperature
+                    };
 
                     // Drain/source ohmic resistances, matching the canonical
                     // prime-node topology used by mos1temp.c and the legacy
@@ -6777,10 +6786,12 @@ impl Engine {
                             .resistors
                             .add(rd_name, drain, dint, drain_r / multiplicity);
                         mosfet.node_drain = dint;
-                        if mosfet.noise_temperature_offset != 0.0 {
-                            circuit
-                                .resistors
-                                .set_last_noise_temperature_offset(mosfet.noise_temperature_offset);
+                        if let Some(temp_k) = mosfet.noise_absolute_temperature {
+                            circuit.set_last_resistor_absolute_noise_temperature(temp_k);
+                        } else if mosfet.noise_temperature_offset != 0.0 {
+                            circuit.set_last_resistor_noise_temperature_offset(
+                                mosfet.noise_temperature_offset,
+                            );
                         }
                     }
                     let source_r = if mosfet.rs_model > 0.0 {
@@ -6798,10 +6809,12 @@ impl Engine {
                             .resistors
                             .add(rs_name, source, sint, source_r / multiplicity);
                         mosfet.node_source = sint;
-                        if mosfet.noise_temperature_offset != 0.0 {
-                            circuit
-                                .resistors
-                                .set_last_noise_temperature_offset(mosfet.noise_temperature_offset);
+                        if let Some(temp_k) = mosfet.noise_absolute_temperature {
+                            circuit.set_last_resistor_absolute_noise_temperature(temp_k);
+                        } else if mosfet.noise_temperature_offset != 0.0 {
+                            circuit.set_last_resistor_noise_temperature_offset(
+                                mosfet.noise_temperature_offset,
+                            );
                         }
                     }
 
@@ -6901,17 +6914,37 @@ impl Engine {
                         jfet.params.tnom = netlist.options.tnom.unwrap_or(27.0) + 273.15;
                         jfet = jfet.with_model_params(&card.params);
                     }
+                    let explicit_temp_k = instance_param(instance_params, &["TEMP"])
+                        .map(crate::constants::celsius_to_kelvin);
+                    let temp_k = if let Some(temp_k) = explicit_temp_k {
+                        temp_k
+                    } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
+                        self.config.temperature + dtemp
+                    } else {
+                        self.config.temperature
+                    };
+                    if !temp_k.is_finite() || temp_k <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "JFET '{}' absolute instance temperature must be finite and positive, got {temp_k} K",
+                            element.name
+                        )));
+                    }
                     jfet = jfet.with_instance_params(instance_params);
+                    jfet.noise_absolute_temperature = explicit_temp_k;
                     jfet.set_analysis_temperature(self.config.temperature);
                     jfet.set_model_order(model_order);
 
                     // jfetnoi.c heats the thermal sources by the instance
                     // offset; resolve it once for the channel source and the
                     // externalized resistors below.
-                    jfet.noise_dtemp = jfet.noise_temperature_offset(
-                        self.config.temperature,
-                        netlist.options.tnom.unwrap_or(27.0),
-                    );
+                    jfet.noise_dtemp = if explicit_temp_k.is_some() {
+                        0.0
+                    } else {
+                        jfet.noise_temperature_offset(
+                            self.config.temperature,
+                            netlist.options.tnom.unwrap_or(27.0),
+                        )
+                    };
 
                     // Realistic extrinsic JFET series resistances (RD/RS) are modeled by
                     // inserting explicit linear resistors and connecting the intrinsic JFET
@@ -6930,10 +6963,10 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
-                        if jfet.noise_dtemp != 0.0 {
-                            circuit
-                                .resistors
-                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                            circuit.set_last_resistor_absolute_noise_temperature(temp_k);
+                        } else if jfet.noise_dtemp != 0.0 {
+                            circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
                         }
                     }
                     if rs > 0.0 {
@@ -6943,10 +6976,10 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
-                        if jfet.noise_dtemp != 0.0 {
-                            circuit
-                                .resistors
-                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                            circuit.set_last_resistor_absolute_noise_temperature(temp_k);
+                        } else if jfet.noise_dtemp != 0.0 {
+                            circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
                         }
                     }
 
@@ -7174,17 +7207,37 @@ impl Engine {
                     if let Some(params_map) = params_map.as_ref() {
                         jfet = jfet.with_model_params(params_map);
                     }
+                    let explicit_temp_k = instance_param(instance_params, &["TEMP"])
+                        .map(crate::constants::celsius_to_kelvin);
+                    let temp_k = if let Some(temp_k) = explicit_temp_k {
+                        temp_k
+                    } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
+                        self.config.temperature + dtemp
+                    } else {
+                        self.config.temperature
+                    };
+                    if !temp_k.is_finite() || temp_k <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "MESFET '{}' absolute instance temperature must be finite and positive, got {temp_k} K",
+                            element.name
+                        )));
+                    }
                     jfet = jfet.with_instance_params(instance_params);
+                    jfet.noise_absolute_temperature = explicit_temp_k;
                     jfet.set_analysis_temperature(self.config.temperature);
                     jfet.set_model_order(model_order);
 
                     // jfetnoi.c heats the thermal sources by the instance
                     // offset; resolve it once for the channel source and the
                     // externalized resistors below.
-                    jfet.noise_dtemp = jfet.noise_temperature_offset(
-                        self.config.temperature,
-                        netlist.options.tnom.unwrap_or(27.0),
-                    );
+                    jfet.noise_dtemp = if explicit_temp_k.is_some() {
+                        0.0
+                    } else {
+                        jfet.noise_temperature_offset(
+                            self.config.temperature,
+                            netlist.options.tnom.unwrap_or(27.0),
+                        )
+                    };
 
                     // ngspice stamps model RD/RS as conductance scaled by the
                     // instance area/multiplicity. Explicit resistors therefore
@@ -7200,10 +7253,10 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
-                        if jfet.noise_dtemp != 0.0 {
-                            circuit
-                                .resistors
-                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                            circuit.set_last_resistor_absolute_noise_temperature(temp_k);
+                        } else if jfet.noise_dtemp != 0.0 {
+                            circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
                         }
                     }
                     if rs > 0.0 {
@@ -7213,10 +7266,10 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
-                        if jfet.noise_dtemp != 0.0 {
-                            circuit
-                                .resistors
-                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        if let Some(temp_k) = jfet.noise_absolute_temperature {
+                            circuit.set_last_resistor_absolute_noise_temperature(temp_k);
+                        } else if jfet.noise_dtemp != 0.0 {
+                            circuit.set_last_resistor_noise_temperature_offset(jfet.noise_dtemp);
                         }
                     }
 

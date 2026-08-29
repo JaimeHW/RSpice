@@ -402,8 +402,11 @@ impl Engine {
                 Ok(value)
             };
 
-            let (mut sources, mut correlated_sources) =
-                Self::try_collect_noise_sources(&circuit, &solution)?;
+            let super::noise::CollectedNoiseSources {
+                elementary: mut sources,
+                elementary_absolute_temperatures,
+                correlated: mut correlated_sources,
+            } = Self::try_collect_noise_sources(&circuit, &solution)?;
             Self::configure_noise_physical_constants(
                 &mut sources,
                 &mut correlated_sources,
@@ -413,17 +416,25 @@ impl Engine {
             let mut white = vec![0.0; evaluation_frequencies.len()];
             let mut colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
             let mut colored_occurrences: HashMap<PssNoiseIdentity, usize> = HashMap::new();
-            for source in &sources {
+            debug_assert_eq!(sources.len(), elementary_absolute_temperatures.len());
+            for (source, &absolute_temperature) in
+                sources.iter().zip(&elementary_absolute_temperatures)
+            {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
                 let projected = projection(source.node_pos, source.node_neg)?;
+                let source_temperature =
+                    Self::elementary_noise_temperature(temperature, absolute_temperature);
                 if pss_noise_is_colored(source.noise_type) {
                     let amplitudes = evaluation_frequencies
                         .iter()
                         .map(|&frequency| {
-                            let density =
-                                Self::evaluated_noise_density(source, frequency, temperature)?;
+                            let density = Self::evaluated_noise_density(
+                                source,
+                                frequency,
+                                source_temperature,
+                            )?;
                             Ok(if density > 0.0 {
                                 projected * density.sqrt()
                             } else {
@@ -440,7 +451,7 @@ impl Engine {
                     *occurrence += 1;
                     colored.insert(key, amplitudes);
                 } else {
-                    let density = Self::evaluated_noise_density(source, 0.0, temperature)?;
+                    let density = Self::evaluated_noise_density(source, 0.0, source_temperature)?;
                     if density > 0.0 {
                         let contribution = density * projected * projected;
                         if !contribution.is_finite() {

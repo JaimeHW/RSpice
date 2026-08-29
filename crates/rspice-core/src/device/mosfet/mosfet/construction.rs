@@ -130,6 +130,7 @@ impl Mosfet {
             nrd: 1.0,
             nrs: 1.0,
             noise_temperature_offset: 0.0,
+            noise_absolute_temperature: None,
             kf: 0.0,
             af: 1.0,
             ef: 1.0,

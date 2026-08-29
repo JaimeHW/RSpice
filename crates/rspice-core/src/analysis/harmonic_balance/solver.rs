@@ -294,9 +294,30 @@ pub struct HbSolver {
 
     /// Registered nonlinear devices for Newton iteration
     nonlinear_devices: Vec<NonlinearDeviceInstance>,
+    /// Per-device thermal-noise temperature provenance, aligned with
+    /// `nonlinear_devices`. Absolute TEMP values are retained directly so an
+    /// extreme analysis temperature cannot destroy them through subtraction.
+    nonlinear_noise_temperatures: Vec<NonlinearNoiseTemperature>,
     /// Registered Verilog-A devices for Newton iteration.
     #[cfg(feature = "veriloga")]
     veriloga_nonlinear_devices: Vec<HbVerilogADevice>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum NonlinearNoiseTemperature {
+    Ambient,
+    Offset(Value),
+    Absolute(Value),
+}
+
+impl NonlinearNoiseTemperature {
+    fn resolve(self, ambient: Value) -> Value {
+        match self {
+            Self::Ambient => ambient,
+            Self::Offset(offset) => ambient + offset,
+            Self::Absolute(temperature) => temperature,
+        }
+    }
 }
 
 #[cfg(feature = "veriloga")]

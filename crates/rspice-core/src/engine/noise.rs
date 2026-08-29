@@ -21,6 +21,12 @@ pub(in crate::engine) enum NoiseOutputPort<'a> {
     },
 }
 
+pub(in crate::engine) struct CollectedNoiseSources {
+    pub(in crate::engine) elementary: Vec<NoiseSource>,
+    pub(in crate::engine) elementary_absolute_temperatures: Vec<Option<Value>>,
+    pub(in crate::engine) correlated: Vec<CorrelatedNoisePair>,
+}
+
 impl Engine {
     pub(in crate::engine) fn configure_noise_physical_constants(
         sources: &mut [NoiseSource],
@@ -65,6 +71,17 @@ impl Engine {
                     Self::noise_source_label(&source.identity)
                 ))
             })
+    }
+
+    /// Select the evaluation temperature for an elementary source. An
+    /// authored absolute `TEMP` bypasses the analysis ambient; sources without
+    /// one retain the public `temperature + temperature_offset` contract.
+    #[inline]
+    pub(in crate::engine) fn elementary_noise_temperature(
+        ambient: Value,
+        absolute: Option<Value>,
+    ) -> Value {
+        absolute.unwrap_or(ambient)
     }
 
     /// Evaluate a correlated device-noise mechanism with the same fail-closed
@@ -891,15 +908,18 @@ impl Engine {
         circuit: &CircuitData,
         dc_solution: &[Value],
     ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
-        Self::try_collect_noise_sources(circuit, dc_solution).unwrap_or_else(|err| panic!("{err}"))
+        let collected = Self::try_collect_noise_sources(circuit, dc_solution)
+            .unwrap_or_else(|err| panic!("{err}"));
+        (collected.elementary, collected.correlated)
     }
 
     pub(in crate::engine) fn try_collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
-    ) -> Result<(Vec<NoiseSource>, Vec<CorrelatedNoisePair>), SimulationError> {
+    ) -> Result<CollectedNoiseSources, SimulationError> {
         let mut noise_sources = Vec::new();
         let mut correlated_noise_sources = Vec::new();
+        let mut absolute_temperatures = HashMap::new();
         let mut bsim4_series_noise_conductances: HashMap<String, Value> = HashMap::new();
 
         for bsim3 in &circuit.bsim3v3.devices {
@@ -1266,6 +1286,9 @@ impl Engine {
                 source.identity = identity.clone();
             }
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
+            if let Some(temperature) = circuit.resistor_absolute_noise_temperature(i) {
+                absolute_temperatures.insert(source.identity.clone(), temperature);
+            }
             noise_sources.push(source);
 
             if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
@@ -1496,6 +1519,9 @@ impl Engine {
                     &mos.name, "ID",
                 ));
                 source.temperature_offset = mos.noise_temperature_offset;
+                if let Some(temperature) = mos.noise_absolute_temperature {
+                    absolute_temperatures.insert(source.identity.clone(), temperature);
+                }
                 noise_sources.push(source);
             }
 
@@ -1545,6 +1571,9 @@ impl Engine {
                             &jfet.name, "ID",
                         ));
                 source.temperature_offset = jfet.noise_dtemp;
+                if let Some(temperature) = jfet.noise_absolute_temperature {
+                    absolute_temperatures.insert(source.identity.clone(), temperature);
+                }
                 noise_sources.push(source);
             }
 
@@ -1609,7 +1638,15 @@ impl Engine {
             "a noise source names a mechanism no result can be written with"
         );
 
-        Ok((noise_sources, correlated_noise_sources))
+        let elementary_absolute_temperatures = noise_sources
+            .iter()
+            .map(|source| absolute_temperatures.get(&source.identity).copied())
+            .collect();
+        Ok(CollectedNoiseSources {
+            elementary: noise_sources,
+            elementary_absolute_temperatures,
+            correlated: correlated_noise_sources,
+        })
     }
 
     /// Run noise analysis
@@ -1963,8 +2000,11 @@ impl Engine {
             circuit.update_nonlinear(&dc_solution);
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
-        let (mut noise_sources, mut correlated_noise_sources) =
-            Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        let CollectedNoiseSources {
+            elementary: mut noise_sources,
+            elementary_absolute_temperatures,
+            correlated: mut correlated_noise_sources,
+        } = Self::try_collect_noise_sources(&circuit, &dc_solution)?;
         Self::configure_noise_physical_constants(
             &mut noise_sources,
             &mut correlated_noise_sources,
@@ -2060,11 +2100,16 @@ impl Engine {
                         .collect()
                 };
 
-            for source in &noise_sources {
+            debug_assert_eq!(noise_sources.len(), elementary_absolute_temperatures.len());
+            for (source, &absolute_temperature) in
+                noise_sources.iter().zip(&elementary_absolute_temperatures)
+            {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let density = Self::evaluated_noise_density(source, frequency, temperature)?;
+                let source_temperature =
+                    Self::elementary_noise_temperature(temperature, absolute_temperature);
+                let density = Self::evaluated_noise_density(source, frequency, source_temperature)?;
                 if density == 0.0 {
                     continue;
                 }
@@ -2335,8 +2380,11 @@ impl Engine {
             circuit.update_nonlinear(&dc_solution);
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
-        let (mut noise_sources, mut correlated_noise_sources) =
-            Self::try_collect_noise_sources(&circuit, &dc_solution)?;
+        let CollectedNoiseSources {
+            elementary: mut noise_sources,
+            elementary_absolute_temperatures,
+            correlated: mut correlated_noise_sources,
+        } = Self::try_collect_noise_sources(&circuit, &dc_solution)?;
         Self::configure_noise_physical_constants(
             &mut noise_sources,
             &mut correlated_noise_sources,
@@ -2555,11 +2603,16 @@ impl Engine {
                 Err(error) => return Err(SimulationError::Solver(error)),
             }
 
-            for source in &noise_sources {
+            debug_assert_eq!(noise_sources.len(), elementary_absolute_temperatures.len());
+            for (source, &absolute_temperature) in
+                noise_sources.iter().zip(&elementary_absolute_temperatures)
+            {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let si = Self::evaluated_noise_density(source, freq, temperature)?;
+                let source_temperature =
+                    Self::elementary_noise_temperature(temperature, absolute_temperature);
+                let si = Self::evaluated_noise_density(source, freq, source_temperature)?;
                 let output_v2 = if si > 0.0 {
                     let transfer = Self::noise_transfer_from_adjoint(
                         transfer_solution,
@@ -3170,7 +3223,11 @@ r1 a 0 rmod
             circuit.update_nonlinear(&solution);
         }
 
-        let (sources, correlated) = Engine::try_collect_noise_sources(&circuit, &solution)
+        let CollectedNoiseSources {
+            elementary: sources,
+            correlated,
+            ..
+        } = Engine::try_collect_noise_sources(&circuit, &solution)
             .expect("VBIC13 generated noise state initializes");
         assert!(correlated.is_empty());
         let vbic = sources

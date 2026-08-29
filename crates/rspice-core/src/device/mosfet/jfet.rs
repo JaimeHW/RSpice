@@ -521,6 +521,9 @@ pub struct Jfet {
     /// Builder-resolved thermal-noise temperature offset in kelvin
     /// (jfetnoi.c `dtemp` semantics).
     pub noise_dtemp: Value,
+    /// Authored absolute instance TEMP retained without subtraction from the
+    /// analysis temperature. `None` selects ambient plus `noise_dtemp`.
+    pub(crate) noise_absolute_temperature: Option<Value>,
     /// Optional instance source terminal temperature override.
     instance_ts: Option<Value>,
     /// Optional instance drain terminal temperature override.
