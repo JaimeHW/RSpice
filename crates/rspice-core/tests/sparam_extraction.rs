@@ -8,7 +8,8 @@
 //! `analysis` above the layer that drives it.
 
 use rspice_core::Complex64;
-use rspice_core::analysis::s_param::{collect_ports, extract_s_matrix};
+use rspice_core::analysis::ac::AcResult;
+use rspice_core::analysis::s_param::{ExtractError, collect_ports, extract_s_matrix};
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -72,4 +73,27 @@ fn annotated_sources_produce_the_same_s_matrix_as_port_elements() {
          .end\n",
     );
     assert_series_resistor(&s, 50.0, 75.0, 50.0);
+}
+
+#[test]
+fn missing_declared_port_node_fails_instead_of_becoming_zero_volts() {
+    let netlist =
+        Netlist::parse("* missing port result basis\nP1 p1 0 PORT=1 Z0=50\nR1 p1 0 50\n.end\n")
+            .expect("deck parses");
+    let ports = collect_ports(&netlist).expect("ports collect");
+    let error = extract_s_matrix(&netlist, &ports, &[1.0], |_| {
+        Ok(vec![AcResult {
+            frequency: 1.0,
+            node_names: vec!["different".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![Complex64::new(0.5, 0.0)],
+            currents: Vec::new(),
+        }])
+    })
+    .expect_err("a missing port coordinate cannot be measured as zero");
+
+    assert!(matches!(
+        error,
+        ExtractError::MissingNodeVoltage { ref node, .. } if node.eq_ignore_ascii_case("p1")
+    ));
 }

@@ -33,6 +33,13 @@ pub enum ExtractError {
     /// part way, and quietly keeping the points it did return would present a
     /// partial measurement as a complete one.
     PointCount { returned: usize, requested: usize },
+    /// A declared port node was absent from the AC result basis, or its named
+    /// coordinate had no corresponding voltage value.
+    MissingNodeVoltage {
+        node: String,
+        node_names: usize,
+        voltages: usize,
+    },
 }
 
 impl std::fmt::Display for ExtractError {
@@ -47,7 +54,16 @@ impl std::fmt::Display for ExtractError {
             } => write!(
                 f,
                 "S-parameter AC solve returned {returned} point(s) for {requested} requested \
-                 frequencies"
+                frequencies"
+            ),
+            Self::MissingNodeVoltage {
+                node,
+                node_names,
+                voltages,
+            } => write!(
+                f,
+                "S-parameter port node '{node}' is unavailable in the AC result \
+                 ({node_names} node name(s), {voltages} voltage value(s))"
             ),
         }
     }
@@ -67,22 +83,27 @@ impl From<NetworkError> for ExtractError {
     }
 }
 
-/// Complex voltage at one node, with ground and unknown names reading as zero.
+/// Complex voltage at one node.
 ///
 /// A netlist's reference node never appears in the solution vector, so looking
-/// it up has to succeed at zero rather than fail. An unknown name reads zero for
-/// the same reason it does everywhere else in SPICE: a node no element connects
-/// to carries no signal.
-fn node_voltage(point: &AcResult, node: &str) -> Complex64 {
+/// it up has to succeed at zero. A declared non-ground port node, however, is
+/// part of the measurement basis; treating a missing coordinate as zero would
+/// manufacture a reflection or transmission result.
+fn node_voltage(point: &AcResult, node: &str) -> Result<Complex64, ExtractError> {
     if node == "0" || node.eq_ignore_ascii_case("gnd") {
-        return Complex64::new(0.0, 0.0);
+        return Ok(Complex64::new(0.0, 0.0));
     }
-    point
+    let value = point
         .node_names
         .iter()
         .position(|name| name.eq_ignore_ascii_case(node))
         .and_then(|index| point.voltages.get(index).copied())
-        .unwrap_or_else(|| Complex64::new(0.0, 0.0))
+        .ok_or_else(|| ExtractError::MissingNodeVoltage {
+            node: node.to_string(),
+            node_names: point.node_names.len(),
+            voltages: point.voltages.len(),
+        })?;
+    Ok(value)
 }
 
 /// Extract the full scattering matrix, indexed `[row][column][frequency]`.
@@ -128,9 +149,9 @@ where
             let voltages = ports
                 .iter()
                 .map(|port| {
-                    node_voltage(point, &port.node_pos) - node_voltage(point, &port.node_neg)
+                    Ok(node_voltage(point, &port.node_pos)? - node_voltage(point, &port.node_neg)?)
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, ExtractError>>()?;
             let column = s_column_from_port_voltages(&voltages, excited, &reference_impedances)?;
             for (row, value) in column.into_iter().enumerate() {
                 s[row][excited][index] = value;

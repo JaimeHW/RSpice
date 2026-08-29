@@ -25,16 +25,16 @@
 //!
 //! # Numerics
 //!
-//! The inverse is Gauss-Jordan with partial pivoting on complex magnitude.
-//! Port counts are small — a handful, not thousands — so the O(n^3) dense
-//! solve is not worth specializing, and the sparse solver's setup cost would
-//! dominate. This is deliberately separate from the single-RHS Gaussian solve
-//! in the harmonic-balance solver: that one solves `Ax = b` for one `b` and
-//! reports through `HbError`, whereas normalization needs a full inverse.
+//! Port counts are small — a handful, not thousands — but normalization still
+//! uses the simulator's scale-aware complex LU and componentwise backward-error
+//! certificate. A hand-written absolute pivot cutoff can reject a valid scaled
+//! network or accept an inaccurate inverse, either of which silently corrupts
+//! every S-parameter derived from it.
 
 use crate::Complex64;
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::solver::{ComplexMatrix, SolverError, StaticMatrix};
 
 /// Rows processed between abort polls.
 ///
@@ -57,12 +57,21 @@ pub enum NetworkError {
         port: usize,
         z0: Value,
     },
+    /// A solved port voltage was NaN or infinite.
+    NonFinitePortVoltage {
+        /// Zero-based port position.
+        port: usize,
+    },
+    /// A network matrix contained a NaN or infinite entry.
+    NonFiniteMatrixEntry { row: usize, column: usize },
     /// `(I + ZY)` is singular, so no scattering matrix exists at this point.
     ///
     /// Callers must surface this. Returning a zero-filled matrix instead —
     /// which one front-end used to do — presents a fabricated measurement as a
     /// real one.
     SingularNormalization,
+    /// LU completed without a certifiably accurate finite inverse.
+    NumericalFailure(String),
 }
 
 impl std::fmt::Display for NetworkError {
@@ -78,8 +87,22 @@ impl std::fmt::Display for NetworkError {
                 "S-parameter port {} has invalid z0 {z0}; expected a positive impedance",
                 port + 1
             ),
+            Self::NonFinitePortVoltage { port } => write!(
+                f,
+                "S-parameter port {} has a non-finite solved voltage",
+                port + 1
+            ),
+            Self::NonFiniteMatrixEntry { row, column } => write!(
+                f,
+                "S-parameter network matrix entry ({}, {}) is non-finite",
+                row + 1,
+                column + 1
+            ),
             Self::SingularNormalization => {
                 write!(f, "S-parameter normalization matrix is singular")
+            }
+            Self::NumericalFailure(message) => {
+                write!(f, "S-parameter normalization solve failed: {message}")
             }
             Self::Aborted => write!(f, "S-parameter conversion was cancelled"),
         }
@@ -88,12 +111,12 @@ impl std::fmt::Display for NetworkError {
 
 impl std::error::Error for NetworkError {}
 
-/// Invert a dense complex matrix by Gauss-Jordan elimination.
+/// Invert a dense complex matrix through certified complex LU solves.
 ///
-/// Returns `None` when the matrix is not square or is numerically singular.
-/// The pivot floor is absolute rather than scaled because the matrices reaching
-/// this function are `I + ZY`, whose entries are already normalized to order
-/// unity by construction.
+/// Returns `None` when the matrix is not square, is singular, or fails for an
+/// input reason that this legacy convenience signature cannot represent. Code
+/// that needs a typed diagnostic should call
+/// [`invert_complex_matrix_with_abort`].
 pub fn invert_complex_matrix(matrix: &[Vec<Complex64>]) -> Option<Vec<Vec<Complex64>>> {
     invert_complex_matrix_with_abort(matrix, &NoAbort)
         .ok()
@@ -113,49 +136,66 @@ pub fn invert_complex_matrix_with_abort(
     if size == 0 || matrix.iter().any(|row| row.len() != size) {
         return Ok(None);
     }
-    let zero = Complex64::new(0.0, 0.0);
-    let one = Complex64::new(1.0, 0.0);
-    let mut augmented = vec![vec![zero; 2 * size]; size];
-    for row in 0..size {
-        augmented[row][..size].copy_from_slice(&matrix[row]);
-        augmented[row][size + row] = one;
+    if abort.is_aborted() {
+        return Err(NetworkError::Aborted);
     }
+    let mut structure = Vec::with_capacity(size);
+    for (row, values) in matrix.iter().enumerate() {
+        for (column, &value) in values.iter().enumerate() {
+            if !value.re.is_finite() || !value.im.is_finite() {
+                return Err(NetworkError::NonFiniteMatrixEntry { row, column });
+            }
+            if row == column || value != Complex64::new(0.0, 0.0) {
+                structure.push((row, column, 0.0));
+            }
+        }
+    }
+
+    let real = StaticMatrix::from_triplets(size, size, &structure)
+        .map_err(|error| NetworkError::NumericalFailure(error.to_string()))?;
+    let mut workspace = ComplexMatrix::from_real_structure(&real);
+    for (row, values) in matrix.iter().enumerate() {
+        for (column, &value) in values.iter().enumerate() {
+            if value != Complex64::new(0.0, 0.0) {
+                workspace
+                    .try_add(row, column, value)
+                    .map_err(|error| NetworkError::NumericalFailure(error.to_string()))?;
+            }
+        }
+    }
+
+    let mut inverse = vec![vec![Complex64::new(0.0, 0.0); size]; size];
+    let mut rhs = vec![Complex64::new(0.0, 0.0); size];
     for column in 0..size {
         if column % ABORT_POLL_STRIDE == 0 && abort.is_aborted() {
             return Err(NetworkError::Aborted);
         }
-        let Some(pivot) = (column..size).max_by(|&lhs, &rhs| {
-            augmented[lhs][column]
-                .norm()
-                .total_cmp(&augmented[rhs][column].norm())
-        }) else {
-            return Ok(None);
+        rhs.fill(Complex64::new(0.0, 0.0));
+        rhs[column] = Complex64::new(1.0, 0.0);
+        let solution = match workspace.solve(&rhs) {
+            Ok(solution) => solution,
+            Err(SolverError::InaccurateSolution(_)) if size <= 64 => {
+                match workspace.solve_dense_extended(&rhs) {
+                    Ok(solution) => solution,
+                    Err(SolverError::SingularMatrix | SolverError::PivotGrowth) => return Ok(None),
+                    Err(error) => {
+                        return Err(NetworkError::NumericalFailure(error.to_string()));
+                    }
+                }
+            }
+            Err(SolverError::SingularMatrix | SolverError::PivotGrowth) => return Ok(None),
+            Err(error) => return Err(NetworkError::NumericalFailure(error.to_string())),
         };
-        if augmented[pivot][column].norm() <= 1e-24 {
-            return Ok(None);
-        }
-        augmented.swap(pivot, column);
-        let pivot_value = augmented[column][column];
-        for value in &mut augmented[column] {
-            *value /= pivot_value;
-        }
-        let pivot_row = augmented[column].clone();
-        for (row, values) in augmented.iter_mut().enumerate() {
-            if row == column {
-                continue;
+        for (row, value) in solution.into_iter().enumerate() {
+            if !value.re.is_finite() || !value.im.is_finite() {
+                return Err(NetworkError::NumericalFailure(
+                    "inverse contains a non-finite value".to_string(),
+                ));
             }
-            let factor = values[column];
-            for index in 0..2 * size {
-                values[index] -= factor * pivot_row[index];
-            }
+            inverse[row][column] = value;
         }
     }
-    Ok(Some(
-        augmented
-            .into_iter()
-            .map(|row| row[size..].to_vec())
-            .collect(),
-    ))
+    Ok(Some(inverse))
 }
 
 /// One column of the scattering matrix, read straight off the port voltages of
@@ -197,9 +237,14 @@ pub fn s_column_from_port_voltages(
             return Err(NetworkError::InvalidReferenceImpedance { port, z0 });
         }
     }
+    for (port, value) in voltages.iter().enumerate() {
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(NetworkError::NonFinitePortVoltage { port });
+        }
+    }
 
     let excited_z0 = reference_impedances[excited];
-    Ok((0..size)
+    let column = (0..size)
         .map(|row| {
             if row == excited {
                 voltages[row] * 2.0 - Complex64::new(1.0, 0.0)
@@ -207,7 +252,17 @@ pub fn s_column_from_port_voltages(
                 voltages[row] * 2.0 * (excited_z0 / reference_impedances[row]).sqrt()
             }
         })
-        .collect())
+        .collect::<Vec<_>>();
+    if let Some(port) = column
+        .iter()
+        .position(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(NetworkError::NumericalFailure(format!(
+            "scattering column overflowed at port {}",
+            port + 1
+        )));
+    }
+    Ok(column)
 }
 
 /// Convert scattering parameters back to an N-port admittance matrix.
@@ -257,24 +312,31 @@ pub fn y_from_s(
         difference[row][row] += one;
     }
 
-    let inverse = invert_complex_matrix(&sum).ok_or(NetworkError::SingularNormalization)?;
+    let inverse = invert_complex_matrix_with_abort(&sum, &NoAbort)?
+        .ok_or(NetworkError::SingularNormalization)?;
     let inverse_scale = reference_impedances
         .iter()
         .map(|z0| 1.0 / z0.sqrt())
         .collect::<Vec<_>>();
 
-    Ok((0..size)
-        .map(|row| {
-            (0..size)
-                .map(|column| {
-                    let product: Complex64 = (0..size)
-                        .map(|k| inverse[row][k] * difference[k][column])
-                        .sum();
-                    product * inverse_scale[row] * inverse_scale[column]
-                })
-                .collect()
-        })
-        .collect())
+    let mut admittance = vec![vec![Complex64::new(0.0, 0.0); size]; size];
+    for row in 0..size {
+        for column in 0..size {
+            let product: Complex64 = (0..size)
+                .map(|k| inverse[row][k] * difference[k][column])
+                .sum();
+            let value = product * inverse_scale[row] * inverse_scale[column];
+            if !value.re.is_finite() || !value.im.is_finite() {
+                return Err(NetworkError::NumericalFailure(format!(
+                    "admittance conversion overflowed at ({}, {})",
+                    row + 1,
+                    column + 1
+                )));
+            }
+            admittance[row][column] = value;
+        }
+    }
+    Ok(admittance)
 }
 
 /// Convert an N-port admittance matrix to scattering parameters.
@@ -335,6 +397,13 @@ pub fn s_from_y_with_abort(
             }
             scattering[row][column] *=
                 (reference_impedances[column] / reference_impedances[row]).sqrt();
+            if !scattering[row][column].re.is_finite() || !scattering[row][column].im.is_finite() {
+                return Err(NetworkError::NumericalFailure(format!(
+                    "scattering conversion overflowed at ({}, {})",
+                    row + 1,
+                    column + 1
+                )));
+            }
         }
     }
     Ok(scattering)
@@ -518,6 +587,24 @@ mod tests {
     }
 
     #[test]
+    fn nonfinite_network_data_is_rejected() {
+        assert_eq!(
+            s_column_from_port_voltages(&[Complex64::new(Value::NAN, 0.0)], 0, &[50.0],),
+            Err(NetworkError::NonFinitePortVoltage { port: 0 })
+        );
+
+        let nonfinite = vec![vec![Complex64::new(Value::NAN, 0.0)]];
+        assert_eq!(
+            s_from_y(&nonfinite, &[50.0]),
+            Err(NetworkError::NonFiniteMatrixEntry { row: 0, column: 0 })
+        );
+        assert_eq!(
+            y_from_s(&nonfinite, &[50.0]),
+            Err(NetworkError::NonFiniteMatrixEntry { row: 0, column: 0 })
+        );
+    }
+
+    #[test]
     fn conversion_is_cancellable_part_way_through() {
         use crate::abort_signal::CountingAbort;
 
@@ -571,5 +658,13 @@ mod tests {
             }
         }
         assert!(invert_complex_matrix(&[]).is_none());
+    }
+
+    #[test]
+    fn inverse_has_no_absolute_pivot_floor() {
+        let tiny = vec![vec![Complex64::new(1.0e-30, 0.0)]];
+        let inverse = invert_complex_matrix(&tiny).expect("scaled 1x1 matrix is nonsingular");
+        assert!((inverse[0][0].re - 1.0e30).abs() <= 1.0e15);
+        assert_eq!(inverse[0][0].im, 0.0);
     }
 }
