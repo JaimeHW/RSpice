@@ -1159,18 +1159,44 @@ impl Waveform {
     fn qualified_sample_interval(&self) -> Result<Value, MeasurementError> {
         let sample_count = self.time.len();
         validate_fft_sample_count(sample_count)?;
-        let duration = self.time[sample_count - 1] - self.time[0];
-        if !duration.is_finite() || duration <= 0.0 {
+        let last_segment = sample_count - 2;
+        let duration = scaled_positive_difference(
+            self.time[sample_count - 1],
+            self.time[0],
+            last_segment,
+            "spectral time span",
+        )
+        .map_err(|error| {
+            MeasurementError::FftError(format!("spectral time-span qualification failed: {error}"))
+        })?;
+        let interval_count = sample_count - 1;
+        let interval_count_value = interval_count as Value;
+        if !interval_count_value.is_finite() || interval_count_value as usize != interval_count {
             return Err(MeasurementError::FftError(format!(
-                "spectral analysis requires a finite positive time span, got {duration}"
+                "spectral interval count {interval_count} cannot be represented exactly"
             )));
         }
-        let interval = duration / (sample_count - 1) as Value;
-        if !interval.is_finite() || interval <= 0.0 {
-            return Err(MeasurementError::FftError(format!(
-                "spectral analysis sample interval is invalid ({interval})"
-            )));
-        }
+        let scaled_interval_count = scaled_positive_value(
+            interval_count_value,
+            last_segment,
+            "spectral interval count",
+        )
+        .map_err(|error| {
+            MeasurementError::FftError(format!(
+                "spectral interval-count qualification failed: {error}"
+            ))
+        })?;
+        let interval = scaled_positive_ratio(
+            duration,
+            scaled_interval_count,
+            last_segment,
+            "spectral sample interval",
+        )
+        .map_err(|error| {
+            MeasurementError::FftError(format!(
+                "spectral sample-interval qualification failed: {error}"
+            ))
+        })?;
         // Permit negligible authored roundoff while bounding the admitted
         // sample-rate error to one part per billion. Timestamp ULPs are
         // qualified separately: a large absolute time origin must not hide
@@ -2283,9 +2309,14 @@ fn value_ulp(value: Value) -> Value {
     if !value.is_finite() {
         return Value::INFINITY;
     }
-    (value.next_up() - value)
-        .abs()
-        .max((value - value.next_down()).abs())
+    let upward = (value.next_up() - value).abs();
+    let downward = (value - value.next_down()).abs();
+    match (upward.is_finite(), downward.is_finite()) {
+        (true, true) => upward.max(downward),
+        (true, false) => upward,
+        (false, true) => downward,
+        (false, false) => Value::INFINITY,
+    }
 }
 
 fn normalized_mean(values: &[Value], scale: Value) -> Result<Value, MeasurementError> {

@@ -242,7 +242,86 @@ fn fft_accepts_long_mathematically_uniform_decimal_grid() {
 }
 
 #[test]
-fn fft_rejects_finite_increasing_timestamps_with_overflowing_span() {
+fn fft_accepts_a_uniform_zero_grid_across_the_full_finite_time_range() {
+    let quarter = f64::MAX / 4.0;
+    let time = [
+        -f64::MAX,
+        -3.0 * quarter,
+        -2.0 * quarter,
+        -quarter,
+        0.0,
+        quarter,
+        2.0 * quarter,
+        3.0 * quarter,
+        f64::MAX,
+    ];
+    assert!(time.iter().all(|timestamp| timestamp.is_finite()));
+    assert!(time.windows(2).all(|pair| pair[1] > pair[0]));
+    assert!((time[time.len() - 1] - time[0]).is_infinite());
+    let interval_ulp = quarter.next_up() - quarter;
+    for pair in time.windows(2) {
+        let interval = pair[1] - pair[0];
+        assert!(interval.is_finite() && interval > 0.0);
+        assert!(
+            (interval - quarter).abs() <= 2.0 * interval_ulp,
+            "stored quarter-span interval is not uniformly rounded: {interval:e}"
+        );
+    }
+
+    let waveform = Waveform::new(&time, &[0.0; 9]).expect("extreme uniform grid is valid");
+    let (frequencies, magnitudes_db) = waveform
+        .fft()
+        .expect("a scaled full-range uniform grid qualifies");
+    assert_eq!(frequencies.len(), 5);
+    assert!(frequencies.iter().all(|frequency| frequency.is_finite()));
+    assert!(frequencies.windows(2).all(|pair| pair[1] > pair[0]));
+    assert!(
+        magnitudes_db
+            .iter()
+            .all(|magnitude| *magnitude == f64::NEG_INFINITY)
+    );
+    assert_eq!(
+        waveform
+            .dominant_frequency()
+            .expect("the same extreme grid qualifies for dominant-frequency analysis"),
+        None
+    );
+}
+
+#[test]
+fn fft_accepts_a_uniform_grid_ending_at_maximum_finite_time() {
+    const SAMPLE_COUNT: usize = 8;
+    let interval = 2.0_f64.powi(1001);
+    let time: Vec<_> = (0..SAMPLE_COUNT)
+        .map(|index| f64::MAX - (SAMPLE_COUNT - 1 - index) as f64 * interval)
+        .collect();
+    assert_eq!(time.last().copied(), Some(f64::MAX));
+    assert!(time.iter().all(|timestamp| timestamp.is_finite()));
+    assert!(
+        time.windows(2)
+            .all(|pair| pair[1] > pair[0] && pair[1] - pair[0] == interval)
+    );
+    let maximum_finite_ulp = f64::MAX - f64::MAX.next_down();
+    assert!(maximum_finite_ulp.is_finite() && maximum_finite_ulp > 0.0);
+    assert!(maximum_finite_ulp <= 1.0e-9 * interval);
+
+    let waveform =
+        Waveform::new(&time, &[0.0; SAMPLE_COUNT]).expect("maximum-endpoint uniform grid is valid");
+    let (frequencies, magnitudes_db) = waveform
+        .fft()
+        .expect("finite one-sided endpoint resolution qualifies");
+    assert!(frequencies.iter().all(|frequency| frequency.is_finite()));
+    assert!(frequencies.windows(2).all(|pair| pair[1] > pair[0]));
+    assert!(
+        magnitudes_db
+            .iter()
+            .all(|magnitude| *magnitude == f64::NEG_INFINITY)
+    );
+    assert_eq!(waveform.dominant_frequency().expect("grid qualifies"), None);
+}
+
+#[test]
+fn fft_rejects_nonuniform_extreme_grid_even_when_raw_span_overflows() {
     let time = [
         -f64::MAX,
         -1.5e308,
@@ -257,13 +336,20 @@ fn fft_rejects_finite_increasing_timestamps_with_overflowing_span() {
     assert!(time.iter().all(|timestamp| timestamp.is_finite()));
     assert!(time.windows(2).all(|pair| pair[1] > pair[0]));
     assert!((time[time.len() - 1] - time[0]).is_infinite());
+    let intervals: Vec<_> = time.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert!(intervals.iter().all(|interval| interval.is_finite()));
+    assert!(intervals.iter().copied().fold(0.0, f64::max) > 1.0e300);
+    assert_eq!(intervals.iter().copied().fold(f64::INFINITY, f64::min), 1.0);
     let values = [0.0; 9];
     let waveform = Waveform::new(&time, &values)
         .expect("finite strictly increasing endpoints form a public waveform");
 
+    let error = waveform
+        .fft()
+        .expect_err("materially nonuniform extreme grid must fail qualification");
     assert!(
-        waveform.fft().is_err(),
-        "overflowing total duration must fail FFT qualification"
+        error.to_string().contains("uniform"),
+        "failure must identify nonuniformity rather than the scalable span: {error}"
     );
 }
 
