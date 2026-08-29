@@ -111,7 +111,10 @@ pub use result::{
 };
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
-pub use transient::{TransientCheckpoint, TransientStartupMode, netlist_fingerprint};
+pub use transient::{
+    DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
+    TransientStartupMode, netlist_fingerprint,
+};
 pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 
 pub(crate) use source_values::extract_dc_value_with_limits;

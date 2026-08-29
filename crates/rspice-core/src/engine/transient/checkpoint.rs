@@ -15,10 +15,11 @@
 //! Distributed LTRA/TXL and coupled-line convolution runtimes fail closed until
 //! their complete native state has a versioned checkpoint contract.
 //!
-//! The on-disk format is a versioned, line-oriented text format using
-//! Rust's shortest-round-trip float formatting, so save/load reproduces
-//! every `f64` bit-exactly with no serialization dependencies (core stays
-//! lean for the wasm build).
+//! The canonical checkpoint representation is a versioned, line-oriented
+//! text format using Rust's shortest-round-trip float formatting, so every
+//! `f64` survives a save/load cycle bit-exactly. A portable packed encoding
+//! wraps a zlib-compressed copy of that canonical text in a versioned binary
+//! envelope with declared lengths and a BLAKE3 integrity seal.
 
 use crate::Value;
 use crate::circuit::CircuitData;
@@ -49,6 +50,26 @@ use super::TransientStartupMode;
 /// remain readable, but fail closed for these capabilities because inventing
 /// delayed waves or authorizing a changed trajectory would be unsafe.
 const FORMAT_VERSION: u32 = 14;
+
+const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
+const PACKED_ENVELOPE_VERSION: u32 = 1;
+const PACKED_COMPRESSION_ZLIB: u32 = 1;
+const PACKED_HEADER_BYTES: usize = PACKED_MAGIC.len() + 4 + 4 + 8 + 8 + 32;
+
+/// Default encoded and decoded checkpoint budget used by [`TransientCheckpoint::load`].
+///
+/// Callers with a tighter or deliberately larger resource policy should use
+/// [`TransientCheckpoint::load_with_limit`] instead.
+pub const DEFAULT_MAX_CHECKPOINT_BYTES: usize = 256 * 1024 * 1024;
+
+/// Portable checkpoint representation selected by save and in-memory APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientCheckpointEncoding {
+    /// Canonical, versioned UTF-8 text. This is the legacy/default core save format.
+    Unpacked,
+    /// Versioned binary envelope containing zlib-compressed canonical text.
+    Packed,
+}
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -2801,19 +2822,313 @@ impl TransientCheckpoint {
         Ok(checkpoint)
     }
 
-    /// Write the checkpoint to a file.
-    pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
+    /// Serialize this checkpoint in the selected portable representation.
+    pub fn to_bytes(&self, encoding: TransientCheckpointEncoding) -> Result<Vec<u8>, String> {
         self.validate_numeric_state()?;
-        atomic_write_checkpoint(path, self.to_text().as_bytes())
+        let canonical = self.to_text().into_bytes();
+        match encoding {
+            TransientCheckpointEncoding::Unpacked => Ok(canonical),
+            TransientCheckpointEncoding::Packed => encode_packed_checkpoint(&canonical),
+        }
+    }
+
+    /// Parse an unpacked or packed checkpoint, selected by its authenticated header.
+    ///
+    /// The default limit matches the production resource-policy default. Use
+    /// [`Self::from_bytes_with_limit`] when the embedding application owns a
+    /// different resource budget.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        Self::from_bytes_with_limit(bytes, DEFAULT_MAX_CHECKPOINT_BYTES)
+    }
+
+    /// Parse an unpacked or packed checkpoint without allowing the canonical
+    /// decoded representation to exceed `max_unpacked_bytes`.
+    pub fn from_bytes_with_limit(bytes: &[u8], max_unpacked_bytes: usize) -> Result<Self, String> {
+        let encoding = if bytes.starts_with(PACKED_MAGIC) {
+            TransientCheckpointEncoding::Packed
+        } else {
+            TransientCheckpointEncoding::Unpacked
+        };
+        Self::from_bytes_with_encoding(bytes, encoding, max_unpacked_bytes)
+    }
+
+    /// Parse a checkpoint using an explicitly required representation.
+    ///
+    /// This is useful at trust boundaries where the caller has authenticated
+    /// representation metadata separately. Normal file loading should use the
+    /// auto-detecting [`Self::load`] or [`Self::load_with_limit`] APIs.
+    pub fn from_bytes_with_encoding(
+        bytes: &[u8],
+        encoding: TransientCheckpointEncoding,
+        max_unpacked_bytes: usize,
+    ) -> Result<Self, String> {
+        let canonical = match encoding {
+            TransientCheckpointEncoding::Unpacked => {
+                if bytes.starts_with(PACKED_MAGIC) {
+                    return Err(
+                        "packed checkpoint supplied where unpacked text was required".to_string(),
+                    );
+                }
+                if bytes.len() > max_unpacked_bytes {
+                    return Err(format!(
+                        "unpacked checkpoint length {} exceeds the configured limit of {max_unpacked_bytes} bytes",
+                        bytes.len()
+                    ));
+                }
+                bytes
+            }
+            TransientCheckpointEncoding::Packed => {
+                return decode_packed_checkpoint(bytes, max_unpacked_bytes)
+                    .and_then(|canonical| parse_canonical_checkpoint(&canonical));
+            }
+        };
+        parse_canonical_checkpoint(canonical)
+    }
+
+    /// Write the checkpoint as canonical unpacked text.
+    ///
+    /// This remains the default for the longstanding core and `--checkpoint`
+    /// APIs. Authored `.OPTIONS RESTART JOB` selects its encoding explicitly.
+    pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
+        self.save_with_encoding(path, TransientCheckpointEncoding::Unpacked)
+    }
+
+    /// Atomically write the checkpoint in the selected representation.
+    pub fn save_with_encoding(
+        &self,
+        path: &std::path::Path,
+        encoding: TransientCheckpointEncoding,
+    ) -> Result<(), String> {
+        let bytes = self.to_bytes(encoding)?;
+        atomic_write_checkpoint(path, &bytes)
             .map_err(|e| format!("cannot write checkpoint '{}': {e}", path.display()))
     }
 
-    /// Read a checkpoint from a file.
+    /// Read and auto-detect a checkpoint using the production default byte budget.
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read checkpoint '{}': {e}", path.display()))?;
-        Self::from_text(&text)
+        Self::load_with_limit(
+            path,
+            DEFAULT_MAX_CHECKPOINT_BYTES,
+            DEFAULT_MAX_CHECKPOINT_BYTES,
+        )
     }
+
+    /// Read and auto-detect a checkpoint with independent encoded and decoded limits.
+    pub fn load_with_limit(
+        path: &std::path::Path,
+        max_encoded_bytes: usize,
+        max_unpacked_bytes: usize,
+    ) -> Result<Self, String> {
+        let bytes = read_checkpoint_file_limited(path, max_encoded_bytes)?;
+        Self::from_bytes_with_limit(&bytes, max_unpacked_bytes)
+    }
+}
+
+fn parse_canonical_checkpoint(canonical: &[u8]) -> Result<TransientCheckpoint, String> {
+    let text = std::str::from_utf8(canonical)
+        .map_err(|error| format!("checkpoint is not valid UTF-8 text: {error}"))?;
+    TransientCheckpoint::from_text(text)
+}
+
+fn encode_packed_checkpoint(canonical: &[u8]) -> Result<Vec<u8>, String> {
+    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(canonical, 6);
+    let canonical_len = u64::try_from(canonical.len())
+        .map_err(|_| "checkpoint text length cannot be represented in the packed format")?;
+    let compressed_len = u64::try_from(compressed.len())
+        .map_err(|_| "compressed checkpoint length cannot be represented in the packed format")?;
+    let total_len = PACKED_HEADER_BYTES
+        .checked_add(compressed.len())
+        .ok_or_else(|| "packed checkpoint length overflow".to_string())?;
+    let mut packed = Vec::new();
+    packed.try_reserve_exact(total_len).map_err(|error| {
+        format!("cannot allocate {total_len} bytes for packed checkpoint: {error}")
+    })?;
+    packed.extend_from_slice(PACKED_MAGIC);
+    packed.extend_from_slice(&PACKED_ENVELOPE_VERSION.to_le_bytes());
+    packed.extend_from_slice(&PACKED_COMPRESSION_ZLIB.to_le_bytes());
+    packed.extend_from_slice(&canonical_len.to_le_bytes());
+    packed.extend_from_slice(&compressed_len.to_le_bytes());
+    packed.extend_from_slice(blake3::hash(canonical).as_bytes());
+    packed.extend_from_slice(&compressed);
+    debug_assert_eq!(packed.len(), total_len);
+    Ok(packed)
+}
+
+fn decode_packed_checkpoint(packed: &[u8], max_unpacked_bytes: usize) -> Result<Vec<u8>, String> {
+    if packed.len() < PACKED_HEADER_BYTES {
+        return Err(format!(
+            "truncated packed checkpoint header: expected {PACKED_HEADER_BYTES} bytes, found {}",
+            packed.len()
+        ));
+    }
+    if &packed[..PACKED_MAGIC.len()] != PACKED_MAGIC {
+        return Err("packed checkpoint magic is missing or corrupt".to_string());
+    }
+
+    let mut offset = PACKED_MAGIC.len();
+    let version = read_packed_u32(packed, &mut offset)?;
+    if version != PACKED_ENVELOPE_VERSION {
+        return Err(format!(
+            "unsupported packed checkpoint envelope version {version}; expected {PACKED_ENVELOPE_VERSION}"
+        ));
+    }
+    let compression = read_packed_u32(packed, &mut offset)?;
+    if compression != PACKED_COMPRESSION_ZLIB {
+        return Err(format!(
+            "unsupported packed checkpoint compression method {compression}"
+        ));
+    }
+    let declared_unpacked = usize::try_from(read_packed_u64(packed, &mut offset)?)
+        .map_err(|_| "packed checkpoint unpacked length exceeds this platform".to_string())?;
+    let declared_compressed = usize::try_from(read_packed_u64(packed, &mut offset)?)
+        .map_err(|_| "packed checkpoint payload length exceeds this platform".to_string())?;
+    if declared_unpacked == 0 {
+        return Err("packed checkpoint declares an empty canonical payload".to_string());
+    }
+    if declared_unpacked > max_unpacked_bytes {
+        return Err(format!(
+            "packed checkpoint declares {declared_unpacked} unpacked bytes, exceeding the configured limit of {max_unpacked_bytes} bytes"
+        ));
+    }
+
+    let digest_end = offset
+        .checked_add(32)
+        .ok_or_else(|| "packed checkpoint header length overflow".to_string())?;
+    let expected_digest: [u8; 32] = packed[offset..digest_end]
+        .try_into()
+        .map_err(|_| "truncated packed checkpoint integrity seal".to_string())?;
+    offset = digest_end;
+    debug_assert_eq!(offset, PACKED_HEADER_BYTES);
+
+    let expected_total = PACKED_HEADER_BYTES
+        .checked_add(declared_compressed)
+        .ok_or_else(|| "packed checkpoint payload length overflow".to_string())?;
+    match packed.len().cmp(&expected_total) {
+        std::cmp::Ordering::Less => {
+            return Err(format!(
+                "truncated packed checkpoint payload: declared {declared_compressed} bytes, found {}",
+                packed.len() - PACKED_HEADER_BYTES
+            ));
+        }
+        std::cmp::Ordering::Greater => {
+            return Err(format!(
+                "packed checkpoint has {} trailing bytes after its declared payload",
+                packed.len() - expected_total
+            ));
+        }
+        std::cmp::Ordering::Equal => {}
+    }
+    let payload = &packed[PACKED_HEADER_BYTES..];
+
+    let mut canonical = Vec::new();
+    canonical
+        .try_reserve_exact(declared_unpacked)
+        .map_err(|error| {
+            format!("cannot allocate {declared_unpacked} bytes for unpacked checkpoint: {error}")
+        })?;
+    canonical.resize(declared_unpacked, 0);
+    let mut inflater =
+        miniz_oxide::inflate::stream::InflateState::new_boxed(miniz_oxide::DataFormat::Zlib);
+    let result = miniz_oxide::inflate::stream::inflate(
+        &mut inflater,
+        payload,
+        &mut canonical,
+        miniz_oxide::MZFlush::Finish,
+    );
+    if result.status != Ok(miniz_oxide::MZStatus::StreamEnd) {
+        return Err(format!(
+            "packed checkpoint payload is not a complete valid zlib stream: {:?}",
+            result.status
+        ));
+    }
+    if result.bytes_consumed != payload.len() {
+        return Err(format!(
+            "packed checkpoint compressed stream has {} trailing bytes",
+            payload.len() - result.bytes_consumed
+        ));
+    }
+    if result.bytes_written != declared_unpacked {
+        return Err(format!(
+            "packed checkpoint unpacked length mismatch: declared {declared_unpacked}, decoded {}",
+            result.bytes_written
+        ));
+    }
+    if blake3::hash(&canonical).as_bytes() != &expected_digest {
+        return Err("packed checkpoint BLAKE3 integrity check failed".to_string());
+    }
+    Ok(canonical)
+}
+
+fn read_packed_u32(bytes: &[u8], offset: &mut usize) -> Result<u32, String> {
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| "packed checkpoint header offset overflow".to_string())?;
+    let value = u32::from_le_bytes(
+        bytes
+            .get(*offset..end)
+            .ok_or_else(|| "truncated packed checkpoint header".to_string())?
+            .try_into()
+            .map_err(|_| "invalid packed checkpoint u32 field".to_string())?,
+    );
+    *offset = end;
+    Ok(value)
+}
+
+fn read_packed_u64(bytes: &[u8], offset: &mut usize) -> Result<u64, String> {
+    let end = offset
+        .checked_add(8)
+        .ok_or_else(|| "packed checkpoint header offset overflow".to_string())?;
+    let value = u64::from_le_bytes(
+        bytes
+            .get(*offset..end)
+            .ok_or_else(|| "truncated packed checkpoint header".to_string())?
+            .try_into()
+            .map_err(|_| "invalid packed checkpoint u64 field".to_string())?,
+    );
+    *offset = end;
+    Ok(value)
+}
+
+fn read_checkpoint_file_limited(
+    path: &std::path::Path,
+    max_encoded_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("cannot read checkpoint '{}': {error}", path.display()))?;
+    let metadata_len = usize::try_from(
+        file.metadata()
+            .map_err(|error| format!("cannot inspect checkpoint '{}': {error}", path.display()))?
+            .len(),
+    )
+    .unwrap_or(usize::MAX);
+    if metadata_len > max_encoded_bytes {
+        return Err(format!(
+            "checkpoint '{}' is {metadata_len} bytes, exceeding the configured encoded limit of {max_encoded_bytes} bytes",
+            path.display()
+        ));
+    }
+
+    let read_limit = u64::try_from(max_encoded_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut reader = file.take(read_limit);
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(metadata_len).map_err(|error| {
+        format!(
+            "cannot allocate {metadata_len} bytes to read checkpoint '{}': {error}",
+            path.display()
+        )
+    })?;
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read checkpoint '{}': {error}", path.display()))?;
+    if bytes.len() > max_encoded_bytes {
+        return Err(format!(
+            "checkpoint '{}' grew beyond the configured encoded limit of {max_encoded_bytes} bytes while it was read",
+            path.display()
+        ));
+    }
+    Ok(bytes)
 }
 
 struct TemporaryCheckpoint {

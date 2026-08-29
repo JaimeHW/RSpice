@@ -63,6 +63,12 @@ fn xyce_bug_1284_job_writes_20ns_checkpoint_and_file_resumes_to_50ns() {
             "missing restart checkpoint {name}"
         );
     }
+    assert!(
+        std::fs::read(dir.join("trans_test2e-08"))
+            .expect("read default-encoded authored checkpoint")
+            .starts_with(b"RSPICE-CPACK\0\0\0\0"),
+        "authored RESTART JOB must default to packed persistence"
+    );
 
     let resumed_csv = dir.join("resumed.csv");
     let output = run_rspice(&[
@@ -141,20 +147,122 @@ fn xyce_restart_rejects_namespace_escape_and_cli_checkpoint_conflict() {
 }
 
 #[test]
-fn xyce_restart_diagnoses_authored_unsupported_encoding_control() {
+fn xyce_restart_pack_selects_distinct_encodings_and_file_auto_detects_both() {
     let dir = test_dir("restart_pack");
-    let deck = dir.join("pack.cir");
+    let packed_deck = dir.join("packed.cir");
     std::fs::write(
-        &deck,
-        "* unsupported Xyce encoding selection\nV1 n 0 1\nR1 n 0 1k\n.TRAN 1n 2n\n.OPTIONS RESTART JOB=safe INITIAL_INTERVAL=1n PACK=1\n.END\n",
+        &packed_deck,
+        "restart encoding contract\n\
+         V1 in 0 PULSE(0 1 0 100p 100p 2n 5n)\n\
+         R1 in out 1k\n\
+         C1 out 0 1p\n\
+         .TRAN 50p 2n\n\
+         .OPTIONS RESTART JOB=packed INITIAL_INTERVAL=2n PACK=1\n\
+         .END\n",
     )
-    .expect("write PACK restart deck");
-    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    .expect("write packed restart deck");
+    let unpacked_deck = dir.join("unpacked.cir");
+    std::fs::write(
+        &unpacked_deck,
+        "restart encoding contract\n\
+         V1 in 0 PULSE(0 1 0 100p 100p 2n 5n)\n\
+         R1 in out 1k\n\
+         C1 out 0 1p\n\
+         .TRAN 50p 2n\n\
+         .OPTIONS RESTART JOB=unpacked INITIAL_INTERVAL=2n PACK=0\n\
+         .END\n",
+    )
+    .expect("write unpacked restart deck");
+
+    for deck in [&packed_deck, &unpacked_deck] {
+        let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+        assert!(
+            output.status.success(),
+            "checkpoint writer failed for {}: {}",
+            deck.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let packed_path = dir.join("packed2e-09");
+    let unpacked_path = dir.join("unpacked2e-09");
+    let packed_bytes = std::fs::read(&packed_path).expect("read packed checkpoint");
+    let unpacked_bytes = std::fs::read(&unpacked_path).expect("read unpacked checkpoint");
+    assert!(packed_bytes.starts_with(b"RSPICE-CPACK\0\0\0\0"));
+    assert!(unpacked_bytes.starts_with(b"RSPICE-CHECKPOINT "));
+    assert_ne!(packed_bytes, unpacked_bytes);
+    assert!(
+        std::fs::read_dir(&dir).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".rspice-checkpoint.tmp.")),
+        "atomic checkpoint temporaries must not remain after successful writes"
+    );
+
+    // FILE always auto-detects the envelope. Deliberately author the opposite
+    // PACK value to prove it is not used as a decoder selector.
+    let packed_resume = dir.join("packed_resume.cir");
+    std::fs::write(
+        &packed_resume,
+        "restart encoding contract\n\
+         V1 in 0 PULSE(0 1 0 100p 100p 2n 5n)\n\
+         R1 in out 1k\n\
+         C1 out 0 1p\n\
+         .TRAN 50p 4n\n\
+         .OPTIONS RESTART FILE=packed2e-09 PACK=0\n\
+         .END\n",
+    )
+    .expect("write packed resume deck");
+    let unpacked_resume = dir.join("unpacked_resume.cir");
+    std::fs::write(
+        &unpacked_resume,
+        "restart encoding contract\n\
+         V1 in 0 PULSE(0 1 0 100p 100p 2n 5n)\n\
+         R1 in out 1k\n\
+         C1 out 0 1p\n\
+         .TRAN 50p 4n\n\
+         .OPTIONS RESTART FILE=unpacked2e-09 PACK=1\n\
+         .END\n",
+    )
+    .expect("write unpacked resume deck");
+
+    let packed_csv = dir.join("packed.csv");
+    let unpacked_csv = dir.join("unpacked.csv");
+    for (deck, csv) in [
+        (&packed_resume, &packed_csv),
+        (&unpacked_resume, &unpacked_csv),
+    ] {
+        let output = run_rspice(&[
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            csv.to_str().unwrap(),
+            "-f",
+            "csv",
+        ]);
+        assert!(
+            output.status.success(),
+            "checkpoint reader failed for {}: {}",
+            deck.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let packed_final = last_vout(&packed_csv);
+    let unpacked_final = last_vout(&unpacked_csv);
+    assert_eq!(packed_final.0.to_bits(), unpacked_final.0.to_bits());
+    assert_eq!(packed_final.1.to_bits(), unpacked_final.1.to_bits());
+
+    let mut corrupt = packed_bytes;
+    corrupt[40] ^= 0x01; // BLAKE3 seal, outside the compressed payload.
+    std::fs::write(&packed_path, corrupt).expect("corrupt packed integrity seal");
+    let output = run_rspice(&["--quiet", "run", packed_resume.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("PACK") && stderr.contains("does not read or write"),
-        "unsupported authored restart encoding must not be ignored: {stderr}"
+        stderr.contains("BLAKE3 integrity check failed"),
+        "corrupt authored checkpoint must fail closed: {stderr}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -206,6 +314,34 @@ fn checkpoint_resume_matches_uninterrupted_run() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(state.exists(), "checkpoint file must be written");
+
+    let checkpoint_bytes = usize::try_from(
+        std::fs::metadata(&state)
+            .expect("checkpoint metadata")
+            .len(),
+    )
+    .expect("checkpoint length fits usize");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .env(
+            "RSPICE_MAX_EXTERNAL_DATA_BYTES",
+            checkpoint_bytes.saturating_sub(1).to_string(),
+        )
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "--resume",
+            state.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run resource-limited checkpoint resume");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("configured encoded limit")
+            && stderr.contains(&checkpoint_bytes.to_string()),
+        "--resume must enforce configured external-data bytes: {stderr}"
+    );
 
     let resumed = dir.join("resumed.csv");
     let output = run_rspice(&[

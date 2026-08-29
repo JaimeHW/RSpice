@@ -510,13 +510,16 @@ pub(super) fn run_transient(
         // checkpointing). The core validates the netlist fingerprint, so a
         // checkpoint can never silently continue a different circuit.
         let run = if let Some(ref resume_path) = ctx.args.resume {
-            let checkpoint =
-                rspice_core::engine::TransientCheckpoint::load(resume_path).map_err(|e| {
-                    CliError::SimulationError {
-                        message: format!("cannot resume from {}: {e}", resume_path.display()),
-                        analysis: Some("Transient".to_string()),
-                    }
-                })?;
+            let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
+            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit(
+                resume_path,
+                checkpoint_limit,
+                checkpoint_limit,
+            )
+            .map_err(|e| CliError::SimulationError {
+                message: format!("cannot resume from {}: {e}", resume_path.display()),
+                analysis: Some("Transient".to_string()),
+            })?;
             if checkpoint.startup_mode() != Some(startup_mode) {
                 return Err(CliError::SimulationError {
                     message: format!(
@@ -762,6 +765,11 @@ fn run_authored_restart(
             // expensive simulation. Xyce may intentionally skip nominal
             // files when one accepted step crosses several cadence points.
             validate_restart_checkpoint_names(job, &schedule)?;
+            let checkpoint_encoding = if restart.pack.unwrap_or(true) {
+                rspice_core::engine::TransientCheckpointEncoding::Packed
+            } else {
+                rspice_core::engine::TransientCheckpointEncoding::Unpacked
+            };
             let (result, checkpoints) = ctx
                 .engine
                 .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
@@ -790,12 +798,15 @@ fn run_authored_restart(
                 previous_nominal = Some(nominal_time);
                 let name = format!("{job}{}", xyce_restart_time_suffix(nominal_time));
                 let path = safe_restart_write_path(&parent, &name)?;
-                scheduled.checkpoint.save(&path).map_err(|error| {
-                    restart_cli_error(format!(
-                        "cannot save .OPTIONS RESTART checkpoint {}: {error}",
-                        path.display()
-                    ))
-                })?;
+                scheduled
+                    .checkpoint
+                    .save_with_encoding(&path, checkpoint_encoding)
+                    .map_err(|error| {
+                        restart_cli_error(format!(
+                            "cannot save .OPTIONS RESTART checkpoint {}: {error}",
+                            path.display()
+                        ))
+                    })?;
                 if !ctx.quiet {
                     println!(
                         "  Restart checkpoint saved (nominal t={nominal_time:.6e}s, accepted t={:.6e}s): {}",
@@ -814,13 +825,18 @@ fn run_authored_restart(
             }
             let parent = restart_namespace_parent(&ctx.args.input)?;
             let path = safe_restart_read_path(&parent, file)?;
-            let checkpoint =
-                rspice_core::engine::TransientCheckpoint::load(&path).map_err(|error| {
-                    restart_cli_error(format!(
-                        "cannot load .OPTIONS RESTART checkpoint {}: {error}",
-                        path.display()
-                    ))
-                })?;
+            let checkpoint_limit = ctx.engine.config().resource_limits.max_external_data_bytes;
+            let checkpoint = rspice_core::engine::TransientCheckpoint::load_with_limit(
+                &path,
+                checkpoint_limit,
+                checkpoint_limit,
+            )
+            .map_err(|error| {
+                restart_cli_error(format!(
+                    "cannot load .OPTIONS RESTART checkpoint {}: {error}",
+                    path.display()
+                ))
+            })?;
             ctx.engine
                 .run_tran_restart_resume_with_abort(
                     ctx.netlist,
@@ -841,11 +857,6 @@ fn run_authored_restart(
 fn validate_supported_restart_options(
     restart: &rspice_core::netlist::XyceRestartOptions,
 ) -> Result<(), CliError> {
-    if restart.pack.is_some() {
-        return Err(restart_cli_error(
-            ".OPTIONS RESTART PACK selects Xyce's packed restart-file encoding, which RSpice does not read or write",
-        ));
-    }
     if restart.print_timeint_options.is_some() {
         return Err(restart_cli_error(
             ".OPTIONS RESTART PRINT_TIMEINT_OPTIONS is not supported; RSpice validates the saved integration configuration instead of importing Xyce time-integrator options",

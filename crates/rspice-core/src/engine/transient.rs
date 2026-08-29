@@ -300,7 +300,10 @@ mod truncation;
 pub(self) use truncation::NgspiceChargeTruncationContext;
 mod vbic;
 
-pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
+pub use checkpoint::{
+    DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
+    netlist_fingerprint,
+};
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };

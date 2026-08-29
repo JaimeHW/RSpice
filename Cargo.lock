@@ -5172,6 +5172,7 @@ dependencies = [
  "faer",
  "libm",
  "log",
+ "miniz_oxide",
  "nom",
  "num-complex",
  "portable-atomic",
