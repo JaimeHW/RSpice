@@ -2,7 +2,7 @@
 
 use crate::config::DampingStrategy;
 use crate::netlist::lexer::Token;
-use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
+use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate, XyceHbTimeDomainMode};
 use crate::numerics::integration::{TransientErrorControl, TransientLteReference};
 use crate::solver::RealSolverBackend;
 
@@ -1649,6 +1649,21 @@ pub(super) fn parse_options_command(
                 options.hb_save_ic_data =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
+            (Some("HBINT"), "TAHB") => {
+                let value = expect_value(stream, line_num, params)?;
+                let mode = parse_usize_option("HBINT.TAHB", value, line_num)?;
+                options.hb_time_domain_mode = Some(match mode {
+                    0 => XyceHbTimeDomainMode::Direct,
+                    1 => XyceHbTimeDomainMode::TransientAssisted,
+                    2 => XyceHbTimeDomainMode::DcOperatingPoint,
+                    _ => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!("HBINT.TAHB must be one of 0, 1, or 2, found {mode}"),
+                        });
+                    }
+                });
+            }
             (Some("HBINT"), _) => {
                 let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
                 ignore_unknown_option(
@@ -1819,6 +1834,29 @@ pub(super) fn parse_options_command(
                     });
                 }
                 options.nonlin_transient_maxstep = Some(value);
+            }
+            (Some("NONLIN-HB"), "MAXSTEP") => {
+                let value = expect_value(stream, line_num, params)?;
+                let value = parse_usize_option("NONLIN-HB.MAXSTEP", value, line_num)?;
+                if value == 0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "NONLIN-HB.MAXSTEP must be at least 1".to_string(),
+                    });
+                }
+                options.nonlin_hb_maxstep = Some(value);
+            }
+            (Some("NONLIN-HB"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
             }
             (Some("NONLIN-TRAN"), "ENFORCEDEVICECONV" | "ENFORCE_DEVICE_CONV")
             | (Some("NONLIN-TRANSIENT"), "ENFORCEDEVICECONV" | "ENFORCE_DEVICE_CONV") => {
@@ -2420,6 +2458,7 @@ pub(super) fn option_package_key_is_known(key_upper: &str) -> bool {
             | "NONLIN"
             | "NONLIN-TRAN"
             | "NONLIN-TRANSIENT"
+            | "NONLIN-HB"
             | "NONLIN-CONTINUATION"
             | "LOCA"
             | "OUTPUT"
@@ -6541,7 +6580,8 @@ mod tests {
              V1 1 0 SIN(0 1 100k)\n\
              R1 1 0 1k\n\
              .hb 100k\n\
-             .options hbint numfreq=5 saveicdata=1\n\
+             .options hbint numfreq=5 saveicdata=1 tahb=0\n\
+             .options nonlin-hb maxstep=2\n\
              .options linsol-hb prec_type=block_jacobi\n\
              .end\n",
         )
@@ -6549,6 +6589,11 @@ mod tests {
 
         assert_eq!(netlist.options.hb_num_frequencies, vec![5]);
         assert_eq!(netlist.options.hb_save_ic_data, Some(true));
+        assert_eq!(
+            netlist.options.hb_time_domain_mode,
+            Some(crate::netlist::XyceHbTimeDomainMode::Direct)
+        );
+        assert_eq!(netlist.options.nonlin_hb_maxstep, Some(2));
         assert_eq!(
             netlist.options.linsol_hb_preconditioner,
             Some(crate::netlist::XyceHbPreconditioner::BlockJacobi)
@@ -6568,6 +6613,11 @@ mod tests {
         };
         merged.merge(&netlist.options);
         assert_eq!(merged.hb_save_ic_data, Some(true));
+        assert_eq!(
+            merged.hb_time_domain_mode,
+            Some(crate::netlist::XyceHbTimeDomainMode::Direct)
+        );
+        assert_eq!(merged.nonlin_hb_maxstep, Some(2));
         assert_eq!(
             merged.linsol_hb_preconditioner,
             Some(crate::netlist::XyceHbPreconditioner::BlockJacobi)
@@ -6590,6 +6640,46 @@ mod tests {
             error.to_string().contains("expected BLOCK_JACOBI"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn harmonic_balance_tahb_and_nonlinear_budget_reject_malformed_values() {
+        for (package, option) in [
+            ("HBINT", "TAHB=-1"),
+            ("HBINT", "TAHB=1.5"),
+            ("HBINT", "TAHB=3"),
+            ("NONLIN-HB", "MAXSTEP=0"),
+            ("NONLIN-HB", "MAXSTEP=-1"),
+            ("NONLIN-HB", "MAXSTEP=2.5"),
+        ] {
+            let deck = format!(
+                "invalid typed HB option\nV1 1 0 0\nR1 1 0 1k\n.hb 1k\n.options {package} {option}\n.end\n"
+            );
+            assert!(
+                Netlist::parse(&deck).is_err(),
+                "{package} {option} must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn harmonic_balance_typed_modes_and_budget_merge_last_authored_values() {
+        let mut merged = crate::netlist::SimulationOptions {
+            hb_time_domain_mode: Some(crate::netlist::XyceHbTimeDomainMode::TransientAssisted),
+            nonlin_hb_maxstep: Some(17),
+            ..Default::default()
+        };
+        merged.merge(&crate::netlist::SimulationOptions {
+            hb_time_domain_mode: Some(crate::netlist::XyceHbTimeDomainMode::DcOperatingPoint),
+            nonlin_hb_maxstep: Some(2),
+            ..Default::default()
+        });
+
+        assert_eq!(
+            merged.hb_time_domain_mode,
+            Some(crate::netlist::XyceHbTimeDomainMode::DcOperatingPoint)
+        );
+        assert_eq!(merged.nonlin_hb_maxstep, Some(2));
     }
 
     #[test]

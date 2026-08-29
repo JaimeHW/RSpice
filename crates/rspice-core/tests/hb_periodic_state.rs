@@ -145,15 +145,20 @@ fn nonlinear_norton_source_never_claims_an_mna_branch_spectrum() {
 }
 
 fn envelope_deck() -> Netlist {
-    Netlist::parse(
+    envelope_deck_with_options("")
+}
+
+fn envelope_deck_with_options(options: &str) -> Netlist {
+    Netlist::parse(&format!(
         "HB Envelope continuation\n\
          Vcarrier carrier 0 SIN(0 1 1meg)\n\
          Vmod mod 0 DC 0 AC 2 PULSE(0 1 250n 20n 20n 2u 10u)\n\
          Rcarrier carrier out 1k\n\
          Rmod mod out 2k\n\
          Cout out 0 160p\n\
+         {options}\n\
          .end\n",
-    )
+    ))
     .expect("Envelope deck parses")
 }
 
@@ -322,6 +327,70 @@ fn hb_envelope_artifact_rejects_every_identity_mismatch() {
             .to_string()
             .contains("different resolved simulation configuration")
     );
+}
+
+#[test]
+fn hb_envelope_resolves_nonlin_hb_identity_and_rejects_unsupported_tahb() {
+    let netlist = envelope_deck_with_options(".options hbint tahb=0\n.options nonlin-hb maxstep=2");
+    let caller_config = envelope_hb_config().with_max_iterations(17);
+    let engine = Engine::new(SimulationConfig::default());
+    let (analysis, state) = engine
+        .run_hb_envelope_continuation_state(&netlist, caller_config.clone(), &["Vmod".to_string()])
+        .expect("typed direct-HB envelope state is created");
+    assert_eq!(analysis.operating_point.config().max_iterations, 2);
+
+    engine
+        .run_tran_from_hb_envelope_state(
+            &netlist,
+            &caller_config,
+            &["Vmod".to_string()],
+            &state,
+            20.0e-9,
+            10.0e-9,
+        )
+        .expect("resume derives the same authored MAXSTEP identity as creation");
+
+    let changed_budget =
+        envelope_deck_with_options(".options hbint tahb=0\n.options nonlin-hb maxstep=3");
+    let budget_error = engine
+        .run_tran_from_hb_envelope_state(
+            &changed_budget,
+            &caller_config,
+            &["Vmod".to_string()],
+            &state,
+            20.0e-9,
+            10.0e-9,
+        )
+        .expect_err("changed authored MAXSTEP must change the HB state identity");
+    assert!(
+        budget_error
+            .to_string()
+            .contains("different HB configuration"),
+        "unexpected MAXSTEP identity error: {budget_error}"
+    );
+
+    let unsupported =
+        envelope_deck_with_options(".options hbint tahb=1\n.options nonlin-hb maxstep=2");
+    let creation_error = engine
+        .run_hb_envelope_continuation_state(
+            &unsupported,
+            caller_config.clone(),
+            &["Vmod".to_string()],
+        )
+        .expect_err("unsupported TAHB must reject envelope creation");
+    assert!(creation_error.to_string().contains("TAHB=1"));
+
+    let resume_error = engine
+        .run_tran_from_hb_envelope_state(
+            &unsupported,
+            &caller_config,
+            &["Vmod".to_string()],
+            &state,
+            20.0e-9,
+            10.0e-9,
+        )
+        .expect_err("unsupported TAHB must reject envelope resume before identity reuse");
+    assert!(resume_error.to_string().contains("TAHB=1"));
 }
 
 #[test]

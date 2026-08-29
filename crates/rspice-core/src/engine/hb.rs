@@ -20,10 +20,10 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::harmonic_balance::HbFft;
+use crate::analysis::harmonic_balance::{HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
-use crate::netlist::SourceSpec;
+use crate::netlist::{SourceSpec, XyceHbTimeDomainMode};
 use crate::{Netlist, Value};
 use num_complex::Complex64;
 use std::collections::BTreeSet;
@@ -387,11 +387,47 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let engine = self.resolved_for_netlist(netlist);
+        let config = engine.hb_config_for_netlist(netlist, config)?;
         engine.hb_validate_config(&config)?;
 
         // Build circuit using SoA architecture
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         engine.run_hb_with_prebuilt_circuit_abort(netlist, circuit, config, abort)
+    }
+
+    /// Apply analysis-local options authored for Xyce's HB packages.
+    ///
+    /// This deliberately returns a derived `HbConfig` instead of modifying
+    /// `Engine::config`: `NONLIN-HB MAXSTEP` is a Newton limit for the HB
+    /// nonlinear system and must never leak into DC, transient, or PSS.
+    pub(super) fn hb_config_for_netlist(
+        &self,
+        netlist: &Netlist,
+        mut config: HbConfig,
+    ) -> Result<HbConfig, SimulationError> {
+        Self::hb_dc_seed_policy(netlist)?;
+        if let Some(maxstep) = netlist.options.nonlin_hb_maxstep {
+            if maxstep == 0 {
+                return Err(HbError::InvalidConfig(
+                    ".OPTIONS NONLIN-HB MAXSTEP must be at least 1".to_string(),
+                )
+                .into());
+            }
+            config.max_iterations = maxstep;
+        }
+        Ok(config)
+    }
+
+    fn hb_dc_seed_policy(netlist: &Netlist) -> Result<HbDcSeedPolicy, SimulationError> {
+        match netlist.options.hb_time_domain_mode {
+            None => Ok(HbDcSeedPolicy::Enabled),
+            Some(XyceHbTimeDomainMode::Direct) => Ok(HbDcSeedPolicy::Disabled),
+            Some(mode) => Err(HbError::InvalidConfig(format!(
+                ".OPTIONS HBINT TAHB={} requests a Xyce initial-state construction that RSpice HB does not implement",
+                mode.xyce_value()
+            ))
+            .into()),
+        }
     }
 
     fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {
@@ -456,6 +492,7 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        let dc_seed_policy = Self::hb_dc_seed_policy(netlist)?;
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
@@ -488,7 +525,7 @@ impl Engine {
         // between converging and wandering for strongly biased circuits. A
         // failed OP falls back to the zero seed with a warning — HB's own
         // continuation may still succeed.
-        if has_supported_nonlinear {
+        if has_supported_nonlinear && dc_seed_policy == HbDcSeedPolicy::Enabled {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -512,7 +549,7 @@ impl Engine {
 
         if has_supported_nonlinear {
             solver
-                .solve_newton_with_abort(&mut state, abort)
+                .solve_newton_with_abort_seed_policy(&mut state, abort, dc_seed_policy)
                 .map_err(|e| match e {
                     crate::analysis::HbError::Aborted => SimulationError::Aborted,
                     crate::analysis::HbError::ConvergenceFailed {
@@ -581,6 +618,133 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::SimulationConfig;
+
+    #[test]
+    fn authored_nonlin_hb_budget_changes_only_the_derived_hb_config() {
+        let netlist = Netlist::parse(
+            "typed HB runtime options\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .options hbint tahb=0\n\
+             .options nonlin-hb maxstep=2\n\
+             .hb 1k\n\
+             .end\n",
+        )
+        .expect("typed HB deck parses");
+        let mut simulation = SimulationConfig::default();
+        simulation.max_iterations = 37;
+        let engine = Engine::new(simulation);
+        let caller_config = HbConfig::new(1.0e3).with_max_iterations(19);
+
+        let effective = engine
+            .hb_config_for_netlist(&netlist, caller_config.clone())
+            .expect("TAHB=0 and NONLIN-HB MAXSTEP are supported");
+
+        assert_eq!(
+            Engine::hb_dc_seed_policy(&netlist).expect("direct policy resolves"),
+            HbDcSeedPolicy::Disabled
+        );
+        assert_eq!(effective.max_iterations, 2);
+        assert_eq!(caller_config.max_iterations, 19);
+        assert_eq!(engine.config.max_iterations, 37);
+
+        let analysis = engine
+            .run_hb(&netlist, caller_config)
+            .expect("typed direct HB options run through the production entry point");
+        assert_eq!(analysis.operating_point.config().max_iterations, 2);
+
+        let without_authored_budget =
+            Netlist::parse("caller HB budget\nV1 out 0 1\nR1 out 0 1k\n.end\n")
+                .expect("base deck parses");
+        let unchanged = engine
+            .hb_config_for_netlist(
+                &without_authored_budget,
+                HbConfig::new(1.0e3).with_max_iterations(19),
+            )
+            .expect("an omitted package leaves the caller's HB budget intact");
+        assert_eq!(
+            Engine::hb_dc_seed_policy(&without_authored_budget)
+                .expect("omitted TAHB policy resolves"),
+            HbDcSeedPolicy::Enabled
+        );
+        assert_eq!(unchanged.max_iterations, 19);
+    }
+
+    #[test]
+    fn explicit_tahb_direct_runs_nonlinear_hb_without_a_dc_seed_policy() {
+        let netlist = Netlist::parse(
+            "direct nonlinear HB\n\
+             V1 in 0 SIN(0 0.01 1k)\n\
+             R1 in out 1k\n\
+             D1 out 0 DMOD\n\
+             C1 out 0 1n\n\
+             .model DMOD D IS=1e-14\n\
+             .options hbint tahb=0\n\
+             .hb 1k\n\
+             .end\n",
+        )
+        .expect("direct nonlinear HB deck parses");
+        assert_eq!(
+            Engine::hb_dc_seed_policy(&netlist).expect("direct policy resolves"),
+            HbDcSeedPolicy::Disabled
+        );
+
+        let analysis = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(1.0e3).with_harmonics(3))
+            .expect("direct frequency-domain nonlinear HB converges from the supplied zero state");
+        assert!(analysis.converged);
+        assert!(analysis.result.is_valid());
+        assert!(
+            analysis.operating_point.iterations() > 0,
+            "direct nonlinear HB must execute Newton rather than publishing its zero initializer"
+        );
+        let input = analysis
+            .result
+            .spectral_voltages
+            .iter()
+            .find(|spectrum| spectrum.node_name.eq_ignore_ascii_case("in"))
+            .expect("driven input spectrum is retained");
+        assert!(
+            input.coefficients[1].norm() > 4.0e-3,
+            "direct nonlinear HB lost its Norton-stamped periodic drive: {:?}",
+            input.coefficients
+        );
+    }
+
+    #[test]
+    fn explicit_unsupported_tahb_modes_are_hb_local_and_fail_closed() {
+        for mode in [1, 2] {
+            let netlist = Netlist::parse(&format!(
+                "unsupported TAHB mode\nV1 out 0 1\nR1 out 0 1k\n.options hbint tahb={mode}\n.options nonlin-hb maxstep=2\n.hb 1k\n.end\n"
+            ))
+            .expect("known Xyce TAHB modes remain typed");
+            let engine = Engine::new(SimulationConfig::default());
+
+            let dc = engine
+                .run_dc_op(&netlist)
+                .expect("HB-local options must not affect DC");
+            assert!((dc.node_voltages[1] - 1.0).abs() < 1.0e-12);
+
+            let error = engine
+                .run_hb(&netlist, HbConfig::new(1.0e3))
+                .expect_err("unsupported explicit TAHB mode must fail before HB");
+            assert!(
+                error.to_string().contains(&format!("TAHB={mode}")),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn manually_constructed_zero_nonlin_hb_budget_fails_closed() {
+        let mut netlist = Netlist::parse("invalid HB budget\nV1 1 0 1\nR1 1 0 1k\n.end\n")
+            .expect("base deck parses");
+        netlist.options.nonlin_hb_maxstep = Some(0);
+        let error = Engine::new(SimulationConfig::default())
+            .hb_config_for_netlist(&netlist, HbConfig::new(1.0e3))
+            .expect_err("invalid typed AST must be rejected at the runtime boundary");
+        assert!(error.to_string().contains("must be at least 1"));
+    }
 
     #[test]
     fn pulse_source_uses_the_exact_configured_collocation_grid() {

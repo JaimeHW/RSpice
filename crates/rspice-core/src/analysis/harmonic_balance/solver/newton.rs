@@ -511,6 +511,19 @@ impl HbSolver {
         state: &mut HbSolverState,
         abort: &dyn AbortSignal,
     ) -> Result<(), HbError> {
+        self.solve_newton_with_abort_seed_policy(state, abort, HbDcSeedPolicy::Enabled)
+    }
+
+    /// Nonlinear HB solve after the engine has resolved the authored
+    /// initialization policy. Direct-frequency-domain Xyce HB (`TAHB=0`)
+    /// must enter Newton from the supplied state without constructing a DC
+    /// operating-point trajectory first.
+    pub(crate) fn solve_newton_with_abort_seed_policy(
+        &mut self,
+        state: &mut HbSolverState,
+        abort: &dyn AbortSignal,
+        dc_seed_policy: HbDcSeedPolicy,
+    ) -> Result<(), HbError> {
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
@@ -529,29 +542,28 @@ impl HbSolver {
         let target_gmin = 0.0;
         let homotopy_floor = 1.0e-12;
 
-        // Step 0: Solve DC operating point first
-        // This establishes the nonlinear device operating points and provides a much
-        // better initial guess than starting from zero or a random guess.
-        match self.solve_dc_operating_point_with_abort(state, abort) {
-            Ok(_dc_solution) => {
-                // DC solution is now stored in state.x[node][0]
-                // Initialize harmonic components to zero (small-signal around DC)
-                // This is the standard HB initialization approach
-                for node in 0..self.num_nodes {
-                    if node < state.x.len() {
-                        for k in 1..state.x[node].len() {
-                            // Keep harmonics at zero - full Newton will find them
-                            state.x[node][k] = Complex64::new(0.0, 0.0);
+        if dc_seed_policy == HbDcSeedPolicy::Enabled {
+            // Step 0: Solve DC operating point first. This is the historical
+            // RSpice default when no TAHB mode is authored.
+            match self.solve_dc_operating_point_with_abort(state, abort) {
+                Ok(_dc_solution) => {
+                    // DC solution is now stored in state.x[node][0]. Initialize
+                    // harmonic components to zero around that operating point.
+                    for node in 0..self.num_nodes {
+                        if node < state.x.len() {
+                            for k in 1..state.x[node].len() {
+                                state.x[node][k] = Complex64::new(0.0, 0.0);
+                            }
                         }
                     }
                 }
+                Err(HbError::ConvergenceFailed { .. } | HbError::SingularMatrix) => {}
+                Err(err) => return Err(err),
             }
-            Err(HbError::ConvergenceFailed { .. } | HbError::SingularMatrix) => {}
-            Err(err) => return Err(err),
+            // If the DC seed does not converge, continue with the existing
+            // fallback strategy. Deterministic model/runtime faults have
+            // already returned above.
         }
-        // If the DC seed does not converge, continue with the existing
-        // fallback strategy. Deterministic model/runtime faults have already
-        // returned above.
 
         // Step 1: Try direct Newton first
         if self.newton_inner_loop(

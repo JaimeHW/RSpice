@@ -2469,6 +2469,8 @@ impl XyceTestRunner {
             device_try_to_compact,
             hb_num_frequencies,
             hb_save_ic_data,
+            hb_time_domain_mode,
+            nonlin_hb_maxstep,
             linsol_hb_preconditioner,
             nonlinear_continuation,
             gmin_stepping,
@@ -2546,6 +2548,8 @@ impl XyceTestRunner {
             && b3soi_gmin_scaling.is_none()
             && device_try_to_compact.is_none()
             && hb_save_ic_data.is_none()
+            && hb_time_domain_mode.is_none()
+            && nonlin_hb_maxstep.is_none()
             && linsol_hb_preconditioner.is_none()
             && nonlinear_continuation.is_none()
             // The continuation rungs, damping, the factorization backend and

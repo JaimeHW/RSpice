@@ -524,6 +524,7 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let engine = self.resolved_for_netlist(netlist);
+        let config = engine.hb_config_for_netlist(netlist, config)?;
         engine.hb_validate_config(&config)?;
         let requested_sources = Self::hb_envelope_requested_source_set(frozen_source_names)?;
         let authenticated_netlist_identity = netlist_checkpoint_identity(netlist)
@@ -616,13 +617,16 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        let engine = self.resolved_for_netlist(netlist);
+        let expected_hb_config =
+            engine.hb_config_for_netlist(netlist, expected_hb_config.clone())?;
         if state.guarantee != HbEnvelopeStateGuarantee::ExactLinearRcMnaV1 {
             return Err(SimulationError::Circuit(
                 "HB Envelope continuation artifact has an unsupported completeness guarantee"
                     .to_string(),
             ));
         }
-        if Self::hb_envelope_config_identity(expected_hb_config) != state.hb_config_identity {
+        if Self::hb_envelope_config_identity(&expected_hb_config) != state.hb_config_identity {
             return Err(SimulationError::Circuit(
                 "HB Envelope continuation artifact belongs to a different HB configuration"
                     .to_string(),
@@ -646,7 +650,6 @@ impl Engine {
                 "HB Envelope continuation duration must be finite and positive, got {duration:e}"
             )));
         }
-        let engine = self.resolved_for_netlist(netlist);
         let netlist_identity = netlist_checkpoint_identity(netlist)
             .expect("every elaborated netlist has a semantic identity");
         if netlist_identity != state.original_netlist_identity {

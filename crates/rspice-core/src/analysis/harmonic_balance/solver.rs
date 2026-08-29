@@ -42,6 +42,17 @@ fn inductor_dc_short_admittance(signed_inductance: Value) -> Value {
     signed_inductance.signum() * DC_SHORT_CONDUCTANCE
 }
 
+/// Whether the nonlinear HB kernel may construct a DC operating-point seed
+/// before its first full frequency-domain Newton step.
+///
+/// This is crate-private because netlist semantics are resolved by the engine;
+/// direct solver clients retain the historical seeded behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HbDcSeedPolicy {
+    Enabled,
+    Disabled,
+}
+
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
 pub enum HbError {

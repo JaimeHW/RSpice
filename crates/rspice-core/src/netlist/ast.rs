@@ -3060,6 +3060,35 @@ pub enum XyceHbPreconditioner {
     BlockJacobi,
 }
 
+/// Initial-state strategy selected by Xyce `.OPTIONS HBINT TAHB`.
+///
+/// Xyce 7.10 assigns distinct behavior to all three accepted integer modes:
+/// direct frequency-domain initialization (`0`), a transient-assisted initial
+/// trajectory (`1`), and a repeated DC operating-point initial state (`2`).
+/// Keeping the authored mode typed lets an analysis reject a strategy it
+/// cannot implement instead of silently running a different HB algorithm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XyceHbTimeDomainMode {
+    /// `TAHB=0`: enter the frequency-domain solve without a transient or DC
+    /// initial-state construction.
+    Direct,
+    /// `TAHB=1`: construct the initial HB trajectory with a transient solve.
+    TransientAssisted,
+    /// `TAHB=2`: initialize every HB time point from a DC operating point.
+    DcOperatingPoint,
+}
+
+impl XyceHbTimeDomainMode {
+    /// Integer spelling accepted by Xyce 7.10's `TAHB` option.
+    pub const fn xyce_value(self) -> usize {
+        match self {
+            Self::Direct => 0,
+            Self::TransientAssisted => 1,
+            Self::DcOperatingPoint => 2,
+        }
+    }
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -3149,6 +3178,16 @@ pub struct SimulationOptions {
     /// Xyce `.OPTIONS HBINT SAVEICDATA`: retain the authored request to write
     /// the harmonic-balance initial-condition data set.
     pub hb_save_ic_data: Option<bool>,
+    /// Xyce `.OPTIONS HBINT TAHB=0|1|2` initial-state strategy.
+    ///
+    /// `None` is intentionally distinct from Xyce's package default. It lets
+    /// RSpice preserve its existing HB API behavior while failing closed when
+    /// a deck explicitly requests an unsupported Xyce initialization mode.
+    pub hb_time_domain_mode: Option<XyceHbTimeDomainMode>,
+    /// Xyce `.OPTIONS NONLIN-HB MAXSTEP` maximum HB Newton-step count.
+    /// This option is analysis-local and must not change DC or transient
+    /// nonlinear iteration budgets.
+    pub nonlin_hb_maxstep: Option<usize>,
     /// Xyce `.OPTIONS LINSOL-HB PREC_TYPE`: typed harmonic-balance linear
     /// solver preconditioner selection.
     pub linsol_hb_preconditioner: Option<XyceHbPreconditioner>,
@@ -3614,6 +3653,12 @@ impl SimulationOptions {
         }
         if other.hb_save_ic_data.is_some() {
             self.hb_save_ic_data = other.hb_save_ic_data;
+        }
+        if other.hb_time_domain_mode.is_some() {
+            self.hb_time_domain_mode = other.hb_time_domain_mode;
+        }
+        if other.nonlin_hb_maxstep.is_some() {
+            self.nonlin_hb_maxstep = other.nonlin_hb_maxstep;
         }
         if other.linsol_hb_preconditioner.is_some() {
             self.linsol_hb_preconditioner = other.linsol_hb_preconditioner;
