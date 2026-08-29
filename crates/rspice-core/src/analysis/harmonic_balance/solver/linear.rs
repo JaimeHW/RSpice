@@ -23,6 +23,7 @@ impl HbSolver {
             l_matrix: Vec::new(),
             voltage_source_branches: Vec::new(),
             voltage_source_branch_names: Vec::new(),
+            periodic_mna_branches: Vec::new(),
             node_names: (0..num_nodes).map(|i| format!("n{}", i)).collect(),
             source_spectra: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             nonlinear_devices: Vec::new(),
@@ -101,12 +102,19 @@ impl HbSolver {
         node_neg: usize,
         dc_voltage: Value,
     ) -> usize {
+        let source_index = self.voltage_source_branches.len();
         let branch_idx = self.num_branches;
         self.voltage_source_branches.push(VoltageSourceBranch::new(
             node_pos, node_neg, branch_idx, dc_voltage,
         ));
         self.voltage_source_branch_names
             .push(format!("V{}", branch_idx + 1));
+        self.periodic_mna_branches
+            .push(PeriodicMnaBranch::VoltageSource {
+                node_pos,
+                node_neg,
+                source_index,
+            });
         self.num_branches += 1;
         branch_idx
     }
@@ -119,6 +127,7 @@ impl HbSolver {
         dc_voltage: Value,
         harmonics: &[(usize, Value, Value)],
     ) -> usize {
+        let source_index = self.voltage_source_branches.len();
         let branch_idx = self.num_branches;
         let mut branch = VoltageSourceBranch::new(node_pos, node_neg, branch_idx, dc_voltage);
         for (harmonic, magnitude, phase) in harmonics {
@@ -127,6 +136,12 @@ impl HbSolver {
         self.voltage_source_branches.push(branch);
         self.voltage_source_branch_names
             .push(format!("V{}", branch_idx + 1));
+        self.periodic_mna_branches
+            .push(PeriodicMnaBranch::VoltageSource {
+                node_pos,
+                node_neg,
+                source_index,
+            });
         self.num_branches += 1;
         branch_idx
     }
@@ -141,6 +156,45 @@ impl HbSolver {
     /// Get number of MNA branch currents
     pub fn num_branches(&self) -> usize {
         self.num_branches
+    }
+
+    /// Add an exact inductor branch for periodic small-signal MNA.
+    pub(crate) fn add_periodic_inductor_branch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        inductance: Value,
+    ) {
+        self.periodic_mna_branches
+            .push(PeriodicMnaBranch::Inductor {
+                node_pos,
+                node_neg,
+                inductance,
+            });
+    }
+
+    /// Register a voltage constraint only in the periodic small-signal MNA
+    /// system. This avoids adding a zero-valued source to a large-signal
+    /// operating-point solve that is intentionally using a Norton continuation.
+    pub(crate) fn add_periodic_voltage_source_branch(
+        &mut self,
+        node_pos: usize,
+        node_neg: usize,
+        source_index: usize,
+    ) {
+        self.periodic_mna_branches
+            .push(PeriodicMnaBranch::VoltageSource {
+                node_pos,
+                node_neg,
+                source_index,
+            });
+    }
+
+    /// Resolve a circuit voltage-source ordinal to its periodic MNA branch.
+    pub(crate) fn periodic_voltage_source_branch(&self, source_index: usize) -> Option<usize> {
+        self.periodic_mna_branches
+            .iter()
+            .position(|branch| matches!(branch, PeriodicMnaBranch::VoltageSource { source_index: index, .. } if *index == source_index))
     }
 
     /// Add DC source current contribution at a node

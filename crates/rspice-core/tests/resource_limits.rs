@@ -318,6 +318,36 @@ fn periodic_small_signal_analyses_enforce_lifted_unknown_budget() {
             limit: 5,
         }))
     ));
+
+    let branch_netlist = Netlist::parse(
+        "lifted periodic MNA branches\n\
+         VIN a 0 0\n\
+         L1 a 0 1u\n\
+         .end",
+    )
+    .expect("branch fixture parses");
+    let branch_pac = PacConfig::new()
+        .with_fundamental(1.0e6)
+        .with_sweep(1.0e3, 1.0e3, 1)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("VIN");
+    assert!(matches!(
+        engine.run_pac(&branch_netlist, branch_pac),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::MatrixUnknowns,
+            requested: 9,
+            limit: 5,
+        }))
+    ));
+    assert!(matches!(
+        engine.run_pnoise(&branch_netlist, 1.0e6, &[1.0e3], "a", None, None, 1),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::MatrixUnknowns,
+            requested: 9,
+            limit: 5,
+        }))
+    ));
 }
 
 #[test]

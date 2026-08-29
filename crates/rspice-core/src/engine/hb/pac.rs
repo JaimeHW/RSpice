@@ -32,6 +32,11 @@ enum PacOperatingPoint<'a> {
     HarmonicBalance(&'a HbOperatingPoint),
 }
 
+pub(super) struct PacInputPort {
+    pub(super) node_injections: Vec<(usize, Complex64)>,
+    pub(super) voltage_source_index: Option<usize>,
+}
+
 impl Engine {
     /// Run Periodic AC analysis.
     ///
@@ -177,9 +182,17 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        let lifted_unknowns = num_nodes.checked_mul(sideband_count).ok_or_else(|| {
+        let periodic_unknowns = num_nodes
+            .checked_add(circuit.voltage_sources.len())
+            .and_then(|count| count.checked_add(circuit.inductors.len()))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "PAC periodic node and branch count overflows this platform".to_string(),
+                )
+            })?;
+        let lifted_unknowns = periodic_unknowns.checked_mul(sideband_count).ok_or_else(|| {
             SimulationError::Circuit(format!(
-                "PAC lifted dimension {num_nodes} nodes x {sideband_count} sidebands overflows this platform"
+                "PAC lifted dimension {periodic_unknowns} MNA unknowns x {sideband_count} sidebands overflows this platform"
             ))
         })?;
         self.ensure_matrix_unknowns(lifted_unknowns)?;
@@ -213,6 +226,11 @@ impl Engine {
         self.ensure_result_values(retained_scalar_values)?;
         if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
+        }
+        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
+            return Err(SimulationError::Circuit(format!(
+                "PAC exact periodic MNA is unavailable because the circuit contains {summary}"
+            )));
         }
 
         let mut hb_config = match &operating_point {
@@ -276,11 +294,36 @@ impl Engine {
             state
         };
 
-        // Resolve the small-signal input source to node-space injections of
-        // unit amplitude. A physical RF port is a Thevenin source behind Z0;
-        // the source itself is still stiff, so its Norton equivalent remains
-        // the exact unit-voltage excitation at the far side of that resistor.
-        let injections = Self::pac_input_injections(&circuit, &input_name, num_nodes)?;
+        // The operating-point solver may use Norton continuation for its
+        // nonlinear node-only Newton system. Build a distinct periodic solver
+        // whose linear network contains exact voltage-source and inductor MNA
+        // branch equations and no corresponding Norton/admittance surrogate.
+        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
+        solver.set_node_names(node_names.clone());
+        self.hb_stamp_resistors(&circuit, &mut solver);
+        self.hb_stamp_capacitors(&circuit, &mut solver);
+        self.hb_stamp_periodic_voltage_source_branches(&circuit, &mut solver);
+        self.hb_stamp_periodic_inductor_branches(&circuit, &mut solver);
+        if has_nonlinear {
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+        }
+
+        // Resolve the named source to an exact unit small-signal excitation.
+        let input_port = Self::pac_input_port(&circuit, &input_name, num_nodes)?;
+        let branch_voltage = input_port
+            .voltage_source_index
+            .map(|source_index| {
+                solver
+                    .periodic_voltage_source_branch(source_index)
+                    .map(|branch| vec![(branch, Complex64::new(1.0, 0.0))])
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "PAC input voltage source '{input_name}' has no periodic MNA branch"
+                        ))
+                    })
+            })
+            .transpose()?
+            .unwrap_or_default();
 
         let mut sweep_config = config.clone();
         sweep_config.fundamental_freq = config.fundamental_freq;
@@ -390,6 +433,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let mut excitations = Vec::new();
+            let mut branch_excitations = Vec::new();
             excitations
                 .try_reserve_exact(excitation_sidebands.len())
                 .map_err(|error| {
@@ -400,27 +444,29 @@ impl Engine {
             for &m in &excitation_sidebands {
                 let mut column_injections = Vec::new();
                 column_injections
-                    .try_reserve_exact(injections.len())
+                    .try_reserve_exact(input_port.node_injections.len())
                     .map_err(|error| {
                         SimulationError::Circuit(format!(
                             "PAC input-port allocation failed: {error}"
                         ))
                     })?;
-                column_injections.extend_from_slice(&injections);
+                column_injections.extend_from_slice(&input_port.node_injections);
                 excitations.push(PeriodicAcExcitation {
                     sideband: m,
                     injections: column_injections,
                 });
+                branch_excitations.push(branch_voltage.clone());
             }
 
             let sideband_count = result.num_sidebands();
             solver
-                .solve_periodic_ac_each(
+                .solve_periodic_ac_each_with_branch_voltages(
                     &state,
                     offset,
                     config.sideband_min,
                     config.sideband_max,
                     &excitations,
+                    &branch_excitations,
                     |col, solution| {
                         if abort.is_aborted() {
                             return Err(AnalysisHbError::Aborted);
@@ -526,15 +572,12 @@ impl Engine {
         })
     }
 
-    /// Map the named small-signal source to unit-amplitude current
-    /// injections. Voltage sources use their stiff Norton conversion (the
-    /// parallel conductance is already stamped); current sources inject
-    /// directly with the SPICE element orientation.
-    pub(in crate::engine::hb) fn pac_input_injections(
+    /// Map the named small-signal source to an exact MNA excitation.
+    pub(in crate::engine::hb) fn pac_input_port(
         circuit: &CircuitData,
         input_name: &str,
         num_nodes: usize,
-    ) -> Result<Vec<(usize, Complex64)>, SimulationError> {
+    ) -> Result<PacInputPort, SimulationError> {
         let trimmed = input_name.trim();
 
         let validate_terminals = |kind: &str, np: usize, nn: usize| {
@@ -560,14 +603,10 @@ impl Engine {
             let np = circuit.voltage_sources.node_pos[idx];
             let nn = circuit.voltage_sources.node_neg[idx];
             validate_terminals("voltage", np, nn)?;
-            let mut injections = Vec::new();
-            if np > 0 {
-                injections.push((np - 1, Complex64::new(HB_NORTON_G, 0.0)));
-            }
-            if nn > 0 {
-                injections.push((nn - 1, Complex64::new(-HB_NORTON_G, 0.0)));
-            }
-            return Ok(injections);
+            return Ok(PacInputPort {
+                node_injections: Vec::new(),
+                voltage_source_index: Some(idx),
+            });
         }
 
         if let Some(idx) = circuit
@@ -586,7 +625,10 @@ impl Engine {
             if nn > 0 {
                 injections.push((nn - 1, Complex64::new(1.0, 0.0)));
             }
-            return Ok(injections);
+            return Ok(PacInputPort {
+                node_injections: injections,
+                voltage_source_index: None,
+            });
         }
 
         Err(SimulationError::Circuit(format!(

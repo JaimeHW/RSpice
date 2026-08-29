@@ -153,6 +153,161 @@ r4 outn 0 3k
 }
 
 #[test]
+fn pac_uses_exact_voltage_source_branches_at_signed_and_zero_frequencies() {
+    let deck = "\
+* exact ideal-source periodic MNA
+vin in 0 dc 0 ac 7 37
+rcouple in clamp 1u
+vclamp clamp 0 dc 0
+.end
+";
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(5.0e5, 1.0e6, 2)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("vin")
+        .with_output_node("in")
+        .with_output_ref("clamp");
+
+    let analysis = run_pac(deck, config);
+    let result = &analysis.result;
+    for frequency_index in 0..result.frequencies.len() {
+        for input_sideband in -1..=1 {
+            for output_sideband in -1..=1 {
+                let actual = result
+                    .conversion_matrix
+                    .get(frequency_index, output_sideband, input_sideband)
+                    .expect("conversion value is materialized");
+                let expected = if output_sideband == input_sideband {
+                    Complex64::new(1.0, 0.0)
+                } else {
+                    Complex64::new(0.0, 0.0)
+                };
+                assert!(
+                    (actual - expected).norm() <= 1.0e-12,
+                    "H[{output_sideband},{input_sideband}] at frequency index {frequency_index} = {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+
+    let input = result.node_index("in").expect("input node retained");
+    let clamp = result.node_index("clamp").expect("clamp node retained");
+    for frequency_index in 0..result.frequencies.len() {
+        let input_voltage = result
+            .voltage(input, frequency_index, 0)
+            .expect("central input voltage retained");
+        let clamp_voltage = result
+            .voltage(clamp, frequency_index, 0)
+            .expect("central clamp voltage retained");
+        assert!((input_voltage - Complex64::new(1.0, 0.0)).norm() <= 1.0e-12);
+        assert!(clamp_voltage.norm() <= 1.0e-12);
+    }
+}
+
+#[test]
+fn pac_uses_an_exact_inductor_branch_at_negative_zero_and_positive_frequency() {
+    let deck = "\
+* exact inductor periodic MNA
+iin 0 in dc 0
+l1 in out 1u
+r1 out 0 1k
+.end
+";
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(5.0e5, 1.0e6, 2)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("iin")
+        .with_output_node("in")
+        .with_output_ref("out");
+
+    let analysis = run_pac(deck, config);
+    let result = &analysis.result;
+    let inductance = 1.0e-6;
+    for (frequency_index, &offset) in result.frequencies.iter().enumerate() {
+        for input_sideband in -1..=1 {
+            for output_sideband in -1..=1 {
+                let actual = result
+                    .conversion_matrix
+                    .get(frequency_index, output_sideband, input_sideband)
+                    .expect("conversion value is materialized");
+                let expected = if output_sideband == input_sideband {
+                    let frequency = offset + f64::from(input_sideband) * F0;
+                    Complex64::new(0.0, 2.0 * std::f64::consts::PI * frequency * inductance)
+                } else {
+                    Complex64::new(0.0, 0.0)
+                };
+                assert!(
+                    (actual - expected).norm() <= 1.0e-10,
+                    "inductor H[{output_sideband},{input_sideband}] at offset {offset:.6e} = {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn pac_exact_mna_fails_closed_for_unrepresented_branch_coupling() {
+    let cases = [
+        (
+            "\
+* coupled inductors require a mutual branch block
+iin 0 a dc 0
+l1 a 0 1u
+l2 b 0 1u
+r2 b 0 50
+k12 l1 l2 0.9
+.end
+",
+            "coupled-inductor",
+        ),
+        (
+            "\
+* current switch requires the actual control branch current spectrum
+iin 0 out dc 0
+vctrl ctrl 0 dc 0
+w1 out 0 vctrl csw
+.model csw iswitch (ron=1 roff=1meg ion=1 ioff=0)
+r1 out 0 1k
+.end
+",
+            "current-controlled switches",
+        ),
+        (
+            "\
+* a VCCS has no branch unknown but still requires a periodic matrix stamp
+iin 0 in dc 0
+g1 out 0 in 0 2
+rin in 0 1
+rout out 0 1
+.end
+",
+            "controlled-source equations",
+        ),
+    ];
+    for (deck, expected) in cases {
+        let netlist = Netlist::parse(deck).expect("unsupported deck still parses");
+        let config = PacConfig::new()
+            .with_fundamental(F0)
+            .with_sweep(1.0e4, 1.0e4, 1)
+            .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+            .with_sidebands(0, 0)
+            .with_input_source("iin")
+            .with_output_node("out");
+        let error = Engine::new(SimulationConfig::default())
+            .run_pac(&netlist, config)
+            .expect_err("an incomplete branch model must not publish PAC data");
+        assert!(
+            error.to_string().contains(expected),
+            "failure must identify the unsupported branch family: {error}"
+        );
+    }
+}
+
+#[test]
 fn pac_without_an_output_reports_conversion_data_as_unavailable() {
     let deck = "\
 * per-node PAC without an output metric

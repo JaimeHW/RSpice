@@ -433,14 +433,27 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        let lifted_unknowns = num_nodes.checked_mul(sideband_count).ok_or_else(|| {
+        let periodic_unknowns = num_nodes
+            .checked_add(circuit.voltage_sources.len())
+            .and_then(|count| count.checked_add(circuit.inductors.len()))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "pnoise periodic node and branch count overflows this platform".to_string(),
+                )
+            })?;
+        let lifted_unknowns = periodic_unknowns.checked_mul(sideband_count).ok_or_else(|| {
             SimulationError::Circuit(format!(
-                "pnoise lifted dimension {num_nodes} nodes x {sideband_count} sidebands overflows this platform"
+                "pnoise lifted dimension {periodic_unknowns} MNA unknowns x {sideband_count} sidebands overflows this platform"
             ))
         })?;
         self.ensure_matrix_unknowns(lifted_unknowns)?;
         if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
+        }
+        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
+            return Err(SimulationError::Circuit(format!(
+                "pnoise exact periodic MNA is unavailable because the circuit contains {summary}"
+            )));
         }
 
         let span = (max_sideband as usize).saturating_mul(2);
@@ -517,6 +530,18 @@ impl Engine {
             }
             state
         };
+
+        // Keep nonlinear operating-point continuation separate from the exact
+        // periodic small-signal MNA network.
+        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
+        solver.set_node_names(node_names.clone());
+        self.hb_stamp_resistors(&circuit, &mut solver);
+        self.hb_stamp_capacitors(&circuit, &mut solver);
+        self.hb_stamp_periodic_voltage_source_branches(&circuit, &mut solver);
+        self.hb_stamp_periodic_inductor_branches(&circuit, &mut solver);
+        if has_nonlinear {
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
+        }
 
         let out_idx = node_names
             .iter()
@@ -677,13 +702,29 @@ impl Engine {
         // Input transfer for input-referred noise: the conversion transfer
         // from the named source (unit excitation at sideband 0) to the
         // output at the analysis frequency.
-        let input_excitation = input_source
-            .map(|name| Self::pac_input_injections(&circuit, name, num_nodes))
+        let input_port = input_source
+            .map(|name| Self::pac_input_port(&circuit, name, num_nodes))
+            .transpose()?;
+        let input_excitation = input_port.as_ref().map(|port| PeriodicAcExcitation {
+            sideband: 0,
+            injections: port.node_injections.clone(),
+        });
+        let input_branch_voltages = input_port
+            .as_ref()
+            .and_then(|port| port.voltage_source_index)
+            .map(|source_index| {
+                solver
+                    .periodic_voltage_source_branch(source_index)
+                    .map(|branch| vec![vec![(branch, Complex64::new(1.0, 0.0))]])
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "pnoise input voltage source '{}' has no periodic MNA branch",
+                            input_source.unwrap_or("")
+                        ))
+                    })
+            })
             .transpose()?
-            .map(|injections| PeriodicAcExcitation {
-                sideband: 0,
-                injections,
-            });
+            .unwrap_or_default();
 
         let mut result_frequencies = Vec::new();
         result_frequencies
@@ -766,12 +807,13 @@ impl Engine {
             if let (Some(excitation), Some(acc)) = (input_excitation.as_ref(), input_noise.as_mut())
             {
                 let response = solver
-                    .solve_periodic_ac(
+                    .solve_periodic_ac_with_branch_voltages(
                         &state,
                         offset,
                         -max_sideband,
                         max_sideband,
                         std::slice::from_ref(excitation),
+                        &input_branch_voltages,
                     )
                     .map_err(|e| {
                         SimulationError::Circuit(format!(

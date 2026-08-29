@@ -587,6 +587,63 @@ impl Engine {
         }
     }
 
+    /// Circuit families whose branch equations are not yet represented by the
+    /// exact PAC/PNoise periodic MNA descriptor set.
+    pub(in crate::engine::hb) fn hb_periodic_mna_unsupported_summary(
+        circuit: &CircuitData,
+    ) -> Option<String> {
+        let mut kinds = Vec::new();
+        if !circuit.iswitches.is_empty() {
+            kinds.push("current-controlled switches requiring control-branch current spectra");
+        }
+        if !circuit.vcvs.is_empty()
+            || !circuit.vccs.is_empty()
+            || !circuit.cccs.is_empty()
+            || !circuit.ccvs.is_empty()
+        {
+            kinds.push("controlled-source equations");
+        }
+        if !circuit.ekv26s.is_empty() || !circuit.ekv3s.is_empty() || !circuit.vdmoses.is_empty() {
+            kinds.push("unstamped advanced semiconductor models");
+        }
+        if !circuit.tlines.is_empty() || !circuit.coupled_tlines.is_empty() {
+            kinds.push("distributed transmission-line equations");
+        }
+        if !circuit.couplings.is_empty()
+            || !circuit.coupled_inductor_pairs.is_empty()
+            || !circuit.multi_winding_transformers.is_empty()
+        {
+            kinds.push("coupled-inductor or transformer mutual branch equations");
+        }
+        if !circuit.jiles_atherton_inductors.is_empty() || !circuit.xyce_core_groups.is_empty() {
+            kinds.push("nonlinear magnetic-core branch equations");
+        }
+        if !circuit.behavioral_sources.is_empty() {
+            kinds.push("behavioral-source equations");
+        }
+        if !circuit.xspice_instances.is_empty() {
+            kinds.push("XSPICE code-model equations");
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        if circuit.has_generated_veriloga_devices() {
+            kinds.push("generated Verilog-A compact-model equations");
+        }
+        let represented_branches = circuit
+            .voltage_sources
+            .len()
+            .checked_add(circuit.inductors.len());
+        if represented_branches != Some(circuit.num_branches()) {
+            kinds.push("unrepresented MNA branch families");
+        }
+        if kinds.is_empty() {
+            None
+        } else {
+            kinds.sort_unstable();
+            kinds.dedup();
+            Some(kinds.join(", "))
+        }
+    }
+
     pub(in crate::engine::hb) fn hb_extract_static_source_voltage(
         spec: Option<&SourceSpec>,
         fallback_dc: Value,

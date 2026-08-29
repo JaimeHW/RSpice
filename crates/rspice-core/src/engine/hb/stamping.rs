@@ -264,6 +264,25 @@ impl Engine {
         }
     }
 
+    /// Register inductors as exact periodic MNA branches.
+    ///
+    /// Unlike the node-admittance HB stamp, this remains well-defined at a
+    /// zero-frequency sideband: the branch equation becomes `Vpos - Vneg = 0`
+    /// and the branch current remains an independent unknown.
+    pub(in crate::engine::hb) fn hb_stamp_periodic_inductor_branches(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+    ) {
+        for i in 0..circuit.inductors.len() {
+            solver.add_periodic_inductor_branch(
+                circuit.inductors.node_pos[i],
+                circuit.inductors.node_neg[i],
+                circuit.inductors.inductances[i],
+            );
+        }
+    }
+
     /// Stamp a two-terminal inductance into HB solver L matrix
     pub(in crate::engine::hb) fn hb_stamp_inductance(
         &self,
@@ -344,6 +363,23 @@ impl Engine {
             solver.set_voltage_source_branch_name(branch, source_name);
         }
         Ok(())
+    }
+
+    /// Register independent voltage sources as zero-valued periodic MNA
+    /// constraints. The large-signal waveform belongs to the operating point;
+    /// PAC supplies the selected unit small-signal source on the branch RHS.
+    pub(in crate::engine::hb) fn hb_stamp_periodic_voltage_source_branches(
+        &self,
+        circuit: &CircuitData,
+        solver: &mut HbSolver,
+    ) {
+        for i in 0..circuit.voltage_sources.len() {
+            solver.add_periodic_voltage_source_branch(
+                circuit.voltage_sources.node_pos[i],
+                circuit.voltage_sources.node_neg[i],
+                i,
+            );
+        }
     }
 
     /// Stamp ideal voltage sources as stiff Norton equivalents for nonlinear HB.

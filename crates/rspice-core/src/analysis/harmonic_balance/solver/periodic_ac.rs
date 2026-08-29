@@ -41,7 +41,7 @@ fn finite_product_is_representable(left: Value, right: Value) -> bool {
 
 fn periodic_sideband_geometry(
     context: &str,
-    num_nodes: usize,
+    num_unknowns: usize,
     sideband_min: i32,
     sideband_max: i32,
 ) -> Result<(usize, usize, usize), HbError> {
@@ -62,9 +62,9 @@ fn periodic_sideband_geometry(
     let span = usize::try_from(span).map_err(|_| {
         HbError::InvalidCircuit(format!("{context} sideband span exceeds this platform"))
     })?;
-    let unknowns = num_nodes.checked_mul(sidebands).ok_or_else(|| {
+    let unknowns = num_unknowns.checked_mul(sidebands).ok_or_else(|| {
         HbError::InvalidCircuit(format!(
-            "{context} lifted dimension {num_nodes} nodes x {sidebands} sidebands overflows usize"
+            "{context} lifted dimension {num_unknowns} MNA unknowns x {sidebands} sidebands overflows usize"
         ))
     })?;
     Ok((sidebands, unknowns, span))
@@ -507,19 +507,25 @@ struct PeriodicConversionOperator<'a> {
     num_sidebands: usize,
     sideband_min: i32,
     offset_hz: Value,
-    omega0: Value,
+    fundamental_hz: Value,
     g_matrix: &'a [(usize, usize, Value)],
     c_matrix: &'a [(usize, usize, Value)],
     l_matrix: &'a [(usize, usize, Value)],
+    mna_branches: &'a [PeriodicMnaBranch],
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
 }
 
 impl PeriodicConversionOperator<'_> {
     #[inline]
+    fn num_unknowns(&self) -> Option<usize> {
+        self.num_nodes.checked_add(self.mna_branches.len())
+    }
+
+    #[inline]
     fn omega(&self, sideband_index: usize) -> Value {
         let k = i64::from(self.sideband_min) + sideband_index as i64;
-        (k as Value).mul_add(self.omega0, 2.0 * PI * self.offset_hz)
+        2.0 * PI * (k as Value).mul_add(self.fundamental_hz, self.offset_hz)
     }
 
     fn validate(&self, context: &str) -> Result<(), HbError> {
@@ -539,8 +545,13 @@ impl PeriodicConversionOperator<'_> {
                     "{context} sideband range exceeds the i32 representation"
                 ))
             })?;
+        let num_unknowns = self.num_unknowns().ok_or_else(|| {
+            HbError::InvalidCircuit(format!(
+                "{context} node and branch unknown count overflows usize"
+            ))
+        })?;
         let (sidebands, unknowns, _) =
-            periodic_sideband_geometry(context, self.num_nodes, self.sideband_min, sideband_max)?;
+            periodic_sideband_geometry(context, num_unknowns, self.sideband_min, sideband_max)?;
         if sidebands != self.num_sidebands {
             return Err(HbError::InvalidCircuit(format!(
                 "{context} operator declares {} sidebands but its range contains {sidebands}",
@@ -552,16 +563,26 @@ impl PeriodicConversionOperator<'_> {
                 "{context} operator has no unknowns"
             )));
         }
+        if !self.l_matrix.is_empty()
+            && self
+                .mna_branches
+                .iter()
+                .any(|branch| matches!(branch, PeriodicMnaBranch::Inductor { .. }))
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "{context} mixes nodal inductor admittances with exact inductor MNA branches"
+            )));
+        }
         if !self.offset_hz.is_finite() || self.offset_hz < 0.0 {
             return Err(HbError::InvalidCircuit(format!(
                 "{context} offset frequency must be finite and non-negative, got {}",
                 self.offset_hz
             )));
         }
-        if !self.omega0.is_finite() || self.omega0 <= 0.0 {
+        if !self.fundamental_hz.is_finite() || self.fundamental_hz <= 0.0 {
             return Err(HbError::InvalidCircuit(format!(
-                "{context} fundamental angular frequency must be finite and positive, got {}",
-                self.omega0
+                "{context} fundamental frequency must be finite and positive, got {}",
+                self.fundamental_hz
             )));
         }
 
@@ -611,6 +632,45 @@ impl PeriodicConversionOperator<'_> {
                     if !admittance.is_finite() || admittance == 0.0 {
                         return Err(HbError::InvalidCircuit(format!(
                             "{context} inductance entry #{entry} ({row}, {column}) has a non-representable admittance at sideband {}",
+                            i64::from(self.sideband_min) + sideband_index as i64
+                        )));
+                    }
+                }
+            }
+        }
+        for (branch_index, branch) in self.mna_branches.iter().enumerate() {
+            let (node_pos, node_neg, inductance) = match *branch {
+                PeriodicMnaBranch::VoltageSource {
+                    node_pos, node_neg, ..
+                } => (node_pos, node_neg, None),
+                PeriodicMnaBranch::Inductor {
+                    node_pos,
+                    node_neg,
+                    inductance,
+                } => (node_pos, node_neg, Some(inductance)),
+            };
+            if node_pos > self.num_nodes || node_neg > self.num_nodes {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} MNA branch #{branch_index} references node pair ({node_pos}, {node_neg}) outside 0..={}",
+                    self.num_nodes
+                )));
+            }
+            if node_pos == node_neg {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} MNA branch #{branch_index} has identical terminals"
+                )));
+            }
+            if let Some(inductance) = inductance {
+                if !inductance.is_finite() || inductance == 0.0 {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "{context} inductor branch #{branch_index} must have finite nonzero inductance"
+                    )));
+                }
+                for sideband_index in 0..self.num_sidebands {
+                    let omega = self.omega(sideband_index);
+                    if !finite_product_is_representable(omega, inductance) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "{context} inductor branch #{branch_index} has a non-representable impedance at sideband {}",
                             i64::from(self.sideband_min) + sideband_index as i64
                         )));
                     }
@@ -706,6 +766,46 @@ impl PeriodicConversionOperator<'_> {
             }
         }
 
+        for (branch_index, branch) in self.mna_branches.iter().enumerate() {
+            let branch_unknown = n + branch_index;
+            let (node_pos, node_neg) = match *branch {
+                PeriodicMnaBranch::VoltageSource {
+                    node_pos, node_neg, ..
+                }
+                | PeriodicMnaBranch::Inductor {
+                    node_pos, node_neg, ..
+                } => (node_pos, node_neg),
+            };
+            for k_idx in 0..s {
+                let branch_coordinate = branch_unknown * s + k_idx;
+                if node_pos > 0 {
+                    let node_coordinate = (node_pos - 1) * s + k_idx;
+                    visitor(node_coordinate, branch_coordinate, Complex64::new(1.0, 0.0));
+                    visitor(branch_coordinate, node_coordinate, Complex64::new(1.0, 0.0));
+                }
+                if node_neg > 0 {
+                    let node_coordinate = (node_neg - 1) * s + k_idx;
+                    visitor(
+                        node_coordinate,
+                        branch_coordinate,
+                        Complex64::new(-1.0, 0.0),
+                    );
+                    visitor(
+                        branch_coordinate,
+                        node_coordinate,
+                        Complex64::new(-1.0, 0.0),
+                    );
+                }
+                if let PeriodicMnaBranch::Inductor { inductance, .. } = *branch {
+                    visitor(
+                        branch_coordinate,
+                        branch_coordinate,
+                        Complex64::new(0.0, -self.omega(k_idx) * inductance),
+                    );
+                }
+            }
+        }
+
         for &(i, j, ref spectrum) in self.g_spectra {
             for k_idx in 0..s {
                 for m_idx in 0..s {
@@ -742,7 +842,7 @@ impl PeriodicConversionOperator<'_> {
     }
 
     fn apply_impl(&self, input: &[Complex64], transpose: bool) -> Vec<Complex64> {
-        let size = self.num_nodes * self.num_sidebands;
+        let size = self.num_unknowns().unwrap_or(0) * self.num_sidebands;
         debug_assert_eq!(input.len(), size);
         let mut output = vec![Complex64::new(0.0, 0.0); size];
         self.visit_entries(|row, column, value| {
@@ -760,7 +860,7 @@ impl PeriodicConversionOperator<'_> {
     }
 
     fn to_dense(&self) -> Vec<Vec<Complex64>> {
-        let size = self.num_nodes * self.num_sidebands;
+        let size = self.num_unknowns().unwrap_or(0) * self.num_sidebands;
         let mut dense = vec![vec![Complex64::new(0.0, 0.0); size]; size];
         self.visit_entries(|row, column, value| dense[row][column] += value);
         dense
@@ -773,14 +873,19 @@ impl PeriodicConversionOperator<'_> {
     /// entries directly at `(column, row)` retains duplicate-stamp summation
     /// while allocating exactly one dense operator.
     fn to_dense_transpose(&self) -> Vec<Vec<Complex64>> {
-        let size = self.num_nodes * self.num_sidebands;
+        let size = self.num_unknowns().unwrap_or(0) * self.num_sidebands;
         let mut transpose = vec![vec![Complex64::new(0.0, 0.0); size]; size];
         self.visit_entries(|row, column, value| transpose[column][row] += value);
         transpose
     }
 
     fn try_harmonic_block(&self, k_idx: usize, transpose: bool) -> Result<Vec<Complex64>, HbError> {
-        let n = self.num_nodes;
+        let node_count = self.num_nodes;
+        let n = self.num_unknowns().ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "periodic preconditioner node and branch count overflows usize".to_string(),
+            )
+        })?;
         let block_entries = n.checked_mul(n).ok_or_else(|| {
             HbError::InvalidCircuit(
                 "periodic preconditioner block dimension overflows usize".to_string(),
@@ -796,17 +901,17 @@ impl PeriodicConversionOperator<'_> {
         let omega_k = self.omega(k_idx);
         let jw = Complex64::new(0.0, omega_k);
         for &(i, j, g) in self.g_matrix {
-            if i < n && j < n {
+            if i < node_count && j < node_count {
                 block[i * n + j] += g;
             }
         }
         for &(i, j, c) in self.c_matrix {
-            if i < n && j < n {
+            if i < node_count && j < node_count {
                 block[i * n + j] += jw * c;
             }
         }
         for &(i, j, l) in self.l_matrix {
-            if i < n && j < n {
+            if i < node_count && j < node_count {
                 block[i * n + j] += if omega_k == 0.0 {
                     Complex64::new(inductor_dc_short_admittance(l), 0.0)
                 } else {
@@ -815,19 +920,43 @@ impl PeriodicConversionOperator<'_> {
             }
         }
         for &(i, j, ref spectrum) in self.g_spectra {
-            if i < n
-                && j < n
+            if i < node_count
+                && j < node_count
                 && let Some(&coefficient) = spectrum.first()
             {
                 block[i * n + j] += coefficient;
             }
         }
         for &(i, j, ref spectrum) in self.c_spectra {
-            if i < n
-                && j < n
+            if i < node_count
+                && j < node_count
                 && let Some(&coefficient) = spectrum.first()
             {
                 block[i * n + j] += jw * coefficient;
+            }
+        }
+        for (branch_index, branch) in self.mna_branches.iter().enumerate() {
+            let row = node_count + branch_index;
+            let (node_pos, node_neg) = match *branch {
+                PeriodicMnaBranch::VoltageSource {
+                    node_pos, node_neg, ..
+                }
+                | PeriodicMnaBranch::Inductor {
+                    node_pos, node_neg, ..
+                } => (node_pos, node_neg),
+            };
+            if node_pos > 0 {
+                let node = node_pos - 1;
+                block[node * n + row] += Complex64::new(1.0, 0.0);
+                block[row * n + node] += Complex64::new(1.0, 0.0);
+            }
+            if node_neg > 0 {
+                let node = node_neg - 1;
+                block[node * n + row] -= Complex64::new(1.0, 0.0);
+                block[row * n + node] -= Complex64::new(1.0, 0.0);
+            }
+            if let PeriodicMnaBranch::Inductor { inductance, .. } = *branch {
+                block[row * n + row] -= jw * inductance;
             }
         }
         if transpose {
@@ -864,10 +993,20 @@ impl PeriodicBlockPreconditioner {
             })?;
         for k_idx in 0..operator.num_sidebands {
             let block = operator.try_harmonic_block(k_idx, transpose)?;
-            factors.push(super::krylov::LuFactors::factor(block, operator.num_nodes));
+            let num_unknowns = operator.num_unknowns().ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic preconditioner node and branch count overflows usize".to_string(),
+                )
+            })?;
+            factors.push(super::krylov::LuFactors::factor(block, num_unknowns));
         }
+        let num_unknowns = operator.num_unknowns().ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "periodic preconditioner node and branch count overflows usize".to_string(),
+            )
+        })?;
         Ok(Self {
-            num_nodes: operator.num_nodes,
+            num_nodes: num_unknowns,
             num_sidebands: operator.num_sidebands,
             factors,
         })
@@ -898,7 +1037,13 @@ struct PeriodicDiagonalPreconditioner {
 impl PeriodicDiagonalPreconditioner {
     fn try_build(operator: &PeriodicConversionOperator<'_>) -> Result<Self, HbError> {
         let size = operator
-            .num_nodes
+            .num_unknowns()
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "periodic diagonal-preconditioner node and branch count overflows usize"
+                        .to_string(),
+                )
+            })?
             .checked_mul(operator.num_sidebands)
             .ok_or_else(|| {
                 HbError::InvalidCircuit(
@@ -986,8 +1131,8 @@ enum PeriodicPreconditioner {
 impl PeriodicPreconditioner {
     fn build(operator: &PeriodicConversionOperator<'_>, transpose: bool) -> Result<Self, HbError> {
         let block_entries = operator
-            .num_nodes
-            .checked_mul(operator.num_nodes)
+            .num_unknowns()
+            .and_then(|unknowns| unknowns.checked_mul(unknowns))
             .and_then(|per_block| per_block.checked_mul(operator.num_sidebands));
         let dense_entry_limit = super::krylov::KRYLOV_AUTO_THRESHOLD
             .checked_mul(super::krylov::KRYLOV_AUTO_THRESHOLD)
@@ -1330,6 +1475,7 @@ impl HbSolver {
     /// SIGNED absolute frequencies `f_k = offset + k*f0`. Each excitation is
     /// solved against the same admittance matrix; the result is indexed
     /// `[excitation][node][sideband - sideband_min]`.
+    #[cfg(test)]
     pub(crate) fn solve_periodic_ac(
         &mut self,
         state: &HbSolverState,
@@ -1338,10 +1484,36 @@ impl HbSolver {
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
+        self.solve_periodic_ac_with_branch_voltages(
+            state,
+            offset_hz,
+            sideband_min,
+            sideband_max,
+            excitations,
+            &[],
+        )
+    }
+
+    pub(crate) fn solve_periodic_ac_with_branch_voltages(
+        &mut self,
+        state: &HbSolverState,
+        offset_hz: Value,
+        sideband_min: i32,
+        sideband_max: i32,
+        excitations: &[PeriodicAcExcitation],
+        branch_voltages: &[Vec<(usize, Complex64)>],
+    ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
         let num_nodes = self.num_nodes;
+        let num_unknowns = num_nodes
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "PAC result node and branch count overflows usize".to_string(),
+                )
+            })?;
         let (num_sidebands, expected_size, _) = periodic_sideband_geometry(
             "PAC result reshape",
-            num_nodes,
+            num_unknowns,
             sideband_min,
             sideband_max,
         )?;
@@ -1351,12 +1523,13 @@ impl HbSolver {
             .map_err(|error| {
                 HbError::InvalidCircuit(format!("PAC result-column allocation failed: {error}"))
             })?;
-        self.solve_periodic_ac_each(
+        self.solve_periodic_ac_each_with_branch_voltages(
             state,
             offset_hz,
             sideband_min,
             sideband_max,
             excitations,
+            branch_voltages,
             |_, solution| {
                 if solution.len() != expected_size {
                     return Err(HbError::InvalidCircuit(format!(
@@ -1393,6 +1566,7 @@ impl HbSolver {
     /// solution after the caller consumes it. This keeps the engine's
     /// conversion-matrix path at O(nodes * sidebands) temporary storage
     /// instead of retaining O(nodes * sidebands^2) values per frequency.
+    #[cfg(test)]
     pub(crate) fn solve_periodic_ac_each(
         &mut self,
         state: &HbSolverState,
@@ -1400,10 +1574,37 @@ impl HbSolver {
         sideband_min: i32,
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
+        consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
+    ) -> Result<(), HbError> {
+        self.solve_periodic_ac_each_with_branch_voltages(
+            state,
+            offset_hz,
+            sideband_min,
+            sideband_max,
+            excitations,
+            &[],
+            consume,
+        )
+    }
+
+    pub(crate) fn solve_periodic_ac_each_with_branch_voltages(
+        &mut self,
+        state: &HbSolverState,
+        offset_hz: Value,
+        sideband_min: i32,
+        sideband_max: i32,
+        excitations: &[PeriodicAcExcitation],
+        branch_voltages: &[Vec<(usize, Complex64)>],
         mut consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
     ) -> Result<(), HbError> {
         let n = self.num_nodes;
-        let (s, size, span) = periodic_sideband_geometry("PAC", n, sideband_min, sideband_max)?;
+        let num_unknowns = n
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit("PAC node and branch count overflows usize".to_string())
+            })?;
+        let (s, size, span) =
+            periodic_sideband_geometry("PAC", num_unknowns, sideband_min, sideband_max)?;
         if size == 0 {
             return Err(HbError::InvalidCircuit(
                 "PAC requires at least one circuit unknown".to_string(),
@@ -1413,6 +1614,13 @@ impl HbSolver {
             return Err(HbError::InvalidCircuit(
                 "PAC requires at least one excitation".to_string(),
             ));
+        }
+        if !branch_voltages.is_empty() && branch_voltages.len() != excitations.len() {
+            return Err(HbError::InvalidCircuit(format!(
+                "PAC received {} branch-excitation columns for {} node-excitation columns",
+                branch_voltages.len(),
+                excitations.len()
+            )));
         }
 
         // Dense direct elimination is still faster for small systems.  Large
@@ -1433,16 +1641,16 @@ impl HbSolver {
         } else {
             (Vec::new(), Vec::new())
         };
-        let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let operator = PeriodicConversionOperator {
             num_nodes: n,
             num_sidebands: s,
             sideband_min,
             offset_hz,
-            omega0,
+            fundamental_hz: self.config.fundamental_freq,
             g_matrix: &self.g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
+            mna_branches: &self.periodic_mna_branches,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -1485,6 +1693,31 @@ impl HbSolver {
                         "PAC excitation at sideband {} overflows while accumulating node {node}",
                         excitation.sideband
                     )));
+                }
+            }
+            if let Some(branch_column) = branch_voltages.get(excitation_index) {
+                for &(branch, amplitude) in branch_column {
+                    if branch >= self.periodic_mna_branches.len() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "PAC excitation at sideband {} references MNA branch {branch}, outside the {}-branch solver",
+                            excitation.sideband,
+                            self.periodic_mna_branches.len()
+                        )));
+                    }
+                    if !complex_is_finite(amplitude) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "PAC excitation at sideband {} has a non-finite branch voltage on MNA branch {branch} ({:+.6e}{:+.6e}j)",
+                            excitation.sideband, amplitude.re, amplitude.im
+                        )));
+                    }
+                    let rhs_index = (n + branch) * s + m_idx as usize;
+                    rhs[rhs_index] += amplitude;
+                    if !complex_is_finite(rhs[rhs_index]) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "PAC excitation at sideband {} overflows while accumulating MNA branch {branch}",
+                            excitation.sideband
+                        )));
+                    }
                 }
             }
             if rhs.iter().all(|value| *value == Complex64::new(0.0, 0.0)) {
@@ -1531,14 +1764,24 @@ impl HbSolver {
         sideband_max: i32,
     ) -> Result<Vec<Vec<Complex64>>, HbError> {
         let n = self.num_nodes;
-        let (s, size, span) =
-            periodic_sideband_geometry("PAC conversion assembly", n, sideband_min, sideband_max)?;
+        let num_unknowns = n
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "PAC conversion node and branch count overflows usize".to_string(),
+                )
+            })?;
+        let (s, size, span) = periodic_sideband_geometry(
+            "PAC conversion assembly",
+            num_unknowns,
+            sideband_min,
+            sideband_max,
+        )?;
         if size == 0 {
             return Err(HbError::InvalidCircuit(
                 "PAC conversion assembly requires at least one circuit unknown".to_string(),
             ));
         }
-        let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let spectra = if self.has_nonlinear_devices() {
             self.conductance_spectra(state, span.max(self.num_harmonics))?
         } else {
@@ -1555,10 +1798,11 @@ impl HbSolver {
             num_sidebands: s,
             sideband_min,
             offset_hz,
-            omega0,
+            fundamental_hz: self.config.fundamental_freq,
             g_matrix: &self.g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
+            mna_branches: &self.periodic_mna_branches,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -1921,7 +2165,13 @@ impl HbSolver {
                 )));
             }
         }
-        let (s, size, span) = periodic_sideband_geometry("pnoise", n, sideband_min, sideband_max)?;
+        let num_unknowns = n
+            .checked_add(self.periodic_mna_branches.len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit("pnoise node and branch count overflows usize".to_string())
+            })?;
+        let (s, size, span) =
+            periodic_sideband_geometry("pnoise", num_unknowns, sideband_min, sideband_max)?;
         if size == 0 {
             return Err(HbError::InvalidCircuit(
                 "pnoise requires at least one circuit unknown".to_string(),
@@ -1937,16 +2187,16 @@ impl HbSolver {
         } else {
             (Vec::new(), Vec::new())
         };
-        let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let operator = PeriodicConversionOperator {
             num_nodes: n,
             num_sidebands: s,
             sideband_min,
             offset_hz,
-            omega0,
+            fundamental_hz: self.config.fundamental_freq,
             g_matrix: &self.g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
+            mna_branches: &self.periodic_mna_branches,
             g_spectra: &spectra,
             c_spectra: &cap_spectra,
         };
@@ -2058,7 +2308,7 @@ impl HbSolver {
                         continue;
                     }
                     let k = sideband_min + k_idx as i32;
-                    let sideband_frequency = offset_hz + (k as f64) * omega0_hz;
+                    let sideband_frequency = (k as f64).mul_add(omega0_hz, offset_hz);
                     if !sideband_frequency.is_finite() {
                         return Err(HbError::InvalidCircuit(format!(
                             "pnoise source '{}' has a non-finite sideband frequency at k={k}",
@@ -2186,10 +2436,11 @@ mod matrix_free_tests {
             num_sidebands: 5,
             sideband_min: -2,
             offset_hz: 3.0e6,
-            omega0: 2.0 * PI * 1.0e6,
+            fundamental_hz: 1.0e6,
             g_matrix: g,
             c_matrix: c,
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: spectra,
             c_spectra: cap_spectra,
         }
@@ -2595,23 +2846,81 @@ mod matrix_free_tests {
                 Complex64::new(0.0, 0.0),
             ],
         )];
-        let operator = test_operator(&g, &c, &spectra, &cap_spectra);
+        let branches = [
+            PeriodicMnaBranch::VoltageSource {
+                node_pos: 1,
+                node_neg: 0,
+                source_index: 0,
+            },
+            PeriodicMnaBranch::Inductor {
+                node_pos: 2,
+                node_neg: 0,
+                inductance: 1.0e-6,
+            },
+        ];
+        let operator = PeriodicConversionOperator {
+            num_nodes: 2,
+            num_sidebands: 5,
+            sideband_min: -2,
+            offset_hz: 3.0e6,
+            fundamental_hz: 1.0e6,
+            g_matrix: &g,
+            c_matrix: &c,
+            l_matrix: &[],
+            mna_branches: &branches,
+            g_spectra: &spectra,
+            c_spectra: &cap_spectra,
+        };
         let dense = operator.to_dense();
         let dense_transpose = operator.to_dense_transpose();
-        let x = (0..10)
+        let x = (0..20)
             .map(|index| Complex64::new(index as Value * 0.13 - 0.4, 0.2 - index as Value * 0.07))
             .collect::<Vec<_>>();
         let forward = operator.apply(&x);
         let transpose = operator.apply_transpose(&x);
-        for row in 0..10 {
-            let expected_forward = (0..10).map(|col| dense[row][col] * x[col]).sum();
-            let expected_transpose = (0..10).map(|col| dense[col][row] * x[col]).sum();
+        for row in 0..20 {
+            let expected_forward = (0..20).map(|col| dense[row][col] * x[col]).sum();
+            let expected_transpose = (0..20).map(|col| dense[col][row] * x[col]).sum();
             assert_close(forward[row], expected_forward);
             assert_close(transpose[row], expected_transpose);
-            for column in 0..10 {
+            for column in 0..20 {
                 assert_eq!(dense_transpose[row][column], dense[column][row]);
             }
         }
+    }
+
+    #[test]
+    fn periodic_mna_krylov_solve_includes_branch_unknowns_and_branch_rhs() {
+        let mut config = HbConfig::new(1.0e6).with_harmonics(1);
+        config.use_krylov = true;
+        let mut solver = HbSolver::new(config, 1);
+        solver.add_conductance(0, 0, 2.0);
+        solver.add_periodic_voltage_source_branch(1, 0, 0);
+        let mut state = HbSolverState::new(1, 1);
+        state.converged = true;
+        let excitation = PeriodicAcExcitation {
+            sideband: 0,
+            injections: Vec::new(),
+        };
+        let mut retained = None;
+        solver
+            .solve_periodic_ac_each_with_branch_voltages(
+                &state,
+                1.0e4,
+                0,
+                0,
+                &[excitation],
+                &[vec![(0, Complex64::new(1.0, 0.0))]],
+                |_, solution| {
+                    retained = Some(solution);
+                    Ok(())
+                },
+            )
+            .expect("exact branch solve is certified");
+        let solution = retained.expect("one PAC column is returned");
+        assert_eq!(solution.len(), 2);
+        assert_close(solution[0], Complex64::new(1.0, 0.0));
+        assert_close(solution[1], Complex64::new(-2.0, 0.0));
     }
 
     #[test]
@@ -2628,10 +2937,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -2683,10 +2993,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -2733,10 +3044,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -2774,10 +3086,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz,
-            omega0: 2.0 * PI * 1.0e6,
+            fundamental_hz: 1.0e6,
             g_matrix: &[],
             c_matrix: &[],
             l_matrix: &l,
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -2798,10 +3111,11 @@ mod matrix_free_tests {
             num_sidebands: 2,
             sideband_min: 0,
             offset_hz,
-            omega0: 1.0,
+            fundamental_hz: 1.0 / (2.0 * PI),
             g_matrix: &[],
             c_matrix: &static_c,
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -2821,10 +3135,11 @@ mod matrix_free_tests {
             num_sidebands: 2,
             sideband_min: 0,
             offset_hz,
-            omega0: 1.0,
+            fundamental_hz: 1.0 / (2.0 * PI),
             g_matrix: &[],
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &periodic_c,
         };
@@ -2915,10 +3230,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &[],
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &invalid_spectra,
             c_spectra: &[],
         };
@@ -3029,10 +3345,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3070,10 +3387,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3102,10 +3420,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &g,
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &[],
             c_spectra: &[],
         };
@@ -3132,10 +3451,11 @@ mod matrix_free_tests {
             num_sidebands: 1,
             sideband_min: 0,
             offset_hz: 1.0,
-            omega0: 2.0 * PI,
+            fundamental_hz: 1.0,
             g_matrix: &[],
             c_matrix: &[],
             l_matrix: &[],
+            mna_branches: &[],
             g_spectra: &invalid_spectra,
             c_spectra: &[],
         };

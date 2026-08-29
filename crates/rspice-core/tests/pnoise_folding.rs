@@ -151,7 +151,10 @@ fn pnoise_mos_and_jfet_dtemp_match_equivalent_ambient_temperature() {
     let contribution = |contributors: &[(String, Vec<f64>)], label: &str| {
         let value = contributors
             .iter()
-            .find(|(name, _)| name.contains(label))
+            .find(|(name, _)| {
+                name.to_ascii_lowercase()
+                    .contains(&label.to_ascii_lowercase())
+            })
             .map(|(_, values)| values[0])
             .unwrap_or_else(|| panic!("missing channel contributor '{label}': {:?}", contributors));
         assert!(
@@ -486,6 +489,64 @@ c1 mid 0 1n
             input_noise[i]
         );
     }
+}
+
+#[test]
+fn pnoise_uses_the_exact_voltage_source_transfer_for_input_referral() {
+    let resistance = 1.0e-6;
+    let deck = "\
+* exact voltage input and low-impedance noisy divider
+vin in 0 dc 0 ac 7 37
+r1 in out 1u
+r2 out 0 1u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, Some("vin"), 0)
+        .expect("pnoise completes");
+
+    let expected_output = 2.0 * K_B * T_REF * resistance;
+    let expected_input = 8.0 * K_B * T_REF * resistance;
+    let input_noise = result
+        .input_noise
+        .expect("input-referred result is present");
+    assert!(
+        (result.output_noise[0] - expected_output).abs() <= 1.0e-10 * expected_output,
+        "exact divider output noise = {:.6e}, expected {expected_output:.6e}",
+        result.output_noise[0]
+    );
+    assert!(
+        (input_noise[0] - expected_input).abs() <= 1.0e-10 * expected_input,
+        "exact divider input-referred noise = {:.6e}, expected {expected_input:.6e}",
+        input_noise[0]
+    );
+    for (name, contribution) in &result.contributors {
+        let expected_contribution = K_B * T_REF * resistance;
+        assert!(
+            (contribution[0] - expected_contribution).abs() <= 1.0e-10 * expected_contribution,
+            "{name} output contribution = {:.6e}, expected {expected_contribution:.6e}",
+            contribution[0]
+        );
+    }
+}
+
+#[test]
+fn pnoise_exact_dc_inductor_branch_clamps_output_noise_to_zero() {
+    let deck = "\
+* exact DC inductor short
+r1 out 0 1k
+l1 out 0 1m
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[0.0], "out", None, None, 0)
+        .expect("DC pnoise completes");
+
+    assert_eq!(result.output_noise, vec![0.0]);
+    assert_eq!(result.contributors.len(), 1);
+    assert_eq!(result.contributors[0].1, vec![0.0]);
 }
 
 #[test]

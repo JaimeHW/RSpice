@@ -209,6 +209,28 @@ pub struct VoltageSourceBranch {
     pub ac_harmonics: Vec<(usize, Complex64)>,
 }
 
+/// One exact MNA branch retained by the periodic small-signal operator.
+///
+/// Large-signal nonlinear HB still uses its node-only continuation system,
+/// but PAC and PNoise must not replace ideal voltage constraints or the DC
+/// inductor equation with an arbitrary large conductance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PeriodicMnaBranch {
+    /// Zero-valued small-signal voltage constraint. `source_index` preserves
+    /// the authored independent-source ordering for PAC excitation lookup.
+    VoltageSource {
+        node_pos: usize,
+        node_neg: usize,
+        source_index: usize,
+    },
+    /// Exact `Vpos - Vneg - j*omega*L*I = 0` branch equation.
+    Inductor {
+        node_pos: usize,
+        node_neg: usize,
+        inductance: Value,
+    },
+}
+
 impl VoltageSourceBranch {
     /// Create new voltage source branch
     pub fn new(node_pos: usize, node_neg: usize, branch_idx: usize, dc_voltage: Value) -> Self {
@@ -285,6 +307,9 @@ pub struct HbSolver {
 
     /// Authored names aligned with `voltage_source_branches`.
     voltage_source_branch_names: Vec<String>,
+
+    /// Exact branch equations used by PAC and PNoise conversion systems.
+    periodic_mna_branches: Vec<PeriodicMnaBranch>,
 
     /// Node names
     node_names: Vec<String>,
