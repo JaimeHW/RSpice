@@ -22,6 +22,17 @@ fn complex_is_finite(value: Complex64) -> bool {
     value.re.is_finite() && value.im.is_finite()
 }
 
+fn try_zeroed_complex_values(count: usize, context: &str) -> Result<Vec<Complex64>, HbError> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(count).map_err(|error| {
+        HbError::InvalidCircuit(format!(
+            "{context} allocation failed for {count} complex values: {error}"
+        ))
+    })?;
+    values.resize(count, Complex64::new(0.0, 0.0));
+    Ok(values)
+}
+
 #[inline]
 fn finite_product_is_representable(left: Value, right: Value) -> bool {
     let product = left * right;
@@ -1327,6 +1338,70 @@ impl HbSolver {
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
+        let num_nodes = self.num_nodes;
+        let (num_sidebands, expected_size, _) = periodic_sideband_geometry(
+            "PAC result reshape",
+            num_nodes,
+            sideband_min,
+            sideband_max,
+        )?;
+        let mut results = Vec::new();
+        results
+            .try_reserve_exact(excitations.len())
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!("PAC result-column allocation failed: {error}"))
+            })?;
+        self.solve_periodic_ac_each(
+            state,
+            offset_hz,
+            sideband_min,
+            sideband_max,
+            excitations,
+            |_, solution| {
+                if solution.len() != expected_size {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "PAC solution contains {} values; expected {}",
+                        solution.len(),
+                        expected_size
+                    )));
+                }
+                let mut by_node = Vec::new();
+                by_node.try_reserve_exact(num_nodes).map_err(|error| {
+                    HbError::InvalidCircuit(format!("PAC node-row allocation failed: {error}"))
+                })?;
+                for node in 0..num_nodes {
+                    let start = node * num_sidebands;
+                    let mut sidebands = Vec::new();
+                    sidebands
+                        .try_reserve_exact(num_sidebands)
+                        .map_err(|error| {
+                            HbError::InvalidCircuit(format!(
+                                "PAC sideband-row allocation failed for node {node}: {error}"
+                            ))
+                        })?;
+                    sidebands.extend_from_slice(&solution[start..start + num_sidebands]);
+                    by_node.push(sidebands);
+                }
+                results.push(by_node);
+                Ok(())
+            },
+        )?;
+        Ok(results)
+    }
+
+    /// Solve PAC excitation columns one at a time and release each full-node
+    /// solution after the caller consumes it. This keeps the engine's
+    /// conversion-matrix path at O(nodes * sidebands) temporary storage
+    /// instead of retaining O(nodes * sidebands^2) values per frequency.
+    pub(crate) fn solve_periodic_ac_each(
+        &mut self,
+        state: &HbSolverState,
+        offset_hz: Value,
+        sideband_min: i32,
+        sideband_max: i32,
+        excitations: &[PeriodicAcExcitation],
+        mut consume: impl FnMut(usize, Vec<Complex64>) -> Result<(), HbError>,
+    ) -> Result<(), HbError> {
         let n = self.num_nodes;
         let (s, size, span) = periodic_sideband_geometry("PAC", n, sideband_min, sideband_max)?;
         if size == 0 {
@@ -1378,9 +1453,11 @@ impl HbSolver {
             None
         };
 
-        let mut results = Vec::with_capacity(excitations.len());
-        for excitation in excitations {
-            let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+        for (excitation_index, excitation) in excitations.iter().enumerate() {
+            let mut rhs = try_zeroed_complex_values(
+                size,
+                &format!("PAC right-hand side for excitation {excitation_index}"),
+            )?;
             let m_idx = i64::from(excitation.sideband) - i64::from(sideband_min);
             if m_idx < 0 || m_idx >= s as i64 {
                 return Err(HbError::InvalidCircuit(format!(
@@ -1436,16 +1513,10 @@ impl HbSolver {
                 self.solve_complex_linear_system(matrix, &rhs)?
             };
 
-            let mut by_node = vec![vec![Complex64::new(0.0, 0.0); s]; n];
-            for node in 0..n {
-                for k_idx in 0..s {
-                    by_node[node][k_idx] = solution[node * s + k_idx];
-                }
-            }
-            results.push(by_node);
+            consume(excitation_index, solution)?;
         }
 
-        Ok(results)
+        Ok(())
     }
 
     /// Assemble the sideband-coupled small-signal admittance matrix at one
@@ -2909,6 +2980,40 @@ mod matrix_free_tests {
                 .expect_err("invalid PAC excitation evidence must fail closed");
             assert!(error.to_string().contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn periodic_ac_propagates_a_stream_consumer_abort_between_columns() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        solver.add_conductance(0, 0, 1.0);
+        let state = HbSolverState::new(1, 1);
+        let excitations = [
+            PeriodicAcExcitation {
+                sideband: 0,
+                injections: vec![(0, Complex64::new(1.0, 0.0))],
+            },
+            PeriodicAcExcitation {
+                sideband: 0,
+                injections: vec![(0, Complex64::new(2.0, 0.0))],
+            },
+        ];
+        let mut consumed = 0;
+        let error = solver
+            .solve_periodic_ac_each(&state, 1.0e3, 0, 0, &excitations, |_, _| {
+                consumed += 1;
+                Err(HbError::Aborted)
+            })
+            .expect_err("the consumer abort must stop the column stream");
+        assert!(matches!(error, HbError::Aborted));
+        assert_eq!(consumed, 1, "no later excitation may be solved or consumed");
+    }
+
+    #[test]
+    fn periodic_allocation_failure_is_returned_as_a_solver_error() {
+        let error = try_zeroed_complex_values(usize::MAX, "PAC allocation regression")
+            .expect_err("an impossible capacity must fail without panicking");
+        assert!(error.to_string().contains("allocation failed"), "{error}");
     }
 
     #[test]

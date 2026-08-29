@@ -13,7 +13,7 @@ use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::PeriodicAcExcitation;
 use crate::analysis::pac::{PacConfig, PacResult};
-use crate::analysis::{HbConfig, HbSolverState};
+use crate::analysis::{HbConfig, HbError as AnalysisHbError, HbSolverState};
 
 /// PAC analysis result with convergence info
 #[derive(Debug)]
@@ -127,6 +127,12 @@ impl Engine {
         self.ensure_analysis_points(frequency_count)?;
         let sideband_count = config.num_sidebands();
         self.ensure_analysis_points(sideband_count)?;
+        let result_record_count = frequency_count.checked_mul(sideband_count).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "PAC result grid {frequency_count} frequencies x {sideband_count} sidebands overflows this platform"
+            ))
+        })?;
+        self.ensure_analysis_points(result_record_count)?;
 
         // The operating point needs enough harmonics that every conversion
         // coupling G[k-m] over the sideband span exists, with headroom for
@@ -171,19 +177,40 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        let spectra_values = frequency_count
-            .saturating_mul(sideband_count)
-            .saturating_mul(num_nodes)
-            .saturating_mul(2);
+        let lifted_unknowns = num_nodes.checked_mul(sideband_count).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "PAC lifted dimension {num_nodes} nodes x {sideband_count} sidebands overflows this platform"
+            ))
+        })?;
+        self.ensure_matrix_unknowns(lifted_unknowns)?;
+        let spectra_complex_values = result_record_count.checked_mul(num_nodes).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "PAC retained node grid {result_record_count} records x {num_nodes} nodes overflows this platform"
+            ))
+        })?;
         let conversion_values = if config.output_node.is_some() {
             frequency_count
-                .saturating_mul(sideband_count)
-                .saturating_mul(sideband_count)
-                .saturating_mul(2)
+                .checked_mul(sideband_count)
+                .and_then(|value| value.checked_mul(sideband_count))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "PAC conversion grid {frequency_count} x {sideband_count} x {sideband_count} overflows this platform"
+                    ))
+                })?
         } else {
             0
         };
-        self.ensure_result_values(spectra_values.saturating_add(conversion_values))?;
+        let retained_complex_values = spectra_complex_values
+            .checked_add(conversion_values)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "PAC retained complex-value count overflows usize".to_string(),
+                )
+            })?;
+        let retained_scalar_values = retained_complex_values.checked_mul(2).ok_or_else(|| {
+            SimulationError::Circuit("PAC retained scalar-value count overflows usize".to_string())
+        })?;
+        self.ensure_result_values(retained_scalar_values)?;
         if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
@@ -266,19 +293,6 @@ impl Engine {
             ));
         }
 
-        let mut result = PacResult::new(
-            config.fundamental_freq,
-            frequencies.clone(),
-            config.sideband_min,
-            config.sideband_max,
-            node_names.clone(),
-            Vec::new(),
-        );
-        result.set_input_source(&input_name);
-        if let Some(ref out) = config.output_node {
-            result.set_output_node(out);
-        }
-
         let output_idx = config
             .output_node
             .as_deref()
@@ -324,68 +338,182 @@ impl Engine {
             ));
         }
 
+        let mut result = if output_idx.is_some() {
+            PacResult::new(
+                config.fundamental_freq,
+                frequencies,
+                config.sideband_min,
+                config.sideband_max,
+                node_names.clone(),
+                Vec::new(),
+            )
+        } else {
+            PacResult::new_without_conversion_matrix(
+                config.fundamental_freq,
+                frequencies,
+                config.sideband_min,
+                config.sideband_max,
+                node_names.clone(),
+                Vec::new(),
+            )
+        }
+        .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+        result.set_input_source(&input_name);
+        if let Some(ref out) = config.output_node {
+            result.set_output_node(out);
+        }
+
         // Excitation columns: the input source's own frequency (m = 0)
         // always; every input sideband when a conversion matrix is wanted.
-        let excitation_sidebands: Vec<i32> = if output_idx.is_some() {
-            (config.sideband_min..=config.sideband_max).collect()
+        let excitation_count = if output_idx.is_some() {
+            sideband_count
         } else {
-            vec![0]
+            1
         };
+        let mut excitation_sidebands = Vec::new();
+        excitation_sidebands
+            .try_reserve_exact(excitation_count)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "PAC excitation-sideband allocation failed: {error}"
+                ))
+            })?;
+        if output_idx.is_some() {
+            excitation_sidebands.extend(config.sideband_min..=config.sideband_max);
+        } else {
+            excitation_sidebands.push(0);
+        }
 
-        for (freq_idx, &offset) in frequencies.iter().enumerate() {
+        for freq_idx in 0..result.frequencies.len() {
+            let offset = result.frequencies[freq_idx];
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let excitations: Vec<PeriodicAcExcitation> = excitation_sidebands
-                .iter()
-                .map(|&m| PeriodicAcExcitation {
+            let mut excitations = Vec::new();
+            excitations
+                .try_reserve_exact(excitation_sidebands.len())
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "PAC excitation-column allocation failed: {error}"
+                    ))
+                })?;
+            for &m in &excitation_sidebands {
+                let mut column_injections = Vec::new();
+                column_injections
+                    .try_reserve_exact(injections.len())
+                    .map_err(|error| {
+                        SimulationError::Circuit(format!(
+                            "PAC input-port allocation failed: {error}"
+                        ))
+                    })?;
+                column_injections.extend_from_slice(&injections);
+                excitations.push(PeriodicAcExcitation {
                     sideband: m,
-                    injections: injections.clone(),
-                })
-                .collect();
+                    injections: column_injections,
+                });
+            }
 
-            let solutions = solver
-                .solve_periodic_ac(
+            let sideband_count = result.num_sidebands();
+            solver
+                .solve_periodic_ac_each(
                     &state,
                     offset,
                     config.sideband_min,
                     config.sideband_max,
                     &excitations,
+                    |col, solution| {
+                        if abort.is_aborted() {
+                            return Err(AnalysisHbError::Aborted);
+                        }
+                        let m = *excitation_sidebands.get(col).ok_or_else(|| {
+                            AnalysisHbError::InvalidCircuit(format!(
+                                "PAC returned unexpected excitation column {col}"
+                            ))
+                        })?;
+                        if m == 0 {
+                            for k_idx in 0..sideband_count {
+                                let k = i64::from(config.sideband_min)
+                                    .checked_add(i64::try_from(k_idx).map_err(|_| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband offset exceeds i64".to_string(),
+                                        )
+                                    })?)
+                                    .and_then(|value| i32::try_from(value).ok())
+                                    .ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband index exceeds i32".to_string(),
+                                        )
+                                    })?;
+                                let data = result
+                                    .get_sideband_data_mut(freq_idx, k)
+                                    .ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC result is missing frequency {freq_idx}, sideband {k}"
+                                        ))
+                                })?;
+                                for node in 0..num_nodes {
+                                    let value = solution[node * sideband_count + k_idx];
+                                    data.set_voltage(node, value).map_err(|error| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC node-spectrum publication failed: {error}"
+                                        ))
+                                    })?;
+                                }
+                            }
+                        }
+
+                        if let Some(out) = output_idx {
+                            for k_idx in 0..sideband_count {
+                                let k = i64::from(config.sideband_min)
+                                    .checked_add(i64::try_from(k_idx).map_err(|_| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband offset exceeds i64".to_string(),
+                                        )
+                                    })?)
+                                    .and_then(|value| i32::try_from(value).ok())
+                                    .ok_or_else(|| {
+                                        AnalysisHbError::InvalidCircuit(
+                                            "PAC sideband index exceeds i32".to_string(),
+                                        )
+                                    })?;
+                                let output = solution[out * sideband_count + k_idx];
+                                let output_voltage = if let Some(reference) = output_ref_idx {
+                                    output - solution[reference * sideband_count + k_idx]
+                                } else {
+                                    output
+                                };
+                                if !output_voltage.re.is_finite()
+                                    || !output_voltage.im.is_finite()
+                                {
+                                    return Err(AnalysisHbError::InvalidCircuit(format!(
+                                        "PAC differential output is non-representable at offset {offset:.6e} Hz, input sideband {m}, output sideband {k}"
+                                    )));
+                                }
+                                result
+                                    .conversion_matrix
+                                    .set(freq_idx, k, m, output_voltage)
+                                    .map_err(|error| {
+                                        AnalysisHbError::InvalidCircuit(format!(
+                                            "PAC conversion publication failed: {error}"
+                                        ))
+                                    })?;
+                            }
+                        }
+                        if abort.is_aborted() {
+                            return Err(AnalysisHbError::Aborted);
+                        }
+                        Ok(())
+                    },
                 )
-                .map_err(|e| {
-                    SimulationError::Circuit(format!(
-                        "PAC solve failed at offset {offset:.6e} Hz: {e}"
-                    ))
+                .map_err(|error| match error {
+                    AnalysisHbError::Aborted => SimulationError::Aborted,
+                    error => SimulationError::Circuit(format!(
+                        "PAC solve failed at offset {offset:.6e} Hz: {error}"
+                    )),
                 })?;
 
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
-            }
-
-            for (col, &m) in excitation_sidebands.iter().enumerate() {
-                let by_node = &solutions[col];
-
-                if m == 0 {
-                    for k_idx in 0..result.num_sidebands() {
-                        let k = config.sideband_min + k_idx as i32;
-                        if let Some(data) = result.get_sideband_data_mut(freq_idx, k) {
-                            for node in 0..num_nodes {
-                                data.set_voltage(node, by_node[node][k_idx]);
-                            }
-                        }
-                    }
-                }
-
-                if let Some(out) = output_idx {
-                    for k_idx in 0..(config.sideband_max - config.sideband_min + 1) as usize {
-                        let k = config.sideband_min + k_idx as i32;
-                        let output_voltage = output_ref_idx
-                            .map_or(by_node[out][k_idx], |reference| {
-                                by_node[out][k_idx] - by_node[reference][k_idx]
-                            });
-                        result.conversion_matrix.set(freq_idx, k, m, output_voltage);
-                    }
-                }
             }
         }
 

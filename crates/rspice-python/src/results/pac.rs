@@ -7,6 +7,73 @@
 
 use super::*;
 
+fn pac_value_error(error: impl std::fmt::Display) -> PyErr {
+    crate::errors::value_error(error.to_string())
+}
+
+fn checked_pickle_sideband_count(sideband_min: i32, sideband_max: i32) -> PyResult<usize> {
+    let span = i64::from(sideband_max) - i64::from(sideband_min);
+    if span < 0 {
+        return Err(pac_value_error(format!(
+            "PAC pickle sideband range [{sideband_min}, {sideband_max}] is empty"
+        )));
+    }
+    usize::try_from(span + 1)
+        .map_err(|_| pac_value_error("PAC pickle sideband count exceeds this platform"))
+}
+
+fn checked_pickle_sideband(sideband_min: i32, offset: usize) -> PyResult<i32> {
+    i64::from(sideband_min)
+        .checked_add(
+            i64::try_from(offset)
+                .map_err(|_| pac_value_error("PAC pickle sideband offset exceeds i64"))?,
+        )
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or_else(|| pac_value_error("PAC pickle sideband index exceeds i32"))
+}
+
+fn validate_pickle_grid(
+    grid: &ComplexGridState,
+    expected_frequencies: usize,
+    expected_rows: usize,
+    expected_values: usize,
+    label: &str,
+) -> PyResult<()> {
+    if grid.len() != expected_frequencies {
+        return Err(pac_value_error(format!(
+            "PAC pickle {label} has {} frequency rows; expected {expected_frequencies}",
+            grid.len()
+        )));
+    }
+    for (frequency_index, rows) in grid.iter().enumerate() {
+        if rows.len() != expected_rows {
+            return Err(pac_value_error(format!(
+                "PAC pickle {label} frequency row {frequency_index} has {} sideband rows; expected {expected_rows}",
+                rows.len()
+            )));
+        }
+        for (row_index, values) in rows.iter().enumerate() {
+            if values.len() != expected_values {
+                return Err(pac_value_error(format!(
+                    "PAC pickle {label} frequency row {frequency_index}, sideband row {row_index} has {} values; expected {expected_values}",
+                    values.len()
+                )));
+            }
+            if let Some((value_index, (re, im))) = values
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, (re, im))| !re.is_finite() || !im.is_finite())
+            {
+                return Err(pac_value_error(format!(
+                    "PAC pickle {label} frequency row {frequency_index}, sideband row {row_index}, value {value_index} is non-finite ({re:+.6e}{im:+.6e}j)"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Periodic small-signal AC sideband conversion result.
 #[pyclass(name = "PacResult", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
@@ -90,7 +157,8 @@ impl PyPacResult {
             .ok_or_else(|| crate::errors::key_error(format!("unknown node '{node}'")))?;
         let values = (0..self.inner.frequencies.len())
             .map(|frequency_index| self.inner.voltage(node_index, frequency_index, sideband))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(pac_value_error)?;
         Ok(values.to_pyarray(py))
     }
 
@@ -107,7 +175,8 @@ impl PyPacResult {
                 self.inner
                     .conversion_gain(input_sideband, output_sideband, frequency_index)
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(pac_value_error)?;
         Ok(values.to_pyarray(py))
     }
 
@@ -124,7 +193,8 @@ impl PyPacResult {
                 self.inner
                     .conversion_gain_db(input_sideband, output_sideband, frequency_index)
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(pac_value_error)?;
         Ok(values.to_pyarray(py))
     }
 
@@ -152,51 +222,102 @@ impl PyPacResult {
         node_voltages: ComplexGridState,
         conversion_matrix: ComplexGridState,
         sources: (Option<String>, Option<String>),
-    ) -> Self {
+    ) -> PyResult<Self> {
         let (fundamental_frequency, sideband_min, sideband_max, iterations, residual, converged) =
             sweep;
         let (node_names, branch_names) = names;
+        let (input_source, output_node) = sources;
+        if !residual.is_finite() || residual < 0.0 {
+            return Err(pac_value_error(format!(
+                "PAC pickle residual must be finite and non-negative, got {residual}"
+            )));
+        }
+        let sideband_count = checked_pickle_sideband_count(sideband_min, sideband_max)?;
+        validate_pickle_grid(
+            &node_voltages,
+            frequencies.len(),
+            sideband_count,
+            node_names.len(),
+            "node-voltage grid",
+        )?;
+        if input_source
+            .as_deref()
+            .is_none_or(|name| name.trim().is_empty())
+        {
+            return Err(pac_value_error(
+                "PAC pickle is missing its input-source identity",
+            ));
+        }
+        let output_name = output_node
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| pac_value_error("PAC pickle is missing its output-node identity"))?;
+        if !node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(output_name))
+        {
+            return Err(pac_value_error(format!(
+                "PAC pickle output node '{output_name}' is not present in its node identities"
+            )));
+        }
+        if conversion_matrix.is_empty() {
+            return Err(pac_value_error(
+                "PAC pickle with an output node is missing its conversion grid",
+            ));
+        }
+        validate_pickle_grid(
+            &conversion_matrix,
+            frequencies.len(),
+            sideband_count,
+            sideband_count,
+            "conversion grid",
+        )?;
         let mut inner = rspice_core::analysis::PacResult::new(
             fundamental_frequency,
-            frequencies.clone(),
+            frequencies,
             sideband_min,
             sideband_max,
             node_names,
             branch_names,
-        );
+        )
+        .map_err(pac_value_error)?;
         for (freq_idx, per_frequency) in node_voltages.into_iter().enumerate() {
             for (offset, voltages) in per_frequency.into_iter().enumerate() {
-                let sideband = sideband_min + offset as i32;
-                if let Some(data) = inner.get_sideband_data_mut(freq_idx, sideband) {
-                    data.node_voltages = complex_from_state(voltages);
+                let sideband = checked_pickle_sideband(sideband_min, offset)?;
+                let data = inner
+                    .get_sideband_data_mut(freq_idx, sideband)
+                    .ok_or_else(|| {
+                        pac_value_error(format!(
+                            "PAC pickle node-voltage coordinate ({freq_idx}, {sideband}) is outside the constructed result"
+                        ))
+                    })?;
+                for (slot, (re, im)) in data.node_voltages.iter_mut().zip(voltages) {
+                    *slot = Complex64::new(re, im);
                 }
             }
         }
-        let mut matrix = rspice_core::analysis::ConversionMatrix::new(
-            fundamental_frequency,
-            sideband_min,
-            sideband_max,
-            frequencies,
-        );
         for (freq_idx, per_frequency) in conversion_matrix.into_iter().enumerate() {
             for (output_offset, row) in per_frequency.into_iter().enumerate() {
+                let output_sideband = checked_pickle_sideband(sideband_min, output_offset)?;
                 for (input_offset, (re, im)) in row.into_iter().enumerate() {
-                    matrix.set(
-                        freq_idx,
-                        sideband_min + output_offset as i32,
-                        sideband_min + input_offset as i32,
-                        Complex64::new(re, im),
-                    );
+                    let input_sideband = checked_pickle_sideband(sideband_min, input_offset)?;
+                    inner
+                        .conversion_matrix
+                        .set(
+                            freq_idx,
+                            output_sideband,
+                            input_sideband,
+                            Complex64::new(re, im),
+                        )
+                        .map_err(pac_value_error)?;
                 }
             }
         }
-        inner.conversion_matrix = matrix;
         inner.iterations = iterations;
         inner.residual = residual;
-        let (input_source, output_node) = sources;
         inner.input_source = input_source;
         inner.output_node = output_node;
-        Self { inner, converged }
+        Ok(Self { inner, converged })
     }
 
     #[allow(clippy::type_complexity)]
@@ -236,15 +357,17 @@ impl PyPacResult {
                         sidebands
                             .iter()
                             .map(|&input| {
-                                let value =
-                                    self.inner.conversion_matrix.get(freq_idx, output, input);
-                                (value.re, value.im)
+                                self.inner
+                                    .conversion_matrix
+                                    .get(freq_idx, output, input)
+                                    .map(|value| (value.re, value.im))
                             })
-                            .collect()
+                            .collect::<Result<Vec<_>, _>>()
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>, _>>()
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(pac_value_error)?;
         Ok((
             unpickler::<Self>(py)?,
             (

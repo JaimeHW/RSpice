@@ -371,11 +371,15 @@ fn run_periodic_sparameter_analysis(
                     let mut values = Vec::with_capacity(pac.frequencies.len());
                     for frequency_index in 0..pac.frequencies.len() {
                         poll_periodically(abort, frequency_index)?;
-                        let mut value = pac.conversion_matrix.get(
-                            frequency_index,
-                            output_sideband,
-                            input_sideband,
-                        ) * wave_scale;
+                        let mut value = pac
+                            .conversion_matrix
+                            .get(frequency_index, output_sideband, input_sideband)
+                            .map_err(|error| {
+                                ServiceRunError::Failure(format!(
+                                    "PSP conversion result is unavailable: {error}"
+                                ))
+                            })?
+                            * wave_scale;
                         if input_index == output_index && input_sideband == output_sideband {
                             value -= Complex64::new(1.0, 0.0);
                         }

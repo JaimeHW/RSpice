@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rspice_core::analysis::HbConfig;
+use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::netlist::{IncludeProcessor, NetlistParseOptions, ParseError};
 use rspice_core::{
     Engine, Netlist, ResourceKind, ResourceLimitError, ResourceLimits, SimulationConfig,
@@ -275,6 +276,46 @@ fn circuit_construction_enforces_node_and_unknown_budgets() {
             resource: ResourceKind::MatrixUnknowns,
             requested: 2,
             limit: 1,
+        }))
+    ));
+}
+
+#[test]
+fn periodic_small_signal_analyses_enforce_lifted_unknown_budget() {
+    let netlist = Netlist::parse(
+        "lifted periodic unknowns\n\
+         IIN 0 a 0\n\
+         RA a 0 1k\n\
+         RB b 0 1k\n\
+         .end",
+    )
+    .expect("fixture parses");
+    let config = SimulationConfig {
+        resource_limits: limits_with(|limits| limits.max_matrix_unknowns = 5),
+        ..SimulationConfig::default()
+    };
+    let engine = Engine::new(config);
+    let pac = PacConfig::new()
+        .with_fundamental(1.0e6)
+        .with_sweep(1.0e3, 1.0e3, 1)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("IIN");
+
+    assert!(matches!(
+        engine.run_pac(&netlist, pac),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::MatrixUnknowns,
+            requested: 6,
+            limit: 5,
+        }))
+    ));
+    assert!(matches!(
+        engine.run_pnoise(&netlist, 1.0e6, &[1.0e3], "a", None, None, 1),
+        Err(SimulationError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::MatrixUnknowns,
+            requested: 6,
+            limit: 5,
         }))
     ));
 }

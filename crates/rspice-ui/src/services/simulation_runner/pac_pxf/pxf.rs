@@ -293,7 +293,16 @@ fn run_pxf_analysis_for_netlist_with_operating_point_abort(
         for out_sb in &sideband_indices {
             let mut row = Vec::with_capacity(sideband_indices.len());
             for in_sb in &sideband_indices {
-                row.push(pac_result.conversion_matrix.get(freq_idx, *out_sb, *in_sb));
+                row.push(
+                    pac_result
+                        .conversion_matrix
+                        .get(freq_idx, *out_sb, *in_sb)
+                        .map_err(|error| {
+                            ServiceRunError::Failure(format!(
+                                "PXF conversion result is unavailable: {error}"
+                            ))
+                        })?,
+                );
             }
             out_rows.push(row);
         }

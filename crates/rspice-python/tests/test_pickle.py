@@ -916,6 +916,54 @@ class TestDistortionResult:
             )
         assert repr(restored) == repr(original)
 
+    def test_pac_rejects_malformed_or_nonfinite_pickle_state(
+        self, engine, mixer_netlist
+    ):
+        original = engine.run_pac(
+            mixer_netlist, RF_FUNDAMENTAL, 1e3, 1e5, 2, "V1", "out", sideband_max=1
+        )
+        valid_state = original.__reduce__()[1]
+
+        malformed = []
+
+        state = list(copy.deepcopy(valid_state))
+        state[3][0].pop()
+        malformed.append((state, "node-voltage grid"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[3][0][0].append((0.0, 0.0))
+        malformed.append((state, "node-voltage grid"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[4].append(copy.deepcopy(state[4][0]))
+        malformed.append((state, "conversion grid"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[3][0][0][0] = (float("nan"), 0.0)
+        malformed.append((state, "non-finite"))
+
+        state = list(copy.deepcopy(valid_state))
+        sweep = list(state[0])
+        sweep[4] = float("nan")
+        state[0] = tuple(sweep)
+        malformed.append((state, "residual"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[5] = (state[5][0], None)
+        malformed.append((state, "output-node identity"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[5] = (state[5][0], "UNKNOWN_OUTPUT")
+        malformed.append((state, "not present in its node identities"))
+
+        state = list(copy.deepcopy(valid_state))
+        state[4] = []
+        malformed.append((state, "missing its conversion grid"))
+
+        for state, message in malformed:
+            with pytest.raises(ValueError, match=message):
+                rspice.PacResult._unpickle(*state)
+
     def test_two_tone_products_survive(self, engine):
         deck = DISTORTION_DECK.replace("DISTOF1 1m 0", "DISTOF1 1m 0 DISTOF2 2m 0")
         original = engine.run_distortion(

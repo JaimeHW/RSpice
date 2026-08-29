@@ -53,7 +53,10 @@ c1 out 0 159.154943091895p
             let f_abs = offset + (m as f64) * F0;
             let expected = Complex64::new(1.0, 0.0) / Complex64::new(1.0, f_abs / fc);
 
-            let got = result.conversion_matrix.get(freq_idx, m, m);
+            let got = result
+                .conversion_matrix
+                .get(freq_idx, m, m)
+                .expect("conversion value is materialized");
             assert!(
                 (got - expected).norm() < 1e-3 * expected.norm(),
                 "diagonal transfer at offset {offset:.3e}, sideband {m}: got {got}, want {expected}"
@@ -63,7 +66,11 @@ c1 out 0 159.154943091895p
                 if k == m {
                     continue;
                 }
-                let leak = result.conversion_matrix.get(freq_idx, k, m).norm();
+                let leak = result
+                    .conversion_matrix
+                    .get(freq_idx, k, m)
+                    .expect("conversion value is materialized")
+                    .norm();
                 assert!(
                     leak < 1e-9,
                     "linear circuit must not convert sidebands: |H[{k},{m}]| = {leak:.3e}"
@@ -72,7 +79,9 @@ c1 out 0 159.154943091895p
         }
 
         // The m = 0 column doubles as the per-node sideband spectra.
-        let direct = result.voltage(out_idx, freq_idx, 0);
+        let direct = result
+            .voltage(out_idx, freq_idx, 0)
+            .expect("PAC node voltage is retained");
         let expected = Complex64::new(1.0, 0.0) / Complex64::new(1.0, offset / fc);
         assert!(
             (direct - expected).norm() < 1e-3 * expected.norm(),
@@ -98,7 +107,11 @@ r1 out 0 1e14
         .with_output_node("out");
 
     let analysis = run_pac(deck, config);
-    let transfer = analysis.result.conversion_matrix.get(0, 0, 0);
+    let transfer = analysis
+        .result
+        .conversion_matrix
+        .get(0, 0, 0)
+        .expect("conversion value is materialized");
     assert!(
         (transfer.norm() - 1.0e14).abs() <= 1.0e2,
         "a unit PAC current through 100 TOhm must produce 1e14 V, got {transfer}"
@@ -126,12 +139,97 @@ r4 outn 0 3k
         .with_output_ref("outn");
 
     let analysis = run_pac(deck, config);
-    let differential = analysis.result.conversion_matrix.get(0, 0, 0);
+    let differential = analysis
+        .result
+        .conversion_matrix
+        .get(0, 0, 0)
+        .expect("conversion value is materialized");
 
     // V(outp) = 1/2 and V(outn) = 3/4 for a unit input.
     assert!(
         (differential - Complex64::new(-0.25, 0.0)).norm() < 1.0e-9,
         "differential PAC response = {differential}"
+    );
+}
+
+#[test]
+fn pac_without_an_output_reports_conversion_data_as_unavailable() {
+    let deck = "\
+* per-node PAC without an output metric
+iin 0 out dc 0
+r1 out 0 1k
+.end
+";
+    let config = PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("iin");
+
+    let analysis = run_pac(deck, config);
+    let result = &analysis.result;
+    assert!(result.conversion_matrix.get(0, 0, 0).is_err());
+    assert!(result.conversion_gain(0, 0, 0).is_err());
+    assert!(result.conversion_gain_db(0, 0, 0).is_err());
+    assert!(result.get_transfer(0, 0).is_err());
+    assert!(result.image_rejection_db(0).is_err());
+    let out = result.node_index("out").expect("output node is retained");
+    let voltage = result
+        .voltage(out, 0, 0)
+        .expect("no-output PAC still retains its physical node spectrum");
+    assert!(
+        (voltage - Complex64::new(1.0e3, 0.0)).norm() < 1.0e-9,
+        "unit current through 1 kohm must retain 1 kV, got {voltage}"
+    );
+}
+
+#[test]
+fn pac_rejects_a_nonrepresentable_differential_transfer() {
+    let deck = "\
+* each node voltage is finite, but their differential exceeds binary64
+iin outn outp dc 0
+r1 outp 0 1e308
+r2 outn 0 1e308
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let base_config = || {
+        PacConfig::new()
+            .with_fundamental(F0)
+            .with_sweep(1.0e4, 1.0e4, 1)
+            .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+            .with_sidebands(0, 0)
+            .with_input_source("iin")
+    };
+    for output in ["outp", "outn"] {
+        let single_ended = engine
+            .run_pac(&netlist, base_config().with_output_node(output))
+            .expect("each single-ended extreme response remains representable");
+        let value = single_ended
+            .result
+            .conversion_matrix
+            .get(0, 0, 0)
+            .expect("single-ended conversion value is materialized");
+        assert!(
+            value.re.is_finite() && value.im.is_finite(),
+            "single-ended {output} response must be finite, got {value}"
+        );
+    }
+    let error = engine
+        .run_pac(
+            &netlist,
+            base_config()
+                .with_output_node("outp")
+                .with_output_ref("outn"),
+        )
+        .expect_err("an unrepresentable differential must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("PAC differential output is non-representable"),
+        "unexpected error: {error}"
     );
 }
 
@@ -154,7 +252,11 @@ P2 p2 0 PORT=2 Z0=50
         .with_output_node("P1");
 
     let analysis = run_pac(deck, config);
-    let voltage = analysis.result.conversion_matrix.get(0, 0, 0);
+    let voltage = analysis
+        .result
+        .conversion_matrix
+        .get(0, 0, 0)
+        .expect("conversion value is materialized");
     assert!(
         (voltage - Complex64::new(2.0 / 3.0, 0.0)).norm() < 1.0e-8,
         "port-plane voltage = {voltage}"
@@ -195,7 +297,11 @@ P2 p2 0 PORT=2 Z0=50
     let analysis = engine
         .run_pac_from_pss_with_abort(&netlist, config, &operating_point, &NoAbort)
         .expect("PAC consumes PSS");
-    let voltage = analysis.result.conversion_matrix.get(0, 0, 0);
+    let voltage = analysis
+        .result
+        .conversion_matrix
+        .get(0, 0, 0)
+        .expect("conversion value is materialized");
     assert!(
         (voltage - Complex64::new(2.0 / 3.0, 0.0)).norm() < 1.0e-8,
         "port-plane voltage = {voltage}"
@@ -231,7 +337,11 @@ P2 p2 0 PORT=2 Z0=50
     let analysis = engine
         .run_pac_from_hb_with_abort(&netlist, config, &hb.operating_point, &NoAbort)
         .expect("PAC consumes retained HB state");
-    let voltage = analysis.result.conversion_matrix.get(0, 0, 0);
+    let voltage = analysis
+        .result
+        .conversion_matrix
+        .get(0, 0, 0)
+        .expect("conversion value is materialized");
     assert!(
         (voltage - Complex64::new(2.0 / 3.0, 0.0)).norm() < 1.0e-8,
         "port-plane voltage = {voltage}"
@@ -268,9 +378,15 @@ cload out 0 1f
         assert!(analysis.converged, "operating point must converge");
         let cm = &analysis.result.conversion_matrix;
         (
-            cm.get(0, 1, 0).norm(),
-            cm.get(0, -1, 0).norm(),
-            cm.get(0, 0, 0).norm(),
+            cm.get(0, 1, 0)
+                .expect("conversion value is materialized")
+                .norm(),
+            cm.get(0, -1, 0)
+                .expect("conversion value is materialized")
+                .norm(),
+            cm.get(0, 0, 0)
+                .expect("conversion value is materialized")
+                .norm(),
         )
     };
 

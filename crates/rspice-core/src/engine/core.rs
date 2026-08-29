@@ -229,6 +229,16 @@ impl Engine {
     }
 
     #[inline]
+    pub(crate) fn ensure_matrix_unknowns(&self, requested: usize) -> Result<(), SimulationError> {
+        ResourceLimitError::ensure(
+            ResourceKind::MatrixUnknowns,
+            requested,
+            self.config.resource_limits.max_matrix_unknowns,
+        )?;
+        Ok(())
+    }
+
+    #[inline]
     /// Check a requested batch-run count against the configured limit.
     pub fn ensure_batch_runs(&self, requested: usize) -> Result<(), SimulationError> {
         ResourceLimitError::ensure(

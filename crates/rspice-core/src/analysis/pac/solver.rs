@@ -34,6 +34,12 @@ pub enum PacError {
 
     /// Input source not found in circuit
     InputSourceNotFound(String),
+
+    /// Result axes or derived metadata are invalid
+    InvalidResult(String),
+
+    /// A result allocation could not be satisfied
+    AllocationFailed(String),
 }
 
 impl std::fmt::Display for PacError {
@@ -46,6 +52,8 @@ impl std::fmt::Display for PacError {
             PacError::MatrixSolverFailed(s) => write!(f, "Matrix solver failed: {}", s),
             PacError::NoInputSource => write!(f, "No input source specified for PAC analysis"),
             PacError::InputSourceNotFound(s) => write!(f, "Input source not found: {}", s),
+            PacError::InvalidResult(s) => write!(f, "Invalid PAC result: {s}"),
+            PacError::AllocationFailed(s) => write!(f, "PAC result allocation failed: {s}"),
         }
     }
 }

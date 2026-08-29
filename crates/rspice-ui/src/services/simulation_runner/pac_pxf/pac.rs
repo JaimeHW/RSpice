@@ -317,10 +317,14 @@ fn validate_pac_result(
     for frequency_index in 0..result.frequencies.len() {
         for output_sideband in result.sideband_indices() {
             for input_sideband in result.sideband_indices() {
-                let value =
-                    result
-                        .conversion_matrix
-                        .get(frequency_index, output_sideband, input_sideband);
+                let value = result
+                    .conversion_matrix
+                    .get(frequency_index, output_sideband, input_sideband)
+                    .map_err(|error| {
+                        ServiceRunError::Failure(format!(
+                            "PAC conversion result is unavailable: {error}"
+                        ))
+                    })?;
                 if !value.re.is_finite() || !value.im.is_finite() {
                     return Err(ServiceRunError::Failure(format!(
                         "PAC conversion matrix contains a non-finite value at frequency point {}, output sideband {}, input sideband {}",
@@ -430,7 +434,14 @@ fn run_pac_analysis_for_netlist_with_operating_point_abort(
             // The configured conversion matrix is the authoritative output
             // channel: unlike the per-node spectra, it includes output_ref
             // for a differential PAC measurement.
-            let voltage = pac_result.conversion_matrix.get(freq_idx, *sideband, 0)
+            let voltage = pac_result
+                .conversion_matrix
+                .get(freq_idx, *sideband, 0)
+                .map_err(|error| {
+                    ServiceRunError::Failure(format!(
+                        "PAC conversion result is unavailable: {error}"
+                    ))
+                })?
                 * Complex64::new(config.pac_magnitude, 0.0);
             spectrum.push((freq_offset, voltage.norm(), voltage.arg().to_degrees()));
         }

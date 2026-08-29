@@ -433,6 +433,12 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
+        let lifted_unknowns = num_nodes.checked_mul(sideband_count).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "pnoise lifted dimension {num_nodes} nodes x {sideband_count} sidebands overflows this platform"
+            ))
+        })?;
+        self.ensure_matrix_unknowns(lifted_unknowns)?;
         if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
@@ -657,13 +663,16 @@ impl Engine {
                     ))
                 })?,
         );
-        self.ensure_result_shape(
-            offsets.len(),
-            sources
-                .len()
-                .saturating_add(2)
-                .saturating_add(usize::from(input_source.is_some())),
-        )?;
+        let values_per_point = sources
+            .len()
+            .checked_add(2)
+            .and_then(|count| count.checked_add(usize::from(input_source.is_some())))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "pnoise retained result width overflows this platform".to_string(),
+                )
+            })?;
+        self.ensure_result_shape(offsets.len(), values_per_point)?;
 
         // Input transfer for input-referred noise: the conversion transfer
         // from the named source (unit excitation at sideband 0) to the
@@ -676,14 +685,56 @@ impl Engine {
                 injections,
             });
 
-        let mut output_noise = Vec::with_capacity(offsets.len());
-        let mut input_noise: Option<Vec<Value>> = input_excitation
-            .as_ref()
-            .map(|_| Vec::with_capacity(offsets.len()));
-        let mut contributors: Vec<(String, Vec<Value>)> = sources
-            .iter()
-            .map(|s| (s.name.clone(), Vec::with_capacity(offsets.len())))
-            .collect();
+        let mut result_frequencies = Vec::new();
+        result_frequencies
+            .try_reserve_exact(offsets.len())
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "pnoise frequency-result allocation failed: {error}"
+                ))
+            })?;
+        result_frequencies.extend_from_slice(offsets);
+
+        let mut output_noise = Vec::new();
+        output_noise
+            .try_reserve_exact(offsets.len())
+            .map_err(|error| {
+                SimulationError::Circuit(format!("pnoise output-result allocation failed: {error}"))
+            })?;
+        let mut input_noise = if input_excitation.is_some() {
+            let mut values = Vec::new();
+            values.try_reserve_exact(offsets.len()).map_err(|error| {
+                SimulationError::Circuit(format!("pnoise input-result allocation failed: {error}"))
+            })?;
+            Some(values)
+        } else {
+            None
+        };
+        let mut contributors: Vec<(String, Vec<Value>)> = Vec::new();
+        contributors
+            .try_reserve_exact(sources.len())
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "pnoise contributor-result allocation failed: {error}"
+                ))
+            })?;
+        for source in &sources {
+            let mut name = String::new();
+            name.try_reserve_exact(source.name.len()).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "pnoise contributor-name allocation failed: {error}"
+                ))
+            })?;
+            name.push_str(&source.name);
+            let mut values = Vec::new();
+            values.try_reserve_exact(offsets.len()).map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "pnoise contributor-value allocation failed for '{}': {error}",
+                    source.name
+                ))
+            })?;
+            contributors.push((name, values));
+        }
         for &offset in offsets {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -772,7 +823,7 @@ impl Engine {
         }
 
         Ok(PnoiseAnalysisResult {
-            frequencies: offsets.to_vec(),
+            frequencies: result_frequencies,
             output_noise,
             contributors,
             input_noise,

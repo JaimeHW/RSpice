@@ -50,7 +50,7 @@
 //! let pac_result = engine.run_pac(&netlist, pac_config)?;
 //!
 //! // Conversion gain from RF (sideband 1) to IF (sideband 0)
-//! let conversion_gain = pac_result.result.conversion_gain(1, 0, 0);
+//! let conversion_gain = pac_result.result.conversion_gain(1, 0, 0)?;
 //! ```
 
 mod config;
