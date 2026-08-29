@@ -196,6 +196,11 @@ impl HbOperatingPoint {
                     "retained HB node '{node}' contains a non-finite coefficient"
                 )));
             }
+            if spectrum.first().is_some_and(|value| value.im != 0.0) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB node '{node}' has a nonzero imaginary DC coefficient"
+                )));
+            }
         }
         if mna_branch_spectral_state.len() != mna_branch_names.len() {
             return Err(SimulationError::Circuit(format!(
@@ -228,6 +233,11 @@ impl HbOperatingPoint {
             {
                 return Err(SimulationError::Circuit(format!(
                     "retained HB MNA branch '{branch}' contains a non-finite coefficient"
+                )));
+            }
+            if spectrum.first().is_some_and(|value| value.im != 0.0) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB MNA branch '{branch}' has a nonzero imaginary DC coefficient"
                 )));
             }
         }

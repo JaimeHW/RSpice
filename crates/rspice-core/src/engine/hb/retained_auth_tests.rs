@@ -115,3 +115,39 @@ fn transported_mna_evidence_rejects_malformed_names_rows_and_values() {
         .contains("non-finite")
     );
 }
+
+#[test]
+fn retained_real_waveform_state_rejects_imaginary_dc_coefficients() {
+    let config = HbConfig::new(1.0e3).with_harmonics(1);
+    let mut invalid_nodes = node_state();
+    invalid_nodes[0][0].im = 1.0e-30;
+    let node_error = HbOperatingPoint::try_from_parts(
+        config.clone(),
+        vec!["out".to_owned()],
+        invalid_nodes,
+        0,
+        0.0,
+    )
+    .expect_err("a one-sided real-waveform basis has no imaginary DC state");
+    assert!(
+        node_error.to_string().contains("imaginary DC"),
+        "{node_error}"
+    );
+
+    let mut invalid_branches = branch_state();
+    invalid_branches[0][0].im = -1.0e-30;
+    let branch_error = HbOperatingPoint::try_from_parts_with_mna_branches(
+        config,
+        vec!["out".to_owned()],
+        node_state(),
+        vec!["V1".to_owned()],
+        invalid_branches,
+        0,
+        0.0,
+    )
+    .expect_err("a retained MNA branch has no imaginary DC state");
+    assert!(
+        branch_error.to_string().contains("imaginary DC"),
+        "{branch_error}"
+    );
+}
