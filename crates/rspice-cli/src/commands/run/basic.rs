@@ -796,7 +796,7 @@ fn run_authored_restart(
                     });
                 }
                 previous_nominal = Some(nominal_time);
-                let name = format!("{job}{}", xyce_restart_time_suffix(nominal_time));
+                let name = format!("{job}{}", xyce_restart_time_suffix(nominal_time)?);
                 let path = safe_restart_write_path(&parent, &name)?;
                 scheduled
                     .checkpoint
@@ -961,7 +961,7 @@ fn push_bounded_checkpoint(
 fn validate_restart_checkpoint_names(job: &str, schedule: &[f64]) -> Result<(), CliError> {
     let mut unique = HashSet::with_capacity(schedule.len());
     for &time in schedule {
-        let name = format!("{job}{}", xyce_restart_time_suffix(time));
+        let name = format!("{job}{}", xyce_restart_time_suffix(time)?);
         if !unique.insert(name.clone()) {
             return Err(restart_cli_error(format!(
                 ".OPTIONS RESTART filename precision maps more than one checkpoint to '{name}'; choose a wider checkpoint interval or shorter stop time"
@@ -971,13 +971,33 @@ fn validate_restart_checkpoint_names(job: &str, schedule: &[f64]) -> Result<(), 
     Ok(())
 }
 
-fn xyce_restart_time_suffix(time: f64) -> String {
-    if time == 0.0 {
-        return "0".to_string();
+fn xyce_restart_time_suffix(time: f64) -> Result<String, CliError> {
+    if !time.is_finite() {
+        return Err(restart_cli_error(format!(
+            ".OPTIONS RESTART checkpoint time must be finite, found {time}"
+        )));
     }
-    let exponent = time.abs().log10().floor() as i32;
+    if time == 0.0 {
+        return Ok(if time.is_sign_negative() {
+            "-0".to_string()
+        } else {
+            "0".to_string()
+        });
+    }
+
+    // A fresh C++ ostream, as used by Xyce's RestartMgr, applies defaultfloat
+    // with six significant digits. The notation boundary is selected after
+    // rounding, so derive it from the already-rounded scientific spelling.
+    let scientific = format!("{time:.5e}");
+    let (mantissa, exponent) = scientific
+        .split_once('e')
+        .expect("finite Rust scientific formatting always contains an exponent");
+    let exponent = exponent
+        .parse::<i32>()
+        .expect("Rust scientific formatting emits a numeric exponent");
     if (-4..6).contains(&exponent) {
-        let decimals = usize::try_from((5 - exponent).max(0)).unwrap_or(0);
+        let decimals =
+            usize::try_from(5 - exponent).expect("fixed-point exponent range is non-negative");
         let mut text = format!("{time:.decimals$}");
         while text.ends_with('0') && text.contains('.') {
             text.pop();
@@ -985,17 +1005,10 @@ fn xyce_restart_time_suffix(time: f64) -> String {
         if text.ends_with('.') {
             text.pop();
         }
-        text
+        Ok(text)
     } else {
-        let scientific = format!("{time:.5e}");
-        let (mantissa, exponent) = scientific
-            .split_once('e')
-            .expect("Rust scientific formatting always contains an exponent");
         let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
-        let exponent = exponent
-            .parse::<i32>()
-            .expect("Rust scientific formatting emits a numeric exponent");
-        format!("{mantissa}e{exponent:+03}")
+        Ok(format!("{mantissa}e{exponent:+03}"))
     }
 }
 
@@ -1585,12 +1598,37 @@ mod restart_tests {
 
     #[test]
     fn restart_suffix_matches_xyce_compact_default_float_spelling() {
-        assert_eq!(xyce_restart_time_suffix(0.0), "0");
-        assert_eq!(xyce_restart_time_suffix(5e-9), "5e-09");
-        assert_eq!(xyce_restart_time_suffix(20e-9), "2e-08");
-        assert_eq!(xyce_restart_time_suffix(15e-9), "1.5e-08");
-        assert_eq!(xyce_restart_time_suffix(0.0001), "0.0001");
-        assert_eq!(xyce_restart_time_suffix(1e6), "1e+06");
+        let oracle = [
+            (0x0000_0000_0000_0000, "0"),
+            (0x8000_0000_0000_0000, "-0"),
+            (0x3e35_798e_e230_8c3a, "5e-09"),
+            (0x3f1a_36e2_0f35_445d, "9.99999e-05"),
+            (0x3f1a_36e2_0f35_445e, "0.0001"),
+            (0x3f1a_36e2_eb1c_432d, "0.0001"),
+            (0x3f50_624d_4981_4abb, "0.001"),
+            (0x40f8_69ff_5c28_f5c3, "100000"),
+            (0x412e_847e_ffff_ffff, "999999"),
+            (0x412e_847f_0000_0000, "1e+06"),
+            (0x412e_8480_0000_0000, "1e+06"),
+            (0xbf1a_36e2_0f35_445e, "-0.0001"),
+            (0xc12e_847f_0000_0000, "-1e+06"),
+            (0x54b2_49ad_2594_c37d, "1e+100"),
+            (0x2b2b_ff2e_e48e_0530, "1e-100"),
+            (0x0000_0000_0000_0001, "4.94066e-324"),
+            (0x7fef_ffff_ffff_ffff, "1.79769e+308"),
+        ];
+        for (bits, expected) in oracle {
+            let time = f64::from_bits(bits);
+            assert_eq!(
+                xyce_restart_time_suffix(time).unwrap(),
+                expected,
+                "Xyce defaultfloat mismatch for {time:.17e} (0x{bits:016X})"
+            );
+        }
+
+        for nonfinite in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(xyce_restart_time_suffix(nonfinite).is_err());
+        }
     }
 
     #[test]
