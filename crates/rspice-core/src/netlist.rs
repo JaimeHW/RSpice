@@ -295,6 +295,23 @@ pub struct ParameterRedefinitionError {
     pub duplicate_origin: NetlistSourceLocation,
 }
 
+/// A device parameter is authored more than once on one `.MODEL` card.
+///
+/// Parameter names are case-insensitive. `LEVEL` is intentionally excluded:
+/// Xyce treats it as a model selector rather than a device parameter and
+/// permits repeated selectors on one logical card.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "{model_origin}: Device model {canonical_model_name}: Duplicate specification of parameter {canonical_parameter_name}"
+)]
+pub struct DuplicateModelParameterError {
+    pub model_name: String,
+    pub canonical_model_name: String,
+    pub parameter_name: String,
+    pub canonical_parameter_name: String,
+    pub model_origin: NetlistSourceLocation,
+}
+
 /// A subcircuit instance names a definition that is absent from its visible
 /// lexical scope.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -479,6 +496,9 @@ pub enum ParseError {
 
     #[error(transparent)]
     ParameterRedefinition(Box<ParameterRedefinitionError>),
+
+    #[error(transparent)]
+    DuplicateModelParameter(Box<DuplicateModelParameterError>),
 
     #[error(transparent)]
     MissingSubcircuitEnds(Box<MissingSubcircuitEndsError>),

@@ -221,6 +221,7 @@ pub(super) fn parse_command(
             let model = parse_model_definition(
                 stream,
                 line_num,
+                origin,
                 params,
                 models,
                 false,

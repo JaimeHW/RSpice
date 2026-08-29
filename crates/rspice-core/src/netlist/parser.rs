@@ -22,20 +22,20 @@ use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, DataTable, DeviceInitialConditionDirective,
     DeviceInitialConditionEntry, DeviceInitialConditionError, DeviceInitialConditionSource,
-    Element, ElementKind, FftAnalysis, FftFormat, FftOutput, FftWindow, FreqVariation,
-    InitialCondition, JfetType, LinAnalysis, MesfetType, MissingSubcircuitEndsBoundary,
-    MissingSubcircuitEndsError, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType,
-    Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind, OutputDirectiveKind,
-    OutputOperand, OutputOperandKind, OutputRequest, ParamContext, ParameterDefinitionKind,
-    ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionError, ParameterRedefinitionPolicy,
-    ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError, PoleZeroAnalysisType,
-    PoleZeroTransferType, PrintDelimiter, PspiceChebyshevKind, PspiceUTiming, PspiceUTimingMode,
-    RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal, SensitivityAcSweep,
-    SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec, StartupDiagnosticCode,
-    StartupDirectiveDisposition, StartupDirectiveEntry, StartupDirectiveKind,
-    StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode, StepCommand, StepSweep,
-    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude, XyceAddResistorMode,
-    XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
+    DuplicateModelParameterError, Element, ElementKind, FftAnalysis, FftFormat, FftOutput,
+    FftWindow, FreqVariation, InitialCondition, JfetType, LinAnalysis, MesfetType,
+    MissingSubcircuitEndsBoundary, MissingSubcircuitEndsError, ModelDef, MonteCarloCommand,
+    MonteCarloDistribution, MosType, Netlist, NetlistSourceLocation, NodeSet, OutputAnalysisKind,
+    OutputDirectiveKind, OutputOperand, OutputOperandKind, OutputRequest, ParamContext,
+    ParameterDefinitionKind, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionError,
+    ParameterRedefinitionPolicy, ParametricValue, ParseDiagnostic, ParseError, ParseWithAbortError,
+    PoleZeroAnalysisType, PoleZeroTransferType, PrintDelimiter, PspiceChebyshevKind, PspiceUTiming,
+    PspiceUTimingMode, RemoveUnusedDeviceType, RemoveUnusedPolicy, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceMultiplicity, SourceRfPort, SourceSpec,
+    StartupDiagnosticCode, StartupDirectiveDisposition, StartupDirectiveEntry,
+    StartupDirectiveKind, StartupDirectiveRecord, StartupDirectiveScope, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    XyceAddResistorMode, XyceAddResistorSpec, XyceAddResistorsPolicy, ensure_parse_not_aborted,
     finish_non_aborting_parse, poll_parse_abort, poll_parse_text,
     validate_startup_directives_with_abort,
 };
@@ -4393,5 +4393,164 @@ mod runtime_model_expression_tests {
                 .iter()
                 .any(|(name, _)| name.eq_ignore_ascii_case("HEATCAPACITY"))
         );
+    }
+}
+
+#[cfg(test)]
+mod model_parameter_identity_tests {
+    use super::*;
+
+    fn parse_xyce(source: &str) -> Result<Netlist, ParseError> {
+        Netlist::parse_with_options(
+            source,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..NetlistParseOptions::default()
+            },
+        )
+    }
+
+    #[test]
+    fn duplicate_model_parameters_are_case_insensitive_and_keep_card_origin() {
+        let source = "duplicate model parameter\n\
+                      .model cd4012_pmos PMOS (LEVEL=3 NFS=5.794e10\n\
+                      + nFs=1e10)\n\
+                      .end\n";
+        let error = parse_xyce(source).expect_err("duplicate NFS must be rejected");
+        let ParseError::DuplicateModelParameter(error) = error else {
+            panic!("expected typed duplicate-model-parameter error, got {error:?}");
+        };
+        assert_eq!(error.model_name, "CD4012_PMOS");
+        assert_eq!(error.canonical_model_name, "CD4012_PMOS");
+        assert_eq!(error.parameter_name, "nFs");
+        assert_eq!(error.canonical_parameter_name, "NFS");
+        assert_eq!(error.model_origin, NetlistSourceLocation::in_memory(2));
+        assert_eq!(
+            error.to_string(),
+            "line 2: Device model CD4012_PMOS: Duplicate specification of parameter NFS"
+        );
+    }
+
+    #[test]
+    fn duplicate_model_parameter_detection_crosses_value_categories() {
+        let source = "cross-category duplicate\n\
+                      .model mixed custom (GAIN=1 gain=\"fast\")\n\
+                      .end\n";
+        let error = parse_xyce(source).expect_err("numeric/string duplicate must be rejected");
+        let ParseError::DuplicateModelParameter(error) = error else {
+            panic!("expected typed duplicate-model-parameter error, got {error:?}");
+        };
+        assert_eq!(error.canonical_model_name, "MIXED");
+        assert_eq!(error.canonical_parameter_name, "GAIN");
+        assert_eq!(error.model_origin, NetlistSourceLocation::in_memory(2));
+    }
+
+    #[test]
+    fn duplicate_model_parameter_retains_file_backed_card_origin() {
+        let source = "file-backed duplicate\n.model local NMOS (NFS=1 NFS=2)\n.end\n";
+        let path = std::path::Path::new("models/device.cir");
+        let error = Netlist::parse_with_path_and_options(
+            source,
+            path,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect_err("file-backed duplicate must be rejected");
+        let ParseError::DuplicateModelParameter(error) = error else {
+            panic!("expected typed duplicate-model-parameter error, got {error:?}");
+        };
+
+        assert_eq!(error.model_origin, NetlistSourceLocation::in_file(path, 2));
+    }
+
+    #[test]
+    fn malformed_duplicate_assignment_reports_its_syntax_before_identity() {
+        let source = "malformed duplicate\n.model m NMOS (NFS=1 nfs=)\n.end\n";
+        let error = parse_xyce(source).expect_err("empty duplicate value must be rejected");
+
+        assert!(matches!(error, ParseError::Syntax { line: 2, message }
+            if !message.contains("Duplicate specification")));
+    }
+
+    #[test]
+    fn repeated_level_selectors_remain_valid_and_source_ordered() {
+        let source = "repeated model selector\n\
+                      .model model504 NPN (LEVEL=504\n\
+                      + level=504.0 BF=100)\n\
+                      .end\n";
+        let netlist = parse_xyce(source).expect("LEVEL is a repeatable Xyce model selector");
+        let model = netlist.models.first().expect("one model");
+        let levels = model
+            .params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[0].0, "LEVEL");
+        assert_eq!(levels[1].0, "LEVEL");
+        assert_eq!(levels[0].1.to_bits(), 504.0f64.to_bits());
+        assert_eq!(levels[1].1.to_bits(), 504.0f64.to_bits());
+    }
+
+    #[test]
+    fn ako_overrides_and_distinct_parameter_aliases_are_not_duplicates() {
+        let source = "distinct model parameter identities\n\
+                      .model base NMOS (NFS=1 VTO=0.7)\n\
+                      .model derived AKO:base NMOS (NFS=2 VT0=0.8)\n\
+                      .end\n";
+        let netlist = parse_xyce(source)
+            .expect("AKO overrides and differently spelled aliases remain distinct");
+        let derived = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("derived"))
+            .expect("derived model");
+
+        assert_eq!(
+            derived
+                .params
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("NFS"))
+                .count(),
+            1
+        );
+        assert!(
+            derived
+                .params
+                .iter()
+                .any(|(name, value)| name == "NFS" && value.to_bits() == 2.0f64.to_bits())
+        );
+        assert!(derived.params.iter().any(|(name, _)| name == "VTO"));
+        assert!(derived.params.iter().any(|(name, _)| name == "VT0"));
+    }
+
+    #[test]
+    fn subcircuit_local_models_use_the_same_duplicate_policy() {
+        let source = "local model duplicate\n\
+                      .subckt cell d g s b\n\
+                      .model local NMOS (NFS=1 nfs=2)\n\
+                      M1 d g s b local\n\
+                      .ends cell\n\
+                      .end\n";
+        let error = parse_xyce(source).expect_err("local duplicate must be rejected");
+        let ParseError::DuplicateModelParameter(error) = error else {
+            panic!("expected typed duplicate-model-parameter error, got {error:?}");
+        };
+
+        assert_eq!(error.canonical_model_name, "LOCAL");
+        assert_eq!(error.canonical_parameter_name, "NFS");
+        assert_eq!(error.model_origin, NetlistSourceLocation::in_memory(3));
+    }
+
+    #[test]
+    fn ngspice_dialect_preserves_duplicate_parameter_compatibility() {
+        let source = "ngspice duplicate compatibility\n\
+                      .model m NMOS (NFS=1 nfs=2)\n\
+                      .end\n";
+
+        parse_netlist(source).expect("ngspice permits repeated model parameters");
     }
 }

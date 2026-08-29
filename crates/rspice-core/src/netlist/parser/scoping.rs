@@ -23,6 +23,7 @@ pub(super) fn qualify_local_model_name(scope: &str, local_name: &str) -> String 
 pub(super) fn parse_model_definition(
     stream: &mut TokenStream,
     line_num: usize,
+    origin: &NetlistSourceLocation,
     params: &ParamContext,
     known_models: &[ModelDef],
     defer_expression_params: bool,
@@ -100,6 +101,8 @@ pub(super) fn parse_model_definition(
         params,
         defer_expression_params,
         model_type_hint,
+        &name,
+        origin,
     )?;
     bare_ident_deferrals.append(&mut model_params.bare_ident_deferrals);
 

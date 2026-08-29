@@ -1474,7 +1474,7 @@ impl LibParser {
                 return Err(format!(".model parameter '{key}' has an empty value"));
             }
             let key = key.to_ascii_lowercase();
-            if !declared.insert(key.clone()) {
+            if key != "level" && !declared.insert(key.clone()) {
                 return Err(format!(
                     ".model parameter '{key}' is declared more than once (parameter names are case-insensitive)"
                 ));
@@ -2250,6 +2250,20 @@ mod tests {
 
     #[test]
     fn model_parameter_and_model_names_are_unique_case_insensitively_per_scope() {
+        let mut repeated_level_parser = LibParser::new(".");
+        let repeated_level =
+            repeated_level_parser.parse_string(".model model504 NPN (LEVEL=504 level=505)\n");
+        assert!(repeated_level.is_ok(), "{:?}", repeated_level.errors);
+        let repeated_level_model = repeated_level
+            .top_level_models
+            .first()
+            .expect("one repeated-LEVEL model");
+        assert_eq!(repeated_level_model.level, Some(505));
+        assert_eq!(
+            repeated_level_model.parameters.get("level").copied(),
+            Some(505.0)
+        );
+
         let mut duplicate_parameter_parser = LibParser::new(".");
         let duplicate_parameter =
             duplicate_parameter_parser.parse_string(".model nch NMOS (VTH0=0.4 vth0=0.5)\n");

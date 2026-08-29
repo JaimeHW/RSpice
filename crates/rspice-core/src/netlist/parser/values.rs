@@ -267,6 +267,8 @@ pub(super) fn parse_model_params(
     params: &ParamContext,
     defer_expression_params: bool,
     model_type: Option<&str>,
+    model_name: &str,
+    origin: &NetlistSourceLocation,
 ) -> Result<ParsedModelParams, ParseError> {
     let mut numeric_params = Vec::new();
     let mut expr_params = Vec::new();
@@ -276,6 +278,7 @@ pub(super) fn parse_model_params(
     let mut real_vector_expr_params = Vec::new();
     let integer_vector_params = Vec::new();
     let mut bare_ident_deferrals: Vec<(String, String, usize)> = Vec::new();
+    let mut authored_names = Vec::new();
 
     let opened_paren = stream.consume(&TokenKind::LParen);
     let allow_missing_close = opened_paren
@@ -289,16 +292,7 @@ pub(super) fn parse_model_params(
         match &stream.peek().kind {
             TokenKind::RParen if opened_paren => {
                 stream.advance();
-                return Ok(ParsedModelParams {
-                    numeric: numeric_params,
-                    expr: expr_params,
-                    string: string_params,
-                    string_vector: string_vector_params,
-                    real_vector: real_vector_params,
-                    real_vector_expr: real_vector_expr_params,
-                    integer_vector: integer_vector_params,
-                    bare_ident_deferrals,
-                });
+                break;
             }
             TokenKind::RParen => {
                 let has_params = !numeric_params.is_empty()
@@ -312,16 +306,7 @@ pub(super) fn parse_model_params(
                     stream.advance();
                     skip_commas(stream);
                     if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-                        return Ok(ParsedModelParams {
-                            numeric: numeric_params,
-                            expr: expr_params,
-                            string: string_params,
-                            string_vector: string_vector_params,
-                            real_vector: real_vector_params,
-                            real_vector_expr: real_vector_expr_params,
-                            integer_vector: integer_vector_params,
-                            bare_ident_deferrals,
-                        });
+                        break;
                     }
                 }
                 return Err(ParseError::Syntax {
@@ -338,16 +323,7 @@ pub(super) fn parse_model_params(
                     || !real_vector_expr_params.is_empty()
                     || !integer_vector_params.is_empty();
                 if allow_missing_close && has_params {
-                    return Ok(ParsedModelParams {
-                        numeric: numeric_params,
-                        expr: expr_params,
-                        string: string_params,
-                        string_vector: string_vector_params,
-                        real_vector: real_vector_params,
-                        real_vector_expr: real_vector_expr_params,
-                        integer_vector: integer_vector_params,
-                        bare_ident_deferrals,
-                    });
+                    break;
                 }
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -360,7 +336,9 @@ pub(super) fn parse_model_params(
 
         // Look for NAME=VALUE
         if let TokenKind::Ident(name) = &stream.peek().kind {
+            let authored_name = stream.peek().lexeme.clone();
             let name = name.clone();
+            authored_names.push((authored_name, name.clone()));
             stream.advance();
 
             if stream.consume(&TokenKind::Equals) {
@@ -672,6 +650,27 @@ pub(super) fn parse_model_params(
                     stream.peek().kind
                 ),
             });
+        }
+    }
+
+    let mut unique_names = HashSet::with_capacity(authored_names.len());
+    for (authored_name, parsed_name) in authored_names {
+        let canonical_name = parsed_name.to_ascii_uppercase();
+        if canonical_name == "LEVEL" {
+            continue;
+        }
+        if !unique_names.insert(canonical_name.clone())
+            && params.expression_dialect() == ExpressionDialect::Xyce
+        {
+            return Err(ParseError::DuplicateModelParameter(Box::new(
+                DuplicateModelParameterError {
+                    model_name: model_name.to_string(),
+                    canonical_model_name: model_name.to_ascii_uppercase(),
+                    parameter_name: authored_name,
+                    canonical_parameter_name: canonical_name,
+                    model_origin: origin.clone(),
+                },
+            )));
         }
     }
 

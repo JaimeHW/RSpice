@@ -293,6 +293,7 @@ pub(super) fn process_line(
             let mut model = parse_model_definition(
                 &mut stream,
                 line_num,
+                origin,
                 &frame.local_params,
                 models,
                 true,
