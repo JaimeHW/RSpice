@@ -679,7 +679,7 @@ impl Jfet {
         frequency_hz: Value,
         external_vd: Value,
         external_vs: Value,
-    ) -> (Value, Value, Value, Value) {
+    ) -> Result<(Value, Value, Value, Value), JfetAcError> {
         let (temp_common, temp_source, _) = self.resolved_temperatures(self.analysis_temperature());
         // GATEMOD=1's gmg/gmd are deliberately not part of the AC stamp:
         // ngspice's hfetacl.c omits them too (only ggd/ggs/gm/gds appear),
@@ -701,7 +701,7 @@ impl Jfet {
                     frequency_hz,
                     gm_base,
                     gds_base,
-                );
+                )?;
                 (gm, gds)
             }
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
@@ -753,16 +753,26 @@ impl Jfet {
             },
         };
 
-        (gm, gds, ggs, ggd)
+        for (quantity, value) in [
+            ("AC transconductance", gm),
+            ("AC output conductance", gds),
+            ("AC gate-source conductance", ggs),
+            ("AC gate-drain conductance", ggd),
+        ] {
+            if !value.is_finite() {
+                return Err(JfetAcError::NonFiniteValue { quantity, value });
+            }
+        }
+        Ok((gm, gds, ggs, ggd))
     }
 
     pub(crate) fn ac_imag_feedback_terms_at_frequency(
         &self,
         voltages: &[Value],
         frequency_hz: Value,
-    ) -> Option<(Value, Value)> {
+    ) -> Result<Option<(Value, Value)>, JfetAcError> {
         if !matches!(self.params.channel_model, JfetChannelModel::ParkerSkellern) {
-            return None;
+            return Ok(None);
         }
 
         let vd = Self::node_voltage(voltages, self.drain);
@@ -775,8 +785,8 @@ impl Jfet {
             self.compute_operating_terms(vgs, vds, vgd);
         let cd_base = ids_base - igd_base;
         let (_, xgm, _, xgds) =
-            self.jfet2_ac_feedback_terms(vgs, vds, cd_base, frequency_hz, gm_base, gds_base);
-        Some((xgm, xgds))
+            self.jfet2_ac_feedback_terms(vgs, vds, cd_base, frequency_hz, gm_base, gds_base)?;
+        Ok(Some((xgm, xgds)))
     }
 
     pub(crate) fn stamp_small_signal_ac(
@@ -784,7 +794,7 @@ impl Jfet {
         voltages: &[Value],
         frequency_hz: Value,
         matrix: &mut impl MatrixStamper,
-    ) {
+    ) -> Result<(), JfetAcError> {
         // AC is linearized at the accepted operating-point solution. Newton
         // limiter/bypass state may legitimately lag that solution by one
         // iteration and must not perturb the small-signal Jacobian.
@@ -802,7 +812,7 @@ impl Jfet {
             frequency_hz,
             external_vd,
             external_vs,
-        );
+        )?;
 
         matrix.stamp(self.drain, self.drain, gds + ggd);
         matrix.stamp(self.drain, self.gate, gm - ggd);
@@ -815,6 +825,7 @@ impl Jfet {
         matrix.stamp(self.source, self.drain, -gds);
         matrix.stamp(self.source, self.gate, -gm - ggs);
         matrix.stamp(self.source, self.source, gm + gds + ggs);
+        Ok(())
     }
 
     /// Calculate junction capacitances

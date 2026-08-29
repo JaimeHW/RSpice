@@ -38,6 +38,7 @@ use crate::NodeId;
 use crate::Value;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
+use std::fmt;
 
 mod bias;
 mod capacitance;
@@ -86,6 +87,49 @@ pub enum JfetChannelModel {
     /// HFET1-compatible MESFET channel equations (ngspice-derived).
     Hfet1,
 }
+
+/// Deterministic Parker-Skellern small-signal evaluation failure.
+///
+/// This stays inside the core device/engine boundary: the engine adds the
+/// instance name and analysis frequency when widening it to a simulation
+/// error.  Keeping failure distinct from a zero-valued term prevents invalid
+/// model arithmetic from silently removing authored device physics.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum JfetAcError {
+    InvalidValue {
+        quantity: &'static str,
+        value: Value,
+    },
+    NonFiniteValue {
+        quantity: &'static str,
+        value: Value,
+    },
+    DegenerateDenominator {
+        quantity: &'static str,
+        value: Value,
+    },
+}
+
+impl fmt::Display for JfetAcError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidValue { quantity, value } => {
+                write!(formatter, "invalid {quantity} value {value}")
+            }
+            Self::NonFiniteValue { quantity, value } => {
+                write!(
+                    formatter,
+                    "{quantity} evaluated to non-finite value {value}"
+                )
+            }
+            Self::DegenerateDenominator { quantity, value } => {
+                write!(formatter, "{quantity} is numerically singular ({value})")
+            }
+        }
+    }
+}
+
+impl std::error::Error for JfetAcError {}
 
 #[derive(Debug, Clone, Copy)]
 struct MesaLevel2Linearization {

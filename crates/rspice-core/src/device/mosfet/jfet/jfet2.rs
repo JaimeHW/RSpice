@@ -1040,10 +1040,27 @@ impl Jfet {
         frequency_hz: Value,
         gm: Value,
         gds: Value,
-    ) -> (Value, Value, Value, Value) {
-        let omega = 2.0 * std::f64::consts::PI * frequency_hz.max(0.0);
+    ) -> Result<(Value, Value, Value, Value), JfetAcError> {
+        for (quantity, value) in [
+            ("gate-source bias", vgs),
+            ("drain-source bias", vds),
+            ("drain current", ids),
+            ("transconductance", gm),
+            ("output conductance", gds),
+        ] {
+            ensure_finite_ac_value(quantity, value)?;
+        }
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
+            return Err(JfetAcError::InvalidValue {
+                quantity: "AC frequency",
+                value: frequency_hz,
+            });
+        }
+
+        let omega = 2.0 * std::f64::consts::PI * frequency_hz;
+        ensure_finite_ac_value("angular frequency", omega)?;
         if omega == 0.0 {
-            return (gm, 0.0, gds, 0.0);
+            return Ok((gm, 0.0, gds, 0.0));
         }
 
         let pol = self.jfet_type.polarity();
@@ -1058,48 +1075,281 @@ impl Jfet {
         let lfga =
             self.params.jfet2_lfgam - self.params.jfet2_lfg1 * vgs_int + lf_g2_vgd + lf_g2_vgd;
         let denom = 1.0 - lfga + self.params.jfet2_lfg1 * vgd_int;
-        if denom.abs() <= 1.0e-30 {
-            return (gm, 0.0, gds, 0.0);
+        ensure_finite_ac_value("drain-feedback denominator", denom)?;
+        if denom == 0.0 {
+            return Err(JfetAcError::DegenerateDenominator {
+                quantity: "drain-feedback denominator",
+                value: denom,
+            });
         }
         let gmo = gm / denom;
-        let wtg = self.params.jfet2_taug * omega;
-        let wtgdet = 1.0 + wtg * wtg;
-        let gwtgdet = gmo / wtgdet;
-        let gdsi = (hfgam - lfga) * gwtgdet;
-        let gdsr = (hfgam - lfga) * gmo - gdsi;
-        let gmi = (eta + self.params.jfet2_lfg1 * vgd_int) * gwtgdet + gdsi;
-        let xgds = wtg * gdsi;
+        ensure_finite_ac_value("feedback transconductance", gmo)?;
+        let gate_relaxation = relaxation_rational_factors(self.params.jfet2_taug, omega, "TAUG")?;
+        let drain_feedback_coefficient = hfgam - lfga;
+        let source_feedback_coefficient = eta + self.params.jfet2_lfg1 * vgd_int;
+        let gdsi = scale_safe_finite_product(
+            "in-phase drain feedback",
+            [
+                drain_feedback_coefficient,
+                gmo,
+                gate_relaxation.inverse_denominator,
+            ],
+        )?;
+        let gdsr = scale_safe_finite_product(
+            "real drain feedback",
+            [
+                drain_feedback_coefficient,
+                gmo,
+                gate_relaxation.second_order_ratio,
+            ],
+        )?;
+        let gmi = scale_safe_finite_product(
+            "in-phase source feedback",
+            [
+                source_feedback_coefficient,
+                gmo,
+                gate_relaxation.inverse_denominator,
+            ],
+        )? + gdsi;
+        let xgds = scale_safe_finite_product(
+            "quadrature drain feedback",
+            [
+                drain_feedback_coefficient,
+                gmo,
+                gate_relaxation.first_order_ratio,
+            ],
+        )?;
         let gds_real = gds + gdsr;
-        let xgm = -wtg * gmi;
-        let gm_real = gmi + gmo * (1.0 - eta - hfgam);
+        let xgm = -(scale_safe_finite_product(
+            "quadrature source feedback",
+            [
+                source_feedback_coefficient,
+                gmo,
+                gate_relaxation.first_order_ratio,
+            ],
+        )? + xgds);
+        let gm_real = gmi
+            + scale_safe_finite_product(
+                "high-frequency transconductance",
+                [gmo, 1.0 - eta - hfgam],
+            )?;
 
         let area = self.area.max(1.0e-30);
         let delta = self.params.jfet2_delta / area;
-        let wtd = self.params.jfet2_taud * omega;
-        let wtddet = 1.0 + wtd * wtd;
+        let thermal_relaxation =
+            relaxation_rational_factors(self.params.jfet2_taud, omega, "TAUD")?;
         let ids_int = pol * ids;
-        let fac = delta * ids_int;
-        let thermal_denom = 1.0 - fac * vds_int;
-        if !thermal_denom.is_finite() || thermal_denom.abs() <= 1.0e-30 {
-            return (gm, 0.0, gds, 0.0);
-        }
-        let del = 1.0 / thermal_denom;
-        let dd = (del - 1.0) / wtddet;
-        let dr = del - dd;
-        let di = wtd * dd;
-        let cdsqr = fac * ids_int * del * wtd / wtddet;
+        let (dr, di, thermal_real, thermal_imag) = if thermal_relaxation.first_order_ratio == 0.0
+            && thermal_relaxation.second_order_ratio == 0.0
+        {
+            // TAUD*omega is exactly zero. The complete thermal branch
+            // reduces identically to dr=1, so do not evaluate coefficients
+            // which are multiplied by exact zero in the model equations.
+            (1.0, 0.0, 0.0, 0.0)
+        } else {
+            let thermal_loop_gain =
+                scale_safe_finite_product("thermal loop gain", [delta, ids_int, vds_int])?;
+            let thermal_denom = 1.0 - thermal_loop_gain;
+            ensure_finite_ac_value("thermal-feedback denominator", thermal_denom)?;
+            if thermal_denom == 0.0 {
+                return Err(JfetAcError::DegenerateDenominator {
+                    quantity: "thermal-feedback denominator",
+                    value: thermal_denom,
+                });
+            }
+            let del = 1.0 / thermal_denom;
+            ensure_finite_ac_value("thermal feedback gain", del)?;
+            // Algebraically `del - (del - 1) * q`, but this form does not
+            // catastrophically cancel when q rounds to one and |del| is large.
+            let dr = thermal_relaxation.inverse_denominator
+                + scale_safe_finite_product(
+                    "thermal real scale",
+                    [del, thermal_relaxation.second_order_ratio],
+                )?;
+            let di = scale_safe_finite_product(
+                "thermal quadrature scale",
+                [del - 1.0, thermal_relaxation.first_order_ratio],
+            )?;
+            let thermal_real = scale_safe_finite_product(
+                "thermal real feedback",
+                [
+                    delta,
+                    ids_int,
+                    ids_int,
+                    del,
+                    thermal_relaxation.second_order_ratio,
+                ],
+            )?;
+            let thermal_imag = scale_safe_finite_product(
+                "thermal quadrature feedback",
+                [
+                    delta,
+                    ids_int,
+                    ids_int,
+                    del,
+                    thermal_relaxation.first_order_ratio,
+                ],
+            )?;
+            (dr, di, thermal_real, thermal_imag)
+        };
 
         let gm_ac = dr * gm_real - di * xgm;
         let xgm_ac = di * gm_real + dr * xgm;
-        let gds_ac = dr * gds_real - di * xgds + cdsqr * wtd;
-        let xgds_ac = di * gds_real + dr * xgds + cdsqr;
-        (
-            finite_or_zero(gm_ac),
-            finite_or_zero(xgm_ac),
-            finite_or_zero(gds_ac),
-            finite_or_zero(xgds_ac),
-        )
+        let gds_ac = dr * gds_real - di * xgds + thermal_real;
+        let xgds_ac = di * gds_real + dr * xgds + thermal_imag;
+        for (quantity, value) in [
+            ("AC transconductance", gm_ac),
+            ("AC quadrature transconductance", xgm_ac),
+            ("AC output conductance", gds_ac),
+            ("AC quadrature output conductance", xgds_ac),
+        ] {
+            ensure_finite_ac_value(quantity, value)?;
+        }
+        Ok((gm_ac, xgm_ac, gds_ac, xgds_ac))
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RelaxationRationalFactors {
+    /// `1 / (1 + w^2)`.
+    inverse_denominator: Value,
+    /// `w / (1 + w^2)`.
+    first_order_ratio: Value,
+    /// `w^2 / (1 + w^2)`.
+    second_order_ratio: Value,
+}
+
+/// Evaluate the three rational factors used by the Parker-Skellern delay
+/// terms without ever forming an overflowing square or multiplying an
+/// infinite dimensionless frequency by an underflowed zero.
+fn relaxation_rational_factors(
+    time_constant: Value,
+    omega: Value,
+    parameter_name: &'static str,
+) -> Result<RelaxationRationalFactors, JfetAcError> {
+    if !time_constant.is_finite() || time_constant < 0.0 {
+        return Err(JfetAcError::InvalidValue {
+            quantity: parameter_name,
+            value: time_constant,
+        });
+    }
+    if !omega.is_finite() || omega < 0.0 {
+        return Err(JfetAcError::InvalidValue {
+            quantity: "angular frequency",
+            value: omega,
+        });
+    }
+    if time_constant == 0.0 || omega == 0.0 {
+        return Ok(RelaxationRationalFactors {
+            inverse_denominator: 1.0,
+            first_order_ratio: 0.0,
+            second_order_ratio: 0.0,
+        });
+    }
+
+    let dimensionless_frequency = time_constant * omega;
+    if dimensionless_frequency.is_infinite() {
+        // Both operands were checked finite and positive, so this is a
+        // representational overflow of a mathematically valid asymptote.
+        // Form 1/(tau*omega) by reciprocating the larger operand first: the
+        // first-order ratio can remain a meaningful subnormal even though
+        // tau*omega itself is not representable.
+        let inverse_frequency = if time_constant >= omega {
+            (1.0 / time_constant) / omega
+        } else {
+            (1.0 / omega) / time_constant
+        };
+        let inverse_square = inverse_frequency * inverse_frequency;
+        let second_order_ratio = 1.0 / (1.0 + inverse_square);
+        return Ok(RelaxationRationalFactors {
+            inverse_denominator: inverse_square * second_order_ratio,
+            first_order_ratio: inverse_frequency * second_order_ratio,
+            second_order_ratio,
+        });
+    }
+    ensure_finite_ac_value(
+        "dimensionless relaxation frequency",
+        dimensionless_frequency,
+    )?;
+
+    if dimensionless_frequency <= 1.0 {
+        let square = dimensionless_frequency * dimensionless_frequency;
+        let inverse_denominator = 1.0 / (1.0 + square);
+        Ok(RelaxationRationalFactors {
+            inverse_denominator,
+            first_order_ratio: dimensionless_frequency * inverse_denominator,
+            second_order_ratio: square * inverse_denominator,
+        })
+    } else {
+        let inverse_frequency = 1.0 / dimensionless_frequency;
+        let inverse_square = inverse_frequency * inverse_frequency;
+        let second_order_ratio = 1.0 / (1.0 + inverse_square);
+        Ok(RelaxationRationalFactors {
+            inverse_denominator: inverse_square * second_order_ratio,
+            first_order_ratio: inverse_frequency * second_order_ratio,
+            second_order_ratio,
+        })
+    }
+}
+
+#[inline]
+fn ensure_finite_ac_value(quantity: &'static str, value: Value) -> Result<Value, JfetAcError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(JfetAcError::NonFiniteValue { quantity, value })
+    }
+}
+
+/// Multiply finite model factors in authored order. The ordinary path is a
+/// direct product, preserving reference rounding. Exact zero factors return
+/// before any `large * zero` intermediate is formed; logarithmic scaling is
+/// used only when an intermediate overflows or underflows despite the final
+/// product remaining representable.
+fn scale_safe_finite_product<const N: usize>(
+    quantity: &'static str,
+    factors: [Value; N],
+) -> Result<Value, JfetAcError> {
+    for &factor in &factors {
+        ensure_finite_ac_value(quantity, factor)?;
+    }
+    if factors.contains(&0.0) {
+        return Ok(0.0);
+    }
+
+    let mut direct = 1.0;
+    let mut needs_scaled_path = false;
+    for &factor in &factors {
+        direct *= factor;
+        if !direct.is_finite() || direct == 0.0 {
+            needs_scaled_path = true;
+            break;
+        }
+    }
+    if !needs_scaled_path {
+        return Ok(direct);
+    }
+
+    let negative = factors
+        .iter()
+        .filter(|factor| factor.is_sign_negative())
+        .count()
+        % 2
+        != 0;
+    let log_magnitude: Value = factors.iter().map(|factor| factor.abs().ln()).sum();
+    if log_magnitude > Value::MAX.ln() {
+        return Err(JfetAcError::NonFiniteValue {
+            quantity,
+            value: if negative {
+                Value::NEG_INFINITY
+            } else {
+                Value::INFINITY
+            },
+        });
+    }
+    let magnitude = log_magnitude.exp();
+    let product = if negative { -magnitude } else { magnitude };
+    ensure_finite_ac_value(quantity, product)
 }
 
 #[inline]
@@ -1144,6 +1394,10 @@ mod tests {
         jfet
     }
 
+    fn ac_terms_array(terms: (Value, Value, Value, Value)) -> [Value; 4] {
+        [terms.0, terms.1, terms.2, terms.3]
+    }
+
     #[test]
     fn parker_skellern_operating_terms_match_ngspice46_common_source_oracle() {
         let jfet = ngspice46_common_source_jfet2();
@@ -1165,6 +1419,158 @@ mod tests {
             "gds={:.16e}",
             terms.gds
         );
+    }
+
+    #[test]
+    fn parker_skellern_relaxation_factors_are_scale_safe_at_huge_finite_tau() {
+        let factors = relaxation_rational_factors(1.0e308, 2.0 * std::f64::consts::PI, "TAUG")
+            .expect("finite time constant has a defined high-frequency limit");
+
+        assert_eq!(factors.inverse_denominator.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(
+            factors.first_order_ratio.to_bits(),
+            ((1.0 / 1.0e308) / (2.0 * std::f64::consts::PI)).to_bits()
+        );
+        assert_eq!(factors.second_order_ratio.to_bits(), 1.0_f64.to_bits());
+    }
+
+    #[test]
+    fn parker_skellern_weighted_products_short_circuit_zero_and_recover_finite_limits() {
+        assert_eq!(
+            scale_safe_finite_product("zero-weight feedback", [Value::MAX, Value::MAX, 0.0])
+                .expect("an exact zero weight nulls the complete term"),
+            0.0
+        );
+
+        let recovered =
+            scale_safe_finite_product("recoverable feedback", [1.0e200, 1.0e200, 1.0e-200])
+                .expect("the final weighted product is finite");
+        assert!((recovered / 1.0e200 - 1.0).abs() < 1.0e-12);
+
+        assert!(matches!(
+            scale_safe_finite_product("unweighted feedback", [Value::MAX, 2.0]),
+            Err(JfetAcError::NonFiniteValue {
+                quantity: "unweighted feedback",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parker_skellern_huge_finite_relaxation_times_do_not_erase_ac_terms() {
+        let vgs = -0.25;
+        let vds = 0.788_235_214_303_974_9;
+        let mut jfet = ngspice46_common_source_jfet2();
+        let operating = jfet.jfet2_operating_terms(vgs, vds, vgs - vds, 300.15);
+
+        jfet.params.jfet2_taug = 1.0e308;
+        let gate_limit = jfet
+            .jfet2_ac_feedback_terms(vgs, vds, operating.ids, 1.0, operating.gm, operating.gds)
+            .expect("huge finite TAUG uses its asymptotic rational limit");
+        assert!(ac_terms_array(gate_limit).into_iter().all(Value::is_finite));
+        assert!(
+            ac_terms_array(gate_limit)
+                .into_iter()
+                .any(|value| value != 0.0)
+        );
+
+        jfet.params.jfet2_taug = 1.0e-9;
+        jfet.params.jfet2_taud = 1.0e308;
+        let thermal_limit = jfet
+            .jfet2_ac_feedback_terms(vgs, vds, operating.ids, 1.0, operating.gm, operating.gds)
+            .expect("huge finite TAUD uses its asymptotic rational limit");
+        assert!(
+            ac_terms_array(thermal_limit)
+                .into_iter()
+                .all(Value::is_finite)
+        );
+        assert!(
+            ac_terms_array(thermal_limit)
+                .into_iter()
+                .any(|value| value != 0.0)
+        );
+    }
+
+    #[test]
+    fn parker_skellern_ac_rejects_degenerate_feedback_denominators() {
+        let mut drain_singular = ngspice46_common_source_jfet2();
+        drain_singular.params.jfet2_lfgam = 1.0;
+        drain_singular.params.jfet2_lfg1 = 0.0;
+        drain_singular.params.jfet2_lfg2 = 0.0;
+        let error = drain_singular
+            .jfet2_ac_feedback_terms(-0.25, 1.0, 1.0e-3, 1.0, 1.0e-3, 1.0e-4)
+            .expect_err("zero drain-feedback denominator must not remove feedback");
+        assert!(matches!(
+            error,
+            JfetAcError::DegenerateDenominator {
+                quantity: "drain-feedback denominator",
+                ..
+            }
+        ));
+
+        let mut thermal_singular = ngspice46_common_source_jfet2();
+        thermal_singular.params.jfet2_delta = 1.0;
+        let error = thermal_singular
+            .jfet2_ac_feedback_terms(-0.25, 1.0, 1.0, 1.0, 1.0e-3, 1.0e-4)
+            .expect_err("zero thermal-feedback denominator must not remove feedback");
+        assert!(matches!(
+            error,
+            JfetAcError::DegenerateDenominator {
+                quantity: "thermal-feedback denominator",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parker_skellern_ac_accepts_tiny_nonzero_feedback_denominator() {
+        let mut jfet = ngspice46_common_source_jfet2();
+        jfet.params.jfet2_lfgam = 1.0;
+        jfet.params.jfet2_lfg1 = 1.0e-40;
+        jfet.params.jfet2_lfg2 = 0.0;
+
+        // vgs=0, vds=-1 gives vgd=1, so the denominator is exactly the
+        // authored 1e-40 term rather than a rounded `1 - (1 - epsilon)`.
+        let terms = jfet
+            .jfet2_ac_feedback_terms(0.0, -1.0, 0.0, 1.0, 1.0e-3, 1.0e-4)
+            .expect("a finite nonzero denominator is mathematically defined");
+        assert!(ac_terms_array(terms).into_iter().all(Value::is_finite));
+    }
+
+    #[test]
+    fn parker_skellern_zero_thermal_delay_avoids_large_del_cancellation() {
+        let mut reference = ngspice46_common_source_jfet2();
+        reference.params.jfet2_taud = 0.0;
+        reference.params.jfet2_delta = 0.0;
+        let expected = reference
+            .jfet2_ac_feedback_terms(-0.25, 1.0, 1.0, 1.0, 1.0e-3, 1.0e-4)
+            .expect("reference feedback evaluates");
+
+        let mut large_del = reference;
+        large_del.params.jfet2_delta = 1.0 - f64::EPSILON / 2.0;
+        let actual = large_del
+            .jfet2_ac_feedback_terms(-0.25, 1.0, 1.0, 1.0, 1.0e-3, 1.0e-4)
+            .expect("finite near-singular thermal feedback evaluates at zero delay");
+
+        assert_eq!(
+            ac_terms_array(actual).map(Value::to_bits),
+            ac_terms_array(expected).map(Value::to_bits),
+            "TAUD=0 must keep dr exactly one even when del is very large"
+        );
+    }
+
+    #[test]
+    fn parker_skellern_zero_frequency_preserves_static_terms() {
+        let mut jfet = ngspice46_common_source_jfet2();
+        jfet.params.jfet2_lfgam = 1.0;
+        jfet.params.jfet2_lfg1 = 0.0;
+        jfet.params.jfet2_taug = 1.0e308;
+        jfet.params.jfet2_taud = 1.0e308;
+
+        let terms = jfet
+            .jfet2_ac_feedback_terms(-0.25, 1.0, 1.0, 0.0, 1.25, 0.5)
+            .expect("zero frequency does not evaluate dynamic feedback");
+        assert_eq!(terms, (1.25, 0.0, 0.5, 0.0));
     }
 
     #[test]

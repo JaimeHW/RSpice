@@ -75,6 +75,26 @@ j1 out g 0 psmod area=1
 "
 }
 
+fn jfet2_extreme_relaxation_ac_deck(taug: &str, taud: &str) -> String {
+    format!(
+        "\
+* JFET2 finite extreme relaxation-time regression
+vdd vdd 0 dc 5
+rd vdd out 2k
+vin g 0 dc -0.25 ac 1
+j1 out g 0 psmod area=1
+.model psmod NJF(level=2 beta=1e-3 vt0=-2 lambda=0.02 vbi=1 is=1e-14 n=1 \
+                 p=2 q=2 xi=1000 z=1 vst=0.1 mvst=0.05 mxi=0.0 \
+                 lfgam=0.01 lfg1=0.002 lfg2=0.001 ibd=1e-12 vbd=10 \
+                 cgs=0 cgd=0 cds=0 acgam=0.05 \
+                 hfgam=0.02 hfg1=0.001 hfg2=0.0005 hfeta=0.01 \
+                 hfe1=0.001 hfe2=0.0007 taug={taug} taud={taud} delta=0.01)
+.op
+.end
+"
+    )
+}
+
 fn jfet2_pjf_ac_deck() -> &'static str {
     "\
 * PJFET2 common-source AC oracle
@@ -888,6 +908,119 @@ fn jfet2_common_source_ac_matches_ngspice46() {
             v.im
         );
     }
+}
+
+#[test]
+fn jfet2_finite_extreme_taug_taud_preserve_operating_point() {
+    let deck = jfet2_extreme_relaxation_ac_deck("1e308", "1e308");
+    let netlist = Netlist::parse(&deck).expect("finite extreme TAUG/TAUD deck parses");
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("finite extreme TAUG/TAUD must not suppress the operating point");
+
+    assert!(
+        result.node_voltages.iter().all(|value| value.is_finite()),
+        "extreme relaxation times produced non-finite OP node voltages: {:?}",
+        result.node_voltages
+    );
+    assert!(
+        result.branch_currents.iter().all(|value| value.is_finite()),
+        "extreme relaxation times produced non-finite OP branch currents: {:?}",
+        result.branch_currents
+    );
+    let supply = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("vdd"))
+        .unwrap_or_else(|| panic!("missing vdd branch in {:?}", result.branch_names));
+    assert!(
+        result.branch_currents[supply].abs() > 1.0e-6,
+        "extreme relaxation times suppressed the finite JFET2 drain current: {:?}",
+        result.branch_currents[supply]
+    );
+}
+
+#[test]
+fn jfet2_finite_extreme_taug_taud_reach_the_ac_asymptote_at_one_hz() {
+    fn out_voltage(result: &rspice_core::analysis::ac::AcResult) -> rspice_core::Complex64 {
+        let out = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap_or_else(|| panic!("missing out node in {:?}", result.node_names));
+        result.voltages[out]
+    }
+
+    // 1e200 s is already indistinguishable from the infinite-time-constant
+    // limit at 1 Hz, but omega*tau remains finite.  1e308 s is also a valid
+    // finite model value while omega*tau overflows.  The latter must use the
+    // same analytic asymptote, not turn intermediate Inf*0 forms into four
+    // zero small-signal coefficients.
+    let reference_deck = jfet2_extreme_relaxation_ac_deck("1e200", "1e200");
+    let reference_netlist =
+        Netlist::parse(&reference_deck).expect("asymptotic reference deck parses");
+    let reference_results = engine()
+        .run_ac(&reference_netlist, &[1.0])
+        .expect("asymptotic reference AC solves");
+    let reference = out_voltage(&reference_results[0]);
+    assert!(
+        reference.re.is_finite() && reference.im.is_finite() && reference.norm() > 1.0e-3,
+        "reference JFET2 asymptote must be finite and physically active, got {reference:?}"
+    );
+
+    for (label, taug, taud) in [
+        ("TAUG", "1e308", "1e200"),
+        ("TAUD", "1e200", "1e308"),
+        ("TAUG+TAUD", "1e308", "1e308"),
+    ] {
+        let deck = jfet2_extreme_relaxation_ac_deck(taug, taud);
+        let netlist = Netlist::parse(&deck).expect("finite extreme relaxation deck parses");
+        let results = engine()
+            .run_ac(&netlist, &[1.0])
+            .unwrap_or_else(|error| panic!("finite extreme {label} AC must solve: {error}"));
+        let result = &results[0];
+        assert!(
+            result
+                .voltages
+                .iter()
+                .chain(result.currents.iter())
+                .all(|value| value.re.is_finite() && value.im.is_finite()),
+            "finite extreme {label} produced non-finite AC results: {result:?}"
+        );
+        let output = out_voltage(result);
+        assert!(
+            output.norm() > 1.0e-3,
+            "finite extreme {label} suppressed the JFET2 AC response: {output:?}"
+        );
+        let delta = (output - reference).norm();
+        assert!(
+            delta <= 1.0e-10 * reference.norm().max(1.0),
+            "finite extreme {label} missed the JFET2 asymptote: output={output:?}, reference={reference:?}, delta={delta:.3e}"
+        );
+    }
+}
+
+#[test]
+fn jfet2_ac_reports_degenerate_feedback_with_instance_and_frequency() {
+    let deck = jfet2_extreme_relaxation_ac_deck("1n", "2n")
+        .replace("lfgam=0.01 lfg1=0.002 lfg2=0.001", "lfgam=1 lfg1=0 lfg2=0");
+    let netlist = Netlist::parse(&deck).expect("degenerate-feedback deck parses");
+
+    engine()
+        .run_dc_op(&netlist)
+        .expect("AC-only feedback singularity must not perturb the operating point");
+    let message = engine()
+        .run_ac(&netlist, &[1.0])
+        .expect_err("exactly singular JFET2 AC feedback must fail closed")
+        .to_string();
+
+    assert!(
+        message.contains("JFET 'J1'")
+            && message.contains("1.0000000000000000e0 Hz")
+            && message.contains("drain-feedback denominator")
+            && message.contains("singular"),
+        "error must identify the instance, frequency, and failed physical term: {message}"
+    );
 }
 
 #[test]

@@ -1674,7 +1674,13 @@ impl Engine {
             .vdmoses
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         for jfet in &circuit.jfets {
-            jfet.stamp_small_signal_ac(op_voltages, frequency_hz, &mut stamper);
+            jfet.stamp_small_signal_ac(op_voltages, frequency_hz, &mut stamper)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "JFET '{}' AC feedback failed at {frequency_hz:.16e} Hz: {error}",
+                        jfet.name
+                    ))
+                })?;
         }
         for sw in &circuit.vswitches {
             sw.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
@@ -1908,15 +1914,19 @@ impl Engine {
         circuit: &CircuitData,
         op_voltages: &[Value],
         frequency_hz: Value,
-    ) {
+    ) -> Result<(), SimulationError> {
         for jfet in &circuit.jfets {
-            let Some((xgm, xgds)) =
-                jfet.ac_imag_feedback_terms_at_frequency(op_voltages, frequency_hz)
+            let Some((xgm, xgds)) = jfet
+                .ac_imag_feedback_terms_at_frequency(op_voltages, frequency_hz)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "JFET '{}' AC feedback failed at {frequency_hz:.16e} Hz: {error}",
+                        jfet.name
+                    ))
+                })?
             else {
                 continue;
             };
-            let xgm = if xgm.is_finite() { xgm } else { 0.0 };
-            let xgds = if xgds.is_finite() { xgds } else { 0.0 };
 
             Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.drain, xgds);
             Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.gate, xgm);
@@ -1925,6 +1935,7 @@ impl Engine {
             Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.gate, -xgm);
             Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.source, xgds + xgm);
         }
+        Ok(())
     }
 
     /// Refill a complex AC workspace in place for one frequency. The
@@ -2056,7 +2067,7 @@ impl Engine {
         // Nonlinear semiconductor junction capacitances at the operating point.
         if has_nonlinear {
             Self::stamp_nonlinear_capacitances(ac_matrix, circuit, op_voltages, omega);
-            Self::stamp_jfet_ac_imag_feedback(ac_matrix, circuit, op_voltages, frequency_hz);
+            Self::stamp_jfet_ac_imag_feedback(ac_matrix, circuit, op_voltages, frequency_hz)?;
         }
 
         // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
