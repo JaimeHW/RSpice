@@ -241,23 +241,66 @@ impl Waveform {
         self.time.is_empty()
     }
 
-    /// Get time span
-    #[inline]
-    pub fn duration(&self) -> Value {
-        self.max_time - self.min_time
+    /// Get the representable authored time span.
+    ///
+    /// A one-point waveform has an exact zero duration. A multi-point span
+    /// that overflows or otherwise cannot be represented fails closed.
+    pub fn duration(&self) -> Result<Value, MeasurementError> {
+        if self.time.is_empty() || self.time.len() != self.values.len() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "duration requires a nonempty matched time/value grid, got {} time point(s) and {} value(s)",
+                self.time.len(),
+                self.values.len()
+            )));
+        }
+        if self.time.len() == 1 {
+            return Ok(0.0);
+        }
+        representable_positive_difference(
+            self.max_time,
+            self.min_time,
+            self.time.len() - 2,
+            "waveform duration",
+        )
     }
 
-    /// Get sample rate (average)
-    #[inline]
-    pub fn sample_rate(&self) -> Value {
+    /// Get the average sample rate over the authored time span.
+    pub fn sample_rate(&self) -> Result<Value, MeasurementError> {
         if self.time.len() < 2 {
-            return 0.0;
+            return Err(MeasurementError::InsufficientData(format!(
+                "sample rate requires at least 2 points, got {}",
+                self.time.len()
+            )));
         }
-        let duration = self.duration();
-        if !duration.is_finite() || duration <= 0.0 {
-            return 0.0;
+        if self.time.len() != self.values.len() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "sample rate requires matching time/value lengths, got {} and {}",
+                self.time.len(),
+                self.values.len()
+            )));
         }
-        (self.time.len() - 1) as Value / duration
+        let segment = self.time.len() - 2;
+        let time_span = scaled_positive_difference(
+            self.max_time,
+            self.min_time,
+            segment,
+            "sample-rate time span",
+        )?;
+        let interval_count = self.time.len() - 1;
+        let interval_count_value = interval_count as Value;
+        if !interval_count_value.is_finite() || interval_count_value as usize != interval_count {
+            return Err(MeasurementError::CalculationError(format!(
+                "sample interval count {interval_count} cannot be represented exactly"
+            )));
+        }
+        let scaled_interval_count =
+            scaled_positive_value(interval_count_value, segment, "sample interval count")?;
+        scaled_positive_ratio(
+            scaled_interval_count,
+            time_span,
+            segment,
+            "average sample rate",
+        )
     }
 
     /// Get value at index
@@ -288,10 +331,29 @@ impl Waveform {
         self.max_value
     }
 
-    /// Get peak-to-peak amplitude
-    #[inline]
-    pub fn peak_to_peak(&self) -> Value {
-        self.max_value - self.min_value
+    /// Get the representable peak-to-peak amplitude.
+    ///
+    /// A constant waveform has an exact zero amplitude. A nonzero range that
+    /// cannot be represented as a finite value returns an error.
+    pub fn peak_to_peak(&self) -> Result<Value, MeasurementError> {
+        if !self.min_value.is_finite()
+            || !self.max_value.is_finite()
+            || self.min_value > self.max_value
+        {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "cached waveform range is invalid: [{}, {}]",
+                self.min_value, self.max_value
+            )));
+        }
+        if self.min_value == self.max_value {
+            return Ok(0.0);
+        }
+        representable_positive_difference(
+            self.max_value,
+            self.min_value,
+            0,
+            "peak-to-peak amplitude",
+        )
     }
 
     /// Calculate the time-weighted average using trapezoidal integration.
@@ -462,59 +524,80 @@ impl Waveform {
         Ok((scale, normalized_moment))
     }
 
-    /// Calculate overshoot as percentage of final value
+    /// Calculate overshoot relative to the authored initial-to-final step.
     ///
     /// Overshoot = (peak - final) / (final - initial) × 100%
+    /// An exact zero step has an undefined normalization and returns an error.
+    /// Every nonzero finite step is evaluated without an absolute cutoff.
     pub fn overshoot(&self) -> Result<Value, MeasurementError> {
-        if self.values.len() < 3 {
+        if self.values.len() < 2 {
             return Err(MeasurementError::InsufficientData(
-                "Need at least 3 points".to_string(),
+                "overshoot requires at least 2 points".to_string(),
             ));
         }
 
         let initial = self.values[0];
-        let final_val = *self.values.last().unwrap();
-        let step_size = (final_val - initial).abs();
-
-        if step_size < 1e-15 {
-            return Ok(0.0); // No step, no overshoot
+        let final_val = self.values[self.values.len() - 1];
+        if final_val == initial {
+            return Err(MeasurementError::CalculationError(
+                "overshoot is undefined for an exact zero initial-to-final step".to_string(),
+            ));
         }
 
         if final_val > initial {
-            // Rising step
-            let peak = self.max_value;
-            Ok((peak - final_val) / step_size * 100.0)
+            qualified_difference_percentage(
+                self.max_value,
+                final_val,
+                final_val,
+                initial,
+                "overshoot",
+            )
         } else {
-            // Falling step
-            let trough = self.min_value;
-            Ok((final_val - trough) / step_size * 100.0)
+            qualified_difference_percentage(
+                final_val,
+                self.min_value,
+                initial,
+                final_val,
+                "overshoot",
+            )
         }
     }
 
-    /// Calculate undershoot as percentage
+    /// Calculate undershoot relative to the authored initial-to-final step.
+    ///
+    /// An exact zero step has an undefined normalization and returns an error.
+    /// Every nonzero finite step is evaluated without an absolute cutoff.
     pub fn undershoot(&self) -> Result<Value, MeasurementError> {
-        if self.values.len() < 3 {
+        if self.values.len() < 2 {
             return Err(MeasurementError::InsufficientData(
-                "Need at least 3 points".to_string(),
+                "undershoot requires at least 2 points".to_string(),
             ));
         }
 
         let initial = self.values[0];
-        let final_val = *self.values.last().unwrap();
-        let step_size = (final_val - initial).abs();
-
-        if step_size < 1e-15 {
-            return Ok(0.0);
+        let final_val = self.values[self.values.len() - 1];
+        if final_val == initial {
+            return Err(MeasurementError::CalculationError(
+                "undershoot is undefined for an exact zero initial-to-final step".to_string(),
+            ));
         }
 
         if final_val > initial {
-            // Rising step - undershoot is below initial
-            let trough = self.min_value;
-            Ok((initial - trough) / step_size * 100.0)
+            qualified_difference_percentage(
+                initial,
+                self.min_value,
+                final_val,
+                initial,
+                "undershoot",
+            )
         } else {
-            // Falling step - undershoot is above initial
-            let peak = self.max_value;
-            Ok((peak - initial) / step_size * 100.0)
+            qualified_difference_percentage(
+                self.max_value,
+                initial,
+                initial,
+                final_val,
+                "undershoot",
+            )
         }
     }
 
@@ -1634,6 +1717,26 @@ struct ScaledPositiveDifference {
     exponent: i32,
 }
 
+fn scaled_positive_value(
+    value: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<ScaledPositiveDifference, MeasurementError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} for segment {segment} must be positive and finite, got {value}"
+        )));
+    }
+    let exponent = libm::ilogb(value);
+    let mantissa = libm::scalbn(value, -exponent);
+    if !mantissa.is_finite() || mantissa <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "scaled {quantity} for segment {segment} is invalid ({mantissa})"
+        )));
+    }
+    Ok(ScaledPositiveDifference { mantissa, exponent })
+}
+
 fn scaled_positive_difference(
     high: Value,
     low: Value,
@@ -1669,7 +1772,28 @@ fn scaled_positive_ratio(
     segment: usize,
     quantity: &str,
 ) -> Result<Value, MeasurementError> {
+    scaled_positive_ratio_with_factor(numerator, denominator, 1.0, segment, quantity)
+}
+
+fn scaled_positive_ratio_with_factor(
+    numerator: ScaledPositiveDifference,
+    denominator: ScaledPositiveDifference,
+    factor: Value,
+    segment: usize,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    if !factor.is_finite() || factor <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} scale factor for segment {segment} is invalid ({factor})"
+        )));
+    }
     let mantissa_ratio = numerator.mantissa / denominator.mantissa;
+    let scaled_mantissa = mantissa_ratio * factor;
+    if !scaled_mantissa.is_finite() || scaled_mantissa <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "scaled {quantity} mantissa for segment {segment} is not representable ({scaled_mantissa})"
+        )));
+    }
     let exponent_delta = numerator
         .exponent
         .checked_sub(denominator.exponent)
@@ -1678,13 +1802,51 @@ fn scaled_positive_ratio(
                 "{quantity} exponent for segment {segment} exceeds this platform"
             ))
         })?;
-    let ratio = libm::scalbn(mantissa_ratio, exponent_delta);
+    let ratio = libm::scalbn(scaled_mantissa, exponent_delta);
     if !ratio.is_finite() || ratio <= 0.0 {
         return Err(MeasurementError::CalculationError(format!(
             "{quantity} for segment {segment} is not representable ({ratio})"
         )));
     }
     Ok(ratio)
+}
+
+fn qualified_difference_percentage(
+    numerator_high: Value,
+    numerator_low: Value,
+    denominator_high: Value,
+    denominator_low: Value,
+    quantity: &str,
+) -> Result<Value, MeasurementError> {
+    for (name, value) in [
+        ("numerator high", numerator_high),
+        ("numerator low", numerator_low),
+        ("denominator high", denominator_high),
+        ("denominator low", denominator_low),
+    ] {
+        if !value.is_finite() {
+            return Err(MeasurementError::CalculationError(format!(
+                "{quantity} {name} endpoint must be finite, got {value}"
+            )));
+        }
+    }
+    if numerator_high < numerator_low {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} numerator endpoints are not ordered ({numerator_high} < {numerator_low})"
+        )));
+    }
+    if numerator_high == numerator_low {
+        return Ok(0.0);
+    }
+    let numerator = scaled_positive_difference(numerator_high, numerator_low, 0, quantity)?;
+    let denominator = scaled_positive_difference(denominator_high, denominator_low, 0, quantity)?;
+    let percentage = scaled_positive_ratio_with_factor(numerator, denominator, 100.0, 0, quantity)?;
+    if !percentage.is_finite() || percentage <= 0.0 {
+        return Err(MeasurementError::CalculationError(format!(
+            "{quantity} percentage is not representable as a positive finite value ({percentage})"
+        )));
+    }
+    Ok(percentage)
 }
 
 fn representable_positive_difference(
