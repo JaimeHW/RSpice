@@ -267,12 +267,33 @@ impl Engine {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
 
+        // Build the exact periodic MNA registry before accepting a retained HB
+        // state. A legacy node-only artifact is reusable only when this
+        // elaborated circuit has no canonical branch unknowns.
+        let mut periodic_solver = HbSolver::new(hb_config.clone(), num_nodes);
+        periodic_solver.set_node_names(node_names.clone());
+        self.hb_stamp_resistors(&circuit, &mut periodic_solver);
+        self.hb_stamp_capacitors(&circuit, &mut periodic_solver);
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut periodic_solver)?;
+        if has_nonlinear {
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut periodic_solver, num_nodes);
+        }
+        let branch_names = periodic_solver
+            .try_periodic_mna_branch_names()
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "PAC branch-result metadata construction failed: {error}"
+                ))
+            })?;
+
         let state = if let Some(operating_point) = operating_point {
             match operating_point {
                 PacOperatingPoint::Shooting(point) => {
                     self.hb_state_from_pss_operating_point(point, &hb_config, &node_names)?
                 }
-                PacOperatingPoint::HarmonicBalance(point) => point.to_solver_state(&node_names)?,
+                PacOperatingPoint::HarmonicBalance(point) => {
+                    point.to_solver_state(&node_names, &branch_names)?
+                }
             }
         } else {
             let mut state = HbSolverState::new(num_nodes, op_harmonics);
@@ -300,19 +321,7 @@ impl Engine {
         // nonlinear node-only Newton system. Build a distinct periodic solver
         // whose linear network contains exact voltage-source and inductor MNA
         // branch equations and no corresponding Norton/admittance surrogate.
-        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
-        solver.set_node_names(node_names.clone());
-        self.hb_stamp_resistors(&circuit, &mut solver);
-        self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
-        if has_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
-        }
-        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
-            SimulationError::Circuit(format!(
-                "PAC branch-result metadata construction failed: {error}"
-            ))
-        })?;
+        let mut solver = periodic_solver;
         let branch_count = branch_names.len();
         if num_nodes.checked_add(branch_count) != Some(periodic_unknowns) {
             return Err(SimulationError::Circuit(format!(

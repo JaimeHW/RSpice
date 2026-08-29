@@ -500,13 +500,32 @@ impl Engine {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
 
+        // Construct the exact periodic branch registry before accepting an HB
+        // artifact. Empty branch evidence is a legacy node-only state and is
+        // valid only when the elaborated circuit registry is also empty.
+        let mut periodic_solver = HbSolver::new(hb_config.clone(), num_nodes);
+        periodic_solver.set_node_names(node_names.clone());
+        self.hb_stamp_resistors(&circuit, &mut periodic_solver);
+        self.hb_stamp_capacitors(&circuit, &mut periodic_solver);
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut periodic_solver)?;
+        if has_nonlinear {
+            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut periodic_solver, num_nodes);
+        }
+        let branch_names = periodic_solver
+            .try_periodic_mna_branch_names()
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "pnoise branch metadata construction failed: {error}"
+                ))
+            })?;
+
         let state = if let Some(operating_point) = operating_point {
             match operating_point {
                 PnoiseOperatingPoint::Shooting(point) => {
                     self.hb_state_from_pss_operating_point(point, &hb_config, &node_names)?
                 }
                 PnoiseOperatingPoint::HarmonicBalance(point) => {
-                    point.to_solver_state(&node_names)?
+                    point.to_solver_state(&node_names, &branch_names)?
                 }
             }
         } else {
@@ -533,14 +552,7 @@ impl Engine {
 
         // Keep nonlinear operating-point continuation separate from the exact
         // periodic small-signal MNA network.
-        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
-        solver.set_node_names(node_names.clone());
-        self.hb_stamp_resistors(&circuit, &mut solver);
-        self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
-        if has_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
-        }
+        let mut solver = periodic_solver;
 
         let out_idx = node_names
             .iter()

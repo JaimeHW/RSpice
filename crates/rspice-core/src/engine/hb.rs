@@ -31,6 +31,8 @@ use std::collections::BTreeSet;
 mod drive;
 mod pac;
 mod pnoise;
+#[cfg(test)]
+mod retained_auth_tests;
 mod stamping;
 mod state;
 
@@ -51,6 +53,13 @@ pub struct HbOperatingPoint {
     config: HbConfig,
     node_names: Vec<String>,
     spectral_state: Vec<Vec<Complex64>>,
+    /// Canonical circuit-MNA branch order authenticated alongside
+    /// `mna_branch_spectral_state`. An empty pair is the legacy node-only
+    /// representation and is never accepted for a circuit that has branches.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    mna_branch_names: Vec<String>,
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    mna_branch_spectral_state: Vec<Vec<Complex64>>,
     iterations: usize,
     residual_norm: Value,
 }
@@ -69,6 +78,21 @@ impl HbOperatingPoint {
     /// Solver Fourier coefficients indexed `[node][harmonic]`.
     pub fn spectral_state(&self) -> &[Vec<Complex64>] {
         &self.spectral_state
+    }
+
+    /// Canonical MNA branch order for the retained current spectra.
+    ///
+    /// An empty slice denotes a legacy node-only artifact, not evidence that
+    /// an elaborated circuit has no branch unknowns. The consuming engine
+    /// makes that distinction against the circuit's canonical MNA registry.
+    pub fn mna_branch_names(&self) -> &[String] {
+        &self.mna_branch_names
+    }
+
+    /// Solver Fourier coefficients indexed `[branch][harmonic]`, with current
+    /// oriented from the authored positive terminal to the negative terminal.
+    pub fn mna_branch_spectral_state(&self) -> &[Vec<Complex64>] {
+        &self.mna_branch_spectral_state
     }
 
     /// Number of nonlinear iterations used by the producer solve.
@@ -93,6 +117,33 @@ impl HbOperatingPoint {
         config: HbConfig,
         node_names: Vec<String>,
         spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_with_mna_branches(
+            config,
+            node_names,
+            spectral_state,
+            Vec::new(),
+            Vec::new(),
+            iterations,
+            residual_norm,
+        )
+    }
+
+    /// Reconstruct an HB operating point with authenticated circuit-MNA
+    /// branch-current spectra.
+    ///
+    /// `mna_branch_names` and `mna_branch_spectral_state` must be in the exact
+    /// canonical branch order of the elaborated circuit. The consumer repeats
+    /// that circuit-specific identity check before numerical reuse.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_from_parts_with_mna_branches(
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
         iterations: usize,
         residual_norm: Value,
     ) -> Result<Self, SimulationError> {
@@ -146,10 +197,46 @@ impl HbOperatingPoint {
                 )));
             }
         }
+        if mna_branch_spectral_state.len() != mna_branch_names.len() {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB state contains {} MNA branch spectral row(s) for {} branch name(s)",
+                mna_branch_spectral_state.len(),
+                mna_branch_names.len()
+            )));
+        }
+        let mut seen_branches = std::collections::HashSet::with_capacity(mna_branch_names.len());
+        for (branch, spectrum) in mna_branch_names.iter().zip(&mna_branch_spectral_state) {
+            if branch.is_empty() || branch.trim() != branch {
+                return Err(SimulationError::Circuit(
+                    "retained HB state contains a non-canonical MNA branch name".to_owned(),
+                ));
+            }
+            if !seen_branches.insert(branch.to_ascii_uppercase()) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB state contains duplicate MNA branch name '{branch}'"
+                )));
+            }
+            if spectrum.len() != expected_harmonics {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB MNA branch '{branch}' contains {} coefficients; the frozen basis requires {expected_harmonics}",
+                    spectrum.len()
+                )));
+            }
+            if spectrum
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB MNA branch '{branch}' contains a non-finite coefficient"
+                )));
+            }
+        }
         Ok(Self {
             config,
             node_names,
             spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
             iterations,
             residual_norm,
         })
@@ -158,6 +245,7 @@ impl HbOperatingPoint {
     fn to_solver_state(
         &self,
         expected_node_names: &[String],
+        expected_mna_branch_names: &[String],
     ) -> Result<HbSolverState, SimulationError> {
         if self.node_names != expected_node_names {
             return Err(SimulationError::Circuit(format!(
@@ -165,8 +253,22 @@ impl HbOperatingPoint {
                 expected_node_names, self.node_names
             )));
         }
+        if self.mna_branch_names != expected_mna_branch_names {
+            let detail = if self.mna_branch_names.is_empty() {
+                "the retained artifact is node-only"
+            } else {
+                "the retained branch basis differs"
+            };
+            return Err(SimulationError::Circuit(format!(
+                "retained HB MNA branch basis does not match the elaborated circuit ({detail}): expected {:?}, received {:?}",
+                expected_mna_branch_names, self.mna_branch_names
+            )));
+        }
         let mut state = HbSolverState::new(self.node_names.len(), self.config.num_harmonics);
         state.x.clone_from(&self.spectral_state);
+        state
+            .mna_branch_currents
+            .clone_from(&self.mna_branch_spectral_state);
         state.iteration = self.iterations;
         state.total_iterations = self.iterations;
         state.residual_norm = self.residual_norm;
