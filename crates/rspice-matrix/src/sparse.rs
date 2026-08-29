@@ -3479,6 +3479,69 @@ fn complex_componentwise_backward_error(
     )
 }
 
+/// Canonicalize unknowns that are mathematically fixed to zero by an exact
+/// homogeneous singleton equation in the selected operator.
+///
+/// Sparse LU can leave a sub-ulp remnant in an auxiliary MNA coordinate whose
+/// equation is exactly `a*x = 0`. A componentwise certificate quite correctly
+/// assigns that remnant an error of one because its residual and denominator
+/// are both `|a*x|`. Setting `x` to positive zero is not a perturbation or a
+/// tolerance: it is the unique solution of the original equation. Rows with a
+/// nonzero right-hand side, zero coefficients, or more than one coefficient
+/// are deliberately ineligible, and callers must certify the complete system
+/// again after applying any projection.
+fn canonicalize_complex_homogeneous_singletons(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    rhs: &[Complex64],
+    solution: &mut [Complex64],
+    operation: ComplexSolveOp,
+) -> bool {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if nrows != ncols
+        || values.len() != csc.row_idx().len()
+        || rhs.len() != nrows
+        || solution.len() != ncols
+    {
+        return false;
+    }
+
+    let mut unique_unknown = vec![None; nrows];
+    let mut multiple = vec![false; nrows];
+    for col in 0..ncols {
+        for index in csc.col_ptr()[col]..csc.col_ptr()[col + 1] {
+            let value = values[index];
+            if value == Complex64::new(0.0, 0.0) {
+                continue;
+            }
+            let original_row = csc.row_idx()[index];
+            let (equation, unknown) = match operation {
+                ComplexSolveOp::Normal => (original_row, col),
+                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => (col, original_row),
+            };
+            if unique_unknown[equation].replace(unknown).is_some() {
+                multiple[equation] = true;
+            }
+        }
+    }
+
+    let mut changed = false;
+    for equation in 0..nrows {
+        if rhs[equation] != Complex64::new(0.0, 0.0) || multiple[equation] {
+            continue;
+        }
+        let Some(unknown) = unique_unknown[equation] else {
+            continue;
+        };
+        if solution[unknown] != Complex64::new(0.0, 0.0) {
+            solution[unknown] = Complex64::new(0.0, 0.0);
+            changed = true;
+        }
+    }
+    changed
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fast_complex_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
@@ -4120,6 +4183,36 @@ impl ComplexMatrix {
     /// fallback for ill-conditioned AC matrices after the sparse complex
     /// backend reports an inaccurate result.
     pub fn solve_dense_extended(&self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
+        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Normal)
+    }
+
+    /// Solve `A^T x = b` through the extended-precision dense fallback and
+    /// certify the rounded result against the physical transposed operator.
+    ///
+    /// Transposed solves reverse the row/column equilibration roles: if
+    /// `B = D_r A D_c`, this solves `B^T y = D_c b` and returns `x = D_r y`.
+    /// No diagonal perturbation or denominator floor is introduced.
+    pub fn solve_dense_extended_transpose(
+        &self,
+        rhs: &[Complex64],
+    ) -> Result<Vec<Complex64>, SolverError> {
+        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Transpose)
+    }
+
+    /// Solve `A^H x = b` through the extended-precision dense fallback and
+    /// certify the rounded result against the physical adjoint operator.
+    pub fn solve_dense_extended_adjoint(
+        &self,
+        rhs: &[Complex64],
+    ) -> Result<Vec<Complex64>, SolverError> {
+        self.solve_dense_extended_operation(rhs, ComplexSolveOp::Adjoint)
+    }
+
+    fn solve_dense_extended_operation(
+        &self,
+        rhs: &[Complex64],
+        operation: ComplexSolveOp,
+    ) -> Result<Vec<Complex64>, SolverError> {
         use qd::Quad;
 
         self.check_stamping_error()?;
@@ -4154,20 +4247,28 @@ impl ComplexMatrix {
             &mut row_scale,
             &mut col_scale,
         )?;
+        let rhs_scale = match operation {
+            ComplexSolveOp::Normal => &row_scale,
+            ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &col_scale,
+        };
         let mut scaled_rhs = Vec::new();
-        scale_complex_rhs(rhs, &row_scale, &mut scaled_rhs)?;
+        scale_complex_rhs(rhs, rhs_scale, &mut scaled_rhs)?;
 
         let mut block = vec![Quad::ZERO; coefficient_count];
         let col_ptr = self.csc.col_ptr();
         let row_idx = self.csc.row_idx();
         for col in 0..n {
             for index in col_ptr[col]..col_ptr[col + 1] {
-                let row = row_idx[index];
-                let value = scaled_values[index];
-                block[row * block_size + col] = Quad::from_f64(value.re);
-                block[row * block_size + col + n] = Quad::from_f64(-value.im);
-                block[(row + n) * block_size + col] = Quad::from_f64(value.im);
-                block[(row + n) * block_size + col + n] = Quad::from_f64(value.re);
+                let original_row = row_idx[index];
+                let (equation, unknown, value) = match operation {
+                    ComplexSolveOp::Normal => (original_row, col, scaled_values[index]),
+                    ComplexSolveOp::Transpose => (col, original_row, scaled_values[index]),
+                    ComplexSolveOp::Adjoint => (col, original_row, scaled_values[index].conj()),
+                };
+                block[equation * block_size + unknown] = Quad::from_f64(value.re);
+                block[equation * block_size + unknown + n] = Quad::from_f64(-value.im);
+                block[(equation + n) * block_size + unknown] = Quad::from_f64(value.im);
+                block[(equation + n) * block_size + unknown + n] = Quad::from_f64(value.re);
             }
         }
         let mut block_rhs = vec![Quad::ZERO; block_size];
@@ -4204,9 +4305,13 @@ impl ComplexMatrix {
             }
         }
 
+        let solution_scale = match operation {
+            ComplexSolveOp::Normal => &col_scale,
+            ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &row_scale,
+        };
         let mut solution = Vec::with_capacity(n);
         for col in 0..n {
-            let scale = Quad::from_f64(col_scale[col]);
+            let scale = Quad::from_f64(solution_scale[col]);
             let real = block_solution[col] * scale;
             let imag = block_solution[col + n] * scale;
             solution.push(Complex64::new(real.0 + real.1, imag.0 + imag.1));
@@ -4233,7 +4338,7 @@ impl ComplexMatrix {
             &mut denominator,
             &mut compensation,
             &mut row_nnz,
-            ComplexSolveOp::Normal,
+            operation,
         )?;
         if backward_error.accepted() {
             return Ok(solution);
@@ -4274,7 +4379,7 @@ impl ComplexMatrix {
                     &mut denominator,
                     &mut compensation,
                     &mut row_nnz,
-                    ComplexSolveOp::Normal,
+                    operation,
                 )?;
                 if trial_error.accepted() {
                     return Ok(trial);
@@ -4733,6 +4838,35 @@ impl ComplexMatrix {
                 break;
             }
             backward_error = refined_error;
+        }
+
+        if canonicalize_complex_homogeneous_singletons(csc, values, rhs, solution, operation) {
+            let canonical_error = complex_componentwise_backward_error(
+                csc,
+                &ws.scaled_values,
+                solution,
+                &ws.scaled_rhs,
+                scaled_denominator_floor,
+                &mut ws.residual,
+                &mut ws.denominator,
+                &mut ws.compensation,
+                &mut ws.row_nnz,
+                operation,
+            )?;
+            if canonical_error.accepted() {
+                let solution_scale = match operation {
+                    ComplexSolveOp::Normal => &ws.col_scale,
+                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                };
+                for (value, &scale) in solution.iter_mut().zip(solution_scale) {
+                    *value *= scale;
+                    if !complex_is_finite(*value) {
+                        return Err(SolverError::Overflow);
+                    }
+                }
+                return Ok(());
+            }
+            backward_error = canonical_error;
         }
 
         Err(SolverError::InaccurateSolution(
@@ -6436,6 +6570,227 @@ mod tests {
                 "complex solution[{index}] relative error {relative_error:.3e}"
             );
         }
+
+        let transpose_expected = [
+            Complex64::new(0.75, -0.125),
+            Complex64::new(-0.5, 0.375),
+            Complex64::new(1.25, -0.625),
+        ];
+        let mut transpose_rhs = [Complex64::new(0.0, 0.0); 3];
+        for equation in 0..3 {
+            for unknown in 0..3 {
+                transpose_rhs[equation] +=
+                    coefficients[unknown][equation] * transpose_expected[unknown];
+            }
+        }
+        let transpose_actual = matrix
+            .solve_dense_extended_transpose(&transpose_rhs)
+            .expect("extended transpose result must pass strict A^T certification");
+        for (index, (&actual, &expected)) in
+            transpose_actual.iter().zip(&transpose_expected).enumerate()
+        {
+            let relative_error = (actual - expected).norm() / expected.norm();
+            assert!(
+                relative_error <= 1.0e-10,
+                "complex transpose solution[{index}] relative error {relative_error:.3e}"
+            );
+        }
+
+        let adjoint_expected = [
+            Complex64::new(-0.25, 0.5),
+            Complex64::new(0.625, -0.75),
+            Complex64::new(1.5, 0.25),
+        ];
+        let mut adjoint_rhs = [Complex64::new(0.0, 0.0); 3];
+        for equation in 0..3 {
+            for unknown in 0..3 {
+                adjoint_rhs[equation] +=
+                    coefficients[unknown][equation].conj() * adjoint_expected[unknown];
+            }
+        }
+        let adjoint_actual = matrix
+            .solve_dense_extended_adjoint(&adjoint_rhs)
+            .expect("extended adjoint result must pass strict A^H certification");
+        for (index, (&actual, &expected)) in
+            adjoint_actual.iter().zip(&adjoint_expected).enumerate()
+        {
+            let relative_error = (actual - expected).norm() / expected.norm();
+            assert!(
+                relative_error <= 1.0e-10,
+                "complex adjoint solution[{index}] relative error {relative_error:.3e}"
+            );
+        }
+    }
+
+    #[test]
+    fn complex_singleton_canonicalization_is_exact_and_fail_closed() {
+        let real = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        matrix.add_real(0, 0, 2.0);
+        matrix.add_real(1, 0, 3.0);
+        matrix.add_real(1, 1, 4.0);
+
+        let tiny = Complex64::new(2.0_f64.powi(-90), -2.0_f64.powi(-92));
+        let zero = Complex64::new(0.0, 0.0);
+        let one = Complex64::new(1.0, 0.0);
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let mut compensation = Vec::new();
+        let mut row_nnz = Vec::new();
+
+        let mut normal = [tiny, one];
+        let normal_rhs = [zero, Complex64::new(4.0, 0.0)];
+        assert!(canonicalize_complex_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &normal_rhs,
+            &mut normal,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(normal, [zero, one]);
+        assert!(
+            complex_componentwise_backward_error(
+                &matrix.csc,
+                &matrix.values,
+                &normal,
+                &normal_rhs,
+                None,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                ComplexSolveOp::Normal,
+            )
+            .unwrap()
+            .accepted()
+        );
+
+        for operation in [ComplexSolveOp::Transpose, ComplexSolveOp::Adjoint] {
+            let mut transposed = [one, tiny];
+            let transposed_rhs = [Complex64::new(2.0, 0.0), zero];
+            assert!(canonicalize_complex_homogeneous_singletons(
+                &matrix.csc,
+                &matrix.values,
+                &transposed_rhs,
+                &mut transposed,
+                operation,
+            ));
+            assert_eq!(transposed, [one, zero]);
+            assert!(
+                complex_componentwise_backward_error(
+                    &matrix.csc,
+                    &matrix.values,
+                    &transposed,
+                    &transposed_rhs,
+                    None,
+                    &mut residual,
+                    &mut denominator,
+                    &mut compensation,
+                    &mut row_nnz,
+                    operation,
+                )
+                .unwrap()
+                .accepted()
+            );
+        }
+
+        let mut two_term_homogeneous = [one, tiny];
+        assert!(!canonicalize_complex_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &[Complex64::new(2.0, 0.0), zero],
+            &mut two_term_homogeneous,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(two_term_homogeneous, [one, tiny]);
+
+        let mut nonhomogeneous_singleton = [tiny, one];
+        assert!(!canonicalize_complex_homogeneous_singletons(
+            &matrix.csc,
+            &matrix.values,
+            &[Complex64::new(1.0, 0.0), Complex64::new(4.0, 0.0)],
+            &mut nonhomogeneous_singleton,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(nonhomogeneous_singleton, [tiny, one]);
+
+        let singular_real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (1, 1, 0.0)]).unwrap();
+        let mut singular = ComplexMatrix::from_real_structure(&singular_real);
+        singular.add_real(1, 1, 1.0);
+        let mut singular_candidate = [tiny, zero];
+        assert!(!canonicalize_complex_homogeneous_singletons(
+            &singular.csc,
+            &singular.values,
+            &[zero, zero],
+            &mut singular_candidate,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(singular_candidate, [tiny, zero]);
+        assert!(matches!(
+            singular.solve(&[zero, zero]),
+            Err(SolverError::SingularMatrix)
+        ));
+
+        let underflow_real =
+            StaticMatrix::from_triplets(2, 2, &[(0, 0, 0.0), (0, 1, 0.0)]).unwrap();
+        let mut underflow_matrix = ComplexMatrix::from_real_structure(&underflow_real);
+        underflow_matrix.add_real(0, 0, 1.0);
+        underflow_matrix.add_real(0, 1, f64::from_bits(1));
+        let mut physical_coefficient_candidate = [tiny, one];
+        assert!(!canonicalize_complex_homogeneous_singletons(
+            &underflow_matrix.csc,
+            &underflow_matrix.values,
+            &[zero, zero],
+            &mut physical_coefficient_candidate,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(physical_coefficient_candidate, [tiny, one]);
+
+        let mut underflowed_values = underflow_matrix.values.clone();
+        let secondary_index = (underflow_matrix.csc.col_ptr()[1]
+            ..underflow_matrix.csc.col_ptr()[2])
+            .find(|&index| underflow_matrix.csc.row_idx()[index] == 0)
+            .unwrap();
+        assert_ne!(underflowed_values[secondary_index], zero);
+        underflowed_values[secondary_index] = zero;
+        let mut erased_coefficient_candidate = [tiny, one];
+        assert!(canonicalize_complex_homogeneous_singletons(
+            &underflow_matrix.csc,
+            &underflowed_values,
+            &[zero, zero],
+            &mut erased_coefficient_candidate,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(erased_coefficient_candidate, [zero, one]);
+
+        let rhs_real = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let mut rhs_matrix = ComplexMatrix::from_real_structure(&rhs_real);
+        rhs_matrix.add_real(0, 0, 1.0);
+        let physical_rhs = [Complex64::new(f64::from_bits(1), 0.0)];
+        let mut physical_rhs_candidate = [tiny];
+        assert!(!canonicalize_complex_homogeneous_singletons(
+            &rhs_matrix.csc,
+            &rhs_matrix.values,
+            &physical_rhs,
+            &mut physical_rhs_candidate,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(physical_rhs_candidate, [tiny]);
+
+        let mut erased_rhs_candidate = [tiny];
+        assert!(canonicalize_complex_homogeneous_singletons(
+            &rhs_matrix.csc,
+            &rhs_matrix.values,
+            &[zero],
+            &mut erased_rhs_candidate,
+            ComplexSolveOp::Normal,
+        ));
+        assert_eq!(erased_rhs_candidate, [zero]);
     }
 
     #[test]
