@@ -36,12 +36,25 @@ pub(super) fn parameter_redefinition_attributes(
     attributes
 }
 
+pub(super) fn duplicate_model_parameter_attributes(
+    error: &rspice_core::netlist::DuplicateModelParameterError,
+) -> ParseErrorAttributes {
+    let mut attributes = ParseErrorAttributes::new("duplicate_model_parameter");
+    attributes.category = Some("model_validation");
+    attributes.set_primary(&error.model_origin);
+    attributes.authored_name = Some(error.model_name.clone());
+    attributes.canonical_name = Some(error.canonical_model_name.clone());
+    attributes.parameter_name = Some(error.parameter_name.clone());
+    attributes.canonical_parameter_name = Some(error.canonical_parameter_name.clone());
+    attributes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rspice_core::netlist::{
-        NetlistSourceLocation, ParameterDefinitionKind, ParameterRedefinitionError,
-        StartupDirectiveConflictError, StartupDirectiveKind,
+        DuplicateModelParameterError, NetlistSourceLocation, ParameterDefinitionKind,
+        ParameterRedefinitionError, StartupDirectiveConflictError, StartupDirectiveKind,
     };
 
     #[test]
@@ -92,5 +105,28 @@ mod tests {
             attributes.conflicting_startup_kind.as_deref(),
             Some("nodeset")
         );
+    }
+
+    #[test]
+    fn duplicate_model_parameter_exposes_model_parameter_and_origin() {
+        let attributes = duplicate_model_parameter_attributes(&DuplicateModelParameterError {
+            model_name: "mOd".into(),
+            canonical_model_name: "MOD".into(),
+            parameter_name: "iS".into(),
+            canonical_parameter_name: "IS".into(),
+            model_origin: NetlistSourceLocation::in_file("models.lib", 14),
+        });
+        assert_eq!(attributes.kind, "duplicate_model_parameter");
+        assert_eq!(attributes.category, Some("model_validation"));
+        assert_eq!(attributes.primary_line, Some(14));
+        assert_eq!(attributes.primary_source.as_deref(), Some("models.lib"));
+        assert_eq!(attributes.authored_name.as_deref(), Some("mOd"));
+        assert_eq!(attributes.canonical_name.as_deref(), Some("MOD"));
+        assert_eq!(attributes.parameter_name.as_deref(), Some("iS"));
+        assert_eq!(attributes.canonical_parameter_name.as_deref(), Some("IS"));
+
+        let stub = include_str!("../../../rspice.pyi");
+        assert!(stub.contains("\"duplicate_model_parameter\""));
+        assert!(stub.contains("\"model_validation\""));
     }
 }

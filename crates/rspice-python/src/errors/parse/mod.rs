@@ -212,6 +212,9 @@ pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
         CoreParseError::ParameterRedefinition(error) => {
             directives::parameter_redefinition_attributes(error)
         }
+        CoreParseError::DuplicateModelParameter(error) => {
+            directives::duplicate_model_parameter_attributes(error)
+        }
         CoreParseError::MissingSubcircuitEnds(error) => {
             let mut attributes = ParseErrorAttributes::new("missing_subcircuit_ends");
             attributes.set_primary(&error.opened_at);
