@@ -2,6 +2,19 @@
 
 use super::*;
 
+#[derive(Debug)]
+pub(super) struct PendingXyceDiodeModelWarning {
+    pub(super) model_index: usize,
+    /// Authored model spelling used by Xyce's warning payload. Local model
+    /// qualification is an internal lookup detail and must not leak here.
+    pub(super) model_name: String,
+    pub(super) origin: NetlistSourceLocation,
+    /// Effective parameter order after AKO inheritance/overrides. ModelDef's
+    /// typed stores group by representation and therefore cannot recover this
+    /// user-visible order later.
+    pub(super) parameter_order: Vec<String>,
+}
+
 pub(super) fn qualify_nested_subckt_name(parent_scope: Option<&str>, local_name: &str) -> String {
     match parent_scope {
         Some(scope) if !scope.is_empty() => format!("{scope}.{local_name}"),
@@ -28,8 +41,9 @@ pub(super) fn parse_model_definition(
     known_models: &[ModelDef],
     defer_expression_params: bool,
     bare_ident_deferrals: &mut Vec<(String, String, usize)>,
-    diagnostics: &mut Vec<ParseDiagnostic>,
+    pending_xyce_diode_model_warnings: &mut Vec<PendingXyceDiodeModelWarning>,
 ) -> Result<ModelDef, ParseError> {
+    let model_index = known_models.len();
     let name = expect_model_name(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;
 
@@ -105,18 +119,11 @@ pub(super) fn parse_model_definition(
         &name,
         origin,
     )?;
-    push_unknown_xyce_diode_model_parameter_warnings(
-        params,
-        model_type_hint,
-        &name,
-        &model_params,
-        origin,
-        diagnostics,
-    );
+    let authored_parameter_order = model_params.authored_parameter_order.clone();
     bare_ident_deferrals.append(&mut model_params.bare_ident_deferrals);
 
     let Some(base_name) = ako_base else {
-        return Ok(ModelDef {
+        let model = ModelDef {
             name,
             model_type: model_type.expect("non-AKO models carry an explicit type"),
             params: model_params.numeric,
@@ -126,7 +133,16 @@ pub(super) fn parse_model_definition(
             real_vector_params: model_params.real_vector,
             real_vector_expr_params: model_params.real_vector_expr,
             integer_vector_params: model_params.integer_vector,
-        });
+        };
+        queue_unknown_xyce_diode_model_parameter_warnings(
+            params,
+            &model,
+            model_index,
+            authored_parameter_order,
+            origin,
+            pending_xyce_diode_model_warnings,
+        );
+        return Ok(model);
     };
 
     let base = ako_base_model.expect("AKO base model was resolved before parsing params");
@@ -227,7 +243,25 @@ pub(super) fn parse_model_definition(
         integer_vector.push((key, value));
     }
 
-    Ok(ModelDef {
+    let mut parameter_order = ako_base_model
+        .and_then(|base| {
+            known_models
+                .iter()
+                .position(|known| std::ptr::eq(known, base))
+        })
+        .and_then(|base_index| {
+            pending_xyce_diode_model_warnings
+                .iter()
+                .find(|warning| warning.model_index == base_index)
+        })
+        .map(|warning| warning.parameter_order.clone())
+        .unwrap_or_else(|| model_parameter_names_in_storage_order(base));
+    for name in &authored_parameter_order {
+        parameter_order.retain(|inherited| !inherited.eq_ignore_ascii_case(name));
+        parameter_order.push(name.clone());
+    }
+
+    let model = ModelDef {
         name,
         model_type,
         params: numeric,
@@ -237,51 +271,201 @@ pub(super) fn parse_model_definition(
         real_vector_params: real_vector,
         real_vector_expr_params: real_vector_expr,
         integer_vector_params: integer_vector,
-    })
+    };
+    queue_unknown_xyce_diode_model_parameter_warnings(
+        params,
+        &model,
+        model_index,
+        parameter_order,
+        origin,
+        pending_xyce_diode_model_warnings,
+    );
+    Ok(model)
 }
 
-fn push_unknown_xyce_diode_model_parameter_warnings(
+fn model_parameter_names_in_storage_order(model: &ModelDef) -> Vec<String> {
+    model
+        .params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(model.expr_params.iter().map(|(name, _)| name))
+        .chain(model.string_params.iter().map(|(name, _)| name))
+        .chain(model.string_vector_params.iter().map(|(name, _)| name))
+        .chain(model.real_vector_params.iter().map(|(name, _)| name))
+        .chain(model.real_vector_expr_params.iter().map(|(name, _)| name))
+        .chain(model.integer_vector_params.iter().map(|(name, _)| name))
+        .map(|name| name.to_ascii_uppercase())
+        .collect()
+}
+
+fn queue_unknown_xyce_diode_model_parameter_warnings(
     params: &ParamContext,
-    model_type: Option<&str>,
-    model_name: &str,
-    model_params: &ParsedModelParams,
+    model: &ModelDef,
+    model_index: usize,
+    parameter_order: Vec<String>,
     origin: &NetlistSourceLocation,
-    diagnostics: &mut Vec<ParseDiagnostic>,
+    pending: &mut Vec<PendingXyceDiodeModelWarning>,
 ) {
     if params.expression_dialect() != ExpressionDialect::Xyce
-        || !model_type.is_some_and(|kind| {
-            kind.eq_ignore_ascii_case("D") || kind.eq_ignore_ascii_case("DIODE")
-        })
+        || !(model.model_type.eq_ignore_ascii_case("D")
+            || model.model_type.eq_ignore_ascii_case("DIODE"))
     {
         return;
     }
 
-    let names = model_params
-        .numeric
-        .iter()
-        .map(|(name, _)| name)
-        .chain(model_params.expr.iter().map(|(name, _)| name))
-        .chain(model_params.string.iter().map(|(name, _)| name))
-        .chain(model_params.string_vector.iter().map(|(name, _)| name))
-        .chain(model_params.real_vector.iter().map(|(name, _)| name))
-        .chain(model_params.real_vector_expr.iter().map(|(name, _)| name))
-        .chain(model_params.integer_vector.iter().map(|(name, _)| name));
+    // Delay every Xyce diode namespace decision until global expressions have
+    // resolved. This keeps diagnostics in authored model-card order and lets a
+    // subcircuit-local LEVEL be decided against each concrete caller scope.
+    pending.push(PendingXyceDiodeModelWarning {
+        model_index,
+        model_name: model.name.clone(),
+        origin: origin.clone(),
+        parameter_order,
+    });
+}
 
-    for name in names {
-        if crate::device::Diode::supports_model_parameter(name) {
+fn uses_generated_xyce_diode_model(model: &ModelDef) -> bool {
+    model
+        .params
+        .iter()
+        .rev()
+        .find(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+        .is_some_and(|(_, level)| {
+            let rounded = level.round();
+            level.is_finite()
+                && (*level - rounded).abs() <= 1e-9
+                && matches!(rounded as i32, 200 | 2002)
+        })
+}
+
+fn push_unknown_xyce_diode_model_parameter_warnings(
+    model: &ModelDef,
+    model_name: &str,
+    parameter_order: &[String],
+    origin: &NetlistSourceLocation,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) {
+    if uses_generated_xyce_diode_model(model) {
+        return;
+    }
+
+    let mut seen = HashSet::new();
+    for name in parameter_order {
+        if !model_has_parameter(model, name) {
+            continue;
+        }
+        if crate::device::Diode::supports_xyce_legacy_model_parameter(name) {
             continue;
         }
         let canonical_name = name.to_ascii_uppercase();
+        if !seen.insert(canonical_name.clone()) {
+            continue;
+        }
         let message = format!(
-            "No model parameter {canonical_name} found for model {model_name} of type D, parameter ignored"
+            "No model parameter {canonical_name} found for model {model_name} of type D, parameter ignored."
         );
-        log::warn!("{origin}: {message}");
         diagnostics.push(ParseDiagnostic::warning_at(
             origin.clone(),
             "xyce-unknown-diode-model-parameter",
             message,
         ));
     }
+}
+
+fn model_has_parameter(model: &ModelDef, expected: &str) -> bool {
+    model
+        .params
+        .iter()
+        .map(|(name, _)| name)
+        .chain(model.expr_params.iter().map(|(name, _)| name))
+        .chain(model.string_params.iter().map(|(name, _)| name))
+        .chain(model.string_vector_params.iter().map(|(name, _)| name))
+        .chain(model.real_vector_params.iter().map(|(name, _)| name))
+        .chain(model.real_vector_expr_params.iter().map(|(name, _)| name))
+        .chain(model.integer_vector_params.iter().map(|(name, _)| name))
+        .any(|name| name.eq_ignore_ascii_case(expected))
+}
+
+pub(super) fn emit_pending_xyce_diode_model_parameter_warnings_with_abort(
+    netlist: &mut Netlist,
+    pending: Vec<PendingXyceDiodeModelWarning>,
+    resource_limits: crate::resource::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let needs_scoped_resolution = pending.iter().any(|warning| {
+        netlist
+            .models
+            .get(warning.model_index)
+            .is_some_and(|model| {
+                model
+                    .expr_params
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+            })
+    });
+    let mut native_scoped_models = HashSet::new();
+    if needs_scoped_resolution {
+        let config = crate::netlist::flattener::FlattenerConfig {
+            max_depth: resource_limits.max_hierarchy_depth,
+            max_elements: resource_limits.max_flattened_elements,
+            ..crate::netlist::flattener::FlattenerConfig::default()
+        };
+        let mut flattener = crate::netlist::flattener::Flattener::with_models_config(
+            &netlist.subcircuits,
+            &netlist.models,
+            config,
+        );
+        match flattener.collect_scoped_models_for_diagnostics_with_abort(netlist, abort) {
+            Ok(()) => {
+                for (scoped_model, source_model_index) in flattener.scoped_models_with_sources() {
+                    if scoped_model
+                        .expr_params
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+                        || uses_generated_xyce_diode_model(scoped_model)
+                    {
+                        continue;
+                    }
+                    native_scoped_models.insert(source_model_index);
+                }
+            }
+            Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+            Err(error @ ParseWithAbortError::Parse(ParseError::ResourceLimit(_))) => {
+                return Err(error);
+            }
+            Err(ParseWithAbortError::Parse(error)) => {
+                // The diagnostic collector isolates ordinary branch failures.
+                // Keep this defensive fallback so future setup-only errors do
+                // not move circuit-construction validation into parsing.
+                log::debug!(
+                    "could not elaborate deferred Xyce diode warnings during parsing: {error}"
+                );
+            }
+        }
+    }
+
+    let (models, diagnostics) = (&netlist.models, &mut netlist.diagnostics);
+    for (index, warning) in pending.into_iter().enumerate() {
+        poll_parse_abort(abort, index)?;
+        let Some(model) = models.get(warning.model_index) else {
+            continue;
+        };
+        let level_is_deferred = model
+            .expr_params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"));
+        if level_is_deferred && !native_scoped_models.contains(&warning.model_index) {
+            continue;
+        }
+        push_unknown_xyce_diode_model_parameter_warnings(
+            model,
+            &warning.model_name,
+            &warning.parameter_order,
+            &warning.origin,
+            diagnostics,
+        );
+    }
+    ensure_parse_not_aborted(abort)
 }
 
 pub(super) fn rewrite_scoped_references(

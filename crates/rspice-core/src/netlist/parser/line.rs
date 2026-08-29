@@ -283,7 +283,7 @@ pub(super) fn process_line(
         if upper.starts_with(".MODEL") {
             let models = &mut state.models;
             let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
-            let diagnostics = &mut state.diagnostics;
+            let pending_xyce_diode_model_warnings = &mut state.pending_xyce_diode_model_warnings;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -299,7 +299,7 @@ pub(super) fn process_line(
                 models,
                 true,
                 model_bare_ident_deferrals,
-                diagnostics,
+                pending_xyce_diode_model_warnings,
             )?;
             let local_name = model.name.clone();
             let qualified_name = qualify_local_model_name(&frame.qualified_name, &local_name);
@@ -327,6 +327,7 @@ pub(super) fn process_line(
             let diagnostics = &mut state.diagnostics;
             let spef_includes = &mut state.spef_includes;
             let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
+            let pending_xyce_diode_model_warnings = &mut state.pending_xyce_diode_model_warnings;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -350,6 +351,7 @@ pub(super) fn process_line(
                     unknown_warned,
                     models,
                     model_bare_ident_deferrals,
+                    pending_xyce_diode_model_warnings,
                     initial_conditions: &mut subckt_initial_conditions,
                     device_initial_conditions,
                     node_sets: &mut subckt_node_sets,
@@ -412,6 +414,7 @@ pub(super) fn process_line(
             unknown_warned: &mut state.unknown_warned,
             models: &mut state.models,
             model_bare_ident_deferrals: &mut state.model_bare_ident_deferrals,
+            pending_xyce_diode_model_warnings: &mut state.pending_xyce_diode_model_warnings,
             initial_conditions: &mut state.initial_conditions,
             device_initial_conditions: &mut state.device_initial_conditions,
             node_sets: &mut state.node_sets,
@@ -478,6 +481,7 @@ pub(super) fn parse_line(
         origin,
         deferred_body_params,
         model_bare_ident_deferrals,
+        pending_xyce_diode_model_warnings,
     } = context;
 
     // Tokenize the line
@@ -515,6 +519,7 @@ pub(super) fn parse_line(
                 unknown_warned,
                 models,
                 model_bare_ident_deferrals,
+                pending_xyce_diode_model_warnings,
                 params,
                 initial_conditions,
                 device_initial_conditions,

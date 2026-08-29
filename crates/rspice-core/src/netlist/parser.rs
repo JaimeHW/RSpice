@@ -742,16 +742,25 @@ fn parse_netlist_impl(
         abort,
     )?;
     resolve_static_model_expression_params_with_abort(&mut state, abort)?;
+    let pending_xyce_diode_model_warnings =
+        std::mem::take(&mut state.pending_xyce_diode_model_warnings);
     validate_resistor_model_references_with_abort(&state, abort)?;
     validate_coupling_model_references_with_abort(&state, abort)?;
 
     ensure_parse_not_aborted(abort)?;
-    state.into_netlist(
+    let mut netlist = state.into_netlist(
         title,
         input,
         root_eof.unwrap_or_else(|| NetlistSourceLocation::in_memory(lines.len() + 1)),
         abort,
-    )
+    )?;
+    emit_pending_xyce_diode_model_parameter_warnings_with_abort(
+        &mut netlist,
+        pending_xyce_diode_model_warnings,
+        options.resource_limits,
+        abort,
+    )?;
+    Ok(netlist)
 }
 
 fn validate_timeint_option_aggregate(

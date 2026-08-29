@@ -190,6 +190,20 @@ pub(crate) fn format_netlist_diagnostic(
     format!("{location}{}", diagnostic.message)
 }
 
+pub(crate) fn format_netlist_warning_lines(
+    diagnostic: &rspice_core::netlist::ParseDiagnostic,
+) -> Vec<String> {
+    diagnostic
+        .xyce_legacy_warning_lines()
+        .map(Vec::from)
+        .unwrap_or_else(|| {
+            vec![format!(
+                "warning: {}",
+                format_netlist_diagnostic(diagnostic)
+            )]
+        })
+}
+
 pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bool) {
     if quiet {
         return;
@@ -198,7 +212,9 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
     for diagnostic in &netlist.diagnostics {
         match diagnostic.severity {
             rspice_core::netlist::DiagnosticSeverity::Warning => {
-                eprintln!("warning: {}", format_netlist_diagnostic(diagnostic));
+                for line in format_netlist_warning_lines(diagnostic) {
+                    eprintln!("{line}");
+                }
             }
         }
     }
@@ -207,6 +223,22 @@ pub(crate) fn emit_netlist_diagnostics(netlist: &rspice_core::Netlist, quiet: bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xyce_legacy_diode_warning_lines_match_the_historical_wrapper() {
+        let diagnostic = rspice_core::netlist::ParseDiagnostic::warning_at(
+            rspice_core::netlist::NetlistSourceLocation::in_file("dir/diode.cir", 29),
+            "xyce-unknown-diode-model-parameter",
+            "No model parameter BOGOPARAM found for model D1N3940 of type D, parameter ignored.",
+        );
+        assert_eq!(
+            format_netlist_warning_lines(&diagnostic),
+            [
+                "Netlist warning in file diode.cir at or near line 29",
+                "No model parameter BOGOPARAM found for model D1N3940 of type D, parameter ignored.",
+            ]
+        );
+    }
 
     #[test]
     fn typed_output_error_text_preserves_occurrence_order_and_locations() {

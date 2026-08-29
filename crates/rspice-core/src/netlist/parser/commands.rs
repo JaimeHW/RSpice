@@ -39,6 +39,7 @@ pub(super) fn parse_command(
         defer_scoped_values,
         deferred_body_params,
         model_bare_ident_deferrals,
+        pending_xyce_diode_model_warnings,
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
@@ -226,7 +227,7 @@ pub(super) fn parse_command(
                 models,
                 false,
                 model_bare_ident_deferrals,
-                diagnostics,
+                pending_xyce_diode_model_warnings,
             )?;
             models.push(model);
         }

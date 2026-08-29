@@ -92,6 +92,7 @@ pub(super) struct ParseState {
     ///  parameters written as an unresolvable bare identifier, with
     /// the parameter name, the reference, and the line that wrote it.
     pub(super) model_bare_ident_deferrals: Vec<(String, String, usize)>,
+    pub(super) pending_xyce_diode_model_warnings: Vec<PendingXyceDiodeModelWarning>,
     pub(super) subcircuits: Vec<SubcircuitDef>,
     pub(super) params: ParamContext,
     pub(super) initial_conditions: Vec<InitialCondition>,
@@ -144,6 +145,7 @@ impl ParseState {
             data_tables: Vec::new(),
             models: Vec::new(),
             model_bare_ident_deferrals: Vec::new(),
+            pending_xyce_diode_model_warnings: Vec::new(),
             subcircuits: Vec::new(),
             params: ParamContext::new(),
             initial_conditions: Vec::new(),
@@ -352,6 +354,7 @@ pub(super) struct ParseLineContext<'a> {
     /// Sink for  parameters written as an unresolvable bare
     /// identifier, carrying the parameter name, the reference, and the line.
     pub(super) model_bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
+    pub(super) pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
 }
 
 pub(super) struct ParseCommandContext<'a> {
@@ -387,6 +390,7 @@ pub(super) struct ParseCommandContext<'a> {
     /// typo afterwards; only end-of-parse validation can tell which, and it
     /// needs the line to report the second case the way the parser used to.
     pub(super) model_bare_ident_deferrals: &'a mut Vec<(String, String, usize)>,
+    pub(super) pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
 }
 
 #[cfg(test)]

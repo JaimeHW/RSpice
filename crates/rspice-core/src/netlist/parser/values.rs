@@ -228,6 +228,11 @@ pub(super) fn looks_like_expression(expr: &str) -> bool {
 }
 
 pub(super) struct ParsedModelParams {
+    /// Canonical parameter names in the order they appeared on the model
+    /// card.  The typed value stores below deliberately optimize later
+    /// resolution by representation, so they cannot reproduce Xyce's
+    /// user-facing diagnostic order on their own.
+    pub(super) authored_parameter_order: Vec<String>,
     pub(super) numeric: Vec<(String, Value)>,
     pub(super) expr: Vec<(String, String)>,
     /// Parameters whose value was a bare identifier this pass could not
@@ -654,7 +659,7 @@ pub(super) fn parse_model_params(
     }
 
     let mut unique_names = HashSet::with_capacity(authored_names.len());
-    for (authored_name, parsed_name) in authored_names {
+    for (authored_name, parsed_name) in &authored_names {
         let canonical_name = parsed_name.to_ascii_uppercase();
         if canonical_name == "LEVEL" {
             continue;
@@ -666,7 +671,7 @@ pub(super) fn parse_model_params(
                 DuplicateModelParameterError {
                     model_name: model_name.to_string(),
                     canonical_model_name: model_name.to_ascii_uppercase(),
-                    parameter_name: authored_name,
+                    parameter_name: authored_name.clone(),
                     canonical_parameter_name: canonical_name,
                     model_origin: origin.clone(),
                 },
@@ -675,6 +680,10 @@ pub(super) fn parse_model_params(
     }
 
     Ok(ParsedModelParams {
+        authored_parameter_order: authored_names
+            .into_iter()
+            .map(|(_, parsed_name)| parsed_name.to_ascii_uppercase())
+            .collect(),
         numeric: numeric_params,
         expr: expr_params,
         string: string_params,

@@ -1035,6 +1035,25 @@ impl ParseDiagnostic {
             severity: DiagnosticSeverity::Warning,
         }
     }
+
+    /// Render the two historical Xyce warning lines for diagnostics whose
+    /// compatibility contract requires byte-stable wrapper predicates.
+    pub fn xyce_legacy_warning_lines(&self) -> Option<[String; 2]> {
+        if self.severity != DiagnosticSeverity::Warning
+            || self.code != "xyce-unknown-diode-model-parameter"
+        {
+            return None;
+        }
+        let origin = self.origin.as_ref()?;
+        let filename = origin.path.as_ref()?.file_name()?.to_str()?;
+        Some([
+            format!(
+                "Netlist warning in file {filename} at or near line {}",
+                origin.line
+            ),
+            self.message.clone(),
+        ])
+    }
 }
 
 /// What the parser did with one command inside a `.control` … `.endc` region.

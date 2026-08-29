@@ -273,6 +273,14 @@ pub struct Flattener<'a> {
     random: RandomState,
     /// Model cards cloned while flattening parameterized subcircuit instances.
     scoped_models: Vec<ModelDef>,
+    /// Exact source-model index for each scoped clone, kept in lockstep with
+    /// `scoped_models` so diagnostics never infer provenance from a generated
+    /// hierarchy suffix or conflate duplicate names.
+    scoped_model_sources: Vec<usize>,
+    /// Diagnostic-only mode that isolates ordinary hierarchy failures between
+    /// sibling instances while still propagating cancellation and resource
+    /// limits. Normal circuit flattening always leaves this disabled.
+    diagnostic_best_effort: bool,
     /// Startup directives scoped while flattening subcircuit instances.
     scoped_initial_conditions: Vec<InitialCondition>,
     scoped_node_sets: Vec<NodeSet>,
@@ -339,6 +347,8 @@ impl<'a> Flattener<'a> {
             expansion_stack: Vec::new(),
             random: RandomState::default(),
             scoped_models: Vec::new(),
+            scoped_model_sources: Vec::new(),
+            diagnostic_best_effort: false,
             scoped_initial_conditions: Vec::new(),
             scoped_node_sets: Vec::new(),
             startup_directives: Vec::new(),
@@ -360,6 +370,52 @@ impl<'a> Flattener<'a> {
         &self.param_resolver
     }
 
+    /// Resolved instance-scoped models paired with their source definitions.
+    pub(crate) fn scoped_models_with_sources(&self) -> impl Iterator<Item = (&ModelDef, usize)> {
+        debug_assert_eq!(self.scoped_models.len(), self.scoped_model_sources.len());
+        self.scoped_models
+            .iter()
+            .zip(&self.scoped_model_sources)
+            .map(|(model, source)| (model, *source))
+    }
+
+    /// Collect instance-scoped model resolutions for parser diagnostics.
+    ///
+    /// Ordinary hierarchy errors are isolated to the failing branch so a
+    /// broken sibling cannot hide diagnostics from a concrete, valid model
+    /// route. Cancellation and configured resource limits remain hard errors.
+    /// This mode deliberately reuses the production scope/substitution logic;
+    /// it does not alter the behavior of normal flattening.
+    pub(crate) fn collect_scoped_models_for_diagnostics_with_abort(
+        &mut self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
+        let previous_mode = self.diagnostic_best_effort;
+        self.diagnostic_best_effort = true;
+        let result = self.flatten_with_abort(netlist, abort).map(|_| ());
+        self.diagnostic_best_effort = previous_mode;
+        result
+    }
+
+    fn handle_branch_error(
+        &self,
+        error: ParseWithAbortError,
+        context: &str,
+    ) -> Result<(), ParseWithAbortError> {
+        match error {
+            error @ ParseWithAbortError::Aborted
+            | error @ ParseWithAbortError::Parse(ParseError::ResourceLimit(_)) => Err(error),
+            ParseWithAbortError::Parse(error) if self.diagnostic_best_effort => {
+                log::debug!(
+                    "skipping invalid hierarchy branch while collecting scoped model diagnostics ({context}): {error}"
+                );
+                Ok(())
+            }
+            error => Err(error),
+        }
+    }
+
     /// Flatten a netlist, expanding all subcircuit instances
     pub fn flatten(&mut self, netlist: &Netlist) -> Result<Vec<Element>, ParseError> {
         finish_non_aborting_parse(self.flatten_with_abort(netlist, &NoAbort))
@@ -373,7 +429,9 @@ impl<'a> Flattener<'a> {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Element>, ParseWithAbortError> {
         ensure_parse_not_aborted(abort)?;
-        validate_mutual_inductor_references(netlist)?;
+        if let Err(error) = validate_mutual_inductor_references(netlist) {
+            self.handle_branch_error(error.into(), "mutual-inductor validation")?;
+        }
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.global_nodes = netlist
@@ -384,6 +442,7 @@ impl<'a> Flattener<'a> {
         self.ground_policy = netlist.ground_policy();
         self.expansion_stack.clear();
         self.scoped_models.clear();
+        self.scoped_model_sources.clear();
         self.scoped_initial_conditions.clear();
         self.scoped_node_sets.clear();
         self.startup_directives = netlist.startup_directives.clone();
@@ -413,7 +472,8 @@ impl<'a> Flattener<'a> {
 
         for (element_index, element) in netlist.elements.iter().enumerate() {
             poll_parse_abort(abort, element_index)?;
-            self.flatten_element(
+            let stack_len = self.expansion_stack.len();
+            if let Err(error) = self.flatten_element(
                 element,
                 "",
                 &HashMap::new(),
@@ -421,7 +481,14 @@ impl<'a> Flattener<'a> {
                 0,
                 &mut flat_elements,
                 abort,
-            )?;
+            ) {
+                self.expansion_stack.truncate(stack_len);
+                self.handle_branch_error(error, &format!("top-level element {}", element.name))?;
+            }
+        }
+
+        if self.diagnostic_best_effort {
+            return Ok(flat_elements);
         }
 
         self.validate_generated_internal_node_collisions(&flat_elements, abort)?;
@@ -972,22 +1039,35 @@ impl<'a> Flattener<'a> {
         self.expansion_stack.push(subckt_name.to_owned());
         for (element_index, sub_element) in subckt.elements.iter().enumerate() {
             poll_parse_abort(abort, element_index)?;
-            // Apply parameter substitution to element values
-            let element_path = self.qualify_hierarchy_name(&new_prefix, &sub_element.name);
-            let mut substituted =
-                self.substitute_params(sub_element, &param_scope, &element_path, &new_prefix)?;
-            if multiplicity != 1.0 {
-                apply_element_multiplicity(&mut substituted, multiplicity);
+            let stack_len = self.expansion_stack.len();
+            let branch_result = (|| -> Result<(), ParseWithAbortError> {
+                // Apply parameter substitution to element values.
+                let element_path = self.qualify_hierarchy_name(&new_prefix, &sub_element.name);
+                let mut substituted =
+                    self.substitute_params(sub_element, &param_scope, &element_path, &new_prefix)?;
+                if multiplicity != 1.0 {
+                    apply_element_multiplicity(&mut substituted, multiplicity);
+                }
+                self.flatten_element(
+                    &substituted,
+                    &new_prefix,
+                    &node_map,
+                    &param_scope,
+                    depth + 1,
+                    output,
+                    abort,
+                )
+            })();
+            if let Err(error) = branch_result {
+                self.expansion_stack.truncate(stack_len);
+                self.handle_branch_error(
+                    error,
+                    &format!(
+                        "element {element_path}",
+                        element_path = self.qualify_hierarchy_name(&new_prefix, &sub_element.name)
+                    ),
+                )?;
             }
-            self.flatten_element(
-                &substituted,
-                &new_prefix,
-                &node_map,
-                &param_scope,
-                depth + 1,
-                output,
-                abort,
-            )?;
         }
         self.expansion_stack.pop();
         self.collect_scoped_startup_directives(
@@ -2584,10 +2664,11 @@ impl<'a> Flattener<'a> {
         model_scope_path: &str,
         preserve_unresolved: bool,
     ) -> Result<String, ParseError> {
-        let Some(model_def) = self
+        let Some((source_model_index, model_def)) = self
             .models
             .iter()
-            .find(|model| model.name.eq_ignore_ascii_case(model_name))
+            .enumerate()
+            .find(|(_, model)| model.name.eq_ignore_ascii_case(model_name))
         else {
             return Ok(model_name.to_string());
         };
@@ -2726,6 +2807,7 @@ impl<'a> Flattener<'a> {
         }
 
         self.scoped_models.push(scoped_model);
+        self.scoped_model_sources.push(source_model_index);
         Ok(scoped_name)
     }
 }
