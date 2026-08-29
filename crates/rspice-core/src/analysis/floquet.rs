@@ -1,63 +1,11 @@
 //! Shared evidence and stability contracts for Floquet spectra.
 
 use crate::Value;
+pub use crate::numerics::FloquetSpectrumCertificate;
 use num_complex::Complex64;
 
 /// Numerical half-width used around the physical unit-circle boundary.
 pub const FLOQUET_UNIT_CIRCLE_BAND: Value = 1.0e-6;
-
-/// Residual certificate for one complete ordinary Floquet eigenspectrum.
-///
-/// Unlike a generalized pole-zero certificate, a Floquet certificate has no
-/// infinite-root accounting: a qualified result contains exactly
-/// `problem_order` finite multipliers.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
-pub struct FloquetSpectrumCertificate {
-    /// Order of the monodromy eigenproblem.
-    pub problem_order: usize,
-    /// Largest normwise backward error among all returned eigenpairs.
-    pub max_backward_error: Value,
-    /// Canonical strict qualification threshold.
-    pub qualification_tolerance: Value,
-}
-
-impl FloquetSpectrumCertificate {
-    /// Canonical qualification threshold for an ordinary spectrum.
-    #[inline]
-    pub fn canonical_qualification_tolerance(problem_order: usize) -> Value {
-        128.0 * problem_order.max(1) as Value * Value::EPSILON
-    }
-
-    /// Construct a strictly qualified certificate.
-    ///
-    /// The tolerance must match the canonical `128 * max(n, 1) * EPSILON`
-    /// value exactly; callers cannot inflate it to authenticate a weaker
-    /// eigenspectrum. Zero-order systems use
-    /// [`FloquetSpectrumEvidence::NoDynamicModes`] instead of a certificate.
-    pub fn new(
-        problem_order: usize,
-        max_backward_error: Value,
-        qualification_tolerance: Value,
-    ) -> Option<Self> {
-        let certificate = Self {
-            problem_order,
-            max_backward_error,
-            qualification_tolerance,
-        };
-        certificate.is_valid().then_some(certificate)
-    }
-
-    /// Whether this is a canonical strict certificate.
-    pub fn is_valid(self) -> bool {
-        self.problem_order > 0
-            && self.max_backward_error.is_finite()
-            && self.max_backward_error >= 0.0
-            && self.qualification_tolerance
-                == Self::canonical_qualification_tolerance(self.problem_order)
-            && self.max_backward_error <= self.qualification_tolerance
-    }
-}
 
 /// Provenance for a retained Floquet multiplier vector.
 #[derive(Debug, Clone, PartialEq)]

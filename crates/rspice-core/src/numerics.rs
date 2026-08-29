@@ -12,6 +12,8 @@
 pub(crate) mod eigenspectrum;
 pub mod integration;
 
+pub use eigenspectrum::FloquetSpectrumCertificate;
+
 use crate::Value;
 
 /// The smallest timestep Xyce will take at `current_time`, and the scale its
