@@ -9,18 +9,19 @@
 //! `registry.rs` and the manifest, which is why subset generation is a
 //! separate entry point that refuses to touch either.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fmt::Write;
 use std::fs;
 use std::io::Write as IoWrite;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
 use crate::metrics::{KernelRegionMetric, PipelinePhase};
 use crate::{CompileError, CompilerOptions, VerilogACompiler};
 
+use super::files::GENERATED_DEVICE_MARKER_FILE;
 use super::{
     GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION, GeneratedBuiltinManifest,
     GeneratedBuiltinManifestDevice, GeneratedBuiltinManifestFile,
@@ -61,6 +62,7 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/types.rs",
     "src/zfilter.rs",
 ];
+const DEBUG_PREPROCESSOR_ENV: &str = "RSPICE_DEBUG_PP";
 
 /// What a full regeneration produced.
 ///
@@ -175,12 +177,19 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     progress: bool,
     jobs: Option<usize>,
 ) -> BuiltinResult<BuiltinGenerationReport> {
+    reject_debug_preprocessor_output()?;
     validate_model_root(model_root)?;
 
     let source_tree_digest = tree_digest(model_root, false)?;
     let generator_digest = generator_digest(generator_root, false)?;
     let (devices, manifest_devices, _) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
+    verify_generation_inputs_unchanged(
+        model_root,
+        generator_root,
+        &source_tree_digest,
+        &generator_digest,
+    )?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any discovered modules",
@@ -199,6 +208,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
         generated_root,
         source_tree_digest,
         generator_digest,
+        &devices,
         &packages,
         manifest_devices,
     )?;
@@ -229,6 +239,7 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
     progress: bool,
     jobs: Option<usize>,
 ) -> BuiltinResult<BuiltinSubsetGenerationReport> {
+    reject_debug_preprocessor_output()?;
     validate_model_root(model_root)?;
 
     let (devices, _, kernel_structures) = generate_devices_with_stack(
@@ -261,6 +272,7 @@ pub fn validate_generated_builtins(
     generator_root: &Path,
     emit_cargo_rerun: bool,
 ) -> BuiltinResult<GeneratedBuiltinManifest> {
+    reject_debug_preprocessor_output()?;
     validate_model_root(model_root)?;
 
     let source_tree_digest = tree_digest(model_root, emit_cargo_rerun)?;
@@ -277,6 +289,64 @@ pub fn validate_generated_builtins(
         stale_generated_builtins_error(generated_root, &source_tree_digest, &generator_digest)
             .into(),
     )
+}
+
+fn reject_debug_preprocessor_output() -> BuiltinResult<()> {
+    reject_debug_preprocessor_output_if(env::var_os(DEBUG_PREPROCESSOR_ENV).is_some())
+}
+
+fn reject_debug_preprocessor_output_if(debug_output_requested: bool) -> BuiltinResult<()> {
+    if debug_output_requested {
+        return Err(format!(
+            "{DEBUG_PREPROCESSOR_ENV} must be unset during Verilog-A built-in generation and validation because it writes .pp.va files into the model source tree; unset it and retry"
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn verify_generation_inputs_unchanged(
+    model_root: &Path,
+    generator_root: &Path,
+    source_tree_digest_before: &str,
+    generator_digest_before: &str,
+) -> BuiltinResult<()> {
+    let source_tree_digest_after = tree_digest(model_root, false)?;
+    let generator_digest_after = generator_digest(generator_root, false)?;
+    ensure_generation_inputs_unchanged(
+        source_tree_digest_before,
+        generator_digest_before,
+        &source_tree_digest_after,
+        &generator_digest_after,
+    )
+}
+
+fn ensure_generation_inputs_unchanged(
+    source_tree_digest_before: &str,
+    generator_digest_before: &str,
+    source_tree_digest_after: &str,
+    generator_digest_after: &str,
+) -> BuiltinResult<()> {
+    let mut changed = Vec::new();
+    if source_tree_digest_before != source_tree_digest_after {
+        changed.push(format!(
+            "model sources changed (before={source_tree_digest_before}, after={source_tree_digest_after})"
+        ));
+    }
+    if generator_digest_before != generator_digest_after {
+        changed.push(format!(
+            "generator inputs changed (before={generator_digest_before}, after={generator_digest_after})"
+        ));
+    }
+    if changed.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Verilog-A built-in generation inputs changed during generation: {}; generated output was not published; retry from stable model and generator source trees",
+        changed.join("; ")
+    )
+    .into())
 }
 
 fn validate_model_root(model_root: &Path) -> BuiltinResult<()> {
@@ -700,13 +770,15 @@ fn build_generated_manifest(
     generated_root: &Path,
     source_tree_digest: String,
     generator_digest: String,
+    generated_devices: &[GeneratedRustDevice],
     packages: &[GeneratedModelPackage],
     mut devices: Vec<GeneratedBuiltinManifestDevice>,
 ) -> BuiltinResult<GeneratedBuiltinManifest> {
-    let output = generated_output_fingerprint(generated_root)?;
     if packages.len() != devices.len() {
         return Err("generated package and manifest device counts differ".into());
     }
+    let owned_paths = generated_owned_output_paths(generated_devices, packages)?;
+    let output = generated_output_fingerprint(generated_root, &owned_paths)?;
     for (device, package) in devices.iter_mut().zip(packages) {
         if device.folder_name != package.folder_name {
             return Err(format!(
@@ -749,26 +821,112 @@ fn build_generated_manifest(
     })
 }
 
+fn generated_owned_output_paths(
+    devices: &[GeneratedRustDevice],
+    packages: &[GeneratedModelPackage],
+) -> BuiltinResult<Vec<String>> {
+    if devices.len() != packages.len() {
+        return Err("generated device and package counts differ".into());
+    }
+
+    let mut paths = vec![
+        "Cargo.toml".to_string(),
+        "src/lib.rs".to_string(),
+        "src/registry.rs".to_string(),
+    ];
+    for (device, package) in devices.iter().zip(packages) {
+        if device.folder_name != package.folder_name {
+            return Err(format!(
+                "generated device '{}' does not match package '{}'",
+                device.folder_name, package.folder_name
+            )
+            .into());
+        }
+        validate_package_slug(&package.package_slug)?;
+        let package_prefix = format!("models/{}", package.package_slug);
+        let source_prefix = format!("{package_prefix}/src");
+        let device_prefix = format!("{source_prefix}/{}", device.folder_name);
+        paths.push(format!("{package_prefix}/{GENERATED_MODEL_PACKAGE_MARKER}"));
+        paths.push(format!("{package_prefix}/Cargo.toml"));
+        paths.push(format!("{source_prefix}/lib.rs"));
+        paths.push(format!("{device_prefix}/{GENERATED_DEVICE_MARKER_FILE}"));
+        paths.extend(
+            device
+                .files
+                .iter()
+                .map(|file| format!("{device_prefix}/{}", file.relative_path.replace('\\', "/"))),
+        );
+    }
+    normalize_generated_owned_paths(paths)
+}
+
+fn normalize_generated_owned_paths(
+    paths: impl IntoIterator<Item = String>,
+) -> BuiltinResult<Vec<String>> {
+    let mut exact = HashSet::new();
+    let mut case_folded = HashSet::new();
+    let mut normalized_paths = Vec::new();
+    for relative_path in paths {
+        let relative_path = relative_path.replace('\\', "/");
+        let path = Path::new(&relative_path);
+        let components = path.components().collect::<Vec<_>>();
+        if relative_path.is_empty()
+            || relative_path.starts_with('/')
+            || components.is_empty()
+            || components
+                .iter()
+                .any(|component| !matches!(component, Component::Normal(_)))
+            || relative_path.split('/').any(str::is_empty)
+            || relative_path == GENERATED_BUILTIN_MANIFEST_FILE_NAME
+        {
+            return Err(
+                format!("unsafe generated owned-file inventory path '{relative_path}'").into(),
+            );
+        }
+        if !exact.insert(relative_path.clone()) {
+            return Err(
+                format!("duplicate generated owned-file inventory path '{relative_path}'").into(),
+            );
+        }
+        if !case_folded.insert(relative_path.to_ascii_lowercase()) {
+            return Err(format!(
+                "case-colliding generated owned-file inventory path '{relative_path}'"
+            )
+            .into());
+        }
+        normalized_paths.push(relative_path);
+    }
+    normalized_paths.sort();
+    Ok(normalized_paths)
+}
+
 fn generated_output_fingerprint(
     generated_root: &Path,
+    owned_paths: &[String],
 ) -> BuiltinResult<GeneratedOutputFingerprint> {
-    let mut paths = Vec::new();
-    collect_tree_files(generated_root, &mut paths)?;
-    paths.retain(|path| {
-        path.file_name().and_then(|name| name.to_str())
-            != Some(GENERATED_BUILTIN_MANIFEST_FILE_NAME)
-    });
-    paths.sort();
+    let owned_paths = normalize_generated_owned_paths(owned_paths.iter().cloned())?;
+    validate_generated_owned_layout(generated_root, &owned_paths)?;
 
     let mut bundle_hasher = blake3::Hasher::new();
     let mut source_bytes = 0u64;
-    let mut files = Vec::with_capacity(paths.len());
-    for path in paths {
-        let relative_path = path
-            .strip_prefix(generated_root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
+    let mut files = Vec::with_capacity(owned_paths.len());
+    for relative_path in owned_paths {
+        let path = generated_root.join(&relative_path);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            format!(
+                "failed to inspect generated owned file '{}' at '{}': {error}",
+                relative_path,
+                path.display()
+            )
+        })?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "generated owned-file inventory entry '{}' is not a regular file at '{}'",
+                relative_path,
+                path.display()
+            )
+            .into());
+        }
         let bytes = fs::read(&path)?;
         let byte_count = bytes.len() as u64;
         source_bytes = source_bytes
@@ -790,11 +948,129 @@ fn generated_output_fingerprint(
     })
 }
 
+fn validate_generated_owned_layout(
+    generated_root: &Path,
+    owned_paths: &[String],
+) -> BuiltinResult<()> {
+    let mut expected_files = owned_paths.iter().cloned().collect::<HashSet<_>>();
+    // The manifest authenticates every other generated file and therefore
+    // cannot include itself in its bundle digest, but it is still the only
+    // additional regular file permitted in the catalog package.
+    expected_files.insert(GENERATED_BUILTIN_MANIFEST_FILE_NAME.to_string());
+
+    let mut expected_directories = HashSet::new();
+    for relative_path in owned_paths {
+        let mut components = relative_path.split('/').collect::<Vec<_>>();
+        components.pop();
+        while !components.is_empty() {
+            expected_directories.insert(components.join("/"));
+            components.pop();
+        }
+    }
+
+    validate_generated_owned_directory(generated_root, "", &expected_files, &expected_directories)
+}
+
+fn validate_generated_owned_directory(
+    directory: &Path,
+    relative_directory: &str,
+    expected_files: &HashSet<String>,
+    expected_directories: &HashSet<String>,
+) -> BuiltinResult<()> {
+    let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        let relative_path = if relative_directory.is_empty() {
+            entry_name
+        } else {
+            format!("{relative_directory}/{entry_name}")
+        };
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+
+        if file_type.is_symlink() {
+            return Err(unexpected_generated_catalog_entry(
+                &relative_path,
+                "symbolic links are not permitted",
+            ));
+        }
+        if expected_files.contains(&relative_path) {
+            if !file_type.is_file() {
+                return Err(unexpected_generated_catalog_entry(
+                    &relative_path,
+                    "the owned-file inventory requires a regular file",
+                ));
+            }
+            continue;
+        }
+        if expected_directories.contains(&relative_path) {
+            if !file_type.is_dir() {
+                return Err(unexpected_generated_catalog_entry(
+                    &relative_path,
+                    "the owned-file inventory requires a directory",
+                ));
+            }
+            validate_generated_owned_directory(
+                &path,
+                &relative_path,
+                expected_files,
+                expected_directories,
+            )?;
+            continue;
+        }
+
+        if relative_directory == "models"
+            && file_type.is_dir()
+            && unmarked_preserved_model_package(&path)?
+        {
+            continue;
+        }
+
+        let kind = if file_type.is_dir() {
+            "unexpected directory"
+        } else if file_type.is_file() {
+            "unexpected file"
+        } else {
+            "unsupported filesystem entry"
+        };
+        return Err(unexpected_generated_catalog_entry(&relative_path, kind));
+    }
+    Ok(())
+}
+
+fn unmarked_preserved_model_package(package_root: &Path) -> BuiltinResult<bool> {
+    match fs::symlink_metadata(package_root.join(GENERATED_MODEL_PACKAGE_MARKER)) {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(format!(
+            "failed to inspect ownership marker for preserved model package '{}': {error}",
+            package_root.display()
+        )
+        .into()),
+    }
+}
+
+fn unexpected_generated_catalog_entry(
+    relative_path: &str,
+    reason: &str,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    format!(
+        "unexpected generated Verilog-A catalog entry '{relative_path}': {reason}; remove it or run `{REGENERATE_BUILTINS_COMMAND}`"
+    )
+    .into()
+}
+
 fn validate_generated_manifest_outputs(
     generated_root: &Path,
     manifest: &GeneratedBuiltinManifest,
 ) -> BuiltinResult<()> {
-    let actual = generated_output_fingerprint(generated_root)?;
+    let owned_paths = manifest
+        .files
+        .iter()
+        .map(|file| file.relative_path.clone())
+        .collect::<Vec<_>>();
+    let actual = generated_output_fingerprint(generated_root, &owned_paths)?;
     if actual.bundle_digest != manifest.bundle_digest {
         return Err(format!(
             "generated Verilog-A bundle digest mismatch: manifest={}, actual={}; run `{REGENERATE_BUILTINS_COMMAND}`",
@@ -1640,6 +1916,52 @@ mod tests {
         ))
     }
 
+    fn generated_manifest_fixture(test_name: &str) -> (PathBuf, PathBuf, GeneratedBuiltinManifest) {
+        let root = temporary_registry_root(test_name);
+        let _ = fs::remove_dir_all(&root);
+        let package = GeneratedModelPackage {
+            folder_name: "fixture__fixture__12345678".to_string(),
+            feature_name: "veriloga-model-fixture".to_string(),
+            package_name: "rspice-veriloga-model-fixture".to_string(),
+            package_slug: "fixture".to_string(),
+        };
+        let mut device = generated_device_fixture(&package.folder_name, "fixture");
+        device.files = vec![crate::rust_backend::GeneratedRustFile {
+            relative_path: "stamp.rs".to_string(),
+            contents: "abc".to_string(),
+        }];
+        let devices = vec![device];
+        let packages = vec![package];
+        write_model_packages(&root, &devices, &packages).expect("write generated model package");
+        write_registry(&root, &devices, &packages).expect("write generated registry");
+        let folder = root
+            .join("models/fixture/src")
+            .join(&packages[0].folder_name);
+        let unowned_file = root.join("models/preserved-unowned/notes.txt");
+        fs::create_dir_all(unowned_file.parent().expect("unowned file parent"))
+            .expect("create preserved unowned directory");
+        fs::write(&unowned_file, "unowned-v1").expect("write preserved unowned file");
+        let manifest = build_generated_manifest(
+            &root,
+            "source".to_string(),
+            "generator".to_string(),
+            &devices,
+            &packages,
+            vec![GeneratedBuiltinManifestDevice {
+                module_name: "fixture".to_string(),
+                public_model_name: "fixture".to_string(),
+                folder_name: "fixture__fixture__12345678".to_string(),
+                feature_name: String::new(),
+                package_name: String::new(),
+                file_count: 1,
+                source_bytes: 3,
+                workspace: Default::default(),
+            }],
+        )
+        .expect("build generated manifest");
+        (root, folder, manifest)
+    }
+
     #[test]
     fn builtin_subset_filter_matches_module_without_selecting_siblings() {
         let model_root = Path::new("models");
@@ -1691,57 +2013,114 @@ mod tests {
     }
 
     #[test]
-    fn generated_manifest_authenticates_every_output_file() {
-        let root = temporary_registry_root("manifest-authentication");
-        let _ = fs::remove_dir_all(&root);
-        let package = GeneratedModelPackage {
-            folder_name: "fixture__fixture__12345678".to_string(),
-            feature_name: "veriloga-model-fixture".to_string(),
-            package_name: "rspice-veriloga-model-fixture".to_string(),
-            package_slug: "fixture".to_string(),
-        };
-        let folder = root.join("models/fixture/src").join(&package.folder_name);
-        fs::create_dir_all(&folder).expect("create generated fixture folder");
-        fs::write(folder.join("stamp.rs"), "abc").expect("write generated fixture");
-        fs::write(folder.join(".rspice-veriloga-generated"), "marker")
-            .expect("write generated ownership marker");
-        fs::create_dir_all(root.join("src")).expect("create registry fixture src dir");
-        fs::write(root.join("src").join("registry.rs"), "registry")
-            .expect("write registry fixture");
+    fn builtin_generation_rejects_debug_preprocessor_side_effects() {
+        reject_debug_preprocessor_output_if(false).expect("unset debug output is accepted");
 
-        let manifest = build_generated_manifest(
-            &root,
-            "source".to_string(),
-            "generator".to_string(),
-            std::slice::from_ref(&package),
-            vec![GeneratedBuiltinManifestDevice {
-                module_name: "fixture".to_string(),
-                public_model_name: "fixture".to_string(),
-                folder_name: "fixture__fixture__12345678".to_string(),
-                feature_name: String::new(),
-                package_name: String::new(),
-                file_count: 1,
-                source_bytes: 3,
-                workspace: Default::default(),
-            }],
+        let error = reject_debug_preprocessor_output_if(true)
+            .expect_err("debug preprocessor output must fail closed");
+        let error = error.to_string();
+        assert!(error.contains(DEBUG_PREPROCESSOR_ENV), "{error}");
+        assert!(error.contains("writes .pp.va files"), "{error}");
+        assert!(error.contains("unset it and retry"), "{error}");
+    }
+
+    #[test]
+    fn builtin_generation_rejects_inputs_that_change_during_the_run() {
+        ensure_generation_inputs_unchanged("source-a", "generator-a", "source-a", "generator-a")
+            .expect("stable inputs are accepted");
+
+        let error = ensure_generation_inputs_unchanged(
+            "source-before",
+            "generator-before",
+            "source-after",
+            "generator-after",
         )
-        .expect("build generated manifest");
+        .expect_err("changed inputs must fail closed")
+        .to_string();
+        assert!(
+            error.contains("model sources changed (before=source-before, after=source-after)"),
+            "{error}"
+        );
+        assert!(
+            error.contains(
+                "generator inputs changed (before=generator-before, after=generator-after)"
+            ),
+            "{error}"
+        );
+        assert!(error.contains("output was not published"), "{error}");
+    }
+
+    #[test]
+    fn generated_manifest_authenticates_every_output_file() {
+        let (root, folder, manifest) = generated_manifest_fixture("manifest-authentication");
+        let unowned_file = root.join("models/preserved-unowned/notes.txt");
+        assert_eq!(
+            fs::read_to_string(&unowned_file).expect("read preserved unowned file"),
+            "unowned-v1"
+        );
 
         assert_eq!(
             manifest.schema_version,
             GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION
         );
-        assert_eq!(manifest.file_count, 3);
+        assert_eq!(manifest.file_count, 8);
         assert_eq!(manifest.devices[0].file_count, 2);
-        assert_eq!(manifest.devices[0].source_bytes, 9);
+        let expected_device_bytes = fs::metadata(folder.join(GENERATED_DEVICE_MARKER_FILE))
+            .expect("generated device marker metadata")
+            .len()
+            + 3;
+        assert_eq!(manifest.devices[0].source_bytes, expected_device_bytes);
+        assert!(
+            manifest
+                .files
+                .iter()
+                .all(|file| !file.relative_path.contains("preserved-unowned"))
+        );
         validate_generated_manifest_outputs(&root, &manifest)
             .expect("fresh generated output authenticates");
+        fs::write(&unowned_file, "unowned-v2").expect("change preserved unowned file");
+        validate_generated_manifest_outputs(&root, &manifest)
+            .expect("preserved unowned output does not alter bundle identity");
 
         fs::write(folder.join("stamp.rs"), "tampered").expect("tamper generated fixture");
         let error = validate_generated_manifest_outputs(&root, &manifest)
             .expect_err("tampered generated output must fail validation");
         assert!(
             error.to_string().contains("bundle digest mismatch"),
+            "{error}"
+        );
+
+        fs::remove_dir_all(root).expect("remove generated fixture");
+    }
+
+    #[test]
+    fn generated_manifest_rejects_extra_catalog_build_script() {
+        let (root, _, manifest) = generated_manifest_fixture("catalog-build-script");
+        fs::write(root.join("build.rs"), "fn main() {}").expect("write extra build script");
+
+        let error = validate_generated_manifest_outputs(&root, &manifest)
+            .expect_err("extra catalog build script must fail closed")
+            .to_string();
+        assert!(
+            error.contains("unexpected generated Verilog-A catalog entry 'build.rs'"),
+            "{error}"
+        );
+
+        fs::remove_dir_all(root).expect("remove generated fixture");
+    }
+
+    #[test]
+    fn generated_manifest_rejects_extra_file_inside_owned_model_package() {
+        let (root, _, manifest) = generated_manifest_fixture("owned-package-extra-file");
+        let extra = root.join("models/fixture/build.rs");
+        fs::write(&extra, "fn main() {}").expect("write owned-package extra file");
+
+        let error = validate_generated_manifest_outputs(&root, &manifest)
+            .expect_err("extra file in owned package must fail closed")
+            .to_string();
+        assert!(
+            error
+                .contains("unexpected generated Verilog-A catalog entry 'models/fixture/build.rs'"),
             "{error}"
         );
 
