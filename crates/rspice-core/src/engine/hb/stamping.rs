@@ -18,7 +18,8 @@ impl Engine {
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
             let cathode = Self::hb_node_to_solver_index(diode.node_cathode, num_nodes);
-            solver.add_nonlinear_device(
+            solver.add_named_nonlinear_device(
+                diode.name.clone(),
                 NonlinearDeviceInstance::diode(anode, cathode, diode.is, diode.n)
                     .with_thermal_voltage(diode.vt)
                     .with_junction_caps(
@@ -74,6 +75,7 @@ impl Engine {
             let instance = instance
                 .with_thermal_voltage(mos.vt)
                 .with_body_effect(mos.gamma, mos.phi)
+                .with_channel_noise_gamma(mos.channel_thermal_noise_gamma())
                 .with_intrinsic_gate(mos.cox * mos.w * leff)
                 .with_bulk_junctions(
                     DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
@@ -82,9 +84,14 @@ impl Engine {
                     is_d,
                 );
             if let Some(temp_k) = mos.noise_absolute_temperature {
-                solver.add_nonlinear_device_with_absolute_noise_temperature(instance, temp_k);
+                solver.add_named_nonlinear_device_with_absolute_noise_temperature(
+                    mos.name.clone(),
+                    instance,
+                    temp_k,
+                );
             } else {
-                solver.add_nonlinear_device_with_noise_temperature_offset(
+                solver.add_named_nonlinear_device_with_noise_temperature_offset(
+                    mos.name.clone(),
                     instance,
                     mos.noise_temperature_offset,
                 );
@@ -139,10 +146,17 @@ impl Engine {
                 0.0,
             );
             if let Some(temp_k) = jfet.noise_absolute_temperature {
-                solver.add_nonlinear_device_with_absolute_noise_temperature(instance, temp_k);
+                solver.add_named_nonlinear_device_with_absolute_noise_temperature(
+                    jfet.name.clone(),
+                    instance,
+                    temp_k,
+                );
             } else {
-                solver
-                    .add_nonlinear_device_with_noise_temperature_offset(instance, jfet.noise_dtemp);
+                solver.add_named_nonlinear_device_with_noise_temperature_offset(
+                    jfet.name.clone(),
+                    instance,
+                    jfet.noise_dtemp,
+                );
             }
         }
 
@@ -151,8 +165,12 @@ impl Engine {
             let node_neg = Self::hb_node_to_solver_index(sw.node_neg, num_nodes);
             let ctrl_pos = Self::hb_node_to_solver_index(sw.ctrl_pos, num_nodes);
             let ctrl_neg = Self::hb_node_to_solver_index(sw.ctrl_neg, num_nodes);
-            solver.add_voltage_switch(
-                node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff, sw.smooth,
+            solver.add_named_nonlinear_device(
+                sw.name.clone(),
+                NonlinearDeviceInstance::voltage_switch(
+                    node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff,
+                    sw.smooth,
+                ),
             );
         }
 

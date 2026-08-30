@@ -317,7 +317,7 @@ fn assert_pnoise_oracle(result: &PnoiseAnalysisResult, label: &str) {
         &format!("{label} RD noise"),
     );
     assert_relative(
-        pnoise_contribution(result, "Nmos#0 channel thermal"),
+        pnoise_contribution(result, "M1 channel thermal"),
         expected_channel,
         1.0e-8,
         &format!("{label} MOS channel noise"),

@@ -10,7 +10,7 @@
 
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::harmonic_balance::HbConfig;
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 const K_B: f64 = 1.380649e-23;
@@ -97,6 +97,130 @@ r1 out 0 1e12
         (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
         "resistor output noise must be 4kTR: got {:.6e}, want {expected:.6e}",
         result.output_noise[0]
+    );
+}
+
+#[test]
+fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_constants() {
+    let resistance = 1.0e3;
+    let netlist = Netlist::parse(
+        "physical RSHUNT pnoise\n\
+         i1 out 0 dc 0\n\
+         .options rshunt=1k\n\
+         .end\n",
+    )
+    .expect("RSHUNT deck parses");
+    for (dialect, boltzmann) in [
+        (SpiceDialect::Ngspice, rspice_core::constants::K_BOLTZMANN),
+        (SpiceDialect::Xyce, rspice_core::constants::XYCE_K_BOLTZMANN),
+    ] {
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_pnoise(&netlist, 1.0e6, &[0.0], "out", None, None, 0)
+            .expect("RSHUNT pnoise completes");
+        let expected = 4.0 * boltzmann * T_REF * resistance;
+        assert_eq!(
+            result.contributors.len(),
+            1,
+            "one electrical node has one shunt"
+        );
+        assert_eq!(
+            result.contributors[0].0.to_ascii_lowercase(),
+            "rshunt:out thermal"
+        );
+        assert!(
+            (result.output_noise[0] - expected).abs() <= 2.0e-12 * expected,
+            "{dialect:?} RSHUNT output noise: got {:.6e}, want {expected:.6e}",
+            result.output_noise[0]
+        );
+        assert!(
+            result
+                .contributors
+                .iter()
+                .all(|(name, _)| !name.to_ascii_uppercase().contains("GMIN")),
+            "numerical GMIN must never enter the physical source catalog"
+        );
+    }
+}
+
+#[test]
+fn pnoise_rejects_active_device_colored_controls_but_accepts_exact_zero() {
+    let cases = [
+        (
+            "resistor",
+            "r1 out 0 rm 1k\n.model rm R (KF=1e-18 AF=1 EF=1)",
+            "r1 out 0 rm 1k\n.model rm R (KF=0 AF=1 EF=1)",
+            "out",
+            "r1",
+        ),
+        (
+            "diode",
+            "v1 in 0 1\nr1 in out 1k\nd1 out 0 dm\n.model dm D (IS=1e-12 KF=1e-18 AF=1)",
+            "v1 in 0 1\nr1 in out 1k\nd1 out 0 dm\n.model dm D (IS=1e-12 KF=0 AF=1)",
+            "out",
+            "d1",
+        ),
+        (
+            "MOSFET",
+            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 mm w=20u l=2u\n.model mm NMOS (LEVEL=1 VTO=1 KP=60u KF=1e-24 AF=1)",
+            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 mm w=20u l=2u\n.model mm NMOS (LEVEL=1 VTO=1 KP=60u KF=0 AF=1)",
+            "d",
+            "m1",
+        ),
+        (
+            "JFET",
+            "vdd vdd 0 5\nvg g 0 -0.5\nrd vdd d 10k\nj1 d g 0 jm\n.model jm NJF (VTO=-2 BETA=1m KF=1e-18 AF=1)",
+            "vdd vdd 0 5\nvg g 0 -0.5\nrd vdd d 10k\nj1 d g 0 jm\n.model jm NJF (VTO=-2 BETA=1m KF=0 AF=1)",
+            "d",
+            "j1",
+        ),
+    ];
+    let engine = Engine::new(SimulationConfig::default());
+    for (mechanism, active_body, zero_body, output, instance) in cases {
+        let active = Netlist::parse(&format!(
+            "active colored {mechanism}\n{active_body}\n.end\n"
+        ))
+        .expect("active colored deck parses");
+        let error = engine
+            .run_pnoise(&active, 1.0e6, &[1.0e4], output, None, None, 0)
+            .expect_err("periodically bias-dependent colored noise must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("cyclostationary colored-noise")
+                && message.to_ascii_lowercase().contains(instance),
+            "{mechanism} rejection must identify the exact instance and mechanism: {message}"
+        );
+
+        let zero = Netlist::parse(&format!("zero colored {mechanism}\n{zero_body}\n.end\n"))
+            .expect("exact-zero colored deck parses");
+        engine
+            .run_pnoise(&zero, 1.0e6, &[1.0e4], output, None, None, 0)
+            .unwrap_or_else(|error| {
+                panic!("exact-zero {mechanism} control must remain accepted: {error}")
+            });
+    }
+}
+
+#[test]
+fn pnoise_names_and_rejects_unrepresented_finite_branch_form_resistor_noise() {
+    let netlist = Netlist::parse(
+        "near-zero branch resistor pnoise\n\
+         v1 in 0 1\n\
+         Rtiny in out 1e-15 TEMP=50 DTEMP=10 NOISY=1\n\
+         rload out 0 1k\n\
+         .options device zeroresistancetol=1e-12\n\
+         .end\n",
+    )
+    .expect("near-zero branch-resistor deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect_err("finite branch-form resistor noise must not be silently omitted");
+    let message = error.to_string();
+    assert!(
+        message.to_ascii_lowercase().contains("rtiny")
+            && message.contains("R=0.000000000000001")
+            && message.contains("does not retain the authored")
+            && message.contains("NOISY/TEMP/DTEMP/flicker"),
+        "branch-form noise limitation must be exact and diagnosable: {message}"
     );
 }
 
@@ -219,8 +343,8 @@ m1 d g 0 0 nm w=20u l=2u
     );
     let mos_hot_contributors = run_contributors(mos_ambient, T_REF + 150.0);
     let mos_offset_contributors = run_contributors(&mos_dtemp, T_REF);
-    let mos_hot = contribution(&mos_hot_contributors, "Nmos#0 channel thermal");
-    let mos_offset = contribution(&mos_offset_contributors, "Nmos#0 channel thermal");
+    let mos_hot = contribution(&mos_hot_contributors, "m1 channel thermal");
+    let mos_offset = contribution(&mos_offset_contributors, "m1 channel thermal");
     assert!(
         (mos_offset - mos_hot).abs() <= 1.0e-10 * mos_hot,
         "MOS DTEMP channel noise must equal the same absolute ambient temperature: {mos_offset:.6e} vs {mos_hot:.6e}"
@@ -232,9 +356,9 @@ m1 d g 0 0 nm w=20u l=2u
     let mos_absolute_contributors = run_contributors(mos_ambient, 423.15);
     let mos_priority_contributors = run_contributors(&mos_temp_priority, T_REF);
     let mos_extreme_contributors = run_contributors(&mos_temp_priority, 1.0e20);
-    let mos_absolute = contribution(&mos_absolute_contributors, "Nmos#0 channel thermal");
-    let mos_priority = contribution(&mos_priority_contributors, "Nmos#0 channel thermal");
-    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "Nmos#0 channel thermal");
+    let mos_absolute = contribution(&mos_absolute_contributors, "m1 channel thermal");
+    let mos_priority = contribution(&mos_priority_contributors, "m1 channel thermal");
+    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "m1 channel thermal");
     assert!(
         (mos_priority - mos_absolute).abs() <= 1.0e-10 * mos_absolute,
         "MOS TEMP must set the absolute channel-noise temperature and outrank DTEMP: {mos_priority:.6e} vs {mos_absolute:.6e}"
@@ -333,17 +457,16 @@ fn pnoise_without_large_signal_drive_matches_stationary_noise() {
     // Forward-biased diode divider: thermal (R1) plus shot (D1) noise with
     // frequency shaping from the 1 nF capacitor.
     let deck = "\
-* stationary parity network (thermal + shot + diode flicker)
+* stationary parity network (thermal + shot)
 v1 in 0 dc 2
 r1 in mid 10k
 d1 mid 0 dmod
 c1 mid 0 1n
-.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0 KF=1e-15 AF=1
+.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0 KF=0 AF=1
 .end
 ";
     let netlist = Netlist::parse(deck).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    // 100 Hz sits in the flicker-dominated region, 10 MHz in pure white.
     let offsets = [1.0e2, 1.0e3, 1.0e5, 1.0e7];
 
     let pnoise = engine

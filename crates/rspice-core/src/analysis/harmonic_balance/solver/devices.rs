@@ -308,10 +308,18 @@ impl NonlinearDeviceInstance {
         match self.device_type {
             NonlinearDeviceType::Diode => vec![(self.terminals[0], self.terminals[1])],
             NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => {
-                vec![(self.terminals[0], self.terminals[2])] // channel thermal
+                vec![
+                    (self.terminals[0], self.terminals[2]), // channel thermal
+                    (self.terminals[2], self.terminals[3]), // source-bulk shot
+                    (self.terminals[0], self.terminals[3]), // drain-bulk shot
+                ]
             }
             NonlinearDeviceType::Njfet | NonlinearDeviceType::Pjfet => {
-                vec![(self.terminals[0], self.terminals[2])] // channel thermal
+                vec![
+                    (self.terminals[0], self.terminals[2]), // channel thermal
+                    (self.terminals[1], self.terminals[2]), // gate-source shot
+                    (self.terminals[1], self.terminals[0]), // gate-drain shot
+                ]
             }
             NonlinearDeviceType::VoltageSwitch => {
                 vec![(self.terminals[0], self.terminals[1])] // ON-resistance thermal
@@ -320,13 +328,21 @@ impl NonlinearDeviceInstance {
     }
 
     /// Human-readable mechanism label for one `noise_branches` entry.
-    pub(crate) fn noise_branch_label(&self, _branch: usize) -> &'static str {
+    pub(crate) fn noise_branch_label(&self, branch: usize) -> &'static str {
         match self.device_type {
             NonlinearDeviceType::Diode => "shot",
-            NonlinearDeviceType::Nmos
-            | NonlinearDeviceType::Pmos
-            | NonlinearDeviceType::Njfet
-            | NonlinearDeviceType::Pjfet => "channel thermal",
+            NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => match branch {
+                0 => "channel thermal",
+                1 => "source-bulk shot",
+                2 => "drain-bulk shot",
+                _ => "invalid MOS noise branch",
+            },
+            NonlinearDeviceType::Njfet | NonlinearDeviceType::Pjfet => match branch {
+                0 => "channel thermal",
+                1 => "gate-source shot",
+                2 => "gate-drain shot",
+                _ => "invalid JFET noise branch",
+            },
             NonlinearDeviceType::VoltageSwitch => "ron thermal",
         }
     }
@@ -358,39 +374,67 @@ impl NonlinearDeviceInstance {
             }
             NonlinearDeviceType::Nmos => {
                 let (_, _, _, gm, _, _) = self.mos_operating_point(1.0, node_voltages);
-                Ok(vec![ScaledNonnegative::checked_product(&[
-                    8.0 / 3.0,
-                    k_b,
-                    temperature,
-                    gm.abs(),
-                ])?])
+                let (vj_sb, vj_db) = self.mos_bulk_junctions(1.0, node_voltages);
+                let (i_sb, _) = junction_current(self.params.is, vj_sb, self.params.vt);
+                let (i_db, _) = junction_current(self.params.is2, vj_db, self.params.vt);
+                Ok(vec![
+                    ScaledNonnegative::checked_product(&[
+                        4.0,
+                        k_b,
+                        temperature,
+                        self.params.channel_noise_gamma,
+                        gm.abs(),
+                    ])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, i_sb.abs()])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, i_db.abs()])?,
+                ])
             }
             NonlinearDeviceType::Pmos => {
                 let (_, _, _, gm, _, _) = self.mos_operating_point(-1.0, node_voltages);
-                Ok(vec![ScaledNonnegative::checked_product(&[
-                    8.0 / 3.0,
-                    k_b,
-                    temperature,
-                    gm.abs(),
-                ])?])
+                let (vj_sb, vj_db) = self.mos_bulk_junctions(-1.0, node_voltages);
+                let (i_sb, _) = junction_current(self.params.is, vj_sb, self.params.vt);
+                let (i_db, _) = junction_current(self.params.is2, vj_db, self.params.vt);
+                Ok(vec![
+                    ScaledNonnegative::checked_product(&[
+                        4.0,
+                        k_b,
+                        temperature,
+                        self.params.channel_noise_gamma,
+                        gm.abs(),
+                    ])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, i_sb.abs()])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, i_db.abs()])?,
+                ])
             }
             NonlinearDeviceType::Njfet => {
                 let (_, gm, _) = self.jfet_ids_gm_gds(node_voltages, 1.0);
-                Ok(vec![ScaledNonnegative::checked_product(&[
-                    8.0 / 3.0,
-                    k_b,
-                    temperature,
-                    gm.abs(),
-                ])?])
+                let (igs, _, igd, _) = self.jfet_gate_junctions(node_voltages, 1.0);
+                Ok(vec![
+                    ScaledNonnegative::checked_product(&[
+                        4.0,
+                        k_b,
+                        temperature,
+                        self.params.channel_noise_gamma,
+                        gm.abs(),
+                    ])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, igs.abs()])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, igd.abs()])?,
+                ])
             }
             NonlinearDeviceType::Pjfet => {
                 let (_, gm, _) = self.jfet_ids_gm_gds(node_voltages, -1.0);
-                Ok(vec![ScaledNonnegative::checked_product(&[
-                    8.0 / 3.0,
-                    k_b,
-                    temperature,
-                    gm.abs(),
-                ])?])
+                let (igs, _, igd, _) = self.jfet_gate_junctions(node_voltages, -1.0);
+                Ok(vec![
+                    ScaledNonnegative::checked_product(&[
+                        4.0,
+                        k_b,
+                        temperature,
+                        self.params.channel_noise_gamma,
+                        gm.abs(),
+                    ])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, igs.abs()])?,
+                    ScaledNonnegative::checked_product(&[2.0, q_e, igd.abs()])?,
+                ])
             }
             NonlinearDeviceType::VoltageSwitch => {
                 let vcp = self.get_terminal_voltage(node_voltages, 2);
@@ -440,6 +484,14 @@ impl NonlinearDeviceInstance {
     pub(crate) fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
         self.params.gamma = gamma;
         self.params.phi = phi;
+        self
+    }
+
+    /// Set the exact white channel-noise coefficient used by the resolved
+    /// model card. Zero disables the channel source without affecting the
+    /// solved channel law.
+    pub(crate) fn with_channel_noise_gamma(mut self, gamma: Value) -> Self {
+        self.params.channel_noise_gamma = gamma;
         self
     }
 
@@ -568,6 +620,11 @@ impl NonlinearDeviceInstance {
                 if !self.params.lambda.is_finite() || self.params.lambda < 0.0 {
                     return Some("MOS LAMBDA must be finite and nonnegative");
                 }
+                if !self.params.channel_noise_gamma.is_finite()
+                    || self.params.channel_noise_gamma < 0.0
+                {
+                    return Some("MOS channel-noise gamma must be finite and nonnegative");
+                }
                 if !self.params.gamma.is_finite() || self.params.gamma < 0.0 {
                     return Some("MOS GAMMA must be finite and nonnegative");
                 }
@@ -593,6 +650,11 @@ impl NonlinearDeviceInstance {
                 }
                 if !self.params.lambda.is_finite() || self.params.lambda < 0.0 {
                     return Some("JFET LAMBDA must be finite and nonnegative");
+                }
+                if !self.params.channel_noise_gamma.is_finite()
+                    || self.params.channel_noise_gamma < 0.0
+                {
+                    return Some("JFET channel-noise gamma must be finite and nonnegative");
                 }
                 if !self.params.is.is_finite() || self.params.is < 0.0 {
                     return Some("JFET IS must be finite and nonnegative");
@@ -1311,7 +1373,23 @@ impl NonlinearDeviceInstance {
 
 impl HbSolver {
     pub(super) fn validate_nonlinear_device_parameters(&self) -> Result<(), HbError> {
+        if self.nonlinear_device_names.len() != self.nonlinear_devices.len()
+            || self.nonlinear_noise_temperatures.len() != self.nonlinear_devices.len()
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "nonlinear HB metadata is misaligned: {} devices, {} names, {} noise temperatures",
+                self.nonlinear_devices.len(),
+                self.nonlinear_device_names.len(),
+                self.nonlinear_noise_temperatures.len()
+            )));
+        }
         for (index, device) in self.nonlinear_devices.iter().enumerate() {
+            let device_name = &self.nonlinear_device_names[index];
+            if device_name.trim().is_empty() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "nonlinear HB device {index} has an empty instance name"
+                )));
+            }
             let expected_terminals = match device.device_type {
                 NonlinearDeviceType::Diode => 2,
                 NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => 4,
@@ -1320,7 +1398,7 @@ impl HbSolver {
             };
             if device.terminals.len() != expected_terminals {
                 return Err(HbError::InvalidCircuit(format!(
-                    "nonlinear HB device {:?}#{index} has {} terminals, expected {expected_terminals}",
+                    "nonlinear HB device '{device_name}' ({:?}) has {} terminals, expected {expected_terminals}",
                     device.device_type,
                     device.terminals.len()
                 )));
@@ -1333,13 +1411,13 @@ impl HbSolver {
                 .find(|(_, node)| *node > self.num_nodes)
             {
                 return Err(HbError::InvalidCircuit(format!(
-                    "nonlinear HB device {:?}#{index} terminal {terminal} node index {node} exceeds {} nodes plus the ground sentinel",
+                    "nonlinear HB device '{device_name}' ({:?}) terminal {terminal} node index {node} exceeds {} nodes plus the ground sentinel",
                     device.device_type, self.num_nodes
                 )));
             }
             if let Some(reason) = device.physical_parameter_error() {
                 return Err(HbError::InvalidCircuit(format!(
-                    "nonlinear HB device {:?}#{index} has invalid physical parameters: {reason}",
+                    "nonlinear HB device '{device_name}' ({:?}) has invalid physical parameters: {reason}",
                     device.device_type
                 )));
             }
@@ -1388,12 +1466,25 @@ mod tests {
         let expected = (8.0 / 3.0) * K_B * TEMPERATURE * 1.0e-3;
         assert!((actual - expected).abs() <= 8.0 * Value::EPSILON * expected);
 
-        // Cutoff has gm=0 and must therefore retain an exact zero noise source.
+        let configured = mos
+            .with_channel_noise_gamma(1.0)
+            .noise_intensities(&[1.0e-3, 1.0, 0.0, 0.0], TEMPERATURE, 1.0, K_B)
+            .unwrap()[0];
+        let configured = libm::scalbn(configured.mantissa, configured.exponent);
+        let configured_expected = 4.0 * K_B * TEMPERATURE * 1.0e-3;
+        assert!(
+            (configured - configured_expected).abs() <= 8.0 * Value::EPSILON * configured_expected
+        );
+
+        // Channel cutoff has gm=0 even though the reverse-biased gate
+        // junctions retain their physical saturation-current shot noise.
         let jfet = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1.0e-3, 0.0, 1.0e-14);
         let cutoff = jfet
             .noise_intensities(&[1.0, -3.0, 0.0], TEMPERATURE, 1.0, K_B)
             .unwrap();
-        assert_eq!(cutoff, vec![ScaledNonnegative::ZERO]);
+        assert_eq!(cutoff[0], ScaledNonnegative::ZERO);
+        assert_ne!(cutoff[1], ScaledNonnegative::ZERO);
+        assert_ne!(cutoff[2], ScaledNonnegative::ZERO);
     }
 
     #[test]

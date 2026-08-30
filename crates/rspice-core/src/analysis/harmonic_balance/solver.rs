@@ -795,6 +795,10 @@ pub struct HbSolver {
 
     /// Registered nonlinear devices for Newton iteration
     nonlinear_devices: Vec<NonlinearDeviceInstance>,
+    /// Stable contributor owners aligned exactly with `nonlinear_devices`.
+    /// Engine clients retain authored instance names; direct solver clients
+    /// receive deterministic type-and-registration-index fallbacks.
+    nonlinear_device_names: Vec<String>,
     /// Per-device thermal-noise temperature provenance, aligned with
     /// `nonlinear_devices`. Absolute TEMP values are retained directly so an
     /// extreme analysis temperature cannot destroy them through subtraction.
@@ -953,6 +957,9 @@ pub struct NonlinearDeviceParams {
     pub kp: Value,
     /// Channel length modulation (MOSFET)
     pub lambda: Value,
+    /// Channel thermal-noise coefficient gamma. The white drain-source
+    /// density is `4*k*T*gamma*|gm|`; Level-1 MOS and JFET defaults use 2/3.
+    pub channel_noise_gamma: Value,
     /// Body-effect coefficient gamma (MOSFET, V^0.5)
     pub gamma: Value,
     /// Surface potential phi (MOSFET, V)
@@ -988,6 +995,7 @@ impl Default for NonlinearDeviceParams {
             vth: 0.7,
             kp: 2e-5,
             lambda: 0.0,
+            channel_noise_gamma: 2.0 / 3.0,
             gamma: 0.0,
             phi: 0.6,
             ron: 1.0,
