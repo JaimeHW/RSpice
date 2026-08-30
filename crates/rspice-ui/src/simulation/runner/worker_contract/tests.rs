@@ -283,6 +283,8 @@ fn browser_worker_transfer_protocol_matches_rust_transport() {
     assert!(source.contains("response.protocolVersion !== expectedProtocolVersion"));
     assert!(source.contains("protocolResponseTransferList(response, WORKER_PROTOCOL_VERSION)"));
     assert!(source.contains("request.protocolVersion !== WORKER_REQUEST_PROTOCOL_VERSION"));
+    assert!(source.contains("rspice_ui_wasm_jit_eval_op_slice_v1"));
+    assert!(source.contains("eval_op_slice_v1: wasmExports.rspice_ui_wasm_jit_eval_op_slice_v1"));
 }
 use crate::simulation::config::{
     AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,

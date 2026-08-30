@@ -64,6 +64,26 @@ pub extern "C" fn rspice_ui_wasm_jit_eval_op_v1(
 
 #[cfg(target_arch = "wasm32")]
 #[unsafe(no_mangle)]
+pub extern "C" fn rspice_ui_wasm_jit_eval_op_slice_v1(
+    frame_offset: u32,
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operand_count: i32,
+) -> f64 {
+    rspice_ui::rspice_ui_wasm_jit_eval_op_slice_v1(
+        frame_offset,
+        opcode,
+        aux0,
+        aux1,
+        aux2,
+        operand_count,
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
 pub extern "C" fn rspice_ui_wasm_jit_math1_v1(opcode: i32, value: f64) -> f64 {
     rspice_ui::rspice_ui_wasm_jit_math1_v1(opcode, value)
 }

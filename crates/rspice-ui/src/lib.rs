@@ -319,6 +319,25 @@ pub fn rspice_ui_wasm_jit_eval_op_v1(
     )
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+pub fn rspice_ui_wasm_jit_eval_op_slice_v1(
+    frame_offset: u32,
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operand_count: i32,
+) -> f64 {
+    rspice_veriloga::wasm_jit::eval_op_slice_v1(
+        frame_offset,
+        opcode,
+        aux0,
+        aux1,
+        aux2,
+        operand_count,
+    )
+}
+
 /// Frame-free unary transcendental capability for generated modules.
 ///
 /// The browser binds this to the secondary module's `math1_v1` import as a raw

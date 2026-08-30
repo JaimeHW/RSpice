@@ -29,11 +29,12 @@ const WASM_JIT_MODEL_MAX_BYTES = 32 * 1024 * 1024;
 const WASM_JIT_IDENTITY = /^[0-9a-f]{64}$/;
 // Raw WebAssembly exports of the primary module, bound straight into every
 // generated module. Passing the wasm-bindgen JavaScript wrappers instead would
-// put a JS frame -- and, for eval_op_v1, BigInt marshalling of its i64
-// argument -- between a model's exp() and its implementation, on a path that
+// put a JS frame -- and, for the descriptor helpers, BigInt marshalling of
+// their i64 arguments -- between a model and its implementation on a path that
 // runs thousands of times per device evaluation.
 const WASM_JIT_RAW_CAPABILITY_EXPORTS = [
   "rspice_ui_wasm_jit_eval_op_v1",
+  "rspice_ui_wasm_jit_eval_op_slice_v1",
   "rspice_ui_wasm_jit_math1_v1",
   "rspice_ui_wasm_jit_math2_v1",
 ];
@@ -103,6 +104,7 @@ function wasmJitImports(wasmExports) {
   return {
     memory: wasmExports.memory,
     eval_op_v1: wasmExports.rspice_ui_wasm_jit_eval_op_v1,
+    eval_op_slice_v1: wasmExports.rspice_ui_wasm_jit_eval_op_slice_v1,
     math1_v1: wasmExports.rspice_ui_wasm_jit_math1_v1,
     math2_v1: wasmExports.rspice_ui_wasm_jit_math2_v1,
   };
