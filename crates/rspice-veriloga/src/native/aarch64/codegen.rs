@@ -25,10 +25,9 @@ use crate::native::abi::{
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_derivative_native, rspice_slew_state_native,
-    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
-    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_derivative_native,
-    rspice_zi_step_native,
+    rspice_slew_derivative_native, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
 };
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
