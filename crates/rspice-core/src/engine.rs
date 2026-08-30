@@ -99,7 +99,7 @@ pub use error::{
 };
 pub use hb::{
     HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, HbOperatingPoint,
-    PacAnalysisResult, PnoiseAnalysisResult,
+    HbOperatingPointIdentity, PacAnalysisResult, PnoiseAnalysisResult,
 };
 pub use health::EngineHealthReport;
 pub use pss::{

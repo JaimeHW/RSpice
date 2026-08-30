@@ -546,6 +546,7 @@ impl Engine {
             netlist,
             frozen_circuit,
             config.clone(),
+            None,
             abort,
         )?;
         if netlist_checkpoint_identity(netlist).as_deref()

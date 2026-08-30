@@ -467,6 +467,9 @@ impl Engine {
         };
         let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
         self.hb_validate_config(&hb_config)?;
+        if let Some(PnoiseOperatingPoint::HarmonicBalance(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
 
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         let num_nodes = circuit.num_nodes();
@@ -524,6 +527,10 @@ impl Engine {
                 "pnoise branch metadata construction failed: {error}"
             ))
         })?;
+
+        if let Some(PnoiseOperatingPoint::HarmonicBalance(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
 
         let solve_operating_point = operating_point.is_none();
         let mut state = if let Some(operating_point) = operating_point {

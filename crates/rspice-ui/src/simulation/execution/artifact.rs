@@ -1045,16 +1045,29 @@ impl HbStateArtifact {
     }
 
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
-        rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
-            self.operating_point.config().clone(),
-            self.operating_point.node_names().to_vec(),
-            self.operating_point.spectral_state().to_vec(),
-            self.operating_point.mna_branch_names().to_vec(),
-            self.operating_point.mna_branch_spectral_state().to_vec(),
-            self.operating_point.iterations(),
-            self.operating_point.residual_norm(),
-        )
-        .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
+        let validation = if let Some(identity) = self.operating_point.producer_identity() {
+            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
+                identity.clone(),
+                self.operating_point.config().clone(),
+                self.operating_point.node_names().to_vec(),
+                self.operating_point.spectral_state().to_vec(),
+                self.operating_point.mna_branch_names().to_vec(),
+                self.operating_point.mna_branch_spectral_state().to_vec(),
+                self.operating_point.iterations(),
+                self.operating_point.residual_norm(),
+            )
+        } else {
+            rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
+                self.operating_point.config().clone(),
+                self.operating_point.node_names().to_vec(),
+                self.operating_point.spectral_state().to_vec(),
+                self.operating_point.mna_branch_names().to_vec(),
+                self.operating_point.mna_branch_spectral_state().to_vec(),
+                self.operating_point.iterations(),
+                self.operating_point.residual_norm(),
+            )
+        };
+        validation.map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
         if self.spectral_real.len() != self.operating_point.spectral_state().len()
             || self.spectral_imaginary.len() != self.operating_point.spectral_state().len()
         {
@@ -1838,6 +1851,10 @@ impl ResolvedExecutionDependencies {
                         ExecutionArtifactPayloadTransferMetadata::HbState(
                             HbStateTransferMetadata {
                                 config: state.operating_point.config().clone(),
+                                producer_identity: state
+                                    .operating_point
+                                    .producer_identity()
+                                    .cloned(),
                                 spectra,
                                 mna_branch_spectra,
                                 iterations: state.operating_point.iterations(),
@@ -2127,7 +2144,20 @@ impl ResolvedExecutionDependencies {
                             mna_branch_spectral_real.push(real);
                             mna_branch_spectral_imaginary.push(imaginary);
                         }
-                        let operating_point =
+                        let operating_point = if let Some(producer_identity) =
+                            metadata.producer_identity
+                        {
+                            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
+                                producer_identity,
+                                metadata.config,
+                                node_names,
+                                spectral_state,
+                                mna_branch_names,
+                                mna_branch_spectral_state,
+                                metadata.iterations,
+                                metadata.residual_norm,
+                            )
+                        } else {
                             rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
                                 metadata.config,
                                 node_names,
@@ -2137,9 +2167,10 @@ impl ResolvedExecutionDependencies {
                                 metadata.iterations,
                                 metadata.residual_norm,
                             )
-                            .map_err(|error| {
-                                ExecutionArtifactError::InvalidPayload(error.to_string())
-                            })?;
+                        }
+                        .map_err(|error| {
+                            ExecutionArtifactError::InvalidPayload(error.to_string())
+                        })?;
                         let state = HbStateArtifact {
                             operating_point: Arc::new(operating_point),
                             spectral_real,
@@ -2297,6 +2328,8 @@ struct HbBranchSpectrumTransferMetadata {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct HbStateTransferMetadata {
     config: rspice_core::analysis::HbConfig,
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
     spectra: Vec<HbSpectrumTransferMetadata>,
     #[serde(default)]
     mna_branch_spectra: Vec<HbBranchSpectrumTransferMetadata>,

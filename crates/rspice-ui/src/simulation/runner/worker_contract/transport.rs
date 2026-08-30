@@ -869,6 +869,8 @@ pub(crate) struct WorkerHbBranchSpectrumTransport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerHbOperatingPointTransport {
     config: rspice_core::analysis::HbConfig,
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
     spectra: Vec<WorkerHbSpectrumTransport>,
     mna_branch_spectra: Vec<WorkerHbBranchSpectrumTransport>,
     iterations: usize,
@@ -933,6 +935,7 @@ impl WorkerHbOperatingPointTransport {
             .collect();
         Self {
             config: operating_point.config().clone(),
+            producer_identity: operating_point.producer_identity().cloned(),
             spectra,
             mna_branch_spectra,
             iterations: operating_point.iterations(),
@@ -1001,7 +1004,18 @@ impl WorkerHbOperatingPointTransport {
                 imaginary,
             )?);
         }
-        let operating_point =
+        let operating_point = if let Some(producer_identity) = self.producer_identity {
+            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
+                producer_identity,
+                self.config,
+                node_names,
+                spectral_state,
+                mna_branch_names,
+                mna_branch_spectral_state,
+                self.iterations,
+                self.residual_norm,
+            )
+        } else {
             rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
                 self.config,
                 node_names,
@@ -1011,7 +1025,8 @@ impl WorkerHbOperatingPointTransport {
                 self.iterations,
                 self.residual_norm,
             )
-            .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
+        }
+        .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
         let actual_state_digest =
             crate::simulation::execution::hb_operating_point_digest(&operating_point);
         if actual_state_digest != self.state_digest {

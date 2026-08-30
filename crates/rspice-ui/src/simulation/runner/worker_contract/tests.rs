@@ -1181,6 +1181,48 @@ fn worker_transport_round_trips_hb_display_and_retained_state() {
 }
 
 #[test]
+fn worker_transport_preserves_authenticated_hb_identity_and_rejects_identity_tamper() {
+    let netlist = rspice_core::netlist::Netlist::parse(
+        "authenticated retained HB worker fixture\n\
+         V1 out 0 DC 1\n\
+         R1 out 0 1k\n\
+         .end\n",
+    )
+    .expect("worker identity fixture parses");
+    let produced = rspice_core::engine::Engine::default()
+        .run_hb(
+            &netlist,
+            rspice_core::analysis::HbConfig::new(1.0e6).with_harmonics(4),
+        )
+        .expect("worker identity fixture solves")
+        .operating_point;
+    assert!(produced.producer_identity().is_some());
+
+    let mut buffers = Vec::new();
+    let transport =
+        WorkerHbOperatingPointTransport::from_operating_point(produced.clone(), &mut buffers);
+    let restored = transport
+        .clone()
+        .into_operating_point(&buffers)
+        .expect("authenticated worker state round-trips");
+    assert_eq!(restored, produced);
+    assert_eq!(restored.producer_identity(), produced.producer_identity());
+
+    let mut tampered = serde_json::to_value(transport).expect("transport serializes");
+    tampered["producer_identity"]["retained_state_identity"] =
+        serde_json::Value::String("0".repeat(64));
+    let tampered: WorkerHbOperatingPointTransport =
+        serde_json::from_value(tampered).expect("structurally valid identity parses");
+    let error = tampered
+        .into_operating_point(&buffers)
+        .expect_err("tampered authenticated state identity must fail closed");
+    assert!(
+        error.contains("numerical payload does not match"),
+        "worker rejection must identify the retained payload authentication failure: {error}"
+    );
+}
+
+#[test]
 fn worker_transport_rejects_missing_or_mismatched_buffers() {
     let response = WorkerResponse {
         id: 12,

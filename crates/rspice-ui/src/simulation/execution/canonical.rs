@@ -157,15 +157,26 @@ pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -
 }
 
 /// Authenticates every numerical and identity field required to reuse an HB
-/// operating point. The zero-branch encoding deliberately matches the legacy
-/// v1 artifact digest; a legacy node-only state can therefore survive an
-/// in-process transport, while the consuming engine still refuses it when the
-/// elaborated circuit has MNA branches.
+/// operating point. Authenticated producer identities use the v2 domain and
+/// are part of the digest. Identityless legacy artifacts retain their exact v1
+/// encoding for backward-compatible parsing, but the core engine refuses them
+/// for dependent numerical reuse.
 pub(in crate::simulation) fn hb_operating_point_digest(
     point: &rspice_core::engine::HbOperatingPoint,
 ) -> ContentDigest {
     let config = point.config();
-    let mut writer = CanonicalWriter::new("rspice.hb-state-artifact/v1");
+    let mut writer = CanonicalWriter::new(if point.producer_identity().is_some() {
+        "rspice.hb-state-artifact/v2"
+    } else {
+        "rspice.hb-state-artifact/v1"
+    });
+    if let Some(identity) = point.producer_identity() {
+        writer.usize(identity.version() as usize);
+        writer.string(identity.semantic_netlist_identity());
+        writer.string(identity.resolved_simulation_identity());
+        writer.string(identity.hb_source_transform_identity());
+        writer.string(identity.retained_state_identity());
+    }
     writer.f64(config.fundamental_freq);
     writer.usize(config.num_harmonics);
     writer.sequence(config.tones.len());

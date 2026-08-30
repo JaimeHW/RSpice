@@ -193,10 +193,15 @@ impl Engine {
         // PAC's tolerances govern the nonlinear periodic operating point.
         // The subsequent sideband systems use deterministic direct solves and
         // therefore have no iterative tolerance of their own.
-        hb_config.tolerance = config.reltol;
-        hb_config.abstol = config.abstol;
+        if !matches!(operating_point, Some(PacOperatingPoint::HarmonicBalance(_))) {
+            hb_config.tolerance = config.reltol;
+            hb_config.abstol = config.abstol;
+        }
         let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
         self.hb_validate_config(&hb_config)?;
+        if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
 
         let input_name = config
             .input_source
@@ -291,6 +296,10 @@ impl Engine {
                 "PAC branch-result metadata construction failed: {error}"
             ))
         })?;
+
+        if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
 
         let solve_operating_point = operating_point.is_none();
         let mut state = if let Some(operating_point) = operating_point {

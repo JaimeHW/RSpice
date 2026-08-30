@@ -23,6 +23,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::{HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
+use crate::engine::transient::netlist_checkpoint_identity;
 use crate::netlist::{SourceSpec, XyceHbTimeDomainMode};
 use crate::{Netlist, Value};
 use num_complex::Complex64;
@@ -39,6 +40,381 @@ mod state;
 pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
+
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 1;
+
+fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
+    hasher.update(&(name.len() as u64).to_le_bytes());
+    hasher.update(name.as_bytes());
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn hb_config_identity(config: &HbConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-hb-source-transform-config-v1\0");
+    hb_identity_field(
+        &mut hasher,
+        "fundamental_freq",
+        &config.fundamental_freq.to_bits().to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "num_harmonics",
+        &(config.num_harmonics as u64).to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "tone_count",
+        &(config.tones.len() as u64).to_le_bytes(),
+    );
+    for (index, tone) in config.tones.iter().enumerate() {
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].frequency"),
+            &tone.frequency.to_bits().to_le_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].num_harmonics"),
+            &(tone.num_harmonics as u64).to_le_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].name"),
+            tone.name.as_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].source_name"),
+            tone.source_name.as_deref().unwrap_or("<none>").as_bytes(),
+        );
+    }
+    for (name, value) in [
+        ("tolerance", config.tolerance),
+        ("abstol", config.abstol),
+        ("damping", config.damping),
+        ("min_damping", config.min_damping),
+    ] {
+        hb_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    for (name, value) in [
+        ("max_iterations", config.max_iterations),
+        ("oversample_factor", config.oversample_factor),
+        ("max_mixing_order", config.max_mixing_order),
+        ("gmres_restart", config.gmres_restart),
+    ] {
+        hb_identity_field(&mut hasher, name, &(value as u64).to_le_bytes());
+    }
+    hb_identity_field(
+        &mut hasher,
+        "collocation_points",
+        &(config
+            .collocation_points
+            .map(|value| value as u64)
+            .unwrap_or(u64::MAX))
+        .to_le_bytes(),
+    );
+    for (name, value) in [
+        ("use_krylov", config.use_krylov),
+        ("source_stepping", config.source_stepping),
+        ("use_exact_jacobian", config.use_exact_jacobian),
+        ("verbose", config.verbose),
+    ] {
+        hb_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hb_retained_state_identity(
+    config: &HbConfig,
+    node_names: &[String],
+    spectral_state: &[Vec<Complex64>],
+    mna_branch_names: &[String],
+    mna_branch_spectral_state: &[Vec<Complex64>],
+    iterations: usize,
+    residual_norm: Value,
+) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-hb-retained-state-v1\0");
+    hb_identity_field(
+        &mut hasher,
+        "hb_config_identity",
+        hb_config_identity(config).as_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "iterations",
+        &(iterations as u64).to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "residual_norm",
+        &residual_norm.to_bits().to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "node_count",
+        &(node_names.len() as u64).to_le_bytes(),
+    );
+    for (index, (node, spectrum)) in node_names.iter().zip(spectral_state).enumerate() {
+        hb_identity_field(&mut hasher, &format!("node[{index}].name"), node.as_bytes());
+        hb_identity_field(
+            &mut hasher,
+            &format!("node[{index}].coefficient_count"),
+            &(spectrum.len() as u64).to_le_bytes(),
+        );
+        for (harmonic, value) in spectrum.iter().enumerate() {
+            hb_identity_field(
+                &mut hasher,
+                &format!("node[{index}].coefficient[{harmonic}].real"),
+                &value.re.to_bits().to_le_bytes(),
+            );
+            hb_identity_field(
+                &mut hasher,
+                &format!("node[{index}].coefficient[{harmonic}].imaginary"),
+                &value.im.to_bits().to_le_bytes(),
+            );
+        }
+    }
+    hb_identity_field(
+        &mut hasher,
+        "mna_branch_count",
+        &(mna_branch_names.len() as u64).to_le_bytes(),
+    );
+    for (index, (branch, spectrum)) in mna_branch_names
+        .iter()
+        .zip(mna_branch_spectral_state)
+        .enumerate()
+    {
+        hb_identity_field(
+            &mut hasher,
+            &format!("mna_branch[{index}].name"),
+            branch.as_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("mna_branch[{index}].coefficient_count"),
+            &(spectrum.len() as u64).to_le_bytes(),
+        );
+        for (harmonic, value) in spectrum.iter().enumerate() {
+            hb_identity_field(
+                &mut hasher,
+                &format!("mna_branch[{index}].coefficient[{harmonic}].real"),
+                &value.re.to_bits().to_le_bytes(),
+            );
+            hb_identity_field(
+                &mut hasher,
+                &format!("mna_branch[{index}].coefficient[{harmonic}].imaginary"),
+                &value.im.to_bits().to_le_bytes(),
+            );
+        }
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn hb_resolved_simulation_identity(config: &super::SimulationConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-hb-resolved-simulation-config-v1\0");
+    for (name, value) in [
+        ("tolerance", config.tolerance),
+        ("temperature", config.temperature),
+        ("matrix_pivot_tolerance", config.matrix_pivot_tolerance),
+        (
+            "matrix_absolute_pivot_tolerance",
+            config.matrix_absolute_pivot_tolerance,
+        ),
+    ] {
+        hb_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    hb_identity_field(
+        &mut hasher,
+        "max_iterations",
+        &(config.max_iterations as u64).to_le_bytes(),
+    );
+    for (name, value) in [
+        ("b3soi_gmin_scaling", config.b3soi_gmin_scaling),
+        ("device_voltage_limiting", config.device_voltage_limiting),
+        ("bypass.enabled", config.bypass_config.enabled),
+    ] {
+        hb_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    for (name, value) in [("rshunt", config.rshunt), ("cshunt", config.cshunt)] {
+        hb_identity_field(
+            &mut hasher,
+            name,
+            &value.map(Value::to_bits).unwrap_or(u64::MAX).to_le_bytes(),
+        );
+    }
+    for (name, value) in [
+        ("bypass.reltol", config.bypass_config.reltol),
+        ("bypass.abstol", config.bypass_config.abstol),
+        ("gmin_initial", config.convergence_config.gmin_initial),
+        ("gmin_target", config.convergence_config.gmin_target),
+        (
+            "junction_gmin_target",
+            config.convergence_config.junction_gmin_target,
+        ),
+        ("voltage_reltol", config.convergence_config.voltage_reltol),
+        ("voltage_abstol", config.convergence_config.voltage_abstol),
+        ("current_abstol", config.convergence_config.current_abstol),
+        ("charge_abstol", config.convergence_config.charge_abstol),
+        ("residual_reltol", config.convergence_config.residual_reltol),
+    ] {
+        hb_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    for (name, value) in [
+        ("gmin_stepping", config.convergence_config.gmin_stepping),
+        ("source_stepping", config.convergence_config.source_stepping),
+        (
+            "pseudo_transient",
+            config.convergence_config.pseudo_transient,
+        ),
+        ("arc_length", config.convergence_config.arc_length),
+    ] {
+        hb_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    for (name, value) in [
+        ("spice_dialect", format!("{:?}", config.spice_dialect)),
+        (
+            "jfet_level2_model",
+            format!("{:?}", config.resolved_jfet_level2_model()),
+        ),
+        ("matrix_solver", format!("{:?}", config.matrix_solver)),
+        (
+            "nonlinear_continuation",
+            format!("{:?}", config.convergence_config.nonlinear_continuation),
+        ),
+        (
+            "damping_strategy",
+            format!("{:?}", config.convergence_config.damping_strategy),
+        ),
+    ] {
+        hb_identity_field(&mut hasher, name, value.as_bytes());
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn is_canonical_blake3_identity(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Versioned semantic producer identity for a retained HB operating point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct HbOperatingPointIdentity {
+    version: u32,
+    semantic_netlist_identity: String,
+    resolved_simulation_identity: String,
+    hb_source_transform_identity: String,
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    retained_state_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HbOperatingPointProducerInputs {
+    semantic_netlist_identity: String,
+    resolved_simulation_identity: String,
+    hb_source_transform_identity: String,
+}
+
+impl HbOperatingPointIdentity {
+    /// Identity schema version.
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Fully elaborated semantic netlist identity.
+    pub fn semantic_netlist_identity(&self) -> &str {
+        &self.semantic_netlist_identity
+    }
+
+    /// Resolved HB-relevant simulation configuration identity.
+    pub fn resolved_simulation_identity(&self) -> &str {
+        &self.resolved_simulation_identity
+    }
+
+    /// Exact HB basis and source-transform configuration identity.
+    pub fn hb_source_transform_identity(&self) -> &str {
+        &self.hb_source_transform_identity
+    }
+
+    /// Canonical identity of the exact retained numerical payload.
+    pub fn retained_state_identity(&self) -> &str {
+        &self.retained_state_identity
+    }
+
+    fn capture(
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        hb_config: &HbConfig,
+    ) -> Result<HbOperatingPointProducerInputs, SimulationError> {
+        let semantic_netlist_identity = netlist_checkpoint_identity(netlist).ok_or_else(|| {
+            SimulationError::Circuit(
+                "HB producer netlist has no canonical semantic identity".to_owned(),
+            )
+        })?;
+        Ok(HbOperatingPointProducerInputs {
+            semantic_netlist_identity,
+            resolved_simulation_identity: hb_resolved_simulation_identity(simulation_config),
+            hb_source_transform_identity: hb_config_identity(hb_config),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind(
+        producer: HbOperatingPointProducerInputs,
+        config: &HbConfig,
+        node_names: &[String],
+        spectral_state: &[Vec<Complex64>],
+        mna_branch_names: &[String],
+        mna_branch_spectral_state: &[Vec<Complex64>],
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Self {
+        Self {
+            version: HB_OPERATING_POINT_IDENTITY_VERSION,
+            semantic_netlist_identity: producer.semantic_netlist_identity,
+            resolved_simulation_identity: producer.resolved_simulation_identity,
+            hb_source_transform_identity: producer.hb_source_transform_identity,
+            retained_state_identity: hb_retained_state_identity(
+                config,
+                node_names,
+                spectral_state,
+                mna_branch_names,
+                mna_branch_spectral_state,
+                iterations,
+                residual_norm,
+            ),
+        }
+    }
+
+    fn validate(&self) -> Result<(), SimulationError> {
+        if self.version != HB_OPERATING_POINT_IDENTITY_VERSION {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB producer identity version {} is unsupported; expected {}",
+                self.version, HB_OPERATING_POINT_IDENTITY_VERSION
+            )));
+        }
+        for (name, value) in [
+            ("semantic netlist", &self.semantic_netlist_identity),
+            ("resolved simulation", &self.resolved_simulation_identity),
+            ("HB source-transform", &self.hb_source_transform_identity),
+            ("retained state", &self.retained_state_identity),
+        ] {
+            if !is_canonical_blake3_identity(value) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB {name} identity is not a canonical BLAKE3 digest"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Exact converged harmonic-balance numerical state retained for dependent
 /// periodic small-signal analyses.
@@ -60,6 +436,10 @@ pub struct HbOperatingPoint {
     mna_branch_names: Vec<String>,
     #[cfg_attr(feature = "veriloga", serde(default))]
     mna_branch_spectral_state: Vec<Vec<Complex64>>,
+    /// Versioned semantic producer authentication. `None` is a parseable
+    /// legacy artifact that must never enter a dependent numerical solve.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    producer_identity: Option<HbOperatingPointIdentity>,
     iterations: usize,
     residual_norm: Value,
 }
@@ -93,6 +473,15 @@ impl HbOperatingPoint {
     /// oriented from the authored positive terminal to the negative terminal.
     pub fn mna_branch_spectral_state(&self) -> &[Vec<Complex64>] {
         &self.mna_branch_spectral_state
+    }
+
+    /// Authenticated semantic identity minted by the producing HB engine.
+    ///
+    /// `None` identifies a legacy or caller-assembled artifact. Such an
+    /// artifact remains inspectable for compatibility, but PAC and PNoise
+    /// reject it before numerical reuse.
+    pub fn producer_identity(&self) -> Option<&HbOperatingPointIdentity> {
+        self.producer_identity.as_ref()
     }
 
     /// Number of nonlinear iterations used by the producer solve.
@@ -147,11 +536,67 @@ impl HbOperatingPoint {
         iterations: usize,
         residual_norm: Value,
     ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_internal(
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            iterations,
+            residual_norm,
+            None,
+        )
+    }
+
+    /// Reconstruct a transported HB operating point together with the exact
+    /// semantic producer identity that was minted by the HB engine.
+    ///
+    /// This validates the identity's schema and digests but does not trust a
+    /// caller assertion by itself. A dependent PAC or PNoise run always
+    /// compares the identity with the currently elaborated deck and resolved
+    /// engine configuration immediately before numerical reuse.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_from_authenticated_parts_with_mna_branches(
+        producer_identity: HbOperatingPointIdentity,
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_internal(
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            iterations,
+            residual_norm,
+            Some(producer_identity),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_from_parts_internal(
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+        producer_identity: Option<HbOperatingPointIdentity>,
+    ) -> Result<Self, SimulationError> {
         config.validate().map_err(|error| {
             SimulationError::Circuit(format!(
                 "retained HB state has an invalid configuration: {error}"
             ))
         })?;
+        if let Some(identity) = producer_identity.as_ref() {
+            identity.validate()?;
+        }
         if !residual_norm.is_finite() || residual_norm < 0.0 {
             return Err(SimulationError::Circuit(
                 "retained HB state has an invalid residual norm".to_owned(),
@@ -238,15 +683,85 @@ impl HbOperatingPoint {
                 )));
             }
         }
-        Ok(Self {
+        let point = Self {
             config,
             node_names,
             spectral_state,
             mna_branch_names,
             mna_branch_spectral_state,
+            producer_identity,
             iterations,
             residual_norm,
-        })
+        };
+        if let Some(identity) = point.producer_identity.as_ref()
+            && identity.retained_state_identity
+                != hb_retained_state_identity(
+                    &point.config,
+                    &point.node_names,
+                    &point.spectral_state,
+                    &point.mna_branch_names,
+                    &point.mna_branch_spectral_state,
+                    point.iterations,
+                    point.residual_norm,
+                )
+        {
+            return Err(SimulationError::Circuit(
+                "retained HB numerical payload does not match its authenticated producer identity"
+                    .to_owned(),
+            ));
+        }
+        Ok(point)
+    }
+
+    fn authenticate_for_reuse(
+        &self,
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        hb_config: &HbConfig,
+    ) -> Result<(), SimulationError> {
+        let retained = self.producer_identity.as_ref().ok_or_else(|| {
+            SimulationError::Circuit(
+                "retained HB operating point is a legacy identityless artifact and is not trusted for dependent numerical reuse"
+                    .to_owned(),
+            )
+        })?;
+        retained.validate()?;
+        if retained.retained_state_identity
+            != hb_retained_state_identity(
+                &self.config,
+                &self.node_names,
+                &self.spectral_state,
+                &self.mna_branch_names,
+                &self.mna_branch_spectral_state,
+                self.iterations,
+                self.residual_norm,
+            )
+        {
+            return Err(SimulationError::Circuit(
+                "retained HB numerical payload does not match its authenticated producer identity"
+                    .to_owned(),
+            ));
+        }
+        let current = HbOperatingPointIdentity::capture(netlist, simulation_config, hb_config)?;
+        if retained.semantic_netlist_identity != current.semantic_netlist_identity {
+            return Err(SimulationError::Circuit(
+                "retained HB semantic circuit identity does not match the currently elaborated netlist"
+                    .to_owned(),
+            ));
+        }
+        if retained.resolved_simulation_identity != current.resolved_simulation_identity {
+            return Err(SimulationError::Circuit(
+                "retained HB resolved simulation configuration does not match the current engine configuration"
+                    .to_owned(),
+            ));
+        }
+        if retained.hb_source_transform_identity != current.hb_source_transform_identity {
+            return Err(SimulationError::Circuit(
+                "retained HB source-transform configuration does not match the current HB configuration"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     fn to_solver_state(
@@ -505,10 +1020,25 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         let config = engine.hb_config_for_netlist(netlist, config)?;
         engine.hb_validate_config(&config)?;
+        let producer_identity =
+            HbOperatingPointIdentity::capture(netlist, &engine.config, &config)?;
 
         // Build circuit using SoA architecture
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        engine.run_hb_with_prebuilt_circuit_abort(netlist, circuit, config, abort)
+        if producer_identity != HbOperatingPointIdentity::capture(netlist, &engine.config, &config)?
+        {
+            return Err(SimulationError::Circuit(
+                "HB semantic producer inputs changed while the circuit was being elaborated"
+                    .to_owned(),
+            ));
+        }
+        engine.run_hb_with_prebuilt_circuit_abort(
+            netlist,
+            circuit,
+            config,
+            Some(producer_identity),
+            abort,
+        )
     }
 
     /// Apply analysis-local options authored for Xyce's HB packages.
@@ -570,6 +1100,7 @@ impl Engine {
         netlist: &Netlist,
         circuit: CircuitData,
         config: HbConfig,
+        producer_inputs: Option<HbOperatingPointProducerInputs>,
         abort: &dyn AbortSignal,
     ) -> Result<HbAnalysisResult, SimulationError> {
         // Get node count (excluding ground)
@@ -761,15 +1292,43 @@ impl Engine {
                 ))
             })?
         };
-        let operating_point = HbOperatingPoint::try_from_parts_with_mna_branches(
-            config.clone(),
-            result.node_names.clone(),
-            state.x.clone(),
-            mna_branch_names,
-            state.mna_branch_currents.clone(),
-            state.total_iterations.max(state.iteration),
-            state.residual_norm,
-        )?;
+        let operating_point = if let Some(producer) = producer_inputs {
+            if producer != HbOperatingPointIdentity::capture(netlist, &self.config, &config)? {
+                return Err(SimulationError::Circuit(
+                    "HB semantic producer inputs changed during the periodic solve".to_owned(),
+                ));
+            }
+            let identity = HbOperatingPointIdentity::bind(
+                producer,
+                &config,
+                &result.node_names,
+                &state.x,
+                &mna_branch_names,
+                &state.mna_branch_currents,
+                state.total_iterations.max(state.iteration),
+                state.residual_norm,
+            );
+            HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
+                identity,
+                config.clone(),
+                result.node_names.clone(),
+                state.x.clone(),
+                mna_branch_names,
+                state.mna_branch_currents.clone(),
+                state.total_iterations.max(state.iteration),
+                state.residual_norm,
+            )?
+        } else {
+            HbOperatingPoint::try_from_parts_with_mna_branches(
+                config.clone(),
+                result.node_names.clone(),
+                state.x.clone(),
+                mna_branch_names,
+                state.mna_branch_currents.clone(),
+                state.total_iterations.max(state.iteration),
+                state.residual_norm,
+            )?
+        };
         Ok(HbAnalysisResult {
             result,
             fundamental_freq: config.fundamental_freq,
