@@ -340,7 +340,10 @@ impl Bug456Role {
     pub(super) const fn is_qualified_owner(self) -> bool {
         matches!(
             (self.case, self.member),
-            (Bug456Case::SimpleUnpacked, Bug456Member::Owner)
+            (
+                Bug456Case::ConverterUnpacked | Bug456Case::SimpleUnpacked,
+                Bug456Member::Owner
+            )
         )
     }
 
