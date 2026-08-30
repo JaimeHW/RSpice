@@ -2604,18 +2604,6 @@ pub mod autodiff {
         }
     }
 
-    fn checked_filter_dc_product(left: f64, right: f64) -> f64 {
-        if !left.is_finite() || !right.is_finite() {
-            return f64::NAN;
-        }
-        let product = left * right;
-        if !product.is_finite() || (product == 0.0 && left != 0.0 && right != 0.0) {
-            f64::NAN
-        } else {
-            product
-        }
-    }
-
     /// Differentiate an expression with respect to a variable
     /// (without assignment-chain shadows; prefer
     /// [`differentiate_with_shadows`] when a chain context exists)
@@ -3154,11 +3142,12 @@ pub mod autodiff {
                 poles,
                 gain,
             } => {
-                // H(0) = gain * prod(-z) / prod(-p) for real DC evaluation
-                let num: f64 = zeros.iter().map(|(re, _)| -re).product();
-                let den: f64 = poles.iter().map(|(re, _)| -re).product();
-                let ratio = checked_filter_dc_gain(num, den);
-                let dc_gain = checked_filter_dc_product(*gain, ratio);
+                // The fallible root validator is shared with canonical
+                // lowering. Legacy autodiff cannot return a compile error, so
+                // an invalid definition remains a NaN sentinel that reaches
+                // the typed numeric-error boundary during device evaluation.
+                let dc_gain = crate::laplace::checked_pole_zero_dc_gain(*gain, zeros, poles)
+                    .unwrap_or(f64::NAN);
                 IrExpr::Binary(
                     BinaryOp::Mul,
                     Box::new(IrExpr::Const(dc_gain)),

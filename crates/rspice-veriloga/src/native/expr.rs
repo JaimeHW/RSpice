@@ -6064,6 +6064,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(gain)
     }
 
+    fn checked_root_dc_gain(
+        &self,
+        operator: &str,
+        gain: f64,
+        zeros: &[(f64, f64)],
+        poles: &[(f64, f64)],
+    ) -> JitResult<f64> {
+        crate::laplace::checked_pole_zero_dc_gain(gain, zeros, poles).map_err(|error| {
+            JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!("{operator} DC derivative: {error}").into(),
+            }
+        })
+    }
+
     fn lower_laplace_call_derivative(
         &mut self,
         normalized: &str,
@@ -6077,45 +6092,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 args.len()
             )));
         }
-        let gain = match normalized {
-            "laplace_zp" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_zp",
-                    product_negated(&zeros),
-                    product_negated(&poles),
-                )?
-            }
-            "laplace_zd" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_zd",
-                    product_negated(&zeros),
-                    first_or(&denominator, 1.0),
-                )?
-            }
-            "laplace_np" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_np",
-                    first_or(&numerator, 0.0),
-                    product_negated(&poles),
-                )?
-            }
-            "laplace_nd" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_nd",
-                    first_or(&numerator, 0.0),
-                    first_or(&denominator, 1.0),
-                )?
-            }
-            _ => unreachable!("caller filters canonical laplace names"),
-        };
+        let gain = self.laplace_call_dc_gain(normalized, args)?;
         self.lower_scaled_derivative(args[0], wrt, gain)
     }
 
@@ -6133,33 +6110,27 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 args.len()
             )));
         }
-        let gain = match normalized {
+        let gain = self.laplace_call_dc_gain(normalized, args)?;
+        self.lower_scaled_second_derivative(args[0], first, second, gain)
+    }
+
+    fn laplace_call_dc_gain(&self, normalized: &str, args: &[ExprId]) -> JitResult<f64> {
+        match normalized {
             "laplace_zp" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_zp",
-                    product_negated(&zeros),
-                    product_negated(&poles),
-                )?
+                let zeros = self.constant_array_root_pairs(args[1], "laplace_zp", "zeros")?;
+                let poles = self.constant_array_root_pairs(args[2], "laplace_zp", "poles")?;
+                self.checked_root_dc_gain("laplace_zp", 1.0, &zeros, &poles)
             }
             "laplace_zd" => {
-                let zeros = self.constant_array_values(args[1])?;
+                let zeros = self.constant_array_root_pairs(args[1], "laplace_zd", "zeros")?;
                 let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_zd",
-                    product_negated(&zeros),
-                    first_or(&denominator, 1.0),
-                )?
+                let numerator = self.checked_root_dc_gain("laplace_zd", 1.0, &zeros, &[])?;
+                self.checked_filter_dc_gain("laplace_zd", numerator, first_or(&denominator, 1.0))
             }
             "laplace_np" => {
                 let numerator = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "laplace_np",
-                    first_or(&numerator, 0.0),
-                    product_negated(&poles),
-                )?
+                let poles = self.constant_array_root_pairs(args[2], "laplace_np", "poles")?;
+                self.checked_root_dc_gain("laplace_np", first_or(&numerator, 0.0), &[], &poles)
             }
             "laplace_nd" => {
                 let numerator = self.constant_array_values(args[1])?;
@@ -6168,11 +6139,10 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     "laplace_nd",
                     first_or(&numerator, 0.0),
                     first_or(&denominator, 1.0),
-                )?
+                )
             }
             _ => unreachable!("caller filters canonical laplace names"),
-        };
-        self.lower_scaled_second_derivative(args[0], first, second, gain)
+        }
     }
 
     fn lower_zi_derivative(
@@ -6343,21 +6313,29 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn laplace_kind_dc_gain(&self, kind: &HirLaplaceKind) -> JitResult<f64> {
         match kind {
-            HirLaplaceKind::ZeroPole { zeros, poles } => self.checked_filter_dc_gain(
-                "laplace_zp",
-                self.constant_expr_product_negated(zeros)?,
-                self.constant_expr_product_negated(poles)?,
-            ),
-            HirLaplaceKind::ZeroDenominator { zeros, denominator } => self.checked_filter_dc_gain(
-                "laplace_zd",
-                self.constant_expr_product_negated(zeros)?,
-                self.constant_expr_first_or(denominator, 1.0)?,
-            ),
-            HirLaplaceKind::NumeratorPole { numerator, poles } => self.checked_filter_dc_gain(
-                "laplace_np",
-                self.constant_expr_first_or(numerator, 0.0)?,
-                self.constant_expr_product_negated(poles)?,
-            ),
+            HirLaplaceKind::ZeroPole { zeros, poles } => {
+                let zeros = self.constant_expr_root_pairs(zeros, "laplace_zp", "zeros")?;
+                let poles = self.constant_expr_root_pairs(poles, "laplace_zp", "poles")?;
+                self.checked_root_dc_gain("laplace_zp", 1.0, &zeros, &poles)
+            }
+            HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+                let zeros = self.constant_expr_root_pairs(zeros, "laplace_zd", "zeros")?;
+                let numerator = self.checked_root_dc_gain("laplace_zd", 1.0, &zeros, &[])?;
+                self.checked_filter_dc_gain(
+                    "laplace_zd",
+                    numerator,
+                    self.constant_expr_first_or(denominator, 1.0)?,
+                )
+            }
+            HirLaplaceKind::NumeratorPole { numerator, poles } => {
+                let poles = self.constant_expr_root_pairs(poles, "laplace_np", "poles")?;
+                self.checked_root_dc_gain(
+                    "laplace_np",
+                    self.constant_expr_first_or(numerator, 0.0)?,
+                    &[],
+                    &poles,
+                )
+            }
             HirLaplaceKind::NumeratorDenominator {
                 numerator,
                 denominator,
@@ -6367,6 +6345,51 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.constant_expr_first_or(denominator, 1.0)?,
             ),
         }
+    }
+
+    fn constant_array_root_pairs(
+        &self,
+        expr_id: ExprId,
+        operator: &str,
+        role: &str,
+    ) -> JitResult<Vec<(f64, f64)>> {
+        let values = self.constant_array_values(expr_id)?;
+        self.root_pairs_from_values(operator, role, values)
+    }
+
+    fn constant_expr_root_pairs(
+        &self,
+        exprs: &[ExprId],
+        operator: &str,
+        role: &str,
+    ) -> JitResult<Vec<(f64, f64)>> {
+        let values = exprs
+            .iter()
+            .map(|expr| self.constant_expr_value(*expr))
+            .collect::<JitResult<Vec<_>>>()?;
+        self.root_pairs_from_values(operator, role, values)
+    }
+
+    fn root_pairs_from_values(
+        &self,
+        operator: &str,
+        role: &str,
+        values: Vec<f64>,
+    ) -> JitResult<Vec<(f64, f64)>> {
+        if values.len() % 2 != 0 {
+            return Err(JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!(
+                    "{operator} {role} root array must contain real/imaginary pairs; found {} values",
+                    values.len()
+                )
+                .into(),
+            });
+        }
+        Ok(values
+            .chunks_exact(2)
+            .map(|pair| (pair[0], pair[1]))
+            .collect())
     }
 
     fn constant_array_values(&self, expr_id: ExprId) -> JitResult<Vec<f64>> {
@@ -6420,13 +6443,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             Some(expr) => self.constant_expr_value(*expr),
             None => Ok(default),
         }
-    }
-
-    fn constant_expr_product_negated(&self, exprs: &[ExprId]) -> JitResult<f64> {
-        exprs
-            .iter()
-            .map(|expr| self.constant_expr_value(*expr))
-            .try_fold(1.0, |acc, value| Ok(acc * -value?))
     }
 
     fn constant_number(&self, expr_id: ExprId) -> Option<f64> {
@@ -9673,10 +9689,6 @@ fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: Node
 
 fn first_or(values: &[f64], default: f64) -> f64 {
     values.first().copied().unwrap_or(default)
-}
-
-fn product_negated(values: &[f64]) -> f64 {
-    values.iter().map(|value| -*value).product()
 }
 
 fn format_current_pair(pos: usize, neg: usize) -> String {

@@ -2408,6 +2408,73 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn laplace_zp_dc_jacobian_matches_checked_gain_across_lowering() {
+    for (case, zeros, poles, expected) in [
+        ("real", "-2.0, 0.0", "-4.0, 0.0", 0.5),
+        (
+            "complex",
+            "-1.0, 2.0, -1.0, -2.0",
+            "-3.0, 4.0, -3.0, -4.0",
+            0.2,
+        ),
+    ] {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+module laplace_zp_dc_parity(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_zp(V(p, n), '{{{zeros}}}, '{{{poles}}});
+endmodule
+"#
+        );
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = std::sync::Arc::new(
+            compiler
+                .compile(&source)
+                .expect("compile legacy pole-zero bytecode model"),
+        );
+        let artifact = compiler
+            .compile_canonical_ir(&source)
+            .expect("compile canonical pole-zero IR");
+
+        #[cfg(feature = "native-bytecode-contract-tests")]
+        let mut legacy = VerilogADevice::try_new(
+            format!("LZP_LEGACY_{case}"),
+            std::sync::Arc::clone(&model),
+            &[1, 0],
+        )
+        .expect("legacy pole-zero current uses native bytecode JIT");
+        let mut canonical = VerilogADevice::try_new_with_canonical_ir(
+            format!("LZP_CANONICAL_{case}"),
+            model,
+            &artifact,
+            &[1, 0],
+        )
+        .expect("canonical pole-zero current uses native JIT");
+
+        let (canonical_matrix, _) = stamp_device(&mut canonical, &[3.0]);
+        let canonical_gain = canonical_matrix.get(&(0, 0)).copied().unwrap_or_default();
+        assert!(
+            (canonical_gain - expected).abs() <= 1.0e-12,
+            "{case} canonical gain: {canonical_gain}"
+        );
+
+        #[cfg(feature = "native-bytecode-contract-tests")]
+        {
+            let (legacy_matrix, _) = stamp_device(&mut legacy, &[3.0]);
+            let legacy_gain = legacy_matrix.get(&(0, 0)).copied().unwrap_or_default();
+            assert!(
+                (legacy_gain - expected).abs() <= 1.0e-12,
+                "{case} legacy gain: {legacy_gain}"
+            );
+            assert_eq!(legacy_gain.to_bits(), canonical_gain.to_bits());
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_zi_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

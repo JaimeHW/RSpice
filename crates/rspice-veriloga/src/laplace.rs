@@ -47,6 +47,55 @@ pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
     StateSpaceFilter::roots_to_polynomial_ascending(roots).map_err(|error| error.to_string())
 }
 
+/// Return the real zero-frequency gain of a pole-zero transfer function.
+///
+/// The root arrays contain `(real, imaginary)` pairs and must describe real
+/// polynomials: every non-real root therefore needs a conjugate partner.  The
+/// constant term is obtained from the same checked root expansion used to
+/// construct the runtime state-space realization, so Jacobian lowering cannot
+/// reinterpret the flattened real/imaginary storage as independent roots.
+pub(crate) fn checked_pole_zero_dc_gain(
+    gain: f64,
+    zeros: &[(f64, f64)],
+    poles: &[(f64, f64)],
+) -> Result<f64, LaplaceError> {
+    if !gain.is_finite() {
+        return Err(LaplaceError::InvalidDefinition(
+            "pole-zero DC gain factor must be finite".into(),
+        ));
+    }
+
+    let zero_constant = checked_root_constant_term("zero", zeros)?;
+    let pole_constant = checked_root_constant_term("pole", poles)?;
+    let numerator = checked_definition_product(gain, zero_constant, "pole-zero DC numerator")?;
+    checked_ratio(numerator, pole_constant, "pole-zero DC gain")
+}
+
+fn checked_root_constant_term(
+    role: &'static str,
+    roots: &[(f64, f64)],
+) -> Result<f64, LaplaceError> {
+    let constant = StateSpaceFilter::roots_to_polynomial_ascending(roots)?
+        .first()
+        .copied()
+        .unwrap_or(1.0);
+    if !constant.is_finite() {
+        return Err(LaplaceError::InvalidDefinition(format!(
+            "{role} root DC product is non-finite"
+        )));
+    }
+    if constant == 0.0
+        && roots
+            .iter()
+            .all(|(real, imaginary)| *real != 0.0 || *imaginary != 0.0)
+    {
+        return Err(LaplaceError::InvalidDefinition(format!(
+            "{role} root DC product underflows f64"
+        )));
+    }
+    Ok(constant)
+}
+
 const PIVOT_RELATIVE_TOLERANCE: f64 = 16.0 * f64::EPSILON;
 const ROOT_RELATIVE_TOLERANCE: f64 = 64.0 * f64::EPSILON;
 
@@ -761,6 +810,26 @@ fn checked_ratio(numerator: f64, denominator: f64, context: &str) -> Result<f64,
     Ok(result)
 }
 
+fn checked_definition_product(left: f64, right: f64, context: &str) -> Result<f64, LaplaceError> {
+    if !left.is_finite() || !right.is_finite() {
+        return Err(LaplaceError::InvalidDefinition(format!(
+            "{context} contains a non-finite factor"
+        )));
+    }
+    let result = left * right;
+    if !result.is_finite() {
+        return Err(LaplaceError::InvalidDefinition(format!(
+            "{context} is outside the representable f64 range"
+        )));
+    }
+    if result == 0.0 && left != 0.0 && right != 0.0 {
+        return Err(LaplaceError::InvalidDefinition(format!(
+            "{context} underflows f64"
+        )));
+    }
+    Ok(result)
+}
+
 fn checked_product(left: f64, right: f64, context: &str) -> Result<f64, LaplaceError> {
     let result = left * right;
     if !result.is_finite() {
@@ -1077,7 +1146,20 @@ impl LaplaceFilter {
 
     /// Evaluate DC gain
     pub fn dc_gain(&self) -> Result<f64, LaplaceError> {
-        self.to_state_space()?.dc_output(1.0)
+        match self {
+            LaplaceFilter::PoleZero { gain, poles, zeros } => {
+                let zeros = zeros
+                    .iter()
+                    .map(|root| (root.re, root.im))
+                    .collect::<Vec<_>>();
+                let poles = poles
+                    .iter()
+                    .map(|root| (root.re, root.im))
+                    .collect::<Vec<_>>();
+                checked_pole_zero_dc_gain(*gain, &zeros, &poles)
+            }
+            LaplaceFilter::NumDen { .. } => self.to_state_space()?.dc_output(1.0),
+        }
     }
 }
 
@@ -1109,6 +1191,71 @@ endmodule
         let solution = solve_complex_system(&[vec![-1.0e-300]], &[1.0e-300], 0.0)
             .expect("a tiny, well-scaled system is nonsingular");
         assert!((solution[0].re - 1.0).abs() <= 8.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn checked_pole_zero_dc_gain_preserves_real_root_pairs() {
+        let gain = checked_pole_zero_dc_gain(3.0, &[(-2.0, 0.0)], &[(-4.0, 0.0)])
+            .expect("ordinary real roots define a finite DC gain");
+        assert_eq!(gain.to_bits(), 1.5_f64.to_bits());
+    }
+
+    #[test]
+    fn checked_pole_zero_dc_gain_uses_conjugate_pair_magnitudes() {
+        let gain = checked_pole_zero_dc_gain(
+            2.0,
+            &[(-1.0, 2.0), (-1.0, -2.0)],
+            &[(-3.0, 4.0), (-3.0, -4.0)],
+        )
+        .expect("conjugate roots define real constant terms");
+        assert!((gain - 0.4).abs() <= 8.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn pole_zero_filter_dc_gain_matches_state_space_equilibrium() {
+        for filter in [
+            LaplaceFilter::PoleZero {
+                gain: 3.0,
+                zeros: vec![Complex64::new(-2.0, 0.0)],
+                poles: vec![Complex64::new(-4.0, 0.0)],
+            },
+            LaplaceFilter::PoleZero {
+                gain: 2.0,
+                zeros: vec![Complex64::new(-1.0, 2.0), Complex64::new(-1.0, -2.0)],
+                poles: vec![Complex64::new(-3.0, 4.0), Complex64::new(-3.0, -4.0)],
+            },
+        ] {
+            let checked = filter.dc_gain().expect("checked pole-zero DC gain");
+            let equilibrium = filter
+                .to_state_space()
+                .and_then(|state_space| state_space.dc_output(1.0))
+                .expect("state-space DC equilibrium");
+            assert!((checked - equilibrium).abs() <= 16.0 * f64::EPSILON);
+        }
+    }
+
+    #[test]
+    fn checked_pole_zero_dc_gain_rejects_invalid_root_definitions() {
+        for (zeros, poles, expected) in [
+            (vec![(1.0, 2.0)], vec![(-1.0, 0.0)], "no conjugate partner"),
+            (
+                vec![(f64::NAN, 0.0)],
+                vec![(-1.0, 0.0)],
+                "must have finite real and imaginary parts",
+            ),
+            (vec![(-1.0, 0.0)], vec![(0.0, 0.0)], "zero denominator"),
+        ] {
+            let error = checked_pole_zero_dc_gain(1.0, &zeros, &poles)
+                .expect_err("invalid pole-zero definition must fail closed");
+            assert!(
+                matches!(error, LaplaceError::InvalidDefinition(_)),
+                "unexpected error type: {error:?}"
+            );
+            assert!(
+                error.to_string().contains(expected),
+                "expected '{expected}' in diagnostic, got: {error}"
+            );
+        }
     }
 
     #[test]
@@ -1251,6 +1398,38 @@ endmodule
             derivative(vec![f64::from_bits(1)], vec![f64::MAX, 1.0]),
         ] {
             assert!(matches!(invalid, IrExpr::Const(value) if value.is_nan()));
+        }
+    }
+
+    #[test]
+    fn legacy_laplace_zp_derivative_uses_checked_root_dc_gain() {
+        use crate::ir::{DerivativeWrt, IrExpr, autodiff};
+
+        let derivative = |zeros, poles| {
+            let expression = IrExpr::LaplaceZP {
+                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
+                zeros,
+                poles,
+                gain: 2.0,
+            };
+            autodiff::simplify(autodiff::differentiate(
+                &expression,
+                &DerivativeWrt::Voltage(0),
+            ))
+        };
+
+        for (zeros, poles, expected) in [
+            (vec![(-2.0, 0.0)], vec![(-4.0, 0.0)], 1.0),
+            (
+                vec![(-1.0, 2.0), (-1.0, -2.0)],
+                vec![(-3.0, 4.0), (-3.0, -4.0)],
+                0.4,
+            ),
+        ] {
+            let IrExpr::Const(actual) = derivative(zeros, poles) else {
+                panic!("linear pole-zero derivative must simplify to a constant");
+            };
+            assert!((actual - expected).abs() <= 8.0 * f64::EPSILON);
         }
     }
 
