@@ -368,18 +368,24 @@ impl BreakpointManager {
 
     /// Get next breakpoint after given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
+        // A device-refined event may be distinct from a scheduled breakpoint
+        // by less than the normal merge tolerance. Immediately after any
+        // breakpoint-style restart, retain strict ordering so that later
+        // corner is still solved rather than silently consumed as coincident.
+        let threshold = if self.just_passed_breakpoint {
+            time
+        } else {
+            time + self.tolerance
+        };
         let permanent = self
             .breakpoints
             .iter()
             .skip(self.current_index)
             .copied()
-            .find(|&t| t > time + self.tolerance);
+            .find(|&t| t > threshold);
         let runtime = self
             .runtime_breakpoints
-            .range((
-                Excluded(BreakpointTimeKey(time + self.tolerance)),
-                Unbounded,
-            ))
+            .range((Excluded(BreakpointTimeKey(threshold)), Unbounded))
             .next()
             .map(|time| time.0);
         match (permanent, runtime) {
@@ -532,6 +538,29 @@ impl BreakpointManager {
             .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
 
+    /// Restart integration after a device-refined discontinuity that is not
+    /// part of this manager's schedule.
+    ///
+    /// A root-refined device event may lie within the merge tolerance of a
+    /// later source breakpoint without being the same time. Restarting must
+    /// therefore leave both the permanent/runtime schedules and any saved
+    /// approach step intact for the later breakpoint.
+    pub fn mark_external_breakpoint_solved(&mut self, time: Value, accepted_delta: Value) -> Value {
+        self.just_passed_breakpoint = true;
+        let next_gap = self
+            .next_after(time)
+            .map(|next| next - time)
+            .filter(|gap| gap.is_finite() && *gap > 0.0)
+            .unwrap_or(Value::INFINITY);
+        let restart = self.restart_step_scale * accepted_delta.min(next_gap);
+
+        if restart.is_finite() && restart > 0.0 {
+            restart
+        } else {
+            MIN_STEP_AFTER_BREAKPOINT
+        }
+    }
+
     /// Check if we just passed a breakpoint and should use minimal timestep
     pub fn should_use_minimal_step(&self) -> bool {
         self.just_passed_breakpoint
@@ -618,6 +647,20 @@ mod breakpoint_manager_tests {
         let restart = breakpoints.mark_breakpoint_solved(10.0);
 
         assert!((restart - 0.05).abs() <= 8.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn external_breakpoint_restart_preserves_a_nearby_scheduled_breakpoint() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-6);
+        breakpoints.add(10.0);
+        let event_time = 10.0 - 0.5e-6;
+
+        assert!(breakpoints.at_breakpoint(event_time));
+        let restart = breakpoints.mark_external_breakpoint_solved(event_time, 2.0);
+
+        assert!((restart - 0.05e-6).abs() <= 8.0 * Value::EPSILON);
+        assert_eq!(breakpoints.next_after(event_time), Some(10.0));
+        assert!(breakpoints.should_use_minimal_step());
     }
 
     #[test]

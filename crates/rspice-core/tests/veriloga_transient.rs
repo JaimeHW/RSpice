@@ -218,6 +218,7 @@ endmodule
                 .all(|value| value.abs() < 1.0e-12),
             "{mode}: event-controlled state changed before the accepted root: {output:?}"
         );
+        event_index
     };
 
     let adaptive = Engine::default()
@@ -232,7 +233,22 @@ endmodule
     })
     .run_tran(&netlist, 1.0e-6, 1.0e-6)
     .expect("locked-grid cross-refinement transient run");
-    assert_event(&locked, "locked grid");
+    let locked_event_index = assert_event(&locked, "locked grid");
+    assert_eq!(
+        locked.time.last().copied(),
+        Some(1.0e-6),
+        "an interior Verilog-A root must not consume the locked-grid endpoint"
+    );
+    assert!(
+        locked.time.windows(2).all(|times| times[0] < times[1]),
+        "root refinement and the locked-grid continuation must make strict progress: {:?}",
+        locked.time
+    );
+    assert!(
+        locked_event_index + 1 < locked.time.len(),
+        "locked-grid integration must continue after restarting at the Verilog-A root: {:?}",
+        locked.time
+    );
 
     let _ = std::fs::remove_file(model);
 }

@@ -175,6 +175,15 @@ fn canonical_transient_step_time(current_time: Value, dt: Value, stop_time: Valu
 }
 
 #[inline]
+const fn accepted_step_hits_breakpoint(
+    landed_device_event: bool,
+    solver_landed_on_breakpoint: bool,
+    scheduled_breakpoint: bool,
+) -> bool {
+    landed_device_event || solver_landed_on_breakpoint || scheduled_breakpoint
+}
+
+#[inline]
 const fn xyce_allows_order_two(max_order: u8) -> bool {
     max_order == 2
 }
@@ -4649,6 +4658,11 @@ impl Engine {
                 trapgear.force_method(method);
             }
             let step_time = canonical_transient_step_time(t, dt, tstop);
+            #[cfg(feature = "veriloga")]
+            let landed_veriloga_event =
+                pending_veriloga_event_time.is_some_and(|event_time| step_time >= event_time);
+            #[cfg(not(feature = "veriloga"))]
+            let landed_veriloga_event = false;
             let analysis_initial_step = uic_requested && accepted_interval_count == 0;
             let analysis_final_step = step_time == tstop;
             let retry_floor_source_activity_delta =
@@ -7099,12 +7113,21 @@ impl Engine {
                     );
 
                     t = step_time;
-                    let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
+                    let scheduled_breakpoint = breakpoints.at_breakpoint(t);
+                    let hit_breakpoint = accepted_step_hits_breakpoint(
+                        landed_veriloga_event,
+                        at_breakpoint,
+                        scheduled_breakpoint,
+                    );
                     if hit_breakpoint {
-                        if !analysis_final_step {
+                        if scheduled_breakpoint && !landed_veriloga_event && !analysis_final_step {
                             t = breakpoints.snap_to_breakpoint(t);
                         }
-                        let restart_dt = breakpoints.mark_breakpoint_solved(t);
+                        let restart_dt = if landed_veriloga_event {
+                            breakpoints.mark_external_breakpoint_solved(t, dt)
+                        } else {
+                            breakpoints.mark_breakpoint_solved(t)
+                        };
                         timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
                     }
 
@@ -7689,16 +7712,30 @@ impl Engine {
                     }
                     locked_cursor += 1;
                 }
-                lte_estimator.uses_accepted_solution_reference() && breakpoints.at_breakpoint(t)
+                accepted_step_hits_breakpoint(
+                    landed_veriloga_event,
+                    false,
+                    lte_estimator.uses_accepted_solution_reference()
+                        && breakpoints.at_breakpoint(t),
+                )
             } else {
-                at_breakpoint || breakpoints.at_breakpoint(t)
+                accepted_step_hits_breakpoint(
+                    landed_veriloga_event,
+                    at_breakpoint,
+                    breakpoints.at_breakpoint(t),
+                )
             };
             // A locked grid is an external acceptance contract: retain its exact
             // target even when a source breakpoint is within the breakpoint
-            // tolerance. `mark_breakpoint_solved` below uses that same tolerance,
-            // so the nearby breakpoint is still consumed without perturbing the
-            // prescribed sample time (in particular, the final grid endpoint).
-            if hit_breakpoint && !locked_step_lands_on_grid && !analysis_final_step {
+            // tolerance. Manager-scheduled landings may consume that nearby
+            // point without perturbing the prescribed sample time. A refined
+            // device root instead retains the source point for a strict follow-up
+            // solve because its candidate was evaluated at the root's own time.
+            if hit_breakpoint
+                && !landed_veriloga_event
+                && !locked_step_lands_on_grid
+                && !analysis_final_step
+            {
                 t = breakpoints.snap_to_breakpoint(t);
             }
             let method_after_step = current_integration_method(&trapgear);
@@ -8036,7 +8073,11 @@ impl Engine {
                 }
             }
             if hit_breakpoint {
-                let restart_dt = breakpoints.mark_breakpoint_solved(t);
+                let restart_dt = if landed_veriloga_event {
+                    breakpoints.mark_external_breakpoint_solved(t, dt)
+                } else {
+                    breakpoints.mark_breakpoint_solved(t)
+                };
                 let span_ceiling =
                     xyce_breakpoint_span_ceiling.anchor(t, breakpoints.next_after(t), tstop);
                 let restarted_max_step = self
@@ -8662,6 +8703,18 @@ mod tests {
             STOP_TIME.to_bits(),
             "a step that consumes the remaining interval must use the exact requested horizon"
         );
+    }
+
+    #[test]
+    fn refined_device_root_restarts_history_without_a_scheduled_breakpoint() {
+        let hit_breakpoint = accepted_step_hits_breakpoint(true, false, false);
+
+        assert!(hit_breakpoint);
+        assert_eq!(
+            Engine::next_trapezoidal_order_after_accepted_step(2, hit_breakpoint, true),
+            1
+        );
+        assert!(!accepted_step_hits_breakpoint(false, false, false));
     }
 
     fn run_native_bjt_total_leads(
