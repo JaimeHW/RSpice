@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "veriloga-builtins")]
 use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{
     Engine, SimulationConfig, SpiceDialect, TransientCheckpoint, TransientStartupMode,
@@ -414,6 +413,72 @@ c1 out 0 1u ic=1
         (trace[2] - expected_bdf2).abs() <= 1.0e-12,
         "second resumed Gear2 interval must use the real first interval as BDF2 history: expected {expected_bdf2:e}, got {:e}",
         trace[2]
+    );
+}
+
+#[test]
+fn xyce_scheduled_checkpoint_restores_the_post_breakpoint_step_proposal() {
+    let netlist = Netlist::parse(
+        "scheduled checkpoint preserves Xyce continuation sizing\n\
+         .tran 0 50u\n\
+         V1 in 0 pulse(0 1 0 1u 1u 5u 10u)\n\
+         R1 in out 1k\n\
+         C1 out 0 1n\n\
+         .end\n",
+    )
+    .expect("scheduled-continuation deck parses");
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: 1200,
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::TrapGear,
+        transient_initial_timestep: Some(1.0e-10),
+        ..Default::default()
+    });
+    let seam = 20.0e-6;
+    let stop = 50.0e-6;
+    let max_step = 5.0e-9;
+    let (full, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            stop,
+            max_step,
+            TransientStartupMode::OperatingPoint,
+            &[seam],
+        )
+        .expect("continuous run and scheduled checkpoint complete");
+    let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
+        .expect("scheduled continuation state round-trips");
+    assert!(
+        full.time
+            .iter()
+            .any(|time| time.to_bits() == checkpoint.time.to_bits()),
+        "scheduled checkpoint is an accepted baseline point"
+    );
+    let proposal = checkpoint
+        .to_text()
+        .lines()
+        .find_map(|line| line.strip_prefix("integration_continuation "))
+        .expect("checkpoint contains integration continuation state")
+        .parse::<f64>()
+        .expect("an in-flight scheduled checkpoint carries a numeric proposal");
+    assert!(proposal.is_finite() && proposal > 0.0);
+    assert_ne!(
+        proposal.to_bits(),
+        1.0e-10_f64.to_bits(),
+        "the fixture must distinguish saved continuation from fresh Xyce startup sizing"
+    );
+
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, stop, max_step)
+        .expect("scheduled checkpoint resumes");
+    assert_eq!(resumed.time[0].to_bits(), checkpoint.time.to_bits());
+    assert_eq!(
+        resumed.time[1].to_bits(),
+        (checkpoint.time + proposal).to_bits(),
+        "resume must use the post-accept proposal rather than recomputing startup sizing"
     );
 }
 

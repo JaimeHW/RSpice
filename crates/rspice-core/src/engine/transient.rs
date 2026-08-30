@@ -2283,6 +2283,7 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         startup_mode: TransientStartupMode,
         integration_max_step: Value,
+        integration_next_step: Value,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
         lte_estimator: &LteEstimator,
@@ -2296,7 +2297,10 @@ impl Engine {
         let Some(&requested_time) = scheduled_times.get(*cursor) else {
             return Ok(());
         };
-        if accepted_time < requested_time {
+        if accepted_time < requested_time
+            && requested_time - accepted_time
+                > crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
+        {
             return Ok(());
         }
         let checkpoint = TransientCheckpoint::capture_with_restart_identity(
@@ -2309,6 +2313,7 @@ impl Engine {
             circuit,
             startup_mode,
             Some(integration_max_step),
+            Some(integration_next_step),
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             Some(lte_estimator),
@@ -2326,10 +2331,12 @@ impl Engine {
         *retained_scheduled_checkpoint_values =
             retained_scheduled_checkpoint_values.saturating_add(retained_checkpoint_values);
         *cursor += 1;
-        while scheduled_times
-            .get(*cursor)
-            .is_some_and(|time| *time <= accepted_time)
-        {
+        while scheduled_times.get(*cursor).is_some_and(|time| {
+            *time <= accepted_time
+                || (*time > accepted_time
+                    && *time - accepted_time
+                        <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE)
+        }) {
             *cursor += 1;
         }
         Ok(())
@@ -2382,7 +2389,7 @@ impl Engine {
         let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
-        if let Some(checkpoint) = resume {
+        let resume_next_step = if let Some(checkpoint) = resume {
             match resume_validation {
                 ResumeValidation::ExactNetlist => {
                     checkpoint.validate_for_with_config(checkpoint_netlist, &self.config)
@@ -2395,7 +2402,12 @@ impl Engine {
             checkpoint
                 .validate_recorded_integration_max_step()
                 .map_err(SimulationError::Circuit)?;
-        }
+            checkpoint
+                .validated_integration_next_step()
+                .map_err(SimulationError::Circuit)?
+        } else {
+            None
+        };
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
@@ -2422,6 +2434,7 @@ impl Engine {
                 &[],
                 &circuit,
                 startup_mode,
+                Some(max_step),
                 Some(max_step),
                 &[],
                 0,
@@ -2830,7 +2843,7 @@ impl Engine {
             .config
             .transient_initial_timestep
             .filter(|step| step.is_finite() && *step > 0.0);
-        let initial_step = if self.config.spice_dialect == SpiceDialect::Xyce {
+        let fresh_initial_step = if self.config.spice_dialect == SpiceDialect::Xyce {
             Self::xyce_initial_timestep(
                 resume_time,
                 tstop,
@@ -2848,6 +2861,7 @@ impl Engine {
                     )
                 })
         };
+        let initial_step = resume_next_step.unwrap_or(fresh_initial_step);
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
             hinted_max_step,
@@ -3447,6 +3461,7 @@ impl Engine {
             &circuit,
             startup_mode,
             max_step,
+            timestep.dt(),
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
             &lte_estimator,
@@ -6764,25 +6779,6 @@ impl Engine {
                             ));
                     }
                     self.ensure_transient_result_limits(&result, retained_result_values)?;
-                    self.capture_scheduled_checkpoint_if_due(
-                        scheduled_checkpoint_times,
-                        &mut scheduled_checkpoint_cursor,
-                        t,
-                        fingerprint,
-                        &netlist_identity,
-                        &restart_identity,
-                        &simulation_identity,
-                        &solution,
-                        &circuit,
-                        startup_mode,
-                        max_step,
-                        &pending_dynamic_tline_breakpoints,
-                        dynamic_tline_breakpoints_added,
-                        &lte_estimator,
-                        retained_result_values,
-                        &mut retained_scheduled_checkpoint_values,
-                        &mut scheduled_checkpoints,
-                    )?;
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -6807,6 +6803,26 @@ impl Engine {
                         trap_order = 1;
                     }
                     livelock_check!(dt);
+                    self.capture_scheduled_checkpoint_if_due(
+                        scheduled_checkpoint_times,
+                        &mut scheduled_checkpoint_cursor,
+                        t,
+                        fingerprint,
+                        &netlist_identity,
+                        &restart_identity,
+                        &simulation_identity,
+                        &solution,
+                        &circuit,
+                        startup_mode,
+                        max_step,
+                        timestep.dt(),
+                        &pending_dynamic_tline_breakpoints,
+                        dynamic_tline_breakpoints_added,
+                        &lte_estimator,
+                        retained_result_values,
+                        &mut retained_scheduled_checkpoint_values,
+                        &mut scheduled_checkpoints,
+                    )?;
                 }
                 if !force_accepted_rejected_lte_step {
                     restore_rejected_transient_nonlinear_state!();
@@ -7143,25 +7159,6 @@ impl Engine {
                     ));
             }
             self.ensure_transient_result_limits(&result, retained_result_values)?;
-            self.capture_scheduled_checkpoint_if_due(
-                scheduled_checkpoint_times,
-                &mut scheduled_checkpoint_cursor,
-                t,
-                fingerprint,
-                &netlist_identity,
-                &restart_identity,
-                &simulation_identity,
-                &solution,
-                &circuit,
-                startup_mode,
-                max_step,
-                &pending_dynamic_tline_breakpoints,
-                dynamic_tline_breakpoints_added,
-                &lte_estimator,
-                retained_result_values,
-                &mut retained_scheduled_checkpoint_values,
-                &mut scheduled_checkpoints,
-            )?;
             if first_accepted_transient_step {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 let accepted_max_step = self
@@ -7310,6 +7307,26 @@ impl Engine {
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
             livelock_check!(dt);
+            self.capture_scheduled_checkpoint_if_due(
+                scheduled_checkpoint_times,
+                &mut scheduled_checkpoint_cursor,
+                t,
+                fingerprint,
+                &netlist_identity,
+                &restart_identity,
+                &simulation_identity,
+                &solution,
+                &circuit,
+                startup_mode,
+                max_step,
+                timestep.dt(),
+                &pending_dynamic_tline_breakpoints,
+                dynamic_tline_breakpoints_added,
+                &lte_estimator,
+                retained_result_values,
+                &mut retained_scheduled_checkpoint_values,
+                &mut scheduled_checkpoints,
+            )?;
             rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
@@ -7410,6 +7427,7 @@ impl Engine {
             &circuit,
             startup_mode,
             Some(max_step),
+            None,
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
             Some(&lte_estimator),
