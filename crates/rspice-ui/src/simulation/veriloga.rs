@@ -37,7 +37,7 @@ pub(crate) struct WasmJitWorkerArtifact {
     pub(crate) stamp_kernel_export: Option<String>,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 impl WasmJitWorkerArtifact {
     pub(crate) fn from_compiled(
         artifact: &rspice_veriloga::wasm_jit::WasmJitModelArtifact,
@@ -94,7 +94,7 @@ pub struct PreparedVerilogARuntime {
 }
 
 impl PreparedVerilogARuntime {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
     pub(crate) fn compile_wasm_jit_artifact(&self) -> Result<WasmJitWorkerArtifact, String> {
         self.validate()?;
         let model: rspice_veriloga::CompiledModel = serde_json::from_str(&self.model_json)

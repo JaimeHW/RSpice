@@ -30,7 +30,10 @@ required-features = ["browser-worker"]
 [features]
 default = []
 generated-veriloga-catalog = ["rspice-core/veriloga-builtins"]
-browser-worker = []
+browser-worker = [
+    "rspice-core/veriloga-wasm-jit",
+    "rspice-veriloga/wasm-jit",
+]
 
 [dependencies]
 # RSpice core simulation engine lives in the target sections below: native
@@ -211,10 +214,12 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # the Web Speech API, which is the supported fallback for this backend.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "web_screen_reader"] }
 
-# No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen. It also
-# used to turn on `getrandom/js` for a browser entropy source faer was said
-# to need — faer has no such dependency, and the pin went with the claim.
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-wasm-jit", "wasm"] }
+# No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen. The
+# interactive image retains portable Verilog-A artifacts and validation, while
+# secondary-module emission and verification are owned exclusively by the
+# `browser-worker` feature above. Keeping that ownership explicit prevents the
+# secondary-module emitter and verifier from being duplicated in both images.
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"

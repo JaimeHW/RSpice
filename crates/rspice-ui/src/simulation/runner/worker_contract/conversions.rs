@@ -861,14 +861,14 @@ pub(super) fn worker_response_from_request_with_progress(
     )
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 thread_local! {
     static ACTIVE_WORKER_PROGRESS_ID: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static PENDING_WASM_JIT_REQUEST: std::cell::RefCell<Option<(u32, WorkerRequest)>> = const { std::cell::RefCell::new(None) };
     static NEXT_WASM_JIT_DISPATCH_TOKEN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(super) fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
@@ -903,7 +903,7 @@ pub(super) fn emit_worker_progress_snapshot(progress: &SimulationProgress) {
     let _ = post_message.call1(&global, &JsValue::from(message));
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(super) fn emit_worker_transient_sample(sample: &super::super::TransientSampleDelta) {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::JsValue;
@@ -938,7 +938,7 @@ pub(super) fn emit_worker_transient_sample(sample: &super::super::TransientSampl
     let _ = post_message.call1(&global, &JsValue::from(message));
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn run_worker_request_value(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
@@ -946,7 +946,7 @@ pub(crate) fn run_worker_request_value(
     run_decoded_worker_request(request)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 fn run_decoded_worker_request(
     request: WorkerRequest,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
@@ -972,7 +972,7 @@ fn run_decoded_worker_request(
     worker_response_transport_value(response)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WasmJitRequestPreparation {
@@ -984,7 +984,7 @@ struct WasmJitRequestPreparation {
 /// Compile every sealed Verilog-A runtime required by a simulation request
 /// before the synchronous solver begins. The JavaScript worker installs these
 /// modules into its persistent, capability-limited instance cache.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn prepare_wasm_jit_request_value(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
@@ -1023,7 +1023,7 @@ pub(crate) fn prepare_wasm_jit_request_value(
 
 /// Consume exactly the request decoded by `prepare_wasm_jit_request_value`.
 /// This avoids a second copy of every transferred numerical dependency.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn run_prepared_wasm_jit_request_value(
     dispatch_token: u32,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
@@ -1051,7 +1051,7 @@ pub(crate) fn run_prepared_wasm_jit_request_value(
 ///
 /// This closes the one failure path between request decoding and synchronous
 /// dispatch without allowing a stale JavaScript caller to cancel newer work.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn cancel_prepared_wasm_jit_request_value(
     dispatch_token: u32,
 ) -> Result<(), wasm_bindgen::JsValue> {
