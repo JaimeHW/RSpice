@@ -1022,11 +1022,20 @@ impl LteEstimator {
         self.update_signal_reference_prefix(solution, prefix_len);
 
         // Shift history: prev_prev_prev <- prev_prev <- prev <- new
+        let prior_history_count = self.history_count;
         self.prev_prev_prev_solution = std::mem::take(&mut self.prev_prev_solution);
         self.prev_prev_solution = std::mem::take(&mut self.prev_solution);
         self.prev_solution = solution.to_vec();
-        self.prev_prev_dt = self.prev_dt;
-        self.prev_dt = dt;
+        // A timestep is an interval between two accepted solutions. The first
+        // recorded solution therefore has no associated interval, and the
+        // synthetic restart timestep attached to a one-solution history must
+        // not be shifted into persisted accepted-interval history.
+        self.prev_prev_dt = if prior_history_count >= 2 {
+            self.prev_dt
+        } else {
+            0.0
+        };
+        self.prev_dt = if prior_history_count >= 1 { dt } else { 0.0 };
         if self.history_count < 3 {
             self.history_count += 1;
         }
@@ -1631,6 +1640,72 @@ mod lte_estimator_tests {
     }
 
     #[test]
+    fn first_record_has_no_interval_and_second_record_starts_interval_history() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PredictorLocal,
+        );
+
+        let first = [1.0, -2.0];
+        estimator.record(&first, 0.125);
+        let first_checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&first)
+            .expect("a one-solution history has no accepted interval");
+        assert_eq!(first_checkpoint.history_count, 1);
+        assert_eq!(first_checkpoint.prev_dt.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(first_checkpoint.prev_prev_dt.to_bits(), 0.0_f64.to_bits());
+
+        let second = [3.0, 4.0];
+        estimator.record(&second, 0.25);
+        let second_checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&second)
+            .expect("two accepted solutions retain exactly one interval");
+        assert_eq!(second_checkpoint.history_count, 2);
+        assert_eq!(second_checkpoint.prev_dt.to_bits(), 0.25_f64.to_bits());
+        assert_eq!(second_checkpoint.prev_prev_dt.to_bits(), 0.0_f64.to_bits());
+
+        let third = [5.0, 6.0];
+        estimator.record(&third, 0.5);
+        let third_checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&third)
+            .expect("three accepted solutions retain two real intervals");
+        assert_eq!(third_checkpoint.history_count, 3);
+        assert_eq!(third_checkpoint.prev_dt.to_bits(), 0.5_f64.to_bits());
+        assert_eq!(third_checkpoint.prev_prev_dt.to_bits(), 0.25_f64.to_bits());
+    }
+
+    #[test]
+    fn synthetic_restart_timestep_does_not_become_an_accepted_interval() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        let restart = [1.0, -2.0];
+        estimator.seed_initial_solution(&restart);
+        estimator.seed_restart_timestep(0.125);
+
+        let first_after_restart = [3.0, 4.0];
+        estimator.record(&first_after_restart, 0.25);
+        let first_checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&first_after_restart)
+            .expect("the first post-restart point retains one real interval");
+        assert_eq!(first_checkpoint.history_count, 2);
+        assert_eq!(first_checkpoint.prev_dt.to_bits(), 0.25_f64.to_bits());
+        assert_eq!(first_checkpoint.prev_prev_dt.to_bits(), 0.0_f64.to_bits());
+
+        let second_after_restart = [5.0, 6.0];
+        estimator.record(&second_after_restart, 0.5);
+        let second_checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&second_after_restart)
+            .expect("the second post-restart point retains both real intervals");
+        assert_eq!(second_checkpoint.history_count, 3);
+        assert_eq!(second_checkpoint.prev_dt.to_bits(), 0.5_f64.to_bits());
+        assert_eq!(second_checkpoint.prev_prev_dt.to_bits(), 0.25_f64.to_bits());
+    }
+
+    #[test]
     fn accepted_boundary_checkpoint_validates_shape_provenance_and_identity() {
         let (estimator, latest) = rich_accepted_boundary_estimator();
         let valid = estimator
@@ -2065,7 +2140,7 @@ mod lte_estimator_tests {
             1.0e-6,
             TransientLteReference::PointGlobal,
         );
-        estimator.seed_reference_prefix(&[0.0], 1);
+        estimator.seed_initial_solution(&[0.0]);
         estimator.record(&[0.0], 2.0);
 
         assert_eq!(
