@@ -3671,6 +3671,12 @@ impl XyceTestRunner {
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
                 }
+                ElementKind::Diode { .. }
+                    if Self::netlist_element_is_native_absolute_transient_legacy_diode(
+                        netlist, element,
+                    ) || Self::netlist_element_is_native_generated_juncap_diode(
+                        netlist, element,
+                    ) => {}
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
@@ -3704,7 +3710,7 @@ impl XyceTestRunner {
                 }
                 _ => {
                     return Err(format!(
-                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, and coupled inductors; element '{}' requires a broader self-verifying transient contract",
+                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, coupled inductors, native legacy diodes, and generated two-terminal JUNCAP diodes; element '{}' requires a broader self-verifying transient contract",
                         element.name
                     ));
                 }

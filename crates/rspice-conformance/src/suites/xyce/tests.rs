@@ -6144,31 +6144,35 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for file_name in [
-        "lead_bsrc_gear.cir",
-        "lead_bsrc_trap.cir",
-        "lead_ind_gear.cir",
-        "lead_ind_trap.cir",
-        "lead_mil_gear.cir",
-        "lead_mil_trap.cir",
-        "lead_min_gear.cir",
-        "lead_min_trap.cir",
-        "lead_min2_trap.cir",
-        "lead_r_c_gear.cir",
-        "lead_r_c_trap.cir",
+    for relative_path in [
+        "Netlists/LEAD_CURRENTS/lead_bsrc_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_bsrc_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_m2_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_m2_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_ind_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_ind_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_mil_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_mil_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_min_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_min_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_min2_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_r_c_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_r_c_trap.cir",
+        "Netlists/Verilog_LEAD_CURRENTS/lead_juncap200_gear.cir",
     ] {
-        let relative_path = format!("Netlists/LEAD_CURRENTS/{file_name}");
         let deck = XyceDeck {
-            path: root.join(&relative_path),
-            relative_path,
+            path: root.join(relative_path),
+            relative_path: relative_path.to_string(),
             section: XyceDeckSection::Netlists,
         };
         let plan = runner
             .static_tran_plan_for_deck(&deck)
-            .unwrap_or_else(|error| panic!("{file_name} should qualify structurally: {error}"));
+            .unwrap_or_else(|error| panic!("{relative_path} should qualify structurally: {error}"));
         let measurements = plan
             .authored_fail_value_oracle()
-            .unwrap_or_else(|| panic!("{file_name} should use the authored FAILVALUE oracle"));
+            .unwrap_or_else(|| panic!("{relative_path} should use the authored FAILVALUE oracle"));
 
         assert!(!measurements.is_empty());
         assert!(
@@ -6184,7 +6188,7 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
         let result = runner.run_test(&deck.path);
         assert!(
             result.passed && !result.expected_unsupported && !result.upstream_excluded,
-            "{file_name} should execute under its authored FAILVALUE oracle: {result:?}"
+            "{relative_path} should execute under its authored FAILVALUE oracle: {result:?}"
         );
         assert!(result.mismatches.is_empty());
         assert_eq!(
@@ -6233,6 +6237,16 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
             "V1 in 0 SIN(0 1 1k)\nR1 in out 1\nL1 out 0 10\nL2 aux 0 100\nR2 aux 0 1\nK1 L1 L2 1 COREMOD\n.MODEL COREMOD CORE LEVEL=2 C=.001",
             "TRAP",
         ),
+        (
+            "native dynamic legacy diode",
+            "V1 in 0 PULSE(0 1 0 1u 1u 5u 10u)\nR1 in out 1k\nD1 out 0 DMOD M=2\n.MODEL DMOD D IS=1e-14 N=1.2 RS=.1 CJO=1n TT=1n",
+            "GEAR",
+        ),
+        (
+            "generated two-terminal JUNCAP diode",
+            "V1 in 0 PULSE(0 1 0 1u 1u 5u 10u)\nR1 in out 1k\nD1 out 0 DMOD\n.MODEL DMOD D LEVEL=200",
+            "GEAR",
+        ),
     ] {
         let source = format!(
             "{label}\n{body}\n.OPTIONS TIMEINT METHOD={method}\n.TRAN 1u 10u\n.MEASURE TRAN MAX_OUT MAX V(out) FAILVALUE=2\n.END\n"
@@ -6249,10 +6263,6 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
 
     for (label, body) in [
         (
-            "diode semiconductor",
-            "V1 out 0 1\nD1 out 0 DMOD\n.MODEL DMOD D",
-        ),
-        (
             "JFET semiconductor",
             "V1 out 0 1\nJ1 out out 0 JMOD\n.MODEL JMOD NJF",
         ),
@@ -6263,10 +6273,6 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
         (
             "transmission line",
             "V1 out 0 1\nT1 out 0 far 0 Z0=50 TD=1n\nR1 far 0 50",
-        ),
-        (
-            "generated compact diode",
-            "V1 out 0 1\nD1 out 0 JUNCAP\n.MODEL JUNCAP D LEVEL=200",
         ),
         (
             "BUG813 MOS lead-current topology",
@@ -6307,10 +6313,6 @@ fn authored_fail_value_hard_failure_decks_are_expected_unsupported() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative_paths = [
         "Netlists/Certification_Tests/BUG_813_SON/bug_813_son.cir",
-        "Netlists/LEAD_CURRENTS/lead_dio1_gear.cir",
-        "Netlists/LEAD_CURRENTS/lead_dio1_trap.cir",
-        "Netlists/LEAD_CURRENTS/lead_dio1_m2_gear.cir",
-        "Netlists/LEAD_CURRENTS/lead_dio1_m2_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_min2_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_nmos3_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_nmos3_trap.cir",
@@ -6324,11 +6326,10 @@ fn authored_fail_value_hard_failure_decks_are_expected_unsupported() {
         "Netlists/LEAD_CURRENTS/lead_sw_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_tra_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_tra_trap.cir",
-        "Netlists/Verilog_LEAD_CURRENTS/lead_juncap200_gear.cir",
     ];
 
     for relative_path in relative_paths {
-        let result = runner.run_test(&root.join(relative_path));
+        let result = runner.run_test(root.join(relative_path));
         assert!(
             result.expected_unsupported && result.passed,
             "{relative_path} must fail closed during planning: {result:?}"
