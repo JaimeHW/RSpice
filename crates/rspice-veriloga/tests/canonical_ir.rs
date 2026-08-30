@@ -42,6 +42,36 @@ fn analyze_fixture(
 }
 
 #[test]
+fn canonical_parameter_validation_preserves_integer_division() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module typed_constants(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real integer_division = 1 / 2;
+    parameter real real_division = 1 / 2.0;
+    parameter integer denominator = 2;
+    parameter real dependent_integer_division = 1 / denominator;
+    parameter real shaped[dependent_integer_division:0] = '{1.0};
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        )
+        .expect("typed constant canonical IR");
+
+    let defaults = artifact
+        .hir
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), parameter.default))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(defaults["integer_division"], Some(0.0));
+    assert_eq!(defaults["real_division"], Some(0.5));
+    assert_eq!(defaults["dependent_integer_division"], None);
+}
+
+#[test]
 fn canonical_noise_plan_retains_scaled_guarded_sources_and_vbic13_names() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
@@ -1304,18 +1334,20 @@ fn canonical_parameter_array_contract_rejects_matching_expression_and_shape_tamp
         |hir, mir| {
             let hir_bound = hir.parameters[1].dimensions[0].left.id;
             let mir_bound = mir.parameters[1].dimensions[0].left.id;
-            let HirExprKind::Number { value, .. } =
+            let HirExprKind::Number { value, raw } =
                 &mut hir.expressions[usize::from(hir_bound)].kind
             else {
                 panic!("expected numeric HIR bound");
             };
             *value = 0.5;
-            let HirExprKind::Number { value, .. } =
+            *raw = "0.5".into();
+            let HirExprKind::Number { value, raw } =
                 &mut mir.expressions[usize::from(mir_bound)].kind
             else {
                 panic!("expected numeric MIR bound");
             };
             *value = 0.5;
+            *raw = "0.5".into();
         },
     );
 
@@ -1421,18 +1453,45 @@ fn canonical_parameter_array_contract_rejects_fractional_integer_elements() {
                 panic!("expected MIR assignment pattern");
             };
             let mir_element = mir_elements[0];
-            let HirExprKind::Number { value, .. } =
+            let HirExprKind::Number { value, raw } =
                 &mut hir.expressions[usize::from(hir_element)].kind
             else {
                 panic!("expected numeric HIR element");
             };
             *value = 1.5;
-            let HirExprKind::Number { value, .. } =
+            *raw = "1.5".into();
+            let HirExprKind::Number { value, raw } =
                 &mut mir.expressions[usize::from(mir_element)].kind
             else {
                 panic!("expected numeric MIR element");
             };
             *value = 1.5;
+            *raw = "1.5".into();
+        },
+    );
+}
+
+#[test]
+fn canonical_parameter_array_contract_rejects_numeric_payload_tampering() {
+    assert_matching_parameter_array_tamper_rejected(
+        parameter_array_source(),
+        1,
+        "integer literal raw text '0' resolves to 0, contradicting stored value 0.5",
+        |hir, mir| {
+            let hir_bound = hir.parameters[1].dimensions[0].left.id;
+            let mir_bound = mir.parameters[1].dimensions[0].left.id;
+            let HirExprKind::Number { value, .. } =
+                &mut hir.expressions[usize::from(hir_bound)].kind
+            else {
+                panic!("expected numeric HIR bound");
+            };
+            *value = 0.5;
+            let HirExprKind::Number { value, .. } =
+                &mut mir.expressions[usize::from(mir_bound)].kind
+            else {
+                panic!("expected numeric MIR bound");
+            };
+            *value = 0.5;
         },
     );
 }

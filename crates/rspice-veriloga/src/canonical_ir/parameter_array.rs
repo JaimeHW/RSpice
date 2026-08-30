@@ -13,6 +13,25 @@ const MAX_PARAMETER_ARRAY_DIAGNOSTICS: usize = 64;
 const MAX_CONSTANT_EXPRESSION_DEPTH: usize = 128;
 const MAX_CONSTANT_EVALUATION_WORK: usize = 4_194_304;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ConstantValue {
+    Integer(i64),
+    Real(f64),
+}
+
+impl ConstantValue {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Integer(value) => value as f64,
+            Self::Real(value) => value,
+        }
+    }
+
+    fn is_truthy(self) -> bool {
+        self.as_f64() != 0.0
+    }
+}
+
 pub(super) trait CanonicalParameterMetadata {
     fn name(&self) -> &SmolStr;
     fn value_type(&self) -> CanonicalValueType;
@@ -80,7 +99,7 @@ pub(super) fn validate_parameter_array_contract<P: CanonicalParameterMetadata>(
     expressions: &[HirExpression],
 ) -> Vec<IrDiagnostic> {
     let mut diagnostics = Vec::new();
-    let mut declared_scalars = HashMap::<SmolStr, f64>::new();
+    let mut declared_scalars = HashMap::<SmolStr, ConstantValue>::new();
     let mut remaining_work = expressions
         .len()
         .saturating_mul(4)
@@ -101,21 +120,22 @@ pub(super) fn validate_parameter_array_contract<P: CanonicalParameterMetadata>(
                 });
                 let value = match (parameter.default(), expression_value) {
                     (Some(folded), Some(Ok(expression)))
-                        if folded.to_bits() != expression.to_bits() =>
+                        if folded.to_bits() != expression.as_f64().to_bits() =>
                     {
                         let reference = parameter.default_expr().expect("expression is present");
                         diagnostics.push(IrDiagnostic::error(
                             phase,
                             format!(
-                                "scalar parameter '{}' folded default {folded} contradicts its default expression value {expression}",
-                                parameter.name()
+                                "scalar parameter '{}' folded default {folded} contradicts its default expression value {}",
+                                parameter.name(),
+                                expression.as_f64(),
                             ),
                             reference.span,
                         ));
                         None
                     }
                     (Some(folded), Some(Ok(_))) | (Some(folded), None) => Some(folded),
-                    (None, Some(Ok(expression))) => Some(expression),
+                    (None, Some(Ok(expression))) => Some(expression.as_f64()),
                     // An unevaluable expression is intentionally not replaced
                     // by potentially contradictory folded metadata. Any array
                     // that depends on it will then fail closed at its bound or
@@ -123,7 +143,14 @@ pub(super) fn validate_parameter_array_contract<P: CanonicalParameterMetadata>(
                     (_, Some(Err(_))) | (None, None) => None,
                 };
                 if let Some(value) = value.filter(|value| value.is_finite()) {
-                    declared_scalars.insert(parameter.name().clone(), value);
+                    let value = if parameter.value_type() == CanonicalValueType::Integer {
+                        exact_i64(value).map(ConstantValue::Integer)
+                    } else {
+                        Some(ConstantValue::Real(value))
+                    };
+                    if let Some(value) = value {
+                        declared_scalars.insert(parameter.name().clone(), value);
+                    }
                 }
             }
             continue;
@@ -289,7 +316,7 @@ fn eval_integer_bound(
             return None;
         }
     };
-    let Some(value) = exact_i64(value) else {
+    let Some(value) = exact_i64(value.as_f64()) else {
         diagnostics.push(IrDiagnostic::error(
             phase,
             format!("{owner} does not resolve to a finite signed 64-bit integer"),
@@ -390,14 +417,17 @@ fn validate_initializer_shape(
             let element_span = element_node.span;
             match evaluator.evaluate(*element) {
                 Ok(value)
-                    if value.is_finite()
+                    if value.as_f64().is_finite()
                         && (value_type != CanonicalValueType::Integer
-                            || (value.fract() == 0.0
-                                && value >= f64::from(i32::MIN)
-                                && value <= f64::from(i32::MAX))) => {}
+                            || (value.as_f64().fract() == 0.0
+                                && value.as_f64() >= f64::from(i32::MIN)
+                                && value.as_f64() <= f64::from(i32::MAX))) => {}
                 Ok(value) => diagnostics.push(IrDiagnostic::error(
                     phase,
-                    format!("{context} has invalid {value_type:?} element value {value}"),
+                    format!(
+                        "{context} has invalid {value_type:?} element value {}",
+                        value.as_f64()
+                    ),
                     element_span,
                 )),
                 Err(detail) => diagnostics.push(IrDiagnostic::error(
@@ -423,16 +453,16 @@ fn validate_initializer_shape(
 
 struct ConstantEvaluator<'expressions, 'budget> {
     expressions: &'expressions [HirExpression],
-    env: &'expressions HashMap<SmolStr, f64>,
+    env: &'expressions HashMap<SmolStr, ConstantValue>,
     visiting: HashSet<ExprId>,
-    cache: HashMap<ExprId, Result<f64, String>>,
+    cache: HashMap<ExprId, Result<ConstantValue, String>>,
     remaining_work: &'budget mut usize,
 }
 
 impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
     fn new(
         expressions: &'expressions [HirExpression],
-        env: &'expressions HashMap<SmolStr, f64>,
+        env: &'expressions HashMap<SmolStr, ConstantValue>,
         remaining_work: &'budget mut usize,
     ) -> Self {
         Self {
@@ -444,11 +474,15 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
         }
     }
 
-    fn evaluate(&mut self, expression: ExprId) -> Result<f64, String> {
+    fn evaluate(&mut self, expression: ExprId) -> Result<ConstantValue, String> {
         self.evaluate_at_depth(expression, 0)
     }
 
-    fn evaluate_at_depth(&mut self, expression: ExprId, depth: usize) -> Result<f64, String> {
+    fn evaluate_at_depth(
+        &mut self,
+        expression: ExprId,
+        depth: usize,
+    ) -> Result<ConstantValue, String> {
         if let Some(cached) = self.cache.get(&expression) {
             return cached.clone();
         }
@@ -473,7 +507,11 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
         result
     }
 
-    fn evaluate_uncached(&mut self, expression: ExprId, depth: usize) -> Result<f64, String> {
+    fn evaluate_uncached(
+        &mut self,
+        expression: ExprId,
+        depth: usize,
+    ) -> Result<ConstantValue, String> {
         let kind = self
             .expressions
             .get(usize::from(expression))
@@ -482,7 +520,15 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
             .clone();
         let next_depth = depth + 1;
         match kind {
-            HirExprKind::Number { value, .. } => Ok(value),
+            HirExprKind::Number { value, raw } => match integer_literal_value(&raw) {
+                Some(integer) if value.to_bits() == (integer as f64).to_bits() => {
+                    Ok(ConstantValue::Integer(integer))
+                }
+                Some(integer) => Err(format!(
+                    "integer literal raw text '{raw}' resolves to {integer}, contradicting stored value {value}"
+                )),
+                None => Ok(ConstantValue::Real(value)),
+            },
             HirExprKind::Identifier { name } => {
                 self.env.get(&name).copied().ok_or_else(|| {
                     format!("identifier '{name}' is not an earlier scalar parameter")
@@ -491,12 +537,18 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
             HirExprKind::Unary { op, operand } => {
                 let value = self.evaluate_at_depth(operand, next_depth)?;
                 match op.as_str() {
-                    "Neg" => Ok(-value),
+                    "Neg" => match value {
+                        ConstantValue::Integer(value) => value
+                            .checked_neg()
+                            .map(ConstantValue::Integer)
+                            .ok_or_else(|| "integer negation overflows".to_string()),
+                        ConstantValue::Real(value) => Ok(ConstantValue::Real(-value)),
+                    },
                     "Pos" => Ok(value),
-                    "Not" => Ok(f64::from(value == 0.0)),
-                    "BitNot" => exact_i64(value)
-                        .map(|value| (!value) as f64)
-                        .ok_or_else(|| "bitwise operand is not an exact integer".to_string()),
+                    "Not" => Ok(ConstantValue::Integer(i64::from(!value.is_truthy()))),
+                    "BitNot" => constant_integer(value)
+                        .map(|value| ConstantValue::Integer(!value))
+                        .ok_or_else(|| "bitwise operand is not an integer".to_string()),
                     _ => Err(format!("unsupported unary operator '{op}'")),
                 }
             }
@@ -504,25 +556,41 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                 let left = self.evaluate_at_depth(left, next_depth)?;
                 let right = self.evaluate_at_depth(right, next_depth)?;
                 match op.as_str() {
-                    "Add" => Ok(left + right),
-                    "Sub" => Ok(left - right),
-                    "Mul" => Ok(left * right),
-                    "Div" => Ok(left / right),
-                    "Mod" => Ok(left % right),
-                    "Pow" => Ok(left.powf(right)),
-                    "Eq" => Ok(f64::from(left == right)),
-                    "Ne" => Ok(f64::from(left != right)),
-                    "Lt" => Ok(f64::from(left < right)),
-                    "Le" => Ok(f64::from(left <= right)),
-                    "Gt" => Ok(f64::from(left > right)),
-                    "Ge" => Ok(f64::from(left >= right)),
-                    "And" => Ok(f64::from(left != 0.0 && right != 0.0)),
-                    "Or" => Ok(f64::from(left != 0.0 || right != 0.0)),
+                    "Add" => constant_add(left, right),
+                    "Sub" => constant_sub(left, right),
+                    "Mul" => constant_mul(left, right),
+                    "Div" => constant_div(left, right),
+                    "Mod" => constant_mod(left, right),
+                    "Pow" => constant_pow(left, right),
+                    "Eq" => Ok(ConstantValue::Integer(i64::from(
+                        left.as_f64() == right.as_f64(),
+                    ))),
+                    "Ne" => Ok(ConstantValue::Integer(i64::from(
+                        left.as_f64() != right.as_f64(),
+                    ))),
+                    "Lt" => Ok(ConstantValue::Integer(i64::from(
+                        left.as_f64() < right.as_f64(),
+                    ))),
+                    "Le" => Ok(ConstantValue::Integer(i64::from(
+                        left.as_f64() <= right.as_f64(),
+                    ))),
+                    "Gt" => Ok(ConstantValue::Integer(i64::from(
+                        left.as_f64() > right.as_f64(),
+                    ))),
+                    "Ge" => Ok(ConstantValue::Integer(i64::from(
+                        left.as_f64() >= right.as_f64(),
+                    ))),
+                    "And" => Ok(ConstantValue::Integer(i64::from(
+                        left.is_truthy() && right.is_truthy(),
+                    ))),
+                    "Or" => Ok(ConstantValue::Integer(i64::from(
+                        left.is_truthy() || right.is_truthy(),
+                    ))),
                     "Shl" | "Shr" => {
-                        let value = exact_i64(left)
-                            .ok_or_else(|| "shift value is not an exact integer".to_string())?;
-                        let shift = u32::try_from(exact_i64(right).ok_or_else(|| {
-                            "shift count is not a nonnegative exact integer".to_string()
+                        let value = constant_integer(left)
+                            .ok_or_else(|| "shift value is not an integer".to_string())?;
+                        let shift = u32::try_from(constant_integer(right).ok_or_else(|| {
+                            "shift count is not a nonnegative integer".to_string()
                         })?)
                         .map_err(|_| {
                             "shift count is not a nonnegative exact integer".to_string()
@@ -533,18 +601,18 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                             value.checked_shr(shift)
                         }
                         .ok_or_else(|| "shift count is outside 0..64".to_string())?;
-                        Ok(shifted as f64)
+                        Ok(ConstantValue::Integer(shifted))
                     }
                     "BitAnd" | "BitOr" | "BitXor" => {
-                        let left = exact_i64(left)
-                            .ok_or_else(|| "bitwise operand is not an exact integer".to_string())?;
-                        let right = exact_i64(right)
-                            .ok_or_else(|| "bitwise operand is not an exact integer".to_string())?;
-                        Ok(match op.as_str() {
+                        let left = constant_integer(left)
+                            .ok_or_else(|| "bitwise operand is not an integer".to_string())?;
+                        let right = constant_integer(right)
+                            .ok_or_else(|| "bitwise operand is not an integer".to_string())?;
+                        Ok(ConstantValue::Integer(match op.as_str() {
                             "BitAnd" => left & right,
                             "BitOr" => left | right,
                             _ => left ^ right,
-                        } as f64)
+                        }))
                     }
                     _ => Err(format!("unsupported binary operator '{op}'")),
                 }
@@ -555,29 +623,51 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                 else_expr,
             } => {
                 let condition = self.evaluate_at_depth(condition, next_depth)?;
-                if condition != 0.0 {
+                if condition.is_truthy() {
                     self.evaluate_at_depth(then_expr, next_depth)
                 } else {
                     self.evaluate_at_depth(else_expr, next_depth)
                 }
             }
             HirExprKind::Call { name, args } => match (name.as_str(), args.as_slice()) {
-                ("abs", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.abs()),
-                ("sqrt", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.sqrt()),
-                ("exp", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.exp()),
-                ("ln" | "log", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.ln()),
-                ("log10", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.log10()),
-                ("floor", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.floor()),
-                ("ceil", [value]) => Ok(self.evaluate_at_depth(*value, next_depth)?.ceil()),
-                ("min", [left, right]) => Ok(self
-                    .evaluate_at_depth(*left, next_depth)?
-                    .min(self.evaluate_at_depth(*right, next_depth)?)),
-                ("max", [left, right]) => Ok(self
-                    .evaluate_at_depth(*left, next_depth)?
-                    .max(self.evaluate_at_depth(*right, next_depth)?)),
-                ("pow", [left, right]) => Ok(self
-                    .evaluate_at_depth(*left, next_depth)?
-                    .powf(self.evaluate_at_depth(*right, next_depth)?)),
+                ("abs", [value]) => match self.evaluate_at_depth(*value, next_depth)? {
+                    ConstantValue::Integer(value) => value
+                        .checked_abs()
+                        .map(ConstantValue::Integer)
+                        .ok_or_else(|| "integer absolute value overflows".to_string()),
+                    ConstantValue::Real(value) => Ok(ConstantValue::Real(value.abs())),
+                },
+                ("sqrt", [value]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*value, next_depth)?.as_f64().sqrt(),
+                )),
+                ("exp", [value]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*value, next_depth)?.as_f64().exp(),
+                )),
+                ("ln" | "log", [value]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*value, next_depth)?.as_f64().ln(),
+                )),
+                ("log10", [value]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*value, next_depth)?.as_f64().log10(),
+                )),
+                ("floor", [value]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*value, next_depth)?.as_f64().floor(),
+                )),
+                ("ceil", [value]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*value, next_depth)?.as_f64().ceil(),
+                )),
+                ("min", [left, right]) => Ok(constant_min(
+                    self.evaluate_at_depth(*left, next_depth)?,
+                    self.evaluate_at_depth(*right, next_depth)?,
+                )),
+                ("max", [left, right]) => Ok(constant_max(
+                    self.evaluate_at_depth(*left, next_depth)?,
+                    self.evaluate_at_depth(*right, next_depth)?,
+                )),
+                ("pow", [left, right]) => Ok(ConstantValue::Real(
+                    self.evaluate_at_depth(*left, next_depth)?
+                        .as_f64()
+                        .powf(self.evaluate_at_depth(*right, next_depth)?.as_f64()),
+                )),
                 _ => Err(format!(
                     "call '{name}' is not a supported constant function"
                 )),
@@ -587,6 +677,111 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                 expression_kind_name(&other)
             )),
         }
+    }
+}
+
+fn integer_literal_value(raw: &str) -> Option<i64> {
+    if raw.is_empty()
+        || raw.contains('.')
+        || raw.contains('e')
+        || raw.contains('E')
+        || raw.chars().any(|character| {
+            matches!(
+                character,
+                'T' | 'G' | 'M' | 'k' | 'K' | 'm' | 'u' | 'n' | 'p' | 'f' | 'a'
+            )
+        })
+    {
+        return None;
+    }
+    raw.replace('_', "").parse().ok()
+}
+
+fn constant_integer(value: ConstantValue) -> Option<i64> {
+    match value {
+        ConstantValue::Integer(value) => Some(value),
+        ConstantValue::Real(_) => None,
+    }
+}
+
+fn constant_add(left: ConstantValue, right: ConstantValue) -> Result<ConstantValue, String> {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => left
+            .checked_add(right)
+            .map(ConstantValue::Integer)
+            .ok_or_else(|| "integer addition overflows".to_string()),
+        _ => Ok(ConstantValue::Real(left.as_f64() + right.as_f64())),
+    }
+}
+
+fn constant_sub(left: ConstantValue, right: ConstantValue) -> Result<ConstantValue, String> {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => left
+            .checked_sub(right)
+            .map(ConstantValue::Integer)
+            .ok_or_else(|| "integer subtraction overflows".to_string()),
+        _ => Ok(ConstantValue::Real(left.as_f64() - right.as_f64())),
+    }
+}
+
+fn constant_mul(left: ConstantValue, right: ConstantValue) -> Result<ConstantValue, String> {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => left
+            .checked_mul(right)
+            .map(ConstantValue::Integer)
+            .ok_or_else(|| "integer multiplication overflows".to_string()),
+        _ => Ok(ConstantValue::Real(left.as_f64() * right.as_f64())),
+    }
+}
+
+fn constant_div(left: ConstantValue, right: ConstantValue) -> Result<ConstantValue, String> {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => left
+            .checked_div(right)
+            .map(ConstantValue::Integer)
+            .ok_or_else(|| "integer division by zero or overflow".to_string()),
+        _ => Ok(ConstantValue::Real(left.as_f64() / right.as_f64())),
+    }
+}
+
+fn constant_mod(left: ConstantValue, right: ConstantValue) -> Result<ConstantValue, String> {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => left
+            .checked_rem(right)
+            .map(ConstantValue::Integer)
+            .ok_or_else(|| "integer modulus by zero or overflow".to_string()),
+        _ => Ok(ConstantValue::Real(left.as_f64() % right.as_f64())),
+    }
+}
+
+fn constant_pow(left: ConstantValue, right: ConstantValue) -> Result<ConstantValue, String> {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+            let exponent = u32::try_from(right)
+                .map_err(|_| "integer exponent must be nonnegative and fit u32".to_string())?;
+            left.checked_pow(exponent)
+                .map(ConstantValue::Integer)
+                .ok_or_else(|| "integer exponentiation overflows".to_string())
+        }
+        _ => Ok(ConstantValue::Real(left.as_f64().powf(right.as_f64()))),
+    }
+}
+
+fn constant_min(left: ConstantValue, right: ConstantValue) -> ConstantValue {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+            ConstantValue::Integer(left.min(right))
+        }
+        _ => ConstantValue::Real(left.as_f64().min(right.as_f64())),
+    }
+}
+
+fn constant_max(left: ConstantValue, right: ConstantValue) -> ConstantValue {
+    match (left, right) {
+        (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+            ConstantValue::Integer(left.max(right))
+        }
+        _ => ConstantValue::Real(left.as_f64().max(right.as_f64())),
     }
 }
 

@@ -19,6 +19,35 @@ const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
 pub(crate) const MAX_PARAMETER_ARRAY_RANK: usize = 16;
 pub(crate) const MAX_PARAMETER_ARRAY_ELEMENTS: u64 = 1_048_576;
 
+/// Numeric value retained by compile-time evaluation.
+///
+/// Verilog-AMS arithmetic is type-sensitive: notably, `1 / 2` is integer
+/// division while `1 / 2.0` is real division. Keeping only an `f64` here
+/// silently erased that distinction before defaults, bounds, and loop limits
+/// were validated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ConstantValue {
+    Integer(i64),
+    Real(f64),
+}
+
+impl ConstantValue {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Integer(value) => value as f64,
+            Self::Real(value) => value,
+        }
+    }
+
+    fn is_real(self) -> bool {
+        matches!(self, Self::Real(_))
+    }
+
+    fn is_truthy(self) -> bool {
+        self.as_f64() != 0.0
+    }
+}
+
 /// Diagnostic code for a system task that parses and is then discarded.
 const NO_EFFECT_SYSTEM_TASK_CODE: &str = "VA-SEM-NO-EFFECT-SYSTEM-TASK";
 
@@ -62,10 +91,10 @@ pub struct SemanticAnalyzer {
     /// Constant parameter default values (compile-time diagnostics only:
     /// instances may override parameters, so these must never influence
     /// generated code)
-    param_consts: HashMap<SmolStr, f64>,
+    param_consts: HashMap<SmolStr, ConstantValue>,
     /// Values that cannot vary per instance (localparams derived purely
     /// from literals). Safe for loop unrolling and code folding.
-    invariant_consts: HashMap<SmolStr, f64>,
+    invariant_consts: HashMap<SmolStr, ConstantValue>,
     /// Current function inlining depth (recursion guard)
     inline_depth: usize,
     /// Nesting depth of runtime-bounded loops (contributions inside them
@@ -661,7 +690,11 @@ impl SemanticAnalyzer {
             // the executable default must remain symbolic. Keeping those two
             // concerns separate lets a later array bound be checked through a
             // transitive chain without baking overridable values into code.
-            let declared_default = param.default.as_ref().and_then(|e| self.eval_const(e));
+            let declared_default_value = param
+                .default
+                .as_ref()
+                .and_then(|expression| self.eval_const_value(expression));
+            let declared_default = declared_default_value.map(ConstantValue::as_f64);
 
             // A default that references other parameters must stay
             // symbolic: instance overrides of those parameters change it,
@@ -765,7 +798,9 @@ impl SemanticAnalyzer {
                 );
             }
 
-            if let Some(value) = declared_default {
+            if let Some(value) = declared_default_value
+                .and_then(|value| Self::constant_for_declared_type(value, param.param_type))
+            {
                 self.param_consts.insert(param.name.clone(), value);
             }
 
@@ -850,10 +885,14 @@ impl SemanticAnalyzer {
                 )));
             }
             if let Some(default) = &localparam.default {
-                if let Some(value) = self.eval_const(default) {
+                if let Some(value) = self.eval_const_value(default).and_then(|value| {
+                    Self::constant_for_declared_type(value, localparam.param_type)
+                }) {
                     self.param_consts.insert(localparam.name.clone(), value);
                 }
-                if let Some(value) = self.eval_const_invariant(default) {
+                if let Some(value) = self.eval_const_invariant_value(default).and_then(|value| {
+                    Self::constant_for_declared_type(value, localparam.param_type)
+                }) {
                     self.invariant_consts.insert(localparam.name.clone(), value);
                 }
             }
@@ -924,13 +963,19 @@ impl SemanticAnalyzer {
                 continue;
             };
 
-            if let Some(value) = self.eval_const(default) {
+            if let Some(value) = self
+                .eval_const_value(default)
+                .and_then(|value| Self::constant_for_declared_type(value, localparam.param_type))
+            {
                 self.param_consts.insert(localparam.name.clone(), value);
             }
             // A localparam derived purely from literals (and other
             // invariant localparams) cannot vary per instance, so it may
             // participate in loop unrolling and other code folding
-            if let Some(value) = self.eval_const_invariant(default) {
+            if let Some(value) = self
+                .eval_const_invariant_value(default)
+                .and_then(|value| Self::constant_for_declared_type(value, localparam.param_type))
+            {
                 self.invariant_consts.insert(localparam.name.clone(), value);
             }
 
@@ -5690,7 +5735,11 @@ impl SemanticAnalyzer {
 
     fn infer_type(&self, expr: &Expression) -> CompileResult<ValueType> {
         match expr {
-            Expression::Number(_) => Ok(ValueType::Real),
+            Expression::Number(number) => Ok(if Self::integer_literal_value(number).is_some() {
+                ValueType::Integer
+            } else {
+                ValueType::Real
+            }),
             Expression::StringLit(_) => Ok(ValueType::String),
             Expression::NullArgument(span) => Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidExpression(
@@ -5785,7 +5834,11 @@ impl SemanticAnalyzer {
     /// compile-time diagnostics (range checks on declared defaults):
     /// instances may override parameters.
     fn eval_const(&self, expr: &Expression) -> Option<f64> {
-        Self::eval_const_with(expr, &self.param_consts)
+        self.eval_const_value(expr).map(ConstantValue::as_f64)
+    }
+
+    fn eval_const_value(&self, expr: &Expression) -> Option<ConstantValue> {
+        Self::eval_const_value_with(expr, &self.param_consts)
     }
 
     /// Whether an expression is fixed for the duration of an analysis.
@@ -5802,7 +5855,12 @@ impl SemanticAnalyzer {
     /// must use this: folding a parameter's *default* would bake it in and
     /// break per-instance overrides.
     fn eval_const_invariant(&self, expr: &Expression) -> Option<f64> {
-        Self::eval_const_with(expr, &self.invariant_consts)
+        self.eval_const_invariant_value(expr)
+            .map(ConstantValue::as_f64)
+    }
+
+    fn eval_const_invariant_value(&self, expr: &Expression) -> Option<ConstantValue> {
+        Self::eval_const_value_with(expr, &self.invariant_consts)
     }
 
     fn exact_const_i64(value: f64) -> Option<i64> {
@@ -5813,95 +5871,246 @@ impl SemanticAnalyzer {
             .then_some(value as i64)
     }
 
-    fn eval_const_with(expr: &Expression, env: &HashMap<SmolStr, f64>) -> Option<f64> {
-        let eval = |e: &Expression| Self::eval_const_with(e, env);
+    fn integer_literal_value(number: &NumberLit) -> Option<i64> {
+        let raw = number.raw.as_str();
+        if raw.is_empty()
+            || raw.contains('.')
+            || raw.contains('e')
+            || raw.contains('E')
+            || raw.chars().any(|character| {
+                matches!(
+                    character,
+                    'T' | 'G' | 'M' | 'k' | 'K' | 'm' | 'u' | 'n' | 'p' | 'f' | 'a'
+                )
+            })
+        {
+            return None;
+        }
+        raw.replace('_', "").parse().ok()
+    }
+
+    fn constant_for_declared_type(
+        value: ConstantValue,
+        declared_type: ParamType,
+    ) -> Option<ConstantValue> {
+        match declared_type {
+            ParamType::Real => Some(ConstantValue::Real(value.as_f64())),
+            ParamType::Integer => Self::exact_const_i64(value.as_f64()).map(ConstantValue::Integer),
+            ParamType::String => None,
+        }
+    }
+
+    fn constant_integer(value: ConstantValue) -> Option<i64> {
+        match value {
+            ConstantValue::Integer(value) => Some(value),
+            ConstantValue::Real(_) => None,
+        }
+    }
+
+    fn constant_add(left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+        match (left, right) {
+            (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+                left.checked_add(right).map(ConstantValue::Integer)
+            }
+            _ => Some(ConstantValue::Real(left.as_f64() + right.as_f64())),
+        }
+    }
+
+    fn constant_sub(left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+        match (left, right) {
+            (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+                left.checked_sub(right).map(ConstantValue::Integer)
+            }
+            _ => Some(ConstantValue::Real(left.as_f64() - right.as_f64())),
+        }
+    }
+
+    fn constant_mul(left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+        match (left, right) {
+            (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+                left.checked_mul(right).map(ConstantValue::Integer)
+            }
+            _ => Some(ConstantValue::Real(left.as_f64() * right.as_f64())),
+        }
+    }
+
+    fn constant_div(left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+        match (left, right) {
+            (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+                left.checked_div(right).map(ConstantValue::Integer)
+            }
+            _ => Some(ConstantValue::Real(left.as_f64() / right.as_f64())),
+        }
+    }
+
+    fn constant_mod(left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+        match (left, right) {
+            (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+                left.checked_rem(right).map(ConstantValue::Integer)
+            }
+            _ => Some(ConstantValue::Real(left.as_f64() % right.as_f64())),
+        }
+    }
+
+    fn constant_pow(left: ConstantValue, right: ConstantValue) -> Option<ConstantValue> {
+        match (left, right) {
+            (ConstantValue::Integer(left), ConstantValue::Integer(right)) => {
+                let exponent = u32::try_from(right).ok()?;
+                left.checked_pow(exponent).map(ConstantValue::Integer)
+            }
+            _ => Some(ConstantValue::Real(left.as_f64().powf(right.as_f64()))),
+        }
+    }
+
+    fn constant_min(left: ConstantValue, right: ConstantValue) -> ConstantValue {
+        if left.is_real() || right.is_real() {
+            ConstantValue::Real(left.as_f64().min(right.as_f64()))
+        } else {
+            ConstantValue::Integer(
+                Self::constant_integer(left)
+                    .expect("integer checked")
+                    .min(Self::constant_integer(right).expect("integer checked")),
+            )
+        }
+    }
+
+    fn constant_max(left: ConstantValue, right: ConstantValue) -> ConstantValue {
+        if left.is_real() || right.is_real() {
+            ConstantValue::Real(left.as_f64().max(right.as_f64()))
+        } else {
+            ConstantValue::Integer(
+                Self::constant_integer(left)
+                    .expect("integer checked")
+                    .max(Self::constant_integer(right).expect("integer checked")),
+            )
+        }
+    }
+
+    fn eval_const_value_with(
+        expr: &Expression,
+        env: &HashMap<SmolStr, ConstantValue>,
+    ) -> Option<ConstantValue> {
+        let eval = |e: &Expression| Self::eval_const_value_with(e, env);
         match expr {
-            Expression::Number(n) => Some(n.value),
+            Expression::Number(number) => Some(
+                Self::integer_literal_value(number)
+                    .map(ConstantValue::Integer)
+                    .unwrap_or(ConstantValue::Real(number.value)),
+            ),
             Expression::Unary(u) => {
                 let v = eval(&u.operand)?;
                 Some(match u.op {
-                    UnaryOp::Neg => -v,
-                    UnaryOp::Pos => v,
-                    UnaryOp::Not => {
-                        if v == 0.0 {
-                            1.0
-                        } else {
-                            0.0
+                    UnaryOp::Neg => match v {
+                        ConstantValue::Integer(value) => {
+                            ConstantValue::Integer(value.checked_neg()?)
                         }
-                    }
-                    UnaryOp::BitNot => (!Self::exact_const_i64(v)?) as f64,
+                        ConstantValue::Real(value) => ConstantValue::Real(-value),
+                    },
+                    UnaryOp::Pos => v,
+                    UnaryOp::Not => ConstantValue::Integer(i64::from(!v.is_truthy())),
+                    UnaryOp::BitNot => match v {
+                        ConstantValue::Integer(value) => ConstantValue::Integer(!value),
+                        ConstantValue::Real(_) => return None,
+                    },
                 })
             }
             Expression::Binary(b) => {
                 let l = eval(&b.left)?;
                 let r = eval(&b.right)?;
                 Some(match b.op {
-                    BinaryOp::Add => l + r,
-                    BinaryOp::Sub => l - r,
-                    BinaryOp::Mul => l * r,
-                    BinaryOp::Div => l / r,
-                    BinaryOp::Mod => l % r,
-                    BinaryOp::Pow => l.powf(r),
-                    BinaryOp::Eq => f64::from(l == r),
-                    BinaryOp::Ne => f64::from(l != r),
-                    BinaryOp::Lt => f64::from(l < r),
-                    BinaryOp::Le => f64::from(l <= r),
-                    BinaryOp::Gt => f64::from(l > r),
-                    BinaryOp::Ge => f64::from(l >= r),
-                    BinaryOp::And => f64::from(l != 0.0 && r != 0.0),
-                    BinaryOp::Or => f64::from(l != 0.0 || r != 0.0),
+                    BinaryOp::Add => Self::constant_add(l, r)?,
+                    BinaryOp::Sub => Self::constant_sub(l, r)?,
+                    BinaryOp::Mul => Self::constant_mul(l, r)?,
+                    BinaryOp::Div => Self::constant_div(l, r)?,
+                    BinaryOp::Mod => Self::constant_mod(l, r)?,
+                    BinaryOp::Pow => Self::constant_pow(l, r)?,
+                    BinaryOp::Eq => ConstantValue::Integer(i64::from(l.as_f64() == r.as_f64())),
+                    BinaryOp::Ne => ConstantValue::Integer(i64::from(l.as_f64() != r.as_f64())),
+                    BinaryOp::Lt => ConstantValue::Integer(i64::from(l.as_f64() < r.as_f64())),
+                    BinaryOp::Le => ConstantValue::Integer(i64::from(l.as_f64() <= r.as_f64())),
+                    BinaryOp::Gt => ConstantValue::Integer(i64::from(l.as_f64() > r.as_f64())),
+                    BinaryOp::Ge => ConstantValue::Integer(i64::from(l.as_f64() >= r.as_f64())),
+                    BinaryOp::And => {
+                        ConstantValue::Integer(i64::from(l.is_truthy() && r.is_truthy()))
+                    }
+                    BinaryOp::Or => {
+                        ConstantValue::Integer(i64::from(l.is_truthy() || r.is_truthy()))
+                    }
                     BinaryOp::Shl => {
-                        let value = Self::exact_const_i64(l)?;
-                        let shift = u32::try_from(Self::exact_const_i64(r)?).ok()?;
-                        value.checked_shl(shift)? as f64
+                        let ConstantValue::Integer(value) = l else {
+                            return None;
+                        };
+                        let ConstantValue::Integer(shift) = r else {
+                            return None;
+                        };
+                        ConstantValue::Integer(value.checked_shl(u32::try_from(shift).ok()?)?)
                     }
                     BinaryOp::Shr => {
-                        let value = Self::exact_const_i64(l)?;
-                        let shift = u32::try_from(Self::exact_const_i64(r)?).ok()?;
-                        value.checked_shr(shift)? as f64
+                        let ConstantValue::Integer(value) = l else {
+                            return None;
+                        };
+                        let ConstantValue::Integer(shift) = r else {
+                            return None;
+                        };
+                        ConstantValue::Integer(value.checked_shr(u32::try_from(shift).ok()?)?)
                     }
-                    BinaryOp::BitAnd => {
-                        (Self::exact_const_i64(l)? & Self::exact_const_i64(r)?) as f64
-                    }
-                    BinaryOp::BitOr => {
-                        (Self::exact_const_i64(l)? | Self::exact_const_i64(r)?) as f64
-                    }
-                    BinaryOp::BitXor => {
-                        (Self::exact_const_i64(l)? ^ Self::exact_const_i64(r)?) as f64
-                    }
+                    BinaryOp::BitAnd => ConstantValue::Integer(
+                        Self::constant_integer(l)? & Self::constant_integer(r)?,
+                    ),
+                    BinaryOp::BitOr => ConstantValue::Integer(
+                        Self::constant_integer(l)? | Self::constant_integer(r)?,
+                    ),
+                    BinaryOp::BitXor => ConstantValue::Integer(
+                        Self::constant_integer(l)? ^ Self::constant_integer(r)?,
+                    ),
                 })
             }
             Expression::Conditional(c) => {
                 let cond = eval(&c.condition)?;
-                if cond != 0.0 {
+                if cond.is_truthy() {
                     eval(&c.then_expr)
                 } else {
                     eval(&c.else_expr)
                 }
             }
             Expression::Call(call) => {
-                let args: Option<Vec<f64>> = call.args.iter().map(eval).collect();
+                let args: Option<Vec<ConstantValue>> = call.args.iter().map(eval).collect();
                 let args = args?;
                 match (call.name.as_str(), args.as_slice()) {
-                    ("abs", [x]) => Some(x.abs()),
-                    ("sqrt", [x]) => Some(x.sqrt()),
-                    ("exp", [x]) => Some(x.exp()),
-                    ("ln" | "log", [x]) => Some(x.ln()),
-                    ("log10", [x]) => Some(x.log10()),
-                    ("floor", [x]) => Some(x.floor()),
-                    ("ceil", [x]) => Some(x.ceil()),
-                    ("min", [a, b]) => Some(a.min(*b)),
-                    ("max", [a, b]) => Some(a.max(*b)),
-                    ("pow", [a, b]) => Some(a.powf(*b)),
+                    ("abs", [ConstantValue::Integer(value)]) => {
+                        Some(ConstantValue::Integer(value.checked_abs()?))
+                    }
+                    ("abs", [value]) => Some(ConstantValue::Real(value.as_f64().abs())),
+                    ("sqrt", [value]) => Some(ConstantValue::Real(value.as_f64().sqrt())),
+                    ("exp", [value]) => Some(ConstantValue::Real(value.as_f64().exp())),
+                    ("ln" | "log", [value]) => Some(ConstantValue::Real(value.as_f64().ln())),
+                    ("log10", [value]) => Some(ConstantValue::Real(value.as_f64().log10())),
+                    ("floor", [value]) => Some(ConstantValue::Real(value.as_f64().floor())),
+                    ("ceil", [value]) => Some(ConstantValue::Real(value.as_f64().ceil())),
+                    ("min", [a, b]) => Some(Self::constant_min(*a, *b)),
+                    ("max", [a, b]) => Some(Self::constant_max(*a, *b)),
+                    ("pow", [a, b]) => Some(ConstantValue::Real(a.as_f64().powf(b.as_f64()))),
                     _ => None,
                 }
             }
             Expression::Identifier(ident) => match ident.name.as_str() {
-                "inf" => Some(f64::INFINITY),
+                "inf" => Some(ConstantValue::Real(f64::INFINITY)),
                 name => env.get(name).copied(),
             },
             _ => None,
         }
+    }
+
+    /// Compatibility entry point for hierarchy elaboration, whose resolved
+    /// scalar vector is still represented as `f64`. Literal arithmetic keeps
+    /// its source type; resolved identifiers are real until the hierarchy
+    /// parameter vector gains explicit type metadata.
+    fn eval_const_with(expr: &Expression, env: &HashMap<SmolStr, f64>) -> Option<f64> {
+        let typed_env = env
+            .iter()
+            .map(|(name, value)| (name.clone(), ConstantValue::Real(*value)))
+            .collect();
+        Self::eval_const_value_with(expr, &typed_env).map(ConstantValue::as_f64)
     }
 
     fn parse_range(

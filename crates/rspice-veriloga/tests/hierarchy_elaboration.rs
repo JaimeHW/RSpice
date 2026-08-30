@@ -50,6 +50,29 @@ endmodule
 }
 
 #[test]
+fn hierarchy_array_shape_preserves_dependent_integer_division() {
+    let source = r#"
+module shaped(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer denominator = 2;
+    parameter real left = 1 / denominator;
+    parameter real taps[left:0] = '{1.0};
+    analog I(p, n) <+ 0.0;
+endmodule
+module parent(p, n);
+    inout p, n;
+    electrical p, n;
+    shaped stage(p, n);
+endmodule
+"#;
+
+    VerilogACompiler::default()
+        .compile_canonical_ir_module(source, Some("parent"))
+        .expect("integer division must resolve the child array shape to one element");
+}
+
+#[test]
 fn child_parameter_override_is_symbolic_and_not_public_abi() {
     let source = r#"
 `include "disciplines.vams"

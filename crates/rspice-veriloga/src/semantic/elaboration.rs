@@ -9,7 +9,8 @@
 use super::{
     AnalyzedArray, AnalyzedAssignment, AnalyzedBranch, AnalyzedContribution, AnalyzedFile,
     AnalyzedInternalNode, AnalyzedLoop, AnalyzedModule, AnalyzedParameter, AnalyzedRegion,
-    AnalyzedStatement, MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK, SemanticAnalyzer,
+    AnalyzedStatement, ConstantValue, MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK,
+    SemanticAnalyzer,
 };
 use crate::ast::{
     AnalogOperator, ArrayAccessExpr, ArrayLiteralExpr, BinaryExpr, BranchAccess, CallExpr,
@@ -478,9 +479,12 @@ impl<'a> HierarchyElaborator<'a> {
                 .default_expr
                 .as_ref()
                 .and_then(|expression| {
-                    SemanticAnalyzer::eval_const_with(expression, &parent_values)
+                    SemanticAnalyzer::eval_const_value_with(expression, &parent_values)
                 })
-                .or(parameter.default);
+                .or_else(|| parameter.default.map(ConstantValue::Real))
+                .and_then(|value| {
+                    SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
+                });
             if let Some(value) = value {
                 parent_values.insert(parameter.name.clone(), value);
             }
@@ -497,24 +501,34 @@ impl<'a> HierarchyElaborator<'a> {
                 .default_expr
                 .as_ref()
                 .and_then(|expression| {
-                    SemanticAnalyzer::eval_const_with(expression, &declared_values)
+                    SemanticAnalyzer::eval_const_value_with(expression, &declared_values)
                 })
-                .or(parameter.default);
+                .or_else(|| parameter.default.map(ConstantValue::Real))
+                .and_then(|value| {
+                    SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
+                });
             if let Some(value) = declared {
                 declared_values.insert(parameter.name.clone(), value);
             }
 
             let effective = if let Some(override_expression) = overrides.get(&index) {
                 let expression = rewrite_expression(override_expression, parent_scope)?;
-                SemanticAnalyzer::eval_const_with(&expression, &parent_values)
+                SemanticAnalyzer::eval_const_value_with(&expression, &parent_values).and_then(
+                    |value| {
+                        SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
+                    },
+                )
             } else {
                 parameter
                     .default_expr
                     .as_ref()
                     .and_then(|expression| {
-                        SemanticAnalyzer::eval_const_with(expression, &effective_values)
+                        SemanticAnalyzer::eval_const_value_with(expression, &effective_values)
                     })
-                    .or(parameter.default)
+                    .or_else(|| parameter.default.map(ConstantValue::Real))
+                    .and_then(|value| {
+                        SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
+                    })
             };
             if let Some(value) = effective {
                 effective_values.insert(parameter.name.clone(), value);
@@ -693,7 +707,7 @@ impl<'a> HierarchyElaborator<'a> {
 
 fn resolve_parameter_array_shape(
     parameter: &AnalyzedParameter,
-    scalar_values: &HashMap<SmolStr, f64>,
+    scalar_values: &HashMap<SmolStr, ConstantValue>,
     path: &str,
     value_kind: &str,
 ) -> CompileResult<EffectiveParameterArrayShape> {
@@ -713,8 +727,8 @@ fn resolve_parameter_array_shape(
     let mut total_elements = 1_u64;
     for (dimension_index, dimension) in parameter.dimensions.iter().enumerate() {
         let resolve_bound = |side: &str, expression: &Expression| {
-            SemanticAnalyzer::eval_const_with(expression, scalar_values)
-                .and_then(SemanticAnalyzer::exact_const_i64)
+            SemanticAnalyzer::eval_const_value_with(expression, scalar_values)
+                .and_then(|value| SemanticAnalyzer::exact_const_i64(value.as_f64()))
                 .ok_or_else(|| {
                     semantic_error(
                         SemanticErrorKind::InvalidExpression(format!(

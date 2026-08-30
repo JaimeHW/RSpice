@@ -45,6 +45,58 @@ fn flat_assignments(m: &AnalyzedModule) -> Vec<&AnalyzedAssignment> {
 }
 
 #[test]
+fn constant_arithmetic_preserves_integer_and_real_literal_types() {
+    let module = analyze_one(&module_src(
+        r#"
+            parameter real integer_division = 1 / 2;
+            parameter real real_division = 1 / 2.0;
+            parameter integer denominator = 2;
+            parameter real dependent_integer_division = 1 / denominator;
+            parameter real promoted_division = 1.0 / denominator;
+            parameter real shaped[dependent_integer_division:0] = '{1.0};
+            analog I(p, n) <+ V(p, n);
+        "#,
+    ));
+
+    let defaults = module
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), parameter.default))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(defaults["integer_division"], Some(0.0));
+    assert_eq!(defaults["real_division"], Some(0.5));
+    assert_eq!(defaults["dependent_integer_division"], None);
+    assert_eq!(defaults["promoted_division"], None);
+}
+
+#[test]
+fn numeric_literal_expression_types_match_the_lexer_token_kind() {
+    let module = analyze_one(&module_src(
+        r#"
+            real from_integer;
+            real from_real;
+            analog begin
+                from_integer = 1;
+                from_real = 1.0;
+                I(p, n) <+ V(p, n);
+            end
+        "#,
+    ));
+
+    let assignments = flat_assignments(&module);
+    let from_integer = assignments
+        .iter()
+        .find(|assignment| assignment.target == "from_integer")
+        .expect("integer-literal assignment");
+    let from_real = assignments
+        .iter()
+        .find(|assignment| assignment.target == "from_real")
+        .expect("real-literal assignment");
+    assert_eq!(from_integer.expr_type, ValueType::Integer);
+    assert_eq!(from_real.expr_type, ValueType::Real);
+}
+
+#[test]
 fn conditional_assignment_lowered_to_guarded_expression() {
     let m = analyze_one(&module_src(
         r#"
