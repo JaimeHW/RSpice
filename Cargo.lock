@@ -1503,8 +1503,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6758be723a3f298bbfda4db75748bc2ba0abafe096b6383c7c32da264764fbc3"
 dependencies = [
  "bytemuck",
- "emath",
+ "emath 0.35.0",
  "serde",
+]
+
+[[package]]
+name = "ecolor"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc883f505d446814c0226bef4b64564b9adb9966fc00c88c57ce6d827dd152d6"
+dependencies = [
+ "emath 0.36.1",
 ]
 
 [[package]]
@@ -1541,7 +1550,7 @@ dependencies = [
  "ahash",
  "bytemuck",
  "document-features",
- "egui",
+ "egui 0.35.0",
  "egui-wgpu",
  "egui-winit",
  "egui_glow",
@@ -1581,9 +1590,9 @@ dependencies = [
  "accesskit",
  "ahash",
  "bitflags 2.13.1",
- "emath",
- "epaint",
- "itertools",
+ "emath 0.35.0",
+ "epaint 0.35.0",
+ "itertools 0.14.0",
  "log",
  "nohash-hasher",
  "profiling",
@@ -1591,6 +1600,26 @@ dependencies = [
  "serde",
  "smallvec",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "egui"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c977ac91dfaa651633fd9722e4ce9ccb32cda4c748b89a5cb57e504036e37c13"
+dependencies = [
+ "accesskit",
+ "ahash",
+ "bitflags 2.13.1",
+ "emath 0.36.1",
+ "epaint 0.36.1",
+ "itertools 0.15.0",
+ "log",
+ "nohash-hasher",
+ "profiling",
+ "smallvec",
+ "unicode-segmentation",
+ "web-sys",
 ]
 
 [[package]]
@@ -1602,8 +1631,8 @@ dependencies = [
  "ahash",
  "bytemuck",
  "document-features",
- "egui",
- "epaint",
+ "egui 0.35.0",
+ "epaint 0.35.0",
  "log",
  "profiling",
  "thiserror 2.0.20",
@@ -1622,7 +1651,7 @@ dependencies = [
  "accesskit_winit",
  "arboard",
  "bytemuck",
- "egui",
+ "egui 0.35.0",
  "log",
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
@@ -1643,9 +1672,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2bd33be7338367bf21f54d62e069d58a5fb3ae033fa8bc6df7a77b9ef4cf957"
 dependencies = [
  "ahash",
- "egui",
+ "egui 0.35.0",
  "enum-map",
- "itertools",
+ "itertools 0.14.0",
  "log",
  "profiling",
 ]
@@ -1657,7 +1686,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52274b9bfb8d8e252cd0f00c9f6214f360d75a0962baa77a2d62ddb002fe99d4"
 dependencies = [
  "bytemuck",
- "egui",
+ "egui 0.35.0",
  "glow",
  "log",
  "memoffset",
@@ -1679,6 +1708,12 @@ dependencies = [
  "bytemuck",
  "serde",
 ]
+
+[[package]]
+name = "emath"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dce03cf1604f74515830012c29991beb0b58f69e4e43f5afe22fa7afed65ccd5"
 
 [[package]]
 name = "encode_unicode"
@@ -1796,29 +1831,52 @@ checksum = "4e60a8888b51da911df23918fd7301359b1d43a406a0ff3b8863af093dd7fc6c"
 dependencies = [
  "ahash",
  "bytemuck",
- "ecolor",
- "emath",
- "epaint_default_fonts",
- "font-types",
- "harfrust",
+ "ecolor 0.35.0",
+ "emath 0.35.0",
+ "font-types 0.11.3",
+ "harfrust 0.7.0",
  "log",
  "nohash-hasher",
  "parking_lot",
  "profiling",
  "self_cell",
  "serde",
- "skrifa",
+ "skrifa 0.42.1",
  "smallvec",
  "unicode-general-category",
  "unicode-segmentation",
- "vello_cpu",
+ "vello_cpu 0.0.9",
+]
+
+[[package]]
+name = "epaint"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11863a6b2b7823010c1090ddf4706947bdda46766742def0673195cbf7ff4a73"
+dependencies = [
+ "ahash",
+ "ecolor 0.36.1",
+ "emath 0.36.1",
+ "epaint_default_fonts",
+ "font-types 0.12.4",
+ "harfrust 0.12.0",
+ "log",
+ "nohash-hasher",
+ "parking_lot",
+ "profiling",
+ "self_cell",
+ "skrifa 0.44.0",
+ "smallvec",
+ "unicode-general-category",
+ "unicode-segmentation",
+ "vello_cpu 0.1.0",
 ]
 
 [[package]]
 name = "epaint_default_fonts"
-version = "0.35.0"
+version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13ee4e1f553a3584c301f3a56ff1a775f1384781396cea301c8d952e9b93f560"
+checksum = "18dee69613aac468922cf28a32025eb7d7ed6985b61f73245848e58f37876c98"
 
 [[package]]
 name = "equator"
@@ -2056,6 +2114,15 @@ checksum = "5b38ad915f6dadd993ced50848a8291a543bd41ca62bc10740d5e64e2ab4cfd7"
 dependencies = [
  "bytemuck",
  "serde",
+]
+
+[[package]]
+name = "font-types"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e64eb721ca85a34323425f4041adc5d82704d3782d5f8f03793bc012419dce23"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -2418,9 +2485,25 @@ dependencies = [
  "hashbrown 0.17.1",
  "log",
  "peniko",
- "skrifa",
+ "skrifa 0.42.1",
  "smallvec",
- "vello_common",
+ "vello_common 0.0.9",
+]
+
+[[package]]
+name = "glifo"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed4a1bb24121291d27230c1b1b44e07d6a9b28cefdb32fe1581dfb84e14f940a"
+dependencies = [
+ "bytemuck",
+ "foldhash 0.2.0",
+ "hashbrown 0.17.1",
+ "log",
+ "peniko",
+ "skrifa 0.44.0",
+ "smallvec",
+ "vello_common 0.1.0",
 ]
 
 [[package]]
@@ -2564,7 +2647,19 @@ checksum = "0431e8e389aa0f1e72bb9d1c2db8957a1a7a3580e8ed97db819c14837aac9b3e"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
- "read-fonts",
+ "read-fonts 0.39.2",
+ "smallvec",
+]
+
+[[package]]
+name = "harfrust"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c03d949a14aa089bbb282f7dd76a498a7f684428e4257202efc119ec010376f9"
+dependencies = [
+ "bitflags 2.13.1",
+ "bytemuck",
+ "read-fonts 0.41.0",
  "smallvec",
 ]
 
@@ -2967,6 +3062,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3145,7 +3249,7 @@ dependencies = [
  "rustc-hash 2.1.3",
  "rustybuzz",
  "siphasher",
- "skrifa",
+ "skrifa 0.42.1",
  "smallvec",
  "subsetter",
  "tiny-skia-path 0.12.0",
@@ -4754,7 +4858,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4ed38b89c2c77ff968c524145ad65fb010f38af5c7a224b53b81d47ac2daa81"
 dependencies = [
  "bytemuck",
- "font-types",
+ "font-types 0.11.3",
+]
+
+[[package]]
+name = "read-fonts"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "046a7d674daf459825b32f5062056d6882db0d2f5a479fbd76ccfc870ac18709"
+dependencies = [
+ "bytemuck",
+ "font-types 0.12.4",
+ "once_cell",
 ]
 
 [[package]]
@@ -5242,7 +5357,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "eframe",
- "egui",
+ "egui 0.36.1",
  "egui_extras",
  "env_logger",
  "futures-util",
@@ -5696,7 +5811,7 @@ name = "rspice-viewer"
 version = "0.1.0"
 dependencies = [
  "eframe",
- "egui",
+ "egui 0.36.1",
  "rspice-publication-contract",
  "rspice-publish",
  "serde_json",
@@ -6010,9 +6125,9 @@ dependencies = [
 
 [[package]]
 name = "self_cell"
-version = "1.2.2"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b12e76d157a900eb52e81bc6e9f3069344290341720e9178cde2407113ac8d89"
+checksum = "2ab42ca02749e120097e328d91d415325bdf43b1c72c4c8badf37375fe40a813"
 
 [[package]]
 name = "semver"
@@ -6236,7 +6351,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c34617370ae968efb7161bb2beb517d9084659aae19e24b89e3db25b46e4564"
 dependencies = [
  "bytemuck",
- "read-fonts",
+ "read-fonts 0.39.2",
+]
+
+[[package]]
+name = "skrifa"
+version = "0.44.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "819ab7d62b1d3e72d9d9dea5650bac30424f9111364bb94928dbf5ecad1baa68"
+dependencies = [
+ "bytemuck",
+ "read-fonts 0.41.0",
 ]
 
 [[package]]
@@ -6461,7 +6586,7 @@ checksum = "38803281d1c23166c5ebcb455439a5d2afe711cc909cf88af72448c297756ad6"
 dependencies = [
  "kurbo",
  "rustc-hash 2.1.3",
- "skrifa",
+ "skrifa 0.42.1",
  "write-fonts",
 ]
 
@@ -7245,15 +7370,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "vello_common"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2e9aed918117e8152c9eddfd8362d73c465c23f26c44786aa331707b8a64fa2"
+dependencies = [
+ "bytemuck",
+ "fearless_simd",
+ "guillotiere",
+ "log",
+ "peniko",
+ "smallvec",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "vello_cpu"
 version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "588691169aed86b5c8fb487266afee01323234e6fd0a3f2aaec0eaa8e4007f23"
 dependencies = [
  "bytemuck",
- "glifo",
+ "glifo 0.1.1",
  "hashbrown 0.17.1",
- "vello_common",
+ "vello_common 0.0.9",
+]
+
+[[package]]
+name = "vello_cpu"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac7349e1f55f6b801c7c277958df4ea53e7f20f21e8014910ad888b2ecda93ea"
+dependencies = [
+ "bytemuck",
+ "glifo 0.2.0",
+ "hashbrown 0.17.1",
+ "vello_common 0.1.0",
 ]
 
 [[package]]
@@ -8403,11 +8555,11 @@ version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb731d4c4d93eacc69a1ad2f270f905788a98e4a3438267bcafbe08d3431c8d8"
 dependencies = [
- "font-types",
+ "font-types 0.11.3",
  "indexmap",
  "kurbo",
  "log",
- "read-fonts",
+ "read-fonts 0.39.2",
 ]
 
 [[package]]

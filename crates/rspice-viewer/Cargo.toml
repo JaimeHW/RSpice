@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rspice-publication-contract.workspace = true
-egui = "0.35.0"
+egui = "0.36.1"
 serde_json.workspace = true
 sha2 = "0.10"
 thiserror.workspace = true

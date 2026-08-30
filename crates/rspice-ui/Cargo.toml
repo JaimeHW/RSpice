@@ -98,7 +98,7 @@ ropey.workspace = true
 krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
-egui = { version = "0.35.0", default-features = false }
+egui = { version = "0.36.1", default-features = false }
 egui_extras = { version = "0.35.0", default-features = false }
 
 # SVG parsing and deterministic software rendering. System font discovery stays
