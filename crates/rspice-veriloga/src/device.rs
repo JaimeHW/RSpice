@@ -5931,7 +5931,7 @@ endmodule
 module native_laplace_error_path(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ laplace_nd(V(p, n), {1.0}, {1.0, 1.0});
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
 endmodule
 "#,
         );

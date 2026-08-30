@@ -4769,6 +4769,7 @@ impl SemanticAnalyzer {
             Expression::Call(call) => {
                 self.validate_builtin_call_arity(call)?;
                 self.validate_null_arguments(call)?;
+                self.validate_filter_vector_operands(call)?;
                 if is_zi_operator_name(&call.name) {
                     self.validate_zi_operand_budget(call)?;
                     self.validate_zi_definition_purity(call)?;
@@ -5416,6 +5417,63 @@ impl SemanticAnalyzer {
                     )),
                     argument.span(),
                 )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Enforce the Verilog-AMS array-value grammar used by the Laplace and Zi
+    /// operators. An ordinary brace concatenation is a packed value, not an
+    /// unpacked coefficient/root vector, and a bare scalar cannot be silently
+    /// promoted to a one-element vector.
+    fn validate_filter_vector_operands(&self, call: &CallExpr) -> CompileResult<()> {
+        let normalized = call.name.to_ascii_lowercase();
+        let roles = match normalized.as_str() {
+            "laplace_zp" | "zi_zp" => ("zeros", "poles", true),
+            "laplace_zd" | "zi_zd" => ("zeros", "denominator", true),
+            "laplace_np" | "zi_np" => ("numerator", "poles", false),
+            "laplace_nd" | "zi_nd" => ("numerator", "denominator", false),
+            _ => return Ok(()),
+        };
+
+        for (index, role, allow_null) in [(1, roles.0, roles.2), (2, roles.1, false)] {
+            let Some(argument) = call.args.get(index) else {
+                // The arity validator owns the missing-argument diagnostic.
+                continue;
+            };
+            match argument {
+                Expression::NullArgument(_) if allow_null => {}
+                Expression::ArrayLiteral(array) if array.assignment_pattern => {}
+                Expression::ArrayLiteral(array) => {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(format!(
+                            "{} {role} vector must be an assignment pattern opened with `'{{` or an array identifier; ordinary concatenation `{{...}}` is not a Verilog-AMS array value",
+                            call.name
+                        )),
+                        array.span,
+                    )));
+                }
+                Expression::Identifier(identifier)
+                    if self.parameter_arrays.contains(&identifier.name)
+                        || self.arrays.contains_key(&identifier.name) =>
+                {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "{} {role} array identifier '{}' is valid Verilog-AMS syntax, but executable filter array operands are not implemented yet",
+                            call.name, identifier.name
+                        )),
+                        identifier.span,
+                    )));
+                }
+                other => {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(format!(
+                            "{} {role} operand must be an assignment pattern opened with `'{{` or an array identifier; a scalar expression is not a filter vector",
+                            call.name
+                        )),
+                        other.span(),
+                    )));
+                }
             }
         }
         Ok(())

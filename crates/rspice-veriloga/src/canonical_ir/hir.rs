@@ -791,6 +791,7 @@ impl HirModel {
             }
             HirExprKind::Call { name, args } => {
                 self.validate_expression_child_list(diagnostics, expression, "arg", args);
+                self.validate_filter_call_vectors(diagnostics, name, args);
                 self.validate_zi_call_budget(diagnostics, expression, name, args);
             }
             HirExprKind::Binary { left, right, .. } => {
@@ -1223,6 +1224,50 @@ impl HirModel {
                 CompilerPhase::HirValidation,
                 error.to_string(),
                 expression.span,
+            ));
+        }
+    }
+
+    fn validate_filter_call_vectors(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        name: &SmolStr,
+        args: &[ExprId],
+    ) {
+        let normalized = name.to_ascii_lowercase();
+        let roles = match normalized.as_str() {
+            "laplace_zp" | "zi_zp" => ("zeros", "poles", true),
+            "laplace_zd" | "zi_zd" => ("zeros", "denominator", true),
+            "laplace_np" | "zi_np" => ("numerator", "poles", false),
+            "laplace_nd" | "zi_nd" => ("numerator", "denominator", false),
+            _ => return,
+        };
+
+        for (index, role, allow_null) in [(1, roles.0, roles.2), (2, roles.1, false)] {
+            let Some(id) = args.get(index) else {
+                return;
+            };
+            let Some(argument) = self.expressions.get(usize::from(*id)) else {
+                continue;
+            };
+            let detail = match &argument.kind {
+                HirExprKind::NullArgument if allow_null => continue,
+                HirExprKind::NullArgument => format!("{name} {role} operand may not be null"),
+                HirExprKind::ArrayLiteral {
+                    assignment_pattern: true,
+                    ..
+                } => continue,
+                HirExprKind::ArrayLiteral { .. } => format!(
+                    "{name} {role} vector must be an assignment pattern opened with `'{{` or an array identifier; ordinary concatenation `{{...}}` is not a Verilog-AMS array value"
+                ),
+                _ => format!(
+                    "{name} {role} operand must be an assignment pattern opened with `'{{` or an array identifier; a scalar expression is not a filter vector"
+                ),
+            };
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                detail,
+                argument.span,
             ));
         }
     }

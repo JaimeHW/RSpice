@@ -16,7 +16,7 @@ module zi_state(p, n);
   electrical p, n;
   real sampled;
   analog begin
-    sampled = zi_nd(V(p, n), {1.0, 0.25}, {1.0, -0.5}, 1.0e-6, 0.0);
+    sampled = zi_nd(V(p, n), '{1.0, 0.25}, '{1.0, -0.5}, 1.0e-6, 0.0);
     I(p, n) <+ sampled;
   end
 endmodule

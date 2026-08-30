@@ -3191,7 +3191,7 @@ mod tests {
             r#"module a(p, n);
                 inout p, n;
                 electrical p, n;
-                analog V(p, n) <+ laplace_nd(I(p, n), {1.0, 2.0}, {0.5});
+                analog V(p, n) <+ laplace_nd(I(p, n), '{1.0, 2.0}, '{0.5});
             endmodule"#,
         );
         let stmts = &m.analog_block.as_ref().unwrap().statements;
@@ -3202,7 +3202,10 @@ mod tests {
             panic!("expected call, got {:?}", c.value);
         };
         assert_eq!(call.name.as_str(), "laplace_nd");
-        assert!(matches!(call.args[1], Expression::ArrayLiteral(_)));
+        assert!(matches!(
+            call.args[1],
+            Expression::ArrayLiteral(ref array) if array.assignment_pattern
+        ));
     }
 
     #[test]

@@ -171,7 +171,7 @@ module va_zi_lifecycle(p, n);
     electrical p, n;
     real sampled;
     analog begin
-        sampled = zi_nd(1.0, {1.0}, {1.0}, 1.0e-6, 0.0);
+        sampled = zi_nd(1.0, '{1.0}, '{1.0}, 1.0e-6, 0.0);
         V(p, n) <+ sampled;
     end
 endmodule
@@ -220,7 +220,7 @@ module va_zi_checkpoint(p, n);
     electrical p, n;
     real sampled;
     analog begin
-        sampled = zi_nd(1.0, {0.5, 0.25}, {1.0, -0.5}, 1.0e-6, 0.0);
+        sampled = zi_nd(1.0, '{0.5, 0.25}, '{1.0, -0.5}, 1.0e-6, 0.0);
         V(p, n) <+ sampled;
     end
 endmodule

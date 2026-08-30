@@ -1135,6 +1135,49 @@ fn diagnostics_can_be_global_without_source_span() {
 }
 
 #[test]
+fn canonical_hir_rejects_filter_concatenations_at_the_operand_span() {
+    let source = r#"
+module filter_pattern(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
+endmodule
+"#;
+    let analyzed = analyze_fixture(source, "filter_pattern").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    hir.validate()
+        .expect("assignment-pattern filter operands must validate");
+
+    let numerator = hir
+        .expressions
+        .iter()
+        .find_map(|expression| match &expression.kind {
+            HirExprKind::Call { name, args } if name == "laplace_nd" => Some(args[1]),
+            _ => None,
+        })
+        .expect("laplace numerator expression");
+    let operand_span = hir.expressions[usize::from(numerator)].span;
+    let HirExprKind::ArrayLiteral {
+        assignment_pattern, ..
+    } = &mut hir.expressions[usize::from(numerator)].kind
+    else {
+        panic!("expected assignment-pattern numerator");
+    };
+    *assignment_pattern = false;
+
+    let diagnostics = hir
+        .validate()
+        .expect_err("ordinary concatenation must fail canonical HIR validation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.phase == CompilerPhase::HirValidation
+            && diagnostic.span == Some(operand_span)
+            && diagnostic.message.contains("ordinary concatenation")
+            && diagnostic.message.contains("assignment pattern")
+    }));
+}
+
+#[test]
 fn hir_lowering_preserves_analyzed_module_surface() {
     let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());

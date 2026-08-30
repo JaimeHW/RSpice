@@ -1242,8 +1242,18 @@ impl<'a> ExprConverter<'a> {
             "laplace_nd" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let numerator = self.const_real_array(require_arg(1)?)?;
-                let denominator = self.const_real_array(require_arg(2)?)?;
+                let numerator = self.const_filter_real_array(
+                    require_arg(1)?,
+                    "laplace_nd",
+                    "numerator",
+                    false,
+                )?;
+                let denominator = self.const_filter_real_array(
+                    require_arg(2)?,
+                    "laplace_nd",
+                    "denominator",
+                    false,
+                )?;
                 validate_laplace_coefficients("laplace_nd", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
                     expr: Box::new(expr),
@@ -1254,11 +1264,10 @@ impl<'a> ExprConverter<'a> {
             "laplace_zp" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let zeros = match require_arg(1)? {
-                    Expression::NullArgument(_) => Vec::new(),
-                    value => self.const_complex_pairs(value)?,
-                };
-                let poles = self.const_complex_pairs(require_arg(2)?)?;
+                let zeros =
+                    self.const_complex_pairs(require_arg(1)?, "laplace_zp", "zeros", true)?;
+                let poles =
+                    self.const_complex_pairs(require_arg(2)?, "laplace_zp", "poles", false)?;
                 validate_laplace_roots("laplace_zp", &zeros, &poles)?;
                 Ok(IrExpr::LaplaceZP {
                     expr: Box::new(expr),
@@ -1272,11 +1281,14 @@ impl<'a> ExprConverter<'a> {
                 // zeros (pairs) + denominator coefficients: expand the
                 // zeros into a numerator polynomial
                 let expr = self.convert(require_arg(0)?)?;
-                let zeros = match require_arg(1)? {
-                    Expression::NullArgument(_) => Vec::new(),
-                    value => self.const_complex_pairs(value)?,
-                };
-                let denominator = self.const_real_array(require_arg(2)?)?;
+                let zeros =
+                    self.const_complex_pairs(require_arg(1)?, "laplace_zd", "zeros", true)?;
+                let denominator = self.const_filter_real_array(
+                    require_arg(2)?,
+                    "laplace_zd",
+                    "denominator",
+                    false,
+                )?;
                 let numerator = crate::laplace::roots_to_polynomial(&zeros).map_err(|e| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                         "laplace_zd zeros: {}",
@@ -1294,8 +1306,14 @@ impl<'a> ExprConverter<'a> {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 // numerator coefficients + poles (pairs)
                 let expr = self.convert(require_arg(0)?)?;
-                let numerator = self.const_real_array(require_arg(1)?)?;
-                let poles = self.const_complex_pairs(require_arg(2)?)?;
+                let numerator = self.const_filter_real_array(
+                    require_arg(1)?,
+                    "laplace_np",
+                    "numerator",
+                    false,
+                )?;
+                let poles =
+                    self.const_complex_pairs(require_arg(2)?, "laplace_np", "poles", false)?;
                 let denominator = crate::laplace::roots_to_polynomial(&poles).map_err(|e| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
                         "laplace_np poles: {}",
@@ -1317,36 +1335,60 @@ impl<'a> ExprConverter<'a> {
                 let expr = self.convert(require_arg(0)?)?;
                 let (numerator, denominator) = match call.name.as_str() {
                     "zi_nd" => (
-                        crate::ir::ZiPolynomialDefinition::Coefficients(
-                            self.zi_real_array(require_arg(1)?, false)?,
-                        ),
-                        crate::ir::ZiPolynomialDefinition::Coefficients(
-                            self.zi_real_array(require_arg(2)?, false)?,
-                        ),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                            require_arg(1)?,
+                            "zi_nd",
+                            "numerator",
+                            false,
+                        )?),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                            require_arg(2)?,
+                            "zi_nd",
+                            "denominator",
+                            false,
+                        )?),
                     ),
                     "zi_zp" => (
-                        crate::ir::ZiPolynomialDefinition::Roots(
-                            self.zi_complex_pairs(require_arg(1)?, true)?,
-                        ),
-                        crate::ir::ZiPolynomialDefinition::Roots(
-                            self.zi_complex_pairs(require_arg(2)?, false)?,
-                        ),
+                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                            require_arg(1)?,
+                            "zi_zp",
+                            "zeros",
+                            true,
+                        )?),
+                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                            require_arg(2)?,
+                            "zi_zp",
+                            "poles",
+                            false,
+                        )?),
                     ),
                     "zi_zd" => (
-                        crate::ir::ZiPolynomialDefinition::Roots(
-                            self.zi_complex_pairs(require_arg(1)?, true)?,
-                        ),
-                        crate::ir::ZiPolynomialDefinition::Coefficients(
-                            self.zi_real_array(require_arg(2)?, false)?,
-                        ),
+                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                            require_arg(1)?,
+                            "zi_zd",
+                            "zeros",
+                            true,
+                        )?),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                            require_arg(2)?,
+                            "zi_zd",
+                            "denominator",
+                            false,
+                        )?),
                     ),
                     _ => (
-                        crate::ir::ZiPolynomialDefinition::Coefficients(
-                            self.zi_real_array(require_arg(1)?, false)?,
-                        ),
-                        crate::ir::ZiPolynomialDefinition::Roots(
-                            self.zi_complex_pairs(require_arg(2)?, false)?,
-                        ),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(self.zi_real_array(
+                            require_arg(1)?,
+                            "zi_np",
+                            "numerator",
+                            false,
+                        )?),
+                        crate::ir::ZiPolynomialDefinition::Roots(self.zi_complex_pairs(
+                            require_arg(2)?,
+                            "zi_np",
+                            "poles",
+                            false,
+                        )?),
                     ),
                 };
                 validate_zi_polynomial_budget(&call.name, &numerator, &denominator)?;
@@ -1466,6 +1508,92 @@ impl<'a> ExprConverter<'a> {
             .collect()
     }
 
+    /// Return the flat expressions in a Verilog-AMS filter vector without
+    /// treating a concatenation or scalar expression as an unpacked array.
+    fn filter_vector_elements<'expr>(
+        &self,
+        expression: &'expr Expression,
+        operator: &str,
+        role: &str,
+        allow_null: bool,
+    ) -> CompileResult<Vec<&'expr Expression>> {
+        match expression {
+            Expression::NullArgument(_) if allow_null => Ok(Vec::new()),
+            Expression::NullArgument(span) => Err(CodeGenError::with_span(
+                CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} {role} operand may not be null"
+                )),
+                *span,
+            )
+            .into()),
+            Expression::ArrayLiteral(array) if !array.assignment_pattern => {
+                Err(CodeGenError::with_span(
+                    CodeGenErrorKind::InvalidExpression(format!(
+                        "{operator} {role} vector must be an assignment pattern opened with `'{{` or an array identifier; ordinary concatenation `{{...}}` is not a Verilog-AMS array value"
+                    )),
+                    array.span,
+                )
+                .into())
+            }
+            Expression::ArrayLiteral(array) => array
+                .elements
+                .iter()
+                .map(|element| match element {
+                    ArrayLiteralElement::Value(expression) => Ok(expression),
+                    ArrayLiteralElement::Replication(replication) => {
+                        Err(CodeGenError::with_span(
+                            CodeGenErrorKind::UnsupportedFeature(
+                                "replication in analog filter assignment patterns is parsed and retained, but executable expansion is not implemented; write the elements explicitly within the operand limit"
+                                    .into(),
+                            ),
+                            replication.span,
+                        )
+                        .into())
+                    }
+                })
+                .collect(),
+            Expression::Identifier(identifier) if self.ctx.array(&identifier.name).is_some() => {
+                Err(CodeGenError::with_span(
+                    CodeGenErrorKind::UnsupportedFeature(format!(
+                        "{operator} {role} array identifier '{}' is valid Verilog-AMS syntax, but executable filter array operands are not implemented yet",
+                        identifier.name
+                    )),
+                    identifier.span,
+                )
+                .into())
+            }
+            other => Err(CodeGenError::with_span(
+                CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} {role} operand must be an assignment pattern opened with `'{{` or an array identifier; a scalar expression is not a filter vector"
+                )),
+                other.span(),
+            )
+            .into()),
+        }
+    }
+
+    fn const_filter_real_array(
+        &self,
+        expression: &Expression,
+        operator: &str,
+        role: &str,
+        allow_null: bool,
+    ) -> CompileResult<Vec<f64>> {
+        self.filter_vector_elements(expression, operator, role, allow_null)?
+            .into_iter()
+            .map(|element| match autodiff_fold(self.convert(element)?) {
+                IrExpr::Const(value) => Ok(value),
+                _ => Err(CodeGenError::with_span(
+                    CodeGenErrorKind::UnsupportedFeature(format!(
+                        "{operator} {role} values must be compile-time constants (parameter-dependent values are not supported yet)"
+                    )),
+                    element.span(),
+                )
+                .into()),
+            })
+            .collect()
+    }
+
     fn zi_definition_arg(
         &self,
         expression: &Expression,
@@ -1511,47 +1639,24 @@ impl<'a> ExprConverter<'a> {
     fn zi_real_array(
         &self,
         expression: &Expression,
+        operator: &str,
+        role: &str,
         allow_null: bool,
     ) -> CompileResult<Vec<IrExpr>> {
-        if matches!(expression, Expression::NullArgument(_)) {
-            if allow_null {
-                return Ok(Vec::new());
-            }
-            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                "null filter operand is not authorized at this position".into(),
-            ))
-            .into());
-        }
-        let elements: Vec<&Expression> = match expression {
-            Expression::ArrayLiteral(array) => array
-                .elements
-                .iter()
-                .map(|element| match element {
-                    ArrayLiteralElement::Value(expression) => Ok(expression),
-                    ArrayLiteralElement::Replication(replication) => Err(CodeGenError::with_span(
-                        CodeGenErrorKind::UnsupportedFeature(
-                            "replication in analog filter coefficient lists is not yet supported; write coefficients explicitly within the operand limit"
-                                .into(),
-                        ),
-                        replication.span,
-                    )
-                    .into()),
-                })
-                .collect::<CompileResult<Vec<_>>>()?,
-            other => vec![other],
-        };
-        elements
+        self.filter_vector_elements(expression, operator, role, allow_null)?
             .into_iter()
-            .map(|value| self.zi_definition_arg(value, "zi filter", "coefficient/root"))
+            .map(|value| self.zi_definition_arg(value, operator, role))
             .collect()
     }
 
     fn zi_complex_pairs(
         &self,
         expression: &Expression,
+        operator: &str,
+        role: &str,
         allow_null: bool,
     ) -> CompileResult<Vec<(IrExpr, IrExpr)>> {
-        let values = self.zi_real_array(expression, allow_null)?;
+        let values = self.zi_real_array(expression, operator, role, allow_null)?;
         if !values.len().is_multiple_of(2) {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "zi pole/zero vectors must contain (real, imaginary) pairs".into(),
@@ -1622,8 +1727,14 @@ impl<'a> ExprConverter<'a> {
     }
 
     /// Evaluate an array-literal argument to constant (re, im) pairs
-    fn const_complex_pairs(&self, expr: &Expression) -> CompileResult<Vec<(f64, f64)>> {
-        let values = self.const_real_array(expr)?;
+    fn const_complex_pairs(
+        &self,
+        expression: &Expression,
+        operator: &str,
+        role: &str,
+        allow_null: bool,
+    ) -> CompileResult<Vec<(f64, f64)>> {
+        let values = self.const_filter_real_array(expression, operator, role, allow_null)?;
         if !values.len().is_multiple_of(2) {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "pole/zero vectors must contain (real, imaginary) pairs".into(),
@@ -2203,7 +2314,9 @@ impl<'a> ExprConverter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinaryExpr, ConditionalExpr, LaplaceKind, NumberLit, ZiKind};
+    use crate::ast::{
+        ArrayLiteralExpr, BinaryExpr, CallExpr, ConditionalExpr, LaplaceKind, NumberLit, ZiKind,
+    };
     use crate::source::Span;
 
     fn number(value: f64) -> Expression {
@@ -2225,6 +2338,52 @@ mod tests {
             num_internal: 0,
             default_transition: 1.0e-9,
         }
+    }
+
+    fn vector(values: &[f64], assignment_pattern: bool) -> Expression {
+        Expression::ArrayLiteral(ArrayLiteralExpr {
+            elements: values
+                .iter()
+                .copied()
+                .map(number)
+                .map(ArrayLiteralElement::Value)
+                .collect(),
+            assignment_pattern,
+            span: Span::dummy(),
+        })
+    }
+
+    #[test]
+    fn source_filter_calls_do_not_scalarize_concatenations_or_scalars() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let call = |numerator: Expression| {
+            Expression::Call(CallExpr {
+                name: "laplace_nd".into(),
+                args: vec![number(1.0), numerator, vector(&[1.0, 1.0], true)],
+                span: Span::dummy(),
+            })
+        };
+
+        let error = converter
+            .convert(&call(vector(&[1.0], false)))
+            .expect_err("concatenation is not a coefficient vector")
+            .to_string();
+        assert!(error.contains("ordinary concatenation"), "got: {error}");
+        assert!(error.contains("assignment pattern"), "got: {error}");
+
+        let error = converter
+            .convert(&call(number(1.0)))
+            .expect_err("scalar is not a coefficient vector")
+            .to_string();
+        assert!(error.contains("scalar expression"), "got: {error}");
+
+        assert!(matches!(
+            converter
+                .convert(&call(vector(&[1.0], true)))
+                .expect("assignment pattern is a coefficient vector"),
+            IrExpr::LaplaceND { .. }
+        ));
     }
 
     #[test]

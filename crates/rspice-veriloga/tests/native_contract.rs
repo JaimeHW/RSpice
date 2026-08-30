@@ -1072,7 +1072,7 @@ fn laplace_current_model() -> rspice_veriloga::CompiledModel {
 module native_laplace_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ laplace_nd(V(p, n), {1.0}, {1.0, 1.0});
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
 endmodule
 "#,
     )
@@ -1087,7 +1087,7 @@ module native_zi_current(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6, 0.0);
+        y = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1.0e-6, 0.0);
         I(p, n) <+ y;
     end
 endmodule
@@ -2366,7 +2366,7 @@ fn native_device_with_canonical_ir_executes_laplace_current_without_fallback() {
 module native_canonical_laplace_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ laplace_nd(V(p, n), {1.0}, {1.0, 1.0});
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2416,7 +2416,7 @@ module native_canonical_zi_current(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6, 0.0);
+        y = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1.0e-6, 0.0);
         I(p, n) <+ y;
     end
 endmodule

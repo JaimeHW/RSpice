@@ -97,6 +97,61 @@ fn numeric_literal_expression_types_match_the_lexer_token_kind() {
 }
 
 #[test]
+fn filter_vectors_require_assignment_patterns_and_report_the_operand_span() {
+    for (operator, role) in [("laplace_nd", "numerator"), ("zi_nd", "numerator")] {
+        let suffix = if operator.starts_with("zi_") {
+            ", 1.0e-6"
+        } else {
+            ""
+        };
+        let source = module_src(&format!(
+            "analog I(p, n) <+ {operator}(V(p, n), {{1.0}}, '{{1.0}}{suffix});"
+        ));
+        let expected_offset = source.find("{1.0}").expect("ordinary concatenation");
+        let error = analyze(&source).expect_err("concatenation is not a filter vector");
+        let CompileError::Semantic(error) = error else {
+            panic!("expected semantic diagnostic, got {error:?}");
+        };
+        assert_eq!(error.span.start, expected_offset as u32);
+        let message = error.to_string();
+        assert!(message.contains(role), "got: {message}");
+        assert!(message.contains("ordinary concatenation"), "got: {message}");
+        assert!(message.contains("assignment pattern"), "got: {message}");
+    }
+}
+
+#[test]
+fn filter_vectors_reject_bare_scalars_without_losing_authorized_null_zeros() {
+    let scalar_source = module_src("analog I(p, n) <+ laplace_nd(V(p, n), 1.0, '{1.0, 1.0});");
+    let expected_offset = scalar_source.find("1.0").expect("scalar operand");
+    let error = analyze(&scalar_source).expect_err("scalar is not a coefficient vector");
+    let CompileError::Semantic(error) = error else {
+        panic!("expected semantic diagnostic, got {error:?}");
+    };
+    assert_eq!(error.span.start, expected_offset as u32);
+    assert!(error.to_string().contains("scalar expression"));
+
+    analyze(&module_src(
+        "analog I(p, n) <+ laplace_zp(V(p, n),, '{-1.0, 0.0});",
+    ))
+    .expect("the zero-vector null is authorized for laplace_zp");
+    analyze(&module_src(
+        "analog I(p, n) <+ zi_zd(V(p, n),, '{1.0}, 1.0e-6);",
+    ))
+    .expect("the zero-vector null is authorized for zi_zd");
+}
+
+#[test]
+fn filter_assignment_pattern_replication_remains_fail_closed() {
+    let source = module_src("analog I(p, n) <+ laplace_nd(V(p, n), '{2{1.0}}, '{1.0, 1.0});");
+    let error = analyze(&source)
+        .expect_err("filter replication must remain retained and unsupported")
+        .to_string();
+    assert!(error.contains("replication in executable expressions"));
+    assert!(error.contains("not yet supported"));
+}
+
+#[test]
 fn conditional_assignment_lowered_to_guarded_expression() {
     let m = analyze_one(&module_src(
         r#"

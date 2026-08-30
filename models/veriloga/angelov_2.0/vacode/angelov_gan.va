@@ -576,7 +576,7 @@ module angelov_gan(d, g, s, t, rf);
 `ifdef USE_REALFREQ
                         I(di,si) <+ white_noise(NoisePwr * Klf, "Burst") * sqrt(1/(1+pow($realfreq/Fgr,2)));
 `else
-                        I(di,si) <+ laplace_np(white_noise(Klf*NoisePwr,"Burst"), {1}, {`M_TWO_PI*Fgr, 0.0, -`M_TWO_PI*Fgr, 0.0});
+                        I(di,si) <+ laplace_np(white_noise(Klf*NoisePwr,"Burst"), '{1}, '{`M_TWO_PI*Fgr, 0.0, -`M_TWO_PI*Fgr, 0.0});
 `endif
 `endif
                 end

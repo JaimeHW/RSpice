@@ -1205,7 +1205,7 @@ endmodule
     #[cfg(not(feature = "native"))]
     #[test]
     fn singular_dc_filter_reaches_typed_interpreter_error_boundary() {
-        let model = compile_filter("laplace_nd(V(p, n), {1.0}, {0.0, 1.0})")
+        let model = compile_filter("laplace_nd(V(p, n), '{1.0}, '{0.0, 1.0})")
             .expect("ideal integrator remains available for transient analysis");
         let mut device = crate::device::VerilogADevice::try_new(
             "L_SINGULAR_DC",
@@ -1246,8 +1246,8 @@ endmodule
     #[test]
     fn ordinary_laplace_calls_report_improper_shapes_without_panicking() {
         for expression in [
-            "laplace_nd(V(p, n), {1.0, 2.0}, {0.5})",
-            "laplace_zp(V(p, n), {-1.0, 0.0, -2.0, 0.0}, {-3.0, 0.0})",
+            "laplace_nd(V(p, n), '{1.0, 2.0}, '{0.5})",
+            "laplace_zp(V(p, n), '{-1.0, 0.0, -2.0, 0.0}, '{-3.0, 0.0})",
         ] {
             let result = std::panic::catch_unwind(|| compile_filter(expression));
             let error = result
@@ -1263,7 +1263,7 @@ endmodule
     #[test]
     fn ordinary_laplace_zp_call_rejects_nonconjugate_roots() {
         let error =
-            compile_filter("laplace_zp(V(p, n), {1.0, 2.0, 3.0, -2.0}, {-1.0, 0.0, -2.0, 0.0})")
+            compile_filter("laplace_zp(V(p, n), '{1.0, 2.0, 3.0, -2.0}, '{-1.0, 0.0, -2.0, 0.0})")
                 .expect_err("nonconjugate roots cannot define a real transfer function");
         assert!(
             error.to_string().contains("no conjugate partner"),
@@ -1273,7 +1273,7 @@ endmodule
 
     #[test]
     fn ordinary_laplace_call_accepts_tiny_common_scaling() {
-        compile_filter("laplace_nd(V(p, n), {1.0e-300}, {1.0e-300, 1.0e-300})")
+        compile_filter("laplace_nd(V(p, n), '{1.0e-300}, '{1.0e-300, 1.0e-300})")
             .expect("absolute coefficient magnitude must not decide validity");
     }
 }

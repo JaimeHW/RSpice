@@ -43,7 +43,7 @@ module ziavg(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6, 0.0);
+        y = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1.0e-6, 0.0);
         I(p, n) <+ y * 1.0e-3;
     end
 endmodule
@@ -101,7 +101,7 @@ module zizp(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_zp(V(p, n), {0.0, 0.0}, {0.5, 0.0}, 1.0e-6);
+        y = zi_zp(V(p, n), '{0.0, 0.0}, '{0.5, 0.0}, 1.0e-6);
         I(p, n) <+ y * 1.0e-3;
     end
 endmodule
@@ -122,7 +122,7 @@ module zparam(p, n);
     parameter real ts = 1.0e-6;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {1.0}, {1.0}, ts, 0.0);
+        y = zi_nd(V(p, n), '{1.0}, '{1.0}, ts, 0.0);
         I(p, n) <+ y;
     end
 endmodule
@@ -163,7 +163,7 @@ fn direct_zero_transition_is_rejected_but_positive_timing_forms_compile() {
 module ztransition_zero(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ (1 ? 2.0 * zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, 0.0) : 0.0);
+    analog I(p, n) <+ (1 ? 2.0 * zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, 0.0) : 0.0);
 endmodule
 "#;
     let error = compiler
@@ -183,7 +183,7 @@ endmodule
 module ztransition(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_nd(V(p, n), {{1.0}}, {{1.0}}, 1.0e-6{suffix});
+    analog I(p, n) <+ zi_nd(V(p, n), '{{1.0}}, '{{1.0}}, 1.0e-6{suffix});
 endmodule
 "#
         );
@@ -203,7 +203,7 @@ module zdynamic_tau(p, n);
     inout p, n;
     electrical p, n;
     parameter real tau = 1.0e-9;
-    analog I(p, n) <+ 2.0 * zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, tau);
+    analog I(p, n) <+ 2.0 * zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, tau);
 endmodule
 "#,
     );
@@ -230,7 +230,7 @@ module zintermediate(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, 0.0);
+        y = zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, 0.0);
         I(p, n) <+ y;
     end
 endmodule
@@ -253,7 +253,7 @@ module zdefault_ramp(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6);
+        y = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1.0e-6);
         I(p, n) <+ y;
     end
 endmodule
@@ -379,7 +379,7 @@ fn singular_dc_gain_is_a_typed_runtime_error() {
 module zsingular(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_nd(V(p, n), {1.0}, {1.0, -1.0}, 1.0e-6);
+    analog I(p, n) <+ zi_nd(V(p, n), '{1.0}, '{1.0, -1.0}, 1.0e-6);
 endmodule
 "#,
     );
@@ -394,8 +394,8 @@ endmodule
 fn invalid_zi_definitions_are_compile_errors() {
     let compiler = VerilogACompiler::new(CompilerOptions::default());
     for (definition, expected) in [
-        ("{0.0}, 1.0e-6", "a0 must be nonzero"),
-        ("{1.0}, 0.0", "greater than zero"),
+        ("'{0.0}, 1.0e-6", "a0 must be nonzero"),
+        ("'{1.0}, 0.0", "greater than zero"),
     ] {
         let source = format!(
             r#"
@@ -403,7 +403,7 @@ fn invalid_zi_definitions_are_compile_errors() {
 module zbad(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_nd(V(p, n), {{1.0}}, {definition});
+    analog I(p, n) <+ zi_nd(V(p, n), '{{1.0}}, {definition});
 endmodule
 "#
         );
@@ -419,7 +419,7 @@ endmodule
 module zbadroot(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_zp(V(p, n), {0.5, 0.25}, {0.0, 0.0}, 1.0e-6);
+    analog I(p, n) <+ zi_zp(V(p, n), '{0.5, 0.25}, '{0.0, 0.0}, 1.0e-6);
 endmodule
 "#;
     let error = compiler
@@ -435,7 +435,7 @@ module zbadt0(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, 0.0, -1.0e-9);
+        y = zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6, 0.0, -1.0e-9);
         I(p, n) <+ y;
     end
 endmodule
@@ -459,7 +459,7 @@ module zbadparam(p, n);
     parameter real t0 = 0.0;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {1.0}, {a0}, ts, 0.0, t0);
+        y = zi_nd(V(p, n), '{1.0}, '{a0}, ts, 0.0, t0);
         I(p, n) <+ y;
     end
 endmodule
@@ -497,7 +497,7 @@ fn zi_operand_ceiling_is_platform_uniform_for_coefficients_and_mixed_roots() {
 module zbudget(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ {operator}(V(p, n), {{{numerator}}}, {{{denominator}}}, 1.0e-6);
+    analog I(p, n) <+ {operator}(V(p, n), '{{{numerator}}}, '{{{denominator}}}, 1.0e-6);
 endmodule
 "#
         )
@@ -538,7 +538,7 @@ fn transient_jacobian_is_feedthrough_on_edges_and_zero_on_hold() {
 module zjac(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6);
+    analog I(p, n) <+ zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1.0e-6);
 endmodule
 "#,
     );
@@ -567,7 +567,7 @@ module zjac_abrupt(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6, 0.0);
+        y = zi_nd(V(p, n), '{0.25}, '{1.0, -0.75}, 1.0e-6, 0.0);
         I(p, n) <+ y;
     end
 endmodule
@@ -596,7 +596,7 @@ module zdynamic(p, n);
     inout p, n;
     electrical p, n;
     analog if (V(p, n) > 0.0)
-        I(p, n) <+ zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6);
+        I(p, n) <+ zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6);
 endmodule
 "#,
         )
@@ -617,7 +617,7 @@ module zstatic(p, n);
     electrical p, n;
     parameter integer enabled = {enabled};
     analog if (enabled)
-        I(p, n) <+ zi_nd(V(p, n), {{1.0}}, {{1.0}}, 1.0e-6);
+        I(p, n) <+ zi_nd(V(p, n), '{{1.0}}, '{{1.0}}, 1.0e-6);
 endmodule
 "#
         );
@@ -641,7 +641,7 @@ module zcase(p, n);
     inout p, n; electrical p, n; real y;
     analog begin
         case (V(p, n) > 0.0)
-            1: y = zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6);
+            1: y = zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6);
             default: y = 0.0;
         endcase
         I(p, n) <+ y;
@@ -655,7 +655,7 @@ module zloop(p, n);
     analog begin
         y = 0.0;
         for (i = 0; i < 1; i = i + 1)
-            y = zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6);
+            y = zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6);
         I(p, n) <+ y;
     end
 endmodule
@@ -668,7 +668,7 @@ module zfunction(p, n);
         input x;
         real x;
         begin
-            sampled = zi_nd(x, {1.0}, {1.0}, 1.0e-6);
+            sampled = zi_nd(x, '{1.0}, '{1.0}, 1.0e-6);
         end
     endfunction
     analog I(p, n) <+ sampled(V(p, n));

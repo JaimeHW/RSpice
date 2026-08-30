@@ -25,7 +25,7 @@ fn laplace_recomputes_from_the_last_accepted_state() {
 module laplace_idempotent(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ laplace_nd(1.0, {1.0}, {1.0, 1.0});
+    analog I(p, n) <+ laplace_nd(1.0, '{1.0}, '{1.0, 1.0});
 endmodule
 "#,
     );
