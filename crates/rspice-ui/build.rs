@@ -282,6 +282,34 @@ fn reserve_main_thread_stack() {
     }
 }
 
+/// Compact relocation addends in the two production browser executables.
+///
+/// `wasm-ld --compress-relocations` uses fixed-width padded LEB encodings
+/// while linking and then rewrites them to their canonical variable width.
+/// This changes neither code nor data semantics. It must stay out of profiles
+/// that carry DWARF, however, because shrinking relocation fields invalidates
+/// debug-section offsets. Keep the contract exact: only the stripped
+/// `web-release` profile for the browser target receives the linker option;
+/// dev/debug, ordinary release, WASI, native desktop, and mobile builds remain
+/// untouched. Cargo reports a custom profile that inherits `release` as
+/// `PROFILE=release`, so the complete effective profile tuple is the stable
+/// discriminator rather than an undocumented inference from `OUT_DIR`.
+fn compress_web_release_wasm_relocations() {
+    println!("cargo:rerun-if-env-changed=TARGET");
+    println!("cargo:rerun-if-env-changed=PROFILE");
+    println!("cargo:rerun-if-env-changed=OPT_LEVEL");
+    println!("cargo:rerun-if-env-changed=DEBUG");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_PANIC");
+    if env::var("TARGET").as_deref() == Ok("wasm32-unknown-unknown")
+        && env::var("PROFILE").as_deref() == Ok("release")
+        && env::var("OPT_LEVEL").as_deref() == Ok("z")
+        && env::var("DEBUG").as_deref() == Ok("false")
+        && env::var("CARGO_CFG_PANIC").as_deref() == Ok("abort")
+    {
+        println!("cargo:rustc-link-arg-bins=--compress-relocations");
+    }
+}
+
 fn main() {
     println!(
         "cargo:rustc-env=RSPICE_BUILD_TARGET={}",
@@ -378,6 +406,7 @@ fn main() {
     fs::write(generated_path, generated).expect("embedded symbol table should be writable");
 
     reserve_main_thread_stack();
+    compress_web_release_wasm_relocations();
 
     // Embed the brand icon as the Windows .exe resource (what Explorer shows).
     // The `#[cfg(windows)]` gate is on the *host* (where winresource is a

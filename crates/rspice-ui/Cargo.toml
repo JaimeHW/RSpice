@@ -99,7 +99,7 @@ krilla = { version = "0.8.2", default-features = false, features = ["raster-imag
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = { version = "0.35.0", default-features = false }
-egui_extras = "0.35.0"
+egui_extras = { version = "0.35.0", default-features = false }
 
 # SVG parsing and deterministic software rendering. System font discovery stays
 # disabled: hardcopy rendering loads only RSpice's pinned IBM Plex assets.
@@ -113,12 +113,6 @@ rfd = { version = "0.17", features = ["file-handle-inner"] }
 
 # Cross-platform config directories
 dirs = "6.0"
-
-# License-key signature verification (internal license-key spec) - pure
-# Rust, works on wasm32. Signing lives in the `services::license` test module,
-# so `rand_core` is requested by the dev-dependency below rather than here:
-# a release or wasm build links the verifier only.
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 
 [dev-dependencies]
 # Keypair generation for license issuance in the `services::license` tests.
@@ -135,6 +129,11 @@ wat = "1"
 # not currently publish its AccessKit tree to the DOM.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
 rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "0.1.0" }
+
+# License verification is pure Rust on every target. Native clients retain
+# dalek's precomputed tables for maximum throughput; key generation remains
+# test-only through the dev-dependency above.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 
 # No RSpice source names `winit`; this edge exists only to turn on winit's
 # default features, which `eframe` above cannot reach: it is taken with
@@ -209,10 +208,22 @@ winresource = "0.1"
 serde_json = { version = "1", features = ["preserve_order"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# eframe 0.34 does not bridge AccessKit into the browser DOM. Its
+# eframe 0.35 does not bridge AccessKit into the browser DOM. Its
 # web_screen_reader feature still announces egui interaction events through
 # the Web Speech API, which is the supported fallback for this backend.
-eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "web_screen_reader"] }
+# Browser startup deliberately requires WebGPU (see `WEB_STARTUP_REQUIREMENT`
+# in main.rs). Eframe's convenience `wgpu` feature also enables egui-wgpu's
+# defaults, including the WebGL fallback and every native wgpu backend. Select
+# its backend-neutral integration instead and activate only wgpu's WebGPU path
+# below, so unreachable renderers cannot enter either browser image.
+eframe = { version = "0.35.0", default-features = false, features = ["wgpu_no_default_features", "persistence", "web_screen_reader"] }
+wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
+
+# Dalek's `fast` feature changes only verification throughput: it selects a
+# precomputed basepoint table, not a different Ed25519 algorithm or policy.
+# Browser license checks are rare, so retain exact verification semantics and
+# zeroization without carrying that table in either browser image.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 
 # No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen. The
 # interactive image retains portable Verilog-A artifacts and validation, while

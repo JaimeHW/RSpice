@@ -14,7 +14,6 @@ rust-version.workspace = true
 # one implementation with the importer, so the offline publisher executable
 # links this crate instead of the GUI.
 base64 = "0.22"
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -22,9 +21,18 @@ thiserror.workspace = true
 unicode-normalization.workspace = true
 uuid = { version = "1", features = ["serde", "v4"] }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Publisher tooling and native clients keep dalek's precomputed basepoint table
+# for high-throughput package signing and verification.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # Browser builds need a `getrandom` backend for identity minting.
 uuid = { version = "1", features = ["js", "serde", "v4"] }
+# The precomputed table selected by `fast` changes throughput only. Browser
+# package verification is infrequent and remains the same strict Ed25519
+# operation without it.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 
 [lints]
 workspace = true
