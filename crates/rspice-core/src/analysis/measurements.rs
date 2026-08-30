@@ -2737,7 +2737,7 @@ mod tests {
                 .iter()
                 .flatten()
                 .map(|entry| entry.weight)
-                .sum()
+                .sum::<usize>()
         );
 
         let mut buffer = vec![Complex::new(0.0, 0.0); 9];

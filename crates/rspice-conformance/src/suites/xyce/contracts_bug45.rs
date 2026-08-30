@@ -1,6 +1,6 @@
+use super::contract_fs::{AnchoredDirectory as Bug45Directory, AnchoredFile as Bug45File};
 use super::*;
 use rspice_core::netlist::{DiagnosticSeverity, SourceSpec};
-use std::io::Read as _;
 
 pub(super) const BUG45_CONTRACT: &str =
     "bug45_unknown_expression_model_parameter_warning_wrapper_owner";
@@ -114,160 +114,9 @@ struct Bug45ProvenanceSeal {
     retained_gold: Vec<u8>,
 }
 
-#[derive(Debug)]
-struct Bug45Directory {
-    path: PathBuf,
-    // On Windows these handles deny delete/write sharing for every resolved
-    // component. On Unix the terminal handle is used for descriptor-relative
-    // enumeration and openat traversal; retaining the chain also makes the
-    // anchored provenance explicit.
-    guards: Vec<fs::File>,
-}
-
 impl XyceTestRunner {
-    #[cfg(not(unix))]
-    fn bug45_open_regular_nofollow(path: &Path, record_label: &str) -> Result<fs::File, String> {
-        let named = fs::symlink_metadata(path)
-            .map_err(|error| format!("failed to inspect {LABEL} {record_label}: {error}"))?;
-        if named.file_type().is_symlink() || !named.file_type().is_file() {
-            return Err(format!(
-                "{LABEL} {record_label} must be a regular non-symlink file"
-            ));
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt as _;
-            use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
-            if named.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                return Err(format!(
-                    "{LABEL} {record_label} must not be a reparse point"
-                ));
-            }
-        }
-
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-
-            options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt as _;
-            use windows_sys::Win32::Storage::FileSystem::{
-                FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-            };
-
-            options
-                .share_mode(FILE_SHARE_READ)
-                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-        }
-        let file = options
-            .open(path)
-            .map_err(|error| format!("failed to open {LABEL} {record_label}: {error}"))?;
-        let opened = file
-            .metadata()
-            .map_err(|error| format!("failed to inspect opened {LABEL} {record_label}: {error}"))?;
-        if !opened.file_type().is_file() {
-            return Err(format!(
-                "{LABEL} {record_label} did not open as a regular file"
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-
-            if opened.dev() != named.dev() || opened.ino() != named.ino() {
-                return Err(format!(
-                    "{LABEL} {record_label} changed while it was opened"
-                ));
-            }
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt as _;
-            use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
-            if opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                return Err(format!("{LABEL} {record_label} opened as a reparse point"));
-            }
-        }
-        Ok(file)
-    }
-
-    fn bug45_open_directory_nofollow(path: &Path, record_label: &str) -> Result<fs::File, String> {
-        let named = fs::symlink_metadata(path)
-            .map_err(|error| format!("failed to inspect {LABEL} {record_label}: {error}"))?;
-        if named.file_type().is_symlink() || !named.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} {record_label} must be a regular non-symlink directory"
-            ));
-        }
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-
-            options.custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::DIRECTORY).bits() as i32,
-            );
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt as _;
-            use windows_sys::Win32::Storage::FileSystem::{
-                FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-            };
-
-            options
-                .share_mode(FILE_SHARE_READ)
-                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
-        }
-        let file = options
-            .open(path)
-            .map_err(|error| format!("failed to open {LABEL} {record_label}: {error}"))?;
-        let opened = file
-            .metadata()
-            .map_err(|error| format!("failed to inspect opened {LABEL} {record_label}: {error}"))?;
-        if !opened.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} {record_label} did not open as a directory"
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt as _;
-
-            if opened.dev() != named.dev() || opened.ino() != named.ino() {
-                return Err(format!(
-                    "{LABEL} {record_label} changed while it was opened"
-                ));
-            }
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt as _;
-            use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-
-            if opened.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-                return Err(format!("{LABEL} {record_label} opened as a reparse point"));
-            }
-        }
-        Ok(file)
-    }
-
     fn bug45_root_directory(&self) -> Result<Bug45Directory, String> {
-        Ok(Bug45Directory {
-            path: self.root.clone(),
-            guards: vec![Self::bug45_open_directory_nofollow(
-                &self.root,
-                "corpus root",
-            )?],
-        })
+        contract_fs::open_root(&self.root, LABEL)
     }
 
     fn bug45_directory_member_names(
@@ -275,177 +124,23 @@ impl XyceTestRunner {
         record_label: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<String>, String> {
-        let mut names = Vec::new();
-        #[cfg(unix)]
-        {
-            let guard = directory
-                .guards
-                .last()
-                .ok_or_else(|| format!("{LABEL} {record_label} lost its directory anchor"))?;
-            let entries = rustix::fs::Dir::read_from(guard).map_err(|error| {
-                format!("failed to enumerate opened {LABEL} {record_label}: {error}")
-            })?;
-            for (index, entry) in entries.enumerate() {
-                if abort.is_aborted() {
-                    return Err(format!(
-                        "{LABEL} deadline expired while enumerating {record_label}"
-                    ));
-                }
-                if index >= MAX_DIRECTORY_ENTRIES {
-                    return Err(format!(
-                        "{LABEL} {record_label} exceeds its census envelope"
-                    ));
-                }
-                let entry = entry.map_err(|error| {
-                    format!("failed to inspect opened {LABEL} {record_label}: {error}")
-                })?;
-                let name = entry.file_name().to_str().map_err(|error| {
-                    format!("{LABEL} {record_label} member name is not UTF-8: {error}")
-                })?;
-                if matches!(name, "." | "..") {
-                    continue;
-                }
-                names.push(name.to_string());
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            for (index, entry) in fs::read_dir(&directory.path)
-                .map_err(|error| format!("failed to enumerate {LABEL} {record_label}: {error}"))?
-                .enumerate()
-            {
-                if abort.is_aborted() {
-                    return Err(format!(
-                        "{LABEL} deadline expired while enumerating {record_label}"
-                    ));
-                }
-                if index >= MAX_DIRECTORY_ENTRIES {
-                    return Err(format!(
-                        "{LABEL} {record_label} exceeds its census envelope"
-                    ));
-                }
-                let entry = entry.map_err(|error| {
-                    format!("failed to inspect {LABEL} {record_label}: {error}")
-                })?;
-                names.push(
-                    entry
-                        .file_name()
-                        .to_str()
-                        .ok_or_else(|| format!("{LABEL} {record_label} member name is not UTF-8"))?
-                        .to_string(),
-                );
-            }
-        }
-        Ok(names)
-    }
-
-    fn bug45_exact_member_name(
-        directory: &Bug45Directory,
-        expected: &str,
-        record_label: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<String, String> {
-        let matches = Self::bug45_directory_member_names(directory, record_label, abort)?
-            .into_iter()
-            .filter(|name| name.eq_ignore_ascii_case(expected))
-            .collect::<Vec<_>>();
-        match matches.as_slice() {
-            [name] if name == expected => Ok(name.clone()),
-            [] => Err(format!("{LABEL} is missing path component {expected:?}")),
-            _ => Err(format!(
-                "{LABEL} path component {expected:?} changed case or became ambiguous: {matches:?}"
-            )),
-        }
-    }
-
-    fn bug45_open_directory_member_nofollow(
-        directory: &Bug45Directory,
-        name: &str,
-        record_label: &str,
-    ) -> Result<fs::File, String> {
-        #[cfg(unix)]
-        {
-            let guard = directory
-                .guards
-                .last()
-                .ok_or_else(|| format!("{LABEL} {record_label} lost its directory anchor"))?;
-            let fd = rustix::fs::openat(
-                guard,
-                name,
-                rustix::fs::OFlags::RDONLY
-                    | rustix::fs::OFlags::CLOEXEC
-                    | rustix::fs::OFlags::NOFOLLOW
-                    | rustix::fs::OFlags::DIRECTORY,
-                rustix::fs::Mode::empty(),
-            )
-            .map_err(|error| format!("failed to open anchored {LABEL} {record_label}: {error}"))?;
-            let file: fs::File = fd.into();
-            if !file
-                .metadata()
-                .map_err(|error| {
-                    format!("failed to inspect opened {LABEL} {record_label}: {error}")
-                })?
-                .is_dir()
-            {
-                return Err(format!(
-                    "{LABEL} {record_label} did not open as a directory"
-                ));
-            }
-            return Ok(file);
-        }
-        #[cfg(not(unix))]
-        Self::bug45_open_directory_nofollow(&directory.path.join(name), record_label)
+        contract_fs::member_names(directory, LABEL, record_label, MAX_DIRECTORY_ENTRIES, abort)
     }
 
     fn bug45_open_file_member_nofollow(
         directory: &Bug45Directory,
         name: &str,
         record_label: &str,
-    ) -> Result<fs::File, String> {
-        #[cfg(unix)]
-        {
-            let guard = directory
-                .guards
-                .last()
-                .ok_or_else(|| format!("{LABEL} {record_label} lost its directory anchor"))?;
-            let fd = rustix::fs::openat(
-                guard,
-                name,
-                rustix::fs::OFlags::RDONLY
-                    | rustix::fs::OFlags::CLOEXEC
-                    | rustix::fs::OFlags::NONBLOCK
-                    | rustix::fs::OFlags::NOFOLLOW,
-                rustix::fs::Mode::empty(),
-            )
-            .map_err(|error| format!("failed to open anchored {LABEL} {record_label}: {error}"))?;
-            let file: fs::File = fd.into();
-            if !file
-                .metadata()
-                .map_err(|error| {
-                    format!("failed to inspect opened {LABEL} {record_label}: {error}")
-                })?
-                .is_file()
-            {
-                return Err(format!(
-                    "{LABEL} {record_label} did not open as a regular file"
-                ));
-            }
-            return Ok(file);
-        }
-        #[cfg(not(unix))]
-        Self::bug45_open_regular_nofollow(&directory.path.join(name), record_label)
+    ) -> Result<Bug45File, String> {
+        contract_fs::open_file_member(directory, name, LABEL, record_label)
     }
 
     fn bug45_exact_child_directory(
-        mut parent: Bug45Directory,
+        parent: Bug45Directory,
         expected: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Bug45Directory, String> {
-        let name = Self::bug45_exact_member_name(&parent, expected, "parent directory", abort)?;
-        let guard = Self::bug45_open_directory_member_nofollow(&parent, &name, expected)?;
-        parent.path.push(&name);
-        parent.guards.push(guard);
-        Ok(parent)
+        contract_fs::exact_child_directory(parent, expected, LABEL, MAX_DIRECTORY_ENTRIES, abort)
     }
 
     fn bug45_exact_child_file(
@@ -453,9 +148,15 @@ impl XyceTestRunner {
         expected: &str,
         record_label: &str,
         abort: &dyn AbortSignal,
-    ) -> Result<fs::File, String> {
-        let name = Self::bug45_exact_member_name(parent, expected, "parent directory", abort)?;
-        Self::bug45_open_file_member_nofollow(parent, &name, record_label)
+    ) -> Result<Bug45File, String> {
+        contract_fs::exact_child_file(
+            parent,
+            expected,
+            LABEL,
+            record_label,
+            MAX_DIRECTORY_ENTRIES,
+            abort,
+        )
     }
 
     fn bug45_optional_exact_child_file(
@@ -463,22 +164,17 @@ impl XyceTestRunner {
         expected: &str,
         record_label: &str,
         abort: &dyn AbortSignal,
-    ) -> Result<Option<fs::File>, String> {
-        let matches = Self::bug45_directory_member_names(parent, "corpus root", abort)?
-            .into_iter()
-            .filter(|name| name.eq_ignore_ascii_case(expected))
-            .collect::<Vec<_>>();
-        match matches.as_slice() {
-            [name] if name == expected => {
-                Self::bug45_open_file_member_nofollow(parent, name, record_label).map(Some)
-            }
-            [] => Ok(None),
-            _ => Err(format!(
-                "{LABEL} optional path component {expected:?} changed case or became ambiguous: {matches:?}"
-            )),
-        }
+    ) -> Result<Option<Bug45File>, String> {
+        contract_fs::optional_exact_child_file(
+            parent,
+            expected,
+            LABEL,
+            "corpus root",
+            record_label,
+            MAX_DIRECTORY_ENTRIES,
+            abort,
+        )
     }
-
     fn bug45_historical_records() -> Vec<String> {
         let mut records = HISTORICAL_ARTIFACTS
             .into_iter()
@@ -521,43 +217,16 @@ impl XyceTestRunner {
     }
 
     fn bug45_read_bounded_opened_raw(
-        file: fs::File,
+        file: Bug45File,
         max_bytes: u64,
         record_label: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<u8>, String> {
-        if abort.is_aborted() {
-            return Err(format!(
-                "{LABEL} deadline expired before reading {record_label}"
-            ));
-        }
-        let metadata = file
-            .metadata()
-            .map_err(|error| format!("failed to inspect opened {LABEL} {record_label}: {error}"))?;
-        if metadata.len() > max_bytes {
-            return Err(format!(
-                "{LABEL} {record_label} exceeds its {max_bytes}-byte read bound"
-            ));
-        }
-        let mut bytes = Vec::with_capacity((metadata.len() as usize).min(max_bytes as usize));
-        file.take(max_bytes + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| format!("failed to read {LABEL} {record_label}: {error}"))?;
-        if abort.is_aborted() {
-            return Err(format!(
-                "{LABEL} deadline expired while reading {record_label}"
-            ));
-        }
-        if bytes.len() as u64 > max_bytes {
-            return Err(format!(
-                "{LABEL} {record_label} exceeds its {max_bytes}-byte read bound"
-            ));
-        }
-        Ok(bytes)
+        contract_fs::read_bounded_raw(file, max_bytes, LABEL, record_label, abort)
     }
 
     fn bug45_read_bounded_opened_canonical(
-        file: fs::File,
+        file: Bug45File,
         max_bytes: u64,
         record_label: &str,
         abort: &dyn AbortSignal,
@@ -567,7 +236,7 @@ impl XyceTestRunner {
     }
 
     fn bug45_read_opened_canonical_record(
-        file: fs::File,
+        file: Bug45File,
         max_bytes: u64,
         expected_bytes: usize,
         expected_sha256: &str,

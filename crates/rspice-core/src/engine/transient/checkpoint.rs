@@ -4,8 +4,10 @@
 //! the full MNA solution plus the capacitor and inductor companion-model
 //! histories. Restoring injects that state into a freshly built circuit and
 //! continues integration from the checkpoint time with absolute-time source
-//! evaluation — the same numerical regime as a breakpoint restart, which
-//! the integrator already performs at every source discontinuity.
+//! evaluation. Current files also retain the post-accept next-step proposal,
+//! its active Xyce breakpoint-span ceiling, and its effective controller
+//! maximum; legacy continuation state fails closed rather than silently
+//! reconstructing different controls.
 //!
 //! Scope, stated precisely: accepted linear-reactive histories, ordinary
 //! lossless scalar transmission-line delay histories, generated Verilog-A
@@ -46,11 +48,14 @@ use super::TransientStartupMode;
 
 /// Format version written to and required from checkpoint files.
 ///
-/// Version 15 adds accepted runtime-compiled Verilog-A VM/operator state.
-/// Earlier files remain readable, but fail closed when the resumed circuit
-/// contains runtime-compiled Verilog-A because inventing operator history is
-/// unsafe.
-const FORMAT_VERSION: u32 = 15;
+/// Version 17 adds accepted runtime-compiled Verilog-A VM/operator state on
+/// top of version 16's active Xyce breakpoint-span ceiling and effective
+/// controller maximum to the accepted integrator's next-step proposal.
+/// Earlier files remain readable, but their incomplete in-flight continuation
+/// or runtime operator state fails closed rather than being reconstructed at
+/// an arbitrary seam.
+const FORMAT_VERSION: u32 = 17;
+const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -70,6 +75,26 @@ pub enum TransientCheckpointEncoding {
     Unpacked,
     /// Versioned binary envelope containing zlib-compressed canonical text.
     Packed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum IntegrationContinuation {
+    /// Versions 1-14 never recorded the post-accept proposal.
+    Unavailable,
+    /// Authenticated PSS/HB state at exact +0 before a transient controller
+    /// has proposed its first interval.
+    SyntheticOrigin,
+    /// Accepted segment endpoint whose TSTOP landing is a deliberate
+    /// integration boundary rather than an in-flight controller state.
+    BreakpointRestart,
+    /// Exact proposal and active Xyce breakpoint-span ceiling selected after
+    /// an accepted transient point. A missing ceiling means the span ceiling
+    /// policy was disabled, not that its state was omitted.
+    Proposed {
+        next_step: Value,
+        breakpoint_span_ceiling: Option<Value>,
+        controller_max_step: Value,
+    },
 }
 
 /// Snapshot of transient-integration state at an accepted time point.
@@ -104,6 +129,11 @@ pub struct TransientCheckpoint {
     /// configuration identity precisely so that changing it cannot be
     /// mistaken for continuing a different simulation.
     integration_max_step: Option<Value>,
+    /// Typed continuation contract: an exact in-flight proposal, a deliberate
+    /// endpoint breakpoint restart, an authenticated synthetic t=0 origin, or
+    /// unavailable legacy state. These cases must never alias during format
+    /// upgrades because only the first restores the in-flight controller.
+    integration_continuation: IntegrationContinuation,
     /// Dynamically discovered transmission-line arrivals that had not yet
     /// occurred at `time`. These are distinct from authored/source
     /// breakpoints: they arise from accepted wave changes and cannot always be
@@ -666,22 +696,36 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 /// Collision-resistant trajectory identity used by authored checkpoint/restart
 /// decks whose run horizon and restart I/O metadata necessarily differ.
 ///
-/// Only the stop horizon of `.TRAN` commands and the complete
-/// `.OPTIONS RESTART` control plane are normalized. The transient print step,
-/// start time, maximum step, UIC contract, circuit/model/source semantics,
-/// output requests, external dependency content, and every other typed option
+/// Only non-trajectory presentation/control metadata and effective-default
+/// execution policies are normalized. The transient print step, start time,
+/// maximum step, UIC contract, circuit/model/source semantics, output requests,
+/// external dependency content, and every trajectory-affecting typed option
 /// remain part of the identity through [`semantic_netlist_identity`].
 pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut normalized = netlist.clone();
+    // A SPICE title is presentation metadata. Authored first/restart decks may
+    // legitimately use different descriptions without changing any equation,
+    // state variable, or accepted-step decision.
+    normalized.title.clear();
     for analysis in &mut normalized.analyses {
         if let crate::netlist::AnalysisCommand::Tran { stop, .. } = analysis {
             *stop = 0.0;
         }
     }
     normalized.options.restart = None;
+    // Interval output controls only which interpolated rows a writer emits;
+    // they do not add breakpoints or change accepted integration state.
+    normalized.options.output_interval_schedule = None;
+    // Xyce's DeviceOptions default is SEPARATELOAD=0. RSpice intentionally
+    // models the switch as loader-policy metadata rather than as a physical
+    // circuit option, so an explicit FALSE and omission are one effective
+    // authored-restart contract. TRUE remains identity-bound.
+    if normalized.options.device_separate_load == Some(false) {
+        normalized.options.device_separate_load = None;
+    }
     Some(semantic_netlist_identity(
         &normalized,
-        b"rspice-transient-restart-compatible-netlist-v2\0",
+        b"rspice-transient-restart-compatible-netlist-v4\0",
     ))
 }
 
@@ -1428,6 +1472,34 @@ impl TransientCheckpoint {
                 "checkpoint integration maximum step must be finite and positive".to_string(),
             );
         }
+        match self.integration_continuation {
+            IntegrationContinuation::Unavailable => {}
+            IntegrationContinuation::SyntheticOrigin
+                if self.time.to_bits() == 0.0_f64.to_bits() => {}
+            IntegrationContinuation::SyntheticOrigin => {
+                return Err(
+                    "checkpoint synthetic integration origin must be at exact +0 time".to_string(),
+                );
+            }
+            IntegrationContinuation::BreakpointRestart => {}
+            IntegrationContinuation::Proposed {
+                next_step,
+                breakpoint_span_ceiling,
+                controller_max_step,
+            } if next_step.is_finite()
+                && next_step > 0.0
+                && breakpoint_span_ceiling
+                    .is_none_or(|ceiling| ceiling.is_finite() && ceiling > 0.0)
+                && controller_max_step.is_finite()
+                && controller_max_step > 0.0
+                && next_step <= controller_max_step => {}
+            IntegrationContinuation::Proposed { .. } => {
+                return Err(
+                    "checkpoint integration continuation values must be finite and positive, and the next step must not exceed the effective controller maximum"
+                        .to_string(),
+                );
+            }
+        }
         let mut previous_arrival = None;
         for &arrival in &self.pending_tline_arrivals {
             if !arrival.is_finite() || arrival <= self.time {
@@ -1682,6 +1754,7 @@ impl TransientCheckpoint {
             circuit,
             startup_mode,
             None,
+            None,
             &[],
             0,
             lte_estimator,
@@ -1699,6 +1772,7 @@ impl TransientCheckpoint {
         circuit: &CircuitData,
         startup_mode: TransientStartupMode,
         integration_max_step: Option<Value>,
+        integration_continuation: Option<(Value, Option<Value>, Value)>,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
         lte_estimator: Option<&LteEstimator>,
@@ -1769,6 +1843,22 @@ impl TransientCheckpoint {
             simulation_identity: Some(simulation_identity),
             startup_mode: Some(startup_mode),
             integration_max_step,
+            integration_continuation: integration_continuation.map_or_else(
+                || {
+                    if time.to_bits() == 0.0_f64.to_bits() {
+                        IntegrationContinuation::SyntheticOrigin
+                    } else {
+                        IntegrationContinuation::BreakpointRestart
+                    }
+                },
+                |(next_step, breakpoint_span_ceiling, controller_max_step)| {
+                    IntegrationContinuation::Proposed {
+                        next_step,
+                        breakpoint_span_ceiling,
+                        controller_max_step,
+                    }
+                },
+            ),
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             cap_v_prev: circuit.capacitors.v_prev.clone(),
@@ -2170,6 +2260,32 @@ impl TransientCheckpoint {
         Ok(())
     }
 
+    /// Return the authenticated proposal for the first interval after this
+    /// accepted point. Synthetic origins and deliberate endpoint breakpoint
+    /// restarts legitimately request fresh startup sizing; legacy state is
+    /// distinguishable and fails closed.
+    pub(crate) fn validated_integration_continuation(
+        &self,
+    ) -> Result<Option<(Value, Option<Value>, Value)>, String> {
+        match self.integration_continuation {
+            IntegrationContinuation::Proposed {
+                next_step,
+                breakpoint_span_ceiling,
+                controller_max_step,
+            } => Ok(Some((
+                next_step,
+                breakpoint_span_ceiling,
+                controller_max_step,
+            ))),
+            IntegrationContinuation::SyntheticOrigin
+            | IntegrationContinuation::BreakpointRestart => Ok(None),
+            IntegrationContinuation::Unavailable => Err(
+                "legacy transient checkpoint does not record complete integration continuation state"
+                    .to_string(),
+            ),
+        }
+    }
+
     /// Clone an already-authenticated synthetic time-zero state and bind it to
     /// the maximum-step contract of its first real transient segment.
     ///
@@ -2195,6 +2311,12 @@ impl TransientCheckpoint {
         if self.integration_max_step.is_some() {
             return Err(
                 "synthetic transient-origin checkpoint already records an integration maximum step"
+                    .to_string(),
+            );
+        }
+        if self.integration_continuation != IntegrationContinuation::SyntheticOrigin {
+            return Err(
+                "synthetic transient-origin checkpoint does not carry synthetic integration state"
                     .to_string(),
             );
         }
@@ -2226,6 +2348,17 @@ impl TransientCheckpoint {
     /// valid.
     pub(crate) fn retained_value_count(&self) -> usize {
         let mut count = 7_usize
+            .saturating_add(2_usize.saturating_mul(usize::from(matches!(
+                self.integration_continuation,
+                IntegrationContinuation::Proposed { .. }
+            ))))
+            .saturating_add(usize::from(matches!(
+                self.integration_continuation,
+                IntegrationContinuation::Proposed {
+                    breakpoint_span_ceiling: Some(_),
+                    ..
+                }
+            )))
             .saturating_add(self.solution.len())
             .saturating_add(self.cap_v_prev.len())
             .saturating_add(self.cap_v_prev_prev.len())
@@ -2316,6 +2449,23 @@ impl TransientCheckpoint {
             "integration_max_step {}\n",
             self.integration_max_step
                 .map_or_else(|| "none".to_string(), |value| value.to_string())
+        ));
+        out.push_str(&format!(
+            "integration_continuation {}\n",
+            match self.integration_continuation {
+                IntegrationContinuation::Unavailable => "unavailable".to_string(),
+                IntegrationContinuation::SyntheticOrigin => "synthetic-origin".to_string(),
+                IntegrationContinuation::BreakpointRestart => "breakpoint-restart".to_string(),
+                IntegrationContinuation::Proposed {
+                    next_step,
+                    breakpoint_span_ceiling,
+                    controller_max_step,
+                } => format!(
+                    "proposed {next_step} {} {controller_max_step}",
+                    breakpoint_span_ceiling
+                        .map_or_else(|| "none".to_string(), |value| value.to_string())
+                ),
+            }
         ));
         out.push_str(&format!(
             "pending_tline_arrivals {}",
@@ -2702,6 +2852,66 @@ impl TransientCheckpoint {
                 None
             };
 
+        let integration_continuation = if version >= 16 {
+            let line = lines
+                .next()
+                .ok_or_else(|| "missing integration continuation line".to_string())?;
+            let field = line
+                .strip_prefix("integration_continuation ")
+                .map(str::trim)
+                .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
+            let fields = field.split_whitespace().collect::<Vec<_>>();
+            match fields.as_slice() {
+                ["unavailable"] => IntegrationContinuation::Unavailable,
+                ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
+                ["breakpoint-restart"] => IntegrationContinuation::BreakpointRestart,
+                ["proposed", next_step, ceiling, controller_max_step] => {
+                    IntegrationContinuation::Proposed {
+                        next_step: next_step.parse::<Value>().map_err(|_| {
+                            format!("malformed integration continuation line: '{line}'")
+                        })?,
+                        breakpoint_span_ceiling: if *ceiling == "none" {
+                            None
+                        } else {
+                            Some(ceiling.parse::<Value>().map_err(|_| {
+                                format!("malformed integration continuation line: '{line}'")
+                            })?)
+                        },
+                        controller_max_step: controller_max_step.parse::<Value>().map_err(
+                            |_| format!("malformed integration continuation line: '{line}'"),
+                        )?,
+                    }
+                }
+                _ => {
+                    return Err(format!("malformed integration continuation line: '{line}'"));
+                }
+            }
+        } else if version == 15 {
+            let line = lines
+                .next()
+                .ok_or_else(|| "missing integration continuation line".to_string())?;
+            let field = line
+                .strip_prefix("integration_continuation ")
+                .map(str::trim)
+                .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
+            match field {
+                "unavailable" => IntegrationContinuation::Unavailable,
+                "synthetic-origin" => IntegrationContinuation::SyntheticOrigin,
+                "breakpoint-restart" => IntegrationContinuation::BreakpointRestart,
+                _ => {
+                    field.parse::<Value>().map_err(|_| {
+                        format!("malformed integration continuation line: '{line}'")
+                    })?;
+                    // Version 15 carried the proposal but not the active span
+                    // ceiling, so an in-flight resume cannot restore its
+                    // controller without potentially changing the proposal.
+                    IntegrationContinuation::Unavailable
+                }
+            }
+        } else {
+            IntegrationContinuation::Unavailable
+        };
+
         let pending_tline_arrivals = if version >= 14 {
             let line = lines
                 .next()
@@ -2944,7 +3154,7 @@ impl TransientCheckpoint {
             } else {
                 (false, Vec::new())
             };
-        let runtime_veriloga_state_available = if version >= 15 {
+        let runtime_veriloga_state_available = if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing 'runtime_veriloga_state_available' line".to_string())?;
@@ -2970,13 +3180,13 @@ impl TransientCheckpoint {
             false
         };
         #[cfg(feature = "veriloga")]
-        let runtime_veriloga_instance_states = if version >= 15 {
+        let runtime_veriloga_instance_states = if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
             read_runtime_veriloga_states(&mut lines)?
         } else {
             Vec::new()
         };
         #[cfg(not(feature = "veriloga"))]
-        if version >= 15 {
+        if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
             let header = lines
                 .next()
                 .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
@@ -3002,6 +3212,7 @@ impl TransientCheckpoint {
             simulation_identity,
             startup_mode,
             integration_max_step,
+            integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             cap_v_prev: cap_iter.next().unwrap(),
@@ -3511,6 +3722,11 @@ mod tests {
             simulation_identity: Some("abcdef0123456789".repeat(4)),
             startup_mode: Some(TransientStartupMode::Uic),
             integration_max_step: Some(2.5e-9),
+            integration_continuation: IntegrationContinuation::Proposed {
+                next_step: 1.25e-9,
+                breakpoint_span_ceiling: Some(6.25e-10),
+                controller_max_step: 6.25e-9,
+            },
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
             cap_v_prev: vec![0.1, -0.2],
@@ -3601,6 +3817,17 @@ mod tests {
             if version < 14 && line.starts_with("integration_max_step ") {
                 continue;
             }
+            if version < 15 && line.starts_with("integration_continuation ") {
+                continue;
+            }
+            if version == 15 && line.starts_with("integration_continuation proposed ") {
+                let next_step = line
+                    .split_whitespace()
+                    .nth(2)
+                    .expect("current proposed continuation carries its next step");
+                output.push_str(&format!("integration_continuation {next_step}\n"));
+                continue;
+            }
             if version < 14 && line.starts_with("pending_tline_arrivals ") {
                 continue;
             }
@@ -3662,10 +3889,14 @@ mod tests {
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
                 break;
             }
-            if version < 15 && line.starts_with("runtime_veriloga_state_available ") {
+            if version < RUNTIME_VERILOGA_FORMAT_VERSION
+                && line.starts_with("runtime_veriloga_state_available ")
+            {
                 continue;
             }
-            if version < 15 && line.starts_with("runtime_veriloga_states ") {
+            if version < RUNTIME_VERILOGA_FORMAT_VERSION
+                && line.starts_with("runtime_veriloga_states ")
+            {
                 let count = line
                     .split_whitespace()
                     .nth(1)
@@ -3703,6 +3934,7 @@ mod tests {
         let mut synthetic = sample();
         synthetic.time = 0.0;
         synthetic.integration_max_step = None;
+        synthetic.integration_continuation = IntegrationContinuation::SyntheticOrigin;
         let requested = 7.5e-10;
 
         let bound = synthetic
@@ -3758,6 +3990,115 @@ mod tests {
                 .bind_authenticated_synthetic_origin_max_step(requested)
                 .expect_err("an existing trajectory cap cannot be rebound")
                 .contains("already records")
+        );
+    }
+
+    #[test]
+    fn integration_continuation_round_trips_and_legacy_state_fails_closed() {
+        let checkpoint = sample();
+        let (next_step, span_ceiling, controller_max_step) = checkpoint
+            .validated_integration_continuation()
+            .expect("current checkpoint continuation validates")
+            .expect("accepted checkpoint carries a proposal");
+        assert_eq!(next_step.to_bits(), 1.25e-9_f64.to_bits());
+        assert_eq!(
+            span_ceiling.map(Value::to_bits),
+            Some(6.25e-10_f64.to_bits())
+        );
+        assert_eq!(controller_max_step.to_bits(), 6.25e-9_f64.to_bits());
+
+        let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("current continuation round-trips");
+        assert_eq!(checkpoint, restored);
+
+        for version in [14, 15] {
+            let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, version))
+                .unwrap_or_else(|error| {
+                    panic!("version-{version} checkpoint remains readable: {error}")
+                });
+            assert!(
+                legacy
+                    .validated_integration_continuation()
+                    .expect_err("incomplete legacy continuation must fail closed")
+                    .contains("does not record complete integration continuation state")
+            );
+        }
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 14))
+            .expect("version-14 checkpoint remains readable");
+        assert!(
+            legacy
+                .to_text()
+                .contains("integration_continuation unavailable\n"),
+            "reserializing legacy state must not invent a proposal"
+        );
+
+        for invalid in [0.0, -1.0e-9, Value::NAN, Value::INFINITY] {
+            let mut malformed = checkpoint.clone();
+            malformed.integration_continuation = IntegrationContinuation::Proposed {
+                next_step: invalid,
+                breakpoint_span_ceiling: Some(6.25e-10),
+                controller_max_step: 6.25e-9,
+            };
+            let error = malformed
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect_err("invalid continuation proposal must fail closed");
+            assert!(
+                error.contains("finite and positive"),
+                "unexpected invalid-proposal error for {invalid:?}: {error}"
+            );
+
+            let mut malformed_ceiling = checkpoint.clone();
+            malformed_ceiling.integration_continuation = IntegrationContinuation::Proposed {
+                next_step: 1.25e-9,
+                breakpoint_span_ceiling: Some(invalid),
+                controller_max_step: 6.25e-9,
+            };
+            let error = malformed_ceiling
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect_err("invalid span ceiling must fail closed");
+            assert!(
+                error.contains("finite and positive"),
+                "unexpected invalid-ceiling error for {invalid:?}: {error}"
+            );
+        }
+
+        for invalid in [0.0, -1.0e-9, Value::NAN, Value::INFINITY] {
+            let mut malformed_controller_max = checkpoint.clone();
+            malformed_controller_max.integration_continuation = IntegrationContinuation::Proposed {
+                next_step: 1.25e-9,
+                breakpoint_span_ceiling: Some(6.25e-10),
+                controller_max_step: invalid,
+            };
+            let error = malformed_controller_max
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect_err("invalid effective controller maximum must fail closed");
+            assert!(
+                error.contains("finite and positive"),
+                "unexpected invalid-controller-maximum error for {invalid:?}: {error}"
+            );
+        }
+
+        let mut oversized_proposal = checkpoint.clone();
+        oversized_proposal.integration_continuation = IntegrationContinuation::Proposed {
+            next_step: 7.5e-9,
+            breakpoint_span_ceiling: Some(6.25e-10),
+            controller_max_step: 6.25e-9,
+        };
+        assert!(
+            oversized_proposal
+                .to_bytes(TransientCheckpointEncoding::Unpacked)
+                .expect_err("proposal above effective controller maximum must fail closed")
+                .contains("must not exceed")
+        );
+
+        let mut legacy_origin = legacy;
+        legacy_origin.time = 0.0;
+        legacy_origin.integration_max_step = None;
+        assert!(
+            legacy_origin
+                .bind_authenticated_synthetic_origin_max_step(1.0e-9)
+                .expect_err("legacy t=0 state is not a synthetic origin")
+                .contains("does not carry synthetic integration state")
         );
     }
 
@@ -3922,6 +4263,7 @@ mod tests {
             &solution,
             &captured_circuit,
             TransientStartupMode::OperatingPoint,
+            None,
             None,
             &[],
             0,
@@ -4512,7 +4854,15 @@ mod tests {
     }
 
     #[test]
-    fn separate_load_policy_changes_semantic_and_restart_identities() {
+    fn separate_load_effective_default_is_restart_compatible_but_true_is_not() {
+        let omitted = Netlist::parse(
+            "separate-load identity\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .END\n",
+        )
+        .expect("omitted separate-load deck parses");
         let disabled = Netlist::parse(
             "separate-load identity\n\
              V1 out 0 1\n\
@@ -4533,14 +4883,91 @@ mod tests {
         .expect("enabled separate-load deck parses");
 
         assert_ne!(
+            netlist_checkpoint_identity(&omitted),
+            netlist_checkpoint_identity(&disabled),
+            "ordinary semantic identity retains explicit loader policy metadata"
+        );
+        assert_ne!(
             netlist_checkpoint_identity(&disabled),
             netlist_checkpoint_identity(&enabled),
             "authored loader policy must participate in semantic identity"
         );
-        assert_ne!(
+        assert_eq!(
+            restart_checkpoint_identity(&omitted),
             restart_checkpoint_identity(&disabled),
+            "omission and Xyce's explicit FALSE default are restart compatible"
+        );
+        assert_ne!(
+            restart_checkpoint_identity(&omitted),
             restart_checkpoint_identity(&enabled),
-            "authored loader policy must participate in restart compatibility"
+            "enabled separate loading remains restart identity-bound"
+        );
+    }
+
+    #[test]
+    fn authored_restart_identity_excludes_title_but_ordinary_identity_retains_it() {
+        let first = Netlist::parse(
+            "first-run title\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .OPTIONS RESTART JOB=bench INITIAL_INTERVAL=1n\n\
+             .END\n",
+        )
+        .expect("first-run deck parses");
+        let restarted = Netlist::parse(
+            "different restart title\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 3n\n\
+             .OPTIONS RESTART FILE=bench1e-09\n\
+             .END\n",
+        )
+        .expect("restart deck parses");
+
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&restarted),
+            "ordinary resume retains the complete authored semantic identity"
+        );
+        assert_eq!(
+            restart_checkpoint_identity(&first),
+            restart_checkpoint_identity(&restarted),
+            "presentation-only title and restart control metadata cannot invalidate authored restart"
+        );
+    }
+
+    #[test]
+    fn authored_restart_identity_excludes_interval_output_projection_only() {
+        let baseline = Netlist::parse(
+            "output identity baseline\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .OPTIONS RESTART JOB=bench INITIAL_INTERVAL=1n\n\
+             .END\n",
+        )
+        .expect("baseline deck parses");
+        let restarted = Netlist::parse(
+            "output identity restart\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 3n\n\
+             .OPTIONS OUTPUT INITIAL_INTERVAL=.25n\n\
+             .OPTIONS RESTART FILE=bench1e-09\n\
+             .END\n",
+        )
+        .expect("restart deck parses");
+
+        assert_ne!(
+            netlist_checkpoint_identity(&baseline),
+            netlist_checkpoint_identity(&restarted),
+            "ordinary semantic identity retains output serialization policy"
+        );
+        assert_eq!(
+            restart_checkpoint_identity(&baseline),
+            restart_checkpoint_identity(&restarted),
+            "interpolated output cadence is trajectory-neutral"
         );
     }
 

@@ -705,6 +705,11 @@ impl ZiFilter {
                 "cannot commit a zi state whose latest transient evaluation failed".into(),
             ));
         }
+        if self.transient_active && self.candidate.is_none() {
+            return Err(ZiFilterError::InvalidEvaluation(
+                "cannot commit active zi state that was skipped by the final device pass".into(),
+            ));
+        }
         if !self.transient_active && !self.transient_seen && self.candidate.is_none() {
             // A statically dormant analysis-specific slot owns no transient
             // clock in this analysis. It must neither validate a stale
@@ -2003,6 +2008,25 @@ mod tests {
         assert_eq!(filter.eval(5.0, 0.0, true).unwrap(), 5.0);
         filter.commit(0.0).unwrap();
         assert_eq!(filter.eval(99.0, 0.5, true).unwrap(), 5.0);
+    }
+
+    #[test]
+    fn active_hold_cannot_commit_when_the_final_device_pass_skips_the_site() {
+        let mut filter = ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap();
+        filter.eval(2.0, 0.0, true).unwrap();
+        filter.commit(0.0).unwrap();
+        filter.begin_evaluation();
+        let before = format!("{filter:#?}");
+
+        let error = filter
+            .commit(0.5)
+            .expect_err("an active Zi site must execute in the final device pass");
+        assert!(
+            error
+                .to_string()
+                .contains("skipped by the final device pass")
+        );
+        assert_eq!(format!("{filter:#?}"), before);
     }
 
     #[test]

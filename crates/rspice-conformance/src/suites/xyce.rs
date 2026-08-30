@@ -12563,6 +12563,7 @@ impl AbortSignal for DeadlineAbort {
 
 mod analysis_support;
 mod comparison;
+mod contract_fs;
 mod contracts;
 mod contracts_bug1025;
 mod contracts_bug1035_son;
@@ -12607,6 +12608,7 @@ mod contracts_bug42_son;
 mod contracts_bug440;
 mod contracts_bug442;
 mod contracts_bug45;
+mod contracts_bug456;
 mod contracts_bug48;
 mod contracts_bug519;
 mod contracts_bug636;

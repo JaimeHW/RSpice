@@ -179,17 +179,11 @@ impl LteEstimator {
     }
 
     #[inline]
-    fn accepted_point_global_reference_prefix_excluding(
-        &self,
-        prefix_len: usize,
-        excluded_indices: &[usize],
-    ) -> Option<Value> {
+    fn accepted_point_global_reference_prefix(&self, prefix_len: usize) -> Option<Value> {
         self.accepted_reference_solution
             .iter()
             .take(prefix_len)
-            .enumerate()
-            .filter(|(index, _)| excluded_indices.binary_search(index).is_err())
-            .try_fold(0.0_f64, |reference, (_, value)| {
+            .try_fold(0.0_f64, |reference, value| {
                 value.is_finite().then(|| reference.max(value.abs()))
             })
     }
@@ -784,9 +778,12 @@ impl LteEstimator {
             | TransientLteReference::PointLocal
             | TransientLteReference::SignalLocal => 0.0,
             TransientLteReference::PointGlobal | TransientLteReference::SignalGlobal => {
-                let Some(reference) =
-                    self.accepted_point_global_reference_prefix_excluding(len, excluded_indices)
-                else {
+                // Xyce NEWLTE=1/2 forms the global reference from the full
+                // accepted solution before assigning MachineBig weights to
+                // device-masked variables. Masks suppress only their error
+                // numerator below; their values still scale every global
+                // reference weight.
+                let Some(reference) = self.accepted_point_global_reference_prefix(len) else {
                     return (Value::INFINITY, false);
                 };
                 reference
@@ -1176,7 +1173,7 @@ mod lte_estimator_tests {
     }
 
     #[test]
-    fn xyce_device_mask_excludes_algebraic_values_from_point_global_weight() {
+    fn xyce_device_mask_retains_algebraic_values_in_point_global_reference() {
         let estimator = accepted_estimator(
             TransientLteReference::PointGlobal,
             &[1.0, 1000.0],
@@ -1184,7 +1181,7 @@ mod lte_estimator_tests {
         );
 
         let (masked_lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
-            &[1.6, 1000.0],
+            &[1.6, 2000.0],
             &[1.0, 1000.0],
             2,
             1.0,
@@ -1192,8 +1189,18 @@ mod lte_estimator_tests {
             IntegrationMethod::Trapezoidal,
             2,
         );
+        let (reference_only_lte, _) = estimator
+            .estimate_correction_prefix_excluding_for_integration(
+                &[1.6, 1000.0],
+                &[1.0, 1000.0],
+                2,
+                1.0,
+                &[1],
+                IntegrationMethod::Trapezoidal,
+                2,
+            );
         let (unmasked_lte, _) = estimator.estimate_correction_prefix_excluding_for_integration(
-            &[1.6, 1000.0],
+            &[1.6, 2000.0],
             &[1.0, 1000.0],
             2,
             1.0,
@@ -1202,7 +1209,22 @@ mod lte_estimator_tests {
             2,
         );
 
-        assert!(masked_lte > unmasked_lte * 100.0);
+        assert_eq!(masked_lte.to_bits(), reference_only_lte.to_bits());
+        assert!(unmasked_lte > masked_lte * 100.0);
+
+        let without_large_algebraic_reference =
+            accepted_estimator(TransientLteReference::PointGlobal, &[1.0, 1.0], &[1.0, 1.0]);
+        let (local_scale_lte, _) = without_large_algebraic_reference
+            .estimate_correction_prefix_excluding_for_integration(
+                &[1.6, 1.0],
+                &[1.0, 1.0],
+                2,
+                1.0,
+                &[1],
+                IntegrationMethod::Trapezoidal,
+                2,
+            );
+        assert!(local_scale_lte > masked_lte * 100.0);
     }
 
     #[test]

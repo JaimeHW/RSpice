@@ -6,11 +6,6 @@
 
 use super::*;
 
-/// `.OPTIONS OUTPUT` schedule: the initial print interval, then the
-/// `(until_time, interval)` pairs that supersede it. `None` when the deck
-/// declares no schedule at all.
-type OutputIntervalSchedule = Result<Option<(Value, Vec<(Value, Value)>)>, String>;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum XyceGeneratedVbicNoiseIssue {
     ModelUnavailable {
@@ -778,60 +773,24 @@ impl XyceTestRunner {
         netlist: &Netlist,
         result: &TransientResult,
     ) -> Result<Vec<Value>, String> {
-        let output_start = plan.tran.start.unwrap_or(0.0).max(0.0);
+        let output_start = plan
+            .tran
+            .start
+            .unwrap_or(0.0)
+            .max(result.time.first().copied().unwrap_or(0.0))
+            .max(0.0);
         let time_epsilon = 16.0 * Value::EPSILON * plan.tran.stop.abs().max(1.0);
-        if !netlist.options.output_time_points.is_empty() {
+        if !netlist.options.output_time_points.is_empty()
+            || netlist.options.output_interval_schedule.is_some()
+        {
             let projection = result.output_projection(
                 &netlist.options.output_time_points,
+                netlist.options.output_interval_schedule.as_ref(),
                 output_start,
                 plan.tran.stop,
+                MAX_NATIVE_TRAN_ORACLE_STEPS as usize,
             )?;
-            return projection.project(&result.time);
-        }
-        if let Some((initial_interval, transitions)) = Self::output_interval_schedule(&plan.source)?
-        {
-            let mut times = Vec::new();
-            let mut next_time = 0.0;
-            let mut interval = initial_interval;
-            let mut boundaries = transitions;
-            boundaries.push((plan.tran.stop, interval));
-            for (boundary, next_interval) in boundaries {
-                let segment_end = boundary.min(plan.tran.stop);
-                while next_time < segment_end - time_epsilon {
-                    if next_time + time_epsilon >= output_start {
-                        times.push(next_time);
-                        if times.len() > MAX_NATIVE_TRAN_ORACLE_STEPS as usize {
-                            return Err(format!(
-                                "OUTPUT schedule requests more than {:.0} serialized transient rows",
-                                MAX_NATIVE_TRAN_ORACLE_STEPS
-                            ));
-                        }
-                    }
-                    next_time += interval;
-                }
-                if boundary > plan.tran.stop + time_epsilon {
-                    break;
-                }
-                if boundary + time_epsilon >= output_start
-                    && times
-                        .last()
-                        .is_none_or(|last| (boundary - *last).abs() > time_epsilon)
-                {
-                    times.push(boundary);
-                }
-                interval = next_interval;
-                next_time = boundary + interval;
-            }
-            if times
-                .last()
-                .is_none_or(|last| (plan.tran.stop - *last).abs() > time_epsilon)
-            {
-                times.push(plan.tran.stop);
-            }
-            if times.is_empty() {
-                return Err("transient output schedule produced no times".to_string());
-            }
-            return Ok(times);
+            return Ok(projection.times().to_vec());
         }
 
         let times = result
@@ -1582,135 +1541,6 @@ impl XyceTestRunner {
             && max_value.is_finite()
             && expected >= min_value.min(max_value)
             && expected <= min_value.max(max_value))
-    }
-
-    pub(super) fn output_initial_interval(source: &str) -> Result<Option<Value>, String> {
-        let mut interval: Option<Value> = None;
-        for line in Self::logical_netlist_lines(source) {
-            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let Some(command) = trimmed.split_whitespace().next() else {
-                continue;
-            };
-            if !command.eq_ignore_ascii_case(".options") {
-                continue;
-            }
-
-            let tokens = Self::split_grouped_whitespace_fields(&trimmed, ".OPTIONS statement")?;
-            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
-            let has_output_package = token_refs
-                .iter()
-                .skip(1)
-                .any(|token| token.eq_ignore_ascii_case("output"));
-            if !has_output_package {
-                continue;
-            }
-
-            let mut index = 1usize;
-            while index < token_refs.len() {
-                if let Some((raw_key, raw_value, consumed)) =
-                    Self::print_option_assignment(&token_refs, index)
-                {
-                    if raw_key.trim().eq_ignore_ascii_case("initial_interval") {
-                        let parsed = rspice_core::netlist::lexer::parse_spice_value(
-                            raw_value.trim().trim_matches(['"', '\'']),
-                        )
-                        .map_err(|err| {
-                            format!(
-                                "failed to parse OUTPUT INITIAL_INTERVAL value '{}': {err}",
-                                raw_value.trim()
-                            )
-                        })?;
-                        if !parsed.is_finite() || parsed <= 0.0 {
-                            return Err(format!(
-                                "OUTPUT INITIAL_INTERVAL must be positive and finite, got {parsed}"
-                            ));
-                        }
-                        if let Some(existing) = interval {
-                            let scale = existing.abs().max(parsed.abs()).max(1.0);
-                            if (existing - parsed).abs() > 1.0e-12 * scale {
-                                return Err(
-                                    "conflicting OUTPUT INITIAL_INTERVAL options are not supported"
-                                        .to_string(),
-                                );
-                            }
-                        } else {
-                            interval = Some(parsed);
-                        }
-                    }
-                    index += consumed;
-                } else {
-                    index += 1;
-                }
-            }
-        }
-
-        Ok(interval)
-    }
-
-    pub(super) fn output_interval_schedule(source: &str) -> OutputIntervalSchedule {
-        let Some(initial_interval) = Self::output_initial_interval(source)? else {
-            return Ok(None);
-        };
-        let mut values = Vec::new();
-        for line in Self::logical_netlist_lines(source) {
-            let trimmed = Self::strip_netlist_comment(&line).trim();
-            let tokens = Self::split_grouped_whitespace_fields(trimmed, ".OPTIONS statement")?;
-            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
-            if !token_refs
-                .first()
-                .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
-                || !token_refs
-                    .iter()
-                    .skip(1)
-                    .any(|token| token.eq_ignore_ascii_case("output"))
-            {
-                continue;
-            }
-            let mut index = 1usize;
-            while index < token_refs.len() {
-                if let Some((_key, _value, consumed)) =
-                    Self::print_option_assignment(&token_refs, index)
-                {
-                    index += consumed;
-                    continue;
-                }
-                let token = token_refs[index].trim().trim_matches(['"', '\'']);
-                if !token.eq_ignore_ascii_case("output")
-                    && let Ok(value) = rspice_core::netlist::lexer::parse_spice_value(token)
-                {
-                    values.push(value);
-                }
-                index += 1;
-            }
-        }
-        if values.len() % 2 != 0 {
-            return Err(format!(
-                "OUTPUT INITIAL_INTERVAL schedule requires time/interval pairs, found {} trailing numeric value(s)",
-                values.len()
-            ));
-        }
-        let mut transitions = Vec::with_capacity(values.len() / 2);
-        let mut previous_time = Value::NEG_INFINITY;
-        for pair in values.chunks_exact(2) {
-            let time = pair[0];
-            let interval = pair[1];
-            if !time.is_finite() || time < 0.0 || time <= previous_time {
-                return Err(format!(
-                    "OUTPUT interval transition times must be finite, nonnegative, and strictly increasing, got {time} after {previous_time}"
-                ));
-            }
-            if !interval.is_finite() || interval <= 0.0 {
-                return Err(format!(
-                    "OUTPUT interval after time {time} must be positive and finite, got {interval}"
-                ));
-            }
-            transitions.push((time, interval));
-            previous_time = time;
-        }
-        Ok(Some((initial_interval, transitions)))
     }
 
     pub(super) fn tran_print_time_scale_factor(source: &str) -> Result<Value, String> {

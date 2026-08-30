@@ -303,7 +303,11 @@ mod checkpoint_tests {
 module atomic_zi(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, 0.0);
+    real sampled;
+    analog begin
+        sampled = zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, 0.0);
+        I(p, n) <+ sampled;
+    end
 endmodule
 "#;
         let model = Compiler::default()

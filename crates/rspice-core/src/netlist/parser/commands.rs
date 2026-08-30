@@ -32,7 +32,6 @@ pub(super) fn parse_command(
         startup_scope,
         options,
         max_analysis_points,
-        output_initial_interval_seen,
         diagnostics,
         spef_includes,
         origin,
@@ -408,7 +407,6 @@ pub(super) fn parse_command(
             params,
             options,
             max_analysis_points,
-            output_initial_interval_seen,
             unknown_warned,
             diagnostics,
         )?,
@@ -1470,7 +1468,6 @@ pub(super) fn parse_options_command(
     params: &ParamContext,
     options: &mut super::SimulationOptions,
     max_analysis_points: usize,
-    output_initial_interval_seen: &mut bool,
     unknown_warned: &mut std::collections::HashSet<String>,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Result<(), ParseError> {
@@ -1482,10 +1479,11 @@ pub(super) fn parse_options_command(
             break;
         }
 
-        // Xyce's RESTART package uses a deliberately irregular tail grammar:
-        // after the ordinary NAME=VALUE fields, bare values occur in
-        // `<time> <interval>` pairs. Detect that tail before asking for an
-        // option key, since its first token is normally numeric.
+        // Xyce's RESTART and OUTPUT packages use deliberately irregular tail
+        // grammars: after an interval scalar, bare values occur in
+        // `<time> <interval>` pairs. RESTART may reach the tail after other
+        // package fields; OUTPUT consumes its tail in the INITIAL_INTERVAL arm
+        // so later named OUTPUT fields on the same line remain available.
         if option_package.as_deref() == Some("RESTART")
             && restart_interval_schedule_starts(stream, params)
         {
@@ -2014,6 +2012,7 @@ pub(super) fn parse_options_command(
                         .timeint_breakpoints
                         .len()
                         .saturating_add(options.output_time_points.len())
+                        .saturating_add(output_interval_count(options))
                         .saturating_add(restart_interval_count(options)),
                     max_analysis_points,
                 )?;
@@ -2301,12 +2300,23 @@ pub(super) fn parse_options_command(
                     });
                 }
                 let value = expect_value(stream, line_num, params)?;
-                let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
-                consume_output_initial_interval_schedule(stream, line_num, params)?;
-                *output_initial_interval_seen = true;
+                let initial_interval =
+                    parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
+                let intervals = parse_output_interval_schedule(
+                    stream,
+                    line_num,
+                    params,
+                    options,
+                    max_analysis_points,
+                )?;
+                options.output_interval_schedule =
+                    Some(crate::netlist::XyceOutputIntervalSchedule {
+                        initial_interval,
+                        intervals,
+                    });
             }
             (Some("OUTPUT"), "OUTPUTTIMEPOINTS") => {
-                if *output_initial_interval_seen {
+                if options.output_interval_schedule.is_some() {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: "Cannot specify both .OPTIONS OUTPUT INITIAL_INTERVAL and OUTPUTTIMEPOINTS".to_string(),
@@ -2321,6 +2331,7 @@ pub(super) fn parse_options_command(
                         .output_time_points
                         .len()
                         .saturating_add(options.timeint_breakpoints.len())
+                        .saturating_add(output_interval_count(options))
                         .saturating_add(restart_interval_count(options)),
                     max_analysis_points,
                 )?;
@@ -2659,6 +2670,7 @@ fn parse_restart_interval_schedule(
         .output_time_points
         .len()
         .saturating_add(options.timeint_breakpoints.len())
+        .saturating_add(output_interval_count(options))
         .saturating_add(
             options
                 .restart
@@ -2730,22 +2742,72 @@ fn parse_restart_interval_schedule(
     Ok(())
 }
 
-fn consume_output_initial_interval_schedule(
+fn parse_output_interval_schedule(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(), ParseError> {
+    options: &super::SimulationOptions,
+    max_analysis_points: usize,
+) -> Result<Vec<crate::netlist::XyceOutputInterval>, ParseError> {
+    let retained_points = options
+        .output_time_points
+        .len()
+        .saturating_add(options.timeint_breakpoints.len())
+        .saturating_add(restart_interval_count(options));
+    let mut intervals = Vec::new();
+    let mut previous_time = None;
     loop {
         skip_commas(stream);
-        if !matches!(
-            stream.peek().kind,
-            TokenKind::Number(_) | TokenKind::Expression(_)
-        ) {
-            return Ok(());
+        if !restart_interval_schedule_starts(stream, params) {
+            return Ok(intervals);
         }
-        let value = expect_value(stream, line_num, params)?;
-        let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
+        let time = expect_value(stream, line_num, params).map_err(|_| ParseError::Syntax {
+            line: line_num,
+            message: "OUTPUT interval schedule expects <time> <interval> pairs".to_string(),
+        })?;
+        let time = parse_non_negative_real_option("OUTPUT.TIME", time, line_num)?;
+        skip_commas(stream);
+        if !restart_interval_schedule_starts(stream, params) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "OUTPUT interval schedule is missing the interval paired with time {time}"
+                ),
+            });
+        }
+        let interval = expect_value(stream, line_num, params).map_err(|_| ParseError::Syntax {
+            line: line_num,
+            message: "OUTPUT interval schedule expects <time> <interval> pairs".to_string(),
+        })?;
+        let interval = parse_positive_real_option("OUTPUT.INTERVAL", interval, line_num)?;
+        if previous_time.is_some_and(|previous| time <= previous) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "OUTPUT.TIME values must be strictly increasing; found {time} after {}",
+                    previous_time.expect("checked above")
+                ),
+            });
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::AnalysisPoints,
+            retained_points
+                .saturating_add(intervals.len())
+                .saturating_add(1),
+            max_analysis_points,
+        )
+        .map_err(ParseError::from)?;
+        let time = if time == 0.0 { 0.0 } else { time };
+        previous_time = Some(time);
+        intervals.push(crate::netlist::XyceOutputInterval { time, interval });
     }
+}
+
+fn output_interval_count(options: &super::SimulationOptions) -> usize {
+    options
+        .output_interval_schedule
+        .as_ref()
+        .map_or(0, |schedule| schedule.intervals.len())
 }
 
 fn parse_time_point_vector_option(
@@ -7051,10 +7113,69 @@ mod tests {
 
     #[test]
     fn options_accept_xyce_output_initial_interval_schedule() {
-        Netlist::parse(&deck_with_options(
+        let netlist = Netlist::parse(&deck_with_options(
             ".options output initial_interval=.001ms .5ms .01ms",
         ))
         .expect("Xyce OUTPUT INITIAL_INTERVAL schedule syntax parses");
+        let schedule = netlist
+            .options
+            .output_interval_schedule
+            .expect("OUTPUT interval schedule is retained");
+        assert_eq!(schedule.initial_interval.to_bits(), 1.0e-6f64.to_bits());
+        assert_eq!(schedule.intervals.len(), 1);
+        assert_eq!(schedule.intervals[0].time.to_bits(), 5.0e-4f64.to_bits());
+        assert_eq!(
+            schedule.intervals[0].interval.to_bits(),
+            1.0e-5f64.to_bits()
+        );
+
+        let bug456 = Netlist::parse(&deck_with_options(
+            ".options output printheader=0 initial_interval=2e-8 \
+             2e-4 1e-8 printfooter=0",
+        ))
+        .expect("named OUTPUT fields may surround the interval schedule");
+        let schedule = bug456
+            .options
+            .output_interval_schedule
+            .expect("BUG456 output cadence is typed");
+        assert_eq!(schedule.initial_interval.to_bits(), 2.0e-8f64.to_bits());
+        assert_eq!(schedule.intervals.len(), 1);
+        assert_eq!(schedule.intervals[0].time.to_bits(), 2.0e-4f64.to_bits());
+        assert_eq!(
+            schedule.intervals[0].interval.to_bits(),
+            1.0e-8f64.to_bits()
+        );
+        assert_eq!(bug456.options.output_print_header, Some(false));
+        assert_eq!(bug456.options.output_print_footer, Some(false));
+    }
+
+    #[test]
+    fn output_interval_schedule_rejects_incomplete_or_unordered_pairs() {
+        for option in [
+            ".options output initial_interval=1u 2u",
+            ".options output initial_interval=1u 3u 1u 2u 1u",
+            ".options output initial_interval=1u 2u 0",
+        ] {
+            let error = Netlist::parse(&deck_with_options(option))
+                .expect_err("malformed OUTPUT cadence must fail closed");
+            assert!(
+                error.to_string().contains("OUTPUT"),
+                "unexpected error for {option:?}: {error}"
+            );
+        }
+
+        let error = Netlist::parse_with_options(
+            &deck_with_options(".options output initial_interval=1u 2u 1u 4u 1u"),
+            crate::netlist::NetlistParseOptions {
+                resource_limits: crate::resource::ResourceLimits {
+                    max_analysis_points: 1,
+                    ..crate::resource::ResourceLimits::default()
+                },
+                ..crate::netlist::NetlistParseOptions::default()
+            },
+        )
+        .expect_err("OUTPUT interval transitions share the analysis-point budget");
+        assert!(error.to_string().contains("analysis_points"));
     }
 
     #[test]

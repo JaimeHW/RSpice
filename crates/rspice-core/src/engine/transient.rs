@@ -160,6 +160,20 @@ fn xyce_iteration_retry_timestep(rejected_dt: Value, hard_min_dt: Value, max_dt:
     (rejected_dt * 0.125).clamp(hard_min_dt, max_dt)
 }
 
+/// Return the exact requested horizon when a step consumes the remaining
+/// transient interval. Floating-point subtraction followed by addition is not
+/// an identity for every pair of finite values, so endpoint-sensitive sources,
+/// device loads, checkpoints, and recorded samples must share this canonical
+/// time instead of independently recomputing `current_time + dt`.
+#[inline]
+fn canonical_transient_step_time(current_time: Value, dt: Value, stop_time: Value) -> Value {
+    if dt >= stop_time - current_time {
+        stop_time
+    } else {
+        current_time + dt
+    }
+}
+
 #[inline]
 const fn xyce_allows_order_two(max_order: u8) -> bool {
     max_order == 2
@@ -306,7 +320,10 @@ pub use self::{
         DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
         netlist_fingerprint,
     },
-    restart::{XyceRestartJobPlan, XyceRestartPlanError},
+    restart::{
+        XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan, XyceRestartPlanError,
+        xyce_restart_schedule_is_due,
+    },
 };
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
@@ -331,8 +348,9 @@ enum ResumeValidation {
 ///
 /// Xyce evaluates restart saves after accepted steps. `nominal_time` is the
 /// due time used in the filename, while `checkpoint.time` is the first
-/// accepted solver time at or after it; these can differ without changing the
-/// integration trajectory.
+/// accepted solver time for which `nominal_time - checkpoint.time <=
+/// XYCE_RESTART_SCHEDULE_TOLERANCE`. It may precede the nominal time by at
+/// most that tolerance or follow it by an unconstrained accepted-step gap.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduledTransientCheckpoint {
     pub nominal_time: Value,
@@ -1889,10 +1907,10 @@ impl Engine {
     ///
     /// The schedule does not add solver breakpoints. After each accepted step,
     /// the first due nominal time emits one checkpoint and all additional
-    /// nominal times already crossed are advanced without another file,
-    /// matching Xyce 7.10. Keeping nominal filename time separate from actual
-    /// accepted state time prevents checkpointing from perturbing the physical
-    /// trajectory.
+    /// nominal times already due under Xyce's restart window are advanced
+    /// without another file, matching Xyce 7.10. Keeping nominal filename time
+    /// separate from actual accepted state time prevents checkpointing from
+    /// perturbing the physical trajectory.
     pub fn run_tran_checkpoint_schedule_with_startup_mode(
         &self,
         netlist: &Netlist,
@@ -1942,6 +1960,13 @@ impl Engine {
             .options
             .output_time_points
             .len()
+            .saturating_add(
+                netlist
+                    .options
+                    .output_interval_schedule
+                    .as_ref()
+                    .map_or(0, |schedule| schedule.intervals.len()),
+            )
             .saturating_add(netlist.options.timeint_breakpoints.len())
             .saturating_add(
                 netlist
@@ -2264,6 +2289,8 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         startup_mode: TransientStartupMode,
         integration_max_step: Value,
+        integration_continuation: Option<(Value, Option<Value>, Value)>,
+        integration_stop_time: Value,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
         lte_estimator: &LteEstimator,
@@ -2277,9 +2304,17 @@ impl Engine {
         let Some(&requested_time) = scheduled_times.get(*cursor) else {
             return Ok(());
         };
-        if accepted_time < requested_time {
+        if !xyce_restart_schedule_is_due(accepted_time, requested_time) {
             return Ok(());
         }
+        let at_integration_endpoint = accepted_time >= integration_stop_time
+            || integration_stop_time - accepted_time
+                <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE;
+        let integration_continuation = if at_integration_endpoint {
+            None
+        } else {
+            integration_continuation
+        };
         let checkpoint = TransientCheckpoint::capture_with_restart_identity(
             fingerprint,
             netlist_identity.clone(),
@@ -2290,6 +2325,7 @@ impl Engine {
             circuit,
             startup_mode,
             Some(integration_max_step),
+            integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             Some(lte_estimator),
@@ -2310,7 +2346,7 @@ impl Engine {
         *cursor += 1;
         while scheduled_times
             .get(*cursor)
-            .is_some_and(|time| *time <= accepted_time)
+            .is_some_and(|time| xyce_restart_schedule_is_due(accepted_time, *time))
         {
             *cursor += 1;
         }
@@ -2364,7 +2400,7 @@ impl Engine {
         let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
-        if let Some(checkpoint) = resume {
+        let resume_next_step = if let Some(checkpoint) = resume {
             match resume_validation {
                 ResumeValidation::ExactNetlist => {
                     checkpoint.validate_for_with_config(checkpoint_netlist, &self.config)
@@ -2377,7 +2413,12 @@ impl Engine {
             checkpoint
                 .validate_recorded_integration_max_step()
                 .map_err(SimulationError::Circuit)?;
-        }
+            checkpoint
+                .validated_integration_continuation()
+                .map_err(SimulationError::Circuit)?
+        } else {
+            None
+        };
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
@@ -2405,6 +2446,7 @@ impl Engine {
                 &circuit,
                 startup_mode,
                 Some(max_step),
+                None,
                 &[],
                 0,
                 None,
@@ -2815,16 +2857,11 @@ impl Engine {
             }
         }
         breakpoints.discard_through(resume_time);
-        let initial_remaining_breakpoints = breakpoints
-            .times()
-            .iter()
-            .filter(|&&time| time > resume_time)
-            .count();
         let configured_initial_step = self
             .config
             .transient_initial_timestep
             .filter(|step| step.is_finite() && *step > 0.0);
-        let initial_step = if self.config.spice_dialect == SpiceDialect::Xyce {
+        let fresh_initial_step = if self.config.spice_dialect == SpiceDialect::Xyce {
             Self::xyce_initial_timestep(
                 resume_time,
                 tstop,
@@ -2842,6 +2879,9 @@ impl Engine {
                     )
                 })
         };
+        let initial_step = resume_next_step
+            .map(|(next_step, _, _)| next_step)
+            .unwrap_or(fresh_initial_step);
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
             hinted_max_step,
@@ -2858,12 +2898,18 @@ impl Engine {
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
         );
-        let startup_span_ceiling = xyce_breakpoint_span_ceiling.anchor(
-            resume_time,
-            breakpoints.next_after(resume_time),
-            tstop,
-        );
-        let startup_max_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
+        let startup_span_ceiling = if let Some((_, saved_ceiling, _)) = resume_next_step {
+            xyce_breakpoint_span_ceiling
+                .restore_active_ceiling(saved_ceiling)
+                .map_err(SimulationError::Circuit)?
+        } else {
+            xyce_breakpoint_span_ceiling.anchor(
+                resume_time,
+                breakpoints.next_after(resume_time),
+                tstop,
+            )
+        };
+        let startup_raw_max_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
             self.transient_device_max_timestep(&circuit, resume_time, hinted_max_step)
                 .min(startup_span_ceiling.unwrap_or(Value::INFINITY))
         } else {
@@ -2871,12 +2917,24 @@ impl Engine {
                 .map(|step| hinted_max_step.max(step))
                 .unwrap_or(hinted_max_step)
         };
+        // Restore the producing controller's effective maximum before applying
+        // this resumed segment's raw device/span cap. Runtime `set_max_dt`
+        // raises a raw cap below the already-established hard floor; reversing
+        // that ordering would instead lower the floor at an arbitrary seam.
+        // Applying the current raw cap second also preserves Xyce's contract
+        // that an extended restart may select its own per-run maximum step.
+        let startup_controller_max_dt = resume_next_step
+            .map(|(_, _, controller_max_step)| controller_max_step)
+            .unwrap_or(startup_raw_max_dt);
         let mut timestep = TimestepController::new_with_preferred_min(
             initial_step,
             hard_min_dt,
             preferred_min_dt,
-            startup_max_dt,
+            startup_controller_max_dt,
         );
+        if resume_next_step.is_some() {
+            timestep.set_max_dt(startup_raw_max_dt);
+        }
         let mut dynamic_tline_breakpoints_added = resume
             .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
             .unwrap_or(0);
@@ -3471,6 +3529,12 @@ impl Engine {
             &circuit,
             startup_mode,
             max_step,
+            Some((
+                timestep.dt(),
+                xyce_breakpoint_span_ceiling.ceiling(),
+                timestep.max_dt(),
+            )),
+            tstop,
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
             &lte_estimator,
@@ -3561,7 +3625,7 @@ impl Engine {
         // accepted.  Keep that integration-state counter separate from the
         // broader recovery budget used by the native/ngspice paths.
         let mut xyce_step_failure_count = 0_usize;
-        let mut total_iterations = 0;
+        let mut total_step_attempts = 0_usize;
         let mut stale_accept_count = 0;
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
         let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
@@ -3572,14 +3636,6 @@ impl Engine {
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
-        const MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT: usize = 16;
-        let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
-        let max_total_iterations = estimated_steps
-            .saturating_mul(400)
-            .saturating_add(
-                initial_remaining_breakpoints.saturating_mul(MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT),
-            )
-            .max(50_000);
         let progress_logging_enabled = log::log_enabled!(log::Level::Info);
         let mut last_progress_log = progress_logging_enabled.then(crate::time_compat::Instant::now);
         let mut rhs = vec![0.0; size];
@@ -3789,7 +3845,12 @@ impl Engine {
             }};
         }
 
-        while t < tstop && total_iterations < max_total_iterations {
+        // Adaptive integration may legitimately take far more attempts than
+        // `TSTOP / DELMAX`: rejected local trials and accepted steps below the
+        // ceiling are numerical work, not retained results. Termination is
+        // governed by the per-point retry/minimum-step/livelock policies,
+        // cooperative abort, and the explicit analysis/result resource limits.
+        while t < tstop {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
             capacitor_accepted_states_valid = false;
@@ -3818,40 +3879,40 @@ impl Engine {
                 .is_some_and(|started| started.elapsed().as_secs() >= 2)
             {
                 log::info!(
-                    "Transient progress: t={:.12e}s / {:.3e}s ({:.1}%), dt={:.3e}, retries={}, order={}, {} iterations",
+                    "Transient progress: t={:.12e}s / {:.3e}s ({:.1}%), dt={:.3e}, retries={}, order={}, {} step attempts",
                     t,
                     tstop,
                     (t / tstop) * 100.0,
                     timestep.dt(),
                     retry_count,
                     trap_order,
-                    total_iterations
+                    total_step_attempts
                 );
                 last_progress_log = Some(crate::time_compat::Instant::now());
             }
 
-            // Abort check - check every ABORT_CHECK_INTERVAL iterations for minimal overhead
-            if total_iterations % ABORT_CHECK_INTERVAL == 0 {
+            // Abort check every few step attempts for minimal overhead.
+            if total_step_attempts % ABORT_CHECK_INTERVAL == 0 {
                 if tstop > 0.0 {
                     abort.observe_progress((t / tstop).clamp(0.0, 1.0));
                 }
                 let is_aborted = abort.is_aborted();
-                if total_iterations == 0 {
+                if total_step_attempts == 0 {
                     log::debug!("First abort check, is_aborted={}", is_aborted);
                 }
                 if is_aborted {
                     log::info!(
-                        "Transient simulation aborted at t={:.3e}s ({:.1}% complete, {} iterations)",
+                        "Transient simulation aborted at t={:.3e}s ({:.1}% complete, {} step attempts)",
                         t,
                         (t / tstop) * 100.0,
-                        total_iterations
+                        total_step_attempts
                     );
                     // Return error indicating abort - partial results are lost
                     return Err(SimulationError::Aborted);
                 }
             }
 
-            total_iterations += 1;
+            total_step_attempts = total_step_attempts.saturating_add(1);
             if locked_grid.is_none() {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 timestep.set_max_dt(
@@ -3968,10 +4029,12 @@ impl Engine {
                 // interval, replay that proposal as a hidden trial so the
                 // nonlinear rollback and predictor history follow the
                 // producing run before landing on the prescribed target.
-                dt = timestep.dt().min(max_step);
+                dt = timestep.dt().min(max_step).min(tstop - t);
                 locked_replay_hidden_attempt = dt > scheduled_dt;
             }
-            let mut expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+            let mut candidate_step_time = canonical_transient_step_time(t, dt, tstop);
+            let mut expected_source_delta =
+                Self::max_expected_source_delta(&circuit, t, candidate_step_time);
             if locked_grid.is_none() {
                 let interior_source_delta = if at_breakpoint && dt.is_finite() && dt > 0.0 {
                     Self::max_expected_source_delta(&circuit, t, t + 0.5 * dt)
@@ -3995,8 +4058,10 @@ impl Engine {
                 );
                 if biased_dt + 1e-30 < dt {
                     dt = biased_dt;
-                    at_breakpoint = breakpoints.at_breakpoint(t + dt);
-                    expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+                    candidate_step_time = canonical_transient_step_time(t, dt, tstop);
+                    at_breakpoint = breakpoints.at_breakpoint(candidate_step_time);
+                    expected_source_delta =
+                        Self::max_expected_source_delta(&circuit, t, candidate_step_time);
                 }
             }
             if fixed_method.is_none() {
@@ -4004,9 +4069,9 @@ impl Engine {
             } else if let Some(method) = fixed_method {
                 trapgear.force_method(method);
             }
-            let step_time = t + dt;
+            let step_time = canonical_transient_step_time(t, dt, tstop);
             let analysis_initial_step = resume.is_none() && uic_requested && result.time.len() == 1;
-            let analysis_final_step = step_time >= tstop;
+            let analysis_final_step = step_time == tstop;
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
                     &circuit,
@@ -4248,7 +4313,7 @@ impl Engine {
             } else {
                 new_solution.clone_from(&solution);
             }
-            circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
+            circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
             for (i, value) in new_solution.iter_mut().enumerate() {
                 let protected_ideal_output = i < num_nodes
                     && force_accept_protected_nodes
@@ -4290,7 +4355,7 @@ impl Engine {
                     &force_accept_protected_nodes,
                 );
                 if damped {
-                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
                 }
                 Self::clip_ideal_output_common_modes(
                     &solution,
@@ -4380,10 +4445,10 @@ impl Engine {
                 }
                 if _iter % ABORT_CHECK_INTERVAL == 0 && abort.is_aborted() {
                     log::info!(
-                        "Transient simulation aborted during Newton solve at t={:.3e}s ({:.1}% complete, {} iterations)",
+                        "Transient simulation aborted during Newton solve at t={:.3e}s ({:.1}% complete, {} step attempts)",
                         t,
                         (t / tstop) * 100.0,
-                        total_iterations
+                        total_step_attempts
                     );
                     return Err(SimulationError::Aborted);
                 }
@@ -4472,7 +4537,7 @@ impl Engine {
                         &mut matrix,
                         &mut rhs,
                         &new_solution,
-                        t + dt,
+                        step_time,
                         dt,
                         &transient_system_context,
                         &mut vbic_snapshot_cache,
@@ -4492,7 +4557,7 @@ impl Engine {
                         .as_mut()
                         .expect("direct Xyce DAE vectors are allocated for the gated path");
                     circuit
-                        .load_direct_xyce_level2_core_dae(&new_solution, t + dt, 0.0, vectors)
+                        .load_direct_xyce_level2_core_dae(&new_solution, step_time, 0.0, vectors)
                         .map_err(SimulationError::Circuit)?;
                     let previous_q = xyce_direct_accepted_q.as_deref().ok_or_else(|| {
                         SimulationError::Circuit("direct Xyce accepted Q history is missing".into())
@@ -4539,10 +4604,10 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 40 {
                         log::warn!(
-                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
-                            t + dt,
+                            "Slow transient Newton stamp at t={:.6e}, dt={:.3e}, step_attempt={}, elapsed={:.3?}",
+                            step_time,
                             dt,
-                            total_iterations,
+                            total_step_attempts,
                             newton_stamp_elapsed,
                         );
                     }
@@ -4580,8 +4645,10 @@ impl Engine {
                                     &rollback,
                                 );
                                 new_solution = trial;
-                                circuit
-                                    .enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
+                                circuit.enforce_ideal_voltage_constraints(
+                                    &mut new_solution,
+                                    step_time,
+                                )?;
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some((search, rollback));
                                 total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -4627,7 +4694,7 @@ impl Engine {
                             &rollback,
                         );
                         new_solution = trial;
-                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt)?;
+                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, step_time)?;
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some((search, rollback));
                         total_merit_nanos += merit_phase_start.elapsed().as_nanos();
@@ -4679,7 +4746,7 @@ impl Engine {
                             nonlinear_iterations = _iter;
                             log::trace!(
                                 "Xyce transient NOX accepted t={:.6e}, dt={:.3e}, iter={}, test={}, code={}",
-                                t + dt,
+                                step_time,
                                 dt,
                                 _iter,
                                 test,
@@ -4699,7 +4766,7 @@ impl Engine {
                         nox_status::XyceNoxDecision::Failed { test, return_code } => {
                             log::trace!(
                                 "Xyce transient NOX rejected t={:.6e}, dt={:.3e}, iter={}, test={}, code={}",
-                                t + dt,
+                                step_time,
                                 dt,
                                 _iter,
                                 test,
@@ -4796,10 +4863,10 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 40 {
                         log::warn!(
-                            "Slow transient Newton solve at t={:.6e}, dt={:.3e}, iter={}, elapsed={:.3?}",
+                            "Slow transient Newton solve at t={:.6e}, dt={:.3e}, step_attempt={}, elapsed={:.3?}",
                             t,
                             dt,
-                            total_iterations,
+                            total_step_attempts,
                             newton_solve_elapsed,
                         );
                     }
@@ -4842,7 +4909,7 @@ impl Engine {
                                 if !logged_divergence {
                                     log::debug!(
                                         "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
-                                        t + dt,
+                                        step_time,
                                         i,
                                         *v
                                     );
@@ -4855,7 +4922,7 @@ impl Engine {
                                 if !logged_divergence {
                                     log::debug!(
                                         "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
-                                        t + dt,
+                                        step_time,
                                         i,
                                         *v
                                     );
@@ -4914,7 +4981,7 @@ impl Engine {
                                 &force_accept_protected_nodes,
                             );
                             if damped {
-                                circuit.enforce_ideal_voltage_constraints(sol, t + dt)?;
+                                circuit.enforce_ideal_voltage_constraints(sol, step_time)?;
                             }
                             Self::clip_ideal_output_common_modes(
                                 &solution,
@@ -4975,7 +5042,7 @@ impl Engine {
                                 &mut matrix,
                                 &mut rhs,
                                 &new_solution,
-                                t + dt,
+                                step_time,
                                 dt,
                                 &transient_system_context,
                                 &mut vbic_snapshot_cache,
@@ -4992,7 +5059,7 @@ impl Engine {
                                 circuit
                                     .load_direct_xyce_level2_core_dae(
                                         &new_solution,
-                                        t + dt,
+                                        step_time,
                                         0.0,
                                         vectors,
                                     )
@@ -5033,7 +5100,7 @@ impl Engine {
                             let behavioral_converged = circuit
                                 .behavioral_linearizations_converged(
                                     &new_solution,
-                                    t + dt,
+                                    step_time,
                                     self.voltage_reltol(),
                                     self.voltage_abstol(),
                                     self.current_abstol(),
@@ -5248,7 +5315,7 @@ impl Engine {
                         let mut behavioral_converged = circuit
                             .behavioral_linearizations_converged(
                                 &new_solution,
-                                t + dt,
+                                step_time,
                                 self.voltage_reltol(),
                                 self.voltage_abstol(),
                                 self.current_abstol(),
@@ -5277,7 +5344,7 @@ impl Engine {
                                     &mut matrix,
                                     &mut rhs,
                                     &new_solution,
-                                    t + dt,
+                                    step_time,
                                     dt,
                                     &residual::TransientSystemContext {
                                         coeff: &coeff,
@@ -5349,7 +5416,7 @@ impl Engine {
                                 behavioral_converged = circuit
                                     .behavioral_linearizations_converged(
                                         &new_solution,
-                                        t + dt,
+                                        step_time,
                                         self.voltage_reltol(),
                                         self.voltage_abstol(),
                                         self.current_abstol(),
@@ -5400,7 +5467,7 @@ impl Engine {
                         had_solver_candidate = false;
                         log::debug!(
                             "Transient solve failed at t={:.6e}, dt={:.3e}: {}",
-                            t + dt,
+                            step_time,
                             dt,
                             e
                         );
@@ -5411,21 +5478,12 @@ impl Engine {
 
             let postloop_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             if !converged {
-                retry_count += 1;
-                if lte_estimator.uses_accepted_solution_reference() {
-                    xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
-                }
-                self.record_convergence(|quality| quality.record_timestep_reduction());
-                let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
-                    xyce_min_order
-                } else {
-                    native_order_after_restart(current_method)
-                };
-                trap_order = xyce_rejected_attempt_order(
-                    xyce_iteration_error_control,
-                    step_trap_order,
-                    recovery_order,
-                );
+                // The retry count describes rejected timestep attempts, not
+                // every failed pass through plain Newton. GMIN continuation
+                // can still recover this same candidate and send it through
+                // the ordinary LTE decision below, so retain only a local
+                // ordinal until every in-step nonlinear rescue has failed.
+                let nonlinear_failure_ordinal = retry_count.saturating_add(1);
 
                 // Diagnostic logging for debugging convergence issues
                 static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -5462,7 +5520,7 @@ impl Engine {
                         r_conv,
                         update_norm,
                         max_dv,
-                        total_iterations
+                        total_step_attempts
                     );
                 }
 
@@ -5481,7 +5539,7 @@ impl Engine {
                 let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
                     && circuit.has_only_xyce_core_inductors()
                     && !circuit.has_xyce_core_level2();
-                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                if nonlinear_failure_ordinal >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
                     // Xyce returns a failed transient DampedNewton/NOX solve
                     // directly to StepErrorControl. RSpice's post-solver GMIN
                     // deformation is not part of that path; under ERROPTION=1
@@ -5496,7 +5554,7 @@ impl Engine {
                         &mut matrix,
                         &mut rhs,
                         &solution,
-                        t + dt,
+                        step_time,
                         dt,
                         &residual::TransientSystemContext {
                             coeff: &coeff,
@@ -5537,7 +5595,7 @@ impl Engine {
                             "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
                             t,
                             dt,
-                            retry_count,
+                            nonlinear_failure_ordinal,
                         );
                     }
                     new_solution = rescued;
@@ -5548,6 +5606,21 @@ impl Engine {
             }
 
             if !converged {
+                retry_count = retry_count.saturating_add(1);
+                if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
+                }
+                self.record_convergence(|quality| quality.record_timestep_reduction());
+                let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_min_order
+                } else {
+                    native_order_after_restart(current_method)
+                };
+                trap_order = xyce_rejected_attempt_order(
+                    xyce_iteration_error_control,
+                    step_trap_order,
+                    recovery_order,
+                );
                 total_failed_attempts += 1;
                 if self.node_voltage_convergence_met(&solution, &new_solution, num_nodes) {
                     // Voltage settled but a device/residual criterion held the
@@ -5565,11 +5638,11 @@ impl Engine {
                     failed_voltage_conv += 1;
                 }
                 // Diagnostic logging for debugging timestep issues
-                if total_iterations < 100 || total_iterations % 10000 == 0 {
+                if total_step_attempts < 100 || total_step_attempts % 10000 == 0 {
                     log::debug!(
-                        "Newton non-convergence at t={:.3e}s, iter={}, dt={:.3e}s, reducing to {:.3e}s",
+                        "Newton non-convergence at t={:.3e}s, step_attempt={}, dt={:.3e}s, reducing to {:.3e}s",
                         t,
-                        total_iterations,
+                        total_step_attempts,
                         dt,
                         Self::nonconvergence_retry_timestep(dt, max_step)
                     );
@@ -5603,11 +5676,11 @@ impl Engine {
                     if retry_count >= LOCKED_MAX_RETRIES {
                         log::error!(
                             "Grid-locked step to t={:.12e}s (dt={:.3e}) failed Newton after {} retries",
-                            t + dt,
+                            step_time,
                             dt,
                             retry_count
                         );
-                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                        return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                     }
                     restore_rejected_transient_nonlinear_state!();
                     total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
@@ -5650,12 +5723,12 @@ impl Engine {
                 if exhausted_retries || exhausted_at_min {
                     log::error!(
                         "Transient Newton recovery exhausted at t={:.12e}s (dt={:.3e}, retries={})",
-                        t + dt,
+                        step_time,
                         dt,
                         retry_count
                     );
                     restore_rejected_transient_nonlinear_state!();
-                    return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                 }
                 restore_rejected_transient_nonlinear_state!();
                 rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
@@ -5969,7 +6042,7 @@ impl Engine {
                 Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {
-                Self::ltra_candidate_truncation_limit(&circuit, &new_solution, t + dt)
+                Self::ltra_candidate_truncation_limit(&circuit, &new_solution, step_time)
             } else {
                 None
             };
@@ -6258,18 +6331,18 @@ impl Engine {
                     if lte_estimator.uses_accepted_solution_reference() {
                         log::error!(
                             "Xyce transient LTE recovery exhausted at t={:.12e}s (dt={:.3e}, retries={})",
-                            t + dt,
+                            step_time,
                             dt,
                             retry_count
                         );
                         restore_rejected_transient_nonlinear_state!();
-                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                        return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                     }
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
                         &circuit,
                         &solution,
                         &new_solution,
-                        t + dt,
+                        step_time,
                         num_nodes,
                         force_accept_delta_limit,
                         &force_accept_protected_nodes,
@@ -6355,7 +6428,7 @@ impl Engine {
                                     t
                                 );
                             }
-                            return Err(SimulationError::ConvergenceFailed(total_iterations));
+                            return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                         }
                         restore_rejected_transient_nonlinear_state!();
                         continue;
@@ -6375,10 +6448,12 @@ impl Engine {
                     stale_accept_count = 0;
                     force_accepted_rejected_lte_step = true;
 
-                    t += dt;
+                    t = step_time;
                     let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
                     if hit_breakpoint {
-                        t = breakpoints.snap_to_breakpoint(t);
+                        if !analysis_final_step {
+                            t = breakpoints.snap_to_breakpoint(t);
+                        }
                         let restart_dt = breakpoints.mark_breakpoint_solved(t);
                         timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
                     }
@@ -6790,25 +6865,6 @@ impl Engine {
                             ));
                     }
                     self.ensure_transient_result_limits(&result, retained_result_values)?;
-                    self.capture_scheduled_checkpoint_if_due(
-                        scheduled_checkpoint_times,
-                        &mut scheduled_checkpoint_cursor,
-                        t,
-                        fingerprint,
-                        &netlist_identity,
-                        &restart_identity,
-                        &simulation_identity,
-                        &solution,
-                        &circuit,
-                        startup_mode,
-                        max_step,
-                        &pending_dynamic_tline_breakpoints,
-                        dynamic_tline_breakpoints_added,
-                        &lte_estimator,
-                        retained_result_values,
-                        &mut retained_scheduled_checkpoint_values,
-                        &mut scheduled_checkpoints,
-                    )?;
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -6833,6 +6889,31 @@ impl Engine {
                         trap_order = 1;
                     }
                     livelock_check!(dt);
+                    self.capture_scheduled_checkpoint_if_due(
+                        scheduled_checkpoint_times,
+                        &mut scheduled_checkpoint_cursor,
+                        t,
+                        fingerprint,
+                        &netlist_identity,
+                        &restart_identity,
+                        &simulation_identity,
+                        &solution,
+                        &circuit,
+                        startup_mode,
+                        max_step,
+                        Some((
+                            timestep.dt(),
+                            xyce_breakpoint_span_ceiling.ceiling(),
+                            timestep.max_dt(),
+                        )),
+                        tstop,
+                        &pending_dynamic_tline_breakpoints,
+                        dynamic_tline_breakpoints_added,
+                        &lte_estimator,
+                        retained_result_values,
+                        &mut retained_scheduled_checkpoint_values,
+                        &mut scheduled_checkpoints,
+                    )?;
                 }
                 if !force_accepted_rejected_lte_step {
                     restore_rejected_transient_nonlinear_state!();
@@ -6847,7 +6928,7 @@ impl Engine {
 
             // Keep ideal source constraints exact before LTE and state updates.
             let projected_voltage_sources = circuit
-                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, t + dt)?;
+                .enforce_prescribed_transient_voltage_constraints(&mut new_solution, step_time)?;
             if projected_voltage_sources {
                 nonlinear_state_matches_new_solution = false;
             }
@@ -6872,7 +6953,7 @@ impl Engine {
                         "Transient stalled near t={:.6e}s: repeated stale accepted steps with active sources",
                         t
                     );
-                    return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    return Err(SimulationError::ConvergenceFailed(total_step_attempts));
                 }
                 trap_order = native_order_after_restart(current_method);
                 restore_rejected_transient_nonlinear_state!();
@@ -6882,13 +6963,15 @@ impl Engine {
             stale_accept_count = 0;
 
             // Accept this timestep
-            t += dt;
+            t = step_time;
             let hit_breakpoint = if let Some(grid) = locked_grid.as_ref() {
                 // Land exactly on reference grid points, but allow pending
                 // XSPICE events to split a locked interval before the next
                 // recorded reference sample.
                 if locked_step_lands_on_grid {
-                    t = grid[locked_cursor];
+                    if !analysis_final_step {
+                        t = grid[locked_cursor];
+                    }
                     locked_cursor += 1;
                 }
                 lte_estimator.uses_accepted_solution_reference() && breakpoints.at_breakpoint(t)
@@ -6900,7 +6983,7 @@ impl Engine {
             // tolerance. `mark_breakpoint_solved` below uses that same tolerance,
             // so the nearby breakpoint is still consumed without perturbing the
             // prescribed sample time (in particular, the final grid endpoint).
-            if hit_breakpoint && !locked_step_lands_on_grid {
+            if hit_breakpoint && !locked_step_lands_on_grid && !analysis_final_step {
                 t = breakpoints.snap_to_breakpoint(t);
             }
             let method_after_step = current_integration_method(&trapgear);
@@ -7172,25 +7255,6 @@ impl Engine {
                     ));
             }
             self.ensure_transient_result_limits(&result, retained_result_values)?;
-            self.capture_scheduled_checkpoint_if_due(
-                scheduled_checkpoint_times,
-                &mut scheduled_checkpoint_cursor,
-                t,
-                fingerprint,
-                &netlist_identity,
-                &restart_identity,
-                &simulation_identity,
-                &solution,
-                &circuit,
-                startup_mode,
-                max_step,
-                &pending_dynamic_tline_breakpoints,
-                dynamic_tline_breakpoints_added,
-                &lte_estimator,
-                retained_result_values,
-                &mut retained_scheduled_checkpoint_values,
-                &mut scheduled_checkpoints,
-            )?;
             if first_accepted_transient_step {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 let accepted_max_step = self
@@ -7341,18 +7405,43 @@ impl Engine {
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
             livelock_check!(dt);
+            self.capture_scheduled_checkpoint_if_due(
+                scheduled_checkpoint_times,
+                &mut scheduled_checkpoint_cursor,
+                t,
+                fingerprint,
+                &netlist_identity,
+                &restart_identity,
+                &simulation_identity,
+                &solution,
+                &circuit,
+                startup_mode,
+                max_step,
+                Some((
+                    timestep.dt(),
+                    xyce_breakpoint_span_ceiling.ceiling(),
+                    timestep.max_dt(),
+                )),
+                tstop,
+                &pending_dynamic_tline_breakpoints,
+                dynamic_tline_breakpoints_added,
+                &lte_estimator,
+                retained_result_values,
+                &mut retained_scheduled_checkpoint_values,
+                &mut scheduled_checkpoints,
+            )?;
             rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
 
         if t < tstop {
             log::error!(
-                "Transient terminated early at t={:.6e}s / {:.6e}s after {} iterations",
+                "Transient terminated early at t={:.6e}s / {:.6e}s after {} step attempts",
                 t,
                 tstop,
-                total_iterations
+                total_step_attempts
             );
-            return Err(SimulationError::ConvergenceFailed(total_iterations));
+            return Err(SimulationError::ConvergenceFailed(total_step_attempts));
         }
 
         log::info!(
@@ -7366,8 +7455,8 @@ impl Engine {
         }
         let transient_wall = transient_wall_start.elapsed();
         log::debug!(
-            "Transient Newton phases: {} iterations, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
-            total_iterations,
+            "Transient Newton phases: {} step attempts, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            total_step_attempts,
             total_merit_trials,
             total_failed_attempts,
             failed_voltage_conv,
@@ -7441,6 +7530,7 @@ impl Engine {
             &circuit,
             startup_mode,
             Some(max_step),
+            None,
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
             Some(&lte_estimator),
@@ -7727,6 +7817,24 @@ mod tests {
     use super::*;
     use crate::{Netlist, SimulationConfig};
     use std::cell::Cell;
+
+    #[test]
+    fn canonical_final_step_time_repairs_subtraction_addition_round_trip() {
+        const CURRENT_TIME: Value = Value::from_bits(0x3e02_db21_7f74_4098);
+        const STOP_TIME: Value = Value::from_bits(0x3e42_ffcc_ca47_13bf);
+
+        let remaining = STOP_TIME - CURRENT_TIME;
+        assert_ne!(
+            (CURRENT_TIME + remaining).to_bits(),
+            STOP_TIME.to_bits(),
+            "the oracle pair must retain its one-ULP subtraction/addition mismatch"
+        );
+        assert_eq!(
+            canonical_transient_step_time(CURRENT_TIME, remaining, STOP_TIME).to_bits(),
+            STOP_TIME.to_bits(),
+            "a step that consumes the remaining interval must use the exact requested horizon"
+        );
+    }
 
     fn run_native_bjt_total_leads(
         method: &str,
@@ -8380,9 +8488,17 @@ mod tests {
         }
 
         let output = output_result
-            .output_projection(&output_netlist.options.output_time_points, 0.0, 5.0e-3)
+            .output_projection(
+                &output_netlist.options.output_time_points,
+                output_netlist.options.output_interval_schedule.as_ref(),
+                0.0,
+                5.0e-3,
+                SimulationConfig::default()
+                    .resource_limits
+                    .max_analysis_points,
+            )
             .expect("OUTPUTTIMEPOINTS projection succeeds");
-        assert_eq!(output.indices().len(), 5);
+        assert_eq!(output.times().len(), 5);
         assert_eq!(output_result.time.len(), breakpoint_result.time.len());
     }
 

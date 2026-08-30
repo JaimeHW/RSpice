@@ -4,13 +4,12 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "veriloga-builtins")]
 use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{
     Engine, SimulationConfig, SpiceDialect, TransientCheckpoint, TransientStartupMode,
 };
 use rspice_core::netlist::Netlist;
-use rspice_core::numerics::integration::IntegrationMethod;
+use rspice_core::numerics::integration::{IntegrationMethod, TransientErrorControl};
 use rspice_core::xspice::{register_data_file, unregister_data_file};
 
 /// Sine-driven RC: smooth, source phase depends on absolute time, so a
@@ -414,6 +413,110 @@ c1 out 0 1u ic=1
         (trace[2] - expected_bdf2).abs() <= 1.0e-12,
         "second resumed Gear2 interval must use the real first interval as BDF2 history: expected {expected_bdf2:e}, got {:e}",
         trace[2]
+    );
+}
+
+#[test]
+fn xyce_scheduled_checkpoint_restores_the_post_breakpoint_step_proposal() {
+    let netlist = Netlist::parse(
+        "scheduled checkpoint preserves Xyce continuation sizing\n\
+         .tran 0 50u\n\
+         V1 in 0 pulse(0 1 0 1u 1u 5u 10u)\n\
+         R1 in 0 1k\n\
+         .end\n",
+    )
+    .expect("scheduled-continuation deck parses");
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: 1200,
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::TrapGear,
+        transient_error_control: TransientErrorControl::NonlinearIterations,
+        transient_initial_timestep: Some(1.0e-10),
+        ..Default::default()
+    });
+    // 23 us is inside the 21-26 us source-breakpoint span. Re-anchoring the
+    // span ceiling here would be observably tighter than restoring the active
+    // ceiling established at 21 us.
+    let seam = 23.0e-6;
+    let stop = 50.0e-6;
+    let max_step = 5.0e-6;
+    let (full, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            stop,
+            max_step,
+            TransientStartupMode::OperatingPoint,
+            &[seam, stop],
+        )
+        .expect("continuous run and scheduled checkpoint complete");
+    assert_eq!(scheduled.len(), 2);
+    assert!(
+        (scheduled[1].checkpoint.time - stop).abs() <= 1.0e-20,
+        "the scheduled endpoint must land within Xyce's breakpoint tolerance"
+    );
+    assert!(
+        scheduled[1]
+            .checkpoint
+            .to_text()
+            .contains("integration_continuation breakpoint-restart\n"),
+        "a scheduled TSTOP checkpoint is an endpoint restart, not in-flight continuation"
+    );
+    let checkpoint = TransientCheckpoint::from_text(&scheduled[0].checkpoint.to_text())
+        .expect("scheduled continuation state round-trips");
+    assert!(
+        full.time
+            .iter()
+            .any(|time| time.to_bits() == checkpoint.time.to_bits()),
+        "scheduled checkpoint is an accepted baseline point"
+    );
+    let checkpoint_text = checkpoint.to_text();
+    let continuation = checkpoint_text
+        .lines()
+        .find_map(|line| line.strip_prefix("integration_continuation proposed "))
+        .expect("an in-flight scheduled checkpoint carries proposed continuation state");
+    let mut continuation = continuation.split_whitespace();
+    let proposal = continuation
+        .next()
+        .expect("continuation carries a next-step proposal")
+        .parse::<f64>()
+        .expect("continuation proposal is numeric");
+    let span_ceiling = continuation
+        .next()
+        .expect("continuation carries an active span ceiling")
+        .parse::<f64>()
+        .expect("active span ceiling is numeric");
+    let controller_max_step = continuation
+        .next()
+        .expect("continuation carries its effective controller maximum")
+        .parse::<f64>()
+        .expect("effective controller maximum is numeric");
+    assert!(continuation.next().is_none());
+    assert!(proposal.is_finite() && proposal > 0.0);
+    assert!(span_ceiling.is_finite() && span_ceiling > 0.0);
+    assert!(controller_max_step.is_finite() && controller_max_step > 0.0);
+    assert!(proposal <= controller_max_step);
+    assert_ne!(
+        proposal.to_bits(),
+        1.0e-10_f64.to_bits(),
+        "the fixture must distinguish saved continuation from fresh Xyce startup sizing"
+    );
+    let reanchored_ceiling = (26.0e-6 - checkpoint.time) / 10.0;
+    assert!(
+        proposal > reanchored_ceiling && span_ceiling > reanchored_ceiling,
+        "the fixture must expose interior-span re-anchoring: proposal={proposal:e}, saved ceiling={span_ceiling:e}, artificial ceiling={reanchored_ceiling:e}"
+    );
+
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, stop, max_step)
+        .expect("scheduled checkpoint resumes");
+    assert_eq!(resumed.time[0].to_bits(), checkpoint.time.to_bits());
+    assert_eq!(
+        resumed.time[1].to_bits(),
+        (checkpoint.time + proposal).to_bits(),
+        "resume must use the post-accept proposal rather than recomputing startup sizing"
     );
 }
 

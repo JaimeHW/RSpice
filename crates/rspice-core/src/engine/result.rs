@@ -1,26 +1,45 @@
 //! Public time-domain result types.
 
 use crate::engine::waveform::TransientResultCompressed;
+use crate::netlist::XyceOutputIntervalSchedule;
 use crate::xspice::DigitalValue;
 use crate::{NodeId, Value};
 use std::collections::HashMap;
 
-/// Exact sample selection used by transient output writers.
+/// One accepted or linearly interpolated transient output sample.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TransientOutputCoordinate {
+    Accepted(usize),
+    Linear {
+        previous: usize,
+        current: usize,
+        from_current: Value,
+    },
+}
+
+/// Sample selection and interpolation used by transient output writers.
 ///
 /// The solver result always retains its complete accepted history. This view
 /// selects output rows without changing integration history, measurements,
 /// Fourier analysis, checkpoint continuation, or compression inputs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TransientOutputProjection {
     source_len: usize,
-    indices: Vec<usize>,
+    times: Vec<Value>,
+    coordinates: Vec<TransientOutputCoordinate>,
 }
 
 impl TransientOutputProjection {
-    pub fn indices(&self) -> &[usize] {
-        &self.indices
+    /// Exact output times represented by this projection.
+    pub fn times(&self) -> &[Value] {
+        &self.times
     }
 
+    /// Project one accepted-history series onto the output grid.
+    ///
+    /// Interval schedules use the same current-side linear formula as Xyce
+    /// 7.10's transient integration methods. Exact accepted samples are copied
+    /// without arithmetic so their IEEE-754 values remain unchanged.
     pub fn project(&self, values: &[Value]) -> Result<Vec<Value>, String> {
         if values.len() != self.source_len {
             return Err(format!(
@@ -29,7 +48,21 @@ impl TransientOutputProjection {
                 self.source_len
             ));
         }
-        Ok(self.indices.iter().map(|index| values[*index]).collect())
+        Ok(self
+            .coordinates
+            .iter()
+            .map(|coordinate| match *coordinate {
+                TransientOutputCoordinate::Accepted(index) => values[index],
+                TransientOutputCoordinate::Linear {
+                    previous,
+                    current,
+                    from_current,
+                } => {
+                    let current_value = values[current];
+                    current_value + from_current * (current_value - values[previous])
+                }
+            })
+            .collect())
     }
 }
 
@@ -145,16 +178,17 @@ impl TransientResult {
 
     /// Build the Xyce transient output view for a requested schedule.
     ///
-    /// With no `OUTPUTTIMEPOINTS`, every accepted sample at or after TSTART
-    /// is selected. With a schedule, only exact accepted requested points in
-    /// the output horizon plus TSTOP are selected. Requested points are solver
-    /// breakpoints, so a missing exact point is a scheduling error rather than
-    /// an invitation to interpolate.
+    /// With no output schedule, every accepted sample at or after TSTART is
+    /// selected. `OUTPUTTIMEPOINTS` requires exact accepted solver breakpoints.
+    /// `INITIAL_INTERVAL` instead builds Xyce's run-relative output lattice and
+    /// linearly interpolates it from the complete accepted history.
     pub fn output_projection(
         &self,
         output_time_points: &[Value],
+        output_interval_schedule: Option<&XyceOutputIntervalSchedule>,
         start_time: Value,
         stop_time: Value,
+        max_points: usize,
     ) -> Result<TransientOutputProjection, String> {
         if !start_time.is_finite()
             || !stop_time.is_finite()
@@ -167,6 +201,11 @@ impl TransientResult {
         }
         if self.time.is_empty() {
             return Err("transient result has no accepted samples".to_string());
+        }
+        if !output_time_points.is_empty() && output_interval_schedule.is_some() {
+            return Err(
+                "transient output cannot combine OUTPUTTIMEPOINTS and INITIAL_INTERVAL".to_string(),
+            );
         }
         if let Some(invalid) = output_time_points
             .iter()
@@ -187,10 +226,61 @@ impl TransientResult {
             }
         }
 
-        let indices = if output_time_points.is_empty() {
+        let (times, coordinates) = if let Some(schedule) = output_interval_schedule {
+            let first = self.time.partition_point(|time| *time < start_time);
+            let output_start_time = self.time.get(first).copied().ok_or_else(|| {
+                format!("transient result has no accepted sample at or after TSTART={start_time}")
+            })?;
+            if output_start_time > stop_time {
+                return Err("transient output projection selected no samples".to_string());
+            }
+            let events = schedule.output_events(&self.time, start_time, stop_time, max_points)?;
+            let mut times = Vec::with_capacity(events.len());
+            let mut coordinates = Vec::with_capacity(events.len());
+            for event in events {
+                times.push(event.output_time);
+                let Some(target) = event.interpolation_time else {
+                    coordinates.push(TransientOutputCoordinate::Accepted(event.accepted_index));
+                    continue;
+                };
+                let current = event.accepted_index;
+                if current == 0 || current >= self.time.len() {
+                    return Err(format!(
+                        "transient output time {target} has no accepted interpolation bracket"
+                    ));
+                }
+                let previous = current - 1;
+                let width = self.time[current] - self.time[previous];
+                let from_current = (target - self.time[current]) / width;
+                if !from_current.is_finite() || !(-1.0..=0.0).contains(&from_current) {
+                    return Err(format!(
+                        "transient output time {target} has an invalid interpolation bracket"
+                    ));
+                }
+                coordinates.push(TransientOutputCoordinate::Linear {
+                    previous,
+                    current,
+                    from_current,
+                });
+            }
+            (times, coordinates)
+        } else if output_time_points.is_empty() {
             let first = self.time.partition_point(|time| *time < start_time);
             let last = self.time.partition_point(|time| *time <= stop_time);
-            (first..last).collect()
+            let indices = (first..last).collect::<Vec<_>>();
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::AnalysisPoints,
+                indices.len(),
+                max_points,
+            )
+            .map_err(|error| error.to_string())?;
+            (
+                indices.iter().map(|index| self.time[*index]).collect(),
+                indices
+                    .into_iter()
+                    .map(TransientOutputCoordinate::Accepted)
+                    .collect(),
+            )
         } else {
             let mut requested = output_time_points
                 .iter()
@@ -200,9 +290,15 @@ impl TransientResult {
             requested.push(stop_time);
             requested.sort_by(Value::total_cmp);
             requested.dedup_by(|left, right| left.to_bits() == right.to_bits());
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::AnalysisPoints,
+                requested.len(),
+                max_points,
+            )
+            .map_err(|error| error.to_string())?;
 
-            let mut indices = Vec::with_capacity(requested.len());
-            for requested_time in requested {
+            let mut coordinates = Vec::with_capacity(requested.len());
+            for &requested_time in &requested {
                 let index = self
                     .time
                     .binary_search_by(|time| time.total_cmp(&requested_time))
@@ -211,17 +307,18 @@ impl TransientResult {
                             "transient result did not land on requested output time {requested_time}"
                         )
                     })?;
-                indices.push(index);
+                coordinates.push(TransientOutputCoordinate::Accepted(index));
             }
-            indices
+            (requested, coordinates)
         };
 
-        if indices.is_empty() {
+        if coordinates.is_empty() {
             return Err("transient output projection selected no samples".to_string());
         }
         Ok(TransientOutputProjection {
             source_len: self.time.len(),
-            indices,
+            times,
+            coordinates,
         })
     }
 
@@ -597,14 +694,14 @@ mod tests {
         let result = result_on_grid(vec![0.0, 0.5, 1.0, 1.5, 2.0]);
 
         let all = result
-            .output_projection(&[], 0.5, 1.5)
+            .output_projection(&[], None, 0.5, 1.5, 100)
             .expect("ordinary output projection succeeds");
-        assert_eq!(all.indices(), &[1, 2, 3]);
+        assert_eq!(all.times(), &[0.5, 1.0, 1.5]);
 
         let scheduled = result
-            .output_projection(&[0.0, 1.0], 0.5, 2.0)
+            .output_projection(&[0.0, 1.0], None, 0.5, 2.0, 100)
             .expect("scheduled output projection succeeds");
-        assert_eq!(scheduled.indices(), &[2, 4]);
+        assert_eq!(scheduled.times(), &[1.0, 2.0]);
         assert_eq!(
             scheduled
                 .project(&result.voltages[0])
@@ -618,14 +715,14 @@ mod tests {
     fn transient_output_projection_requires_exact_accepted_schedule_points() {
         let result = result_on_grid(vec![0.0, 1.0, 2.0]);
         let error = result
-            .output_projection(&[1.5], 0.0, 2.0)
+            .output_projection(&[1.5], None, 0.0, 2.0, 100)
             .expect_err("output points are solver stops, not interpolation requests");
         assert!(error.contains("did not land"));
 
         let projection = result
-            .output_projection(&[0.0, 2.0], 0.0, 2.0)
+            .output_projection(&[0.0, 2.0], None, 0.0, 2.0, 100)
             .expect("explicit zero and deduplicated stop are valid");
-        assert_eq!(projection.indices(), &[0, 2]);
+        assert_eq!(projection.times(), &[0.0, 2.0]);
         assert!(projection.project(&[1.0]).is_err());
     }
 
@@ -633,12 +730,153 @@ mod tests {
     fn transient_output_projection_rejects_invalid_result_grids() {
         for time in [vec![], vec![0.0, 0.0], vec![0.0, Value::NAN]] {
             let result = result_on_grid(time);
-            assert!(result.output_projection(&[], 0.0, 1.0).is_err());
+            assert!(result.output_projection(&[], None, 0.0, 1.0, 100).is_err());
         }
 
         let result = result_on_grid(vec![0.0, 1.0]);
         for schedule in [vec![-1.0], vec![Value::NAN], vec![Value::INFINITY]] {
-            assert!(result.output_projection(&schedule, 0.0, 1.0).is_err());
+            assert!(
+                result
+                    .output_projection(&schedule, None, 0.0, 1.0, 100)
+                    .is_err()
+            );
         }
+    }
+
+    #[test]
+    fn interval_output_projection_anchors_at_resume_and_interpolates_off_grid() {
+        let initial = 2.0e-4;
+        let stop = initial + 6.0e-8;
+        let result = result_on_grid(vec![initial, initial + 3.0e-8, stop]);
+        let schedule = XyceOutputIntervalSchedule {
+            initial_interval: 2.0e-8,
+            intervals: Vec::new(),
+        };
+        let projection = result
+            .output_projection(&[], Some(&schedule), 0.0, stop, 10)
+            .expect("resumed interval output projects");
+        let second = initial + 2.0e-8;
+        let third = second + 2.0e-8;
+        assert_eq!(
+            projection
+                .times()
+                .iter()
+                .map(|time| time.to_bits())
+                .collect::<Vec<_>>(),
+            [initial, second, third, stop].map(Value::to_bits)
+        );
+        let projected = projection
+            .project(&result.voltages[0])
+            .expect("affine waveform projects");
+        for (&time, &value) in projection.times().iter().zip(&projected) {
+            assert!((value - 2.0 * time).abs() <= 4.0 * Value::EPSILON * time.abs().max(1.0));
+        }
+    }
+
+    #[test]
+    fn interval_output_projection_resets_at_transitions_and_bounds_rows() {
+        let result = result_on_grid(vec![0.0, 0.45, 0.8, 1.0]);
+        let schedule = XyceOutputIntervalSchedule {
+            initial_interval: 0.3,
+            intervals: vec![crate::netlist::XyceOutputInterval {
+                time: 0.5,
+                interval: 0.2,
+            }],
+        };
+        let projection = result
+            .output_projection(&[], Some(&schedule), 0.0, 1.0, 6)
+            .expect("transition schedule projects");
+        let after_transition = 0.5 + 0.2;
+        assert_eq!(projection.times(), &[0.0, 0.3, 0.5, after_transition, 0.9]);
+        assert!(
+            result
+                .output_projection(&[], Some(&schedule), 0.0, 1.0, 4)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn interval_output_projection_preserves_run_lattice_after_off_lattice_tstart() {
+        let result = result_on_grid(vec![0.0, 0.95, 1.02, 1.2]);
+        let schedule = XyceOutputIntervalSchedule {
+            initial_interval: 0.1,
+            intervals: Vec::new(),
+        };
+        let projection = result
+            .output_projection(&[], Some(&schedule), 0.95, 1.2, 20)
+            .expect("off-lattice TSTART projects");
+        let xyce_next = 0.999_999_999_999_999_9_f64;
+        let xyce_third = xyce_next + 0.1;
+        assert_eq!(xyce_next.to_bits(), 0x3fefffffffffffff);
+        assert_eq!(
+            projection
+                .times()
+                .iter()
+                .map(|time| time.to_bits())
+                .collect::<Vec<_>>(),
+            [0.95, xyce_next, xyce_third, 1.2].map(Value::to_bits)
+        );
+    }
+
+    #[test]
+    fn interval_output_projection_replays_transition_rounding_from_accepted_grid() {
+        let schedule = XyceOutputIntervalSchedule {
+            initial_interval: 0.5,
+            intervals: vec![crate::netlist::XyceOutputInterval {
+                time: 0.5,
+                interval: 0.1,
+            }],
+        };
+        let separate_steps = result_on_grid(vec![0.0, 0.55, 0.65, 0.75, 0.85, 1.0])
+            .output_projection(&[], Some(&schedule), 0.0, 1.0, 20)
+            .expect("separate accepted steps project");
+        let leap = result_on_grid(vec![0.0, 0.55, 0.65, 0.85, 1.0])
+            .output_projection(&[], Some(&schedule), 0.0, 1.0, 20)
+            .expect("accepted-step leap projects");
+
+        let separate_eight_tenths = separate_steps
+            .times()
+            .iter()
+            .copied()
+            .min_by(|left, right| (left - 0.8).abs().total_cmp(&(right - 0.8).abs()))
+            .expect("separate grid has output rows");
+        let leap_eight_tenths = leap
+            .times()
+            .iter()
+            .copied()
+            .min_by(|left, right| (left - 0.8).abs().total_cmp(&(right - 0.8).abs()))
+            .expect("leap grid has output rows");
+        assert_eq!(separate_eight_tenths.to_bits(), 0x3fe9_9999_9999_999a);
+        assert_eq!(leap_eight_tenths.to_bits(), 0x3fe9_9999_9999_9999);
+    }
+
+    #[test]
+    fn interval_output_projection_preserves_duplicate_final_events_and_states() {
+        let result = result_on_grid(vec![0.0, 0.95, 1.0]);
+        let schedule = XyceOutputIntervalSchedule {
+            initial_interval: 0.3,
+            intervals: Vec::new(),
+        };
+        let projection = result
+            .output_projection(&[], Some(&schedule), 0.0, 1.0, 10)
+            .expect("Xyce duplicate-final schedule projects");
+        assert_eq!(projection.times().len(), 6);
+        assert_eq!(
+            projection
+                .times()
+                .iter()
+                .map(|time| time.to_bits())
+                .collect::<Vec<_>>(),
+            [0.0, 0.3, 0.6, 0.899_999_999_999_999_9, 1.0, 1.0].map(Value::to_bits)
+        );
+
+        let projected = projection
+            .project(&result.voltages[0])
+            .expect("duplicate output events retain their source states");
+        assert_eq!(
+            projected[projected.len() - 2].to_bits(),
+            (2.0f64 * 0.95).to_bits()
+        );
+        assert_eq!(projected[projected.len() - 1].to_bits(), 2.0f64.to_bits());
     }
 }

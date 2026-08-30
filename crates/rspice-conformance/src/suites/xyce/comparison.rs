@@ -2628,11 +2628,25 @@ impl XyceTestRunner {
         good: &XycePrnTable,
         test: &XycePrnTable,
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+        self.compare_xyce_verify_transient_tables_with_abort(
+            good,
+            test,
+            &rspice_core::abort_signal::NoAbort,
+        )
+    }
+
+    pub(super) fn compare_xyce_verify_transient_tables_with_abort(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_xyce_verify_transient_tables_with_uniform_tolerance_and_abort(
             good,
             test,
             XyceVerifyTransientTolerance::release_7_10_default(),
             XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            abort,
         )
     }
 
@@ -2676,13 +2690,31 @@ impl XyceTestRunner {
         tolerance: XyceVerifyTransientTolerance,
         scientific_precision: usize,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_xyce_verify_transient_tables_with_uniform_tolerance_and_abort(
+            good,
+            test,
+            tolerance,
+            scientific_precision,
+            &rspice_core::abort_signal::NoAbort,
+        )
+    }
+
+    fn compare_xyce_verify_transient_tables_with_uniform_tolerance_and_abort(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerance: XyceVerifyTransientTolerance,
+        scientific_precision: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
         let tolerance = tolerance.validate()?;
         let probe_count = good.columns.len().saturating_sub(2);
-        self.compare_xyce_verify_transient_tables_with_probe_tolerances(
+        self.compare_xyce_verify_transient_tables_with_probe_tolerances_and_abort(
             good,
             test,
             &vec![tolerance; probe_count],
             scientific_precision,
+            abort,
         )
     }
 
@@ -2693,6 +2725,31 @@ impl XyceTestRunner {
         tolerances: &[XyceVerifyTransientTolerance],
         scientific_precision: usize,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_xyce_verify_transient_tables_with_probe_tolerances_and_abort(
+            good,
+            test,
+            tolerances,
+            scientific_precision,
+            &rspice_core::abort_signal::NoAbort,
+        )
+    }
+
+    fn compare_xyce_verify_transient_tables_with_probe_tolerances_and_abort(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerances: &[XyceVerifyTransientTolerance],
+        scientific_precision: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let ensure_not_aborted = || {
+            if abort.is_aborted() {
+                Err("xyce_verify transient comparison aborted".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        ensure_not_aborted()?;
         Self::xyce_prn_scientific_text(0.0, scientific_precision)?;
         if good.columns.len() != test.columns.len()
             || !good
@@ -2722,6 +2779,7 @@ impl XyceTestRunner {
             Self::xyce_verify_quotient_operand_indices(&good.columns[2..]);
         let serialization_relative_tolerance = 4.0 * 10.0f64.powi(-(scientific_precision as i32));
         for (row_index, row) in test.rows.iter().enumerate() {
+            ensure_not_aborted()?;
             for (probe_index, operands) in quotient_operand_indices.iter().enumerate() {
                 let Some((numerator_index, divisor_index)) = *operands else {
                     continue;
@@ -2756,18 +2814,21 @@ impl XyceTestRunner {
             }
         }
 
+        ensure_not_aborted()?;
         let good_rows = Self::normalized_xyce_verify_transient_rows(
             good,
             "good",
             &tolerances,
             scientific_precision,
         )?;
+        ensure_not_aborted()?;
         let test_rows = Self::normalized_xyce_verify_transient_rows(
             test,
             "test",
             &tolerances,
             scientific_precision,
         )?;
+        ensure_not_aborted()?;
         if good_rows.len() < 2 || test_rows.len() < 2 {
             return Err(format!(
                 "xyce_verify transient RMS requires at least two distinct printed times in both series, found good={} and test={}",
@@ -2794,6 +2855,7 @@ impl XyceTestRunner {
         let mut interpolated = Vec::with_capacity(test_rows.len());
         let mut good_high = 0usize;
         for (test_time, _) in &test_rows {
+            ensure_not_aborted()?;
             while good_high + 1 < good_rows.len() && good_rows[good_high].0 < *test_time {
                 good_high += 1;
             }
@@ -2844,6 +2906,7 @@ impl XyceTestRunner {
         for (row_index, ((_, test_values), good_values)) in
             test_rows.iter().zip(&interpolated).enumerate()
         {
+            ensure_not_aborted()?;
             for probe_index in 0..probe_count {
                 let expected = good_values[probe_index];
                 let actual = test_values[probe_index];
@@ -2939,6 +3002,7 @@ impl XyceTestRunner {
             ));
         }
         for row_index in 1..test_rows.len() {
+            ensure_not_aborted()?;
             let width = (test_rows[row_index].0 - test_rows[row_index - 1].0).abs();
             for probe_index in 0..probe_count {
                 rms_errors[probe_index] += 0.5
@@ -2948,11 +3012,13 @@ impl XyceTestRunner {
             }
         }
         for error in &mut rms_errors {
+            ensure_not_aborted()?;
             *error = (*error / duration).sqrt();
         }
 
         let mut mismatches = Vec::new();
         for (probe_index, rms_error) in rms_errors.into_iter().enumerate() {
+            ensure_not_aborted()?;
             if !rms_error.is_finite() {
                 return Err(format!(
                     "xyce_verify RMS error is non-finite for probe {}",
@@ -5235,7 +5301,11 @@ impl XyceTestRunner {
             })
             .collect::<Vec<_>>();
         let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
-        let output_initial_interval = Self::output_initial_interval(source)?;
+        let output_initial_interval = netlist
+            .options
+            .output_interval_schedule
+            .as_ref()
+            .map(|schedule| schedule.initial_interval);
         let tran_time_scale_factor = Self::tran_print_time_scale_factor(source)?;
         Self::validate_transient_result_time_grid(result)?;
         let reference_times = reference
@@ -6431,6 +6501,81 @@ impl XyceTestRunner {
                 "continuous artifact expects {probe}={value} at row {row}, but evaluation omitted it"
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod xyce_verify_abort_tests {
+    use super::*;
+
+    fn runner() -> XyceTestRunner {
+        let config = XyceRunnerConfig {
+            max_mismatches: 16,
+            ..XyceRunnerConfig::default()
+        };
+        XyceTestRunner::new(env!("CARGO_MANIFEST_DIR"), config)
+    }
+
+    fn constant_table(value: Value) -> XycePrnTable {
+        XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+            ],
+            rows: vec![vec![0.0, 0.0, value], vec![1.0, 1.0, value]],
+        }
+    }
+
+    #[test]
+    fn xyce_verify_integrated_rms_abort_overload_fails_immediately() {
+        let table = constant_table(1.0);
+        let error = runner()
+            .compare_xyce_verify_transient_tables_with_abort(
+                &table,
+                &table,
+                &rspice_core::abort_signal::ImmediateAbort,
+            )
+            .expect_err("an already-aborted comparison must fail closed");
+
+        assert_eq!(error, "xyce_verify transient comparison aborted");
+    }
+
+    #[test]
+    fn xyce_verify_integrated_rms_abort_overload_preserves_good_test_direction() {
+        let runner = runner();
+        let smaller = constant_table(1.0);
+        let larger = constant_table(1.010_05);
+        let no_abort = rspice_core::abort_signal::NoAbort;
+
+        let legacy_forward = runner
+            .compare_xyce_verify_transient_tables(&smaller, &larger)
+            .expect("legacy forward comparison remains structurally valid");
+        let abort_aware_forward = runner
+            .compare_xyce_verify_transient_tables_with_abort(&smaller, &larger, &no_abort)
+            .expect("abort-aware forward comparison remains structurally valid");
+        assert_eq!(legacy_forward.len(), 1);
+        assert_eq!(abort_aware_forward.len(), legacy_forward.len());
+        assert_eq!(abort_aware_forward[0].probe, legacy_forward[0].probe);
+        assert_eq!(
+            abort_aware_forward[0].relative_error.to_bits(),
+            legacy_forward[0].relative_error.to_bits()
+        );
+
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&larger, &smaller)
+                .expect("legacy reverse comparison remains structurally valid")
+                .is_empty(),
+            "xyce_verify normalizes by the GOOD waveform, so reversing GOOD and TEST is intentionally asymmetric"
+        );
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_abort(&larger, &smaller, &no_abort)
+                .expect("abort-aware reverse comparison remains structurally valid")
+                .is_empty(),
+            "the abort overload must preserve GOOD/TEST direction semantics"
+        );
     }
 }
 

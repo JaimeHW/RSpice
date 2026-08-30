@@ -323,7 +323,6 @@ pub(super) fn process_line(
             let output_requests = &mut state.output_requests;
             let startup_directives = &mut state.startup_directives;
             let options = &mut state.options;
-            let output_initial_interval_seen = &mut state.output_initial_interval_seen;
             let diagnostics = &mut state.diagnostics;
             let spef_includes = &mut state.spef_includes;
             let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
@@ -365,7 +364,6 @@ pub(super) fn process_line(
                     output_requests,
                     options,
                     max_analysis_points: state.max_analysis_points,
-                    output_initial_interval_seen,
                     diagnostics,
                     pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
                     spef_includes,
@@ -425,7 +423,6 @@ pub(super) fn process_line(
             output_requests: &mut state.output_requests,
             options: &mut state.options,
             max_analysis_points: state.max_analysis_points,
-            output_initial_interval_seen: &mut state.output_initial_interval_seen,
             diagnostics: &mut state.diagnostics,
             pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
             spef_includes: &mut state.spef_includes,
@@ -474,7 +471,6 @@ pub(super) fn parse_line(
         output_requests,
         options,
         max_analysis_points,
-        output_initial_interval_seen,
         diagnostics,
         pspice_chebyshev_source_count,
         spef_includes,
@@ -532,7 +528,6 @@ pub(super) fn parse_line(
                 output_requests,
                 options,
                 max_analysis_points,
-                output_initial_interval_seen,
                 diagnostics,
                 spef_includes,
                 origin,

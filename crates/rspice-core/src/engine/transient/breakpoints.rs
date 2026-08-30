@@ -34,9 +34,17 @@ impl Engine {
         let activity_horizon = activity_horizon.min(remaining);
 
         if activity_horizon.is_finite() && activity_horizon > 0.0 {
-            Self::max_expected_source_delta(circuit, time, time + activity_horizon)
+            Self::max_expected_source_delta(
+                circuit,
+                time,
+                canonical_transient_step_time(time, activity_horizon, tstop),
+            )
         } else {
-            Self::max_expected_source_delta(circuit, time, time + attempted_dt)
+            Self::max_expected_source_delta(
+                circuit,
+                time,
+                canonical_transient_step_time(time, attempted_dt, tstop),
+            )
         }
     }
 

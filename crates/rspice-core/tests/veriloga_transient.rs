@@ -268,7 +268,7 @@ endmodule
         .expect("legacy refusal fixture captures");
     let legacy = checkpoint
         .to_text()
-        .replace("RSPICE-CHECKPOINT 15", "RSPICE-CHECKPOINT 14")
+        .replace("RSPICE-CHECKPOINT 17", "RSPICE-CHECKPOINT 16")
         .lines()
         .take_while(|line| !line.starts_with("runtime_veriloga_state_available "))
         .collect::<Vec<_>>()
