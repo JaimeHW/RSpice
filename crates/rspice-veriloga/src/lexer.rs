@@ -726,14 +726,13 @@ impl<'a> Lexer<'a> {
             if ch.is_ascii_digit() {
                 self.advance();
             } else if ch == '.' && !has_dot && !has_exp {
-                // Check if next char is digit (to avoid parsing "1.2.3")
                 self.advance();
-                if let Some(next) = self.peek_char()
-                    && !next.is_ascii_digit()
-                {
-                    // Backtrack - this is integer followed by '.'
-                    // We can't backtrack easily, so mark as error or handle differently
-                    // For now, require digit after dot
+                if !self.peek_char().is_some_and(|next| next.is_ascii_digit()) {
+                    let text = self.source[start..self.pos].to_string();
+                    return Err(LexerError::new(
+                        LexerErrorKind::InvalidNumber(text),
+                        Span::new(self.source_id, start as u32, self.pos as u32),
+                    ));
                 }
                 has_dot = true;
             } else if (ch == 'e' || ch == 'E') && !has_exp {
@@ -782,6 +781,12 @@ impl<'a> Lexer<'a> {
 
         let text = &self.source[start..self.pos];
         let span = Span::new(self.source_id, start as u32, self.pos as u32);
+        if first == '.' {
+            return Err(LexerError::new(
+                LexerErrorKind::InvalidNumber(text.to_string()),
+                span,
+            ));
+        }
         // Numbers with scale factors, dot, or exponent are real literals
         let kind = if has_dot || has_exp || has_scale {
             TokenKind::RealLiteral
@@ -993,11 +998,15 @@ mod tests {
     }
 
     #[test]
-    fn leading_dot_numbers_are_real_literals() {
-        for src in [".5", ".5e-3", ".5k"] {
-            let toks = lex(src);
-            assert_eq!(toks[0].kind, TokenKind::RealLiteral, "for {src}");
-            assert_eq!(toks[0].text.as_deref(), Some(src), "for {src}");
+    fn decimal_literals_require_digits_on_both_sides_of_the_point() {
+        for src in [".5", ".5e-3", ".5k", "9.", "9.e2"] {
+            let error = Lexer::new(src, SourceId::new(0))
+                .collect_tokens()
+                .expect_err("malformed real literal must be rejected");
+            assert!(
+                matches!(error.kind, LexerErrorKind::InvalidNumber(_)),
+                "unexpected error for {src}: {error}"
+            );
         }
     }
 
