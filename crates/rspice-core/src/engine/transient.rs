@@ -3790,6 +3790,47 @@ impl Engine {
         let mut failed_residual_only: usize = 0;
         let mut rejected_attempt_nonlinear_state_scratch = None;
 
+        // Xyce makes the interval after every accepted, non-final breakpoint a
+        // new OneStep integration epoch.  Its restart dump is written before
+        // that next-loop initialization, so scheduled checkpoints must observe
+        // the accepted pre-initialization state and the uninterrupted run must
+        // re-seed only after capture.  Keep the operation here, next to the
+        // acceptance paths, because it intentionally resets loop-local device
+        // histories and OneStep caches without discarding physical device or
+        // transmission-line state.
+        macro_rules! reinitialize_xyce_breakpoint_histories {
+            ($hit_breakpoint:expr, $analysis_final_step:expr) => {
+                if self.config.spice_dialect == SpiceDialect::Xyce
+                    && $hit_breakpoint
+                    && !$analysis_final_step
+                {
+                    Self::reseed_reactive_histories_for_restart(
+                        &mut circuit,
+                        &solution,
+                        0.0,
+                        &mut bjt_history,
+                        &mut jfet_history,
+                        &mut diode_history,
+                        &mut mosfet_history,
+                        &mut vdmos_history,
+                        &mut b3soi_history,
+                        &mut bsim3_history,
+                        &mut bsim4_history,
+                        &mut ekv26_history,
+                    );
+                    vbic_snapshot_cache.fill(None);
+                    xyce_static_history = None;
+                    xyce_direct_static_history = None;
+                    circuit.initialize_xyce_core_q_histories();
+                    if let Some(accepted_q) = xyce_direct_accepted_q.as_mut() {
+                        circuit
+                            .initialize_direct_xyce_accepted_q(accepted_q)
+                            .map_err(SimulationError::Circuit)?;
+                    }
+                }
+            };
+        }
+
         // Runs after every accepted point (all acceptance paths): counts the
         // floor-dt streak and performs the livelock restart when it trips.
         // A macro rather than a helper because the restart touches a dozen
@@ -6947,6 +6988,7 @@ impl Engine {
                         &mut retained_scheduled_checkpoint_values,
                         &mut scheduled_checkpoints,
                     )?;
+                    reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
                 }
                 if !force_accepted_rejected_lte_step {
                     restore_rejected_transient_nonlinear_state!();
@@ -7470,6 +7512,7 @@ impl Engine {
                 &mut retained_scheduled_checkpoint_values,
                 &mut scheduled_checkpoints,
             )?;
+            reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
             rejected_attempt_nonlinear_state_scratch = rejected_attempt_nonlinear_state.take();
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }

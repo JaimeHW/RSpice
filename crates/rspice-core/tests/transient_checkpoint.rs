@@ -615,6 +615,96 @@ fn xyce_source_breakpoint_checkpoint_restores_the_global_controller_phase() {
     }
 }
 
+#[test]
+fn xyce_source_breakpoint_restart_preserves_reactive_bjt_trajectory() {
+    let netlist = Netlist::parse(
+        "source-breakpoint restart preserves reactive BJT trajectory\n\
+         .tran 0 30u\n\
+         VCC vcc 0 5\n\
+         VDRIVE drive 0 pulse(0 1 0 1u 1u 4u 10u)\n\
+         RB drive base 1k\n\
+         RC vcc collector 470\n\
+         Q1 collector base 0 QBENCH\n\
+         CLOAD collector 0 1n\n\
+         .model QBENCH NPN(Is=14.34f Bf=255.9 Vaf=74.03 Rb=10 Cjc=7.306p \
+                         Mjc=.3416 Vjc=.75 Cje=22.01p Mje=.377 Vje=.75 \
+                         Tr=46.91n Tf=411.1p Itf=.6 Vtf=1.7 Xtf=3)\n\
+         .end\n",
+    )
+    .expect("reactive BJT checkpoint deck parses");
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: 1200,
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::TrapGear,
+        transient_error_control: TransientErrorControl::LocalTruncation,
+        transient_initial_timestep: Some(1.0e-10),
+        temperature: 300.15,
+        ..Default::default()
+    });
+    let seam = 21.0e-6;
+    let stop = 30.0e-6;
+    let max_step = 500.0e-9;
+    let (full, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            stop,
+            max_step,
+            TransientStartupMode::OperatingPoint,
+            &[seam],
+        )
+        .expect("continuous reactive BJT run completes");
+    let source_checkpoint = &scheduled
+        .first()
+        .expect("reactive BJT source-breakpoint checkpoint is captured")
+        .checkpoint;
+    let baseline_index = full
+        .time
+        .iter()
+        .position(|time| time.to_bits() == source_checkpoint.time.to_bits())
+        .expect("reactive BJT checkpoint is an accepted baseline point");
+    let expected_time = &full.time[baseline_index..];
+
+    for encoding in [
+        TransientCheckpointEncoding::Unpacked,
+        TransientCheckpointEncoding::Packed,
+    ] {
+        let encoded = source_checkpoint
+            .to_bytes(encoding)
+            .unwrap_or_else(|error| panic!("{encoding:?} checkpoint encodes: {error}"));
+        let checkpoint = TransientCheckpoint::from_bytes(&encoded)
+            .unwrap_or_else(|error| panic!("{encoding:?} checkpoint decodes: {error}"));
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, stop, max_step)
+            .unwrap_or_else(|error| panic!("{encoding:?} checkpoint resumes: {error}"));
+        assert_eq!(
+            resumed.time, expected_time,
+            "{encoding:?} accepted grid differs after the reactive BJT breakpoint"
+        );
+        for (node, (actual, baseline)) in resumed.voltages.iter().zip(&full.voltages).enumerate() {
+            assert_eq!(
+                actual,
+                &baseline[baseline_index..],
+                "{encoding:?} node {node} differs after the reactive BJT breakpoint"
+            );
+        }
+        for (branch, (actual, baseline)) in resumed
+            .branch_currents
+            .iter()
+            .zip(&full.branch_currents)
+            .enumerate()
+        {
+            assert_eq!(
+                actual,
+                &baseline[baseline_index..],
+                "{encoding:?} branch {branch} differs after the reactive BJT breakpoint"
+            );
+        }
+    }
+}
+
 /// A restart may widen its own maximum step. The captured cap bounded the
 /// steps of the segment that is already over; it is not seam state, and Xyce
 /// likewise recomputes the working cap from the restart deck rather than
