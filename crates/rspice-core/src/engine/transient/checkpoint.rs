@@ -76,7 +76,8 @@ const PACKED_ENVELOPE_VERSION: u32 = 1;
 const PACKED_COMPRESSION_ZLIB: u32 = 1;
 const PACKED_HEADER_BYTES: usize = PACKED_MAGIC.len() + 4 + 4 + 8 + 8 + 32;
 
-/// Default encoded and decoded checkpoint budget used by [`TransientCheckpoint::load`].
+/// Default encoded, decoded, and parsed-heap checkpoint budget used by
+/// [`TransientCheckpoint::load`].
 ///
 /// Callers with a tighter or deliberately larger resource policy should use
 /// [`TransientCheckpoint::load_with_limit`] instead.
@@ -948,10 +949,68 @@ impl<'a> Iterator for CheckpointLines<'a> {
     }
 }
 
+/// Aggregate backing-allocation budget for one checkpoint parse.
+///
+/// The charge is the requested element capacity (`count * size_of::<T>()`) for
+/// every parsed `Vec`, plus the copied byte length for every retained `String`.
+/// It deliberately does not charge stack fields or the borrowed canonical
+/// input. Charges are cumulative rather than released as temporary column
+/// vectors are transformed, which bounds peak parser amplification as well as
+/// the heap retained by the resulting checkpoint.
+struct CheckpointParseBudget {
+    used: usize,
+    limit: usize,
+}
+
+impl CheckpointParseBudget {
+    fn new(limit: usize) -> Self {
+        Self { used: 0, limit }
+    }
+
+    fn charge_items<T>(&mut self, count: usize, name: &str) -> Result<(), String> {
+        let bytes = count.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
+            format!(
+                "checkpoint parsed-memory allocation size overflow for '{name}' ({count} items)"
+            )
+        })?;
+        self.charge_bytes(bytes, name)
+    }
+
+    fn charge_bytes(&mut self, bytes: usize, name: &str) -> Result<(), String> {
+        let total = self.used.checked_add(bytes).ok_or_else(|| {
+            format!(
+                "checkpoint parsed-memory budget overflow while allocating '{name}' ({bytes} bytes requested)"
+            )
+        })?;
+        if total > self.limit {
+            return Err(format!(
+                "checkpoint parsed-memory limit exceeded while allocating '{name}': {bytes} bytes requested with {} bytes already charged; limit is {} bytes",
+                self.used, self.limit
+            ));
+        }
+        self.used = total;
+        Ok(())
+    }
+}
+
+fn allocate_checkpoint_capacity<T>(
+    count: usize,
+    name: &str,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<T>, String> {
+    budget.charge_items::<T>(count, name)?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(count)
+        .map_err(|_| format!("'{name}' count {count} exceeds checkpoint allocation limits"))?;
+    Ok(values)
+}
+
 fn allocate_checkpoint_rows<T>(
     lines: &CheckpointLines<'_>,
     count: usize,
     name: &str,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<T>, String> {
     let remaining_rows = lines.remaining();
     if count > remaining_rows {
@@ -960,11 +1019,54 @@ fn allocate_checkpoint_rows<T>(
         ));
     }
 
-    let mut values = Vec::new();
-    values
-        .try_reserve_exact(count)
-        .map_err(|_| format!("'{name}' count {count} exceeds checkpoint allocation limits"))?;
-    Ok(values)
+    allocate_checkpoint_capacity(count, name, budget)
+}
+
+fn copy_checkpoint_string(
+    value: &str,
+    name: &str,
+    budget: &mut CheckpointParseBudget,
+) -> Result<String, String> {
+    budget.charge_bytes(value.len(), name)?;
+    let mut copy = String::new();
+    copy.try_reserve_exact(value.len()).map_err(|_| {
+        format!(
+            "'{name}' string length {} exceeds checkpoint allocation limits",
+            value.len()
+        )
+    })?;
+    copy.push_str(value);
+    Ok(copy)
+}
+
+fn concatenate_checkpoint_string(
+    prefix: &str,
+    suffix: &str,
+    name: &str,
+    budget: &mut CheckpointParseBudget,
+) -> Result<String, String> {
+    let length = prefix.len().checked_add(suffix.len()).ok_or_else(|| {
+        format!("checkpoint parsed-memory allocation size overflow for '{name}' string")
+    })?;
+    budget.charge_bytes(length, name)?;
+    let mut value = String::new();
+    value.try_reserve_exact(length).map_err(|_| {
+        format!("'{name}' string length {length} exceeds checkpoint allocation limits")
+    })?;
+    value.push_str(prefix);
+    value.push_str(suffix);
+    Ok(value)
+}
+
+fn collect_checkpoint_fields<'a>(
+    value: &'a str,
+    name: &str,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<&'a str>, String> {
+    let count = value.split_whitespace().count();
+    let mut fields = allocate_checkpoint_capacity(count, name, budget)?;
+    fields.extend(value.split_whitespace());
+    Ok(fields)
 }
 
 fn write_value_vector(out: &mut String, name: &str, values: &[Value]) {
@@ -983,12 +1085,16 @@ fn write_i64_vector(out: &mut String, name: &str, values: &[i64]) {
     }
 }
 
-fn read_value_vector(lines: &mut CheckpointLines<'_>, name: &str) -> Result<Vec<Value>, String> {
+fn read_value_vector(
+    lines: &mut CheckpointLines<'_>,
+    name: &str,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<Value>, String> {
     let header = lines
         .next()
         .ok_or_else(|| format!("missing '{name}' vector"))?;
     let count = parse_count_header(header, name)?;
-    let mut values = allocate_checkpoint_rows(lines, count, name)?;
+    let mut values = allocate_checkpoint_rows(lines, count, name, budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1012,6 +1118,7 @@ fn read_value_section(
     lines: &mut CheckpointLines<'_>,
     name: &str,
     columns: usize,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<Vec<Value>>, String> {
     let header = lines
         .next()
@@ -1020,11 +1127,9 @@ fn read_value_section(
     if columns == 0 {
         return Err(format!("'{name}' section must have at least one column"));
     }
-    let mut cols = Vec::new();
-    cols.try_reserve_exact(columns)
-        .map_err(|_| format!("'{name}' column count {columns} exceeds allocation limits"))?;
+    let mut cols = allocate_checkpoint_capacity(columns, name, budget)?;
     for _ in 0..columns {
-        cols.push(allocate_checkpoint_rows(lines, count, name)?);
+        cols.push(allocate_checkpoint_rows(lines, count, name, budget)?);
     }
     for row in 0..count {
         let line = lines
@@ -1047,12 +1152,16 @@ fn read_value_section(
     Ok(cols)
 }
 
-fn read_i64_vector(lines: &mut CheckpointLines<'_>, name: &str) -> Result<Vec<i64>, String> {
+fn read_i64_vector(
+    lines: &mut CheckpointLines<'_>,
+    name: &str,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<i64>, String> {
     let header = lines
         .next()
         .ok_or_else(|| format!("missing '{name}' vector"))?;
     let count = parse_count_header(header, name)?;
-    let mut values = allocate_checkpoint_rows(lines, count, name)?;
+    let mut values = allocate_checkpoint_rows(lines, count, name, budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1075,12 +1184,13 @@ fn read_i64_vector(lines: &mut CheckpointLines<'_>, name: &str) -> Result<Vec<i6
 fn read_nonempty_line_vector(
     lines: &mut CheckpointLines<'_>,
     name: &str,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<String>, String> {
     let header = lines
         .next()
         .ok_or_else(|| format!("missing '{name}' section"))?;
     let count = parse_count_header(header, name)?;
-    let mut values = allocate_checkpoint_rows(lines, count, name)?;
+    let mut values = allocate_checkpoint_rows(lines, count, name, budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1089,7 +1199,7 @@ fn read_nonempty_line_vector(
         if value.is_empty() {
             return Err(format!("'{name}' row {row} is empty"));
         }
-        values.push(value.to_string());
+        values.push(copy_checkpoint_string(value, name, budget)?);
     }
     Ok(values)
 }
@@ -1097,12 +1207,13 @@ fn read_nonempty_line_vector(
 fn read_canonical_nonempty_line_vector(
     lines: &mut CheckpointLines<'_>,
     name: &str,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<String>, String> {
     let header = lines
         .next()
         .ok_or_else(|| format!("missing '{name}' section"))?;
     let count = parse_count_header(header, name)?;
-    let mut values = allocate_checkpoint_rows(lines, count, name)?;
+    let mut values = allocate_checkpoint_rows(lines, count, name, budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1112,19 +1223,20 @@ fn read_canonical_nonempty_line_vector(
                 "'{name}' row {row} must be nonempty canonical text without surrounding whitespace"
             ));
         }
-        values.push(line.to_string());
+        values.push(copy_checkpoint_string(line, name, budget)?);
     }
     Ok(values)
 }
 
 fn read_tline_states(
     lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<TransmissionLineCheckpoint>, String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'tline_states' section".to_string())?;
     let count = parse_count_header(header, "tline_states")?;
-    let mut states = allocate_checkpoint_rows(lines, count, "tline_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "tline_states", budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1211,7 +1323,8 @@ fn read_tline_states(
         let initial_state = initial_present
             .then(|| read_sample(lines, "tline_initial"))
             .transpose()?;
-        let mut state_history = allocate_checkpoint_rows(lines, sample_count, "tline_samples")?;
+        let mut state_history =
+            allocate_checkpoint_rows(lines, sample_count, "tline_samples", budget)?;
         for _ in 0..sample_count {
             state_history.push(read_sample(lines, "tline_sample")?);
         }
@@ -1238,17 +1351,17 @@ fn read_tline_states(
             Ok(sample)
         };
         let mut forward_history =
-            allocate_checkpoint_rows(lines, forward_count, "tline_forward_samples")?;
+            allocate_checkpoint_rows(lines, forward_count, "tline_forward_samples", budget)?;
         for _ in 0..forward_count {
             forward_history.push(read_delay_sample(lines, "tline_forward")?);
         }
         let mut backward_history =
-            allocate_checkpoint_rows(lines, backward_count, "tline_backward_samples")?;
+            allocate_checkpoint_rows(lines, backward_count, "tline_backward_samples", budget)?;
         for _ in 0..backward_count {
             backward_history.push(read_delay_sample(lines, "tline_backward")?);
         }
         states.push(TransmissionLineCheckpoint {
-            name: name.to_string(),
+            name: copy_checkpoint_string(name, "tline state name", budget)?,
             impedance,
             initial_state,
             state_history,
@@ -1266,12 +1379,13 @@ fn read_tline_states(
 fn read_xspice_instance_states(
     lines: &mut CheckpointLines<'_>,
     version: u32,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<XspiceInstanceCheckpoint>, String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'xspice_states' section".to_string())?;
     let count = parse_count_header(header, "xspice_states")?;
-    let mut states = allocate_checkpoint_rows(lines, count, "xspice_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "xspice_states", budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1290,7 +1404,7 @@ fn read_xspice_instance_states(
             return Err(format!("'xspice_state' row {row}: extra field '{extra}'"));
         }
         let (time, time_prev) = if version >= 5 {
-            let times = read_value_vector(lines, "context_time")?;
+            let times = read_value_vector(lines, "context_time", budget)?;
             if times.len() != 2 {
                 return Err(format!(
                     "'context_time' for XSPICE state row {row} must contain 2 values, got {}",
@@ -1302,14 +1416,14 @@ fn read_xspice_instance_states(
             (0.0, 0.0)
         };
         states.push(XspiceInstanceCheckpoint {
-            name: name.to_string(),
-            model: model.to_string(),
+            name: copy_checkpoint_string(name, "XSPICE state name", budget)?,
+            model: copy_checkpoint_string(model, "XSPICE model name", budget)?,
             context: CmContextCheckpoint {
                 time,
                 time_prev,
-                state: read_value_vector(lines, "state")?,
-                state_prev: read_value_vector(lines, "state_prev")?,
-                int_state: read_i64_vector(lines, "int_state")?,
+                state: read_value_vector(lines, "state", budget)?,
+                state_prev: read_value_vector(lines, "state_prev", budget)?,
+                int_state: read_i64_vector(lines, "int_state", budget)?,
             },
         });
     }
@@ -1345,12 +1459,14 @@ fn read_finite_value_field(
 
 fn read_accepted_diode_nonlinear_states(
     lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<AcceptedDiodeNonlinearCheckpoint>, String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'accepted_diode_nonlinear_states' section".to_string())?;
     let count = parse_count_header(header, "accepted_diode_nonlinear_states")?;
-    let mut states = allocate_checkpoint_rows(lines, count, "accepted_diode_nonlinear_states")?;
+    let mut states =
+        allocate_checkpoint_rows(lines, count, "accepted_diode_nonlinear_states", budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1414,8 +1530,12 @@ fn read_accepted_diode_nonlinear_states(
             ));
         }
         states.push(AcceptedDiodeNonlinearCheckpoint {
-            instance_name: instance_name.to_string(),
-            runtime_tag: runtime_tag.to_string(),
+            instance_name: copy_checkpoint_string(
+                instance_name,
+                "accepted diode instance name",
+                budget,
+            )?,
+            runtime_tag: copy_checkpoint_string(runtime_tag, "accepted diode runtime tag", budget)?,
             state: DiodeNonlinearState {
                 prev_vd,
                 prev_vd_old,
@@ -1437,6 +1557,7 @@ fn read_accepted_diode_nonlinear_states(
 
 fn read_accepted_bjt_nonlinear_states(
     lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<AcceptedBjtNonlinearCheckpoint>, String> {
     let header = lines
         .next()
@@ -1450,7 +1571,8 @@ fn read_accepted_bjt_nonlinear_states(
             lines.remaining()
         ));
     }
-    let mut states = allocate_checkpoint_rows(lines, count, "accepted_bjt_nonlinear_states")?;
+    let mut states =
+        allocate_checkpoint_rows(lines, count, "accepted_bjt_nonlinear_states", budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1495,7 +1617,7 @@ fn read_accepted_bjt_nonlinear_states(
             ));
         }
         let mut state_values =
-            allocate_checkpoint_rows(lines, value_count, "accepted_bjt_state_values")?;
+            allocate_checkpoint_rows(lines, value_count, "accepted_bjt_state_values", budget)?;
         for value_row in 0..value_count {
             let value_line = lines.next().ok_or_else(|| {
                 format!("accepted BJT state row {row} values truncate at row {value_row}")
@@ -1520,8 +1642,12 @@ fn read_accepted_bjt_nonlinear_states(
             state_values.push(value);
         }
         states.push(AcceptedBjtNonlinearCheckpoint {
-            instance_name: instance_name.to_string(),
-            runtime_tag: runtime_tag.to_string(),
+            instance_name: copy_checkpoint_string(
+                instance_name,
+                "accepted BJT instance name",
+                budget,
+            )?,
+            runtime_tag: copy_checkpoint_string(runtime_tag, "accepted BJT runtime tag", budget)?,
             legacy_junction_limited,
             reduced_linearization_valid,
             previous_reduced_linearization_valid,
@@ -1536,16 +1662,17 @@ fn read_generated_state_rows(
     lines: &mut CheckpointLines<'_>,
     name: &str,
     value_columns: usize,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<(Vec<Vec<Value>>, Vec<bool>), String> {
     let header = lines
         .next()
         .ok_or_else(|| format!("missing '{name}' section"))?;
     let count = parse_count_header(header, name)?;
-    let mut values = Vec::with_capacity(value_columns);
+    let mut values = allocate_checkpoint_capacity(value_columns, name, budget)?;
     for _ in 0..value_columns {
-        values.push(allocate_checkpoint_rows(lines, count, name)?);
+        values.push(allocate_checkpoint_rows(lines, count, name, budget)?);
     }
-    let mut initialized = allocate_checkpoint_rows(lines, count, name)?;
+    let mut initialized = allocate_checkpoint_rows(lines, count, name, budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1579,12 +1706,13 @@ fn read_generated_state_rows(
 
 fn read_generated_veriloga_states(
     lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'generated_veriloga_states' section".to_string())?;
     let count = parse_count_header(header, "generated_veriloga_states")?;
-    let mut states = allocate_checkpoint_rows(lines, count, "generated_veriloga_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "generated_veriloga_states", budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1618,14 +1746,22 @@ fn read_generated_veriloga_states(
             return Err(format!("generated state row {row}: extra field '{extra}'"));
         }
 
-        let (mut ddt, ddt_initialized) = read_generated_state_rows(lines, "ddt_state", 3)?;
-        let (mut idt, idt_initialized) = read_generated_state_rows(lines, "idt_state", 1)?;
+        let (mut ddt, ddt_initialized) = read_generated_state_rows(lines, "ddt_state", 3, budget)?;
+        let (mut idt, idt_initialized) = read_generated_state_rows(lines, "idt_state", 1, budget)?;
         let (mut limiter, limiter_initialized) =
-            read_generated_state_rows(lines, "limiter_state", 1)?;
+            read_generated_state_rows(lines, "limiter_state", 1, budget)?;
         states.push(GeneratedVerilogAInstanceCheckpoint {
-            instance_name: instance_name.to_string(),
-            model_name: model_name.to_string(),
-            model_identity: model_identity.to_string(),
+            instance_name: copy_checkpoint_string(
+                instance_name,
+                "generated instance name",
+                budget,
+            )?,
+            model_name: copy_checkpoint_string(model_name, "generated model name", budget)?,
+            model_identity: copy_checkpoint_string(
+                model_identity,
+                "generated model identity",
+                budget,
+            )?,
             state_version,
             state: GeneratedVerilogAPersistentState {
                 ddt_previous: ddt.remove(0),
@@ -1719,6 +1855,13 @@ fn read_runtime_veriloga_states(
 
 impl TransientCheckpoint {
     fn validate_numeric_state(&self) -> Result<(), String> {
+        self.validate_numeric_state_with_budget(None)
+    }
+
+    fn validate_numeric_state_with_budget(
+        &self,
+        mut budget: Option<&mut CheckpointParseBudget>,
+    ) -> Result<(), String> {
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -1886,16 +2029,32 @@ impl TransientCheckpoint {
                 "accepted diode/BJT nonlinear checkpoint blocker text is malformed".to_string(),
             );
         }
-        let mut diode_names = std::collections::HashSet::new();
+        let mut diode_names = match budget.as_deref_mut() {
+            Some(budget) => allocate_checkpoint_capacity(
+                self.accepted_nonlinear_states.diodes.len(),
+                "accepted diode validation names",
+                budget,
+            )?,
+            None => {
+                let count = self.accepted_nonlinear_states.diodes.len();
+                let mut names = Vec::new();
+                names.try_reserve_exact(count).map_err(|_| {
+                    format!(
+                        "accepted diode validation name count {count} exceeds allocation limits"
+                    )
+                })?;
+                names
+            }
+        };
         for (index, checkpoint) in self.accepted_nonlinear_states.diodes.iter().enumerate() {
             if checkpoint.instance_name.is_empty()
                 || checkpoint.instance_name.chars().any(char::is_whitespace)
-                || !diode_names.insert(checkpoint.instance_name.as_str())
             {
                 return Err(format!(
                     "accepted diode nonlinear checkpoint state {index} has an invalid or duplicate instance name"
                 ));
             }
+            diode_names.push((checkpoint.instance_name.as_str(), index));
             if checkpoint.runtime_tag != DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG {
                 return Err(format!(
                     "accepted diode nonlinear checkpoint state {index} uses unsupported runtime tag '{}'",
@@ -1927,16 +2086,38 @@ impl TransientCheckpoint {
                 ));
             }
         }
-        let mut bjt_names = std::collections::HashSet::new();
+        diode_names.sort_unstable_by_key(|(name, _)| *name);
+        if let Some(duplicate) = diode_names.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(format!(
+                "accepted diode nonlinear checkpoint state {} has an invalid or duplicate instance name",
+                duplicate[1].1
+            ));
+        }
+
+        let mut bjt_names = match budget.as_deref_mut() {
+            Some(budget) => allocate_checkpoint_capacity(
+                self.accepted_nonlinear_states.bjts.len(),
+                "accepted BJT validation names",
+                budget,
+            )?,
+            None => {
+                let count = self.accepted_nonlinear_states.bjts.len();
+                let mut names = Vec::new();
+                names.try_reserve_exact(count).map_err(|_| {
+                    format!("accepted BJT validation name count {count} exceeds allocation limits")
+                })?;
+                names
+            }
+        };
         for (index, checkpoint) in self.accepted_nonlinear_states.bjts.iter().enumerate() {
             if checkpoint.instance_name.is_empty()
                 || checkpoint.instance_name.chars().any(char::is_whitespace)
-                || !bjt_names.insert(checkpoint.instance_name.as_str())
             {
                 return Err(format!(
                     "accepted BJT nonlinear checkpoint state {index} has an invalid or duplicate instance name"
                 ));
             }
+            bjt_names.push((checkpoint.instance_name.as_str(), index));
             if checkpoint.runtime_tag != BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG {
                 return Err(format!(
                     "accepted BJT nonlinear checkpoint state {index} uses unsupported runtime tag '{}'",
@@ -1959,6 +2140,13 @@ impl TransientCheckpoint {
                     "accepted BJT nonlinear checkpoint state {index} contains a non-finite value"
                 ));
             }
+        }
+        bjt_names.sort_unstable_by_key(|(name, _)| *name);
+        if let Some(duplicate) = bjt_names.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(format!(
+                "accepted BJT nonlinear checkpoint state {} has an invalid or duplicate instance name",
+                duplicate[1].1
+            ));
         }
         if !self.lte_signal_global_reference.is_finite()
             || self.lte_signal_global_reference < 0.0
@@ -3186,8 +3374,35 @@ impl TransientCheckpoint {
         out
     }
 
-    /// Parse the versioned text format.
+    /// Parse the versioned text format using the production resource policy.
+    ///
+    /// Canonical input bytes and aggregate parsed backing allocations are
+    /// independently limited to [`DEFAULT_MAX_CHECKPOINT_BYTES`].
     pub fn from_text(text: &str) -> Result<Self, String> {
+        Self::from_text_with_limit(text, DEFAULT_MAX_CHECKPOINT_BYTES)
+    }
+
+    /// Parse the versioned text format with a caller-owned resource ceiling.
+    ///
+    /// `max_unpacked_bytes` is applied independently to the borrowed canonical
+    /// text length and to aggregate parsed heap backing. Parsed heap charges
+    /// every requested `Vec` capacity and copied `String` byte, and parsing
+    /// fails before a reservation or copy that would cross the ceiling.
+    pub fn from_text_with_limit(text: &str, max_unpacked_bytes: usize) -> Result<Self, String> {
+        if text.len() > max_unpacked_bytes {
+            return Err(format!(
+                "unpacked checkpoint length {} exceeds the configured limit of {max_unpacked_bytes} bytes",
+                text.len()
+            ));
+        }
+        let mut budget = CheckpointParseBudget::new(max_unpacked_bytes);
+        Self::parse_text_with_budget(text, &mut budget)
+    }
+
+    fn parse_text_with_budget(
+        text: &str,
+        budget: &mut CheckpointParseBudget,
+    ) -> Result<Self, String> {
         let mut lines = CheckpointLines::new(text);
 
         let header = lines.next().ok_or("empty checkpoint file")?;
@@ -3222,7 +3437,11 @@ impl TransientCheckpoint {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             {
-                Some(identity.to_string())
+                Some(copy_checkpoint_string(
+                    identity,
+                    "netlist identity",
+                    budget,
+                )?)
             } else {
                 return Err(format!(
                     "malformed netlist identity line: '{identity_line}'"
@@ -3245,7 +3464,11 @@ impl TransientCheckpoint {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             {
-                Some(identity.to_string())
+                Some(copy_checkpoint_string(
+                    identity,
+                    "restart identity",
+                    budget,
+                )?)
             } else {
                 return Err(format!(
                     "malformed restart identity line: '{identity_line}'"
@@ -3268,7 +3491,11 @@ impl TransientCheckpoint {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
             {
-                Some(identity.to_string())
+                Some(copy_checkpoint_string(
+                    identity,
+                    "simulation identity",
+                    budget,
+                )?)
             } else {
                 return Err(format!(
                     "malformed simulation identity line: '{identity_line}'"
@@ -3324,7 +3551,8 @@ impl TransientCheckpoint {
                 .strip_prefix("integration_continuation ")
                 .map(str::trim)
                 .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
-            let fields = field.split_whitespace().collect::<Vec<_>>();
+            let fields =
+                collect_checkpoint_fields(field, "integration continuation fields", budget)?;
             match fields.as_slice() {
                 ["unavailable"] => IntegrationContinuation::Unavailable,
                 ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
@@ -3371,7 +3599,8 @@ impl TransientCheckpoint {
                 .strip_prefix("integration_continuation ")
                 .map(str::trim)
                 .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
-            let fields = field.split_whitespace().collect::<Vec<_>>();
+            let fields =
+                collect_checkpoint_fields(field, "integration continuation fields", budget)?;
             match fields.as_slice() {
                 ["unavailable"] => IntegrationContinuation::Unavailable,
                 ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
@@ -3447,17 +3676,21 @@ impl TransientCheckpoint {
                     super::MAX_DYNAMIC_TLINE_BREAKPOINTS
                 ));
             }
-            let arrivals = fields
-                .map(|field| {
-                    field.parse::<Value>().map_err(|_| {
-                        format!("malformed pending transmission-line arrival '{field}'")
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if arrivals.len() != count {
+            let mut arrivals =
+                allocate_checkpoint_capacity(count, "pending transmission-line arrivals", budget)?;
+            for index in 0..count {
+                let field = fields.next().ok_or_else(|| {
+                    format!(
+                        "pending transmission-line arrivals declared {count} values but contained {index}"
+                    )
+                })?;
+                arrivals.push(field.parse::<Value>().map_err(|_| {
+                    format!("malformed pending transmission-line arrival '{field}'")
+                })?);
+            }
+            if fields.next().is_some() {
                 return Err(format!(
-                    "pending transmission-line arrivals declared {count} values but contained {}",
-                    arrivals.len()
+                    "pending transmission-line arrivals declared {count} values but contained more"
                 ));
             }
             arrivals
@@ -3481,7 +3714,7 @@ impl TransientCheckpoint {
             0
         };
 
-        let mut solution_cols = read_value_section(&mut lines, "solution", 1)?;
+        let mut solution_cols = read_value_section(&mut lines, "solution", 1, budget)?;
         if solution_cols[0].iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
         }
@@ -3507,14 +3740,14 @@ impl TransientCheckpoint {
                         return Err(format!("malformed LTE reference mode line: '{mode_line}'"));
                     }
                 };
-                let global = read_value_vector(&mut lines, "lte_signal_global")?;
+                let global = read_value_vector(&mut lines, "lte_signal_global", budget)?;
                 if global.len() != 1 || !global[0].is_finite() || global[0] < 0.0 {
                     return Err(
                         "'lte_signal_global' must contain one finite non-negative value"
                             .to_string(),
                     );
                 }
-                let local = read_value_vector(&mut lines, "lte_signal_local")?;
+                let local = read_value_vector(&mut lines, "lte_signal_local", budget)?;
                 if local.iter().any(|value| !value.is_finite() || *value < 0.0) {
                     return Err(
                         "'lte_signal_local' values must be finite and non-negative".to_string()
@@ -3524,7 +3757,7 @@ impl TransientCheckpoint {
             } else {
                 (None, 0.0, Vec::new())
             };
-        let cap_cols = read_value_section(&mut lines, "capacitors", 5)?;
+        let cap_cols = read_value_section(&mut lines, "capacitors", 5, budget)?;
         let inductor_flux_history_available = if version >= 13 {
             let availability_line = lines
                 .next()
@@ -3557,31 +3790,40 @@ impl TransientCheckpoint {
         } else {
             3
         };
-        let mut ind_cols = read_value_section(&mut lines, "inductors", ind_columns)?;
+        let mut ind_cols = read_value_section(&mut lines, "inductors", ind_columns, budget)?;
         if !inductor_flux_history_available {
             // Files that predate the flux history carry three columns; keep
             // the missing history empty so resume fails closed instead of
             // reading a neighbouring column as the third accepted current.
-            ind_cols.insert(2, Vec::new());
+            // Build a separate four-slot outer vector so both its complete
+            // replacement backing and the still-live three-slot source are
+            // reflected in the cumulative parsed-memory charge.
+            let mut legacy_cols = ind_cols.into_iter();
+            let mut expanded = allocate_checkpoint_capacity(4, "legacy inductor columns", budget)?;
+            expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
+            expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
+            expanded.push(Vec::new());
+            expanded.push(legacy_cols.next().expect("three parsed inductor columns"));
+            ind_cols = expanded;
         }
         let xyce_memristor_resistance_stores = if version >= 10 {
-            read_value_vector(&mut lines, "xyce_memristor_resistance_stores")?
+            read_value_vector(&mut lines, "xyce_memristor_resistance_stores", budget)?
         } else {
             Vec::new()
         };
         let generic_switch_stores = if version >= 11 {
-            let columns = read_value_section(&mut lines, "generic_switch_stores", 4)?;
+            let columns = read_value_section(&mut lines, "generic_switch_stores", 4, budget)?;
             let count = columns.first().map_or(0, Vec::len);
-            (0..count)
-                .map(|index| {
-                    [
-                        columns[0][index],
-                        columns[1][index],
-                        columns[2][index],
-                        columns[3][index],
-                    ]
-                })
-                .collect()
+            let mut stores = allocate_checkpoint_capacity(count, "generic_switch_stores", budget)?;
+            for index in 0..count {
+                stores.push([
+                    columns[0][index],
+                    columns[1][index],
+                    columns[2][index],
+                    columns[3][index],
+                ]);
+            }
+            stores
         } else {
             Vec::new()
         };
@@ -3615,9 +3857,10 @@ impl TransientCheckpoint {
                     resume_blockers: read_canonical_nonempty_line_vector(
                         &mut lines,
                         "accepted_nonlinear_blockers",
+                        budget,
                     )?,
-                    diodes: read_accepted_diode_nonlinear_states(&mut lines)?,
-                    bjts: read_accepted_bjt_nonlinear_states(&mut lines)?,
+                    diodes: read_accepted_diode_nonlinear_states(&mut lines, budget)?,
+                    bjts: read_accepted_bjt_nonlinear_states(&mut lines, budget)?,
                 },
             )
         } else {
@@ -3648,29 +3891,41 @@ impl TransientCheckpoint {
             }
             (
                 available,
-                read_nonempty_line_vector(&mut lines, "tline_blockers")?,
-                read_tline_states(&mut lines)?,
+                read_nonempty_line_vector(&mut lines, "tline_blockers", budget)?,
+                read_tline_states(&mut lines, budget)?,
             )
         } else {
             (false, Vec::new(), Vec::new())
         };
         let xspice_instances = if version >= 2 {
-            read_nonempty_line_vector(&mut lines, "xspice")?
+            read_nonempty_line_vector(&mut lines, "xspice", budget)?
         } else {
             Vec::new()
         };
         let mut xspice_resume_blockers = if version >= 3 {
-            read_nonempty_line_vector(&mut lines, "xspice_blockers")?
+            read_nonempty_line_vector(&mut lines, "xspice_blockers", budget)?
         } else {
             Vec::new()
         };
         if version == 2 && !xspice_instances.is_empty() {
-            xspice_resume_blockers.extend(xspice_instances.iter().map(|instance| {
-                format!("{instance}: legacy checkpoint did not record model checkpoint support")
-            }));
+            const SUFFIX: &str = ": legacy checkpoint did not record model checkpoint support";
+            let mut blockers = allocate_checkpoint_capacity(
+                xspice_instances.len(),
+                "legacy XSPICE blockers",
+                budget,
+            )?;
+            for instance in &xspice_instances {
+                blockers.push(concatenate_checkpoint_string(
+                    instance,
+                    SUFFIX,
+                    "legacy XSPICE blocker",
+                    budget,
+                )?);
+            }
+            xspice_resume_blockers = blockers;
         }
         let xspice_instance_states = if version >= 4 {
-            read_xspice_instance_states(&mut lines, version)?
+            read_xspice_instance_states(&mut lines, version, budget)?
         } else {
             Vec::new()
         };
@@ -3698,7 +3953,10 @@ impl TransientCheckpoint {
                         "generated Verilog-A availability line has extra field '{extra}'"
                     ));
                 }
-                (available, read_generated_veriloga_states(&mut lines)?)
+                (
+                    available,
+                    read_generated_veriloga_states(&mut lines, budget)?,
+                )
             } else {
                 (false, Vec::new())
             };
@@ -3793,7 +4051,7 @@ impl TransientCheckpoint {
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states,
         };
-        checkpoint.validate_numeric_state()?;
+        checkpoint.validate_numeric_state_with_budget(Some(budget))?;
         Ok(checkpoint)
     }
 
@@ -3816,8 +4074,12 @@ impl TransientCheckpoint {
         Self::from_bytes_with_limit(bytes, DEFAULT_MAX_CHECKPOINT_BYTES)
     }
 
-    /// Parse an unpacked or packed checkpoint without allowing the canonical
-    /// decoded representation to exceed `max_unpacked_bytes`.
+    /// Parse an unpacked or packed checkpoint with a caller-owned ceiling.
+    ///
+    /// `max_unpacked_bytes` independently limits the canonical decoded
+    /// representation and aggregate parsed heap backing. Thus packed parsing
+    /// may hold at most one ceiling's worth of decoded text plus one ceiling's
+    /// worth of charged parsed vectors/strings (in addition to the input).
     pub fn from_bytes_with_limit(bytes: &[u8], max_unpacked_bytes: usize) -> Result<Self, String> {
         let encoding = if bytes.starts_with(PACKED_MAGIC) {
             TransientCheckpointEncoding::Packed
@@ -3831,7 +4093,9 @@ impl TransientCheckpoint {
     ///
     /// This is useful at trust boundaries where the caller has authenticated
     /// representation metadata separately. Normal file loading should use the
-    /// auto-detecting [`Self::load`] or [`Self::load_with_limit`] APIs.
+    /// auto-detecting [`Self::load`] or [`Self::load_with_limit`] APIs. The
+    /// supplied ceiling independently limits canonical bytes and parsed heap,
+    /// as described by [`Self::from_bytes_with_limit`].
     pub fn from_bytes_with_encoding(
         bytes: &[u8],
         encoding: TransientCheckpointEncoding,
@@ -3853,11 +4117,12 @@ impl TransientCheckpoint {
                 bytes
             }
             TransientCheckpointEncoding::Packed => {
-                return decode_packed_checkpoint(bytes, max_unpacked_bytes)
-                    .and_then(|canonical| parse_canonical_checkpoint(&canonical));
+                return decode_packed_checkpoint(bytes, max_unpacked_bytes).and_then(|canonical| {
+                    parse_canonical_checkpoint(&canonical, max_unpacked_bytes)
+                });
             }
         };
-        parse_canonical_checkpoint(canonical)
+        parse_canonical_checkpoint(canonical, max_unpacked_bytes)
     }
 
     /// Write the checkpoint as canonical unpacked text.
@@ -3888,7 +4153,10 @@ impl TransientCheckpoint {
         )
     }
 
-    /// Read and auto-detect a checkpoint with independent encoded and decoded limits.
+    /// Read and auto-detect a checkpoint with independent resource limits.
+    ///
+    /// `max_encoded_bytes` limits the file read. `max_unpacked_bytes`
+    /// independently limits both canonical bytes and aggregate parsed heap.
     pub fn load_with_limit(
         path: &std::path::Path,
         max_encoded_bytes: usize,
@@ -3899,10 +4167,13 @@ impl TransientCheckpoint {
     }
 }
 
-fn parse_canonical_checkpoint(canonical: &[u8]) -> Result<TransientCheckpoint, String> {
+fn parse_canonical_checkpoint(
+    canonical: &[u8],
+    max_unpacked_bytes: usize,
+) -> Result<TransientCheckpoint, String> {
     let text = std::str::from_utf8(canonical)
         .map_err(|error| format!("checkpoint is not valid UTF-8 text: {error}"))?;
-    TransientCheckpoint::from_text(text)
+    TransientCheckpoint::from_text_with_limit(text, max_unpacked_bytes)
 }
 
 fn encode_packed_checkpoint(canonical: &[u8]) -> Result<Vec<u8>, String> {
@@ -6497,43 +6768,122 @@ mod tests {
         assert!(TransientCheckpoint::from_text(truncated).is_err());
     }
 
+    fn checkpoint_with_dense_capacitor_rows(count: usize) -> String {
+        let text = sample().to_text();
+        let header = "capacitors 2\n";
+        let header_start = text.find(header).expect("sample capacitor header");
+        let rows_start = header_start + header.len();
+        let rows_length = text[rows_start..]
+            .match_indices('\n')
+            .nth(1)
+            .expect("sample has two capacitor rows")
+            .0
+            + 1;
+        let mut dense = String::new();
+        dense.push_str(&text[..header_start]);
+        dense.push_str(&format!("capacitors {count}\n"));
+        for _ in 0..count {
+            dense.push_str("0 0 0 0 0\n");
+        }
+        dense.push_str(&text[rows_start + rows_length..]);
+        dense
+    }
+
+    #[test]
+    fn dense_small_numbers_obey_aggregate_parsed_memory_limit() {
+        const ROWS: usize = 4096;
+        let text = checkpoint_with_dense_capacitor_rows(ROWS);
+        let limit = text.len();
+        assert!(
+            ROWS * std::mem::size_of::<Value>() < limit,
+            "one capacitor column must fit so this exercises the aggregate budget"
+        );
+
+        let text_error = TransientCheckpoint::from_text_with_limit(&text, limit)
+            .expect_err("dense text must not amplify beyond its parsed-memory ceiling");
+        assert!(
+            text_error.contains("parsed-memory limit") && text_error.contains("capacitors"),
+            "unexpected dense-text diagnostic: {text_error}"
+        );
+
+        let unpacked_error = TransientCheckpoint::from_bytes_with_limit(text.as_bytes(), limit)
+            .expect_err("unpacked bytes must apply the same parsed-memory ceiling");
+        assert!(
+            unpacked_error.contains("parsed-memory limit") && unpacked_error.contains("capacitors"),
+            "unexpected unpacked diagnostic: {unpacked_error}"
+        );
+
+        let packed = encode_packed_checkpoint(text.as_bytes()).expect("dense checkpoint packs");
+        let packed_error = TransientCheckpoint::from_bytes_with_limit(&packed, limit)
+            .expect_err("packed bytes must apply the same parsed-memory ceiling");
+        assert!(
+            packed_error.contains("parsed-memory limit") && packed_error.contains("capacitors"),
+            "unexpected packed diagnostic: {packed_error}"
+        );
+    }
+
+    #[test]
+    fn custom_text_limit_preserves_normal_and_legacy_parsing() {
+        let current = sample().to_text();
+        let byte_error = TransientCheckpoint::from_text_with_limit(&current, current.len() - 1)
+            .expect_err("custom text parsing must enforce its canonical byte ceiling first");
+        assert!(
+            byte_error.contains("unpacked checkpoint length")
+                && byte_error.contains("configured limit"),
+            "unexpected custom text byte-limit diagnostic: {byte_error}"
+        );
+
+        let current_limit = current.len().saturating_mul(8);
+        assert_eq!(
+            TransientCheckpoint::from_text_with_limit(&current, current_limit)
+                .expect("ordinary current checkpoint fits a caller-owned budget"),
+            sample()
+        );
+
+        let legacy = legacy_text(&sample(), 7);
+        let legacy_limit = legacy.len().saturating_mul(8);
+        TransientCheckpoint::from_text_with_limit(&legacy, legacy_limit)
+            .expect("legacy checkpoint fits the same explicit parsed-memory policy");
+    }
+
     #[test]
     fn declared_section_counts_are_bounded_before_allocation() {
         let count = usize::MAX;
+        let mut budget = CheckpointParseBudget::new(DEFAULT_MAX_CHECKPOINT_BYTES);
 
         let text = format!("state {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_value_vector(&mut lines, "state")
+        let err = read_value_vector(&mut lines, "state", &mut budget)
             .expect_err("oversized floating-point vectors must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
         let text = format!("solution {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_value_section(&mut lines, "solution", 1)
+        let err = read_value_section(&mut lines, "solution", 1, &mut budget)
             .expect_err("oversized table sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
         let text = format!("int_state {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_i64_vector(&mut lines, "int_state")
+        let err = read_i64_vector(&mut lines, "int_state", &mut budget)
             .expect_err("oversized integer vectors must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
         let text = format!("xspice {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_nonempty_line_vector(&mut lines, "xspice")
+        let err = read_nonempty_line_vector(&mut lines, "xspice", &mut budget)
             .expect_err("oversized string sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
         let text = format!("xspice_states {count}\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_xspice_instance_states(&mut lines, FORMAT_VERSION)
+        let err = read_xspice_instance_states(&mut lines, FORMAT_VERSION, &mut budget)
             .expect_err("oversized nested XSPICE sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
 
         let text = format!("accepted_bjt_nonlinear_states {count}\n\n\n\n");
         let mut lines = CheckpointLines::new(&text);
-        let err = read_accepted_bjt_nonlinear_states(&mut lines)
+        let err = read_accepted_bjt_nonlinear_states(&mut lines, &mut budget)
             .expect_err("outer accepted BJT counts must be bounded by fixed nested row shape");
         assert!(
             err.contains("each state requires"),
