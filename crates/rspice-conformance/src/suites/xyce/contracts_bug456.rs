@@ -342,6 +342,7 @@ impl Bug456Role {
             (self.case, self.member),
             (
                 Bug456Case::ConverterUnpacked
+                    | Bug456Case::ConverterPacked
                     | Bug456Case::ConverterOutput
                     | Bug456Case::EmitterGear
                     | Bug456Case::EmitterTrapGear
