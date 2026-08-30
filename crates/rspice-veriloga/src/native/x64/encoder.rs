@@ -1358,6 +1358,8 @@ mod tests {
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
             runtime_status: Default::default(),
+            state_candidate_valid: std::ptr::null_mut(),
+            state_candidate_valid_len: 0,
         };
 
         let mut encoder = X64Encoder::new();

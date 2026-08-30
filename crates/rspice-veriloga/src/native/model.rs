@@ -104,6 +104,7 @@ pub(crate) struct NativeRequiredStorage {
     pub state_values: usize,
     pub state_values_prev: usize,
     pub state_initialized: usize,
+    pub state_candidate_valid: usize,
     pub lookup_tables: usize,
     pub laplace_filters: usize,
     pub zi_filters: usize,
@@ -126,7 +127,6 @@ impl NativeRequiredStorage {
         }
 
         let mut max_state = None;
-        let mut max_limit_state = None;
         let mut max_transition_filter = None;
         let mut max_slew_filter = None;
         let mut max_delay_buffer = None;
@@ -140,7 +140,6 @@ impl NativeRequiredStorage {
                     | Instruction::IdtModState(index) => update_max(&mut max_state, *index),
                     Instruction::LimitState(index) | Instruction::CanonicalLimitState(index) => {
                         update_max(&mut max_state, *index);
-                        update_max(&mut max_limit_state, *index);
                     }
                     Instruction::TransitionState(index) => {
                         update_max(&mut max_transition_filter, *index);
@@ -188,7 +187,8 @@ impl NativeRequiredStorage {
         Self {
             state_values,
             state_values_prev: state_values,
-            state_initialized: required_count(max_limit_state),
+            state_initialized: state_values,
+            state_candidate_valid: state_values,
             lookup_tables: model.lookup_tables.len(),
             laplace_filters: model.laplace_filters.len(),
             zi_filters: model.zi_filters.len(),
@@ -1816,6 +1816,8 @@ mod tests {
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
             runtime_status: Default::default(),
+            state_candidate_valid: std::ptr::null_mut(),
+            state_candidate_valid_len: 0,
         }
     }
 }

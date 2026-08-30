@@ -103,3 +103,48 @@ endmodule
         "first-step ddt",
     );
 }
+
+#[test]
+fn rejected_first_integration_candidate_does_not_initialize_accepted_history() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module rejected_first_candidate(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ ddt(V(p, n));
+        I(p, n) <+ idt(V(p, n), 10.0);
+        I(p, n) <+ idtmod(V(p, n), 0.25, 2.0, 0.0);
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.set_analysis_type(2);
+    device.set_timestep(0.5);
+
+    device.update_voltages(&[4.0]);
+    let rejected = device.try_evaluate().expect("first candidate evaluation");
+    assert_close(rejected[0], 0.0, "first-candidate ddt");
+    assert_close(rejected[1], 12.0, "first-candidate idt");
+    assert_close(rejected[2], 0.25, "first-candidate idtmod");
+
+    device.update_voltages(&[6.0]);
+    let accepted = device
+        .try_evaluate()
+        .expect("replacement candidate evaluation");
+    assert_close(accepted[0], 0.0, "replacement-candidate ddt");
+    assert_close(accepted[1], 13.0, "replacement-candidate idt");
+    assert_close(accepted[2], 1.25, "replacement-candidate idtmod");
+    device.advance_state();
+
+    device.set_time(0.5);
+    device.update_voltages(&[8.0]);
+    let next = device
+        .try_evaluate()
+        .expect("next accepted-history evaluation");
+    assert_close(next[0], 4.0, "accepted-history ddt");
+    assert_close(next[1], 17.0, "accepted-history idt");
+    assert_close(next[2], 1.25, "accepted-history idtmod");
+}

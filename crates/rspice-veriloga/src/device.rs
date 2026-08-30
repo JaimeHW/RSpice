@@ -3199,6 +3199,12 @@ impl VerilogADevice {
             limiter_active: &mut context.limiter_active,
             limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
             runtime_status: Default::default(),
+            state_candidate_valid: if context.state_candidate_valid.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.state_candidate_valid.as_mut_ptr()
+            },
+            state_candidate_valid_len: context.state_candidate_valid.len(),
         }
     }
 
@@ -3534,6 +3540,11 @@ impl VerilogADevice {
             "state-initialization flag storage",
             required.state_initialized,
             context.state_initialized.len(),
+        )?;
+        Self::validate_native_runtime_storage_len(
+            "integration candidate-valid storage",
+            required.state_candidate_valid,
+            context.state_candidate_valid.len(),
         )?;
         Self::validate_native_runtime_storage_len(
             "lookup-table storage",
@@ -6116,6 +6127,7 @@ endmodule
             context.state_derivatives.resize(1, 0.0);
             context.state_derivatives_prev.resize(1, 0.0);
             context.state_initialized.resize(1, false);
+            context.state_candidate_valid.resize(1, 0);
             context
         }
 
@@ -6123,6 +6135,7 @@ endmodule
             state_values: 1,
             state_values_prev: 1,
             state_initialized: 1,
+            state_candidate_valid: 1,
             ..NativeRequiredStorage::default()
         };
 
@@ -6143,6 +6156,12 @@ endmodule
         let error = VerilogADevice::validate_native_runtime_storage(&context, required)
             .expect_err("missing prior derivative storage must hard-fail before dispatch");
         assert_native_hard_fail(error, "prior state-derivative storage");
+
+        let mut context = populated_context();
+        context.state_candidate_valid.clear();
+        let error = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing integration candidate storage must hard-fail before dispatch");
+        assert_native_hard_fail(error, "integration candidate-valid storage");
     }
 
     #[test]

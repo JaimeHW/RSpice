@@ -1331,6 +1331,12 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         limiter_active: &mut context.limiter_active,
         limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
         runtime_status: Default::default(),
+        state_candidate_valid: if context.state_candidate_valid.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            context.state_candidate_valid.as_mut_ptr()
+        },
+        state_candidate_valid_len: context.state_candidate_valid.len(),
     }
 }
 

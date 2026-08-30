@@ -9,6 +9,7 @@
 //! This is the reference runtime: whatever the JIT and the generated Rust
 //! backend produce is expected to agree with it numerically.
 
+use super::context::INTEGRATION_CANDIDATE_VALID;
 use super::{VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
@@ -420,7 +421,7 @@ impl<'a> Vm<'a> {
                     0.0
                 };
                 self.context.state_derivatives[*idx] = derivative;
-                self.context.state_initialized[*idx] = true;
+                self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
                 self.stack.push(derivative);
             }
 
@@ -457,7 +458,7 @@ impl<'a> Vm<'a> {
                 };
                 self.context.state_values[*idx] = new_integral;
                 self.context.state_derivatives[*idx] = current_value;
-                self.context.state_initialized[*idx] = true;
+                self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
 
                 self.stack.push(new_integral);
             }
@@ -510,7 +511,7 @@ impl<'a> Vm<'a> {
 
                 self.context.state_values[*idx] = wrapped;
                 self.context.state_derivatives[*idx] = current_value;
-                self.context.state_initialized[*idx] = true;
+                self.context.state_candidate_valid[*idx] = INTEGRATION_CANDIDATE_VALID;
 
                 self.stack.push(wrapped);
             }
@@ -560,11 +561,15 @@ impl<'a> Vm<'a> {
                 let step_limit = self.pop()?;
                 let new_value = self.pop()?;
 
-                if self.context.state_values.len() <= *idx {
-                    self.context.state_values.resize(*idx + 1, 0.0);
-                }
-                if self.context.state_initialized.len() <= *idx {
-                    self.context.state_initialized.resize(*idx + 1, false);
+                if self.context.state_values.len() <= *idx
+                    || self.context.state_values_prev.len() <= *idx
+                    || self.context.state_values_older.len() <= *idx
+                    || self.context.state_derivatives.len() <= *idx
+                    || self.context.state_derivatives_prev.len() <= *idx
+                    || self.context.state_initialized.len() <= *idx
+                    || self.context.state_candidate_valid.len() <= *idx
+                {
+                    self.context.allocate_states(*idx + 1);
                 }
 
                 let limited_value = if self.context.state_initialized[*idx] {
@@ -944,6 +949,7 @@ impl<'a> Vm<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::IntegrationCoefficients;
 
     fn execute(instructions: Vec<Instruction>) -> Result<f64, VmError> {
         let mut context = VmContext::default();
@@ -1302,5 +1308,207 @@ mod tests {
         .expect_err("singular transient state solve must fail");
         assert!(matches!(error, VmError::InvalidNumericResult(_)));
         assert!(error.to_string().contains("transient"));
+    }
+
+    #[test]
+    fn integration_initialization_is_published_only_when_the_candidate_is_accepted() {
+        let mut context = VmContext::with_states(0, 3);
+        context.integration = IntegrationCoefficients::backward_euler(0.5);
+
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(4.0), Instruction::DdtState(0)],
+            )
+            .unwrap(),
+            0.0
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(10.0),
+                    Instruction::IdtState(1),
+                ],
+            )
+            .unwrap(),
+            11.0
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::IdtModState(2),
+                ],
+            )
+            .unwrap(),
+            0.0
+        );
+        assert_eq!(context.state_initialized, vec![false; 3]);
+        assert_eq!(context.state_candidate_valid, vec![1; 3]);
+        assert!(
+            context
+                .accepted_checkpoint()
+                .expect_err("a speculative integration candidate must block checkpoint capture")
+                .to_string()
+                .contains("in-flight Newton candidate")
+        );
+
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(7.0), Instruction::DdtState(0)],
+            )
+            .unwrap(),
+            0.0
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(4.0),
+                    Instruction::PushConst(20.0),
+                    Instruction::IdtState(1),
+                ],
+            )
+            .unwrap(),
+            22.0
+        );
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.25),
+                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::IdtModState(2),
+                ],
+            )
+            .unwrap(),
+            0.75
+        );
+        assert_eq!(context.state_initialized, vec![false; 3]);
+
+        context.advance_state().unwrap();
+        assert_eq!(context.state_initialized, vec![true; 3]);
+        assert_eq!(context.state_candidate_valid, vec![2; 3]);
+        assert_eq!(context.state_values_prev, vec![7.0, 22.0, 0.75]);
+    }
+
+    #[test]
+    fn acceptance_leaves_unexecuted_integration_slots_unchanged() {
+        let mut context = VmContext::with_states(0, 2);
+        context.integration = IntegrationCoefficients::backward_euler(1.0);
+        context.state_values_prev = vec![1.0, 2.0];
+        context.state_values_older = vec![0.5, 1.5];
+        context.state_derivatives_prev = vec![0.25, 0.75];
+        context.state_initialized = vec![true, true];
+        context.state_candidate_valid = vec![2, 2];
+
+        context.begin_stateful_evaluation();
+        execute_with_context(
+            &mut context,
+            vec![Instruction::PushConst(3.0), Instruction::DdtState(0)],
+        )
+        .unwrap();
+        context.advance_state().unwrap();
+
+        assert_eq!(context.state_values_prev, vec![3.0, 2.0]);
+        assert_eq!(context.state_values_older, vec![1.0, 1.5]);
+        assert_eq!(context.state_derivatives_prev[1], 0.75);
+    }
+
+    #[test]
+    fn skipped_retry_discards_a_failed_nonfinite_integration_candidate() {
+        let mut context = VmContext::with_states(0, 1);
+        context.integration = IntegrationCoefficients::backward_euler(1.0);
+        context.state_values[0] = 4.0;
+        context.state_values_prev[0] = 4.0;
+        context.state_values_older[0] = 3.0;
+        context.state_derivatives[0] = 2.0;
+        context.state_derivatives_prev[0] = 2.0;
+        context.state_initialized[0] = true;
+
+        context.begin_stateful_evaluation();
+        assert!(
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(f64::NAN), Instruction::DdtState(0)],
+            )
+            .unwrap()
+            .is_nan()
+        );
+        assert!(context.validate_advance_state().is_err());
+
+        context.begin_stateful_evaluation();
+        context
+            .advance_state()
+            .expect("a clean retry that skips the operator must accept");
+        assert_eq!(context.state_values[0].to_bits(), 4.0_f64.to_bits());
+        assert_eq!(context.state_derivatives[0].to_bits(), 2.0_f64.to_bits());
+        assert_eq!(context.state_values_prev[0].to_bits(), 4.0_f64.to_bits());
+        assert_eq!(context.state_values_older[0].to_bits(), 3.0_f64.to_bits());
+        assert!(context.accepted_checkpoint().is_ok());
+    }
+
+    #[test]
+    fn nonfinite_operating_point_candidate_is_not_promoted_to_transient_history() {
+        let mut context = VmContext::with_states(0, 1);
+
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(f64::NAN), Instruction::DdtState(0)],
+            )
+            .unwrap()
+            .to_bits(),
+            0.0_f64.to_bits()
+        );
+        assert!(!context.state_initialized[0]);
+
+        context.set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0));
+
+        assert!(!context.state_initialized[0]);
+        assert_eq!(context.state_values[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(context.state_values_prev[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(context.state_values_older[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(context.state_derivatives[0].to_bits(), 0.0_f64.to_bits());
+        assert_eq!(context.state_candidate_valid, vec![2]);
+    }
+
+    #[test]
+    fn dynamic_limiter_allocation_keeps_every_state_pool_structurally_aligned() {
+        let mut context = VmContext::default();
+        assert_eq!(
+            execute_with_context(
+                &mut context,
+                vec![
+                    Instruction::PushConst(5.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::LimitState(2),
+                ],
+            )
+            .unwrap()
+            .to_bits(),
+            5.0_f64.to_bits()
+        );
+
+        assert_eq!(context.state_values.len(), 3);
+        assert_eq!(context.state_values_prev.len(), 3);
+        assert_eq!(context.state_values_older.len(), 3);
+        assert_eq!(context.state_derivatives.len(), 3);
+        assert_eq!(context.state_derivatives_prev.len(), 3);
+        assert_eq!(context.state_initialized.len(), 3);
+        assert_eq!(context.state_candidate_valid, vec![0; 3]);
+        context.advance_state().unwrap();
+        assert_eq!(context.state_values[2].to_bits(), 5.0_f64.to_bits());
     }
 }

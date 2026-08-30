@@ -22,6 +22,10 @@ use crate::codegen::LookupTable;
 use crate::laplace::{LaplaceCheckpoint, StateSpaceFilter};
 use crate::zfilter::ZiCheckpoint;
 
+pub(crate) const INTEGRATION_CANDIDATE_NONE: u8 = 0;
+pub(crate) const INTEGRATION_CANDIDATE_VALID: u8 = 1;
+pub(crate) const INTEGRATION_CANDIDATE_IDLE: u8 = 2;
+
 pub const CURRENT_PAIR_GROUND: usize = usize::MAX;
 
 pub fn terminal_pair_current_index(pos: usize, neg: usize, num_terminals: usize) -> Option<usize> {
@@ -198,9 +202,15 @@ pub struct VmContext {
     pub state_derivatives: Vec<f64>,
     /// Derivative/input values at the previous accepted point.
     pub state_derivatives_prev: Vec<f64>,
-    /// Per-slot flag marking state slots that have been written at least
-    /// once (used by $limit to detect its first evaluation)
+    /// Per-slot accepted initialization state. Integration operators consult
+    /// this only for accepted history; limiters also use their dedicated slots
+    /// as immediate Newton-iteration history.
     pub state_initialized: Vec<bool>,
+    /// Per-slot integration candidate status. Zero denotes a non-integration
+    /// or not-yet-observed slot, one a candidate from the latest evaluation,
+    /// and two a known integration slot with no current candidate. This state
+    /// is runtime-only and is never serialized.
+    pub(crate) state_candidate_valid: Vec<u8>,
     /// Current timestep (delta t) for transient analysis
     pub timestep: f64,
     /// Companion coefficients selected by the transient solver.
@@ -277,6 +287,7 @@ impl Default for VmContext {
             state_derivatives: Vec::new(),
             state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
+            state_candidate_valid: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -321,6 +332,7 @@ impl VmContext {
             state_derivatives: Vec::new(),
             state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
+            state_candidate_valid: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -363,6 +375,7 @@ impl VmContext {
             state_derivatives: Vec::new(),
             state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
+            state_candidate_valid: Vec::new(),
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -405,6 +418,7 @@ impl VmContext {
             state_derivatives: vec![0.0; num_states],
             state_derivatives_prev: vec![0.0; num_states],
             state_initialized: vec![false; num_states],
+            state_candidate_valid: vec![0; num_states],
             timestep: 0.0,
             integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
@@ -450,23 +464,41 @@ impl VmContext {
             || self.state_derivatives.len() != state_count
             || self.state_derivatives_prev.len() != state_count
             || self.state_initialized.len() != state_count
+            || self.state_candidate_valid.len() != state_count
         {
             return Err(invalid(
                 "candidate integration-state storage shape is inconsistent".into(),
             ));
         }
         if self
-            .state_values
+            .state_candidate_valid
             .iter()
-            .chain(&self.state_values_prev)
+            .any(|status| *status > INTEGRATION_CANDIDATE_IDLE)
+        {
+            return Err(invalid(
+                "candidate integration-state validity storage is malformed".into(),
+            ));
+        }
+        if self
+            .state_values_prev
+            .iter()
             .chain(&self.state_values_older)
-            .chain(&self.state_derivatives)
             .chain(&self.state_derivatives_prev)
             .any(|value| !value.is_finite())
         {
             return Err(invalid(
-                "candidate integration state contains a non-finite value".into(),
+                "accepted integration history contains a non-finite value".into(),
             ));
+        }
+        for index in 0..state_count {
+            if self.state_candidate_valid[index] == INTEGRATION_CANDIDATE_VALID
+                && (!self.state_values[index].is_finite()
+                    || !self.state_derivatives[index].is_finite())
+            {
+                return Err(invalid(format!(
+                    "candidate integration state {index} contains a non-finite value"
+                )));
+            }
         }
         if self.timer_event_bound != f64::INFINITY
             && (!self.timer_event_bound.is_finite() || self.timer_event_bound <= time)
@@ -517,10 +549,23 @@ impl VmContext {
     /// runtime-compiled instance. This phase is deliberately infallible.
     pub(crate) fn apply_validated_advance_state(&mut self) {
         let time = self.time;
-        self.state_values_older.clone_from(&self.state_values_prev);
-        self.state_values_prev.clone_from(&self.state_values);
-        self.state_derivatives_prev
-            .clone_from(&self.state_derivatives);
+        for index in 0..self.state_candidate_valid.len() {
+            match self.state_candidate_valid[index] {
+                INTEGRATION_CANDIDATE_NONE => continue,
+                INTEGRATION_CANDIDATE_IDLE => {
+                    self.state_values[index] = self.state_values_prev[index];
+                    self.state_derivatives[index] = self.state_derivatives_prev[index];
+                    continue;
+                }
+                INTEGRATION_CANDIDATE_VALID => {}
+                _ => unreachable!("validated integration candidate status"),
+            }
+            self.state_values_older[index] = self.state_values_prev[index];
+            self.state_values_prev[index] = self.state_values[index];
+            self.state_derivatives_prev[index] = self.state_derivatives[index];
+            self.state_initialized[index] = true;
+            self.state_candidate_valid[index] = INTEGRATION_CANDIDATE_IDLE;
+        }
         for buffer in &mut self.delay_buffers {
             buffer.commit();
         }
@@ -543,6 +588,28 @@ impl VmContext {
 
     pub(crate) fn accepted_checkpoint(&self) -> Result<VmAcceptedCheckpoint, VmError> {
         let invalid = |message: String| VmError::InvalidNumericResult(message);
+        if self.state_candidate_valid.len() != self.state_values.len() {
+            return Err(invalid(
+                "integration candidate-valid storage shape is inconsistent".into(),
+            ));
+        }
+        if self
+            .state_candidate_valid
+            .iter()
+            .any(|status| *status > INTEGRATION_CANDIDATE_IDLE)
+        {
+            return Err(invalid(
+                "integration candidate-valid storage is malformed".into(),
+            ));
+        }
+        if self
+            .state_candidate_valid
+            .contains(&INTEGRATION_CANDIDATE_VALID)
+        {
+            return Err(invalid(
+                "integration state has an in-flight Newton candidate".into(),
+            ));
+        }
         for (index, state) in self.delay_buffers.iter().enumerate() {
             state
                 .validate_checkpoint_ready()
@@ -750,6 +817,7 @@ impl VmContext {
             .clone_from(&checkpoint.state_derivatives_prev);
         self.state_initialized
             .clone_from(&checkpoint.state_initialized);
+        self.state_candidate_valid.fill(0);
         for (target, state) in self.delay_buffers.iter_mut().zip(&checkpoint.delay_buffers) {
             target.restore_checkpoint(state);
         }
@@ -810,6 +878,7 @@ impl VmContext {
         self.state_derivatives.fill(0.0);
         self.state_derivatives_prev.fill(0.0);
         self.state_initialized.fill(false);
+        self.state_candidate_valid.fill(0);
         self.timestep = 0.0;
         self.integration = IntegrationCoefficients::inactive();
 
@@ -847,6 +916,11 @@ impl VmContext {
     /// device evaluation. Only candidates recreated by the final Newton pass
     /// may be committed when the point is accepted.
     pub(crate) fn begin_stateful_evaluation(&mut self) {
+        for status in &mut self.state_candidate_valid {
+            if *status == INTEGRATION_CANDIDATE_VALID {
+                *status = INTEGRATION_CANDIDATE_IDLE;
+            }
+        }
         for buffer in &mut self.delay_buffers {
             buffer.begin_evaluation();
         }
@@ -903,10 +977,40 @@ impl VmContext {
             // that state to both history lanes when transient integration
             // starts so a biased ddt() differentiates from the operating
             // point and idt() starts from its DC initial condition.
-            self.state_values_prev.clone_from(&self.state_values);
-            self.state_values_older.clone_from(&self.state_values);
-            self.state_derivatives_prev
-                .clone_from(&self.state_derivatives);
+            for index in 0..self.state_candidate_valid.len() {
+                match self.state_candidate_valid[index] {
+                    INTEGRATION_CANDIDATE_NONE => continue,
+                    INTEGRATION_CANDIDATE_IDLE => {
+                        self.state_values[index] = self.state_values_prev[index];
+                        self.state_derivatives[index] = self.state_derivatives_prev[index];
+                    }
+                    INTEGRATION_CANDIDATE_VALID => {
+                        if self.state_values[index].is_finite()
+                            && self.state_derivatives[index].is_finite()
+                        {
+                            self.state_values_prev[index] = self.state_values[index];
+                            self.state_values_older[index] = self.state_values[index];
+                            self.state_derivatives_prev[index] = self.state_derivatives[index];
+                            self.state_initialized[index] = true;
+                        } else {
+                            self.state_values[index] = self.state_values_prev[index];
+                            self.state_derivatives[index] = self.state_derivatives_prev[index];
+                        }
+                        self.state_candidate_valid[index] = INTEGRATION_CANDIDATE_IDLE;
+                    }
+                    _ => {}
+                }
+            }
+        } else if self.integration != coefficients {
+            // A candidate evaluated with different companion coefficients
+            // cannot be accepted under the new integration rule.
+            for index in 0..self.state_candidate_valid.len() {
+                if self.state_candidate_valid[index] == INTEGRATION_CANDIDATE_VALID {
+                    self.state_candidate_valid[index] = INTEGRATION_CANDIDATE_IDLE;
+                    self.state_values[index] = self.state_values_prev[index];
+                    self.state_derivatives[index] = self.state_derivatives_prev[index];
+                }
+            }
         }
         self.integration = coefficients;
     }
@@ -937,6 +1041,7 @@ impl VmContext {
         self.state_derivatives.resize(count, 0.0);
         self.state_derivatives_prev.resize(count, 0.0);
         self.state_initialized.resize(count, false);
+        self.state_candidate_valid.resize(count, 0);
     }
 
     /// Allocate delay buffers used by `absdelay(...)`.
@@ -1198,6 +1303,7 @@ mod tests {
         context.state_derivatives = vec![17.0, 18.0];
         context.state_derivatives_prev = vec![19.0, 20.0];
         context.state_initialized = vec![true, true];
+        context.state_candidate_valid = vec![1, 2];
         context.currents = vec![21.0];
         context.set_branch_current(0, 1, 22.0);
         context.request_timer_event(2.0);
@@ -1258,6 +1364,7 @@ mod tests {
         assert_eq!(context.state_derivatives, vec![0.0, 0.0]);
         assert_eq!(context.state_derivatives_prev, vec![0.0, 0.0]);
         assert_eq!(context.state_initialized, vec![false, false]);
+        assert_eq!(context.state_candidate_valid, vec![0, 0]);
         assert_eq!(context.timestep, 0.0);
         assert_eq!(context.integration, IntegrationCoefficients::inactive());
         assert!(context.currents.is_empty());
@@ -1442,6 +1549,7 @@ mod tests {
         context.state_derivatives = vec![44.0];
         context.state_derivatives_prev = vec![55.0];
         context.state_initialized = vec![true];
+        context.state_candidate_valid = vec![0];
 
         context.allocate_delay_buffers(1);
         context.delay_buffers[0].eval(0.25, 4.0, 0.1);
@@ -1516,6 +1624,22 @@ mod tests {
             .accepted_checkpoint()
             .expect_err("an in-flight Zi candidate must block checkpoint capture");
         assert!(error.to_string().contains("in-flight Newton candidate"));
+    }
+
+    #[test]
+    fn accepted_checkpoint_rejects_malformed_candidate_status_storage() {
+        let mut context = VmContext::with_states(0, 1);
+        context.state_candidate_valid.clear();
+        let error = context
+            .accepted_checkpoint()
+            .expect_err("candidate-status shape mismatch must block checkpoint capture");
+        assert!(error.to_string().contains("shape is inconsistent"));
+
+        context.state_candidate_valid = vec![3];
+        let error = context
+            .accepted_checkpoint()
+            .expect_err("invalid candidate status must block checkpoint capture");
+        assert!(error.to_string().contains("malformed"));
     }
 
     #[test]

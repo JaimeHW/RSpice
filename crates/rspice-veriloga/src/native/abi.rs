@@ -263,6 +263,12 @@ pub struct EvalContext {
     /// native calls.
     #[doc(hidden)]
     pub runtime_status: NativeRuntimeStatus,
+    /// Per-integration-state marker written by a speculative native
+    /// evaluation. These flags are committed by the owning `VmContext`, never
+    /// by generated code.
+    pub state_candidate_valid: *mut u8,
+    /// Length of `state_candidate_valid`.
+    pub state_candidate_valid_len: usize,
 }
 
 impl EvalContext {
@@ -324,6 +330,8 @@ impl EvalContext {
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
             runtime_status: Default::default(),
+            state_candidate_valid: std::ptr::null_mut(),
+            state_candidate_valid_len: 0,
         }
     }
 
@@ -1177,12 +1185,14 @@ unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> b
         && state_id < ctx.state_derivatives_len
         && state_id < ctx.state_derivatives_prev_len
         && state_id < ctx.state_initialized_len
+        && state_id < ctx.state_candidate_valid_len
         && !ctx.state_values.is_null()
         && !ctx.state_prev.is_null()
         && !ctx.state_older.is_null()
         && !ctx.state_derivatives.is_null()
         && !ctx.state_derivatives_prev.is_null()
         && !ctx.state_initialized.is_null()
+        && !ctx.state_candidate_valid.is_null()
 }
 
 /// Native companion evaluation for `ddt`.
@@ -1241,7 +1251,7 @@ pub unsafe extern "C" fn rspice_ddt_state_native(
     unsafe {
         *ctx.state_values.add(state_id) = value;
         *ctx.state_derivatives.add(state_id) = derivative;
-        *ctx.state_initialized.add(state_id) = 1;
+        *ctx.state_candidate_valid.add(state_id) = 1;
     }
     derivative
 }
@@ -1332,7 +1342,7 @@ unsafe fn rspice_integral_state_native(
     unsafe {
         *ctx.state_values.add(state_id) = value;
         *ctx.state_derivatives.add(state_id) = input;
-        *ctx.state_initialized.add(state_id) = 1;
+        *ctx.state_candidate_valid.add(state_id) = 1;
     }
     value
 }
@@ -1935,7 +1945,7 @@ mod tests {
     use super::{
         EvalContext, INTEGER_CAST_DESCRIPTOR, NativeRuntimeStatus, integer_binary_descriptor,
         rspice_above_state_native, rspice_absdelay_state_native, rspice_cross_state_native,
-        rspice_ddt_state_native, rspice_dynamic_variable_slot_native,
+        rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_idt_state_native,
         rspice_integer_operation_native, rspice_laplace_step_native,
         rspice_last_crossing_state_native, rspice_limiter_previous_native,
         rspice_limiter_store_native, rspice_native_dynamic_variable_error,
@@ -2010,12 +2020,14 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, limiter_active), 408);
         assert_eq!(offset_of!(EvalContext, limiting_enabled), 416);
         assert_eq!(offset_of!(EvalContext, runtime_status), 424);
+        assert_eq!(offset_of!(EvalContext, state_candidate_valid), 456);
+        assert_eq!(offset_of!(EvalContext, state_candidate_valid_len), 464);
         assert_eq!(offset_of!(NativeRuntimeStatus, failed), 0);
         assert_eq!(
             NativeRuntimeStatus::failed_offset(),
             offset_of!(NativeRuntimeStatus, failed)
         );
-        assert_eq!(size_of::<EvalContext>(), 456);
+        assert_eq!(size_of::<EvalContext>(), 472);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -2023,13 +2035,19 @@ mod tests {
     fn integration_helpers_validate_every_history_buffer_length() {
         let operand = [1.0];
 
-        for missing in ["older", "derivatives", "previous derivatives"] {
+        for missing in [
+            "older",
+            "derivatives",
+            "previous derivatives",
+            "candidate status",
+        ] {
             let previous = [0.0];
             let older = [0.0];
             let previous_derivatives = [0.0];
             let mut values = [0.0];
             let mut derivatives = [0.0];
             let mut initialized = [0_u8];
+            let mut candidate_valid = [0_u8];
             let mut ctx = empty_eval_context();
             ctx.state_prev = previous.as_ptr();
             ctx.state_prev_len = previous.len();
@@ -2043,10 +2061,13 @@ mod tests {
             ctx.state_derivatives_prev_len = previous_derivatives.len();
             ctx.state_initialized = initialized.as_mut_ptr();
             ctx.state_initialized_len = initialized.len();
+            ctx.state_candidate_valid = candidate_valid.as_mut_ptr();
+            ctx.state_candidate_valid_len = candidate_valid.len();
             match missing {
                 "older" => ctx.state_older_len = 0,
                 "derivatives" => ctx.state_derivatives_len = 0,
                 "previous derivatives" => ctx.state_derivatives_prev_len = 0,
+                "candidate status" => ctx.state_candidate_valid_len = 0,
                 _ => unreachable!(),
             }
             ctx.clear_runtime_error();
@@ -2062,6 +2083,53 @@ mod tests {
                 "{missing}: unexpected error: {error}"
             );
         }
+    }
+
+    #[test]
+    fn native_integration_helpers_publish_only_speculative_candidate_status() {
+        let previous = [0.0];
+        let older = [0.0];
+        let previous_derivatives = [0.0];
+        let mut values = [0.0];
+        let mut derivatives = [0.0];
+        let mut initialized = [0_u8];
+        let mut candidate_valid = [0_u8];
+        let mut ctx = empty_eval_context();
+        ctx.state_prev = previous.as_ptr();
+        ctx.state_prev_len = previous.len();
+        ctx.state_older = older.as_ptr();
+        ctx.state_older_len = older.len();
+        ctx.state_values = values.as_mut_ptr();
+        ctx.state_values_len = values.len();
+        ctx.state_derivatives = derivatives.as_mut_ptr();
+        ctx.state_derivatives_len = derivatives.len();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_derivatives_prev_len = previous_derivatives.len();
+        ctx.state_initialized = initialized.as_mut_ptr();
+        ctx.state_initialized_len = initialized.len();
+        ctx.state_candidate_valid = candidate_valid.as_mut_ptr();
+        ctx.state_candidate_valid_len = candidate_valid.len();
+        ctx.integration_active = 1;
+        ctx.integration_derivative_scale = 1.0;
+        ctx.integration_previous_value_scale = 1.0;
+
+        let first = [2.0, 10.0];
+        assert_eq!(
+            unsafe { rspice_idt_state_native(first.as_ptr(), &ctx, 0) }.to_bits(),
+            12.0_f64.to_bits()
+        );
+        assert_eq!(initialized[0], 0, "accepted state must remain untouched");
+        assert_eq!(candidate_valid[0], 1);
+
+        candidate_valid[0] = 0;
+        let rejected_retry = [3.0, 20.0];
+        assert_eq!(
+            unsafe { rspice_idt_state_native(rejected_retry.as_ptr(), &ctx, 0) }.to_bits(),
+            23.0_f64.to_bits()
+        );
+        assert_eq!(initialized[0], 0);
+        assert_eq!(candidate_valid[0], 1);
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -2273,6 +2341,8 @@ mod tests {
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
             runtime_status: Default::default(),
+            state_candidate_valid: std::ptr::null_mut(),
+            state_candidate_valid_len: 0,
         };
 
         assert_eq!(

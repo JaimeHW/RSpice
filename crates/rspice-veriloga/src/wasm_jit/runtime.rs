@@ -408,6 +408,7 @@ fn require_integration_state(
         context.state_derivatives.len(),
         context.state_derivatives_prev.len(),
         context.state_initialized.len(),
+        context.state_candidate_valid.len(),
     ]
     .into_iter()
     .all(|len| index < len);
@@ -1025,6 +1026,8 @@ mod tests {
         assert_eq!(derivative, 10.0);
         assert_eq!(session.context().state_values[0], 3.0);
         assert_eq!(session.context().state_derivatives[0], 10.0);
+        assert!(session.context().state_initialized[0]);
+        assert_eq!(session.context().state_candidate_valid[0], 1);
 
         let jacobian = evaluate_helper_with_session(
             441,
@@ -1040,6 +1043,42 @@ mod tests {
         session.context_mut().time = 1.0;
         assert!(session.take_error().is_none());
         assert_eq!(session.into_context().time, 1.0);
+    }
+
+    #[test]
+    fn stateful_integration_helper_does_not_accept_initialization_speculatively() {
+        let mut context = VmContext::with_states(0, 1);
+        context.integration = IntegrationCoefficients::backward_euler(1.0);
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let first = evaluate_helper_with_session(
+            442,
+            0,
+            0,
+            0,
+            [2.0, 10.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate first speculative idt candidate");
+        assert_eq!(first.to_bits(), 12.0_f64.to_bits());
+        assert!(!session.context().state_initialized[0]);
+        assert_eq!(session.context().state_candidate_valid[0], 1);
+
+        session.context_mut().begin_stateful_evaluation();
+        let replacement = evaluate_helper_with_session(
+            442,
+            0,
+            0,
+            0,
+            [3.0, 20.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate replacement speculative idt candidate");
+        assert_eq!(replacement.to_bits(), 23.0_f64.to_bits());
+        assert!(!session.context().state_initialized[0]);
+        assert_eq!(session.context().state_candidate_valid[0], 1);
     }
 
     #[test]

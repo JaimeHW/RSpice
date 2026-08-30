@@ -205,6 +205,7 @@ endmodule
         let voltages = [1.0_f64, 0.0];
         let mut states = vec![0.0_f64; required.state_values];
         let mut initialized = vec![0_u8; required.state_initialized];
+        let mut candidate_valid = vec![0_u8; required.state_candidate_valid];
         let mut context = EvalContext::empty_for_test();
         context.params = params.as_ptr();
         context.voltages = voltages.as_ptr();
@@ -212,6 +213,8 @@ endmodule
         context.state_values_len = states.len();
         context.state_initialized = initialized.as_mut_ptr();
         context.state_initialized_len = initialized.len();
+        context.state_candidate_valid = candidate_valid.as_mut_ptr();
+        context.state_candidate_valid_len = candidate_valid.len();
         let mut variables = vec![0.0_f64; model.num_variables];
         native.run_assignments(&context, variables.as_mut_ptr());
         assert!(variables.iter().all(|value| value.is_finite()));

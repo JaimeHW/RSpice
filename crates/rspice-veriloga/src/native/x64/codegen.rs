@@ -5335,6 +5335,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
         set_backward_euler(&mut ctx, 0.25);
 
@@ -8180,6 +8182,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
         ctx.integration_derivative_scale = 4.0;
         ctx.integration_previous_value_scale = 4.0;
@@ -8281,6 +8285,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
@@ -8407,6 +8413,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
@@ -8531,6 +8539,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         assert_eq!(
@@ -8571,6 +8581,8 @@ mod tests {
             ctx.state_derivatives_prev_len = previous_derivatives.len();
             ctx.state_initialized = state_initialized.as_mut_ptr();
             ctx.state_initialized_len = state_initialized.len();
+            ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+            ctx.state_candidate_valid_len = state_initialized.len();
             ctx.state_values_len = state_values.len();
             ctx.integration_derivative_scale = 4.0;
             ctx.integration_previous_value_scale = 4.0;
@@ -8708,6 +8720,8 @@ mod tests {
         ctx.state_derivatives_prev_len = previous_derivatives.len();
         ctx.state_initialized = state_initialized.as_mut_ptr();
         ctx.state_initialized_len = state_initialized.len();
+        ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        ctx.state_candidate_valid_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
@@ -12364,6 +12378,8 @@ mod tests {
         state_ctx.state_derivatives_prev_len = previous_derivatives.len();
         state_ctx.state_initialized = state_initialized.as_mut_ptr();
         state_ctx.state_initialized_len = state_initialized.len();
+        state_ctx.state_candidate_valid = state_initialized.as_mut_ptr();
+        state_ctx.state_candidate_valid_len = state_initialized.len();
         run_native_value_microbench(
             "stateful_ddt",
             native_program(
@@ -12750,6 +12766,8 @@ mod tests {
             limiter_active: std::ptr::null_mut(),
             limiting_enabled: 0,
             runtime_status: Default::default(),
+            state_candidate_valid: std::ptr::null_mut(),
+            state_candidate_valid_len: 0,
         }
     }
 
