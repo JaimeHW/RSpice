@@ -54,6 +54,17 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevicesRollback,
 }
 
+/// Accepted native diode/BJT state plus any runtime families that deliberately
+/// block resume. Capture is infallible so checkpoint producers can persist a
+/// diagnostic image even when a circuit contains an unsupported VBIC runtime;
+/// validation/restore fail closed on a non-empty blocker list.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct AcceptedNativeNonlinearCheckpointStates {
+    pub(crate) diodes: Vec<crate::device::semiconductor::AcceptedDiodeNonlinearCheckpoint>,
+    pub(crate) bjts: Vec<crate::device::semiconductor::AcceptedBjtNonlinearCheckpoint>,
+    pub(crate) resume_blockers: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DiodeStampMode {
     LimitedNewton,
@@ -271,6 +282,87 @@ mod tests {
 }
 
 impl CircuitData {
+    /// Capture every supported accepted native nonlinear runtime without
+    /// changing the infallible checkpoint-capture contract. Unsupported or
+    /// invalid device state is represented by an explicit, named blocker.
+    pub(crate) fn capture_accepted_native_nonlinear_checkpoint_states(
+        &self,
+    ) -> AcceptedNativeNonlinearCheckpointStates {
+        let mut captured = AcceptedNativeNonlinearCheckpointStates {
+            diodes: Vec::with_capacity(self.diodes.devices.len()),
+            bjts: Vec::with_capacity(self.bjts.devices.len()),
+            resume_blockers: Vec::new(),
+        };
+        for diode in &self.diodes.devices {
+            match diode.accepted_nonlinear_checkpoint() {
+                Ok(state) => captured.diodes.push(state),
+                Err(blocker) => captured.resume_blockers.push(blocker),
+            }
+        }
+        for bjt in &self.bjts.devices {
+            match bjt.accepted_nonlinear_checkpoint() {
+                Ok(state) => captured.bjts.push(state),
+                Err(blocker) => captured.resume_blockers.push(blocker),
+            }
+        }
+        captured
+    }
+
+    /// Validate all names, runtime tags, fixed payload shapes and finite values
+    /// before any live device is mutated.
+    pub(crate) fn validate_accepted_native_nonlinear_checkpoint_states(
+        &self,
+        captured: &AcceptedNativeNonlinearCheckpointStates,
+    ) -> Result<(), String> {
+        if !captured.resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint does not contain restorable native nonlinear state: {}",
+                captured.resume_blockers.join("; ")
+            ));
+        }
+        if captured.diodes.len() != self.diodes.devices.len() {
+            return Err(format!(
+                "checkpoint diode accepted nonlinear state shape mismatch: captured {}, circuit has {}",
+                captured.diodes.len(),
+                self.diodes.devices.len()
+            ));
+        }
+        if captured.bjts.len() != self.bjts.devices.len() {
+            return Err(format!(
+                "checkpoint BJT accepted nonlinear state shape mismatch: captured {}, circuit has {}",
+                captured.bjts.len(),
+                self.bjts.devices.len()
+            ));
+        }
+        for (index, (diode, state)) in self.diodes.devices.iter().zip(&captured.diodes).enumerate()
+        {
+            diode
+                .validate_accepted_nonlinear_checkpoint(state)
+                .map_err(|error| format!("checkpoint diode instance {index}: {error}"))?;
+        }
+        for (index, (bjt, state)) in self.bjts.devices.iter().zip(&captured.bjts).enumerate() {
+            bjt.validate_accepted_nonlinear_checkpoint(state)
+                .map_err(|error| format!("checkpoint BJT instance {index}: {error}"))?;
+        }
+        Ok(())
+    }
+
+    /// Restore compact accepted state into the current elaboration. Validation
+    /// is deliberately completed for every device before the first write.
+    pub(crate) fn restore_accepted_native_nonlinear_checkpoint_states(
+        &mut self,
+        captured: &AcceptedNativeNonlinearCheckpointStates,
+    ) -> Result<(), String> {
+        self.validate_accepted_native_nonlinear_checkpoint_states(captured)?;
+        for (diode, state) in self.diodes.devices.iter_mut().zip(&captured.diodes) {
+            diode.restore_accepted_nonlinear_checkpoint(state)?;
+        }
+        for (bjt, state) in self.bjts.devices.iter_mut().zip(&captured.bjts) {
+            bjt.restore_accepted_nonlinear_checkpoint(state)?;
+        }
+        Ok(())
+    }
+
     /// Whether transient nonlinear trial state consists solely of classic
     /// MOS devices. Their physical residual stamp and charge companions are
     /// pure functions of the candidate solution, so a proof restamp can

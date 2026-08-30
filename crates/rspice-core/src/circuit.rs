@@ -38,7 +38,7 @@ mod linear_stamping;
 mod magnetic;
 mod nonlinear;
 pub use crate::op_label::{OP_LABELS, OpLabel};
-pub(crate) use nonlinear::NonlinearDeviceStateSnapshot;
+pub(crate) use nonlinear::{AcceptedNativeNonlinearCheckpointStates, NonlinearDeviceStateSnapshot};
 
 /// Resolve persisted text back to the interned label this build emits.
 ///

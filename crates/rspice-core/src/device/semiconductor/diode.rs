@@ -362,18 +362,34 @@ pub struct Diode {
 /// live device and are not recopied for every transient timestep.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DiodeNonlinearState {
-    prev_vd: Value,
-    prev_vd_old: Value,
-    prev_id: Value,
-    prev_gd: Value,
-    candidate_eval_valid: bool,
-    junction_gmin: Value,
-    junction_history_valid: bool,
-    last_limited_vd: Value,
-    limited: bool,
-    last_stamp_vd: Value,
-    last_stamp_id: Value,
-    last_stamp_gd: Value,
+    pub(crate) prev_vd: Value,
+    pub(crate) prev_vd_old: Value,
+    pub(crate) prev_id: Value,
+    pub(crate) prev_gd: Value,
+    pub(crate) candidate_eval_valid: bool,
+    pub(crate) junction_gmin: Value,
+    pub(crate) junction_history_valid: bool,
+    pub(crate) last_limited_vd: Value,
+    pub(crate) limited: bool,
+    pub(crate) last_stamp_vd: Value,
+    pub(crate) last_stamp_id: Value,
+    pub(crate) last_stamp_gd: Value,
+}
+
+pub(crate) const DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "native-diode-v1";
+
+/// Accepted native-diode Newton/limiter state carried across a transient seam.
+///
+/// The instance name and runtime tag make ordinal checkpoint storage fail
+/// closed if a future elaboration reorders devices or changes the runtime that
+/// owns the state.  The numeric payload is exactly the same compact state used
+/// by rejected-trial rollback; model parameters, topology and linked matrix
+/// indices remain owned by the freshly elaborated live device.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AcceptedDiodeNonlinearCheckpoint {
+    pub(crate) instance_name: String,
+    pub(crate) runtime_tag: String,
+    pub(crate) state: DiodeNonlinearState,
 }
 
 impl Diode {
@@ -408,6 +424,70 @@ impl Diode {
         self.last_stamp_vd.set(state.last_stamp_vd);
         self.last_stamp_id.set(state.last_stamp_id);
         self.last_stamp_gd.set(state.last_stamp_gd);
+    }
+
+    pub(crate) fn accepted_nonlinear_checkpoint(
+        &self,
+    ) -> Result<AcceptedDiodeNonlinearCheckpoint, String> {
+        let checkpoint = AcceptedDiodeNonlinearCheckpoint {
+            instance_name: self.name.clone(),
+            runtime_tag: DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG.to_string(),
+            state: self.nonlinear_state_snapshot(),
+        };
+        self.validate_accepted_nonlinear_checkpoint(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+        &self,
+        checkpoint: &AcceptedDiodeNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        if checkpoint.instance_name != self.name {
+            return Err(format!(
+                "diode instance name mismatch: captured '{}', circuit has '{}'",
+                checkpoint.instance_name, self.name
+            ));
+        }
+        if checkpoint.runtime_tag != DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG {
+            return Err(format!(
+                "diode '{}' runtime mismatch: captured '{}', runtime requires '{}'",
+                self.name, checkpoint.runtime_tag, DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG
+            ));
+        }
+        let state = checkpoint.state;
+        let numeric = [
+            state.prev_vd,
+            state.prev_vd_old,
+            state.prev_id,
+            state.prev_gd,
+            state.junction_gmin,
+            state.last_limited_vd,
+            state.last_stamp_vd,
+            state.last_stamp_id,
+            state.last_stamp_gd,
+        ];
+        if numeric.iter().any(|value| !value.is_finite()) {
+            return Err(format!(
+                "diode '{}' accepted nonlinear checkpoint contains a non-finite value",
+                self.name
+            ));
+        }
+        if state.junction_gmin < 0.0 {
+            return Err(format!(
+                "diode '{}' accepted nonlinear checkpoint has negative junction gmin",
+                self.name
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedDiodeNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        self.validate_accepted_nonlinear_checkpoint(checkpoint)?;
+        self.restore_nonlinear_state(checkpoint.state);
+        Ok(())
     }
 
     /// Create a new diode with default 1N4148 parameters
@@ -2934,5 +3014,34 @@ mod tests {
         assert_eq!(explicit.rs, 5.0);
         assert_eq!(explicit.cj0, 2.0e-12);
         assert_eq!(explicit.sidewall_cj0, 3.0e-12);
+    }
+
+    #[test]
+    fn accepted_nonlinear_checkpoint_round_trips_without_replacing_the_device() {
+        let mut source = test_diode();
+        source.set_junction_gmin(3.0e-12);
+        source.update(&[0.71, 0.02]);
+        source.limited_linearization(0.69);
+        let checkpoint = source
+            .accepted_nonlinear_checkpoint()
+            .expect("finite accepted diode state captures");
+
+        let mut restored = test_diode();
+        restored.update(&[-0.4, 0.3]);
+        restored.node_anode = 7;
+        restored
+            .restore_accepted_nonlinear_checkpoint(&checkpoint)
+            .expect("accepted diode state restores");
+
+        assert_eq!(
+            restored
+                .accepted_nonlinear_checkpoint()
+                .expect("restored state captures"),
+            checkpoint
+        );
+        assert_eq!(
+            restored.node_anode, 7,
+            "restore must preserve live topology"
+        );
     }
 }

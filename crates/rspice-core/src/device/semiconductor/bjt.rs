@@ -408,6 +408,53 @@ pub(crate) struct BjtChargeSnapshot {
     pub branches: [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
 }
 
+pub(crate) const BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG: &str = "legacy-gummel-poon-v1";
+
+const BJT_ACCEPTED_SCALAR_VALUE_COUNT: usize = 62;
+const BJT_REDUCED_CHECKPOINT_VALUE_COUNT: usize = INTERNAL_DIM
+    + EXTERNAL_DIM
+    + INTERNAL_DIM * INTERNAL_DIM
+    + INTERNAL_DIM * EXTERNAL_DIM
+    + EXTERNAL_DIM * INTERNAL_DIM
+    + EXTERNAL_DIM * EXTERNAL_DIM
+    + EXTERNAL_DIM * EXTERNAL_DIM
+    + INTERNAL_DIM
+    + EXTERNAL_DIM;
+const BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT: usize = BJT_INTERNAL_STATE_DIM
+    + EXTERNAL_DIM
+    + BJT_INTERNAL_STATE_DIM * BJT_INTERNAL_STATE_DIM
+    + BJT_INTERNAL_STATE_DIM * EXTERNAL_DIM
+    + EXTERNAL_DIM * BJT_INTERNAL_STATE_DIM
+    + EXTERNAL_DIM * EXTERNAL_DIM
+    + EXTERNAL_DIM * EXTERNAL_DIM
+    + BJT_INTERNAL_STATE_DIM
+    + EXTERNAL_DIM;
+const BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT: usize =
+    1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM + 4;
+pub(crate) const BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
+    + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
+    + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
+    + BJT_DYNAMIC_CHARGE_COUNT * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
+
+/// Accepted limiter/evaluation state for one reduced legacy Gummel-Poon BJT.
+///
+/// `state_values` is a versioned, fixed-shape numeric image rather than a
+/// cloned [`Bjt`]: it contains only mutable evaluation, limiter, reduction and
+/// charge-snapshot caches.  Static model parameters, topology, matrix indices
+/// and temperature variants remain owned by the live device.  Four explicit
+/// validity/status flags retain the semantics of caches whose all-zero value
+/// is otherwise ambiguous.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AcceptedBjtNonlinearCheckpoint {
+    pub(crate) instance_name: String,
+    pub(crate) runtime_tag: String,
+    pub(crate) legacy_junction_limited: bool,
+    pub(crate) reduced_linearization_valid: bool,
+    pub(crate) previous_reduced_linearization_valid: bool,
+    pub(crate) charge_snapshot_valid: bool,
+    pub(crate) state_values: Vec<Value>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct EvaluatedBjtState {
     linearized: BjtLinearization,
@@ -1018,6 +1065,414 @@ pub struct Bjt {
 impl Bjt {
     const VBIC_CONVERGENCE_BRANCH_COUNT: usize = 10;
     const THERMAL_VARIANT_CACHE_CAPACITY: usize = 4;
+
+    #[inline]
+    fn checkpoint_extend_matrix<const ROWS: usize, const COLS: usize>(
+        values: &mut Vec<Value>,
+        matrix: &[[Value; COLS]; ROWS],
+    ) {
+        values.extend(matrix.iter().flat_map(|row| row.iter()).copied());
+    }
+
+    #[inline]
+    fn checkpoint_take_array<const N: usize>(values: &[Value], cursor: &mut usize) -> [Value; N] {
+        let end = *cursor + N;
+        let result = values[*cursor..end]
+            .try_into()
+            .expect("validated BJT checkpoint array shape");
+        *cursor = end;
+        result
+    }
+
+    #[inline]
+    fn checkpoint_take_matrix<const ROWS: usize, const COLS: usize>(
+        values: &[Value],
+        cursor: &mut usize,
+    ) -> [[Value; COLS]; ROWS] {
+        std::array::from_fn(|_| Self::checkpoint_take_array(values, cursor))
+    }
+
+    #[inline]
+    fn checkpoint_push_linearization(values: &mut Vec<Value>, state: BjtLinearization) {
+        values.extend([
+            state.ic,
+            state.ib,
+            state.dic_dvbe,
+            state.dic_dvbc,
+            state.dic_dvrth,
+            state.dib_dvbe,
+            state.dib_dvbc,
+            state.dib_dvrth,
+            state.qb,
+            state.dqb_dvbe,
+            state.dqb_dvbc,
+            state.dqb_dvrth,
+        ]);
+    }
+
+    #[inline]
+    fn checkpoint_take_linearization(values: &[Value], cursor: &mut usize) -> BjtLinearization {
+        let value = Self::checkpoint_take_array::<12>(values, cursor);
+        BjtLinearization {
+            ic: value[0],
+            ib: value[1],
+            dic_dvbe: value[2],
+            dic_dvbc: value[3],
+            dic_dvrth: value[4],
+            dib_dvbe: value[5],
+            dib_dvbc: value[6],
+            dib_dvrth: value[7],
+            qb: value[8],
+            dqb_dvbe: value[9],
+            dqb_dvbc: value[10],
+            dqb_dvrth: value[11],
+        }
+    }
+
+    fn checkpoint_push_reduced(values: &mut Vec<Value>, state: BjtReducedLinearization) {
+        values.extend(state.internal_voltages);
+        values.extend(state.external_voltages);
+        Self::checkpoint_extend_matrix(values, &state.g_ii);
+        Self::checkpoint_extend_matrix(values, &state.g_ie);
+        Self::checkpoint_extend_matrix(values, &state.g_ei);
+        Self::checkpoint_extend_matrix(values, &state.g_ee);
+        Self::checkpoint_extend_matrix(values, &state.g_reduced);
+        values.extend(state.z_i_static);
+        values.extend(state.z_e_static);
+    }
+
+    fn checkpoint_take_reduced(values: &[Value], cursor: &mut usize) -> BjtReducedLinearization {
+        BjtReducedLinearization {
+            internal_voltages: Self::checkpoint_take_array(values, cursor),
+            external_voltages: Self::checkpoint_take_array(values, cursor),
+            g_ii: Self::checkpoint_take_matrix(values, cursor),
+            g_ie: Self::checkpoint_take_matrix(values, cursor),
+            g_ei: Self::checkpoint_take_matrix(values, cursor),
+            g_ee: Self::checkpoint_take_matrix(values, cursor),
+            g_reduced: Self::checkpoint_take_matrix(values, cursor),
+            z_i_static: Self::checkpoint_take_array(values, cursor),
+            z_e_static: Self::checkpoint_take_array(values, cursor),
+            // Only the legacy GP runtime is admitted. Its reduced cache never
+            // owns the VBIC-only dynamic input bundle.
+            cached_dynamic_inputs: None,
+        }
+    }
+
+    fn checkpoint_push_dynamic_reduction(values: &mut Vec<Value>, state: BjtDynamicReduction) {
+        values.extend(state.internal_voltages);
+        values.extend(state.external_voltages);
+        Self::checkpoint_extend_matrix(values, &state.g_ii);
+        Self::checkpoint_extend_matrix(values, &state.g_ie);
+        Self::checkpoint_extend_matrix(values, &state.g_ei);
+        Self::checkpoint_extend_matrix(values, &state.g_ee);
+        Self::checkpoint_extend_matrix(values, &state.g_reduced);
+        values.extend(state.z_i_static);
+        values.extend(state.z_e_static);
+    }
+
+    fn checkpoint_take_dynamic_reduction(
+        values: &[Value],
+        cursor: &mut usize,
+    ) -> BjtDynamicReduction {
+        BjtDynamicReduction {
+            internal_voltages: Self::checkpoint_take_array(values, cursor),
+            external_voltages: Self::checkpoint_take_array(values, cursor),
+            g_ii: Self::checkpoint_take_matrix(values, cursor),
+            g_ie: Self::checkpoint_take_matrix(values, cursor),
+            g_ei: Self::checkpoint_take_matrix(values, cursor),
+            g_ee: Self::checkpoint_take_matrix(values, cursor),
+            g_reduced: Self::checkpoint_take_matrix(values, cursor),
+            z_i_static: Self::checkpoint_take_array(values, cursor),
+            z_e_static: Self::checkpoint_take_array(values, cursor),
+            // These are VBIC-only inputs. A legacy charge snapshot leaves them
+            // at the default zero state.
+            vbic_transport: TransportChargeState::default(),
+            vbic_d_itzf_d_vrth: 0.0,
+        }
+    }
+
+    #[inline]
+    fn checkpoint_endpoint_value(endpoint: Option<usize>) -> Value {
+        endpoint.map_or(-1.0, |index| index as Value)
+    }
+
+    fn checkpoint_push_charge_branch(values: &mut Vec<Value>, branch: BjtChargeBranch) {
+        values.push(branch.charge);
+        values.extend(branch.d_internal);
+        values.extend(branch.d_external);
+        values.extend([
+            Self::checkpoint_endpoint_value(branch.pos_internal),
+            Self::checkpoint_endpoint_value(branch.neg_internal),
+            Self::checkpoint_endpoint_value(branch.pos_external),
+            Self::checkpoint_endpoint_value(branch.neg_external),
+        ]);
+    }
+
+    fn checkpoint_decode_endpoint(value: Value, dimension: usize) -> Option<usize> {
+        if value < 0.0 {
+            None
+        } else {
+            Some(value as usize).filter(|index| *index < dimension)
+        }
+    }
+
+    fn checkpoint_take_charge_branch(values: &[Value], cursor: &mut usize) -> BjtChargeBranch {
+        let charge = values[*cursor];
+        *cursor += 1;
+        let d_internal = Self::checkpoint_take_array(values, cursor);
+        let d_external = Self::checkpoint_take_array(values, cursor);
+        let endpoints = Self::checkpoint_take_array::<4>(values, cursor);
+        BjtChargeBranch {
+            charge,
+            d_internal,
+            d_external,
+            pos_internal: Self::checkpoint_decode_endpoint(endpoints[0], BJT_INTERNAL_STATE_DIM),
+            neg_internal: Self::checkpoint_decode_endpoint(endpoints[1], BJT_INTERNAL_STATE_DIM),
+            pos_external: Self::checkpoint_decode_endpoint(endpoints[2], EXTERNAL_DIM),
+            neg_external: Self::checkpoint_decode_endpoint(endpoints[3], EXTERNAL_DIM),
+        }
+    }
+
+    fn accepted_nonlinear_checkpoint_runtime(&self) -> Result<(), String> {
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon && !self.vbic_mna_promoted {
+            return Ok(());
+        }
+        let runtime = if self.vbic_mna_promoted {
+            "promoted VBIC"
+        } else {
+            "reduced VBIC"
+        };
+        Err(format!(
+            "BJT '{}': {runtime} accepted nonlinear state is not checkpointable; only the legacy Gummel-Poon runtime has a complete checkpoint contract",
+            self.name
+        ))
+    }
+
+    /// Capture the future-affecting accepted Newton state of a legacy GP BJT.
+    pub(crate) fn accepted_nonlinear_checkpoint(
+        &self,
+    ) -> Result<AcceptedBjtNonlinearCheckpoint, String> {
+        self.accepted_nonlinear_checkpoint_runtime()?;
+        if self
+            .reduced_linearization_cache
+            .get()
+            .cached_dynamic_inputs
+            .is_some()
+            || self
+                .previous_reduced_linearization
+                .cached_dynamic_inputs
+                .is_some()
+        {
+            return Err(format!(
+                "BJT '{}': legacy accepted nonlinear cache unexpectedly contains VBIC dynamic inputs",
+                self.name
+            ));
+        }
+
+        let mut values = Vec::with_capacity(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
+        values.extend([
+            self.vbe,
+            self.vbc,
+            self.vcx,
+            self.vbi,
+            self.vci,
+            self.vbx,
+            self.vei,
+            self.vbp,
+            self.vsi,
+            self.vrth,
+            self.vxf1,
+            self.vxf2,
+            self.vc_ext,
+            self.vb_ext,
+            self.ve_ext,
+            self.vs_ext,
+        ]);
+        values.extend(self.eval_anchor);
+        values.extend([self.ic, self.ib, self.ie, self.isub]);
+        Self::checkpoint_push_linearization(&mut values, self.intrinsic_linearization);
+        values.extend([
+            self.vbe_prev,
+            self.vbc_prev,
+            self.vcx_prev,
+            self.vbi_prev,
+            self.vci_prev,
+            self.vbx_prev,
+            self.vei_prev,
+            self.vbp_prev,
+            self.vsi_prev,
+            self.vrth_prev,
+        ]);
+        values.extend([self.ic_prev, self.ib_prev, self.ie_prev, self.isub_prev]);
+        Self::checkpoint_push_linearization(&mut values, self.intrinsic_linearization_prev);
+        Self::checkpoint_push_reduced(&mut values, self.reduced_linearization_cache.get());
+        Self::checkpoint_push_reduced(&mut values, self.previous_reduced_linearization);
+        let charge_snapshot = self.charge_snapshot_cache.get();
+        Self::checkpoint_push_dynamic_reduction(&mut values, charge_snapshot.reduction);
+        for branch in charge_snapshot.branches {
+            Self::checkpoint_push_charge_branch(&mut values, branch);
+        }
+        debug_assert_eq!(values.len(), BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT);
+
+        let checkpoint = AcceptedBjtNonlinearCheckpoint {
+            instance_name: self.name.clone(),
+            runtime_tag: BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG.to_string(),
+            legacy_junction_limited: self.legacy_junction_limited,
+            reduced_linearization_valid: self.reduced_linearization_cache_valid.get(),
+            previous_reduced_linearization_valid: self.previous_reduced_linearization_valid,
+            charge_snapshot_valid: self.charge_snapshot_cache_valid.get(),
+            state_values: values,
+        };
+        self.validate_accepted_nonlinear_checkpoint(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    /// Validate provenance and the complete fixed-shape numeric payload before
+    /// a live device is mutated.
+    pub(crate) fn validate_accepted_nonlinear_checkpoint(
+        &self,
+        checkpoint: &AcceptedBjtNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        self.accepted_nonlinear_checkpoint_runtime()?;
+        if checkpoint.instance_name != self.name {
+            return Err(format!(
+                "BJT instance name mismatch: captured '{}', circuit has '{}'",
+                checkpoint.instance_name, self.name
+            ));
+        }
+        if checkpoint.runtime_tag != BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG {
+            return Err(format!(
+                "BJT '{}' runtime mismatch: captured '{}', runtime requires '{}'",
+                self.name, checkpoint.runtime_tag, BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG
+            ));
+        }
+        if checkpoint.state_values.len() != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+            return Err(format!(
+                "BJT '{}' accepted nonlinear state shape mismatch: captured {} values, runtime requires {}",
+                self.name,
+                checkpoint.state_values.len(),
+                BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+            ));
+        }
+        if checkpoint
+            .state_values
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "BJT '{}' accepted nonlinear checkpoint contains a non-finite value",
+                self.name
+            ));
+        }
+
+        let endpoint_start = BJT_ACCEPTED_SCALAR_VALUE_COUNT
+            + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
+            + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT;
+        let mut cursor = endpoint_start;
+        for branch in 0..BJT_DYNAMIC_CHARGE_COUNT {
+            cursor += 1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM;
+            let endpoints = &checkpoint.state_values[cursor..cursor + 4];
+            let dimensions = [
+                BJT_INTERNAL_STATE_DIM,
+                BJT_INTERNAL_STATE_DIM,
+                EXTERNAL_DIM,
+                EXTERNAL_DIM,
+            ];
+            for (lane, (&endpoint, &dimension)) in
+                endpoints.iter().zip(dimensions.iter()).enumerate()
+            {
+                let absent = endpoint.to_bits() == (-1.0_f64).to_bits();
+                let present =
+                    endpoint >= 0.0 && endpoint.fract() == 0.0 && endpoint < dimension as Value;
+                if !absent && !present {
+                    return Err(format!(
+                        "BJT '{}' charge branch {branch} endpoint {lane} is outside its runtime topology",
+                        self.name
+                    ));
+                }
+            }
+            if (endpoints[0] >= 0.0 && endpoints[2] >= 0.0)
+                || (endpoints[1] >= 0.0 && endpoints[3] >= 0.0)
+            {
+                return Err(format!(
+                    "BJT '{}' charge branch {branch} checkpoint selects both internal and external endpoints",
+                    self.name
+                ));
+            }
+            cursor += 4;
+        }
+        debug_assert_eq!(cursor, checkpoint.state_values.len());
+        Ok(())
+    }
+
+    /// Restore accepted state into the existing elaborated device. Static
+    /// model/topology/linkage fields are deliberately untouched.
+    pub(crate) fn restore_accepted_nonlinear_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedBjtNonlinearCheckpoint,
+    ) -> Result<(), String> {
+        self.validate_accepted_nonlinear_checkpoint(checkpoint)?;
+        let values = &checkpoint.state_values;
+        let mut cursor = 0;
+        let evaluated = Self::checkpoint_take_array::<16>(values, &mut cursor);
+        [
+            self.vbe,
+            self.vbc,
+            self.vcx,
+            self.vbi,
+            self.vci,
+            self.vbx,
+            self.vei,
+            self.vbp,
+            self.vsi,
+            self.vrth,
+            self.vxf1,
+            self.vxf2,
+            self.vc_ext,
+            self.vb_ext,
+            self.ve_ext,
+            self.vs_ext,
+        ] = evaluated;
+        self.eval_anchor = Self::checkpoint_take_array(values, &mut cursor);
+        [self.ic, self.ib, self.ie, self.isub] = Self::checkpoint_take_array(values, &mut cursor);
+        self.intrinsic_linearization = Self::checkpoint_take_linearization(values, &mut cursor);
+        let previous = Self::checkpoint_take_array::<10>(values, &mut cursor);
+        [
+            self.vbe_prev,
+            self.vbc_prev,
+            self.vcx_prev,
+            self.vbi_prev,
+            self.vci_prev,
+            self.vbx_prev,
+            self.vei_prev,
+            self.vbp_prev,
+            self.vsi_prev,
+            self.vrth_prev,
+        ] = previous;
+        [self.ic_prev, self.ib_prev, self.ie_prev, self.isub_prev] =
+            Self::checkpoint_take_array(values, &mut cursor);
+        self.intrinsic_linearization_prev =
+            Self::checkpoint_take_linearization(values, &mut cursor);
+        self.reduced_linearization_cache
+            .set(Self::checkpoint_take_reduced(values, &mut cursor));
+        self.previous_reduced_linearization = Self::checkpoint_take_reduced(values, &mut cursor);
+        let reduction = Self::checkpoint_take_dynamic_reduction(values, &mut cursor);
+        let branches =
+            std::array::from_fn(|_| Self::checkpoint_take_charge_branch(values, &mut cursor));
+        self.charge_snapshot_cache.set(BjtChargeSnapshot {
+            reduction,
+            branches,
+        });
+        debug_assert_eq!(cursor, values.len());
+
+        self.legacy_junction_limited = checkpoint.legacy_junction_limited;
+        self.reduced_linearization_cache_valid
+            .set(checkpoint.reduced_linearization_valid);
+        self.previous_reduced_linearization_valid = checkpoint.previous_reduced_linearization_valid;
+        self.charge_snapshot_cache_valid
+            .set(checkpoint.charge_snapshot_valid);
+        Ok(())
+    }
 
     /// Create a new NPN BJT with default 2N2222 parameters
     pub fn new_npn(name: String, collector: NodeId, base: NodeId, emitter: NodeId) -> Self {
@@ -1839,5 +2294,98 @@ impl Bjt {
     /// fights it (junction turn-on transiently raises the raw residual).
     pub(crate) fn uses_legacy_gummel_poon(&self) -> bool {
         self.charge_model == BjtChargeModel::LegacyGummelPoon
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    fn evaluated_legacy_bjt() -> Bjt {
+        let mut bjt = Bjt::new_npn("qcheckpoint".to_string(), 1, 2, 3);
+        bjt.set_xyce_compatibility(true);
+        bjt.update(&[1.4, 0.76, 0.02]);
+        let _ = bjt.charge_snapshot(1.4, 0.76, 0.02, 0.0);
+        bjt
+    }
+
+    #[test]
+    fn legacy_accepted_nonlinear_checkpoint_restores_first_newton_and_charge_caches() {
+        let source = evaluated_legacy_bjt();
+        let checkpoint = source
+            .accepted_nonlinear_checkpoint()
+            .expect("legacy accepted state captures");
+        assert_eq!(
+            checkpoint.state_values.len(),
+            BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+        );
+
+        let mut restored = Bjt::new_npn("qcheckpoint".to_string(), 1, 2, 3);
+        restored.set_xyce_compatibility(true);
+        restored.update(&[-0.3, 0.1, 0.4]);
+        restored
+            .restore_accepted_nonlinear_checkpoint(&checkpoint)
+            .expect("legacy accepted state restores");
+        assert_eq!(
+            restored
+                .accepted_nonlinear_checkpoint()
+                .expect("restored state recaptures"),
+            checkpoint
+        );
+
+        let mut uninterrupted = source.clone();
+        let next = [1.31, 0.70, 0.02];
+        uninterrupted.update(&next);
+        restored.update(&next);
+        let _ = uninterrupted.charge_snapshot(next[0], next[1], next[2], 0.0);
+        let _ = restored.charge_snapshot(next[0], next[1], next[2], 0.0);
+        assert_eq!(
+            restored
+                .accepted_nonlinear_checkpoint()
+                .expect("resumed next-Newton state captures"),
+            uninterrupted
+                .accepted_nonlinear_checkpoint()
+                .expect("uninterrupted next-Newton state captures")
+        );
+    }
+
+    #[test]
+    fn legacy_checkpoint_validation_rejects_shape_and_topology_corruption() {
+        let bjt = evaluated_legacy_bjt();
+        let checkpoint = bjt
+            .accepted_nonlinear_checkpoint()
+            .expect("legacy accepted state captures");
+
+        let mut wrong_shape = checkpoint.clone();
+        wrong_shape.state_values.pop();
+        assert!(
+            bjt.validate_accepted_nonlinear_checkpoint(&wrong_shape)
+                .unwrap_err()
+                .contains("shape mismatch")
+        );
+
+        let mut wrong_endpoint = checkpoint;
+        let first_endpoint = BJT_ACCEPTED_SCALAR_VALUE_COUNT
+            + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
+            + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
+            + 1
+            + BJT_INTERNAL_STATE_DIM
+            + EXTERNAL_DIM;
+        wrong_endpoint.state_values[first_endpoint] = BJT_INTERNAL_STATE_DIM as Value;
+        assert!(
+            bjt.validate_accepted_nonlinear_checkpoint(&wrong_endpoint)
+                .unwrap_err()
+                .contains("outside its runtime topology")
+        );
+    }
+
+    #[test]
+    fn vbic_runtime_returns_an_explicit_checkpoint_blocker() {
+        let mut bjt = Bjt::new_npn("qvbic".to_string(), 1, 2, 3);
+        bjt.charge_model = BjtChargeModel::Vbic;
+        let error = bjt.accepted_nonlinear_checkpoint().unwrap_err();
+        assert!(error.contains("qvbic"));
+        assert!(error.contains("reduced VBIC"));
+        assert!(error.contains("not checkpointable"));
     }
 }
