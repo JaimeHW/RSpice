@@ -2283,7 +2283,8 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         startup_mode: TransientStartupMode,
         integration_max_step: Value,
-        integration_next_step: Value,
+        integration_continuation: Option<(Value, Option<Value>, Value)>,
+        integration_stop_time: Value,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
         lte_estimator: &LteEstimator,
@@ -2303,6 +2304,14 @@ impl Engine {
         {
             return Ok(());
         }
+        let at_integration_endpoint = accepted_time >= integration_stop_time
+            || integration_stop_time - accepted_time
+                <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE;
+        let integration_continuation = if at_integration_endpoint {
+            None
+        } else {
+            integration_continuation
+        };
         let checkpoint = TransientCheckpoint::capture_with_restart_identity(
             fingerprint,
             netlist_identity.clone(),
@@ -2313,7 +2322,7 @@ impl Engine {
             circuit,
             startup_mode,
             Some(integration_max_step),
-            Some(integration_next_step),
+            integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             Some(lte_estimator),
@@ -2403,7 +2412,7 @@ impl Engine {
                 .validate_recorded_integration_max_step()
                 .map_err(SimulationError::Circuit)?;
             checkpoint
-                .validated_integration_next_step()
+                .validated_integration_continuation()
                 .map_err(SimulationError::Circuit)?
         } else {
             None
@@ -2435,7 +2444,7 @@ impl Engine {
                 &circuit,
                 startup_mode,
                 Some(max_step),
-                Some(max_step),
+                None,
                 &[],
                 0,
                 None,
@@ -2861,7 +2870,9 @@ impl Engine {
                     )
                 })
         };
-        let initial_step = resume_next_step.unwrap_or(fresh_initial_step);
+        let initial_step = resume_next_step
+            .map(|(next_step, _, _)| next_step)
+            .unwrap_or(fresh_initial_step);
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
             hinted_max_step,
@@ -2878,12 +2889,18 @@ impl Engine {
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
         );
-        let startup_span_ceiling = xyce_breakpoint_span_ceiling.anchor(
-            resume_time,
-            breakpoints.next_after(resume_time),
-            tstop,
-        );
-        let startup_max_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
+        let startup_span_ceiling = if let Some((_, saved_ceiling, _)) = resume_next_step {
+            xyce_breakpoint_span_ceiling
+                .restore_active_ceiling(saved_ceiling)
+                .map_err(SimulationError::Circuit)?
+        } else {
+            xyce_breakpoint_span_ceiling.anchor(
+                resume_time,
+                breakpoints.next_after(resume_time),
+                tstop,
+            )
+        };
+        let startup_raw_max_dt = if self.config.spice_dialect == SpiceDialect::Xyce {
             self.transient_device_max_timestep(&circuit, resume_time, hinted_max_step)
                 .min(startup_span_ceiling.unwrap_or(Value::INFINITY))
         } else {
@@ -2891,12 +2908,24 @@ impl Engine {
                 .map(|step| hinted_max_step.max(step))
                 .unwrap_or(hinted_max_step)
         };
+        // Restore the producing controller's effective maximum before applying
+        // this resumed segment's raw device/span cap. Runtime `set_max_dt`
+        // raises a raw cap below the already-established hard floor; reversing
+        // that ordering would instead lower the floor at an arbitrary seam.
+        // Applying the current raw cap second also preserves Xyce's contract
+        // that an extended restart may select its own per-run maximum step.
+        let startup_controller_max_dt = resume_next_step
+            .map(|(_, _, controller_max_step)| controller_max_step)
+            .unwrap_or(startup_raw_max_dt);
         let mut timestep = TimestepController::new_with_preferred_min(
             initial_step,
             hard_min_dt,
             preferred_min_dt,
-            startup_max_dt,
+            startup_controller_max_dt,
         );
+        if resume_next_step.is_some() {
+            timestep.set_max_dt(startup_raw_max_dt);
+        }
         let mut dynamic_tline_breakpoints_added = resume
             .map(TransientCheckpoint::dynamic_tline_breakpoints_added)
             .unwrap_or(0);
@@ -3461,7 +3490,12 @@ impl Engine {
             &circuit,
             startup_mode,
             max_step,
-            timestep.dt(),
+            Some((
+                timestep.dt(),
+                xyce_breakpoint_span_ceiling.ceiling(),
+                timestep.max_dt(),
+            )),
+            tstop,
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
             &lte_estimator,
@@ -6815,7 +6849,12 @@ impl Engine {
                         &circuit,
                         startup_mode,
                         max_step,
-                        timestep.dt(),
+                        Some((
+                            timestep.dt(),
+                            xyce_breakpoint_span_ceiling.ceiling(),
+                            timestep.max_dt(),
+                        )),
+                        tstop,
                         &pending_dynamic_tline_breakpoints,
                         dynamic_tline_breakpoints_added,
                         &lte_estimator,
@@ -7319,7 +7358,12 @@ impl Engine {
                 &circuit,
                 startup_mode,
                 max_step,
-                timestep.dt(),
+                Some((
+                    timestep.dt(),
+                    xyce_breakpoint_span_ceiling.ceiling(),
+                    timestep.max_dt(),
+                )),
+                tstop,
                 &pending_dynamic_tline_breakpoints,
                 dynamic_tline_breakpoints_added,
                 &lte_estimator,

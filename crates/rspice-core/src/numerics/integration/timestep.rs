@@ -95,6 +95,34 @@ impl XyceBreakpointSpanCeiling {
     pub(crate) const fn ceiling(&self) -> Option<Value> {
         self.max_dt
     }
+
+    /// Restore the ceiling of an already-active span from an authenticated
+    /// in-flight checkpoint. Re-anchoring at the checkpoint time would create
+    /// a shorter artificial span and could clamp the restored next proposal.
+    pub(crate) fn restore_active_ceiling(
+        &mut self,
+        max_dt: Option<Value>,
+    ) -> Result<Option<Value>, String> {
+        if max_dt.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            return Err(
+                "checkpoint Xyce breakpoint-span ceiling must be finite and positive".to_string(),
+            );
+        }
+        if self.min_steps.is_none() != max_dt.is_none() {
+            return Err(match self.min_steps {
+                None => {
+                    "checkpoint carries a Xyce breakpoint-span ceiling while the policy is disabled"
+                        .to_string()
+                }
+                Some(_) => {
+                    "checkpoint omits the active Xyce breakpoint-span ceiling while the policy is enabled"
+                        .to_string()
+                }
+            });
+        }
+        self.max_dt = max_dt;
+        Ok(self.max_dt)
+    }
 }
 
 /// Xyce `ERROPTION=1` accepted-step multiplier.
@@ -173,6 +201,14 @@ impl TimestepController {
     /// Get current timestep
     pub fn dt(&self) -> Value {
         self.current_dt
+    }
+
+    /// Get the controller's effective maximum timestep.
+    ///
+    /// This can be greater than a raw device or breakpoint-span limit when
+    /// that limit lies below the hard convergence-recovery floor.
+    pub fn max_dt(&self) -> Value {
+        self.max_dt
     }
 
     /// Get the hard minimum timestep.
@@ -260,6 +296,40 @@ mod timestep_controller_tests {
     use crate::numerics::integration::{BreakpointManager, BreakpointStepPolicy};
 
     #[test]
+    fn maximum_step_respects_the_existing_hard_floor() {
+        let mut timestep =
+            TimestepController::new_with_preferred_min(2.0e-12, 1.0e-12, 1.0e-9, 1.0e-6);
+        timestep.set_max_dt(5.0e-13);
+
+        assert_eq!(timestep.hard_min_dt().to_bits(), 1.0e-12_f64.to_bits());
+        assert_eq!(timestep.max_dt().to_bits(), 1.0e-12_f64.to_bits());
+        assert_eq!(timestep.dt().to_bits(), 1.0e-12_f64.to_bits());
+    }
+
+    #[test]
+    fn restored_effective_maximum_preserves_floor_before_new_raw_cap() {
+        let saved_proposal = 5.0e-13;
+        let saved_effective_max = 5.0e-13;
+        let resumed_time_floor = 1.0e-12;
+        let resumed_raw_cap = 1.0e-13;
+
+        let mut restored = TimestepController::new_with_preferred_min(
+            saved_proposal,
+            resumed_time_floor,
+            1.0e-9,
+            saved_effective_max,
+        );
+        restored.set_max_dt(resumed_raw_cap);
+
+        assert_eq!(
+            restored.hard_min_dt().to_bits(),
+            saved_effective_max.to_bits()
+        );
+        assert_eq!(restored.max_dt().to_bits(), saved_effective_max.to_bits());
+        assert_eq!(restored.dt().to_bits(), saved_proposal.to_bits());
+    }
+
+    #[test]
     fn dynamic_hard_minimum_clamps_existing_and_future_proposals() {
         let mut controller =
             TimestepController::new_with_preferred_min(1.0e-20, 1.0e-30, 1.0e-12, 1.0);
@@ -301,6 +371,37 @@ mod timestep_controller_tests {
         // Only after landing does the following interval get a new fixed cap.
         assert_eq!(ceiling.anchor(4.0, Some(10.0), 20.0), Some(0.6));
         assert_eq!(ceiling.ceiling(), Some(0.6));
+    }
+
+    #[test]
+    fn xyce_breakpoint_ceiling_restores_an_interior_span_without_reanchoring() {
+        let mut ceiling = XyceBreakpointSpanCeiling::new(Some(10));
+        ceiling
+            .restore_active_ceiling(Some(0.75))
+            .expect("active ceiling restores");
+        assert_eq!(ceiling.ceiling(), Some(0.75));
+
+        let mut disabled = XyceBreakpointSpanCeiling::new(None);
+        assert!(
+            disabled
+                .restore_active_ceiling(Some(0.75))
+                .expect_err("disabled policy rejects invented ceiling")
+                .contains("disabled")
+        );
+        assert_eq!(
+            disabled
+                .restore_active_ceiling(None)
+                .expect("disabled policy restores absent ceiling"),
+            None
+        );
+
+        let mut enabled = XyceBreakpointSpanCeiling::new(Some(10));
+        assert!(
+            enabled
+                .restore_active_ceiling(None)
+                .expect_err("enabled policy rejects missing active ceiling")
+                .contains("omits")
+        );
     }
 
     #[test]
