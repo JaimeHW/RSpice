@@ -176,15 +176,10 @@ pub(super) fn member_names(
         let entries = rustix::fs::Dir::read_from(guard).map_err(|error| {
             format!("failed to enumerate opened {contract_label} {record_label}: {error}")
         })?;
-        for (index, entry) in entries.enumerate() {
+        for entry in entries {
             if abort.is_aborted() {
                 return Err(format!(
                     "{contract_label} deadline expired while enumerating {record_label}"
-                ));
-            }
-            if index >= max_entries {
-                return Err(format!(
-                    "{contract_label} {record_label} exceeds its census envelope"
                 ));
             }
             let entry = entry.map_err(|error| {
@@ -196,23 +191,25 @@ pub(super) fn member_names(
             if matches!(name, "." | "..") {
                 continue;
             }
+            if names.len() >= max_entries {
+                return Err(format!(
+                    "{contract_label} {record_label} exceeds its census envelope"
+                ));
+            }
             names.push(name.to_string());
         }
     }
     #[cfg(not(unix))]
     {
-        for (index, entry) in fs::read_dir(&directory.path)
-            .map_err(|error| {
-                format!("failed to enumerate {contract_label} {record_label}: {error}")
-            })?
-            .enumerate()
-        {
+        for entry in fs::read_dir(&directory.path).map_err(|error| {
+            format!("failed to enumerate {contract_label} {record_label}: {error}")
+        })? {
             if abort.is_aborted() {
                 return Err(format!(
                     "{contract_label} deadline expired while enumerating {record_label}"
                 ));
             }
-            if index >= max_entries {
+            if names.len() >= max_entries {
                 return Err(format!(
                     "{contract_label} {record_label} exceeds its census envelope"
                 ));
@@ -514,6 +511,12 @@ mod tests {
         assert!(exact_child_directory(root, "exact", TEST_LABEL, 8, &NoAbort).is_err());
         let root = open_root(root_path, TEST_LABEL).expect("re-anchor fixture root");
         assert!(exact_child_directory(root, "Missing", TEST_LABEL, 8, &NoAbort).is_err());
+        let root = open_root(root_path, TEST_LABEL).expect("re-anchor fixture root");
+        assert_eq!(
+            member_names(&root, TEST_LABEL, "root", 1, &NoAbort)
+                .expect("one real member fits an exact one-entry census"),
+            ["Exact"]
+        );
         let root = open_root(root_path, TEST_LABEL).expect("re-anchor fixture root");
         assert!(member_names(&root, TEST_LABEL, "root", 0, &NoAbort).is_err());
         let root = open_root(root_path, TEST_LABEL).expect("re-anchor fixture root");
