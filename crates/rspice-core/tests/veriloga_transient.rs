@@ -265,16 +265,15 @@ endmodule
 
     let (_, checkpoint) = engine
         .run_tran_checkpointed(&netlist, 1.3e-6, 0.2e-6)
-        .expect("legacy refusal fixture captures");
-    let legacy = checkpoint
-        .to_text()
-        .replace("RSPICE-CHECKPOINT 17", "RSPICE-CHECKPOINT 16")
-        .lines()
-        .take_while(|line| !line.starts_with("runtime_veriloga_state_available "))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let legacy = TransientCheckpoint::from_text(&(legacy + "\n"))
-        .expect("legacy checkpoint remains parseable for a precise refusal");
+        .expect("missing-state refusal fixture captures");
+    let text = checkpoint.to_text();
+    let (prefix, _) = text
+        .split_once("runtime_veriloga_state_available ")
+        .expect("current checkpoint contains runtime Verilog-A provenance");
+    let missing_state =
+        format!("{prefix}runtime_veriloga_state_available 0\nruntime_veriloga_states 0\n");
+    let legacy = TransientCheckpoint::from_text(&missing_state)
+        .expect("state-absent checkpoint remains parseable for a precise refusal");
     let error = engine
         .run_tran_resume(&netlist, &legacy, 3.5e-6, 0.2e-6)
         .expect_err("legacy checkpoint must not invent runtime operator history");

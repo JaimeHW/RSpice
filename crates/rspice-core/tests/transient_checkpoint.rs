@@ -71,50 +71,73 @@ fn out_index(result: &rspice_core::engine::TransientResult) -> usize {
         .expect("out node present")
 }
 
-fn assert_segmented_xspice_deck_tracks(
+fn assert_scheduled_xspice_deck_resumes_exactly(
     label: &str,
     deck: &str,
     tstop: f64,
     split: f64,
     step: f64,
-    tolerance: f64,
 ) {
     let netlist = Netlist::parse(deck).unwrap_or_else(|err| panic!("{label} deck parses: {err}"));
     let engine = Engine::new(SimulationConfig::default());
 
-    let full = engine
-        .run_tran(&netlist, tstop, step)
-        .unwrap_or_else(|err| panic!("{label} full run completes: {err}"));
+    // Capture inside the baseline run so observing the checkpoint does not
+    // introduce a new endpoint or perturb its adaptive accepted grid.
+    let (full, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            tstop,
+            step,
+            TransientStartupMode::OperatingPoint,
+            &[split],
+        )
+        .unwrap_or_else(|err| panic!("{label} scheduled baseline run completes: {err}"));
+    assert_eq!(scheduled.len(), 1, "{label} emits one scheduled checkpoint");
+    let packed = scheduled[0]
+        .checkpoint
+        .to_bytes(TransientCheckpointEncoding::Packed)
+        .unwrap_or_else(|err| panic!("{label} checkpoint packs: {err}"));
+    let checkpoint = TransientCheckpoint::from_bytes(&packed)
+        .unwrap_or_else(|err| panic!("{label} packed checkpoint parses: {err}"));
+    let baseline_index = full
+        .time
+        .iter()
+        .position(|time| time.to_bits() == checkpoint.time.to_bits())
+        .unwrap_or_else(|| panic!("{label} checkpoint is an accepted baseline point"));
     let full_out = out_index(&full);
-
-    let (first, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, split, step)
-        .unwrap_or_else(|err| panic!("{label} first segment completes: {err}"));
     let (second, _) = engine
         .run_tran_resume(&netlist, &checkpoint, tstop, step)
         .unwrap_or_else(|err| panic!("{label} resumed segment completes: {err}"));
     let second_out = out_index(&second);
 
-    let mut worst = 0.0f64;
-    let sample_step = (tstop - split) / 16.0;
-    for k in 1..=16 {
-        let t = split + (k as f64) * sample_step;
-        let v_full = interpolate(&full.time, &full.voltages[full_out], t);
-        let v_seg = interpolate(&second.time, &second.voltages[second_out], t);
-        worst = worst.max((v_full - v_seg).abs());
-    }
-    assert!(
-        worst < tolerance,
-        "{label} checkpoint resume must track the full run (worst |delta| = {worst})"
-    );
-
-    let v_seam_first = *first.voltages[out_index(&first)].last().unwrap();
-    let v_seam_second = second.voltages[second_out][0];
     assert_eq!(
-        v_seam_first.to_bits(),
-        v_seam_second.to_bits(),
-        "{label} seam state is carried bit-exactly"
+        second.time.len(),
+        full.time.len() - baseline_index,
+        "{label} resumed accepted-grid length differs from the baseline suffix"
     );
+    for (row, (&actual, &expected)) in second
+        .time
+        .iter()
+        .zip(&full.time[baseline_index..])
+        .enumerate()
+    {
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "{label} accepted grid differs at suffix row {row}"
+        );
+    }
+    for (row, (&actual, &expected)) in second.voltages[second_out]
+        .iter()
+        .zip(&full.voltages[full_out][baseline_index..])
+        .enumerate()
+    {
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "{label} output differs at suffix row {row}: expected {expected:.17e}, got {actual:.17e}"
+        );
+    }
 }
 
 fn branch_index(result: &rspice_core::engine::TransientResult, name: &str) -> usize {
@@ -960,79 +983,23 @@ fn resume_requires_a_later_stop_time() {
 
 #[test]
 fn stateless_xspice_checkpoint_resume_tracks_unsegmented_gain() {
-    let netlist = Netlist::parse(XSPICE_GAIN_DECK).expect("XSPICE gain deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-
-    let full = engine
-        .run_tran(&netlist, 40e-9, TAU_STEP)
-        .expect("full XSPICE gain run completes");
-    let full_out = out_index(&full);
-
-    let (first, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 20e-9, TAU_STEP)
-        .expect("first XSPICE gain segment can run");
-    let (second, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 40e-9, TAU_STEP)
-        .expect("stateless XSPICE gain resumes");
-
-    let second_out = out_index(&second);
-    let mut worst = 0.0f64;
-    for k in 1..=12 {
-        let t = 20.0e-9 + (k as f64) * 1.5e-9;
-        let v_full = interpolate(&full.time, &full.voltages[full_out], t);
-        let v_seg = interpolate(&second.time, &second.voltages[second_out], t);
-        worst = worst.max((v_full - v_seg).abs());
-    }
-    assert!(
-        worst < 1e-9,
-        "stateless XSPICE gain checkpoint resume must track the full run (worst |Δ| = {worst})"
-    );
-
-    let v_seam_first = *first.voltages[out_index(&first)].last().unwrap();
-    let v_seam_second = second.voltages[second_out][0];
-    assert_eq!(
-        v_seam_first.to_bits(),
-        v_seam_second.to_bits(),
-        "stateless XSPICE seam state is carried bit-exactly"
+    assert_scheduled_xspice_deck_resumes_exactly(
+        "stateless XSPICE gain",
+        XSPICE_GAIN_DECK,
+        40e-9,
+        20e-9,
+        TAU_STEP,
     );
 }
 
 #[test]
 fn stateful_xspice_checkpoint_resume_tracks_unsegmented_integrator() {
-    let netlist = Netlist::parse(XSPICE_INTEGRATOR_DECK).expect("XSPICE int deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-
-    let full = engine
-        .run_tran(&netlist, 40e-9, TAU_STEP)
-        .expect("full XSPICE int run completes");
-    let full_out = out_index(&full);
-
-    let (first, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 20e-9, TAU_STEP)
-        .expect("first XSPICE int segment can run");
-    let (second, _) = engine
-        .run_tran_resume(&netlist, &checkpoint, 40e-9, TAU_STEP)
-        .expect("stateful XSPICE int resumes");
-
-    let second_out = out_index(&second);
-    let mut worst = 0.0f64;
-    for k in 1..=12 {
-        let t = 20.0e-9 + (k as f64) * 1.5e-9;
-        let v_full = interpolate(&full.time, &full.voltages[full_out], t);
-        let v_seg = interpolate(&second.time, &second.voltages[second_out], t);
-        worst = worst.max((v_full - v_seg).abs());
-    }
-    assert!(
-        worst < 1e-9,
-        "stateful XSPICE int checkpoint resume must track the full run (worst |delta| = {worst})"
-    );
-
-    let v_seam_first = *first.voltages[out_index(&first)].last().unwrap();
-    let v_seam_second = second.voltages[second_out][0];
-    assert_eq!(
-        v_seam_first.to_bits(),
-        v_seam_second.to_bits(),
-        "stateful XSPICE seam state is carried bit-exactly"
+    assert_scheduled_xspice_deck_resumes_exactly(
+        "stateful XSPICE integrator",
+        XSPICE_INTEGRATOR_DECK,
+        40e-9,
+        20e-9,
+        TAU_STEP,
     );
 }
 
@@ -1053,7 +1020,6 @@ rload out 0 1k
             60.0e-9,
             30.0e-9,
             0.5e-9,
-            1.0e-6,
         ),
         (
             "hyst",
@@ -1068,7 +1034,6 @@ rload out 0 1k
 ",
             90.0e-9,
             45.0e-9,
-            1.0e-9,
             1.0e-9,
         ),
         (
@@ -1085,7 +1050,6 @@ rload out 0 1k
             90.0e-9,
             45.0e-9,
             1.0e-9,
-            1.0e-9,
         ),
         (
             "astate",
@@ -1099,18 +1063,16 @@ rload out 0 1k
 .end
 ",
             60.0e-9,
-            // `astate` returns an accepted-sample history value, so inserting
-            // an arbitrary segment endpoint changes its adaptive sample grid.
-            // Split at the source's existing falling-edge breakpoint to compare
-            // checkpoint continuation without introducing a new timepoint.
+            // `astate` returns an accepted-sample history value. Request the
+            // checkpoint at its source edge so the exact continuation test
+            // also covers a model-state transition boundary.
             31.0e-9,
-            1.0e-9,
             1.0e-9,
         ),
     ];
 
-    for (label, deck, tstop, split, step, tolerance) in cases {
-        assert_segmented_xspice_deck_tracks(label, deck, tstop, split, step, tolerance);
+    for (label, deck, tstop, split, step) in cases {
+        assert_scheduled_xspice_deck_resumes_exactly(label, deck, tstop, split, step);
     }
 }
 

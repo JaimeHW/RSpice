@@ -2538,14 +2538,14 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?,
             )
         } else {
-            AcceptedIntegrationRuntime::Exact(
+            AcceptedIntegrationRuntime::Exact(Box::new(
                 AcceptedIntegrationRuntimeCheckpoint::capture(
                     solution,
                     accepted_time,
                     accepted_integration_runtime_capture,
                 )
                 .map_err(SimulationError::Circuit)?,
-            )
+            ))
         };
         let checkpoint = TransientCheckpoint::capture_with_restart_identity(
             fingerprint,
@@ -7215,24 +7215,6 @@ impl Engine {
                             force_accept_bsim4_truncation_limit,
                         ),
                     );
-                    lte_estimator.record(&new_solution, dt);
-                    if hit_breakpoint {
-                        if lte_estimator.uses_accepted_solution_reference() {
-                            lte_estimator.restart_history_from(&new_solution);
-                        }
-                        xyce_lte_restart_first_step = true;
-                    }
-                    lte_estimator.set_method_order(effective_method_order(
-                        method_after_step,
-                        accepted_step_trap_order,
-                    ));
-                    if fixed_method.is_none() {
-                        if hit_breakpoint {
-                            trapgear.restart_from(&new_solution);
-                        } else {
-                            trapgear.update(&new_solution, dt);
-                        }
-                    }
                     let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
                         && !uses_direct_xyce_dae
@@ -7346,6 +7328,29 @@ impl Engine {
                     if circuit.has_generated_veriloga_devices() {
                         circuit.accept_generated_veriloga_timestep();
                     }
+
+                    // XSPICE voltage outputs are projected only when their
+                    // model state is accepted. Commit controller histories
+                    // afterward so their latest vector is the circuit
+                    // solution that is checkpointed and starts the next step.
+                    if fixed_method.is_none() {
+                        if hit_breakpoint {
+                            trapgear.restart_from(&new_solution);
+                        } else {
+                            trapgear.update(&new_solution, dt);
+                        }
+                    }
+                    lte_estimator.record(&new_solution, dt);
+                    if hit_breakpoint {
+                        if lte_estimator.uses_accepted_solution_reference() {
+                            lte_estimator.restart_history_from(&new_solution);
+                        }
+                        xyce_lte_restart_first_step = true;
+                    }
+                    lte_estimator.set_method_order(effective_method_order(
+                        method_after_step,
+                        accepted_step_trap_order,
+                    ));
 
                     solution.clone_from(&new_solution);
                     circuit
@@ -7586,19 +7591,6 @@ impl Engine {
                 t = breakpoints.snap_to_breakpoint(t);
             }
             let method_after_step = current_integration_method(&trapgear);
-            if !lte_estimator.uses_accepted_solution_reference() {
-                lte_estimator.record(&new_solution, dt);
-                lte_estimator
-                    .set_method_order(effective_method_order(method_after_step, step_trap_order));
-            }
-            if fixed_method.is_none() {
-                if hit_breakpoint {
-                    trapgear.restart_from(&new_solution);
-                } else {
-                    trapgear.update(&new_solution, dt);
-                }
-            }
-
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
                 self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
             }
@@ -7777,6 +7769,13 @@ impl Engine {
                 circuit.accept_generated_veriloga_timestep();
             }
 
+            if fixed_method.is_none() {
+                if hit_breakpoint {
+                    trapgear.restart_from(&new_solution);
+                } else {
+                    trapgear.update(&new_solution, dt);
+                }
+            }
             if lte_estimator.uses_accepted_solution_reference() {
                 lte_estimator.record_with_order(
                     &new_solution,
@@ -7787,6 +7786,12 @@ impl Engine {
                 if hit_breakpoint {
                     lte_estimator.restart_history_from(&new_solution);
                 }
+                lte_estimator
+                    .set_method_order(effective_method_order(method_after_step, step_trap_order));
+            } else {
+                // Commit predictor-local history after XSPICE has projected
+                // accepted voltage outputs into the solution vector.
+                lte_estimator.record(&new_solution, dt);
                 lte_estimator
                     .set_method_order(effective_method_order(method_after_step, step_trap_order));
             }

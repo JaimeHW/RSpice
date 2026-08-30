@@ -166,7 +166,7 @@ pub(super) enum AcceptedIntegrationRuntime {
     /// intentionally start from normalized order-one integration state.
     RestartNormalized(RestartNormalizedIntegrationRuntimeCheckpoint),
     /// Complete state for continuing an arbitrary accepted interval exactly.
-    Exact(AcceptedIntegrationRuntimeCheckpoint),
+    Exact(Box<AcceptedIntegrationRuntimeCheckpoint>),
 }
 
 /// Complete accepted-boundary state that influences the next integration
@@ -4003,7 +4003,7 @@ fn read_accepted_integration_runtime(
         damped_status,
     };
     runtime.validate_numeric_state(solution, checkpoint_time)?;
-    Ok(AcceptedIntegrationRuntime::Exact(runtime))
+    Ok(AcceptedIntegrationRuntime::Exact(Box::new(runtime)))
 }
 
 fn accepted_integration_runtime_retained_value_count(
@@ -7407,7 +7407,7 @@ mod tests {
                 analysis_first_step_pending: false,
                 xyce_breakpoint_restart_pending: false,
             },
-            accepted_integration_runtime: AcceptedIntegrationRuntime::Exact(
+            accepted_integration_runtime: AcceptedIntegrationRuntime::Exact(Box::new(
                 AcceptedIntegrationRuntimeCheckpoint {
                     version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
                     resume_blockers: Vec::new(),
@@ -7463,7 +7463,7 @@ mod tests {
                         min_convergence_rate: 0.9995,
                     }),
                 },
-            ),
+            )),
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
             cap_v_prev: vec![0.1, -0.2],
