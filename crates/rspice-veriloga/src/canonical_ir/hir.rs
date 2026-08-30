@@ -17,9 +17,10 @@ use smol_str::SmolStr;
 use std::collections::HashSet;
 
 use crate::ast::{
-    AnalogOperator, ArrayLiteralElement, BranchAccess, CrossDirection, Expression, LaplaceKind,
-    LimiterArgument, NoiseSource, PortDirection, ZiKind,
+    AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CrossDirection, Expression,
+    LaplaceKind, LimiterArgument, NoiseSource, PortDirection, UnaryOp, ZiKind,
 };
+use crate::numeric_literal::parse_integer_literal;
 use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement, ParameterScope};
 use crate::types::{ParameterRange, ValueType};
 
@@ -2161,6 +2162,7 @@ fn lower_regions(
 struct HirLowerer {
     expressions: Vec<HirExpression>,
     declared_branches: HashSet<SmolStr>,
+    replication_work: usize,
 }
 
 impl HirLowerer {
@@ -2168,6 +2170,7 @@ impl HirLowerer {
         Self {
             expressions: Vec::new(),
             declared_branches,
+            replication_work: 0,
         }
     }
 
@@ -2236,17 +2239,7 @@ impl HirLowerer {
                 index: self.lower_expr(&array.index).id,
             },
             Expression::ArrayLiteral(array) => HirExprKind::ArrayLiteral {
-                elements: array
-                    .elements
-                    .iter()
-                    .map(|element| match element {
-                        ArrayLiteralElement::Value(expression) => self.lower_expr(expression).id,
-                        ArrayLiteralElement::Replication(replication) => panic!(
-                            "semantic invariant violated: unsupported replication at source offset {} reached canonical HIR lowering",
-                            replication.span.start
-                        ),
-                    })
-                    .collect(),
+                elements: self.lower_array_literal_elements(&array.elements),
                 assignment_pattern: array.assignment_pattern,
             },
             Expression::AnalogOperator(operator) => self.lower_analog_operator(operator),
@@ -2259,6 +2252,95 @@ impl HirLowerer {
             .iter()
             .map(|expr| self.lower_expr(expr).id)
             .collect()
+    }
+
+    /// Public source compilation materializes supported assignment-pattern
+    /// replication in semantic analysis. This defensive path also handles a
+    /// handcrafted `AnalyzedModule`: valid closed integer replication is
+    /// lowered with shared child IDs, while malformed or unsafe retained
+    /// replication becomes an unknown sentinel that canonical validation
+    /// rejects. No untrusted AST can panic the lowering boundary.
+    fn lower_array_literal_elements(&mut self, elements: &[ArrayLiteralElement]) -> Vec<ExprId> {
+        self.lower_array_literal_elements_at_depth(elements, 0)
+    }
+
+    fn lower_array_literal_elements_at_depth(
+        &mut self,
+        elements: &[ArrayLiteralElement],
+        depth: usize,
+    ) -> Vec<ExprId> {
+        const MAX_ELEMENTS: usize = 1_048_576;
+        const MAX_WORK: usize = 4_194_304;
+        const MAX_DEPTH: usize = 128;
+
+        if depth >= MAX_DEPTH {
+            return elements
+                .first()
+                .map(|element| vec![self.lower_invalid_replication(element.span())])
+                .unwrap_or_default();
+        }
+
+        let mut lowered = Vec::new();
+        for element in elements {
+            match element {
+                ArrayLiteralElement::Value(expression) => {
+                    lowered.push(self.lower_expr(expression).id);
+                }
+                ArrayLiteralElement::Replication(replication) => {
+                    let Some(count) = exact_retained_replication_count(&replication.count)
+                        .and_then(|count| usize::try_from(count).ok())
+                    else {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    };
+                    if replication.elements.is_empty() {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    }
+                    let body = self.lower_array_literal_elements_at_depth(
+                        &replication.elements,
+                        depth + 1,
+                    );
+                    let Some(additional) = count.checked_mul(body.len()) else {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    };
+                    let Some(projected) = lowered.len().checked_add(additional) else {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    };
+                    let Some(projected_work) = self.replication_work.checked_add(additional) else {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    };
+                    if projected > MAX_ELEMENTS || projected_work > MAX_WORK {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    }
+                    if lowered.try_reserve(additional).is_err() {
+                        lowered.push(self.lower_invalid_replication(replication.span));
+                        continue;
+                    }
+                    self.replication_work = projected_work;
+                    for _ in 0..count {
+                        lowered.extend(body.iter().copied());
+                    }
+                }
+            }
+        }
+        lowered
+    }
+
+    fn lower_invalid_replication(&mut self, span: crate::source::Span) -> ExprId {
+        let id = ExprId::from(self.expressions.len());
+        self.expressions.push(HirExpression {
+            id,
+            kind: HirExprKind::Identifier {
+                name: "__rspice_invalid_retained_replication".into(),
+            },
+            span: SourceSpanRef::from(span),
+        });
+        id
     }
 
     fn lower_branch_access_expr(&mut self, access: &BranchAccess) -> ExprId {
@@ -2499,6 +2581,55 @@ impl HirLowerer {
                 name: name.clone(),
             },
         }
+    }
+}
+
+fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
+    let evaluate = |expression| exact_retained_replication_count(expression);
+    match expression {
+        Expression::Number(number) => parse_integer_literal(number.raw.as_str()).ok().flatten(),
+        Expression::Unary(unary) => {
+            let value = evaluate(&unary.operand)?;
+            match unary.op {
+                UnaryOp::Pos => Some(value),
+                UnaryOp::Neg => value.checked_neg(),
+                UnaryOp::Not => Some(i64::from(value == 0)),
+                UnaryOp::BitNot => Some(!value),
+            }
+        }
+        Expression::Binary(binary) => {
+            let left = evaluate(&binary.left)?;
+            let right = evaluate(&binary.right)?;
+            match binary.op {
+                BinaryOp::Add => left.checked_add(right),
+                BinaryOp::Sub => left.checked_sub(right),
+                BinaryOp::Mul => left.checked_mul(right),
+                BinaryOp::Div => left.checked_div(right),
+                BinaryOp::Mod => left.checked_rem(right),
+                BinaryOp::Pow => left.checked_pow(u32::try_from(right).ok()?),
+                BinaryOp::Eq => Some(i64::from(left == right)),
+                BinaryOp::Ne => Some(i64::from(left != right)),
+                BinaryOp::Lt => Some(i64::from(left < right)),
+                BinaryOp::Le => Some(i64::from(left <= right)),
+                BinaryOp::Gt => Some(i64::from(left > right)),
+                BinaryOp::Ge => Some(i64::from(left >= right)),
+                BinaryOp::And => Some(i64::from(left != 0 && right != 0)),
+                BinaryOp::Or => Some(i64::from(left != 0 || right != 0)),
+                BinaryOp::Shl => left.checked_shl(u32::try_from(right).ok()?),
+                BinaryOp::Shr => left.checked_shr(u32::try_from(right).ok()?),
+                BinaryOp::BitAnd => Some(left & right),
+                BinaryOp::BitOr => Some(left | right),
+                BinaryOp::BitXor => Some(left ^ right),
+            }
+        }
+        Expression::Conditional(conditional) => {
+            if evaluate(&conditional.condition)? != 0 {
+                evaluate(&conditional.then_expr)
+            } else {
+                evaluate(&conditional.else_expr)
+            }
+        }
+        _ => None,
     }
 }
 

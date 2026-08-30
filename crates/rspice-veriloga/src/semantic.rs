@@ -19,6 +19,10 @@ use std::collections::{HashMap, HashSet};
 const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
 pub(crate) const MAX_PARAMETER_ARRAY_RANK: usize = 16;
 pub(crate) const MAX_PARAMETER_ARRAY_ELEMENTS: u64 = 1_048_576;
+const MAX_REPLICATION_NESTING: usize = 128;
+const MAX_REPLICATION_MATERIALIZATION_WORK: usize = 4_194_304;
+const MAX_ANALOG_FILTER_VECTOR_ELEMENTS: usize =
+    crate::zfilter::MAX_ZI_RUNTIME_OPERANDS - crate::zfilter::ZI_FIXED_RUNTIME_OPERANDS;
 
 /// Numeric value retained by compile-time evaluation.
 ///
@@ -620,9 +624,27 @@ impl SemanticAnalyzer {
             .enumerate()
         {
             let is_parameter_array = !param.dimensions.is_empty();
+            let materialized_array_default = if is_parameter_array {
+                param
+                    .default
+                    .as_ref()
+                    .map(|default| {
+                        self.materialize_replication_expression(
+                            default,
+                            MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+                            MAX_REPLICATION_MATERIALIZATION_WORK,
+                            &format!("default of parameter array '{}'", param.name),
+                            false,
+                        )
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
             if is_parameter_array {
                 self.validate_parameter_array_declaration(
                     param,
+                    materialized_array_default.as_ref(),
                     parameter_index,
                     &module.parameters,
                     &parameter_indices,
@@ -822,7 +844,7 @@ impl SemanticAnalyzer {
                     })
                     .collect(),
                 default,
-                default_expr: param.default.clone(),
+                default_expr: materialized_array_default.or_else(|| param.default.clone()),
                 range: range.clone(),
             });
 
@@ -4124,28 +4146,15 @@ impl SemanticAnalyzer {
                 span: access.span,
             }),
             Expression::ArrayLiteral(array) => Expression::ArrayLiteral(ArrayLiteralExpr {
-                elements: {
-                    if let Some(replication) = array.first_replication() {
-                        return Err(CompileError::Semantic(SemanticError::new(
-                            SemanticErrorKind::UnsupportedFeature(
-                                "replication in executable expressions is parsed but not yet supported; write the elements explicitly"
-                                    .into(),
-                            ),
-                            replication.span,
-                        )));
-                    }
-                    array
-                        .elements
-                        .iter()
-                        .map(|element| {
-                            let ArrayLiteralElement::Value(expression) = element else {
-                                unreachable!("replication was rejected before expression lowering");
-                            };
-                            self.materialize_output_function_calls(expression, module, sink)
-                                .map(ArrayLiteralElement::Value)
-                        })
-                        .collect::<CompileResult<Vec<_>>>()?
-                },
+                elements: array
+                    .elements
+                    .iter()
+                    .map(|element| {
+                        self.materialize_output_function_calls_in_array_element(
+                            element, module, sink,
+                        )
+                    })
+                    .collect::<CompileResult<Vec<_>>>()?,
                 assignment_pattern: array.assignment_pattern,
                 span: array.span,
             }),
@@ -4155,6 +4164,38 @@ impl SemanticAnalyzer {
             Expression::NoiseSource(noise) => Expression::NoiseSource(
                 self.materialize_output_function_calls_in_noise_source(noise, module, sink)?,
             ),
+        })
+    }
+
+    fn materialize_output_function_calls_in_array_element(
+        &mut self,
+        element: &ArrayLiteralElement,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<ArrayLiteralElement> {
+        Ok(match element {
+            ArrayLiteralElement::Value(expression) => ArrayLiteralElement::Value(
+                self.materialize_output_function_calls(expression, module, sink)?,
+            ),
+            ArrayLiteralElement::Replication(replication) => {
+                ArrayLiteralElement::Replication(ReplicationExpr {
+                    count: Box::new(self.materialize_output_function_calls(
+                        &replication.count,
+                        module,
+                        sink,
+                    )?),
+                    elements: replication
+                        .elements
+                        .iter()
+                        .map(|element| {
+                            self.materialize_output_function_calls_in_array_element(
+                                element, module, sink,
+                            )
+                        })
+                        .collect::<CompileResult<Vec<_>>>()?,
+                    span: replication.span,
+                })
+            }
         })
     }
 
@@ -4771,9 +4812,10 @@ impl SemanticAnalyzer {
                 self.validate_builtin_call_arity(call)?;
                 self.validate_null_arguments(call)?;
                 self.validate_filter_vector_operands(call)?;
+                let call = self.materialize_filter_call_replication(call)?;
                 if is_zi_operator_name(&call.name) {
-                    self.validate_zi_operand_budget(call)?;
-                    self.validate_zi_definition_purity(call)?;
+                    self.validate_zi_operand_budget(&call)?;
+                    self.validate_zi_definition_purity(&call)?;
                 }
 
                 if is_zi_operator_name(&call.name)
@@ -5478,6 +5520,35 @@ impl SemanticAnalyzer {
             }
         }
         Ok(())
+    }
+
+    fn materialize_filter_call_replication(&self, call: &CallExpr) -> CompileResult<CallExpr> {
+        let normalized = call.name.to_ascii_lowercase();
+        let roles = match normalized.as_str() {
+            "laplace_zp" | "zi_zp" => ("zeros", "poles"),
+            "laplace_zd" | "zi_zd" => ("zeros", "denominator"),
+            "laplace_np" | "zi_np" => ("numerator", "poles"),
+            "laplace_nd" | "zi_nd" => ("numerator", "denominator"),
+            _ => return Ok(call.clone()),
+        };
+
+        let mut materialized = call.clone();
+        for (index, role) in [(1, roles.0), (2, roles.1)] {
+            let Some(argument) = materialized.args.get_mut(index) else {
+                continue;
+            };
+            if !matches!(argument, Expression::ArrayLiteral(_)) {
+                continue;
+            }
+            *argument = self.materialize_replication_expression(
+                argument,
+                MAX_ANALOG_FILTER_VECTOR_ELEMENTS,
+                MAX_ANALOG_FILTER_VECTOR_ELEMENTS.saturating_mul(4),
+                &format!("{} {role} vector", call.name),
+                true,
+            )?;
+        }
+        Ok(materialized)
     }
 
     const MAX_INLINE_DEPTH: usize = 16;
@@ -6372,9 +6443,390 @@ impl SemanticAnalyzer {
     /// Bounds remain symbolic in analyzed output: instance overrides of an
     /// earlier scalar parameter may change the eventual shape. This pass only
     /// proves that resolving those bounds later is deterministic and numeric.
+    /// Expand retained replication only for language constructs whose result
+    /// is an unpacked assignment-pattern value. The source AST is never
+    /// mutated; analyzed/canonical metadata receives a bounded materialized
+    /// clone. A complete sizing pass runs before any expanded vector is
+    /// allocated, including checked multiplication for nested replication.
+    fn materialize_replication_expression(
+        &self,
+        expression: &Expression,
+        max_elements_per_pattern: usize,
+        max_work: usize,
+        owner: &str,
+        require_instance_invariant_count: bool,
+    ) -> CompileResult<Expression> {
+        let Expression::ArrayLiteral(array) = expression else {
+            return Ok(expression.clone());
+        };
+        self.measure_replication_array(
+            array,
+            max_elements_per_pattern,
+            max_work,
+            owner,
+            require_instance_invariant_count,
+            0,
+        )?;
+        Ok(Expression::ArrayLiteral(self.build_materialized_array(
+            array,
+            owner,
+            require_instance_invariant_count,
+        )?))
+    }
+
+    fn replication_count(
+        &self,
+        replication: &ReplicationExpr,
+        owner: &str,
+        require_instance_invariant_count: bool,
+    ) -> CompileResult<u64> {
+        let value = if require_instance_invariant_count {
+            self.eval_const_invariant_value(&replication.count)
+        } else {
+            self.eval_const_value(&replication.count)
+        };
+        let count = match value {
+            Some(ConstantValue::Integer(value)) => value,
+            Some(ConstantValue::Real(value)) => {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} replication count must be an integer constant expression; found real value {value}"
+                    )),
+                    replication.count.span(),
+                )));
+            }
+            None => {
+                let requirement = if require_instance_invariant_count {
+                    "an instance-invariant integer constant expression (overridable parameters cannot determine executable operand shape)"
+                } else {
+                    "an integer constant expression"
+                };
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} replication count must be {requirement}"
+                    )),
+                    replication.count.span(),
+                )));
+            }
+        };
+        if count < 0 {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "{owner} replication count must be non-negative; found {count}"
+                )),
+                replication.count.span(),
+            )));
+        }
+        u64::try_from(count).map_err(|_| {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "{owner} replication count {count} is not representable by the materialization contract"
+                )),
+                replication.count.span(),
+            ))
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn measure_replication_array(
+        &self,
+        array: &ArrayLiteralExpr,
+        max_elements_per_pattern: usize,
+        max_work: usize,
+        owner: &str,
+        require_instance_invariant_count: bool,
+        depth: usize,
+    ) -> CompileResult<(usize, usize)> {
+        if depth >= MAX_REPLICATION_NESTING {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "{owner} replication nesting exceeds the safety limit of {MAX_REPLICATION_NESTING}"
+                )),
+                array.span,
+            )));
+        }
+        let (elements, work) = self.measure_replication_elements(
+            &array.elements,
+            max_elements_per_pattern,
+            max_work,
+            owner,
+            require_instance_invariant_count,
+            depth,
+        )?;
+        if elements > max_elements_per_pattern {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "{owner} materializes {elements} elements in one assignment-pattern dimension; the supported safety limit is {max_elements_per_pattern}"
+                )),
+                array.span,
+            )));
+        }
+        if work > max_work {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "{owner} replication materialization requires {work} syntax-tree items; the work budget is {max_work}"
+                )),
+                array.span,
+            )));
+        }
+        Ok((elements, work))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn measure_replication_elements(
+        &self,
+        elements: &[ArrayLiteralElement],
+        max_elements_per_pattern: usize,
+        max_work: usize,
+        owner: &str,
+        require_instance_invariant_count: bool,
+        depth: usize,
+    ) -> CompileResult<(usize, usize)> {
+        if depth >= MAX_REPLICATION_NESTING {
+            let span = elements
+                .first()
+                .map(ArrayLiteralElement::span)
+                .unwrap_or_else(|| Span::new(crate::source::SourceId::new(0), 0, 0));
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "{owner} replication nesting exceeds the safety limit of {MAX_REPLICATION_NESTING}"
+                )),
+                span,
+            )));
+        }
+        let mut output_len = 0_usize;
+        let mut work = 0_usize;
+        for element in elements {
+            let (element_len, element_work, span) = match element {
+                ArrayLiteralElement::Value(Expression::ArrayLiteral(nested)) => {
+                    let (_, nested_work) = self.measure_replication_array(
+                        nested,
+                        max_elements_per_pattern,
+                        max_work,
+                        owner,
+                        require_instance_invariant_count,
+                        depth + 1,
+                    )?;
+                    (1, nested_work.checked_add(1), nested.span)
+                }
+                ArrayLiteralElement::Value(expression) => (1, Some(1), expression.span()),
+                ArrayLiteralElement::Replication(replication) => {
+                    if replication.elements.is_empty() {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} replication body must contain at least one element"
+                            )),
+                            replication.span,
+                        )));
+                    }
+                    let count = self.replication_count(
+                        replication,
+                        owner,
+                        require_instance_invariant_count,
+                    )?;
+                    let (body_len, body_work) = self.measure_replication_elements(
+                        &replication.elements,
+                        max_elements_per_pattern,
+                        max_work,
+                        owner,
+                        require_instance_invariant_count,
+                        depth + 1,
+                    )?;
+                    let expanded_len = count
+                        .checked_mul(u64::try_from(body_len).map_err(|_| {
+                            CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "{owner} replication body length is not representable as u64"
+                                )),
+                                replication.span,
+                            ))
+                        })?)
+                        .ok_or_else(|| {
+                            CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "{owner} replication element count overflows u64"
+                                )),
+                                replication.span,
+                            ))
+                        })?;
+                    let expanded_work = count
+                        .checked_mul(u64::try_from(body_work).map_err(|_| {
+                            CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "{owner} replication body work is not representable as u64"
+                                )),
+                                replication.span,
+                            ))
+                        })?)
+                        .ok_or_else(|| {
+                            CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "{owner} replication work count overflows u64"
+                                )),
+                                replication.span,
+                            ))
+                        })?;
+                    if expanded_len > max_elements_per_pattern as u64 {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "{owner} materializes {expanded_len} elements in one assignment-pattern dimension; the supported safety limit is {max_elements_per_pattern}"
+                            )),
+                            replication.span,
+                        )));
+                    }
+                    if expanded_work > max_work as u64 {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "{owner} replication materialization requires {expanded_work} syntax-tree items; the work budget is {max_work}"
+                            )),
+                            replication.span,
+                        )));
+                    }
+                    (
+                        usize::try_from(expanded_len).map_err(|_| {
+                            CompileError::Semantic(SemanticError::new(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "{owner} replication element count {expanded_len} is not representable on this platform"
+                                )),
+                                replication.span,
+                            ))
+                        })?,
+                        usize::try_from(expanded_work).ok(),
+                        replication.span,
+                    )
+                }
+            };
+            let element_work = element_work.ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} replication work count overflows usize"
+                    )),
+                    span,
+                ))
+            })?;
+            output_len = output_len.checked_add(element_len).ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} replication element count overflows usize"
+                    )),
+                    span,
+                ))
+            })?;
+            work = work.checked_add(element_work).ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "{owner} replication work count overflows usize"
+                    )),
+                    span,
+                ))
+            })?;
+            if output_len > max_elements_per_pattern {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "{owner} materializes {output_len} elements in one assignment-pattern dimension; the supported safety limit is {max_elements_per_pattern}"
+                    )),
+                    span,
+                )));
+            }
+            if work > max_work {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "{owner} replication materialization requires more than {max_work} syntax-tree items"
+                    )),
+                    span,
+                )));
+            }
+        }
+        Ok((output_len, work))
+    }
+
+    fn build_materialized_array(
+        &self,
+        array: &ArrayLiteralExpr,
+        owner: &str,
+        require_instance_invariant_count: bool,
+    ) -> CompileResult<ArrayLiteralExpr> {
+        let elements = self.build_materialized_elements(
+            &array.elements,
+            owner,
+            require_instance_invariant_count,
+        )?;
+        Ok(ArrayLiteralExpr {
+            elements,
+            assignment_pattern: array.assignment_pattern,
+            span: array.span,
+        })
+    }
+
+    fn build_materialized_elements(
+        &self,
+        elements: &[ArrayLiteralElement],
+        owner: &str,
+        require_instance_invariant_count: bool,
+    ) -> CompileResult<Vec<ArrayLiteralElement>> {
+        let mut materialized = Vec::new();
+        for element in elements {
+            match element {
+                ArrayLiteralElement::Value(Expression::ArrayLiteral(nested)) => {
+                    materialized.push(ArrayLiteralElement::Value(Expression::ArrayLiteral(
+                        self.build_materialized_array(
+                            nested,
+                            owner,
+                            require_instance_invariant_count,
+                        )?,
+                    )));
+                }
+                ArrayLiteralElement::Value(expression) => {
+                    materialized.push(ArrayLiteralElement::Value(expression.clone()));
+                }
+                ArrayLiteralElement::Replication(replication) => {
+                    let count = self.replication_count(
+                        replication,
+                        owner,
+                        require_instance_invariant_count,
+                    )?;
+                    let count = usize::try_from(count).map_err(|_| {
+                        CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} replication count is not representable on this platform during materialization"
+                            )),
+                            replication.span,
+                        ))
+                    })?;
+                    let body = self.build_materialized_elements(
+                        &replication.elements,
+                        owner,
+                        require_instance_invariant_count,
+                    )?;
+                    let additional = count.checked_mul(body.len()).ok_or_else(|| {
+                        CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} replication element count overflows usize during materialization"
+                            )),
+                            replication.span,
+                        ))
+                    })?;
+                    materialized.try_reserve(additional).map_err(|_| {
+                        CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "{owner} replication materialization could not reserve storage for {additional} elements"
+                            )),
+                            replication.span,
+                        ))
+                    })?;
+                    for _ in 0..count {
+                        materialized.extend(body.iter().cloned());
+                    }
+                }
+            }
+        }
+        Ok(materialized)
+    }
+
     fn validate_parameter_array_declaration(
         &mut self,
         parameter: &ParameterDecl,
+        materialized_default: Option<&Expression>,
         parameter_index: usize,
         parameters: &[ParameterDecl],
         parameter_indices: &HashMap<SmolStr, usize>,
@@ -6427,7 +6879,7 @@ impl SemanticAnalyzer {
             );
         }
 
-        let initializer = match parameter.default.as_ref() {
+        let initializer = match materialized_default.or(parameter.default.as_ref()) {
             Some(Expression::ArrayLiteral(initializer)) if initializer.assignment_pattern => {
                 Some(initializer)
             }
@@ -6514,48 +6966,44 @@ impl SemanticAnalyzer {
 
         let constant_shape = self.resolve_parameter_array_default_shape(parameter);
         if let Some(initializer) = initializer {
-            let replication = initializer.first_replication();
-            if let Some(replication) = replication {
+            if parameter.param_type != ParamType::String {
                 let owner = format!("default of parameter array '{}'", parameter.name);
-                self.record_error_at(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "{owner} uses replication; array-valued parameter replication is retained by the parser but is not yet supported by canonical execution"
-                    )),
-                    replication.span,
-                );
-            } else {
-                if parameter.param_type != ParamType::String {
-                    let owner = format!("default of parameter array '{}'", parameter.name);
-                    for element in &initializer.elements {
-                        let ArrayLiteralElement::Value(expression) = element else {
-                            unreachable!("replication was rejected before initializer validation");
-                        };
-                        self.validate_parameter_array_initializer_elements(
-                            expression,
-                            parameter,
-                            &owner,
-                            parameter_index,
-                            parameters,
-                            parameter_indices,
-                        );
+                for element in &initializer.elements {
+                    match element {
+                        ArrayLiteralElement::Value(expression) => {
+                            self.validate_parameter_array_initializer_elements(
+                                expression,
+                                parameter,
+                                &owner,
+                                parameter_index,
+                                parameters,
+                                parameter_indices,
+                            );
+                        }
+                        ArrayLiteralElement::Replication(replication) => {
+                            self.record_error_at(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "{owner} retained replication reached parameter-array validation without bounded materialization"
+                                )),
+                                replication.span,
+                            );
+                        }
                     }
                 }
+            }
 
-                if let Some(shape) = constant_shape
-                    && let Err(detail) =
-                        Self::validate_parameter_array_initializer_shape(initializer, &shape, 0)
-                {
-                    self.record_error_at(
-                        SemanticErrorKind::TypeMismatch {
-                            expected: format!(
-                                "rectangular assignment pattern with shape {shape:?}"
-                            ),
-                            found: detail,
-                            context: format!("default of parameter array '{}'", parameter.name),
-                        },
-                        initializer.span,
-                    );
-                }
+            if let Some(shape) = constant_shape
+                && let Err(detail) =
+                    Self::validate_parameter_array_initializer_shape(initializer, &shape, 0)
+            {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: format!("rectangular assignment pattern with shape {shape:?}"),
+                        found: detail,
+                        context: format!("default of parameter array '{}'", parameter.name),
+                    },
+                    initializer.span,
+                );
             }
         }
     }
@@ -6634,8 +7082,8 @@ impl SemanticAnalyzer {
                     }
                     ArrayLiteralElement::Replication(replication) => {
                         self.record_error_at(
-                            SemanticErrorKind::UnsupportedFeature(format!(
-                                "{owner} uses replication; array-valued parameter replication is retained by the parser but is not yet supported by canonical execution"
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "{owner} retained replication reached parameter-array validation without bounded materialization"
                             )),
                             replication.span,
                         );
@@ -6715,7 +7163,7 @@ impl SemanticAnalyzer {
             match (is_leaf, element) {
                 (_, ArrayLiteralElement::Replication(_)) => {
                     return Err(format!(
-                        "dimension {} contains unsupported replication",
+                        "dimension {} contains retained replication after the materialization boundary",
                         dimension + 1
                     ));
                 }

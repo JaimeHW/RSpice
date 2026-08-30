@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use rspice_veriloga::ast::{
-    AnalogOperator, BranchAccess, Expression, LaplaceKind, NumberLit, PortDirection,
+    AnalogOperator, ArrayLiteralElement, ArrayLiteralExpr, BranchAccess, Expression, LaplaceKind,
+    NumberLit, PortDirection, ReplicationExpr,
 };
 use rspice_veriloga::canonical_ir::{
     BranchId, BranchUnknownId, ContributionId, EquationId, ExprId, ModuleId, NodeId, ParamId,
@@ -105,6 +106,94 @@ endmodule
             if *value == 9_007_199_254_740_992.0
                 && raw.as_str() == "54'h20_0000_0000_0000"
     ));
+}
+
+#[test]
+fn canonical_parameter_array_replication_materializes_without_a_schema_change() {
+    let source = r#"
+module replicated_array(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer copies = 2;
+    parameter real taps[0:1][0:2] = '{copies{'{3{0.25}}}};
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("replicated parameter-array canonical IR");
+    let default = artifact.hir.parameters[1]
+        .default_expr
+        .as_ref()
+        .expect("array default")
+        .id;
+    let HirExprKind::ArrayLiteral { elements, .. } =
+        &artifact.hir.expressions[usize::from(default)].kind
+    else {
+        panic!("expected outer assignment pattern");
+    };
+    assert_eq!(elements.len(), 2);
+    for element in elements {
+        let HirExprKind::ArrayLiteral {
+            elements: inner, ..
+        } = &artifact.hir.expressions[usize::from(*element)].kind
+        else {
+            panic!("expected inner assignment pattern");
+        };
+        assert_eq!(inner.len(), 3);
+    }
+}
+
+#[test]
+fn canonical_lowering_defensively_handles_retained_replication_without_panicking() {
+    let source = r#"
+module retained_replication(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real taps[0:1] = '{1.0, 1.0};
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#;
+    let mut analyzed = analyze_fixture(source, "retained_replication").expect("analyze fixture");
+    analyzed.parameters[0].default_expr = Some(Expression::ArrayLiteral(ArrayLiteralExpr {
+        elements: vec![ArrayLiteralElement::Replication(ReplicationExpr {
+            count: Box::new(Expression::Number(NumberLit {
+                value: 2.0,
+                raw: "2".into(),
+                span: Span::dummy(),
+            })),
+            elements: vec![ArrayLiteralElement::Value(Expression::Number(NumberLit {
+                value: 1.0,
+                raw: "1".into(),
+                span: Span::dummy(),
+            }))],
+            span: Span::dummy(),
+        })],
+        assignment_pattern: true,
+        span: Span::dummy(),
+    }));
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    hir.validate()
+        .expect("closed retained replication lowers defensively");
+
+    let Expression::ArrayLiteral(default) = analyzed.parameters[0]
+        .default_expr
+        .as_mut()
+        .expect("array default")
+    else {
+        panic!("expected array default");
+    };
+    let ArrayLiteralElement::Replication(replication) = &mut default.elements[0] else {
+        panic!("expected retained replication");
+    };
+    *replication.count = Expression::Number(NumberLit {
+        value: 2.0,
+        raw: "2.0".into(),
+        span: Span::dummy(),
+    });
+    let invalid = HirModel::from_analyzed_module(&metadata, &analyzed);
+    assert_validation_message(&invalid, "__rspice_invalid_retained_replication");
 }
 
 #[test]

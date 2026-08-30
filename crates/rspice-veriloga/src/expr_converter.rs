@@ -1535,23 +1535,17 @@ impl<'a> ExprConverter<'a> {
                 )
                 .into())
             }
-            Expression::ArrayLiteral(array) => array
-                .elements
-                .iter()
-                .map(|element| match element {
-                    ArrayLiteralElement::Value(expression) => Ok(expression),
-                    ArrayLiteralElement::Replication(replication) => {
-                        Err(CodeGenError::with_span(
-                            CodeGenErrorKind::UnsupportedFeature(
-                                "replication in analog filter assignment patterns is parsed and retained, but executable expansion is not implemented; write the elements explicitly within the operand limit"
-                                    .into(),
-                            ),
-                            replication.span,
-                        )
-                        .into())
-                    }
-                })
-                .collect(),
+            Expression::ArrayLiteral(array) => {
+                let mut materialized = Vec::new();
+                self.append_filter_vector_elements(
+                    &array.elements,
+                    operator,
+                    role,
+                    &mut materialized,
+                    0,
+                )?;
+                Ok(materialized)
+            }
             Expression::Identifier(identifier) if self.ctx.array(&identifier.name).is_some() => {
                 Err(CodeGenError::with_span(
                     CodeGenErrorKind::UnsupportedFeature(format!(
@@ -1570,6 +1564,154 @@ impl<'a> ExprConverter<'a> {
             )
             .into()),
         }
+    }
+
+    fn append_filter_vector_elements<'expr>(
+        &self,
+        elements: &'expr [ArrayLiteralElement],
+        operator: &str,
+        role: &str,
+        output: &mut Vec<&'expr Expression>,
+        depth: usize,
+    ) -> CompileResult<()> {
+        const MAX_DEPTH: usize = 128;
+        const MAX_ELEMENTS: usize =
+            crate::zfilter::MAX_ZI_RUNTIME_OPERANDS - crate::zfilter::ZI_FIXED_RUNTIME_OPERANDS;
+
+        if depth >= MAX_DEPTH {
+            let Some(first) = elements.first() else {
+                return Ok(());
+            };
+            return Err(CodeGenError::with_span(
+                CodeGenErrorKind::UnsupportedFeature(format!(
+                    "{operator} {role} replication nesting exceeds the safety limit of {MAX_DEPTH}"
+                )),
+                first.span(),
+            )
+            .into());
+        }
+
+        for element in elements {
+            match element {
+                ArrayLiteralElement::Value(expression) => {
+                    if output.len() == MAX_ELEMENTS {
+                        return Err(CodeGenError::with_span(
+                            CodeGenErrorKind::InvalidExpression(format!(
+                                "{operator} {role} vector exceeds the materialization limit of {MAX_ELEMENTS} elements"
+                            )),
+                            expression.span(),
+                        )
+                        .into());
+                    }
+                    output.push(expression);
+                }
+                ArrayLiteralElement::Replication(replication) => {
+                    if replication.elements.is_empty() {
+                        return Err(CodeGenError::with_span(
+                            CodeGenErrorKind::InvalidExpression(format!(
+                                "{operator} {role} replication body must contain at least one element"
+                            )),
+                            replication.span,
+                        )
+                        .into());
+                    }
+                    let count = self.filter_replication_count(replication, operator, role)?;
+                    let mut body = Vec::new();
+                    self.append_filter_vector_elements(
+                        &replication.elements,
+                        operator,
+                        role,
+                        &mut body,
+                        depth + 1,
+                    )?;
+                    let additional = count.checked_mul(body.len()).ok_or_else(|| {
+                        CodeGenError::with_span(
+                            CodeGenErrorKind::InvalidExpression(format!(
+                                "{operator} {role} replication element count overflows usize"
+                            )),
+                            replication.span,
+                        )
+                    })?;
+                    let projected = output.len().checked_add(additional).ok_or_else(|| {
+                        CodeGenError::with_span(
+                            CodeGenErrorKind::InvalidExpression(format!(
+                                "{operator} {role} vector length overflows usize"
+                            )),
+                            replication.span,
+                        )
+                    })?;
+                    if projected > MAX_ELEMENTS {
+                        return Err(CodeGenError::with_span(
+                            CodeGenErrorKind::InvalidExpression(format!(
+                                "{operator} {role} replication materializes {projected} elements; the supported limit is {MAX_ELEMENTS}"
+                            )),
+                            replication.span,
+                        )
+                        .into());
+                    }
+                    output.try_reserve(additional).map_err(|_| {
+                        CodeGenError::with_span(
+                            CodeGenErrorKind::UnsupportedFeature(format!(
+                                "{operator} {role} replication could not reserve storage for {additional} elements"
+                            )),
+                            replication.span,
+                        )
+                    })?;
+                    for _ in 0..count {
+                        output.extend(body.iter().copied());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn filter_replication_count(
+        &self,
+        replication: &crate::ast::ReplicationExpr,
+        operator: &str,
+        role: &str,
+    ) -> CompileResult<usize> {
+        let value = match autodiff_fold(self.convert(&replication.count)?) {
+            IrExpr::Const(value) => value,
+            _ => {
+                return Err(CodeGenError::with_span(
+                    CodeGenErrorKind::InvalidExpression(format!(
+                        "{operator} {role} replication count must be an instance-invariant integer constant expression"
+                    )),
+                    replication.count.span(),
+                )
+                .into());
+            }
+        };
+        if !value.is_finite() || value.fract() != 0.0 {
+            return Err(CodeGenError::with_span(
+                CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} {role} replication count must be a finite integer; found {value}"
+                )),
+                replication.count.span(),
+            )
+            .into());
+        }
+        if value < 0.0 {
+            return Err(CodeGenError::with_span(
+                CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} {role} replication count must be non-negative; found {value}"
+                )),
+                replication.count.span(),
+            )
+            .into());
+        }
+        if value > usize::MAX as f64 {
+            return Err(CodeGenError::with_span(
+                CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} {role} replication count {value} is not representable on this platform"
+                )),
+                replication.count.span(),
+            )
+            .into());
+        }
+        Ok(value as usize)
     }
 
     fn const_filter_real_array(
@@ -2315,7 +2457,8 @@ impl<'a> ExprConverter<'a> {
 mod tests {
     use super::*;
     use crate::ast::{
-        ArrayLiteralExpr, BinaryExpr, CallExpr, ConditionalExpr, LaplaceKind, NumberLit, ZiKind,
+        ArrayLiteralExpr, BinaryExpr, CallExpr, ConditionalExpr, LaplaceKind, NumberLit,
+        ReplicationExpr, ZiKind,
     };
     use crate::source::Span;
 
@@ -2353,6 +2496,18 @@ mod tests {
         })
     }
 
+    fn replicated_vector(count: i64, elements: Vec<ArrayLiteralElement>) -> Expression {
+        Expression::ArrayLiteral(ArrayLiteralExpr {
+            elements: vec![ArrayLiteralElement::Replication(ReplicationExpr {
+                count: Box::new(number(count as f64)),
+                elements,
+                span: Span::dummy(),
+            })],
+            assignment_pattern: true,
+            span: Span::dummy(),
+        })
+    }
+
     #[test]
     fn source_filter_calls_do_not_scalarize_concatenations_or_scalars() {
         let context = empty_context();
@@ -2384,6 +2539,48 @@ mod tests {
                 .expect("assignment pattern is a coefficient vector"),
             IrExpr::LaplaceND { .. }
         ));
+    }
+
+    #[test]
+    fn source_filter_codegen_materializes_bounded_nested_replication() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let inner = ArrayLiteralElement::Replication(ReplicationExpr {
+            count: Box::new(number(2.0)),
+            elements: vec![ArrayLiteralElement::Value(number(1.0))],
+            span: Span::dummy(),
+        });
+        let expression = Expression::Call(CallExpr {
+            name: "laplace_nd".into(),
+            args: vec![
+                number(1.0),
+                replicated_vector(2, vec![inner]),
+                vector(&[1.0, 1.0, 1.0, 1.0], true),
+            ],
+            span: Span::dummy(),
+        });
+        let IrExpr::LaplaceND { numerator, .. } = converter
+            .convert(&expression)
+            .expect("nested replication lowers defensively at codegen")
+        else {
+            panic!("expected Laplace IR");
+        };
+        assert_eq!(numerator, vec![1.0; 4]);
+
+        let oversized = Expression::Call(CallExpr {
+            name: "laplace_nd".into(),
+            args: vec![
+                number(1.0),
+                replicated_vector(1021, vec![ArrayLiteralElement::Value(number(1.0))]),
+                vector(&[1.0], true),
+            ],
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&oversized)
+            .expect_err("oversized replication fails before allocation")
+            .to_string();
+        assert!(error.contains("supported limit is 1020"), "{error}");
     }
 
     #[test]

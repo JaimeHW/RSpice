@@ -177,13 +177,52 @@ fn filter_vectors_reject_bare_scalars_without_losing_authorized_null_zeros() {
 }
 
 #[test]
-fn filter_assignment_pattern_replication_remains_fail_closed() {
-    let source = module_src("analog I(p, n) <+ laplace_nd(V(p, n), '{2{1.0}}, '{1.0, 1.0});");
-    let error = analyze(&source)
-        .expect_err("filter replication must remain retained and unsupported")
-        .to_string();
-    assert!(error.contains("replication in executable expressions"));
-    assert!(error.contains("not yet supported"));
+fn filter_assignment_pattern_replication_materializes_nested_and_zero_counts() {
+    analyze(&module_src(
+        "analog I(p, n) <+ laplace_nd(V(p, n), '{2{2{1.0}}}, '{1.0, 1.0, 1.0, 1.0});",
+    ))
+    .expect("nested Laplace replication materializes at the semantic boundary");
+    analyze(&module_src(
+        "analog I(p, n) <+ zi_nd(V(p, n), '{0{9.0}, 0.5}, '{1.0}, 1.0e-6);",
+    ))
+    .expect("zero-count Zi replication contributes no vector elements");
+}
+
+#[test]
+fn filter_replication_counts_and_operand_budgets_fail_before_allocation() {
+    for (count, expected) in [
+        ("2.0", "integer constant expression"),
+        ("-1", "must be non-negative"),
+        ("(1 << 62)", "replication element count overflows u64"),
+        ("1021", "supported safety limit is 1020"),
+    ] {
+        let source = module_src(&format!(
+            "analog I(p, n) <+ laplace_nd(V(p, n), '{{{count}{{1.0, 1.0, 1.0, 1.0, 1.0}}}}, '{{1.0, 1.0, 1.0, 1.0, 1.0}});"
+        ));
+        let error = analyze(&source)
+            .expect_err("invalid or unsafe replication count must fail")
+            .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
+
+    analyze(&module_src(
+        "analog I(p, n) <+ laplace_nd(V(p, n), '{1020{1.0}}, '{1020{1.0}});",
+    ))
+    .expect("the per-vector materialization boundary is accepted");
+    analyze(&module_src(
+        "analog I(p, n) <+ zi_nd(V(p, n), '{1019{1.0}}, '{1.0}, 1.0e-6);",
+    ))
+    .expect("the complete Zi runtime operand boundary is accepted");
+
+    let error = analyze(&module_src(
+        r#"
+            parameter integer repeats = 2;
+            analog I(p, n) <+ laplace_nd(V(p, n), '{repeats{1.0}}, '{1.0, 1.0});
+        "#,
+    ))
+    .expect_err("an overridable parameter cannot change executable operand shape")
+    .to_string();
+    assert!(error.contains("instance-invariant"), "{error}");
 }
 
 #[test]
@@ -574,21 +613,79 @@ fn parameter_array_defaults_require_exact_rectangular_shape_when_bounds_resolve(
 }
 
 #[test]
-fn parameter_array_replication_fails_closed_without_expansion() {
-    let error = analyze(&module_src(
+fn parameter_array_replication_materializes_nested_patterns_without_mutating_source_ast() {
+    let analyzed = analyze(&module_src(
         r#"
-            parameter real taps[0:0] = '{5{0.0}};
+            parameter integer repeats = 2;
+            parameter real taps[0:1][0:2] = '{repeats{'{3{0.25}}}};
             analog I(p, n) <+ V(p, n);
             "#,
     ))
-    .expect_err("unsupported parameter-array replication must fail")
-    .to_string();
+    .expect("nested parameter-array replication is valid");
+    let module = analyzed
+        .modules
+        .values()
+        .next()
+        .expect("one analyzed module");
+    let Expression::ArrayLiteral(outer) = module.parameters[1]
+        .default_expr
+        .as_ref()
+        .expect("materialized array default")
+    else {
+        panic!("expected array default");
+    };
+    assert_eq!(outer.elements.len(), 2);
+    assert!(outer.first_replication().is_none());
+    for element in &outer.elements {
+        let ArrayLiteralElement::Value(Expression::ArrayLiteral(inner)) = element else {
+            panic!("expected nested assignment pattern");
+        };
+        assert_eq!(inner.elements.len(), 3);
+        assert!(inner.first_replication().is_none());
+    }
 
-    assert!(
-        error.contains("array-valued parameter replication")
-            || error.contains("contains unsupported replication"),
-        "unexpected diagnostic: {error}"
-    );
+    let source_module = analyzed
+        .source
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Item::Module(module) => Some(module),
+            _ => None,
+        })
+        .expect("retained source module");
+    let Expression::ArrayLiteral(source_default) = source_module.parameters[1]
+        .default
+        .as_ref()
+        .expect("source array default")
+    else {
+        panic!("expected retained source array default");
+    };
+    assert!(source_default.first_replication().is_some());
+}
+
+#[test]
+fn parameter_array_zero_and_unsafe_replication_counts_are_diagnostic() {
+    analyze(&module_src(
+        r#"
+            parameter real taps[0:1] = '{0{9.0}, 1.0, 2.0};
+            analog I(p, n) <+ V(p, n);
+            "#,
+    ))
+    .expect("zero replication contributes no initializer elements");
+
+    for (count, expected) in [
+        ("2.0", "integer constant expression"),
+        ("-1", "must be non-negative"),
+        ("(1 << 62)", "replication element count overflows u64"),
+        ("1048577", "supported safety limit is 1048576"),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "parameter real taps[0:0] = '{{{count}{{1.0, 2.0, 3.0, 4.0, 5.0}}}};\nanalog I(p, n) <+ V(p, n);"
+        )))
+        .expect_err("invalid or unsafe parameter replication must fail")
+        .to_string();
+        assert!(error.contains(expected), "unexpected diagnostic: {error}");
+    }
 }
 
 #[test]
