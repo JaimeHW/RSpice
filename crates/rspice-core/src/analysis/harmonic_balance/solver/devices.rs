@@ -171,7 +171,7 @@ impl NonlinearDeviceParams {
             vth: vto,
             kp: beta,
             lambda,
-            is: is.max(1e-30),
+            is,
             ..Default::default()
         }
     }
@@ -187,9 +187,9 @@ impl NonlinearDeviceParams {
         Self {
             vth: vt,
             vh: vh.abs(),
-            ron: ron.max(1e-6),
-            roff: roff.max(1e-6),
-            smooth: smooth.max(1e-9),
+            ron,
+            roff,
+            smooth,
             ..Default::default()
         }
     }
@@ -569,8 +569,8 @@ impl NonlinearDeviceInstance {
     ) -> Self {
         self.params.cap_a = cap_sb;
         self.params.cap_b = cap_db;
-        self.params.is = is_s.max(1e-30);
-        self.params.is2 = is_d.max(1e-30);
+        self.params.is = is_s;
+        self.params.is2 = is_d;
         self
     }
 
@@ -689,7 +689,6 @@ impl NonlinearDeviceInstance {
         let vd = v_a - v_c;
 
         let (_, gd) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
-        let gd = gd.max(1e-12); // Minimum conductance for numerical stability
 
         let a = self.terminals[0];
         let c = self.terminals[1];
@@ -818,7 +817,7 @@ impl NonlinearDeviceInstance {
     /// (ngspice MOS1 convention).
     fn mos_ids(&self, vgs: Value, vds: Value, vth: Value) -> (Value, Value, Value) {
         let kp = self.params.kp;
-        let lambda = self.params.lambda.max(0.0);
+        let lambda = self.params.lambda;
         let vov = vgs - vth;
 
         if vov <= 0.0 {
@@ -931,14 +930,6 @@ impl NonlinearDeviceInstance {
         let g = self.terminals[1];
         let b = self.terminals[3];
 
-        let (gm, gds, gmbs) = if gm == 0.0 && gds == 0.0 {
-            // Cutoff: tiny drain-source leak keeps the Jacobian regular
-            // without introducing a phantom path to ground.
-            (0.0, 1e-12, 0.0)
-        } else {
-            (gm, gds, gmbs)
-        };
-
         // The polarity factors cancel (p^2 = 1): the node-space stamps are the
         // textbook MOS pattern in the effective frame for NMOS and PMOS alike.
         // Ids falls as Vsb rises (gmbs acts like a back-gate gm controlled by
@@ -999,8 +990,8 @@ impl NonlinearDeviceInstance {
         let vgs_int = polarity * vgs;
         let vds_int = polarity * vds;
         let vto = self.params.vth;
-        let beta = self.params.kp.max(1e-18);
-        let lambda = self.params.lambda.max(0.0);
+        let beta = self.params.kp;
+        let lambda = self.params.lambda;
         let vgst = vgs_int - vto;
 
         let (ids_int, gm, gds) = if vgst <= 0.0 {
@@ -1040,7 +1031,7 @@ impl NonlinearDeviceInstance {
             (ids, gm, gds)
         };
 
-        (polarity * ids_int, gm, gds.max(1e-12))
+        (polarity * ids_int, gm, gds)
     }
 
     /// Gate junction currents `(igs, ggs, igd, ggd)` in the polarity frame.
@@ -1119,13 +1110,26 @@ impl NonlinearDeviceInstance {
     fn switch_conductance_and_derivative(&self, vctrl: Value) -> (Value, Value) {
         // HB uses a memoryless smooth switch characteristic. Hysteresis parameter
         // is retained in params for compatibility with shared model cards.
-        let smooth = self.params.smooth.max(1e-9);
+        let smooth = self.params.smooth;
+        let ron = self.params.ron;
+        let roff = self.params.roff;
+        if !vctrl.is_finite()
+            || !smooth.is_finite()
+            || smooth <= 0.0
+            || !ron.is_finite()
+            || ron <= 0.0
+            || !roff.is_finite()
+            || roff <= 0.0
+        {
+            // Native HB residual/Jacobian validation turns these sentinels into
+            // a typed solve error. Do not replace invalid authored parameters
+            // with a different physical switch law.
+            return (Value::NAN, Value::NAN);
+        }
         let x = (vctrl - self.params.vth) / smooth;
         let tanh_x = x.tanh();
         let f = 0.5 * (1.0 - tanh_x);
 
-        let ron = self.params.ron.max(1e-6);
-        let roff = self.params.roff.max(ron);
         let log_ron = ron.ln();
         let log_roff = roff.ln();
         let dlog_r = log_roff - log_ron;
@@ -1137,7 +1141,7 @@ impl NonlinearDeviceInstance {
         let dlogr_dvctrl = dlog_r * df_dvctrl;
         let dg_dvctrl = -g * dlogr_dvctrl;
 
-        (g.max(1e-12), dg_dvctrl)
+        (g, dg_dvctrl)
     }
 
     fn eval_voltage_switch(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
@@ -1541,13 +1545,92 @@ mod tests {
         let expected = (8.0 / 3.0) * K_B * TEMPERATURE * 1.0e-3;
         assert!((actual - expected).abs() <= 8.0 * Value::EPSILON * expected);
 
-        // The runtime keeps a tiny JFET gds floor for matrix conditioning.
         // Cutoff has gm=0 and must therefore retain an exact zero noise source.
         let jfet = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1.0e-3, 0.0, 1.0e-14);
         let cutoff = jfet
             .noise_intensities(&[1.0, -3.0, 0.0], TEMPERATURE, 1.0, K_B)
             .unwrap();
         assert_eq!(cutoff, vec![ScaledNonnegative::ZERO]);
+    }
+
+    #[test]
+    fn cutoff_device_jacobians_do_not_invent_physical_conductance() {
+        let diode = NonlinearDeviceInstance::diode(0, 1, 0.0, 1.0);
+        assert!(
+            diode
+                .jacobian(&[-1.0, 0.0])
+                .iter()
+                .all(|(_, conductance)| *conductance == 0.0)
+        );
+
+        let mos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.0).with_bulk_junctions(
+            DepletionCap::none(),
+            DepletionCap::none(),
+            0.0,
+            0.0,
+        );
+        assert!(
+            mos.jacobian(&[1.0, -1.0, 0.0, 0.0])
+                .iter()
+                .all(|(_, conductance)| *conductance == 0.0)
+        );
+
+        let jfet = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1.0e-3, 0.0, 0.0);
+        assert!(
+            jfet.jacobian(&[1.0, -3.0, 0.0])
+                .iter()
+                .all(|(_, conductance)| *conductance == 0.0)
+        );
+    }
+
+    #[test]
+    fn zero_lambda_mos_saturation_has_exact_zero_output_conductance() {
+        let mos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.0).with_bulk_junctions(
+            DepletionCap::none(),
+            DepletionCap::none(),
+            0.0,
+            0.0,
+        );
+        let voltages = [2.0, 1.5, 0.0, 0.0];
+        let (_, _, _, gm, gds, gmbs) = mos.mos_operating_point(1.0, &voltages);
+        assert!(gm > 0.0);
+        assert_eq!(gds, 0.0);
+        assert_eq!(gmbs, 0.0);
+
+        let drain_diagonal = mos
+            .jacobian(&voltages)
+            .iter()
+            .filter(|((row, column), _)| *row == 0 && *column == 0)
+            .map(|(_, value)| value)
+            .sum::<Value>();
+        assert_eq!(drain_diagonal, 0.0);
+    }
+
+    #[test]
+    fn voltage_switch_preserves_high_off_resistance_without_a_conductance_floor() {
+        let switch =
+            NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.0, 0.0, 1.0, 1.0e15, 0.1);
+        let (conductance, derivative) = switch.switch_conductance_and_derivative(-100.0);
+        let expected = 1.0e-15;
+        assert!((conductance - expected).abs() <= 16.0 * Value::EPSILON * expected);
+        assert_eq!(derivative, 0.0);
+        assert!(conductance < 1.0e-12);
+    }
+
+    #[test]
+    fn voltage_switch_invalid_physical_parameters_fail_closed() {
+        for (ron, roff, smooth) in [
+            (0.0, 1.0e6, 0.1),
+            (1.0, 0.0, 0.1),
+            (1.0, 1.0e6, 0.0),
+            (Value::NAN, 1.0e6, 0.1),
+        ] {
+            let switch =
+                NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.0, 0.0, ron, roff, smooth);
+            let (conductance, derivative) = switch.switch_conductance_and_derivative(0.0);
+            assert!(conductance.is_nan());
+            assert!(derivative.is_nan());
+        }
     }
 
     /// Deterministic uniform sample in [lo, hi).
