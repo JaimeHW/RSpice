@@ -123,9 +123,14 @@ pub struct HbSolverState {
     pub converged: bool,
 
     /// Spectra for branch-current unknowns retained by an actual MNA solve.
-    /// Nonlinear HB currently uses node-only Newton state, so this remains
-    /// empty for that path rather than synthesizing non-existent unknowns.
+    /// Rows are in the solver's canonical exact-MNA branch order.
     pub mna_branch_currents: Vec<Vec<Complex64>>,
+
+    /// KVL residual spectra aligned with `mna_branch_currents`.
+    pub(crate) mna_branch_residual: Vec<Vec<Complex64>>,
+
+    /// Per-row voltage scale for the KVL convergence certificate.
+    pub(crate) mna_branch_residual_scale: Vec<Vec<Value>>,
 }
 
 impl HbSolverState {
@@ -140,7 +145,148 @@ impl HbSolverState {
             total_iterations: 0,
             converged: false,
             mna_branch_currents: Vec::new(),
+            mna_branch_residual: Vec::new(),
+            mna_branch_residual_scale: Vec::new(),
         }
+    }
+
+    /// Fallibly allocate or validate the exact-MNA branch portion of this
+    /// state without changing its public node-only construction contract.
+    ///
+    /// Existing branch currents are preserved so an authenticated operating
+    /// point can enter a dependent solve. Empty residual workspaces are
+    /// allocated transactionally; any nonempty incompatible shape fails
+    /// closed instead of truncating or silently reordering state.
+    pub(crate) fn try_prepare_mna_branches(
+        &mut self,
+        num_branches: usize,
+        num_harmonics: usize,
+    ) -> Result<(), HbError> {
+        let width = num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "HB branch-state harmonic width exceeds this platform".to_string(),
+            )
+        })?;
+        let validate_complex_rows =
+            |label: &str, rows: &[Vec<Complex64>], allow_empty: bool| -> Result<(), HbError> {
+                if allow_empty && rows.is_empty() {
+                    return Ok(());
+                }
+                if rows.len() != num_branches {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB {label} has {} branch rows; expected {num_branches}",
+                        rows.len()
+                    )));
+                }
+                for (branch, row) in rows.iter().enumerate() {
+                    if row.len() != width {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB {label} branch {branch} has {} harmonics; expected {width}",
+                            row.len()
+                        )));
+                    }
+                    if row
+                        .iter()
+                        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                    {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB {label} branch {branch} contains a non-finite value"
+                        )));
+                    }
+                    if row.first().is_some_and(|value| value.im != 0.0) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB {label} branch {branch} has a nonzero imaginary DC component"
+                        )));
+                    }
+                }
+                Ok(())
+            };
+        validate_complex_rows("MNA current state", &self.mna_branch_currents, true)?;
+        validate_complex_rows("MNA residual state", &self.mna_branch_residual, true)?;
+        if !self.mna_branch_residual_scale.is_empty() {
+            if self.mna_branch_residual_scale.len() != num_branches {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB MNA residual scale has {} branch rows; expected {num_branches}",
+                    self.mna_branch_residual_scale.len()
+                )));
+            }
+            for (branch, row) in self.mna_branch_residual_scale.iter().enumerate() {
+                if row.len() != width {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB MNA residual scale branch {branch} has {} harmonics; expected {width}",
+                        row.len()
+                    )));
+                }
+                if row.iter().any(|value| !value.is_finite() || *value < 0.0) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB MNA residual scale branch {branch} contains an invalid value"
+                    )));
+                }
+            }
+        }
+
+        let allocate_complex_rows = || -> Result<Vec<Vec<Complex64>>, HbError> {
+            let mut rows = Vec::new();
+            rows.try_reserve_exact(num_branches).map_err(|error| {
+                HbError::InvalidCircuit(format!("HB MNA branch-row allocation failed: {error}"))
+            })?;
+            for _ in 0..num_branches {
+                let mut row = Vec::new();
+                row.try_reserve_exact(width).map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "HB MNA branch-spectrum allocation failed: {error}"
+                    ))
+                })?;
+                row.resize(width, Complex64::new(0.0, 0.0));
+                rows.push(row);
+            }
+            Ok(rows)
+        };
+        let allocate_scale_rows = || -> Result<Vec<Vec<Value>>, HbError> {
+            let mut rows = Vec::new();
+            rows.try_reserve_exact(num_branches).map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "HB MNA branch-scale row allocation failed: {error}"
+                ))
+            })?;
+            for _ in 0..num_branches {
+                let mut row = Vec::new();
+                row.try_reserve_exact(width).map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "HB MNA branch-scale allocation failed: {error}"
+                    ))
+                })?;
+                row.resize(width, 0.0);
+                rows.push(row);
+            }
+            Ok(rows)
+        };
+
+        let currents = self
+            .mna_branch_currents
+            .is_empty()
+            .then(allocate_complex_rows)
+            .transpose()?;
+        let residual = self
+            .mna_branch_residual
+            .is_empty()
+            .then(allocate_complex_rows)
+            .transpose()?;
+        let residual_scale = self
+            .mna_branch_residual_scale
+            .is_empty()
+            .then(allocate_scale_rows)
+            .transpose()?;
+        if let Some(rows) = currents {
+            self.mna_branch_currents = rows;
+        }
+        if let Some(rows) = residual {
+            self.mna_branch_residual = rows;
+        }
+        if let Some(rows) = residual_scale {
+            self.mna_branch_residual_scale = rows;
+        }
+        Ok(())
     }
 
     /// Compute residual norm (L2 over all nodes and harmonics)
@@ -152,6 +298,7 @@ impl HbSolverState {
         self.residual_norm = self
             .residual
             .iter()
+            .chain(self.mna_branch_residual.iter())
             .flat_map(|node| node.iter())
             .fold(0.0, |norm, value| norm.hypot(value.re).hypot(value.im));
     }
@@ -160,40 +307,163 @@ impl HbSolverState {
     /// satisfy |res| <= abstol + reltol * (sum of |contribution| into the
     /// row), using the scale accumulated during residual assembly.
     pub fn rows_converged(&self, reltol: Value, abstol: Value) -> bool {
-        if !reltol.is_finite() || reltol < 0.0 || !abstol.is_finite() || abstol < 0.0 {
+        self.rows_converged_with_branch_tolerances(reltol, abstol, abstol)
+    }
+
+    pub(crate) fn rows_converged_with_branch_tolerances(
+        &self,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+    ) -> bool {
+        if !reltol.is_finite()
+            || reltol < 0.0
+            || !current_abstol.is_finite()
+            || current_abstol < 0.0
+            || !voltage_abstol.is_finite()
+            || voltage_abstol < 0.0
+        {
             return false;
         }
-        self.residual
-            .iter()
-            .zip(self.residual_scale.iter())
-            .all(|(res_row, scale_row)| {
-                res_row
-                    .iter()
-                    .zip(scale_row.iter())
-                    .all(|(r, s)| residual_entry_converged(*r, *s, reltol, abstol))
-            })
+        let current_rows_converged = residual_rows_converged(
+            &self.x,
+            &self.residual,
+            &self.residual_scale,
+            reltol,
+            current_abstol,
+            false,
+        );
+        current_rows_converged
+            && residual_rows_converged(
+                &self.mna_branch_currents,
+                &self.mna_branch_residual,
+                &self.mna_branch_residual_scale,
+                reltol,
+                voltage_abstol,
+                false,
+            )
     }
 
     /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
     /// the DC operating-point pre-solve which only assembles harmonic 0.
     pub fn dc_rows_converged(&self, reltol: Value, abstol: Value) -> bool {
-        if !reltol.is_finite() || reltol < 0.0 || !abstol.is_finite() || abstol < 0.0 {
+        self.dc_rows_converged_with_branch_tolerances(reltol, abstol, abstol)
+    }
+
+    /// DC convergence certificate with dimensionally distinct KCL-current and
+    /// KVL-voltage absolute tolerances.
+    pub(crate) fn dc_rows_converged_with_branch_tolerances(
+        &self,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+    ) -> bool {
+        if !reltol.is_finite() || reltol < 0.0 {
             return false;
         }
-        self.residual
-            .iter()
-            .zip(self.residual_scale.iter())
-            .all(
-                |(res_row, scale_row)| match (res_row.first(), scale_row.first()) {
-                    (Some(r), Some(s)) => residual_entry_converged(*r, *s, reltol, abstol),
-                    _ => true,
-                },
+        if !current_abstol.is_finite()
+            || current_abstol < 0.0
+            || !voltage_abstol.is_finite()
+            || voltage_abstol < 0.0
+        {
+            return false;
+        }
+        let current_rows_converged = residual_rows_converged(
+            &self.x,
+            &self.residual,
+            &self.residual_scale,
+            reltol,
+            current_abstol,
+            true,
+        );
+        current_rows_converged
+            && residual_rows_converged(
+                &self.mna_branch_currents,
+                &self.mna_branch_residual,
+                &self.mna_branch_residual_scale,
+                reltol,
+                voltage_abstol,
+                true,
             )
     }
 
-    /// Total number of unknowns
+    /// Dimensionless worst-row residual certificate shared by DC and
+    /// full-spectrum Newton line searches. KCL and KVL rows use independent
+    /// absolute tolerances, so amperes and volts are never added or dotted.
+    pub(crate) fn certificate_merit(
+        &self,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+        dc_only: bool,
+    ) -> Result<Value, HbError> {
+        if !reltol.is_finite()
+            || reltol < 0.0
+            || !current_abstol.is_finite()
+            || current_abstol <= 0.0
+            || !voltage_abstol.is_finite()
+            || voltage_abstol <= 0.0
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB residual-certificate tolerances must be finite and positive".to_string(),
+            ));
+        }
+        let current_merit = residual_rows_merit(
+            "KCL-current",
+            &self.x,
+            &self.residual,
+            &self.residual_scale,
+            reltol,
+            current_abstol,
+            dc_only,
+        )?;
+        let voltage_merit = residual_rows_merit(
+            "KVL-voltage",
+            &self.mna_branch_currents,
+            &self.mna_branch_residual,
+            &self.mna_branch_residual_scale,
+            reltol,
+            voltage_abstol,
+            dc_only,
+        )?;
+        Ok(current_merit.max(voltage_merit))
+    }
+
+    /// Total number of spectral coordinates, or `usize::MAX` when publicly
+    /// mutable state is malformed or cannot be represented. Resource and
+    /// transport authorization must use the fallible internal qualifier.
     pub fn total_unknowns(&self) -> usize {
-        self.x.len() * self.x.first().map(|v| v.len()).unwrap_or(0)
+        self.try_total_unknowns().unwrap_or(usize::MAX)
+    }
+
+    /// Fallible coordinate count for resource authorization and transport
+    /// validation. Unlike `total_unknowns`, this never treats a saturated
+    /// value as evidence that a state fits a caller's resource budget.
+    pub(crate) fn try_total_unknowns(&self) -> Result<usize, HbError> {
+        if self.x.is_empty() && self.mna_branch_currents.is_empty() {
+            return Ok(0);
+        }
+        let width = self.x.first().map(|row| row.len()).unwrap_or(0);
+        if width == 0
+            || self.x.iter().any(|row| row.len() != width)
+            || self
+                .mna_branch_currents
+                .iter()
+                .any(|row| row.len() != width)
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB solver state is not a nonempty rectangular spectral grid".to_string(),
+            ));
+        }
+        self.x
+            .len()
+            .checked_add(self.mna_branch_currents.len())
+            .and_then(|rows| rows.checked_mul(width))
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "HB solver-state coordinate count exceeds this platform".to_string(),
+                )
+            })
     }
 }
 
@@ -209,6 +479,98 @@ fn residual_entry_converged(
     }
     let tolerance = abstol + reltol * scale;
     tolerance.is_finite() && residual.norm() <= tolerance
+}
+
+fn residual_rows_converged(
+    solution: &[Vec<Complex64>],
+    residual: &[Vec<Complex64>],
+    scale: &[Vec<Value>],
+    reltol: Value,
+    abstol: Value,
+    dc_only: bool,
+) -> bool {
+    if solution.len() != residual.len() || residual.len() != scale.len() {
+        return false;
+    }
+    solution
+        .iter()
+        .zip(residual)
+        .zip(scale)
+        .all(|((solution_row, residual_row), scale_row)| {
+            if solution_row.is_empty()
+                || solution_row.len() != residual_row.len()
+                || residual_row.len() != scale_row.len()
+            {
+                return false;
+            }
+            if dc_only {
+                residual_entry_converged(residual_row[0], scale_row[0], reltol, abstol)
+            } else {
+                residual_row
+                    .iter()
+                    .zip(scale_row)
+                    .all(|(&entry, &entry_scale)| {
+                        residual_entry_converged(entry, entry_scale, reltol, abstol)
+                    })
+            }
+        })
+}
+
+fn residual_rows_merit(
+    label: &str,
+    solution: &[Vec<Complex64>],
+    residual: &[Vec<Complex64>],
+    scale: &[Vec<Value>],
+    reltol: Value,
+    abstol: Value,
+    dc_only: bool,
+) -> Result<Value, HbError> {
+    if solution.len() != residual.len() || residual.len() != scale.len() {
+        return Err(HbError::InvalidCircuit(format!(
+            "HB {label} certificate row cardinality is inconsistent"
+        )));
+    }
+    let mut merit: Value = 0.0;
+    for (row, ((solution_row, residual_row), scale_row)) in
+        solution.iter().zip(residual).zip(scale).enumerate()
+    {
+        if solution_row.is_empty()
+            || solution_row.len() != residual_row.len()
+            || residual_row.len() != scale_row.len()
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB {label} certificate row {row} has an inconsistent harmonic width"
+            )));
+        }
+        let width = if dc_only { 1 } else { residual_row.len() };
+        for harmonic in 0..width {
+            let residual = residual_row[harmonic];
+            let scale = scale_row[harmonic];
+            if !residual.re.is_finite()
+                || !residual.im.is_finite()
+                || !scale.is_finite()
+                || scale < 0.0
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB {label} certificate row {row}, harmonic {harmonic} is non-finite"
+                )));
+            }
+            if harmonic == 0 && residual.im != 0.0 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB {label} certificate row {row} has a nonzero imaginary DC residual"
+                )));
+            }
+            let tolerance = abstol + reltol * scale;
+            if !tolerance.is_finite() || tolerance <= 0.0 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB {label} certificate row {row}, harmonic {harmonic} has an invalid tolerance"
+                )));
+            }
+            let ratio = residual.norm() / tolerance;
+            merit = merit.max(if ratio.is_finite() { ratio } else { Value::MAX });
+        }
+    }
+    Ok(merit)
 }
 
 #[cfg(test)]
@@ -243,6 +605,41 @@ mod solver_state_qualification_tests {
         state.residual[0][0] = Complex64::new(0.0, 0.0);
         assert!(!state.rows_converged(Value::NAN, 0.0));
         assert!(!state.dc_rows_converged(-1.0, 0.0));
+    }
+
+    #[test]
+    fn branch_state_preparation_and_certificates_are_shape_strict() {
+        let mut state = HbSolverState::new(1, 1);
+        state
+            .try_prepare_mna_branches(1, 1)
+            .expect("one exact branch row is allocated");
+        assert_eq!(state.try_total_unknowns().unwrap(), 4);
+        assert_eq!(
+            state
+                .certificate_merit(1.0e-3, 1.0e-12, 1.0e-6, false)
+                .unwrap(),
+            0.0
+        );
+        assert!(state.rows_converged_with_branch_tolerances(1.0e-3, 1.0e-12, 1.0e-6));
+
+        state.mna_branch_residual_scale[0].pop();
+        assert!(!state.rows_converged_with_branch_tolerances(1.0e-3, 1.0e-12, 1.0e-6));
+        assert!(
+            state
+                .certificate_merit(1.0e-3, 1.0e-12, 1.0e-6, false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn branch_preparation_rejects_nonreal_dc_current_evidence() {
+        let mut state = HbSolverState::new(1, 1);
+        state.mna_branch_currents =
+            vec![vec![Complex64::new(0.0, 1.0e-30), Complex64::new(0.0, 0.0)]];
+        let error = state
+            .try_prepare_mna_branches(1, 1)
+            .expect_err("harmonic zero must be exactly real");
+        assert!(error.to_string().contains("imaginary DC"), "{error}");
     }
 }
 
