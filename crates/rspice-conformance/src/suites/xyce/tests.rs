@@ -6144,7 +6144,19 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for file_name in ["lead_bsrc_gear.cir", "lead_bsrc_trap.cir"] {
+    for file_name in [
+        "lead_bsrc_gear.cir",
+        "lead_bsrc_trap.cir",
+        "lead_ind_gear.cir",
+        "lead_ind_trap.cir",
+        "lead_mil_gear.cir",
+        "lead_mil_trap.cir",
+        "lead_min_gear.cir",
+        "lead_min_trap.cir",
+        "lead_min2_trap.cir",
+        "lead_r_c_gear.cir",
+        "lead_r_c_trap.cir",
+    ] {
         let relative_path = format!("Netlists/LEAD_CURRENTS/{file_name}");
         let deck = XyceDeck {
             path: root.join(&relative_path),
@@ -6158,13 +6170,7 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
             .authored_fail_value_oracle()
             .unwrap_or_else(|| panic!("{file_name} should use the authored FAILVALUE oracle"));
 
-        assert_eq!(
-            measurements
-                .iter()
-                .map(|measurement| measurement.name.as_str())
-                .collect::<Vec<_>>(),
-            ["MAXMAG1", "TOTALRMS1", "MAXMAG2", "TOTALRMS2"]
-        );
+        assert!(!measurements.is_empty());
         assert!(
             measurements
                 .iter()
@@ -6189,6 +6195,155 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
 }
 
 #[test]
+fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
+    fn admission(source: &str) -> Result<Option<Vec<XyceAuthoredFailValueMeasurement>>, String> {
+        let netlist = XyceTestRunner::parse_xyce_netlist(
+            source,
+            Path::new("authored-failvalue-semantic-envelope.cir"),
+        )
+        .expect("semantic-envelope fixture parses");
+        let steps =
+            XyceTestRunner::step_commands(&netlist).expect("semantic-envelope fixture has no STEP");
+        XyceTestRunner::authored_fail_value_tran_measurements(&netlist, &steps, false, false, false)
+    }
+
+    for (label, body, method) in [
+        (
+            "independent, behavioral, and passive",
+            "V1 in 0 PULSE(0 1 0 1u 1u 5u 10u)\nR1 in out 1k\nC1 out 0 1u\nB1 aux 0 V={V(out)}\nR2 aux 0 1k",
+            "TRAP",
+        ),
+        (
+            "linear coupled inductors",
+            "V1 in 0 SIN(0 1 1k)\nR1 in out 1\nL1 out 0 1m\nL2 aux 0 2m\nR2 aux 0 1\nK1 L1 L2 .5",
+            "GEAR",
+        ),
+        (
+            "hierarchical linear coupled inductors",
+            "V1 out 0 SIN(0 1 1k)\nX1 out WINDINGS\n.SUBCKT WINDINGS p\nL1 p 0 1m\nL2 aux 0 2m\nR1 aux 0 1\nK1 L1 L2 .5\n.ENDS",
+            "TRAP",
+        ),
+        (
+            "nonlinear CORE level 1",
+            "V1 in 0 SIN(0 1 1k)\nR1 in out 1\nL1 out 0 10\nL2 aux 0 100\nR2 aux 0 1\nK1 L1 L2 1 COREMOD\n.MODEL COREMOD CORE C=.001",
+            "GEAR",
+        ),
+        (
+            "nonlinear CORE level 2 trapezoidal",
+            "V1 in 0 SIN(0 1 1k)\nR1 in out 1\nL1 out 0 10\nL2 aux 0 100\nR2 aux 0 1\nK1 L1 L2 1 COREMOD\n.MODEL COREMOD CORE LEVEL=2 C=.001",
+            "TRAP",
+        ),
+    ] {
+        let source = format!(
+            "{label}\n{body}\n.OPTIONS TIMEINT METHOD={method}\n.TRAN 1u 10u\n.MEASURE TRAN MAX_OUT MAX V(out) FAILVALUE=2\n.END\n"
+        );
+        assert!(
+            admission(&source)
+                .unwrap_or_else(|error| panic!(
+                    "{label} should satisfy the device envelope: {error}"
+                ))
+                .is_some(),
+            "{label} should qualify"
+        );
+    }
+
+    for (label, body) in [
+        (
+            "diode semiconductor",
+            "V1 out 0 1\nD1 out 0 DMOD\n.MODEL DMOD D",
+        ),
+        (
+            "JFET semiconductor",
+            "V1 out 0 1\nJ1 out out 0 JMOD\n.MODEL JMOD NJF",
+        ),
+        (
+            "voltage switch",
+            "V1 out 0 1\nVCTRL ctl 0 1\nS1 out 0 ctl 0 SWMOD\n.MODEL SWMOD VSWITCH RON=1 ROFF=1MEG VON=1 VOFF=0",
+        ),
+        (
+            "transmission line",
+            "V1 out 0 1\nT1 out 0 far 0 Z0=50 TD=1n\nR1 far 0 50",
+        ),
+        (
+            "generated compact diode",
+            "V1 out 0 1\nD1 out 0 JUNCAP\n.MODEL JUNCAP D LEVEL=200",
+        ),
+        (
+            "BUG813 MOS lead-current topology",
+            "VDS supply 0 5\nVMOND supply out 0\nVGS gate 0 SIN(0 1 50k)\nM1 out gate 0 0 NFET L=2u W=2u\n.MODEL NFET NMOS LEVEL=1 UO=966.5 VTO=1.043\nB1 check 0 V={ABS(I(VMOND)*V(supply))}\nR1 check 0 100",
+        ),
+        (
+            "CORE level 2 Gear integration",
+            "V1 in 0 SIN(0 1 1k)\nR1 in out 1\nL1 out 0 10\nL2 aux 0 100\nR2 aux 0 1\nK1 L1 L2 1 COREMOD\n.MODEL COREMOD CORE LEVEL=2 C=.001",
+        ),
+    ] {
+        let source = format!(
+            "{label}\n{body}\n.OPTIONS TIMEINT METHOD=GEAR\n.TRAN 1u 10u\n.MEASURE TRAN MAX_OUT MAX V(out) FAILVALUE=2\n.END\n"
+        );
+        let error = admission(&source)
+            .expect_err("unsupported semantic shape must fail planning rather than execute");
+        assert!(
+            error.contains("authored FAILVALUE TRAN oracle"),
+            "{label} returned a non-contract diagnostic: {error}"
+        );
+    }
+
+    for level in ["1.5", "3"] {
+        let source = format!(
+            "unsupported CORE level\nV1 in 0 SIN(0 1 1k)\nR1 in out 1\nL1 out 0 10\nL2 aux 0 100\nR2 aux 0 1\nK1 L1 L2 1 COREMOD\n.MODEL COREMOD CORE LEVEL={level} C=.001\n.OPTIONS TIMEINT METHOD=TRAP\n.TRAN 1u 10u\n.MEASURE TRAN MAX_OUT MAX V(out) FAILVALUE=2\n.END\n"
+        );
+        let error = admission(&source)
+            .expect_err("noncanonical CORE level must fail before integration-method admission");
+        assert!(
+            error.contains("supports only exact LEVEL=1 or LEVEL=2"),
+            "CORE LEVEL={level} returned the wrong capability diagnostic: {error}"
+        );
+    }
+}
+
+#[test]
+fn authored_fail_value_hard_failure_decks_are_expected_unsupported() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative_paths = [
+        "Netlists/Certification_Tests/BUG_813_SON/bug_813_son.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_m2_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_dio1_m2_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_min2_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_nmos3_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_nmos3_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_nsoi_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_nsoi_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_pjfet_tran_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_pjfet_tran_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_psoi_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_psoi_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_sw_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_sw_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_tra_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_tra_trap.cir",
+        "Netlists/Verilog_LEAD_CURRENTS/lead_juncap200_gear.cir",
+    ];
+
+    for relative_path in relative_paths {
+        let result = runner.run_test(&root.join(relative_path));
+        assert!(
+            result.expected_unsupported && result.passed,
+            "{relative_path} must fail closed during planning: {result:?}"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("authored FAILVALUE TRAN oracle")),
+            "{relative_path} should report the semantic capability boundary: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn authored_fail_value_admission_rejects_nonordinary_and_competing_oracle_shapes() {
     let source = "authored FAILVALUE admission\n\
 V1 out 0 1\n\
@@ -6204,6 +6359,7 @@ R1 out 0 1\n\
         XyceTestRunner::authored_fail_value_tran_measurements(
             &netlist, &steps, false, false, false,
         )
+        .expect("ordinary device envelope qualifies")
         .expect("ordinary typed measurement qualifies")
         .len(),
         1
@@ -6214,6 +6370,7 @@ R1 out 0 1\n\
         XyceTestRunner::authored_fail_value_tran_measurements(
             &netlist, &steps, false, false, false,
         )
+        .expect("ordinary device envelope qualifies")
         .is_some(),
         "analysis-domain matching is deliberately case-insensitive"
     );
@@ -6222,6 +6379,7 @@ R1 out 0 1\n\
         XyceTestRunner::authored_fail_value_tran_measurements(
             &netlist, &steps, false, false, false,
         )
+        .expect("ordinary device envelope qualifies")
         .is_none()
     );
     netlist.measurements[0].analysis = "TRAN".to_string();
@@ -6230,6 +6388,7 @@ R1 out 0 1\n\
         XyceTestRunner::authored_fail_value_tran_measurements(
             &netlist, &steps, false, false, false,
         )
+        .expect("ordinary device envelope qualifies")
         .is_none()
     );
     netlist.measurements[0].fail_value = Some(2.0);
@@ -6238,6 +6397,7 @@ R1 out 0 1\n\
         XyceTestRunner::authored_fail_value_tran_measurements(
             &netlist, &steps, false, false, false,
         )
+        .expect("ordinary device envelope qualifies")
         .is_none()
     );
     netlist.analyses.pop();
@@ -6255,6 +6415,7 @@ R1 out 0 1\n\
                 has_waveform,
                 has_measurement,
             )
+            .expect("ordinary device envelope qualifies")
             .is_none()
         );
     }
@@ -6270,6 +6431,7 @@ R1 out 0 1\n\
         XyceTestRunner::authored_fail_value_tran_measurements(
             &stepped, &steps, false, false, false,
         )
+        .expect("ordinary device envelope qualifies")
         .is_none()
     );
 }

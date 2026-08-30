@@ -394,7 +394,7 @@ impl XyceTestRunner {
                 has_remeasure_input,
                 false,
                 !measurement_reference_paths.is_empty(),
-            )
+            )?
         } else {
             None
         };

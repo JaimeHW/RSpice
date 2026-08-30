@@ -3558,7 +3558,7 @@ impl XyceTestRunner {
         has_remeasure_input: bool,
         has_waveform_oracle: bool,
         has_measurement_oracle: bool,
-    ) -> Option<Vec<XyceAuthoredFailValueMeasurement>> {
+    ) -> Result<Option<Vec<XyceAuthoredFailValueMeasurement>>, String> {
         if has_remeasure_input
             || has_waveform_oracle
             || has_measurement_oracle
@@ -3571,10 +3571,12 @@ impl XyceTestRunner {
                     || measurement.fail_value.is_none()
             })
         {
-            return None;
+            return Ok(None);
         }
 
-        netlist
+        Self::validate_authored_fail_value_tran_device_contract(netlist)?;
+
+        Ok(netlist
             .measurements
             .iter()
             .map(|measurement| {
@@ -3583,7 +3585,197 @@ impl XyceTestRunner {
                     failure_limit: measurement.fail_value?,
                 })
             })
-            .collect()
+            .collect())
+    }
+
+    pub(super) fn validate_authored_fail_value_tran_device_contract(
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        const LABEL: &str = "authored FAILVALUE TRAN oracle";
+
+        validate_output_symbols(netlist)
+            .map_err(|error| format!("{LABEL} has an unresolved output dependency: {error}"))?;
+        let measurement_requests = netlist
+            .output_requests
+            .iter()
+            .filter(|request| request.directive == OutputDirectiveKind::Measure)
+            .collect::<Vec<_>>();
+        if measurement_requests.len() != netlist.measurements.len() {
+            return Err(format!(
+                "{LABEL} requires one typed output request for every measurement"
+            ));
+        }
+        for request in measurement_requests {
+            for dependency in &request.dependencies {
+                if !matches!(dependency.operator.to_ascii_uppercase().as_str(), "V" | "I") {
+                    return Err(format!(
+                        "{LABEL} cannot materialize measurement dependency '{}({})'",
+                        dependency.operator, dependency.symbol
+                    ));
+                }
+            }
+        }
+
+        if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            let flattened = flatten_netlist_with_models(netlist)
+                .map_err(|error| format!("{LABEL} could not flatten subcircuits: {error}"))?;
+            Self::validate_flattened_subcircuit_instances_resolved(netlist, &flattened.elements)?;
+            let mut flat_netlist = netlist.clone();
+            flat_netlist.elements = flattened.elements;
+            flat_netlist.models.extend(flattened.scoped_models);
+            flat_netlist
+                .initial_conditions
+                .extend(flattened.scoped_initial_conditions);
+            flat_netlist.node_sets.extend(flattened.scoped_node_sets);
+            flat_netlist.subcircuits.clear();
+            return Self::validate_authored_fail_value_tran_device_contract_flat(&flat_netlist);
+        }
+
+        Self::validate_authored_fail_value_tran_device_contract_flat(netlist)
+    }
+
+    fn validate_authored_fail_value_tran_device_contract_flat(
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        const LABEL: &str = "authored FAILVALUE TRAN oracle";
+
+        for element in &netlist.elements {
+            if !matches!(&element.provenance, ElementProvenance::Authored) {
+                return Err(format!(
+                    "{LABEL} does not admit generated element '{}'",
+                    element.name
+                ));
+            }
+            match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::validate_static_step_tran_source_spec(&element.name, spec)?;
+                }
+                ElementKind::BehavioralVoltage { expression, .. }
+                | ElementKind::BehavioralCurrent { expression, .. } => {
+                    Self::validate_transient_behavioral_expression(
+                        &element.name,
+                        expression,
+                        &netlist.params,
+                    )?;
+                }
+                ElementKind::Resistor { .. } => {
+                    Self::validate_static_step_resistor_contract(netlist, &element.name)?;
+                }
+                ElementKind::Capacitor { .. } => {
+                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?;
+                }
+                ElementKind::Inductor { .. } => {
+                    Self::validate_static_step_inductor_contract(netlist, &element.name)?;
+                }
+                ElementKind::Coupling {
+                    inductors,
+                    coefficient,
+                    model,
+                } => {
+                    Self::validate_static_step_coupling_contract(
+                        netlist,
+                        &element.name,
+                        inductors,
+                        *coefficient,
+                        model.as_deref(),
+                    )?;
+                    if let Some(model_name) = model {
+                        let level = Self::authored_fail_value_core_model_level(
+                            netlist,
+                            &element.name,
+                            model_name,
+                        )?;
+                        if level >= 2.0
+                            && !matches!(
+                                netlist.options.method.as_deref(),
+                                None | Some("TRAP" | "TRAPEZOIDAL" | "TRAPEZOID" | "ONESTEP" | "7")
+                            )
+                        {
+                            return Err(format!(
+                                "{LABEL} supports nonlinear CORE LEVEL>=2 coupling '{}' only with trapezoidal integration",
+                                element.name
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, and coupled inductors; element '{}' requires a broader self-verifying transient contract",
+                        element.name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn authored_fail_value_core_model_level(
+        netlist: &Netlist,
+        element_name: &str,
+        model_name: &str,
+    ) -> Result<Value, String> {
+        const LABEL: &str = "authored FAILVALUE TRAN oracle";
+        let model = Self::find_unique_model_in(&netlist.models, model_name).ok_or_else(|| {
+            format!(
+                "{LABEL} requires coupling '{element_name}' to resolve one unique CORE model '{model_name}'"
+            )
+        })?;
+        if !model.model_type.eq_ignore_ascii_case("CORE")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} requires coupling '{element_name}' model '{model_name}' to be a scalar numeric CORE model"
+            ));
+        }
+
+        let mut level = None;
+        let mut c = None;
+        for (name, value) in &model.params {
+            if name.eq_ignore_ascii_case("LEVEL") {
+                if level.replace(*value).is_some() {
+                    return Err(format!(
+                        "{LABEL} does not admit duplicate LEVEL parameters on CORE model '{model_name}'"
+                    ));
+                }
+            } else if name.eq_ignore_ascii_case("C") {
+                if c.replace(*value).is_some() {
+                    return Err(format!(
+                        "{LABEL} does not admit duplicate C parameters on CORE model '{model_name}'"
+                    ));
+                }
+            } else {
+                return Err(format!(
+                    "{LABEL} CORE model '{model_name}' parameter '{name}' is outside the validated scalar C/LEVEL envelope"
+                ));
+            }
+        }
+        if c.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            return Err(format!(
+                "{LABEL} CORE model '{model_name}' has invalid C={}",
+                c.expect("C is present")
+            ));
+        }
+        let level = level.unwrap_or(1.0);
+        if !level.is_finite() || level < 0.0 {
+            return Err(format!(
+                "{LABEL} CORE model '{model_name}' has invalid LEVEL={level}"
+            ));
+        }
+        if level != 1.0 && level != 2.0 {
+            return Err(format!(
+                "{LABEL} CORE model '{model_name}' supports only exact LEVEL=1 or LEVEL=2, got {level}"
+            ));
+        }
+        Ok(level)
     }
 
     pub(super) fn validate_authored_fail_value_tran_results(
