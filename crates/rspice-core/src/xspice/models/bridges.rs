@@ -878,23 +878,36 @@ fn bidi_resistive_unknown_range(
 
 fn bidi_advance_current(
     current: Value,
+    current_partial: Value,
     target: Value,
+    target_partial: Value,
     interval: Value,
     range: Value,
     params: BidiParams,
-) -> Value {
+) -> (Value, Value) {
     if !(interval.is_finite() && interval > 0.0) {
-        return current;
+        return (current, current_partial);
     }
 
-    let Some(transition_time) = bidi_current_transition_time(current, target, range, params) else {
-        return current;
-    };
     let delta = target - current;
+    if delta.abs() <= 1.0e-18 {
+        return (target, target_partial);
+    }
+    let Some(transition_time) = bidi_current_transition_time(current, target, range, params) else {
+        return (current, current_partial);
+    };
     if transition_time > interval && transition_time.is_finite() {
-        current + delta * interval / transition_time
+        // `transition_time` is proportional to `abs(delta)`, so the
+        // slew-limited increment has constant magnitude while the sign of
+        // `delta` is unchanged. Its voltage derivative is therefore the
+        // derivative of the segment's starting current, not the derivative
+        // of the as-yet-unreached target.
+        (
+            current + delta * interval / transition_time,
+            current_partial,
+        )
     } else {
-        target
+        (target, target_partial)
     }
 }
 
@@ -951,10 +964,17 @@ fn bidi_drive_current(
     let segments = bidi_analog_segments(ctx, index, drive, layout);
     for segment in segments.iter() {
         svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
-        let (target, segment_partial, range) =
+        let (target, target_partial, range) =
             bidi_current_target(voltage, segment.drive, svoc, params);
-        partial = segment_partial;
-        current = bidi_advance_current(current, target, segment.interval, range, params);
+        (current, partial) = bidi_advance_current(
+            current,
+            partial,
+            target,
+            target_partial,
+            segment.interval,
+            range,
+            params,
+        );
     }
 
     BidiAnalogDrive {
@@ -2187,11 +2207,26 @@ mod tests {
         let (_, _, range) = bidi_current_target(0.0, drive, 0.5, params);
         assert!((range - 0.001).abs() <= 1.0e-15);
 
-        let current = bidi_advance_current(0.0, 0.001, 0.5e-9, range, params);
+        let (current, partial) =
+            bidi_advance_current(0.0, 0.0, 0.001, 0.0001, 0.5e-9, range, params);
         assert!(
             (current - 0.0005).abs() <= 1.0e-15,
             "bipolar rails should not cancel the bidi_bridge current transition range"
         );
+        assert_eq!(
+            partial, 0.0,
+            "a slew-limited current increment is independent of its unreached target"
+        );
+
+        let (settled_current, settled_partial) =
+            bidi_advance_current(0.0, 0.0, 0.001, 0.0001, 2.0e-9, range, params);
+        assert!((settled_current - 0.001).abs() <= 1.0e-15);
+        assert!((settled_partial - 0.0001).abs() <= 1.0e-15);
+
+        let (equal_current, equal_partial) =
+            bidi_advance_current(0.001, 0.0, 0.001, 0.0001, 0.5e-9, range, params);
+        assert!((equal_current - 0.001).abs() <= 1.0e-15);
+        assert!((equal_partial - 0.0001).abs() <= 1.0e-15);
     }
 
     fn set_bidi_default_params(ctx: &mut CmContext, smooth: Value) {
