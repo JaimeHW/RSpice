@@ -112,6 +112,49 @@ fn stateful_analog_operator_guards_are_checked_as_one_complete_family() {
 }
 
 #[test]
+fn stateful_operator_under_model_and_connectivity_guards_is_analysis_invariant() {
+    let source = module_src(
+        r#"
+            parameter integer TNOIMOD = 0 from [0:3];
+            parameter integer TNODEOUT = 1;
+            analog begin
+                case (TNOIMOD)
+                    0: I(p, n) <+ 0.0;
+                    3: begin
+                        if (TNODEOUT && !$port_connected(n)) begin
+                            if ($port_connected(p))
+                                I(p, n) <+ ddt(V(p, n));
+                            else
+                                I(n, p) <+ ddt(0.5 * V(p, n));
+                        end
+                    end
+                endcase
+            end
+        "#,
+    );
+    analyze(&source)
+        .expect("model and elaborated-connectivity guards are fixed during an analysis");
+
+    let runtime = module_src(
+        r#"
+            analog begin
+                case (V(p, n) > 0.0)
+                    1: I(p, n) <+ ddt(V(p, n));
+                    default: I(p, n) <+ 0.0;
+                endcase
+            end
+        "#,
+    );
+    let error = analyze(&runtime).expect_err("solution-dependent case must remain rejected");
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("'ddt' analog operator"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("under runtime control flow"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
 fn pure_operators_noise_and_accesses_are_not_misclassified_as_stateful() {
     for expression in [
         "ddx(V(p, n), V(p, n))",

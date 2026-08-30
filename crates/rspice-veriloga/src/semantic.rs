@@ -6400,7 +6400,38 @@ impl SemanticAnalyzer {
     /// legal as an analog-operator control expression even though it is not
     /// safe for compile-time code-shape folding.
     fn expression_is_simulation_invariant(&self, expr: &Expression) -> bool {
-        self.eval_const(expr).is_some()
+        if self.eval_const(expr).is_some() {
+            return true;
+        }
+        match expr {
+            Expression::Unary(unary) => self.expression_is_simulation_invariant(&unary.operand),
+            Expression::Binary(binary) => {
+                self.expression_is_simulation_invariant(&binary.left)
+                    && self.expression_is_simulation_invariant(&binary.right)
+            }
+            Expression::Conditional(conditional) => {
+                self.expression_is_simulation_invariant(&conditional.condition)
+                    && self.expression_is_simulation_invariant(&conditional.then_expr)
+                    && self.expression_is_simulation_invariant(&conditional.else_expr)
+            }
+            // Connectivity is fixed when an instance is elaborated. Compact
+            // models use it together with model selectors to choose which
+            // terminal owns a thermal `ddt`; that choice cannot change during
+            // Newton or between accepted transient steps.
+            Expression::SystemFunction(function)
+                if function.name.eq_ignore_ascii_case("$port_connected")
+                    && function.args.len() == 1 =>
+            {
+                matches!(
+                    &function.args[0],
+                    Expression::Identifier(identifier)
+                        if self.symbols.lookup(&identifier.name).is_some_and(|symbol| {
+                            matches!(symbol.kind, SymbolKind::Port | SymbolKind::Node)
+                        })
+                )
+            }
+            _ => false,
+        }
     }
 
     /// Constant evaluation that only resolves instance-invariant values.
