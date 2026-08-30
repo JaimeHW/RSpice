@@ -4091,7 +4091,9 @@ mod tests {
             .expect("behavioral circuit builds");
 
         assert_eq!(
-            circuit.behavioral_sources.voltage_sources[0].evaluate(&[], 0.0),
+            circuit.behavioral_sources.voltage_sources[0]
+                .evaluate(&[], 0.0)
+                .expect("finite behavioral voltage"),
             7.5e-9
         );
     }

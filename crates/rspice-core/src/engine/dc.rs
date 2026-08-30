@@ -406,7 +406,9 @@ impl Engine {
             }
             let voltage = node_voltage(source.node_pos) - node_voltage(source.node_neg);
             let mut observable_source = source.clone();
-            let current = observable_source.evaluate(solution, 0.0);
+            let current = observable_source
+                .evaluate(solution, 0.0)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
             let power = voltage * current;
             result.push_dc_observable(format!("I({})", source.name), current);
             result.push_dc_observable(format!("P({})", source.name), power);

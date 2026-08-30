@@ -23,6 +23,23 @@ const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
 
+fn try_stamp_behavioral_ac_coefficient(
+    matrix: &mut ComplexMatrix,
+    row: usize,
+    column: usize,
+    coefficient: Value,
+    source_kind: &str,
+    source_name: &str,
+    frequency: Value,
+) -> Result<(), SimulationError> {
+    matrix.try_add_real(row, column, coefficient).map_err(|error| {
+        SimulationError::Circuit(format!(
+            "behavioral {source_kind} source '{source_name}' stamp failed at time {time:.17e} s and frequency {frequency:.17e} Hz while adding matrix coefficient {coefficient}: {error}",
+            time = 0.0,
+        ))
+    })
+}
+
 #[derive(Debug, Clone, Copy)]
 struct AcVoltageConstraint {
     node_pos: NodeId,
@@ -337,7 +354,10 @@ impl Engine {
     /// with a supplied operating state before building a small-signal
     /// operator. Distortion analysis also uses this at nearby bias states for
     /// circuit-wide directional differentiation.
-    pub(super) fn prepare_small_signal_state(circuit: &mut CircuitData, operating_state: &[Value]) {
+    pub(super) fn prepare_small_signal_state(
+        circuit: &mut CircuitData,
+        operating_state: &[Value],
+    ) -> Result<(), SimulationError> {
         if circuit.has_nonlinear_devices() {
             for dev in &circuit.b3soi.devices {
                 dev.begin_timestep_iteration();
@@ -350,7 +370,9 @@ impl Engine {
             }
             circuit.update_nonlinear(operating_state);
         }
-        circuit.prepare_behavioral_small_signal(operating_state);
+        circuit
+            .prepare_behavioral_small_signal(operating_state)
+            .map_err(SimulationError::Circuit)
     }
 
     /// Align nonlinear devices and behavioral-source Jacobians with an
@@ -361,7 +383,7 @@ impl Engine {
         circuit: &mut CircuitData,
         operating_state: &[Value],
         frequency: Value,
-    ) {
+    ) -> Result<(), SimulationError> {
         if circuit.has_nonlinear_devices() {
             for dev in &circuit.b3soi.devices {
                 dev.begin_timestep_iteration();
@@ -374,7 +396,9 @@ impl Engine {
             }
             circuit.update_nonlinear(operating_state);
         }
-        circuit.prepare_behavioral_small_signal_state_at_frequency(operating_state, frequency);
+        circuit
+            .prepare_behavioral_small_signal_state_at_frequency(operating_state, frequency)
+            .map_err(SimulationError::Circuit)
     }
 
     #[inline]
@@ -2391,17 +2415,57 @@ impl Engine {
             let br = circuit.get_branch_matrix_index(source.branch_ordinal);
 
             if np > 0 {
-                ac_matrix.add_real(br - 1, np - 1, 1.0);
-                ac_matrix.add_real(np - 1, br - 1, 1.0);
+                try_stamp_behavioral_ac_coefficient(
+                    ac_matrix,
+                    br - 1,
+                    np - 1,
+                    1.0,
+                    "voltage",
+                    &source.name,
+                    frequency_hz,
+                )?;
+                try_stamp_behavioral_ac_coefficient(
+                    ac_matrix,
+                    np - 1,
+                    br - 1,
+                    1.0,
+                    "voltage",
+                    &source.name,
+                    frequency_hz,
+                )?;
             }
             if nn > 0 {
-                ac_matrix.add_real(br - 1, nn - 1, -1.0);
-                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+                try_stamp_behavioral_ac_coefficient(
+                    ac_matrix,
+                    br - 1,
+                    nn - 1,
+                    -1.0,
+                    "voltage",
+                    &source.name,
+                    frequency_hz,
+                )?;
+                try_stamp_behavioral_ac_coefficient(
+                    ac_matrix,
+                    nn - 1,
+                    br - 1,
+                    -1.0,
+                    "voltage",
+                    &source.name,
+                    frequency_hz,
+                )?;
             }
             // Branch row: V(np) - V(nn) - Σ (df/dx)·x = 0
             for (global_idx, df) in source.linearized_partials() {
                 if df != 0.0 {
-                    ac_matrix.add_real(br - 1, global_idx, -df);
+                    try_stamp_behavioral_ac_coefficient(
+                        ac_matrix,
+                        br - 1,
+                        global_idx,
+                        -df,
+                        "voltage",
+                        &source.name,
+                        frequency_hz,
+                    )?;
                 }
             }
         }
@@ -2414,10 +2478,26 @@ impl Engine {
                     continue;
                 }
                 if np > 0 {
-                    ac_matrix.add_real(np - 1, global_idx, df);
+                    try_stamp_behavioral_ac_coefficient(
+                        ac_matrix,
+                        np - 1,
+                        global_idx,
+                        df,
+                        "current",
+                        &source.name,
+                        frequency_hz,
+                    )?;
                 }
                 if nn > 0 {
-                    ac_matrix.add_real(nn - 1, global_idx, -df);
+                    try_stamp_behavioral_ac_coefficient(
+                        ac_matrix,
+                        nn - 1,
+                        global_idx,
+                        -df,
+                        "current",
+                        &source.name,
+                        frequency_hz,
+                    )?;
                 }
             }
         }
@@ -2464,7 +2544,7 @@ impl Engine {
             &mut state_circuit,
             operating_state,
             omega / (2.0 * PI),
-        );
+        )?;
         Self::try_build_small_signal_ac_matrix(&state_circuit, matrix, operating_state, omega)
     }
 
@@ -2597,11 +2677,13 @@ impl Engine {
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages,
             // operating region) with the final converged operating point.
-            Self::prepare_small_signal_state(&mut circuit, &dc_solution);
+            Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
         } else {
             // Behavioral source caches may still be present on an otherwise
             // linear circuit.
-            circuit.prepare_behavioral_small_signal(&dc_solution);
+            circuit
+                .prepare_behavioral_small_signal(&dc_solution)
+                .map_err(SimulationError::Circuit)?;
         }
 
         let num_nodes = circuit.num_nodes();
@@ -2648,7 +2730,9 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
-            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
+            circuit
+                .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
+                .map_err(SimulationError::Circuit)?;
             Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 circuit,
                 ac_matrix,

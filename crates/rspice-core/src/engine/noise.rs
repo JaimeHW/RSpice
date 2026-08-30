@@ -2596,7 +2596,9 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
-        circuit.prepare_behavioral_small_signal(&dc_solution);
+        circuit
+            .prepare_behavioral_small_signal(&dc_solution)
+            .map_err(SimulationError::Circuit)?;
         let CollectedNoiseSources {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
@@ -2652,7 +2654,9 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * frequency;
-            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency);
+            circuit
+                .prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency)
+                .map_err(SimulationError::Circuit)?;
             Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 &circuit,
                 &mut ac_matrix,
@@ -2976,7 +2980,9 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
-        circuit.prepare_behavioral_small_signal(&dc_solution);
+        circuit
+            .prepare_behavioral_small_signal(&dc_solution)
+            .map_err(SimulationError::Circuit)?;
         let CollectedNoiseSources {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
@@ -3130,7 +3136,9 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
-            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
+            circuit
+                .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
+                .map_err(SimulationError::Circuit)?;
             Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 circuit,
                 ac_matrix,

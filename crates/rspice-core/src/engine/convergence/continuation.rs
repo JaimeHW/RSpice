@@ -211,7 +211,9 @@ impl Engine {
             rhs.fill(0.0);
             self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin);
             if let Some(zero_solution) = zero_solution.as_deref() {
-                circuit.stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0);
+                circuit
+                    .stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0)
+                    .map_err(SolverError::InvalidCircuit)?;
             }
 
             match matrix.solve_into(&rhs, &mut proposal) {
@@ -266,7 +268,9 @@ impl Engine {
 
             self.stamp_dc_scaled(circuit, matrix, &mut rhs, gmin_floor, scale);
             if let Some(zero_solution) = zero_solution.as_deref() {
-                circuit.stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0);
+                circuit
+                    .stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0)
+                    .map_err(SolverError::InvalidCircuit)?;
             }
 
             match matrix.solve_into(&rhs, &mut proposal) {

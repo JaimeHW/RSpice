@@ -122,7 +122,12 @@ use rspice_core::analysis::harmonic_balance::{
 /// plus its canonical-parts, shooting-state-basis, producer-identity, and
 /// authenticated-construction APIs), while removing the obsolete public HB
 /// BJT-parameter and current-switch registration helpers offsets two.
-const MAX_PUBLIC_ITEMS: usize = 4260;
+///
+/// The latest +1 is `BehavioralEvaluationError`. Public behavioral-source
+/// evaluation and stamping APIs are fallible so non-finite equations cannot
+/// be silently converted into zero-valued sources; callers need the typed
+/// error to retain source identity and analysis-coordinate diagnostics.
+const MAX_PUBLIC_ITEMS: usize = 4261;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

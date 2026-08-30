@@ -63,7 +63,7 @@ impl Engine {
             abort,
         )?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        Self::prepare_small_signal_state(&mut circuit, &dc_solution);
+        Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
 
         let rhs_f1 = build_distortion_rhs(&circuit, DistortionInputTone::F1)?;
         if rhs_f1.iter().all(is_zero_complex) {
@@ -222,7 +222,8 @@ impl VolterraContext<'_> {
     ) -> Result<Vec<Complex64>, SimulationError> {
         check_abort(self.abort)?;
         self.circuit
-            .prepare_behavioral_small_signal_at_frequency(self.operating_state, frequency);
+            .prepare_behavioral_small_signal_at_frequency(self.operating_state, frequency)
+            .map_err(SimulationError::Circuit)?;
         let mut operator = Engine::try_build_small_signal_ac_matrix(
             self.circuit,
             self.matrix,

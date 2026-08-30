@@ -23,6 +23,24 @@ const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
+fn finite_difference_with_one_sided_fallback(
+    f0: Value,
+    fp: Value,
+    fm: Value,
+    step: Value,
+) -> Option<Value> {
+    let central = (fp.is_finite() && fm.is_finite())
+        .then(|| (fp - fm) / (2.0 * step))
+        .filter(|derivative| derivative.is_finite());
+    let forward = (fp.is_finite() && f0.is_finite())
+        .then(|| (fp - f0) / step)
+        .filter(|derivative| derivative.is_finite());
+    let backward = (fm.is_finite() && f0.is_finite())
+        .then(|| (f0 - fm) / step)
+        .filter(|derivative| derivative.is_finite());
+    central.or(forward).or(backward)
+}
+
 /// Result of resolving an `I(device)` operand in a behavioral expression.
 ///
 /// A device can exist without owning an MNA branch-current solution variable.
@@ -70,6 +88,56 @@ pub struct BehavioralReferenceError {
     pub dependency_name: String,
     pub canonical_dependency_name: String,
     pub reason: BehavioralReferenceReason,
+}
+
+/// A behavioral source could not be evaluated or stamped without losing a
+/// finite physical value.
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum BehavioralEvaluationError {
+    #[error(
+        "behavioral {source_kind} source '{source_name}' produced non-finite {quantity} at time {time:.17e} s and frequency {frequency:.17e} Hz: {value}"
+    )]
+    NonFinite {
+        source_kind: &'static str,
+        source_name: String,
+        quantity: String,
+        time: Value,
+        frequency: Value,
+        value: Value,
+    },
+    #[error(
+        "behavioral {source_kind} source '{source_name}' stamp failed at time {time:.17e} s and frequency {frequency:.17e} Hz: {detail}"
+    )]
+    Stamp {
+        source_kind: &'static str,
+        source_name: String,
+        time: Value,
+        frequency: Value,
+        detail: String,
+    },
+}
+
+fn try_stamp_behavioral_matrix_coefficient(
+    matrix: &mut StaticMatrix,
+    row: usize,
+    column: usize,
+    coefficient: Value,
+    source_kind: &'static str,
+    source_name: &str,
+    time: Value,
+    frequency: Value,
+) -> Result<(), BehavioralEvaluationError> {
+    matrix
+        .try_add(row, column, coefficient)
+        .map_err(|error| BehavioralEvaluationError::Stamp {
+            source_kind,
+            source_name: source_name.to_string(),
+            time,
+            frequency,
+            detail: format!(
+                "matrix coefficient {coefficient} at row {row}, column {column}: {error}"
+            ),
+        })
 }
 
 impl BehavioralReferenceError {
@@ -155,6 +223,32 @@ pub struct BehavioralVoltageSource {
 }
 
 impl BehavioralVoltageSource {
+    fn nonfinite_error(
+        &self,
+        quantity: impl Into<String>,
+        time: Value,
+        value: Value,
+    ) -> BehavioralEvaluationError {
+        BehavioralEvaluationError::NonFinite {
+            source_kind: "voltage",
+            source_name: self.name.clone(),
+            quantity: quantity.into(),
+            time,
+            frequency: self.frequency,
+            value,
+        }
+    }
+
+    fn stamp_error(&self, time: Value, detail: impl Into<String>) -> BehavioralEvaluationError {
+        BehavioralEvaluationError::Stamp {
+            source_kind: "voltage",
+            source_name: self.name.clone(),
+            time,
+            frequency: self.frequency,
+            detail: detail.into(),
+        }
+    }
+
     /// Create a new behavioral voltage source
     pub fn new(
         name: String,
@@ -302,19 +396,29 @@ impl BehavioralVoltageSource {
     }
 
     /// Evaluate the expression with current circuit solution.
-    pub fn evaluate(&mut self, solution: &[Value], time: Value) -> Value {
+    pub fn evaluate(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         self.refresh_expression_inputs(solution);
         let value = self.evaluate_with_cached_inputs(time);
         if !value.is_finite() {
             self.invalidate_cached_exact_constraint();
+            return Err(self.nonfinite_error("expression value", time, value));
         }
-        value
+        Ok(value)
     }
 
     /// Evaluate and commit stateful expression operators at an accepted point.
-    pub(crate) fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
-        let _ = self.evaluate(solution, time);
+    pub(crate) fn accept_transient_step(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
+        self.evaluate(solution, time)?;
         self.vm.accept_transient_step(time);
+        Ok(())
     }
 
     #[inline]
@@ -399,7 +503,12 @@ impl BehavioralVoltageSource {
     }
 
     #[inline]
-    fn estimate_node_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+    fn estimate_node_partial(
+        &mut self,
+        idx: usize,
+        f0: Value,
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         let base = self.node_values[idx];
         let h = Self::derivative_step(base);
         self.node_values[idx] = base + h;
@@ -408,23 +517,23 @@ impl BehavioralVoltageSource {
         let fm = self.evaluate_with_cached_inputs(time);
         self.node_values[idx] = base;
 
-        let mut df = if fp.is_finite() && fm.is_finite() {
-            (fp - fm) / (2.0 * h)
-        } else if fp.is_finite() && f0.is_finite() {
-            (fp - f0) / h
-        } else if fm.is_finite() && f0.is_finite() {
-            (f0 - fm) / h
-        } else {
-            0.0
-        };
-        if !df.is_finite() {
-            df = 0.0;
-        }
-        df
+        let df = finite_difference_with_one_sided_fallback(f0, fp, fm, h).ok_or_else(|| {
+            self.nonfinite_error(
+                format!("node derivative {idx} (no finite difference exists)"),
+                time,
+                Value::NAN,
+            )
+        })?;
+        Ok(df)
     }
 
     #[inline]
-    fn estimate_branch_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+    fn estimate_branch_partial(
+        &mut self,
+        idx: usize,
+        f0: Value,
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         let base = self.branch_values[idx];
         let h = Self::derivative_step(base);
         self.branch_values[idx] = base + h;
@@ -433,22 +542,21 @@ impl BehavioralVoltageSource {
         let fm = self.evaluate_with_cached_inputs(time);
         self.branch_values[idx] = base;
 
-        let mut df = if fp.is_finite() && fm.is_finite() {
-            (fp - fm) / (2.0 * h)
-        } else if fp.is_finite() && f0.is_finite() {
-            (fp - f0) / h
-        } else if fm.is_finite() && f0.is_finite() {
-            (f0 - fm) / h
-        } else {
-            0.0
-        };
-        if !df.is_finite() {
-            df = 0.0;
-        }
-        df
+        let df = finite_difference_with_one_sided_fallback(f0, fp, fm, h).ok_or_else(|| {
+            self.nonfinite_error(
+                format!("branch-current derivative {idx} (no finite difference exists)"),
+                time,
+                Value::NAN,
+            )
+        })?;
+        Ok(df)
     }
 
-    fn linearize_expression(&mut self, solution: &[Value], time: Value) -> Value {
+    fn linearize_expression(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         self.invalidate_cached_exact_constraint();
         self.refresh_expression_inputs(solution);
         let f0 = self.evaluate_with_cached_inputs(time);
@@ -457,7 +565,7 @@ impl BehavioralVoltageSource {
             self.node_partials.fill(0.0);
             self.branch_partials.fill(0.0);
             self.linearized_affine = 0.0;
-            return 0.0;
+            return Err(self.nonfinite_error("expression value", time, f0));
         }
 
         for idx in 0..self.node_bindings.len() {
@@ -474,7 +582,8 @@ impl BehavioralVoltageSource {
                     self.expression_dialect,
                     DerivativeTarget::Node(idx),
                 )
-                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))
+                .map(Ok)
+                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
             } else {
                 0.0
             };
@@ -493,7 +602,8 @@ impl BehavioralVoltageSource {
                     self.expression_dialect,
                     DerivativeTarget::Branch(idx),
                 )
-                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))
+                .map(Ok)
+                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
             } else {
                 0.0
             };
@@ -502,36 +612,64 @@ impl BehavioralVoltageSource {
         let mut affine = f0;
         for (idx, binding) in self.node_bindings.iter().enumerate() {
             if let Some(global_idx) = binding {
-                affine -= self.node_partials[idx] * solution[*global_idx];
+                let term = self.node_partials[idx] * solution[*global_idx];
+                if !term.is_finite() {
+                    return Err(self.nonfinite_error(
+                        format!("node affine product {idx}"),
+                        time,
+                        term,
+                    ));
+                }
+                affine -= term;
+                if !affine.is_finite() {
+                    return Err(self.nonfinite_error("affine linearization", time, affine));
+                }
             }
         }
         for (idx, binding) in self.branch_bindings.iter().enumerate() {
             if let Some(global_idx) = binding {
-                affine -= self.branch_partials[idx] * solution[*global_idx];
+                let term = self.branch_partials[idx] * solution[*global_idx];
+                if !term.is_finite() {
+                    return Err(self.nonfinite_error(
+                        format!("branch-current affine product {idx}"),
+                        time,
+                        term,
+                    ));
+                }
+                affine -= term;
+                if !affine.is_finite() {
+                    return Err(self.nonfinite_error("affine linearization", time, affine));
+                }
             }
         }
-        if affine.is_finite() {
-            self.cached_exact_constraint = Some((time, f0));
-        }
-        let affine = if !affine.is_finite() { 0.0 } else { affine };
+        self.cached_exact_constraint = Some((time, f0));
         self.linearized_affine = affine;
-        affine
+        Ok(affine)
     }
 
     /// Refresh the linearization (value and partials) at the given
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
-    pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
+    pub(crate) fn linearize_at(
+        &mut self,
+        solution: &[Value],
+    ) -> Result<(), BehavioralEvaluationError> {
         self.set_frequency(0.0);
-        let _ = self.linearize_expression(solution, 0.0);
+        self.linearize_expression(solution, 0.0)?;
+        Ok(())
     }
 
-    pub(crate) fn linearize_at_frequency(&mut self, solution: &[Value], frequency: Value) {
+    pub(crate) fn linearize_at_frequency(
+        &mut self,
+        solution: &[Value],
+        frequency: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
         if !self.frequency_dependent {
-            return;
+            return Ok(());
         }
         self.set_frequency(frequency);
-        let _ = self.linearize_expression(solution, 0.0);
+        self.linearize_expression(solution, 0.0)?;
+        Ok(())
     }
 
     /// Linearize at an arbitrary state and frequency. Unlike
@@ -541,9 +679,10 @@ impl BehavioralVoltageSource {
         &mut self,
         solution: &[Value],
         frequency: Value,
-    ) {
+    ) -> Result<(), BehavioralEvaluationError> {
         self.set_frequency(frequency);
-        let _ = self.linearize_expression(solution, 0.0);
+        self.linearize_expression(solution, 0.0)?;
+        Ok(())
     }
 
     /// Visit the cached linearized partials as `(solution_index, df/dx)`
@@ -582,10 +721,15 @@ impl BehavioralVoltageSource {
         time: Value,
         reltol: Value,
         abstol: Value,
-    ) -> bool {
-        let actual = self.evaluate(solution, time);
+    ) -> Result<bool, BehavioralEvaluationError> {
+        let actual = self.evaluate(solution, time)?;
         let linearized = self.linearized_expression_value(solution);
-        linearization_values_converged(actual, linearized, reltol, abstol)
+        if !linearized.is_finite() {
+            return Err(self.nonfinite_error("cached linearized value", time, linearized));
+        }
+        Ok(linearization_values_converged(
+            actual, linearized, reltol, abstol,
+        ))
     }
 
     /// Stamp into the matrix (MNA voltage source with computed value)
@@ -596,8 +740,8 @@ impl BehavioralVoltageSource {
         solution: &[Value],
         num_nodes: usize,
         time: Value,
-    ) {
-        let v_affine = self.linearize_expression(solution, time);
+    ) -> Result<(), BehavioralEvaluationError> {
+        let v_affine = self.linearize_expression(solution, time)?;
         let br = num_nodes + self.branch_ordinal;
         let np = self.node_pos;
         let nn = self.node_neg;
@@ -605,12 +749,48 @@ impl BehavioralVoltageSource {
         // Standard voltage source MNA stamping
         // Branch equation: V(n+) - V(n-) = v_value
         if np > 0 {
-            matrix.add(br - 1, np - 1, 1.0);
-            matrix.add(np - 1, br - 1, 1.0);
+            try_stamp_behavioral_matrix_coefficient(
+                matrix,
+                br - 1,
+                np - 1,
+                1.0,
+                "voltage",
+                &self.name,
+                time,
+                self.frequency,
+            )?;
+            try_stamp_behavioral_matrix_coefficient(
+                matrix,
+                np - 1,
+                br - 1,
+                1.0,
+                "voltage",
+                &self.name,
+                time,
+                self.frequency,
+            )?;
         }
         if nn > 0 {
-            matrix.add(br - 1, nn - 1, -1.0);
-            matrix.add(nn - 1, br - 1, -1.0);
+            try_stamp_behavioral_matrix_coefficient(
+                matrix,
+                br - 1,
+                nn - 1,
+                -1.0,
+                "voltage",
+                &self.name,
+                time,
+                self.frequency,
+            )?;
+            try_stamp_behavioral_matrix_coefficient(
+                matrix,
+                nn - 1,
+                br - 1,
+                -1.0,
+                "voltage",
+                &self.name,
+                time,
+                self.frequency,
+            )?;
         }
 
         // Linearized behavioral dependency terms on branch equation row:
@@ -619,7 +799,16 @@ impl BehavioralVoltageSource {
             if let Some(global_idx) = binding {
                 let df = self.node_partials[idx];
                 if df != 0.0 {
-                    matrix.add(br - 1, *global_idx, -df);
+                    try_stamp_behavioral_matrix_coefficient(
+                        matrix,
+                        br - 1,
+                        *global_idx,
+                        -df,
+                        "voltage",
+                        &self.name,
+                        time,
+                        self.frequency,
+                    )?;
                 }
             }
         }
@@ -627,13 +816,29 @@ impl BehavioralVoltageSource {
             if let Some(global_idx) = binding {
                 let df = self.branch_partials[idx];
                 if df != 0.0 {
-                    matrix.add(br - 1, *global_idx, -df);
+                    try_stamp_behavioral_matrix_coefficient(
+                        matrix,
+                        br - 1,
+                        *global_idx,
+                        -df,
+                        "voltage",
+                        &self.name,
+                        time,
+                        self.frequency,
+                    )?;
                 }
             }
         }
 
         // RHS: branch equation
-        rhs[br - 1] = v_affine;
+        let rhs_slot = rhs.get_mut(br - 1).ok_or_else(|| {
+            self.stamp_error(
+                time,
+                format!("RHS row {} is outside the MNA system", br - 1),
+            )
+        })?;
+        *rhs_slot = v_affine;
+        Ok(())
     }
 }
 
@@ -1848,6 +2053,32 @@ pub struct BehavioralCurrentSource {
 }
 
 impl BehavioralCurrentSource {
+    fn nonfinite_error(
+        &self,
+        quantity: impl Into<String>,
+        time: Value,
+        value: Value,
+    ) -> BehavioralEvaluationError {
+        BehavioralEvaluationError::NonFinite {
+            source_kind: "current",
+            source_name: self.name.clone(),
+            quantity: quantity.into(),
+            time,
+            frequency: self.frequency,
+            value,
+        }
+    }
+
+    fn stamp_error(&self, time: Value, detail: impl Into<String>) -> BehavioralEvaluationError {
+        BehavioralEvaluationError::Stamp {
+            source_kind: "current",
+            source_name: self.name.clone(),
+            time,
+            frequency: self.frequency,
+            detail: detail.into(),
+        }
+    }
+
     /// Create a new behavioral current source
     pub fn new(
         name: String,
@@ -1986,15 +2217,28 @@ impl BehavioralCurrentSource {
     }
 
     /// Evaluate the expression with current circuit solution.
-    pub fn evaluate(&mut self, solution: &[Value], time: Value) -> Value {
+    pub fn evaluate(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         self.refresh_expression_inputs(solution);
-        self.evaluate_with_cached_inputs(time)
+        let value = self.evaluate_with_cached_inputs(time);
+        if !value.is_finite() {
+            return Err(self.nonfinite_error("expression value", time, value));
+        }
+        Ok(value)
     }
 
     /// Evaluate and commit stateful expression operators at an accepted point.
-    pub(crate) fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
-        let _ = self.evaluate(solution, time);
+    pub(crate) fn accept_transient_step(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
+        self.evaluate(solution, time)?;
         self.vm.accept_transient_step(time);
+        Ok(())
     }
 
     #[inline]
@@ -2064,7 +2308,12 @@ impl BehavioralCurrentSource {
     }
 
     #[inline]
-    fn estimate_node_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+    fn estimate_node_partial(
+        &mut self,
+        idx: usize,
+        f0: Value,
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         let base = self.node_values[idx];
         let h = Self::derivative_step(base);
         self.node_values[idx] = base + h;
@@ -2073,23 +2322,23 @@ impl BehavioralCurrentSource {
         let fm = self.evaluate_with_cached_inputs(time);
         self.node_values[idx] = base;
 
-        let mut df = if fp.is_finite() && fm.is_finite() {
-            (fp - fm) / (2.0 * h)
-        } else if fp.is_finite() && f0.is_finite() {
-            (fp - f0) / h
-        } else if fm.is_finite() && f0.is_finite() {
-            (f0 - fm) / h
-        } else {
-            0.0
-        };
-        if !df.is_finite() {
-            df = 0.0;
-        }
-        df
+        let df = finite_difference_with_one_sided_fallback(f0, fp, fm, h).ok_or_else(|| {
+            self.nonfinite_error(
+                format!("node derivative {idx} (no finite difference exists)"),
+                time,
+                Value::NAN,
+            )
+        })?;
+        Ok(df)
     }
 
     #[inline]
-    fn estimate_branch_partial(&mut self, idx: usize, f0: Value, time: Value) -> Value {
+    fn estimate_branch_partial(
+        &mut self,
+        idx: usize,
+        f0: Value,
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         let base = self.branch_values[idx];
         let h = Self::derivative_step(base);
         self.branch_values[idx] = base + h;
@@ -2098,22 +2347,21 @@ impl BehavioralCurrentSource {
         let fm = self.evaluate_with_cached_inputs(time);
         self.branch_values[idx] = base;
 
-        let mut df = if fp.is_finite() && fm.is_finite() {
-            (fp - fm) / (2.0 * h)
-        } else if fp.is_finite() && f0.is_finite() {
-            (fp - f0) / h
-        } else if fm.is_finite() && f0.is_finite() {
-            (f0 - fm) / h
-        } else {
-            0.0
-        };
-        if !df.is_finite() {
-            df = 0.0;
-        }
-        df
+        let df = finite_difference_with_one_sided_fallback(f0, fp, fm, h).ok_or_else(|| {
+            self.nonfinite_error(
+                format!("branch-current derivative {idx} (no finite difference exists)"),
+                time,
+                Value::NAN,
+            )
+        })?;
+        Ok(df)
     }
 
-    fn linearize_expression(&mut self, solution: &[Value], time: Value) -> Value {
+    fn linearize_expression(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<Value, BehavioralEvaluationError> {
         self.refresh_expression_inputs(solution);
         let f0 = self.evaluate_with_cached_inputs(time);
 
@@ -2121,7 +2369,7 @@ impl BehavioralCurrentSource {
             self.node_partials.fill(0.0);
             self.branch_partials.fill(0.0);
             self.linearized_affine = 0.0;
-            return 0.0;
+            return Err(self.nonfinite_error("expression value", time, f0));
         }
 
         for idx in 0..self.node_bindings.len() {
@@ -2138,7 +2386,8 @@ impl BehavioralCurrentSource {
                     self.expression_dialect,
                     DerivativeTarget::Node(idx),
                 )
-                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))
+                .map(Ok)
+                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
             } else {
                 0.0
             };
@@ -2157,7 +2406,8 @@ impl BehavioralCurrentSource {
                     self.expression_dialect,
                     DerivativeTarget::Branch(idx),
                 )
-                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))
+                .map(Ok)
+                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
             } else {
                 0.0
             };
@@ -2166,33 +2416,63 @@ impl BehavioralCurrentSource {
         let mut affine = f0;
         for (idx, binding) in self.node_bindings.iter().enumerate() {
             if let Some(global_idx) = binding {
-                affine -= self.node_partials[idx] * solution[*global_idx];
+                let term = self.node_partials[idx] * solution[*global_idx];
+                if !term.is_finite() {
+                    return Err(self.nonfinite_error(
+                        format!("node affine product {idx}"),
+                        time,
+                        term,
+                    ));
+                }
+                affine -= term;
+                if !affine.is_finite() {
+                    return Err(self.nonfinite_error("affine linearization", time, affine));
+                }
             }
         }
         for (idx, binding) in self.branch_bindings.iter().enumerate() {
             if let Some(global_idx) = binding {
-                affine -= self.branch_partials[idx] * solution[*global_idx];
+                let term = self.branch_partials[idx] * solution[*global_idx];
+                if !term.is_finite() {
+                    return Err(self.nonfinite_error(
+                        format!("branch-current affine product {idx}"),
+                        time,
+                        term,
+                    ));
+                }
+                affine -= term;
+                if !affine.is_finite() {
+                    return Err(self.nonfinite_error("affine linearization", time, affine));
+                }
             }
         }
-        let affine = if !affine.is_finite() { 0.0 } else { affine };
         self.linearized_affine = affine;
-        affine
+        Ok(affine)
     }
 
     /// Refresh the linearization (value and partials) at the given
     /// operating point for small-signal assembly. AC has no time axis;
     /// expressions see t = 0.
-    pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
+    pub(crate) fn linearize_at(
+        &mut self,
+        solution: &[Value],
+    ) -> Result<(), BehavioralEvaluationError> {
         self.frequency = 0.0;
-        let _ = self.linearize_expression(solution, 0.0);
+        self.linearize_expression(solution, 0.0)?;
+        Ok(())
     }
 
-    pub(crate) fn linearize_at_frequency(&mut self, solution: &[Value], frequency: Value) {
+    pub(crate) fn linearize_at_frequency(
+        &mut self,
+        solution: &[Value],
+        frequency: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
         if !self.frequency_dependent {
-            return;
+            return Ok(());
         }
         self.frequency = frequency;
-        let _ = self.linearize_expression(solution, 0.0);
+        self.linearize_expression(solution, 0.0)?;
+        Ok(())
     }
 
     /// Linearize at an arbitrary state and frequency. Unlike
@@ -2202,9 +2482,10 @@ impl BehavioralCurrentSource {
         &mut self,
         solution: &[Value],
         frequency: Value,
-    ) {
+    ) -> Result<(), BehavioralEvaluationError> {
         self.frequency = frequency;
-        let _ = self.linearize_expression(solution, 0.0);
+        self.linearize_expression(solution, 0.0)?;
+        Ok(())
     }
 
     /// Visit the cached linearized partials as `(solution_index, df/dx)`
@@ -2243,10 +2524,15 @@ impl BehavioralCurrentSource {
         time: Value,
         reltol: Value,
         abstol: Value,
-    ) -> bool {
-        let actual = self.evaluate(solution, time);
+    ) -> Result<bool, BehavioralEvaluationError> {
+        let actual = self.evaluate(solution, time)?;
         let linearized = self.linearized_expression_value(solution);
-        linearization_values_converged(actual, linearized, reltol, abstol)
+        if !linearized.is_finite() {
+            return Err(self.nonfinite_error("cached linearized value", time, linearized));
+        }
+        Ok(linearization_values_converged(
+            actual, linearized, reltol, abstol,
+        ))
     }
 
     /// Stamp linearized behavioral current source into matrix and RHS.
@@ -2256,8 +2542,8 @@ impl BehavioralCurrentSource {
         rhs: &mut [Value],
         solution: &[Value],
         time: Value,
-    ) {
-        let i_affine = self.linearize_expression(solution, time);
+    ) -> Result<(), BehavioralEvaluationError> {
+        let i_affine = self.linearize_expression(solution, time)?;
         let np = self.node_pos;
         let nn = self.node_neg;
 
@@ -2271,10 +2557,28 @@ impl BehavioralCurrentSource {
                 let df = self.node_partials[idx];
                 if df != 0.0 {
                     if np > 0 {
-                        matrix.add(np - 1, *global_idx, df);
+                        try_stamp_behavioral_matrix_coefficient(
+                            matrix,
+                            np - 1,
+                            *global_idx,
+                            df,
+                            "current",
+                            &self.name,
+                            time,
+                            self.frequency,
+                        )?;
                     }
                     if nn > 0 {
-                        matrix.add(nn - 1, *global_idx, -df);
+                        try_stamp_behavioral_matrix_coefficient(
+                            matrix,
+                            nn - 1,
+                            *global_idx,
+                            -df,
+                            "current",
+                            &self.name,
+                            time,
+                            self.frequency,
+                        )?;
                     }
                 }
             }
@@ -2284,21 +2588,60 @@ impl BehavioralCurrentSource {
                 let df = self.branch_partials[idx];
                 if df != 0.0 {
                     if np > 0 {
-                        matrix.add(np - 1, *global_idx, df);
+                        try_stamp_behavioral_matrix_coefficient(
+                            matrix,
+                            np - 1,
+                            *global_idx,
+                            df,
+                            "current",
+                            &self.name,
+                            time,
+                            self.frequency,
+                        )?;
                     }
                     if nn > 0 {
-                        matrix.add(nn - 1, *global_idx, -df);
+                        try_stamp_behavioral_matrix_coefficient(
+                            matrix,
+                            nn - 1,
+                            *global_idx,
+                            -df,
+                            "current",
+                            &self.name,
+                            time,
+                            self.frequency,
+                        )?;
                     }
                 }
             }
         }
 
         if np > 0 {
-            rhs[np - 1] -= i_affine;
+            let rhs_slot = rhs.get_mut(np - 1).ok_or_else(|| {
+                self.stamp_error(
+                    time,
+                    format!("RHS row {} is outside the MNA system", np - 1),
+                )
+            })?;
+            let updated = *rhs_slot - i_affine;
+            if !updated.is_finite() {
+                return Err(self.nonfinite_error("positive-node RHS stamp", time, updated));
+            }
+            *rhs_slot = updated;
         }
         if nn > 0 {
-            rhs[nn - 1] += i_affine;
+            let rhs_slot = rhs.get_mut(nn - 1).ok_or_else(|| {
+                self.stamp_error(
+                    time,
+                    format!("RHS row {} is outside the MNA system", nn - 1),
+                )
+            })?;
+            let updated = *rhs_slot + i_affine;
+            if !updated.is_finite() {
+                return Err(self.nonfinite_error("negative-node RHS stamp", time, updated));
+            }
+            *rhs_slot = updated;
         }
+        Ok(())
     }
 }
 
@@ -2377,13 +2720,18 @@ impl BehavioralSources {
         reltol: Value,
         voltage_abstol: Value,
         current_abstol: Value,
-    ) -> bool {
-        self.voltage_sources
-            .iter_mut()
-            .all(|source| source.linearization_converged(solution, time, reltol, voltage_abstol))
-            && self.current_sources.iter_mut().all(|source| {
-                source.linearization_converged(solution, time, reltol, current_abstol)
-            })
+    ) -> Result<bool, BehavioralEvaluationError> {
+        for source in &mut self.voltage_sources {
+            if !source.linearization_converged(solution, time, reltol, voltage_abstol)? {
+                return Ok(false);
+            }
+        }
+        for source in &mut self.current_sources {
+            if !source.linearization_converged(solution, time, reltol, current_abstol)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub(crate) fn transient_breakpoints(&self, tstop: Value, tstep_hint: Value) -> Vec<Value> {
@@ -2403,13 +2751,18 @@ impl BehavioralSources {
     }
 
     /// Commit stateful expression operators once at a successful timestep.
-    pub(crate) fn accept_transient_step(&mut self, solution: &[Value], time: Value) {
+    pub(crate) fn accept_transient_step(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+    ) -> Result<(), BehavioralEvaluationError> {
         for source in &mut self.voltage_sources {
-            source.accept_transient_step(solution, time);
+            source.accept_transient_step(solution, time)?;
         }
         for source in &mut self.current_sources {
-            source.accept_transient_step(solution, time);
+            source.accept_transient_step(solution, time)?;
         }
+        Ok(())
     }
 
     /// Stamp all behavioral sources
@@ -2420,13 +2773,14 @@ impl BehavioralSources {
         solution: &[Value],
         num_nodes: usize,
         time: Value,
-    ) {
+    ) -> Result<(), BehavioralEvaluationError> {
         for vs in &mut self.voltage_sources {
-            vs.stamp(matrix, rhs, solution, num_nodes, time);
+            vs.stamp(matrix, rhs, solution, num_nodes, time)?;
         }
         for cs in &mut self.current_sources {
-            cs.stamp(matrix, rhs, solution, time);
+            cs.stamp(matrix, rhs, solution, time)?;
         }
+        Ok(())
     }
 }
 
@@ -2441,7 +2795,9 @@ mod tests {
         let mut prescribed = BehavioralVoltageSource::new("Bfixed".to_string(), 1, 0, 1, "3.25")
             .expect("constant behavioral voltage source parses");
         let time = 1.25;
-        prescribed.linearize_expression(&[], time);
+        prescribed
+            .linearize_expression(&[], time)
+            .expect("finite prescribed voltage");
 
         assert_eq!(prescribed.cached_exact_constraint_at(time), Some(3.25));
         assert_eq!(
@@ -2459,7 +2815,9 @@ mod tests {
                 |_| BehavioralBranchResolution::MissingDevice,
             )
             .expect("solution-dependent source binds");
-        dependent.linearize_expression(&[2.0], time);
+        dependent
+            .linearize_expression(&[2.0], time)
+            .expect("finite dependent voltage");
 
         assert_eq!(dependent.cached_exact_constraint_at(time), None);
     }
@@ -2471,36 +2829,150 @@ mod tests {
                 .expect("context-dependent behavioral voltage source parses");
         let time = 2.0;
 
-        source.linearize_expression(&[], time);
+        source
+            .linearize_expression(&[], time)
+            .expect("finite initial context");
         assert!(source.cached_exact_constraint_at(time).is_some());
         source.set_temperature(50.0);
         assert_eq!(source.cached_exact_constraint_at(time), None);
 
-        source.linearize_expression(&[], time);
+        source
+            .linearize_expression(&[], time)
+            .expect("finite temperature context");
         source.set_frequency(1.0e6);
         assert_eq!(source.cached_exact_constraint_at(time), None);
 
-        source.linearize_expression(&[], time);
+        source
+            .linearize_expression(&[], time)
+            .expect("finite frequency context");
         source.set_gmin(1.0e-9);
         assert_eq!(source.cached_exact_constraint_at(time), None);
 
-        source.linearize_expression(&[], time);
+        source
+            .linearize_expression(&[], time)
+            .expect("finite GMIN context");
         source.set_expression_dialect(ExpressionDialect::Xyce);
         assert_eq!(source.cached_exact_constraint_at(time), None);
 
         let mut nonfinite =
             BehavioralVoltageSource::new("Binf".to_string(), 1, 0, 1, "1e308*1e308")
                 .expect("nonfinite behavioral expression parses");
-        nonfinite.linearize_expression(&[], time);
+        assert!(nonfinite.linearize_expression(&[], time).is_err());
         assert_eq!(nonfinite.cached_exact_constraint_at(time), None);
 
         let mut later_nonfinite =
             BehavioralVoltageSource::new("Blater".to_string(), 1, 0, 1, "exp(time*1000)")
                 .expect("time-dependent behavioral expression parses");
-        later_nonfinite.linearize_expression(&[], 0.0);
+        later_nonfinite
+            .linearize_expression(&[], 0.0)
+            .expect("initial expression is finite");
         assert!(later_nonfinite.cached_exact_constraint_at(0.0).is_some());
-        assert!(!later_nonfinite.evaluate(&[], 1.0).is_finite());
+        assert!(later_nonfinite.evaluate(&[], 1.0).is_err());
         assert_eq!(later_nonfinite.cached_exact_constraint_at(0.0), None);
+    }
+
+    #[test]
+    fn voltage_and_current_linearization_reject_nonfinite_derivatives() {
+        let expression = "1e308*exp(2*v(ctrl))";
+        let mut voltage = BehavioralVoltageSource::new("BV_DERIV".to_string(), 2, 0, 1, expression)
+            .expect("behavioral voltage expression parses");
+        voltage
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("voltage-source control binds");
+        let voltage_error = voltage
+            .linearize_expression(&[0.0, 0.0, 0.0], 0.0)
+            .expect_err("overflowing voltage derivative must fail closed");
+        assert!(voltage_error.to_string().contains("node derivative"));
+        assert!(voltage_error.to_string().contains("BV_DERIV"));
+
+        let mut current = BehavioralCurrentSource::new("BI_DERIV".to_string(), 2, 0, expression)
+            .expect("behavioral current expression parses");
+        current
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("current-source control binds");
+        let current_error = current
+            .linearize_expression(&[0.0, 0.0], 0.0)
+            .expect_err("overflowing current derivative must fail closed");
+        assert!(current_error.to_string().contains("node derivative"));
+        assert!(current_error.to_string().contains("BI_DERIV"));
+    }
+
+    #[test]
+    fn voltage_and_current_linearization_reject_nonfinite_affine_products() {
+        let expression = "1.1e308*(v(ctrl)-1.7)";
+        let mut voltage =
+            BehavioralVoltageSource::new("BV_AFFINE".to_string(), 2, 0, 1, expression)
+                .expect("behavioral voltage expression parses");
+        voltage
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("voltage-source control binds");
+        let voltage_error = voltage
+            .linearize_expression(&[1.7, 0.0, 0.0], 0.0)
+            .expect_err("overflowing voltage affine product must fail closed");
+        assert!(voltage_error.to_string().contains("node affine product"));
+        assert!(voltage_error.to_string().contains("BV_AFFINE"));
+
+        let mut current = BehavioralCurrentSource::new("BI_AFFINE".to_string(), 2, 0, expression)
+            .expect("behavioral current expression parses");
+        current
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("current-source control binds");
+        let current_error = current
+            .linearize_expression(&[1.7, 0.0], 0.0)
+            .expect_err("overflowing current affine product must fail closed");
+        assert!(current_error.to_string().contains("node affine product"));
+        assert!(current_error.to_string().contains("BI_AFFINE"));
+    }
+
+    #[test]
+    fn voltage_and_current_stamps_reject_nonfinite_matrix_accumulation() {
+        let expression = "1e308*v(ctrl)";
+        let mut voltage = BehavioralVoltageSource::new("BV_STAMP".to_string(), 2, 0, 1, expression)
+            .expect("behavioral voltage expression parses");
+        voltage
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("voltage-source control binds");
+        let mut voltage_matrix =
+            StaticMatrix::from_triplets(3, 3, &[(2, 1, 0.0), (1, 2, 0.0), (2, 0, -Value::MAX)])
+                .expect("voltage stamp matrix builds");
+        let voltage_error = voltage
+            .stamp(&mut voltage_matrix, &mut [0.0; 3], &[1.0, 0.0, 0.0], 2, 0.0)
+            .expect_err("overflowing voltage matrix accumulation must fail closed");
+        let voltage_message = voltage_error.to_string();
+        assert!(voltage_message.contains("BV_STAMP"));
+        assert!(voltage_message.contains("matrix coefficient -100000"));
+
+        let mut current = BehavioralCurrentSource::new("BI_STAMP".to_string(), 2, 0, expression)
+            .expect("behavioral current expression parses");
+        current
+            .bind_references(
+                |name| (name == "ctrl").then_some(1),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("current-source control binds");
+        let mut current_matrix = StaticMatrix::from_triplets(2, 2, &[(1, 0, Value::MAX)])
+            .expect("current stamp matrix builds");
+        let current_error = current
+            .stamp(&mut current_matrix, &mut [0.0; 2], &[1.0, 0.0], 0.0)
+            .expect_err("overflowing current matrix accumulation must fail closed");
+        let current_message = current_error.to_string();
+        assert!(current_message.contains("BI_STAMP"));
+        assert!(current_message.contains("matrix coefficient 100000"));
     }
 
     #[test]
@@ -2530,9 +3002,13 @@ mod tests {
                 |_| BehavioralBranchResolution::MissingDevice,
             )
             .expect("invariant source binds");
-        invariant.linearize_at(&[3.0]);
+        invariant
+            .linearize_at(&[3.0])
+            .expect("finite invariant linearization");
         let initial_partials = invariant.linearized_partials().collect::<Vec<_>>();
-        invariant.linearize_at_frequency(&[9.0], 100.0);
+        invariant
+            .linearize_at_frequency(&[9.0], 100.0)
+            .expect("finite invariant frequency preparation");
         assert_eq!(invariant.frequency, 0.0);
         assert_eq!(
             invariant.linearized_partials().collect::<Vec<_>>(),
@@ -2548,8 +3024,12 @@ mod tests {
                 |_| BehavioralBranchResolution::MissingDevice,
             )
             .expect("frequency-dependent source binds");
-        dependent.linearize_at(&[3.0]);
-        dependent.linearize_at_frequency(&[3.0], 100.0);
+        dependent
+            .linearize_at(&[3.0])
+            .expect("finite dependent linearization");
+        dependent
+            .linearize_at_frequency(&[3.0], 100.0)
+            .expect("finite dependent frequency preparation");
         assert_eq!(dependent.frequency, 100.0);
         assert_eq!(
             dependent.linearized_partials().collect::<Vec<_>>(),
@@ -2714,7 +3194,9 @@ mod tests {
                 |_| BehavioralBranchResolution::MissingDevice,
             )
             .expect("Akima input binds");
-        akima.linearize_at(&[0.3]);
+        akima
+            .linearize_at(&[0.3])
+            .expect("finite Akima linearization");
         let (_, derivative) = akima
             .linearized_partials()
             .next()
@@ -2750,7 +3232,9 @@ mod tests {
                 |_| BehavioralBranchResolution::MissingDevice,
             )
             .expect("table input binds");
-        table.linearize_at(&[0.1]);
+        table
+            .linearize_at(&[0.1])
+            .expect("finite table linearization");
         let (_, derivative) = table
             .linearized_partials()
             .next()
@@ -2784,7 +3268,9 @@ mod tests {
             )
             .expect("inactive voltage reference binds");
 
-        source.linearize_at(&[7.0]);
+        source
+            .linearize_at(&[7.0])
+            .expect("finite file lookup linearization");
         let (_, derivative) = source
             .linearized_partials()
             .next()

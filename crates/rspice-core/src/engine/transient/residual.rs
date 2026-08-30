@@ -1696,7 +1696,9 @@ impl Engine {
             let static_behavioral_snapshot = ctx
                 .xyce_one_step_order2
                 .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
-            circuit.stamp_behavioral_sources(matrix, rhs, solution, time);
+            circuit
+                .stamp_behavioral_sources(matrix, rhs, solution, time)
+                .map_err(SimulationError::Circuit)?;
             if let Some((before_values, before_rhs)) = static_behavioral_snapshot {
                 for (value, before) in matrix.values_mut().iter_mut().zip(before_values) {
                     *value = before + 0.5 * (*value - before);
@@ -2321,7 +2323,9 @@ impl Engine {
                     )
                     .map_err(SimulationError::Circuit)?;
             } else {
-                circuit.stamp_behavioral_sources(probe, probe_rhs, solution, time);
+                circuit
+                    .stamp_behavioral_sources(probe, probe_rhs, solution, time)
+                    .map_err(SimulationError::Circuit)?;
             }
             if circuit.has_xspice_devices() {
                 // OneStep's order-2 history term applies to the complete

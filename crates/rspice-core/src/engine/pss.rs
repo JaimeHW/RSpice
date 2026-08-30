@@ -3182,16 +3182,20 @@ impl Engine {
             circuit
                 .stamp_nonlinear(matrix, rhs, linearize_at)
                 .map_err(SimulationError::Circuit)?;
-            circuit
-                .stamp_behavioral(
-                    matrix,
-                    rhs,
-                    linearize_at,
-                    t_next,
-                    crate::xspice::AnalysisType::Transient,
-                )
-                .map_err(SimulationError::Circuit)?;
         }
+        // B sources remain part of the physical transient equation even when
+        // they are solution-independent and therefore do not make the circuit
+        // nonlinear. Keep their fallible evaluation on the PSS shooting path
+        // instead of omitting time-only sources from the periodic orbit.
+        circuit
+            .stamp_behavioral(
+                matrix,
+                rhs,
+                linearize_at,
+                t_next,
+                crate::xspice::AnalysisType::Transient,
+            )
+            .map_err(SimulationError::Circuit)?;
         Ok(())
     }
 

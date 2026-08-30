@@ -92,7 +92,9 @@ mod tests {
         circuit.set_semiconductor_junction_gmin(1.0e-3);
 
         assert_eq!(
-            circuit.behavioral_sources.voltage_sources[0].evaluate(&[], 0.0),
+            circuit.behavioral_sources.voltage_sources[0]
+                .evaluate(&[], 0.0)
+                .expect("finite GMIN source"),
             2.5e-8,
             "expression-visible GMIN is the fixed resolved device option, not the active continuation conductance"
         );
@@ -1522,9 +1524,10 @@ impl CircuitData {
         rhs: &mut [Value],
         solution: &[Value],
         time: Value,
-    ) {
+    ) -> Result<(), String> {
         self.behavioral_sources
-            .stamp_all(matrix, rhs, solution, self.num_nodes, time);
+            .stamp_all(matrix, rhs, solution, self.num_nodes, time)
+            .map_err(|error| error.to_string())
     }
 
     /// Stamp behavioral sources and generated Verilog-A builtins with the
@@ -1596,7 +1599,7 @@ impl CircuitData {
         _analysis: crate::xspice::AnalysisType,
         _evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
     ) -> Result<(), String> {
-        self.stamp_behavioral_sources(matrix, rhs, solution, time);
+        self.stamp_behavioral_sources(matrix, rhs, solution, time)?;
         #[cfg(feature = "veriloga-builtins-base")]
         {
             let generated_analysis = match _analysis {
@@ -1674,13 +1677,9 @@ impl CircuitData {
         reltol: Value,
         voltage_abstol: Value,
         current_abstol: Value,
-    ) -> bool {
-        self.behavioral_sources.linearizations_converged(
-            solution,
-            time,
-            reltol,
-            voltage_abstol,
-            current_abstol,
-        )
+    ) -> Result<bool, String> {
+        self.behavioral_sources
+            .linearizations_converged(solution, time, reltol, voltage_abstol, current_abstol)
+            .map_err(|error| error.to_string())
     }
 }

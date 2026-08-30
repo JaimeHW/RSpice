@@ -162,7 +162,9 @@ impl Engine {
         if has_nonlinear {
             circuit.update_nonlinear(&dc_solution);
         }
-        circuit.prepare_behavioral_small_signal(&dc_solution);
+        circuit
+            .prepare_behavioral_small_signal(&dc_solution)
+            .map_err(SimulationError::Circuit)?;
 
         let size = circuit.matrix_size();
         let br = circuit.get_branch_matrix_index(br_ordinal);
@@ -180,7 +182,9 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             let omega = 2.0 * PI * freq;
-            circuit.prepare_behavioral_small_signal_at_frequency(&dc_solution, freq);
+            circuit
+                .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
+                .map_err(SimulationError::Circuit)?;
             Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 &circuit,
                 &mut ac_matrix,
