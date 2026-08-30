@@ -723,12 +723,11 @@ impl SemanticAnalyzer {
             // A default that references other parameters must stay
             // symbolic: instance overrides of those parameters change it,
             // so it is evaluated per instance at setup time.
-            let default = if is_parameter_array
-                || param
-                    .default
-                    .as_ref()
-                    .is_some_and(|e| Self::references_identifiers(e, &param_names))
-            {
+            let default_depends_on_parameters = param
+                .default
+                .as_ref()
+                .is_some_and(|expression| Self::references_identifiers(expression, &param_names));
+            let default = if is_parameter_array || default_depends_on_parameters {
                 None
             } else {
                 declared_default
@@ -809,7 +808,8 @@ impl SemanticAnalyzer {
             };
 
             // Validate default against range
-            if let (Some(default_val), Some(range_constraint)) = (declared_default, &range)
+            if !default_depends_on_parameters
+                && let (Some(default_val), Some(range_constraint)) = (declared_default, &range)
                 && !range_constraint.contains(default_val)
             {
                 self.record_error_at(
