@@ -1827,7 +1827,7 @@ impl CircuitData {
 
     /// Commit build-time generated Verilog-A integrator state after acceptance.
     #[cfg(feature = "veriloga-builtins-base")]
-    pub fn accept_generated_veriloga_timestep(&mut self) -> Result<(), String> {
+    pub(crate) fn accept_generated_veriloga_timestep(&mut self) -> Result<(), String> {
         self.generated_veriloga_devices.advance_state()
     }
 
@@ -1947,7 +1947,7 @@ impl CircuitData {
     /// Sets the simulation time, integration timestep, and analysis type so
     /// ddt/idt and event operators see transient semantics.
     #[cfg(feature = "veriloga")]
-    pub fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
+    pub(crate) fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
             device.try_begin_analysis(analysis).map_err(|error| {
@@ -1962,7 +1962,7 @@ impl CircuitData {
     /// refreshes ordered assignments and speculative state immediately before
     /// the timepoint is accepted.
     #[cfg(feature = "veriloga")]
-    pub fn evaluate_veriloga_timepoint(&mut self, solution: &[Value]) -> Result<(), String> {
+    pub(crate) fn evaluate_veriloga_timepoint(&mut self, solution: &[Value]) -> Result<(), String> {
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
             device
@@ -2038,7 +2038,7 @@ impl CircuitData {
     /// stepper can place a fine restart without a level-true region
     /// pinning tiny steps forever.
     #[cfg(feature = "veriloga")]
-    pub fn accept_veriloga_timestep(&mut self) -> Result<bool, String> {
+    pub(crate) fn accept_veriloga_timestep(&mut self) -> Result<bool, String> {
         self.veriloga_devices.validate_timestep_acceptance()?;
         let discontinuity = self
             .veriloga_devices
@@ -2051,7 +2051,7 @@ impl CircuitData {
     /// Tightest `$bound_step` request across Verilog-A devices at the
     /// latest evaluation (None when nothing bounds the next step)
     #[cfg(feature = "veriloga")]
-    pub fn veriloga_timestep_bound(&self) -> Result<Option<Value>, String> {
+    pub(crate) fn veriloga_timestep_bound(&self) -> Result<Option<Value>, String> {
         let mut tightest: Option<Value> = None;
         for device in self.veriloga_devices.iter() {
             let instance = device.name.clone();

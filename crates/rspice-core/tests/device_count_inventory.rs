@@ -63,6 +63,10 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "branch residuals retained from the current Core stamp",
     ),
     (
+        "resistor_absolute_noise_temperatures",
+        "per-resistor noise metadata for the resistor instances already counted",
+    ),
+    (
         "xspice_digital_drivers",
         "per-output digital drive state of the counted XSPICE instances",
     ),

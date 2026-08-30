@@ -209,7 +209,7 @@ impl TimestepController {
     ///
     /// This can be greater than a raw device or breakpoint-span limit when
     /// that limit lies below the hard convergence-recovery floor.
-    pub fn max_dt(&self) -> Value {
+    pub(crate) fn max_dt(&self) -> Value {
         self.max_dt
     }
 
