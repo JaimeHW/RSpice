@@ -305,6 +305,7 @@ impl SpectrumAnalysis {
         let point = fft.points.get(idx)?;
         let mut freq = point.frequency;
         let mut db = point.magnitude_db();
+        let mut mag = point.magnitude;
         if !db.is_finite() {
             return None;
         }
@@ -319,16 +320,15 @@ impl SpectrumAnalysis {
                     let delta = (0.5 * (left - right) / denom).clamp(-0.5, 0.5);
                     let df = fft.frequency_resolution();
                     freq = point.frequency + delta * df;
-                    db = center - 0.25 * (left - right) * delta;
+                    let interpolated_db = center - 0.25 * (left - right) * delta;
+                    if interpolated_db != center {
+                        db = interpolated_db;
+                        mag = 10.0_f64.powf(db / 20.0);
+                    }
                 }
             }
         }
 
-        let mag = if db.is_finite() {
-            10.0_f64.powf(db / 20.0)
-        } else {
-            point.magnitude
-        };
         if !mag.is_finite() || mag <= 0.0 {
             return None;
         }
