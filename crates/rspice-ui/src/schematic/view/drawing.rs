@@ -6,18 +6,15 @@
 use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::state::{
-    Bus, BusTap, Component, ComponentType, Point, PortDirection, PortSpec, SchematicProbe, Wire,
+    Bus, BusTap, Component, ComponentType, Point, PortDirection, PortSpec, ResolvedSymbolSource,
+    SchematicProbe, Wire,
 };
 use crate::workbench::app_state::AppState;
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::SchematicSymbolContext;
-use super::resolved_symbol_render::{draw_resolved_symbol_with_visibility, pin_label_align};
-use super::symbol_primitives::{
-    draw_capacitor_symbol, draw_cccs_symbol, draw_ccvs_symbol, draw_diode_symbol,
-    draw_ground_symbol, draw_inductor_symbol, draw_isource_symbol, draw_nmos_symbol,
-    draw_npn_symbol, draw_pmos_symbol, draw_pnp_symbol, draw_resistor_symbol, draw_vccs_symbol,
-    draw_vcvs_symbol, draw_vsource_symbol, rotation_to_index,
+use super::resolved_symbol_render::{
+    draw_resolved_symbol_with_visibility, resolved_symbol_world_bounds,
 };
 use super::viewport::Viewport;
 
@@ -31,7 +28,6 @@ const DEFAULT_BUS_TAP_STROKE_WIDTH: f32 = 2.0;
 const SELECTED_BUS_TAP_STROKE_WIDTH: f32 = 2.4;
 const PROBE_RADIUS: f32 = 9.0;
 const PROBE_CROSSHAIR_HALF_SPAN: f32 = 13.0;
-type PortMarkerSegment = ((f32, f32), (f32, f32));
 
 const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
 const _: [(); 1] = [(); (SELECTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
@@ -465,25 +461,18 @@ pub(super) fn draw_component(
 
     let stroke = Stroke::new(if selected { 1.5 } else { 1.0 } * scale, outline_color);
 
-    // SVG symbols expect rotation in degrees (0, 90, 180, 270)
-    // Procedural drawing uses rotation_to_delta() which expects index (0-3)
     let rotation_degrees = component.rotation.degrees();
-    let rotation_index = rotation_to_index(component.rotation);
     let resolved_cell_symbol = if component.kind == ComponentType::CellInstance {
         symbol_context.resolved_symbol(component)
     } else {
         None
     };
 
-    // Try to use SVG symbol if available — via the library's baked
-    // (pre-flattened, pre-transformed) geometry: per frame this is one
-    // multiply-add per vertex instead of bezier + trig per vertex.
-    let svg_rendered = if component.kind == ComponentType::Port {
-        // Typed interface direction is component-owned runtime data; the
-        // static library glyph cannot represent it without lying.
-        false
-    } else if component.kind == ComponentType::CellInstance {
-        symbol_library
+    // Authored symbols are the sole component-body source. Missing library or
+    // instance resolution is rendered as an explicit error marker; it must
+    // never silently change the circuit's visual semantics.
+    let symbol_drew_its_own_labels = if component.kind == ComponentType::CellInstance {
+        if symbol_library
             .and_then(|library| compatible_builtin_xspice_asset(component, library))
             .and_then(|(library, filename, width, height)| {
                 library.baked_asset(
@@ -500,122 +489,75 @@ pub(super) fn draw_component(
                 draw_artwork_lead_extensions(painter, pos, scale, component, stroke);
                 true
             })
-    } else if let Some(library) = symbol_library {
-        if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
-            component.kind,
-            rotation_degrees,
-            component.symbol_variant.as_deref(),
-        ) {
-            let baked = library.baked(
+        {
+            false
+        } else if let Some(symbol) = resolved_cell_symbol
+            && symbol.source() == ResolvedSymbolSource::Authored
+            && resolved_symbol_world_bounds(component, symbol).is_some()
+        {
+            draw_resolved_symbol_with_visibility(
+                painter,
+                pos,
+                scale,
+                component,
                 symbol,
+                stroke,
+                parameter_labels,
+            );
+            true
+        } else {
+            draw_symbol_resolution_error(painter, pos, scale, component.kind, "unresolved cell");
+            false
+        }
+    } else if let Some((library, symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
+        library
+            .get_with_rotation_variant(
+                component.kind,
+                rotation_degrees,
+                component.symbol_variant.as_deref(),
+            )
+            .map(|(symbol, rotation)| (library, symbol, rotation))
+    }) {
+        let symbol_stroke = if component.kind == ComponentType::Port {
+            port_symbol_stroke(stroke, scale, selected, component.port_spec().as_ref())
+        } else {
+            stroke
+        };
+        let baked = library.baked(
+            symbol,
+            adjusted_rotation,
+            component.mirror_h,
+            component.mirror_v,
+        );
+        draw_baked(painter, &baked, pos, scale, symbol_stroke);
+        if component.kind == ComponentType::Port {
+            draw_port_direction_overlay(
+                painter,
+                pos,
+                scale,
                 adjusted_rotation,
                 component.mirror_h,
                 component.mirror_v,
+                component
+                    .port_spec()
+                    .map(|port| port.direction)
+                    .unwrap_or_default(),
+                symbol_stroke,
             );
-            draw_baked(painter, &baked, pos, scale, stroke);
-            true
-        } else {
-            // No SVG available for this component type, will use procedural fallback
-            false
         }
+        false
     } else {
-        // Symbol library not available, procedural fallback will be used
+        draw_symbol_resolution_error(painter, pos, scale, component.kind, "missing canonical SVG");
         false
     };
-
-    // Fall back to procedural drawing if SVG not available
-    if !svg_rendered {
-        // Using procedural drawing fallback
-        match component.kind {
-            ComponentType::Resistor => {
-                draw_resistor_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Capacitor => {
-                draw_capacitor_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Inductor => {
-                draw_inductor_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::VoltageSource => {
-                draw_vsource_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::CurrentSource => {
-                draw_isource_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Ground => {
-                draw_ground_symbol(painter, pos, scale, stroke);
-            }
-            ComponentType::Port => {
-                let spec = component.port_spec();
-                draw_port_symbol(
-                    painter,
-                    pos,
-                    scale,
-                    rotation_index,
-                    (component.mirror_h, component.mirror_v),
-                    spec.as_ref().map(|port| port.direction).unwrap_or_default(),
-                    port_stroke(stroke, scale, selected, spec.as_ref()),
-                );
-            }
-            ComponentType::Diode => {
-                draw_diode_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Nmos => {
-                draw_nmos_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Pmos => {
-                draw_pmos_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::NpnBjt => {
-                draw_npn_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::PnpBjt => {
-                draw_pnp_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Vcvs => {
-                draw_vcvs_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Vccs => {
-                draw_vccs_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Ccvs => {
-                draw_ccvs_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::Cccs => {
-                draw_cccs_symbol(painter, pos, scale, rotation_index, stroke);
-            }
-            ComponentType::CellInstance => {
-                if let Some(symbol) = resolved_cell_symbol {
-                    draw_resolved_symbol_with_visibility(
-                        painter,
-                        pos,
-                        scale,
-                        component,
-                        symbol,
-                        stroke,
-                        parameter_labels,
-                    );
-                } else {
-                    draw_cell_instance_symbol(painter, pos, scale, component, stroke);
-                }
-            }
-            _ => {
-                // Generic component: draw a rectangle
-                let rect = Rect::from_center_size(pos, Vec2::splat(30.0 * scale));
-                painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-            }
-        }
-    }
 
     // Smart label placement based on component type, rotation, and dimensions
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides.
     //
-    // A generated block prints its own name and value against the anchors in
-    // its symbol document; everything else — including a cell instance drawn
-    // with authored artwork — is labelled here, so no placed instance can end
-    // up without its reference designator.
-    let symbol_drew_its_own_labels = resolved_cell_symbol.is_some() && !svg_rendered;
+    // A resolved authored cell symbol prints its own name and value against
+    // the anchors in its symbol document. Canonical catalog artwork and error
+    // states use the ordinary instance labels here.
     if !symbol_drew_its_own_labels
         && parameter_labels != crate::state::SchematicParameterLabelVisibility::Hidden
     {
@@ -623,9 +565,80 @@ pub(super) fn draw_component(
     }
 }
 
+pub(super) fn port_symbol_stroke(
+    symbol_stroke: Stroke,
+    scale: f32,
+    selected: bool,
+    spec: Option<&PortSpec>,
+) -> Stroke {
+    if spec.is_none_or(|port| port.vector().is_none()) {
+        return symbol_stroke;
+    }
+    let width = if selected {
+        SELECTED_BUS_STROKE_WIDTH
+    } else {
+        DEFAULT_BUS_STROKE_WIDTH
+    };
+    Stroke::new(width * scale, symbol_stroke.color)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the overlay mirrors the symbol transform contract"
+)]
+pub(super) fn draw_port_direction_overlay(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    rotation_degrees: i32,
+    mirror_h: bool,
+    mirror_v: bool,
+    direction: PortDirection,
+    stroke: Stroke,
+) {
+    let screen_point = |point| {
+        let point = crate::schematic::port_overlay::transform_point(
+            point,
+            rotation_degrees,
+            mirror_h,
+            mirror_v,
+        );
+        Pos2::new(pos.x + point.x * scale, pos.y + point.y * scale)
+    };
+    for segment in crate::schematic::port_overlay::direction_segments(direction) {
+        painter.line_segment(
+            [screen_point(segment.start), screen_point(segment.end)],
+            stroke,
+        );
+    }
+}
+
+pub(super) fn draw_symbol_resolution_error(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    kind: ComponentType,
+    reason: &str,
+) {
+    let color = egui::Color32::from_rgb(220, 70, 70);
+    let half = 12.0 * scale.max(0.25);
+    let rect = Rect::from_center_size(pos, Vec2::splat(half * 2.0));
+    let stroke = Stroke::new(1.5 * scale.max(0.5), color);
+    painter.rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
+    painter.line_segment([rect.left_top(), rect.right_bottom()], stroke);
+    painter.line_segment([rect.right_top(), rect.left_bottom()], stroke);
+    painter.text(
+        pos + egui::vec2(0.0, half + 4.0 * scale.max(0.5)),
+        egui::Align2::CENTER_TOP,
+        format!("{}: {reason}", kind.display_name()),
+        egui::FontId::monospace(9.0 * scale.max(0.75)),
+        color,
+    );
+}
+
 /// Resolve authored artwork only when every visible lead anchor is exactly
-/// the same point as the frozen executable terminal layout. The fallback is
-/// the generated direction-aware symbol, never approximate artwork.
+/// the same point as the frozen executable terminal layout. A mismatch uses
+/// another authored cell symbol when available, otherwise an explicit error.
 pub(super) fn compatible_builtin_xspice_asset<'a>(
     component: &'a Component,
     library: &'a SymbolLibrary,
@@ -667,173 +680,6 @@ pub(super) fn draw_artwork_lead_extensions(
             )
         };
         painter.line_segment([to_screen(edge), to_screen(terminal)], stroke);
-    }
-}
-
-/// The weight one interface port is drawn at.
-///
-/// A port whose name declares a vector carries the same conductors the bus it
-/// meets does, so it is stroked at the bus's weight — the constant `draw_bus`
-/// itself uses, never a literal that matches it today — and reads as part of
-/// that bus rather than as a scalar flag standing on one. Every other port
-/// keeps the symbol weight, because every other name carries one conductor.
-fn port_stroke(
-    symbol_stroke: Stroke,
-    scale: f32,
-    selected: bool,
-    spec: Option<&PortSpec>,
-) -> Stroke {
-    if spec.is_none_or(|port| port.vector().is_none()) {
-        return symbol_stroke;
-    }
-    let width = if selected {
-        SELECTED_BUS_STROKE_WIDTH
-    } else {
-        DEFAULT_BUS_STROKE_WIDTH
-    };
-    Stroke::new(width * scale, symbol_stroke.color)
-}
-
-/// Interface port: a flag whose tip is the attachment point at (-10, 0).
-/// It must read as "this net leaves the cell", not as a floating label —
-/// the filled tip distinguishes it from a net label at a glance.
-pub(super) fn draw_port_symbol(
-    painter: &Painter,
-    pos: Pos2,
-    scale: f32,
-    rotation_index: i32,
-    mirror: (bool, bool),
-    direction: PortDirection,
-    stroke: Stroke,
-) {
-    let rotate = |dx: f32, dy: f32| -> Pos2 {
-        let dx = if mirror.0 { -dx } else { dx };
-        let dy = if mirror.1 { -dy } else { dy };
-        let (x, y) = match rotation_index.rem_euclid(4) {
-            0 => (dx, dy),
-            1 => (-dy, dx),
-            2 => (-dx, -dy),
-            _ => (dy, -dx),
-        };
-        Pos2::new(pos.x + x * scale, pos.y + y * scale)
-    };
-    let outline = [
-        rotate(-10.0, 0.0),
-        rotate(-4.0, -6.0),
-        rotate(10.0, -6.0),
-        rotate(10.0, 6.0),
-        rotate(-4.0, 6.0),
-    ];
-    for i in 0..outline.len() {
-        painter.line_segment([outline[i], outline[(i + 1) % outline.len()]], stroke);
-    }
-    painter.circle_filled(rotate(-10.0, 0.0), 1.6 * scale, stroke.color);
-    let direction_segments: &[PortMarkerSegment] = match direction {
-        PortDirection::In => &[
-            ((-1.5, 0.0), (5.0, 0.0)),
-            ((5.0, 0.0), (2.0, -2.5)),
-            ((5.0, 0.0), (2.0, 2.5)),
-        ],
-        PortDirection::Out => &[
-            ((5.0, 0.0), (-1.5, 0.0)),
-            ((-1.5, 0.0), (1.5, -2.5)),
-            ((-1.5, 0.0), (1.5, 2.5)),
-        ],
-        PortDirection::InOut => &[
-            ((-1.5, 0.0), (5.0, 0.0)),
-            ((5.0, 0.0), (2.0, -2.5)),
-            ((5.0, 0.0), (2.0, 2.5)),
-            ((-1.5, 0.0), (1.5, -2.5)),
-            ((-1.5, 0.0), (1.5, 2.5)),
-        ],
-        PortDirection::Supply => &[((2.0, -3.0), (2.0, 3.0)), ((-1.0, -3.0), (5.0, -3.0))],
-    };
-    for &((x1, y1), (x2, y2)) in direction_segments {
-        painter.line_segment([rotate(x1, y1), rotate(x2, y2)], stroke);
-    }
-}
-
-/// Hierarchical cell instance: a block body with pin stubs and pin names
-/// matching the bound interface, and the master cell's name inside — the
-/// symbol must read as "descend into me", not as an anonymous square.
-///
-/// Geometry comes from the same `instance_pin_layout` the netlister reads,
-/// transformed through the component's full mirror+rotation, so the drawn
-/// stubs land exactly on the electrical terminals in every orientation.
-pub(super) fn draw_cell_instance_symbol(
-    painter: &Painter,
-    pos: Pos2,
-    scale: f32,
-    component: &Component,
-    stroke: Stroke,
-) {
-    use crate::state::Point;
-
-    let to_screen = |p: Point| -> Pos2 {
-        let t = component.transform_point(p);
-        Pos2::new(pos.x + t.x as f32 * scale, pos.y + t.y as f32 * scale)
-    };
-
-    let block = component.instance_block();
-    let (min, max) = block.body;
-    let corners = [
-        to_screen(min),
-        to_screen(Point::new(max.x, min.y)),
-        to_screen(max),
-        to_screen(Point::new(min.x, max.y)),
-    ];
-    for i in 0..4 {
-        painter.line_segment([corners[i], corners[(i + 1) % 4]], stroke);
-    }
-
-    // Pin leads from each terminal to the body edge its own side implies, a
-    // connection dot at the terminal, and the port name just inside the body.
-    let label_font = crate::state::GENERATED_PIN_LABEL_SIZE * scale;
-    for pin in block.pins {
-        let inner = crate::state::lead_inner(pin.offset, pin.side, Some(block.body));
-        painter.line_segment([to_screen(pin.offset), to_screen(inner)], stroke);
-        painter.circle_filled(to_screen(pin.offset), 1.6 * scale, stroke.color);
-
-        if pin.name.is_empty() || label_font < 4.0 {
-            continue;
-        }
-        painter.text(
-            to_screen(crate::state::pin_label_anchor(
-                pin.offset,
-                pin.side,
-                Some(block.body),
-            )),
-            pin_label_align(component, pin.side),
-            crate::state::fit_pin_name(&pin.name),
-            crate::ui::theme::mono(label_font, crate::ui::theme::FontWeight::Regular),
-            stroke.color.gamma_multiply(0.75),
-        );
-    }
-
-    // Master cell name inside the body, elided to fit; legible from ~60 %
-    // zoom like the component labels.
-    let cell_name = component
-        .library_cell
-        .as_ref()
-        .map(|binding| binding.cell.as_str())
-        .unwrap_or("cell");
-    let font_size = 9.0 * scale;
-    if font_size >= 4.0 {
-        let max_chars = 8usize;
-        let display: String = if cell_name.chars().count() > max_chars {
-            let mut text: String = cell_name.chars().take(max_chars - 1).collect();
-            text.push('…');
-            text
-        } else {
-            cell_name.to_owned()
-        };
-        painter.text(
-            pos,
-            egui::Align2::CENTER_CENTER,
-            display,
-            crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Medium),
-            stroke.color,
-        );
     }
 }
 
@@ -1118,48 +964,32 @@ mod tests {
         assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
     }
 
-    /// A vector port is stroked at the weight its bus is stroked at, read off
-    /// the same constant `draw_bus` reads. A port that declares one conductor
-    /// keeps the symbol weight it shares with every other instance.
     #[test]
-    fn a_vector_port_draws_at_the_bus_weight_and_a_scalar_port_does_not() {
+    fn canonical_vector_port_body_and_overlay_use_bus_weight() {
         let scale = 1.5;
-        let symbol = Stroke::new(1.0 * scale, crate::ui::tokens::active_palette().symbol);
-        let named = |name: &str| PortSpec {
+        let symbol = Stroke::new(scale, crate::ui::tokens::active_palette().symbol);
+        let spec = |name: &str| PortSpec {
             name: name.to_owned(),
             direction: PortDirection::InOut,
         };
-        let vector = named("DATA[7:0]");
+        let vector = spec("DATA[7:0]");
 
         assert_eq!(
-            port_stroke(symbol, scale, false, Some(&vector)).width,
+            port_symbol_stroke(symbol, scale, false, Some(&vector)).width,
             DEFAULT_BUS_STROKE_WIDTH * scale
         );
         assert_eq!(
-            port_stroke(symbol, scale, true, Some(&vector)).width,
+            port_symbol_stroke(symbol, scale, true, Some(&vector)).width,
             SELECTED_BUS_STROKE_WIDTH * scale
         );
-        assert_eq!(
-            port_stroke(symbol, scale, false, Some(&vector)).color,
-            symbol.color,
-            "only the weight follows the bus; selection still owns the color"
-        );
-        // A single member is a bit of a bus, so it declares nothing and is
-        // drawn as the scalar terminal it is.
         for scalar in ["EN", "DATA[3]", "bias_1"] {
-            let spec = named(scalar);
             assert_eq!(
-                port_stroke(symbol, scale, false, Some(&spec)),
-                symbol,
-                "{scalar}"
-            );
-            assert_eq!(
-                port_stroke(symbol, scale, true, Some(&spec)),
+                port_symbol_stroke(symbol, scale, false, Some(&spec(scalar))),
                 symbol,
                 "{scalar}"
             );
         }
-        assert_eq!(port_stroke(symbol, scale, false, None), symbol);
+        assert_eq!(port_symbol_stroke(symbol, scale, false, None), symbol);
     }
 
     #[test]
@@ -1184,8 +1014,8 @@ mod tests {
     }
 
     /// Every catalog device whose artwork was authored for its own interface
-    /// must keep drawing that artwork. Sizing a generated block to its pin
-    /// names must never cost a device its glyph, and must never stretch one.
+    /// must keep drawing that artwork. Interface-derived terminal spacing must
+    /// never cost a device its glyph, and must never stretch one.
     #[test]
     fn every_catalog_device_with_matching_artwork_still_draws_it_undistorted() {
         const ARTWORK_DEVICES: [&str; 23] = [

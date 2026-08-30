@@ -475,7 +475,9 @@ impl RSpiceApp {
                 Some(lib)
             }
             Err(e) => {
-                log::warn!("Failed to load SVG symbols, using procedural: {}", e);
+                log::error!(
+                    "Canonical symbol library unavailable; schematic components will display resolution errors: {e}"
+                );
                 None
             }
         };

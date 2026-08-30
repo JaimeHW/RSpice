@@ -6,7 +6,7 @@ use std::fmt::Write;
 
 use crate::state::{
     Bus, BusTap, DesignNote, DesignNoteKind, DesignNoteRenderContext, DocumentationShape,
-    DocumentationShapeGeometry, Junction, Rotation, SchematicState, Wire, arc_parameters,
+    DocumentationShapeGeometry, Junction, SchematicState, Wire, arc_parameters,
 };
 
 use super::SvgExportConfig;
@@ -19,6 +19,7 @@ pub(super) fn calculate_bounds(
     calculate_bounds_with_context(state, config, "schematic")
 }
 
+#[cfg(test)]
 pub(super) fn calculate_bounds_with_context(
     state: &SchematicState,
     config: &SvgExportConfig,
@@ -460,7 +461,7 @@ fn offset_svg_polyline(points: &[(f64, f64)], offset: f64) -> Vec<(f64, f64)> {
         .collect()
 }
 
-fn estimated_text_width(text: &str, config: &SvgExportConfig) -> f64 {
+pub(super) fn estimated_text_width(text: &str, config: &SvgExportConfig) -> f64 {
     text.chars().count() as f64 * config.font_size * 0.62
 }
 
@@ -473,13 +474,4 @@ pub(super) fn write_junction(svg: &mut String, junction: &Junction, config: &Svg
         junction_radius(config)
     )
     .unwrap();
-}
-
-pub(super) fn get_rotation_transform(rotation: Rotation, cx: f64, cy: f64) -> String {
-    match rotation {
-        Rotation::R0 => String::new(),
-        Rotation::R90 => format!("rotate(90, {}, {})", cx, cy),
-        Rotation::R180 => format!("rotate(180, {}, {})", cx, cy),
-        Rotation::R270 => format!("rotate(270, {}, {})", cx, cy),
-    }
 }

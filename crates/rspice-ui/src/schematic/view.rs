@@ -9,7 +9,8 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use egui::{Sense, Ui, WidgetInfo, WidgetType};
 
 use crate::state::{
-    Component, ComponentType, Point, ResolvedCellSymbol, SchematicState, SymbolResolver,
+    Component, ComponentType, Point, ResolvedCellSymbol, ResolvedSymbolSource, SchematicState,
+    SymbolResolver,
 };
 use crate::workbench::app_state::AppState;
 
@@ -37,7 +38,6 @@ pub(crate) mod sheet_visibility;
 mod shelf_drag;
 mod snap_resolution;
 mod stretch_interaction;
-mod symbol_primitives;
 mod viewport;
 pub(crate) mod violations;
 
@@ -117,7 +117,10 @@ impl SchematicSymbolContext {
             let Some(binding) = component.library_cell.as_ref() else {
                 continue;
             };
-            let Some(resolved) = resolver.resolve_binding(binding) else {
+            let Some(resolved) = resolver
+                .resolve_binding(binding)
+                .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)
+            else {
                 continue;
             };
             resolved_by_component_id.insert(component.id, resolved.clone());
@@ -132,7 +135,8 @@ impl SchematicSymbolContext {
             .schematic
             .pending_library_cell
             .as_ref()
-            .and_then(|binding| resolver.resolve_binding(binding));
+            .and_then(|binding| resolver.resolve_binding(binding))
+            .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored);
         let revision = symbol_context_revision(state);
 
         Self {
@@ -1220,8 +1224,8 @@ pub fn render_schematic_view(
 /// Paint a component symbol centered in `rect` — used by the component
 /// browser's preview pane. Pure presentation: no state access.
 ///
-/// Uses the same SVG symbol the canvas renders (scaled to fit the rect);
-/// procedural primitives are only the no-library fallback.
+/// Uses the same canonical SVG symbol the canvas renders, scaled to fit the
+/// preview rect. Missing or invalid resolution paints an explicit error state.
 pub fn draw_symbol_preview(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -1231,26 +1235,73 @@ pub fn draw_symbol_preview(
 ) {
     let stroke = egui::Stroke::new(1.6, color);
 
-    if let Some(library) = symbol_library
-        && let Some((symbol, rotation)) = library.get_with_rotation_variant(kind, 0, None)
+    if let Some((symbol, rotation)) =
+        symbol_library.and_then(|library| library.get_with_rotation_variant(kind, 0, None))
     {
-        // Fit the symbol's grid-unit box into the preview rect.
-        let fit = ((rect.width() - 12.0) / symbol.target_width.max(0.001))
-            .min((rect.height() - 8.0) / symbol.target_height.max(0.001));
-        crate::schematic::symbols::draw_symbol(
+        if let Some(fit) = symbol_preview_scale(rect, symbol.target_width, symbol.target_height) {
+            crate::schematic::symbols::draw_symbol(
+                painter,
+                symbol,
+                rect.center(),
+                fit,
+                rotation,
+                false,
+                false,
+                stroke,
+            );
+            if kind == ComponentType::Port {
+                drawing::draw_port_direction_overlay(
+                    painter,
+                    rect.center(),
+                    fit,
+                    rotation,
+                    false,
+                    false,
+                    crate::state::PortDirection::default(),
+                    stroke,
+                );
+            }
+        } else {
+            drawing::draw_symbol_resolution_error(
+                painter,
+                rect.center(),
+                1.0,
+                kind,
+                "invalid canonical bounds",
+            );
+        }
+    } else {
+        drawing::draw_symbol_resolution_error(
             painter,
-            symbol,
             rect.center(),
-            fit,
-            rotation,
-            false,
-            false,
-            stroke,
+            1.0,
+            kind,
+            "missing canonical SVG",
         );
-        return;
+    }
+}
+
+fn symbol_preview_scale(rect: egui::Rect, target_width: f32, target_height: f32) -> Option<f32> {
+    let size = rect.size();
+    if !rect.is_finite()
+        || size.x <= 0.0
+        || size.y <= 0.0
+        || !target_width.is_finite()
+        || !target_height.is_finite()
+        || target_width <= 0.0
+        || target_height <= 0.0
+    {
+        return None;
     }
 
-    preview::draw_procedural_component_preview(painter, kind, rect.center(), 0.9, 0, stroke);
+    // A proportional inset keeps tiny cells usable instead of allowing the
+    // fixed browser padding to consume their entire drawing area. Larger
+    // previews retain the established six-point maximum breathing room.
+    let inset = (size.x.min(size.y) * 0.12).min(6.0);
+    let available_width = size.x - 2.0 * inset;
+    let available_height = size.y - 2.0 * inset;
+    let fit = (available_width / target_width).min(available_height / target_height);
+    (fit.is_finite() && fit > 0.0).then_some(fit)
 }
 
 #[cfg(test)]
@@ -1260,6 +1311,49 @@ mod tests {
         Cell, Library, LibraryCellInstance, NetLabel, PortDirection, PortSpec, SymbolDocument,
         SymbolPin, SymbolShape, View, ViewType,
     };
+
+    #[test]
+    fn browser_preview_scale_is_positive_adaptive_and_finite() {
+        let tiny = symbol_preview_scale(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(2.0)),
+            40.0,
+            20.0,
+        )
+        .expect("a small positive preview remains drawable");
+        let roomy = symbol_preview_scale(
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(100.0, 60.0)),
+            40.0,
+            20.0,
+        )
+        .expect("a normal preview fits");
+
+        assert!(tiny.is_finite() && tiny > 0.0);
+        assert!(roomy.is_finite() && roomy > tiny);
+        assert_eq!(
+            symbol_preview_scale(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO),
+                40.0,
+                20.0,
+            ),
+            None
+        );
+        assert_eq!(
+            symbol_preview_scale(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(f32::INFINITY, 20.0),),
+                40.0,
+                20.0,
+            ),
+            None
+        );
+        assert_eq!(
+            symbol_preview_scale(
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(20.0)),
+                f32::NAN,
+                20.0,
+            ),
+            None
+        );
+    }
 
     fn port(name: &str, direction: PortDirection) -> PortSpec {
         PortSpec {
@@ -1629,6 +1723,29 @@ mod tests {
             context.resolved_symbol(&generated_preview).is_some(),
             "generated array members resolve authored symbols by immutable binding"
         );
+    }
+
+    #[test]
+    fn symbol_context_does_not_accept_an_interface_generated_substitute() {
+        let mut state = AppState::default();
+        let mut binding = LibraryCellInstance::new("missing", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+        let id = state
+            .schematic
+            .add_library_cell_component(Point::origin(), binding);
+
+        let context = SchematicSymbolContext::from_state(&state);
+        let component = state
+            .schematic
+            .components
+            .iter()
+            .find(|component| component.id == id)
+            .expect("component placed");
+
+        assert!(context.resolved_symbol(component).is_none());
     }
 
     #[test]

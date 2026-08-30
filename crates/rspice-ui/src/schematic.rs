@@ -19,6 +19,7 @@ pub(crate) mod bus_geometry;
 mod component_palette;
 pub use component_palette::{ComponentPaletteEntry, component_palette};
 pub(crate) mod export;
+mod port_overlay;
 mod source_labels;
 pub(crate) mod symbol_editor;
 pub(crate) mod symbols;
