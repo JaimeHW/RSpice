@@ -600,11 +600,9 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
-        if !has_supported_nonlinear
-            && let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit)
-        {
+        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
             return Err(SimulationError::Circuit(format!(
-                "exact linear HB MNA is unavailable because the circuit contains {summary}"
+                "exact HB MNA is unavailable because the circuit contains {summary}"
             )));
         }
         let mna_unknowns = num_nodes
@@ -660,13 +658,8 @@ impl Engine {
         // Stamp linear circuit elements into HB solver
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        if has_supported_nonlinear {
-            self.hb_stamp_inductors(&circuit, &mut solver);
-            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &config, &drive_tones)?;
-        } else {
-            self.hb_stamp_voltage_sources(&circuit, &mut solver, &config, &drive_tones)?;
-            self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
-        }
+        self.hb_stamp_voltage_sources(&circuit, &mut solver, &config, &drive_tones)?;
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
@@ -674,6 +667,28 @@ impl Engine {
 
         // Create solver state
         let mut state = HbSolverState::new(num_nodes, config.num_harmonics);
+        state
+            .try_prepare_mna_branches(solver.exact_mna_branches().len(), config.num_harmonics)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "HB canonical MNA state allocation failed: {error}"
+                ))
+            })?;
+        let retained_state_values = state.try_total_unknowns().map_err(|error| {
+            SimulationError::Circuit(format!("HB state qualification failed: {error}"))
+        })?;
+        let expected_retained_state_values = mna_unknowns
+            .checked_mul(config.num_harmonics + 1)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB retained state dimension exceeds this platform".to_string(),
+                )
+            })?;
+        if retained_state_values != expected_retained_state_values {
+            return Err(SimulationError::Circuit(format!(
+                "HB retained state contains {retained_state_values} complex coordinates; resource qualification authorized {expected_retained_state_values}"
+            )));
+        }
 
         // Seed harmonic 0 with the DC operating point: Newton starts on the
         // bias trajectory instead of from zero, which is the difference
@@ -748,7 +763,7 @@ impl Engine {
         let mut result = solver.build_result(&state).map_err(|error| {
             SimulationError::Circuit(format!("HB result construction failed: {error}"))
         })?;
-        self.hb_attach_periodic_state(&circuit, &mut result, has_supported_nonlinear);
+        self.hb_attach_periodic_state(&circuit, &mut result, false);
 
         let mna_branch_names = if solver.exact_mna_branches().is_empty() {
             Vec::new()

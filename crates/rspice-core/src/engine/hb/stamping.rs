@@ -249,27 +249,6 @@ impl Engine {
         }
     }
 
-    /// Stamp inductors into HB solver L matrix
-    ///
-    /// In the frequency domain, inductors have admittance Y_L = 1/(jωL).
-    /// The solver handles the frequency-dependent admittance at each harmonic:
-    /// - DC (k=0): short circuit (large conductance)
-    /// - AC (k>0): Y_L = -j/(k*ω₀*L)
-    pub(in crate::engine::hb) fn hb_stamp_inductors(
-        &self,
-        circuit: &CircuitData,
-        solver: &mut HbSolver,
-    ) {
-        for i in 0..circuit.inductors.len() {
-            let np = circuit.inductors.node_pos[i];
-            let nn = circuit.inductors.node_neg[i];
-            let l = circuit.inductors.inductances[i];
-
-            // Stamp inductance matrix
-            self.hb_stamp_inductance(solver, np, nn, l);
-        }
-    }
-
     /// Register every supported exact HB MNA branch in the circuit's
     /// canonical one-based branch order.
     ///
@@ -453,34 +432,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Stamp a two-terminal inductance into HB solver L matrix
-    pub(in crate::engine::hb) fn hb_stamp_inductance(
-        &self,
-        solver: &mut HbSolver,
-        np: usize,
-        nn: usize,
-        value: Value,
-    ) {
-        // Standard MNA stamp pattern for two-terminal inductor
-        if np > 0 && nn > 0 {
-            // Both nodes are non-ground
-            let i = np - 1;
-            let j = nn - 1;
-            solver.add_inductance(i, i, value);
-            solver.add_inductance(i, j, -value);
-            solver.add_inductance(j, i, -value);
-            solver.add_inductance(j, j, value);
-        } else if np > 0 {
-            // nn is ground
-            let i = np - 1;
-            solver.add_inductance(i, i, value);
-        } else if nn > 0 {
-            // np is ground
-            let i = nn - 1;
-            solver.add_inductance(i, i, value);
-        }
-    }
-
     /// Stamp ideal voltage sources into HB solver using MNA branch equations.
     pub(in crate::engine::hb) fn hb_stamp_voltage_sources(
         &self,
@@ -532,79 +483,6 @@ impl Engine {
                         "HB voltage-source registration failed: {error}"
                     ))
                 })?;
-        }
-        Ok(())
-    }
-
-    /// Stamp ideal voltage sources as stiff Norton equivalents for nonlinear HB.
-    ///
-    /// Nonlinear HB Newton currently solves in node-voltage space only. Converting
-    /// ideal voltage sources to Norton form avoids branch-current unknowns while
-    /// preserving source waveforms with a very small equivalent source resistance.
-    pub(in crate::engine::hb) fn hb_stamp_voltage_sources_norton(
-        &self,
-        circuit: &CircuitData,
-        solver: &mut HbSolver,
-        config: &HbConfig,
-        drive_tones: &[HbDriveTone],
-    ) -> Result<(), SimulationError> {
-        for i in 0..circuit.voltage_sources.len() {
-            let np = circuit.voltage_sources.node_pos[i];
-            let nn = circuit.voltage_sources.node_neg[i];
-            let dc = circuit.voltage_sources.dc_values[i];
-            let ac_mag = circuit
-                .voltage_sources
-                .ac_magnitudes
-                .get(i)
-                .copied()
-                .unwrap_or(0.0);
-            let ac_phase = circuit
-                .voltage_sources
-                .ac_phases
-                .get(i)
-                .copied()
-                .unwrap_or(0.0);
-            let spec = circuit
-                .voltage_sources
-                .source_specs
-                .get(i)
-                .and_then(|s| s.as_ref());
-            let source_name = circuit
-                .voltage_sources
-                .names
-                .get(i)
-                .map(|name| name.as_str())
-                .unwrap_or("");
-            let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
-
-            let spectrum =
-                Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
-
-            self.hb_stamp_admittance(solver, np, nn, HB_NORTON_G, true);
-
-            // Norton conversion of `V` in series with Rs = 1/G: a current source
-            // G*V injecting INTO the positive node, in parallel with G. The
-            // independent-current-source convention (current pulled out of the
-            // positive node) does not apply here.
-            let i_dc = spectrum.dc * HB_NORTON_G;
-            if np > 0 {
-                solver.add_dc_source(np - 1, i_dc);
-            }
-            if nn > 0 {
-                solver.add_dc_source(nn - 1, -i_dc);
-            }
-
-            for (harmonic, amplitude, phase) in spectrum.harmonics {
-                let i_ac = amplitude * HB_NORTON_G;
-                if i_ac.abs() > 1e-30 {
-                    if np > 0 {
-                        solver.add_harmonic_source(np - 1, harmonic, i_ac, phase);
-                    }
-                    if nn > 0 {
-                        solver.add_harmonic_source(nn - 1, harmonic, -i_ac, phase);
-                    }
-                }
-            }
         }
         Ok(())
     }

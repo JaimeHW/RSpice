@@ -610,7 +610,7 @@ impl HbSolver {
         Ok(())
     }
 
-    fn validate_exact_linear_mna(&self) -> Result<(), HbError> {
+    pub(crate) fn validate_exact_large_signal_mna(&self) -> Result<(), HbError> {
         if self.periodic_mna_branches.len() != self.periodic_mna_branch_names.len() {
             return Err(HbError::InvalidCircuit(format!(
                 "exact linear MNA has {} descriptors for {} names",
@@ -623,6 +623,26 @@ impl HbSolver {
                 "exact linear MNA cannot combine inductor branch equations with legacy nodal inductor admittances"
                     .to_string(),
             ));
+        }
+        let graph_nodes = self.num_nodes.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "exact HB ideal-constraint graph exceeds this platform".to_string(),
+            )
+        })?;
+        let mut graph_parents: Vec<usize> = (0..graph_nodes).collect();
+        let mut graph_ranks = vec![0_u8; graph_nodes];
+        fn graph_root(parents: &mut [usize], node: usize) -> usize {
+            let mut root = node;
+            while parents[root] != root {
+                root = parents[root];
+            }
+            let mut cursor = node;
+            while parents[cursor] != cursor {
+                let next = parents[cursor];
+                parents[cursor] = root;
+                cursor = next;
+            }
+            root
         }
         let mut seen_sources = vec![false; self.voltage_source_branches.len()];
         for (index, (branch, name)) in self
@@ -672,6 +692,7 @@ impl HbSolver {
                     if source_name != name
                         || source.node_pos != *node_pos
                         || source.node_neg != *node_neg
+                        || self.voltage_source_branches.get(*source_index) != Some(source)
                     {
                         return Err(HbError::InvalidCircuit(format!(
                             "exact linear MNA branch '{name}' does not match its authored voltage-source descriptor"
@@ -722,6 +743,21 @@ impl HbSolver {
                     "exact linear MNA branch '{name}' has invalid terminal pair ({node_pos}, {node_neg}) for {} non-ground nodes",
                     self.num_nodes
                 )));
+            }
+            let root_pos = graph_root(&mut graph_parents, node_pos);
+            let root_neg = graph_root(&mut graph_parents, node_neg);
+            if root_pos == root_neg {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact HB MNA has a singular or inconsistent conflicting ideal branch loop at '{name}'"
+                )));
+            }
+            if graph_ranks[root_pos] < graph_ranks[root_neg] {
+                graph_parents[root_pos] = root_neg;
+            } else {
+                graph_parents[root_neg] = root_pos;
+                if graph_ranks[root_pos] == graph_ranks[root_neg] {
+                    graph_ranks[root_pos] = graph_ranks[root_pos].saturating_add(1);
+                }
             }
         }
         if seen_sources.iter().any(|seen| !seen) {
@@ -873,7 +909,7 @@ impl HbSolver {
     /// the solver's internal Fourier-coefficient convention: stored AC
     /// entries are physical amplitudes, so harmonics k >= 1 convert with a
     /// factor 1/2 (see `set_harmonic_source`).
-    fn voltage_source_value_at_harmonic(
+    pub(crate) fn voltage_source_value_at_harmonic(
         branch: &VoltageSourceBranch,
         harmonic: usize,
     ) -> Complex64 {
@@ -893,7 +929,7 @@ impl HbSolver {
         state: &mut HbSolverState,
         branch_currents: &[Vec<Complex64>],
         exact_mna: bool,
-    ) -> Result<Value, HbError> {
+    ) -> Result<(), HbError> {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let h = self.num_harmonics + 1;
 
@@ -902,6 +938,12 @@ impl HbSolver {
         }
         for node_scale in &mut state.residual_scale {
             node_scale.fill(0.0);
+        }
+        for branch_residual in &mut state.mna_branch_residual {
+            branch_residual.fill(Complex64::new(0.0, 0.0));
+        }
+        for branch_scale in &mut state.mna_branch_residual_scale {
+            branch_scale.fill(0.0);
         }
 
         // Start with nodal current source spectra.
@@ -982,13 +1024,9 @@ impl HbSolver {
             }
         }
 
-        let mut residual_norm = state
-            .residual
-            .iter()
-            .flat_map(|node| node.iter())
-            .fold(0.0_f64, |norm, value| norm.hypot(value.re).hypot(value.im));
-
-        // Include branch KVL residuals in the overall convergence norm.
+        // Retain every branch KVL residual and its voltage-domain reference
+        // scale so linear publication uses the same typed KCL/KVL
+        // certificate as nonlinear Newton.
         if exact_mna {
             for (branch_index, branch) in self.periodic_mna_branches.iter().enumerate() {
                 let (node_pos, node_neg) = match branch {
@@ -1001,13 +1039,18 @@ impl HbSolver {
                 };
                 for k in 0..h {
                     let mut voltage_drop = Complex64::new(0.0, 0.0);
+                    let mut voltage_scale = 0.0;
                     if node_pos > 0 {
-                        voltage_drop += state.x[node_pos - 1][k];
+                        let voltage = state.x[node_pos - 1][k];
+                        voltage_drop += voltage;
+                        voltage_scale += voltage.norm();
                     }
                     if node_neg > 0 {
-                        voltage_drop -= state.x[node_neg - 1][k];
+                        let voltage = state.x[node_neg - 1][k];
+                        voltage_drop -= voltage;
+                        voltage_scale += voltage.norm();
                     }
-                    let residual = match branch {
+                    let (residual, constitutive_scale) = match branch {
                         ExactMnaBranch::VoltageSource { source, .. } => {
                             let source = source.as_ref().ok_or_else(|| {
                                 HbError::InvalidCircuit(
@@ -1015,38 +1058,60 @@ impl HbSolver {
                                         .to_string(),
                                 )
                             })?;
-                            Self::voltage_source_value_at_harmonic(source, k) - voltage_drop
+                            let source_value = Self::voltage_source_value_at_harmonic(source, k);
+                            (source_value - voltage_drop, source_value.norm())
                         }
                         ExactMnaBranch::Inductor { inductance, .. } => {
-                            Complex64::new(0.0, (k as Value) * omega0 * *inductance)
-                                * branch_currents[branch_index][k]
-                                - voltage_drop
+                            let constitutive_voltage =
+                                Complex64::new(0.0, (k as Value) * omega0 * *inductance)
+                                    * branch_currents[branch_index][k];
+                            (
+                                constitutive_voltage - voltage_drop,
+                                constitutive_voltage.norm(),
+                            )
                         }
                     };
-                    residual_norm = residual_norm.hypot(residual.re).hypot(residual.im);
+                    state.mna_branch_residual[branch_index][k] = residual;
+                    state.mna_branch_residual_scale[branch_index][k] =
+                        voltage_scale + constitutive_scale;
                 }
             }
         } else {
             for branch in &self.voltage_source_branches {
                 for k in 0..h {
                     let mut voltage_drop = Complex64::new(0.0, 0.0);
+                    let mut voltage_scale = 0.0;
                     if branch.node_pos > 0 {
-                        voltage_drop += state.x[branch.node_pos - 1][k];
+                        let voltage = state.x[branch.node_pos - 1][k];
+                        voltage_drop += voltage;
+                        voltage_scale += voltage.norm();
                     }
                     if branch.node_neg > 0 {
-                        voltage_drop -= state.x[branch.node_neg - 1][k];
+                        let voltage = state.x[branch.node_neg - 1][k];
+                        voltage_drop -= voltage;
+                        voltage_scale += voltage.norm();
                     }
-                    let residual = Self::voltage_source_value_at_harmonic(branch, k) - voltage_drop;
-                    residual_norm = residual_norm.hypot(residual.re).hypot(residual.im);
+                    let source_value = Self::voltage_source_value_at_harmonic(branch, k);
+                    state.mna_branch_residual[branch.branch_idx][k] = source_value - voltage_drop;
+                    state.mna_branch_residual_scale[branch.branch_idx][k] =
+                        voltage_scale + source_value.norm();
                 }
             }
         }
-        if !residual_norm.is_finite() {
+        state.compute_residual_norm();
+        if !state.residual_norm.is_finite()
+            || state
+                .residual_scale
+                .iter()
+                .chain(&state.mna_branch_residual_scale)
+                .flatten()
+                .any(|scale| !scale.is_finite() || *scale < 0.0)
+        {
             return Err(HbError::InvalidCircuit(
-                "linear HB residual contains a non-finite value".to_string(),
+                "linear HB residual certificate contains a non-finite value".to_string(),
             ));
         }
-        Ok(residual_norm)
+        Ok(())
     }
 
     /// Solve for linear circuit (direct solve for diagonal harmonic blocks).
@@ -1057,7 +1122,7 @@ impl HbSolver {
         self.validate_linear_storage(state)?;
         let exact_mna = !self.periodic_mna_branches.is_empty();
         if exact_mna {
-            self.validate_exact_linear_mna()?;
+            self.validate_exact_large_signal_mna()?;
         }
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
         let n = self.num_nodes;
@@ -1067,6 +1132,7 @@ impl HbSolver {
         } else {
             self.num_branches
         };
+        state.try_prepare_mna_branches(m, self.num_harmonics)?;
         let total_unknowns = n.checked_add(m).ok_or_else(|| {
             HbError::InvalidCircuit("linear HB MNA dimension exceeds this platform".to_string())
         })?;
@@ -1176,22 +1242,38 @@ impl HbSolver {
             }
 
             for node in 0..n {
-                state.x[node][k] = solution[node];
+                state.x[node][k] = if k == 0 {
+                    Complex64::new(solution[node].re, 0.0)
+                } else {
+                    solution[node]
+                };
             }
             for branch_idx in 0..m {
                 let col = n + branch_idx;
-                branch_currents[branch_idx][k] = solution[col];
+                branch_currents[branch_idx][k] = if k == 0 {
+                    Complex64::new(solution[col].re, 0.0)
+                } else {
+                    solution[col]
+                };
             }
         }
 
-        state.residual_norm = if m == 0 {
-            self.compute_linear_residual(state);
-            state.residual_norm
-        } else {
-            self.compute_linear_residual_with_branches(state, &branch_currents, exact_mna)?
-        };
-        state.converged = state.residual_norm < self.config.tolerance;
         state.mna_branch_currents = branch_currents;
+        if m == 0 {
+            self.compute_linear_residual(state);
+        } else {
+            let retained_branch_currents = state.mna_branch_currents.clone();
+            self.compute_linear_residual_with_branches(
+                state,
+                &retained_branch_currents,
+                exact_mna,
+            )?;
+        }
+        state.converged = state.rows_converged_with_branch_tolerances(
+            self.config.tolerance,
+            self.config.abstol,
+            crate::constants::VNTOL,
+        );
 
         if state.converged {
             Ok(())

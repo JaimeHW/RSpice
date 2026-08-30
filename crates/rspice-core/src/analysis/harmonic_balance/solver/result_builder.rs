@@ -31,6 +31,14 @@ impl HbSolver {
                     "HB result node '{name}' contains a non-finite coefficient"
                 )));
             }
+            if spectrum
+                .first()
+                .is_some_and(|coefficient| coefficient.im != 0.0)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB result node '{name}' has a nonzero imaginary DC coefficient"
+                )));
+            }
         }
         if !state.residual_norm.is_finite() || state.residual_norm < 0.0 {
             return Err(HbError::InvalidCircuit(
@@ -92,6 +100,14 @@ impl HbSolver {
             {
                 return Err(HbError::InvalidCircuit(format!(
                     "HB result MNA branch '{name}' contains a non-finite coefficient"
+                )));
+            }
+            if spectrum
+                .first()
+                .is_some_and(|coefficient| coefficient.im != 0.0)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB result MNA branch '{name}' has a nonzero imaginary DC coefficient"
                 )));
             }
         }

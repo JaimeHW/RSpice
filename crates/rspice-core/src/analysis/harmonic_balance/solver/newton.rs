@@ -7,6 +7,18 @@ use std::f64::consts::PI;
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
+#[derive(Debug)]
+struct HbNewtonStep {
+    node_voltages: Vec<Vec<Complex64>>,
+    branch_currents: Vec<Vec<Complex64>>,
+}
+
+#[derive(Debug, Clone)]
+struct HbNewtonCheckpoint {
+    node_voltages: Vec<Vec<Complex64>>,
+    branch_currents: Vec<Vec<Complex64>>,
+}
+
 /// Exact real-split HB Jacobian as an operator.  Storage is proportional to
 /// the sparse linear stamps plus the device coupling spectra; the global
 /// `(nodes * harmonics)^2` matrix is never materialized.
@@ -238,13 +250,18 @@ mod exact_matrix_free_tests {
         let mut state = HbSolverState::new(1, 1);
         state.x[0][0] = Complex64::new(1.0, 1.0);
         solver
-            .compute_full_residual_with_gmin(&mut state, 0.0)
+            .compute_full_residual_with_gmin(&mut state, 0.0, 1.0)
             .expect("finite linear residual");
         assert!(state.residual_norm > 0.0);
 
-        let delta = vec![vec![Complex64::new(0.0, 0.0); 2]];
+        let delta = HbNewtonStep {
+            node_voltages: vec![vec![Complex64::new(0.0, 0.0); 2]],
+            branch_currents: Vec::new(),
+        };
+        let reltol = solver.config.tolerance;
+        let abstol = solver.config.abstol;
         solver
-            .apply_line_search_with_gmin(&mut state, &delta, 0.0, &NoAbort)
+            .apply_line_search_with_gmin(&mut state, &delta, 0.0, 1.0, reltol, abstol, &NoAbort)
             .expect("line search accepts the representable DC state");
 
         assert_eq!(state.x[0][0], Complex64::new(1.0, 0.0));
@@ -556,6 +573,9 @@ impl HbSolver {
             return self.solve_linear(state);
         }
 
+        self.validate_exact_large_signal_mna()?;
+        state.try_prepare_mna_branches(self.exact_mna_branches().len(), self.num_harmonics)?;
+
         // GMIN is a continuation aid, never part of the authored circuit.
         // Commercial SPICE implementations may walk a shunted homotopy, but
         // the result is accepted only after Newton converges on the physical
@@ -593,6 +613,7 @@ impl HbSolver {
             self.config.max_iterations,
             tol,
             abstol,
+            1.0,
             abort,
         )? {
             state.converged = true;
@@ -609,11 +630,15 @@ impl HbSolver {
                 self.config.max_iterations,
                 tol * 10.0,
                 abstol,
+                1.0,
                 abort,
             )? {
                 // Converged at higher GMIN - now refine with progressively lower GMIN
                 // Save state before refinement in case we need to restore
-                let mut last_good_state = state.x.clone();
+                let mut last_good_state = HbNewtonCheckpoint {
+                    node_voltages: state.x.clone(),
+                    branch_currents: state.mna_branch_currents.clone(),
+                };
                 let mut current_gmin = gmin_level;
                 while current_gmin > homotopy_floor {
                     // Use factor of 2 for very gradual refinement
@@ -624,13 +649,18 @@ impl HbSolver {
                         self.config.max_iterations,
                         tol,
                         abstol,
+                        1.0,
                         abort,
                     )? {
                         // Success - update last good state
-                        last_good_state = state.x.clone();
+                        last_good_state = HbNewtonCheckpoint {
+                            node_voltages: state.x.clone(),
+                            branch_currents: state.mna_branch_currents.clone(),
+                        };
                     } else {
                         // Failed - restore last good state and stop refining
-                        state.x = last_good_state;
+                        state.x = last_good_state.node_voltages;
+                        state.mna_branch_currents = last_good_state.branch_currents;
                         break;
                     }
                 }
@@ -643,6 +673,7 @@ impl HbSolver {
                     self.config.max_iterations,
                     tol,
                     abstol,
+                    1.0,
                     abort,
                 )? {
                     state.converged = true;
@@ -653,7 +684,6 @@ impl HbSolver {
 
         // Step 3: Try source stepping
         // Scale sources from 0 to full, using previous converged solution as starting point
-        let original_sources = self.source_spectra.clone();
         let mut source_stepper = SourceStepper::new();
         let mut total_iterations = 0; // Reset for source stepping
         let max_total_iter = self.config.max_iterations * 20;
@@ -666,23 +696,12 @@ impl HbSolver {
                 }
             }
         }
+        for spectrum in &mut state.mna_branch_currents {
+            spectrum.fill(Complex64::new(0.0, 0.0));
+        }
 
         while !source_stepper.is_complete() && total_iterations < max_total_iter {
             let factor = source_stepper.factor();
-
-            // Scale sources by current factor
-            for node in 0..self.num_nodes {
-                if node < self.source_spectra.len() {
-                    for k in 0..self.source_spectra[node].len() {
-                        self.source_spectra[node][k] = original_sources
-                            .get(node)
-                            .and_then(|s| s.get(k))
-                            .copied()
-                            .unwrap_or(Complex64::new(0.0, 0.0))
-                            * factor;
-                    }
-                }
-            }
 
             // Don't reset state.x - keep converged solution from previous source level
 
@@ -693,6 +712,7 @@ impl HbSolver {
                 self.config.max_iterations / 2,
                 tol * 10.0,
                 abstol,
+                factor,
                 abort,
             )?;
 
@@ -708,9 +728,6 @@ impl HbSolver {
             }
         }
 
-        // Restore original sources
-        self.source_spectra = original_sources;
-
         // If source stepping completed, do final Newton with original sources
         if source_stepper.is_complete()
             && self.newton_inner_loop(
@@ -719,6 +736,7 @@ impl HbSolver {
                 self.config.max_iterations,
                 tol,
                 abstol,
+                1.0,
                 abort,
             )?
         {
@@ -744,6 +762,7 @@ impl HbSolver {
                 self.config.max_iterations / 4,
                 tol * 100.0, // Relaxed tolerance during stepping
                 abstol,
+                1.0,
                 abort,
             )?;
 
@@ -766,6 +785,7 @@ impl HbSolver {
                 self.config.max_iterations,
                 tol,
                 abstol,
+                1.0,
                 abort,
             )?
         {
@@ -788,6 +808,7 @@ impl HbSolver {
         max_iter: usize,
         tol: Value,
         abstol: Value,
+        source_scale: Value,
         abort: &dyn AbortSignal,
     ) -> Result<bool, HbError> {
         for iter in 0..max_iter {
@@ -798,12 +819,12 @@ impl HbSolver {
             state.total_iterations += 1;
 
             // 1. Compute full residual: linear + nonlinear + GMIN contributions
-            self.compute_full_residual_with_gmin(state, gmin)?;
+            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
 
             // 2. Check convergence: per-row KCL test. A global norm hides a
             // microamp imbalance at a high-impedance node behind the amp
             // scale of stiff source rows, accepting grossly wrong bias.
-            if state.rows_converged(tol, abstol) {
+            if state.rows_converged_with_branch_tolerances(tol, abstol, crate::constants::VNTOL) {
                 return Ok(true);
             }
 
@@ -828,7 +849,15 @@ impl HbSolver {
             };
 
             // 5. Apply line search for robust convergence
-            match self.apply_line_search_with_gmin(state, &delta_x, gmin, abort) {
+            match self.apply_line_search_with_gmin(
+                state,
+                &delta_x,
+                gmin,
+                source_scale,
+                tol,
+                abstol,
+                abort,
+            ) {
                 Ok(()) => {}
                 Err(HbError::SingularMatrix) => return Ok(false),
                 Err(err) => return Err(err),
@@ -846,9 +875,26 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
         gmin: Value,
+        source_scale: Value,
     ) -> Result<(), HbError> {
+        if !source_scale.is_finite() || !(0.0..=1.0).contains(&source_scale) {
+            return Err(HbError::InvalidCircuit(format!(
+                "nonlinear HB source scale must be finite and within 0..=1, found {source_scale:e}"
+            )));
+        }
         // Start with linear residual (I_source - Y*V)
         self.compute_linear_residual(state);
+        if source_scale != 1.0 {
+            for (node, spectrum) in self.source_spectra.iter().enumerate() {
+                for (harmonic, &source) in spectrum.iter().enumerate() {
+                    state.residual[node][harmonic] += (source_scale - 1.0) * source;
+                    state.residual_scale[node][harmonic] =
+                        (state.residual_scale[node][harmonic] - source.norm()).max(0.0)
+                            + (source_scale * source).norm();
+                }
+            }
+        }
+        self.add_exact_mna_residual(state, source_scale)?;
 
         // Subtract GMIN contribution: I_gmin = gmin * V (current leaves node via GMIN)
         for node in 0..self.num_nodes {
@@ -865,6 +911,126 @@ impl HbSolver {
         if self.has_nonlinear_devices() {
             self.add_nonlinear_residual(state)?;
         }
+        if !state.residual_norm.is_finite()
+            || state
+                .residual_scale
+                .iter()
+                .chain(&state.mna_branch_residual_scale)
+                .flatten()
+                .any(|scale| !scale.is_finite() || *scale < 0.0)
+        {
+            return Err(HbError::InvalidCircuit(
+                "nonlinear HB residual certificate contains a non-finite value".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Add canonical exact-MNA KCL incidence and KVL branch equations to the
+    /// full-spectrum residual. Nonlinear current and charge contributions are
+    /// node-only and are accumulated after this seam.
+    fn add_exact_mna_residual(
+        &self,
+        state: &mut HbSolverState,
+        source_scale: Value,
+    ) -> Result<(), HbError> {
+        let harmonic_count = self.num_harmonics + 1;
+        let omega0 = 2.0 * PI * self.config.fundamental_freq;
+        if state.mna_branch_currents.len() != self.exact_mna_branches().len()
+            || state.mna_branch_residual.len() != self.exact_mna_branches().len()
+            || state.mna_branch_residual_scale.len() != self.exact_mna_branches().len()
+        {
+            return Err(HbError::InvalidCircuit(
+                "nonlinear HB exact-MNA state does not match the canonical branch registry"
+                    .to_string(),
+            ));
+        }
+        for row in &mut state.mna_branch_residual {
+            row.fill(Complex64::new(0.0, 0.0));
+        }
+        for row in &mut state.mna_branch_residual_scale {
+            row.fill(0.0);
+        }
+
+        for (branch_index, branch) in self.exact_mna_branches().iter().enumerate() {
+            let currents = &state.mna_branch_currents[branch_index];
+            if currents.len() != harmonic_count {
+                return Err(HbError::InvalidCircuit(format!(
+                    "nonlinear HB branch {} current spectrum has {} harmonics; expected {harmonic_count}",
+                    branch_index + 1,
+                    currents.len()
+                )));
+            }
+            let (node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
+                    node_pos, node_neg, ..
+                }
+                | ExactMnaBranch::Inductor {
+                    node_pos, node_neg, ..
+                } => (*node_pos, *node_neg),
+            };
+            for (harmonic, &current) in currents.iter().enumerate() {
+                if harmonic == 0 && current.im != 0.0 {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "nonlinear HB branch {} has a nonzero imaginary DC current",
+                        branch_index + 1
+                    )));
+                }
+                if node_pos > 0 {
+                    state.residual[node_pos - 1][harmonic] -= current;
+                    state.residual_scale[node_pos - 1][harmonic] += current.norm();
+                }
+                if node_neg > 0 {
+                    state.residual[node_neg - 1][harmonic] += current;
+                    state.residual_scale[node_neg - 1][harmonic] += current.norm();
+                }
+
+                let mut voltage_drop = Complex64::new(0.0, 0.0);
+                let mut voltage_scale = 0.0;
+                if node_pos > 0 {
+                    let voltage = state.x[node_pos - 1][harmonic];
+                    voltage_drop += voltage;
+                    voltage_scale += voltage.norm();
+                }
+                if node_neg > 0 {
+                    let voltage = state.x[node_neg - 1][harmonic];
+                    voltage_drop -= voltage;
+                    voltage_scale += voltage.norm();
+                }
+                let (residual, constitutive_scale) = match branch {
+                    ExactMnaBranch::VoltageSource { source, .. } => {
+                        let source = source.as_ref().ok_or_else(|| {
+                            HbError::InvalidCircuit(format!(
+                                "nonlinear HB voltage branch {} has no authored source spectrum",
+                                branch_index + 1
+                            ))
+                        })?;
+                        let source_value =
+                            source_scale * Self::voltage_source_value_at_harmonic(source, harmonic);
+                        (source_value - voltage_drop, source_value.norm())
+                    }
+                    ExactMnaBranch::Inductor { inductance, .. } => {
+                        let impedance_current =
+                            Complex64::new(0.0, harmonic as Value * omega0 * *inductance) * current;
+                        (impedance_current - voltage_drop, impedance_current.norm())
+                    }
+                };
+                if !residual.re.is_finite()
+                    || !residual.im.is_finite()
+                    || !voltage_scale.is_finite()
+                    || !constitutive_scale.is_finite()
+                {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "nonlinear HB branch {} produced a non-finite KVL residual",
+                        branch_index + 1
+                    )));
+                }
+                state.mna_branch_residual[branch_index][harmonic] = residual;
+                state.mna_branch_residual_scale[branch_index][harmonic] =
+                    voltage_scale + constitutive_scale;
+            }
+        }
+        state.compute_residual_norm();
         Ok(())
     }
 
@@ -901,26 +1067,47 @@ impl HbSolver {
     fn apply_line_search_with_gmin(
         &mut self,
         state: &mut HbSolverState,
-        delta_x: &[Vec<Complex64>],
+        delta: &HbNewtonStep,
         gmin: Value,
+        source_scale: Value,
+        reltol: Value,
+        current_abstol: Value,
         abort: &dyn AbortSignal,
     ) -> Result<(), HbError> {
-        let initial_norm = state.residual_norm;
+        let initial_merit =
+            state.certificate_merit(reltol, current_abstol, crate::constants::VNTOL, false)?;
         let armijo_c = 1e-4;
         let min_alpha = 0.01;
         let vt = 0.02585; // Thermal voltage at 300K
 
         let mut alpha = 1.0;
         let mut best_alpha = alpha;
-        let mut best_norm = f64::INFINITY;
+        let mut best_merit = f64::INFINITY;
 
-        let x_orig: Vec<Vec<Complex64>> = state.x.clone();
+        let x_orig = state.x.clone();
+        let branch_orig = state.mna_branch_currents.clone();
+        let harmonic_count = self.num_harmonics + 1;
+        if delta.node_voltages.len() != self.num_nodes
+            || delta
+                .node_voltages
+                .iter()
+                .any(|row| row.len() != harmonic_count)
+            || delta.branch_currents.len() != self.exact_mna_branches().len()
+            || delta
+                .branch_currents
+                .iter()
+                .any(|row| row.len() != harmonic_count)
+        {
+            return Err(HbError::InvalidCircuit(
+                "nonlinear HB line search received a malformed node/branch Newton step".to_string(),
+            ));
+        }
 
         while alpha >= min_alpha {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            for (node, dx_node) in delta_x.iter().enumerate() {
+            for (node, dx_node) in delta.node_voltages.iter().enumerate() {
                 for (k, &dx) in dx_node.iter().enumerate() {
                     if node < state.x.len() && k < state.x[node].len() {
                         let v_old = x_orig[node][k].re;
@@ -947,15 +1134,27 @@ impl HbSolver {
                     }
                 }
             }
+            for (branch, delta_spectrum) in delta.branch_currents.iter().enumerate() {
+                for (harmonic, &delta_current) in delta_spectrum.iter().enumerate() {
+                    let value = branch_orig[branch][harmonic] + alpha * delta_current;
+                    state.mna_branch_currents[branch][harmonic] = if harmonic == 0 {
+                        Complex64::new(value.re, 0.0)
+                    } else {
+                        value
+                    };
+                }
+            }
 
-            self.compute_full_residual_with_gmin(state, gmin)?;
+            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+            let merit =
+                state.certificate_merit(reltol, current_abstol, crate::constants::VNTOL, false)?;
 
-            if state.residual_norm < initial_norm * (1.0 - armijo_c * alpha) {
+            if merit < initial_merit * (1.0 - armijo_c * alpha) {
                 return Ok(());
             }
 
-            if state.residual_norm < best_norm {
-                best_norm = state.residual_norm;
+            if merit < best_merit {
+                best_merit = merit;
                 best_alpha = alpha;
             }
 
@@ -963,7 +1162,7 @@ impl HbSolver {
         }
 
         // Use best step found with voltage limiting
-        for (node, dx_node) in delta_x.iter().enumerate() {
+        for (node, dx_node) in delta.node_voltages.iter().enumerate() {
             for (k, &dx) in dx_node.iter().enumerate() {
                 if node < state.x.len() && k < state.x[node].len() {
                     let v_old = x_orig[node][k].re;
@@ -984,7 +1183,17 @@ impl HbSolver {
                 }
             }
         }
-        self.compute_full_residual_with_gmin(state, gmin)?;
+        for (branch, delta_spectrum) in delta.branch_currents.iter().enumerate() {
+            for (harmonic, &delta_current) in delta_spectrum.iter().enumerate() {
+                let value = branch_orig[branch][harmonic] + best_alpha * delta_current;
+                state.mna_branch_currents[branch][harmonic] = if harmonic == 0 {
+                    Complex64::new(value.re, 0.0)
+                } else {
+                    value
+                };
+            }
+        }
+        self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
 
         Ok(())
     }
@@ -1100,14 +1309,24 @@ impl HbSolver {
     /// - Diagonal blocks (k == l): linear admittance + linearized nonlinear
     /// - Off-diagonal blocks: nonlinear coupling via FFT convolution
     ///
-    /// For efficiency, we flatten to a single [n*h x n*h] complex matrix
+    /// For efficiency, we flatten to one complex matrix over canonical
+    /// `[node + branch][harmonic]` coordinates. Nonlinear blocks remain
+    /// strictly node-to-node.
     fn build_full_jacobian(
         &mut self,
         state: &HbSolverState,
     ) -> Result<Vec<Vec<Complex64>>, HbError> {
         let n = self.num_nodes;
+        let branch_count = self.exact_mna_branches().len();
         let h = self.num_harmonics + 1;
-        let size = n * h;
+        let entity_count = n.checked_add(branch_count).ok_or_else(|| {
+            HbError::InvalidCircuit("nonlinear HB MNA dimension exceeds this platform".to_string())
+        })?;
+        let size = entity_count.checked_mul(h).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "nonlinear HB spectral MNA dimension exceeds this platform".to_string(),
+            )
+        })?;
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
 
         // Initialize Jacobian
@@ -1148,6 +1367,36 @@ impl HbSolver {
                         // AC: Y_L = -j/(ωL)
                         jac[row][col] -= Complex64::new(0.0, -1.0 / (omega_k * l));
                     }
+                }
+            }
+
+            // Exact MNA incidence and branch constitutive equations. The
+            // residual convention is source-minus-current for KCL and
+            // authored/constitutive voltage minus terminal drop for KVL.
+            for (branch_index, branch) in self.exact_mna_branches().iter().enumerate() {
+                let branch_entity = n + branch_index;
+                let branch_coordinate = branch_entity * h + k;
+                let (node_pos, node_neg) = match branch {
+                    ExactMnaBranch::VoltageSource {
+                        node_pos, node_neg, ..
+                    }
+                    | ExactMnaBranch::Inductor {
+                        node_pos, node_neg, ..
+                    } => (*node_pos, *node_neg),
+                };
+                if node_pos > 0 {
+                    let node_coordinate = (node_pos - 1) * h + k;
+                    jac[node_coordinate][branch_coordinate] -= 1.0;
+                    jac[branch_coordinate][node_coordinate] -= 1.0;
+                }
+                if node_neg > 0 {
+                    let node_coordinate = (node_neg - 1) * h + k;
+                    jac[node_coordinate][branch_coordinate] += 1.0;
+                    jac[branch_coordinate][node_coordinate] += 1.0;
+                }
+                if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                    jac[branch_coordinate][branch_coordinate] +=
+                        Complex64::new(0.0, omega_k * *inductance);
                 }
             }
         }
@@ -1352,22 +1601,36 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         gmin: Value,
-    ) -> Result<Vec<Vec<Complex64>>, HbError> {
+    ) -> Result<HbNewtonStep, HbError> {
         let n = self.num_nodes;
+        let branch_count = self.exact_mna_branches().len();
+        if branch_count > 0 && self.config.use_krylov {
+            return Err(HbError::InvalidCircuit(
+                "forced Krylov nonlinear HB with exact MNA branches requires the branch-aware realified operator"
+                    .to_string(),
+            ));
+        }
+        let entity_count = n.checked_add(branch_count).ok_or_else(|| {
+            HbError::InvalidCircuit("nonlinear HB MNA dimension exceeds this platform".to_string())
+        })?;
         let h = self.num_harmonics + 1; // complex components per node
         let w = 2 * self.num_harmonics + 1; // real unknowns per node
-        let size = n * w;
+        let size = entity_count.checked_mul(w).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "nonlinear HB realified MNA dimension exceeds this platform".to_string(),
+            )
+        })?;
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
 
         // Row/column index helpers in the real layout.
-        let re_idx = |node: usize, k: usize| -> usize {
+        let re_idx = |entity: usize, k: usize| -> usize {
             if k == 0 {
-                node * w
+                entity * w
             } else {
-                node * w + 2 * k - 1
+                entity * w + 2 * k - 1
             }
         };
-        let im_idx = |node: usize, k: usize| -> usize { node * w + 2 * k };
+        let im_idx = |entity: usize, k: usize| -> usize { entity * w + 2 * k };
 
         // Realified RHS: -residual, DC keeps only its real equation.
         let mut rhs = vec![0.0; size];
@@ -1380,11 +1643,25 @@ impl HbSolver {
                 }
             }
         }
+        for branch in 0..branch_count {
+            for k in 0..h {
+                let residual = state.mna_branch_residual[branch][k];
+                let entity = n + branch;
+                rhs[re_idx(entity, k)] = -residual.re;
+                if k > 0 {
+                    rhs[im_idx(entity, k)] = -residual.im;
+                }
+            }
+        }
 
         // Large exact systems take the matrix-free route first.  A failed or
         // stagnated inner solve falls through to the established dense
         // elimination below, preserving the convergence policy exactly.
-        let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
+        // The matrix-free realified operator is node-only today. Branch-aware
+        // Krylov is a separate implementation stage; exact-MNA systems use
+        // the qualified dense real elimination below.
+        let try_krylov = branch_count == 0
+            && (self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD);
         if try_krylov && n > 0 {
             let extended = 2 * self.num_harmonics;
             let g_spectra = if self.has_nonlinear_devices() {
@@ -1430,7 +1707,7 @@ impl HbSolver {
                         outcome.relative_residual
                     );
                 }
-                let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+                let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
                 for node in 0..n {
                     for k in 0..h {
                         let re = outcome.solution[re_idx(node, k)].re;
@@ -1439,10 +1716,13 @@ impl HbSolver {
                         } else {
                             0.0
                         };
-                        delta_x[node][k] = Complex64::new(re, im);
+                        node_voltages[node][k] = Complex64::new(re, im);
                     }
                 }
-                return Ok(delta_x);
+                return Ok(HbNewtonStep {
+                    node_voltages,
+                    branch_currents: Vec::new(),
+                });
             }
             log::debug!(
                 "HB exact matrix-free solve stagnated after {} iterations (relative residual \
@@ -1456,9 +1736,9 @@ impl HbSolver {
         // from the existing complex assembly.
         let jac_c = self.build_full_jacobian_with_gmin(state, gmin)?;
         let mut a = vec![vec![0.0; size]; size];
-        for i in 0..n {
+        for i in 0..entity_count {
             for k in 0..h {
-                for j in 0..n {
+                for j in 0..entity_count {
                     for l in 0..h {
                         let t = jac_c[i * h + k][j * h + l];
                         if t.re == 0.0 && t.im == 0.0 {
@@ -1522,7 +1802,7 @@ impl HbSolver {
 
         let solution = self.solve_real_linear_system(&a, &rhs)?;
 
-        let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+        let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
         for node in 0..n {
             for k in 0..h {
                 let re = solution[re_idx(node, k)];
@@ -1531,11 +1811,27 @@ impl HbSolver {
                 } else {
                     0.0
                 };
-                delta_x[node][k] = Complex64::new(re, im);
+                node_voltages[node][k] = Complex64::new(re, im);
+            }
+        }
+        let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; branch_count];
+        for (branch, spectrum) in branch_currents.iter_mut().enumerate() {
+            let entity = n + branch;
+            for (k, coefficient) in spectrum.iter_mut().enumerate() {
+                let re = solution[re_idx(entity, k)];
+                let im = if k > 0 {
+                    solution[im_idx(entity, k)]
+                } else {
+                    0.0
+                };
+                *coefficient = Complex64::new(re, im);
             }
         }
 
-        Ok(delta_x)
+        Ok(HbNewtonStep {
+            node_voltages,
+            branch_currents,
+        })
     }
 
     /// Solve the Jacobian system: J * ΔX = -R
@@ -1551,10 +1847,24 @@ impl HbSolver {
         &self,
         jac: &[Vec<Complex64>],
         state: &HbSolverState,
-    ) -> Result<Vec<Vec<Complex64>>, HbError> {
+    ) -> Result<HbNewtonStep, HbError> {
         let n = self.num_nodes;
+        let branch_count = self.exact_mna_branches().len();
+        if branch_count > 0 && self.config.use_krylov {
+            return Err(HbError::InvalidCircuit(
+                "forced Krylov nonlinear HB with exact MNA branches requires the branch-aware complex operator"
+                    .to_string(),
+            ));
+        }
+        let entity_count = n.checked_add(branch_count).ok_or_else(|| {
+            HbError::InvalidCircuit("nonlinear HB MNA dimension exceeds this platform".to_string())
+        })?;
         let h = self.num_harmonics + 1;
-        let size = n * h;
+        let size = entity_count.checked_mul(h).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "nonlinear HB complex MNA dimension exceeds this platform".to_string(),
+            )
+        })?;
 
         // Flatten RHS (negative residual)
         let mut rhs = Vec::with_capacity(size);
@@ -1563,8 +1873,23 @@ impl HbSolver {
                 rhs.push(-state.residual[node][k]);
             }
         }
+        for branch in 0..branch_count {
+            for k in 0..h {
+                rhs.push(-state.mna_branch_residual[branch][k]);
+            }
+        }
+        if jac.len() != size || jac.iter().any(|row| row.len() != size) || rhs.len() != size {
+            return Err(HbError::InvalidCircuit(format!(
+                "nonlinear HB complex Newton system has Jacobian/RHS dimensions {}/{}; expected {size}",
+                jac.len(),
+                rhs.len()
+            )));
+        }
 
-        let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
+        // The legacy complex Krylov preconditioner is node-only. Preserve the
+        // dense exact-MNA seam until the dedicated branch-aware operator lands.
+        let try_krylov = branch_count == 0
+            && (self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD);
         let flat_solution = if try_krylov && n > 0 && h > 0 {
             match self.solve_jacobian_krylov(jac, &rhs, n, h) {
                 Some(solution) => solution,
@@ -1574,17 +1899,44 @@ impl HbSolver {
             self.solve_complex_linear_system(jac, &rhs)?
         };
 
-        // Reshape to [node][harmonic]
-        let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
-        for (idx, &val) in flat_solution.iter().enumerate() {
-            let node = idx / h;
-            let harmonic = idx % h;
-            if node < n {
-                delta_x[node][harmonic] = val;
+        if flat_solution.len() != size
+            || flat_solution
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+        {
+            return Err(HbError::InvalidCircuit(
+                "nonlinear HB complex Newton solve produced a malformed or non-finite step"
+                    .to_string(),
+            ));
+        }
+        let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+        for (node, spectrum) in node_voltages.iter_mut().enumerate() {
+            for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
+                let value = flat_solution[node * h + harmonic];
+                *coefficient = if harmonic == 0 {
+                    Complex64::new(value.re, 0.0)
+                } else {
+                    value
+                };
+            }
+        }
+        let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; branch_count];
+        for (branch, spectrum) in branch_currents.iter_mut().enumerate() {
+            let entity = n + branch;
+            for (harmonic, coefficient) in spectrum.iter_mut().enumerate() {
+                let value = flat_solution[entity * h + harmonic];
+                *coefficient = if harmonic == 0 {
+                    Complex64::new(value.re, 0.0)
+                } else {
+                    value
+                };
             }
         }
 
-        Ok(delta_x)
+        Ok(HbNewtonStep {
+            node_voltages,
+            branch_currents,
+        })
     }
 
     /// Attempt the Newton-step solve via block-Jacobi-preconditioned GMRES.
