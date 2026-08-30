@@ -41,6 +41,16 @@ pub enum HealthMode {
     Readiness,
 }
 
+/// Transfer excitation selected by the CLI pole-zero shortcut.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum PzTransferMode {
+    /// Drive and measure the input port as a voltage transfer.
+    #[default]
+    Voltage,
+    /// Inject current at the input port and measure a transimpedance transfer.
+    Current,
+}
+
 /// Xyce-compatible behavior for a parameter defined more than once in one
 /// lexical scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -428,12 +438,21 @@ pub struct RunArgs {
     pub hb_harmonics: usize,
 
     /// PZ (Pole-Zero) analysis input node (name or index)
-    #[arg(long, value_name = "NODE", help = "Input node for pole-zero analysis")]
+    #[arg(
+        long,
+        value_name = "NODE",
+        help = "Input node for pole-zero analysis",
+        requires = "pz_output"
+    )]
     pub pz_input: Option<String>,
 
     /// PZ (Pole-Zero) analysis output node (name or index)
     #[arg(long, value_name = "NODE", requires = "pz_input")]
     pub pz_output: Option<String>,
+
+    /// PZ input transfer type (default: voltage)
+    #[arg(long, value_enum, value_name = "TYPE", requires = "pz_input")]
+    pub pz_transfer: Option<PzTransferMode>,
 
     /// Sensitivity analysis output node (name or index)
     #[arg(

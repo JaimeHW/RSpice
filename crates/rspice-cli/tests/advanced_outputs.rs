@@ -329,6 +329,46 @@ fn pole_zero_exports_complex_singularities() {
 }
 
 #[test]
+fn pole_zero_explicit_current_transfer_preserves_current_port_contract() {
+    let dir = test_dir("pz-current-parallel-voltage-source");
+    let deck = write_deck(
+        &dir,
+        "voltage-driven-rc.sp",
+        "* voltage-driven RC\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 100n\n\
+         .end\n",
+    );
+    let out = dir.join("pz-current.csv");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--pz-input",
+        "in",
+        "--pz-output",
+        "out",
+        "--pz-transfer",
+        "current",
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(!output.status.success(), "current input must be explicit");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("requested current input is parallel to an independent ideal voltage source"),
+        "unexpected stderr: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn sensitivity_exports_table() {
     let dir = test_dir("sens");
     let deck = write_deck(

@@ -20,7 +20,7 @@ use crate::report::{
     TapReporter,
 };
 
-use crate::cli::{CliError, Config, MeasFormat, OutputFormat, RunArgs};
+use crate::cli::{CliError, Config, MeasFormat, OutputFormat, PzTransferMode, RunArgs};
 use rspice_core::engine::{StepPlan, StepPlanLimits};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
@@ -2392,7 +2392,8 @@ fn run_requested_mode(
         (ctx.args.pz_input.as_deref(), ctx.args.pz_output.as_deref())
     {
         let (input, output) = resolve_node_pair(ctx, input, output, "--pz-input/--pz-output")?;
-        frequency::run_pz(ctx, input, output)?;
+        let input_is_current = matches!(ctx.args.pz_transfer, Some(PzTransferMode::Current));
+        frequency::run_pz(ctx, input, output, input_is_current)?;
         return Ok(RequestedModeOutcome::RanNeedsMeasurementFinalization);
     }
 

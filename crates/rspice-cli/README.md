@@ -48,7 +48,7 @@ A handful of analyses can instead be requested from the command line. When one o
 | Monte Carlo | `--monte-carlo N` |
 | Periodic steady-state (PSS) | `--pss-freq F` |
 | Harmonic balance | `--hb-freq F` |
-| Pole-zero | `--pz-input NODE --pz-output NODE` |
+| Pole-zero | `--pz-input NODE --pz-output NODE [--pz-transfer voltage|current]` |
 | DC sensitivity | `--sens-output NODE --sens-param NAME` |
 | Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (needs a `.AC` card for the sweep) |
 | Process corners | `--corners tt,ss,ff` |
@@ -185,6 +185,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--hb-harmonics <N>` | Number of HB harmonics (default: 9) |
 | `--pz-input <NODE>` | Pole-zero input node (name or index) |
 | `--pz-output <NODE>` | Pole-zero output node (requires `--pz-input`) |
+| `--pz-transfer <TYPE>` | Input excitation for the pole-zero transfer: `voltage` (default) or `current` (requires `--pz-input`) |
 | `--sens-output <NODE>` | Sensitivity analysis output node (name or index) |
 | `--sens-param <PARAM>` | Parameter name for sensitivity analysis (requires `--sens-output`) |
 | `--sens-value <VALUE>` | Nominal parameter value (default: 1.0; requires `--sens-param`) |
@@ -228,8 +229,11 @@ rspice run vco.sp --pss-freq 2.4e9 --pss-harmonics 15 -v
 # Harmonic balance for RF circuits
 rspice run mixer.sp --hb-freq 900e6 --hb-harmonics 9
 
-# Pole-zero analysis
+# Pole-zero voltage-transfer analysis (the CLI default)
 rspice run opamp.sp --pz-input 1 --pz-output 4
+
+# Pole-zero transimpedance analysis with a current input
+rspice run transimpedance.sp --pz-input 1 --pz-output 4 --pz-transfer current
 
 # DC sensitivity
 rspice run amp.sp --sens-output 3 --sens-param R1 --sens-value 10k

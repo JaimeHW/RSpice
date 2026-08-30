@@ -730,15 +730,31 @@ pub(super) fn run_pz(
     ctx: &RunContext<'_>,
     input_node: usize,
     output_node: usize,
+    input_is_current: bool,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
-            "Running Pole-Zero analysis: input=node {}, output=node {}",
-            input_node, output_node
+            "Running Pole-Zero analysis: input=node {} ({}), output=node {}",
+            input_node,
+            if input_is_current {
+                "current"
+            } else {
+                "voltage"
+            },
+            output_node
         );
     }
 
-    match ctx.engine.run_pz(ctx.netlist, input_node, output_node) {
+    match ctx.engine.run_pz_ports(
+        ctx.netlist,
+        input_node,
+        None,
+        output_node,
+        None,
+        input_is_current,
+        true,
+        true,
+    ) {
         Ok(result) => {
             report_pz(ctx, &result.poles, &result.zeros)?;
             Ok(())
