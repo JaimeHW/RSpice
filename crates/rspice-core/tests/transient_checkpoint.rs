@@ -617,6 +617,25 @@ fn xyce_source_breakpoint_checkpoint_restores_the_global_controller_phase() {
 
 #[test]
 fn xyce_source_breakpoint_restart_preserves_reactive_bjt_trajectory() {
+    fn assert_exact_suffix(label: &str, actual: &[f64], baseline: &[f64]) {
+        assert_eq!(
+            actual.len(),
+            baseline.len(),
+            "{label} length differs: baseline={}, resumed={}",
+            baseline.len(),
+            actual.len()
+        );
+        for (row, (&actual, &baseline)) in actual.iter().zip(baseline).enumerate() {
+            assert_eq!(
+                actual.to_bits(),
+                baseline.to_bits(),
+                "{label} differs at suffix row {row}: baseline={baseline:.17e} ({:#018x}), resumed={actual:.17e} ({:#018x})",
+                baseline.to_bits(),
+                actual.to_bits()
+            );
+        }
+    }
+
     let netlist = Netlist::parse(
         "source-breakpoint restart preserves reactive BJT trajectory\n\
          .tran 0 30u\n\
@@ -679,15 +698,16 @@ fn xyce_source_breakpoint_restart_preserves_reactive_bjt_trajectory() {
         let (resumed, _) = engine
             .run_tran_resume(&netlist, &checkpoint, stop, max_step)
             .unwrap_or_else(|error| panic!("{encoding:?} checkpoint resumes: {error}"));
-        assert_eq!(
-            resumed.time, expected_time,
-            "{encoding:?} accepted grid differs after the reactive BJT breakpoint"
+        assert_exact_suffix(
+            &format!("{encoding:?} accepted grid"),
+            &resumed.time,
+            expected_time,
         );
         for (node, (actual, baseline)) in resumed.voltages.iter().zip(&full.voltages).enumerate() {
-            assert_eq!(
+            assert_exact_suffix(
+                &format!("{encoding:?} node {node}"),
                 actual,
                 &baseline[baseline_index..],
-                "{encoding:?} node {node} differs after the reactive BJT breakpoint"
             );
         }
         for (branch, (actual, baseline)) in resumed
@@ -696,10 +716,10 @@ fn xyce_source_breakpoint_restart_preserves_reactive_bjt_trajectory() {
             .zip(&full.branch_currents)
             .enumerate()
         {
-            assert_eq!(
+            assert_exact_suffix(
+                &format!("{encoding:?} branch {branch}"),
                 actual,
                 &baseline[baseline_index..],
-                "{encoding:?} branch {branch} differs after the reactive BJT breakpoint"
             );
         }
     }
