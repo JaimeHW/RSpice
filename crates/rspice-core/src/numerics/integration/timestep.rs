@@ -9,6 +9,8 @@ use crate::Value;
 use crate::numerics::integration::IntegrationMethod;
 
 const TRAPGEAR_SIGN_CHANGE_FLOOR: Value = crate::constants::VNTOL;
+const TRAPGEAR_OSCILLATION_THRESHOLD: usize = 3;
+const TRAPGEAR_RECOVERY_STEPS: usize = 2;
 
 /// Xyce transient-step acceptance policy selected by `TIMEINT ERROPTION`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -476,6 +478,23 @@ pub struct TrapGearController {
     recovery_steps: usize,
 }
 
+/// Version-neutral state projection of the Trap/Gear hysteresis detector.
+///
+/// Checkpoint encoders own their wire version and transpose these parallel
+/// vectors as needed. The detector's thresholds are deliberately absent:
+/// they are implementation policy covered by the simulation identity, not
+/// mutable trajectory state.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TrapGearControllerSnapshot {
+    pub(crate) current_method: IntegrationMethod,
+    pub(crate) prev_values: Vec<Value>,
+    pub(crate) prev_signs: Vec<bool>,
+    pub(crate) prev_sign_valid: Vec<bool>,
+    pub(crate) sign_change_count: Vec<usize>,
+    pub(crate) smooth_steps: usize,
+    pub(crate) at_breakpoint: bool,
+}
+
 impl TrapGearController {
     /// Create a new TrapGear controller
     pub fn new() -> Self {
@@ -487,9 +506,144 @@ impl TrapGearController {
             sign_change_count: Vec::new(),
             smooth_steps: 0,
             at_breakpoint: false,
-            oscillation_threshold: 3,
-            recovery_steps: 2,
+            oscillation_threshold: TRAPGEAR_OSCILLATION_THRESHOLD,
+            recovery_steps: TRAPGEAR_RECOVERY_STEPS,
         }
+    }
+
+    /// Capture every mutable field that can affect the next method decision.
+    pub(crate) fn capture_snapshot(&self) -> TrapGearControllerSnapshot {
+        TrapGearControllerSnapshot {
+            current_method: self.current_method,
+            prev_values: self.prev_values.clone(),
+            prev_signs: self.prev_signs.clone(),
+            prev_sign_valid: self.prev_sign_valid.clone(),
+            sign_change_count: self.sign_change_count.clone(),
+            smooth_steps: self.smooth_steps,
+            at_breakpoint: self.at_breakpoint,
+        }
+    }
+
+    /// Validate an untrusted controller snapshot without mutating live state.
+    ///
+    /// An empty detector is the canonical pre-first-update state and may sit
+    /// beside a nonempty accepted solution. Once active, every lane is updated
+    /// together and `prev_values` must be the exact accepted boundary used to
+    /// seed the next derivative decision.
+    pub(crate) fn validate_snapshot(
+        snapshot: &TrapGearControllerSnapshot,
+        accepted_solution: &[Value],
+    ) -> Result<(), String> {
+        if snapshot.current_method == IntegrationMethod::TrapGear {
+            return Err(
+                "Trap/Gear controller snapshot uses hybrid TrapGear as an effective method"
+                    .to_string(),
+            );
+        }
+
+        let lane_count = snapshot.prev_values.len();
+        for (label, actual) in [
+            ("previous derivative signs", snapshot.prev_signs.len()),
+            (
+                "previous derivative-sign validity",
+                snapshot.prev_sign_valid.len(),
+            ),
+            (
+                "consecutive sign-change counts",
+                snapshot.sign_change_count.len(),
+            ),
+        ] {
+            if actual != lane_count {
+                return Err(format!(
+                    "Trap/Gear controller snapshot {label} length {actual} does not match previous-value length {lane_count}"
+                ));
+            }
+        }
+
+        if snapshot.smooth_steps > TRAPGEAR_RECOVERY_STEPS {
+            return Err(format!(
+                "Trap/Gear controller snapshot smooth-step count {} exceeds canonical recovery bound {}",
+                snapshot.smooth_steps, TRAPGEAR_RECOVERY_STEPS
+            ));
+        }
+
+        if lane_count > 0 {
+            if accepted_solution.len() != lane_count {
+                return Err(format!(
+                    "active Trap/Gear controller snapshot lane count {lane_count} does not match accepted solution length {}",
+                    accepted_solution.len()
+                ));
+            }
+            for (index, (&previous, &accepted)) in snapshot
+                .prev_values
+                .iter()
+                .zip(accepted_solution)
+                .enumerate()
+            {
+                if !previous.is_finite() {
+                    return Err(format!(
+                        "Trap/Gear controller snapshot previous value {index} is not finite"
+                    ));
+                }
+                if !accepted.is_finite() {
+                    return Err(format!(
+                        "Trap/Gear controller accepted solution value {index} is not finite"
+                    ));
+                }
+                if previous.to_bits() != accepted.to_bits() {
+                    return Err(format!(
+                        "Trap/Gear controller snapshot previous value {index} does not exactly match the accepted solution"
+                    ));
+                }
+            }
+        }
+
+        let all_signs_valid = snapshot.prev_sign_valid.iter().all(|valid| *valid);
+        let no_signs_valid = snapshot.prev_sign_valid.iter().all(|valid| !*valid);
+        if !all_signs_valid && !no_signs_valid {
+            return Err(
+                "Trap/Gear controller snapshot mixes initialized and uninitialized derivative-sign lanes"
+                    .to_string(),
+            );
+        }
+        for (index, &count) in snapshot.sign_change_count.iter().enumerate() {
+            if count >= TRAPGEAR_OSCILLATION_THRESHOLD {
+                return Err(format!(
+                    "Trap/Gear controller snapshot sign-change count {count} at lane {index} reaches detector threshold {TRAPGEAR_OSCILLATION_THRESHOLD}"
+                ));
+            }
+            if !snapshot.prev_sign_valid[index] {
+                if count != 0 {
+                    return Err(format!(
+                        "Trap/Gear controller snapshot uninitialized lane {index} has sign-change count {count}"
+                    ));
+                }
+                if !snapshot.prev_signs[index] {
+                    return Err(format!(
+                        "Trap/Gear controller snapshot uninitialized lane {index} does not carry the canonical positive sign"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Restore a validated snapshot atomically with respect to validation.
+    pub(crate) fn restore_snapshot(
+        &mut self,
+        snapshot: &TrapGearControllerSnapshot,
+        accepted_solution: &[Value],
+    ) -> Result<(), String> {
+        Self::validate_snapshot(snapshot, accepted_solution)?;
+        self.current_method = snapshot.current_method;
+        self.prev_values.clone_from(&snapshot.prev_values);
+        self.prev_signs.clone_from(&snapshot.prev_signs);
+        self.prev_sign_valid.clone_from(&snapshot.prev_sign_valid);
+        self.sign_change_count
+            .clone_from(&snapshot.sign_change_count);
+        self.smooth_steps = snapshot.smooth_steps;
+        self.at_breakpoint = snapshot.at_breakpoint;
+        Ok(())
     }
 
     /// Get the current effective integration method
@@ -565,7 +719,7 @@ impl TrapGearController {
             self.smooth_steps = 0;
         } else {
             // Truly smooth - no sign changes
-            self.smooth_steps += 1;
+            self.smooth_steps = self.smooth_steps.saturating_add(1).min(self.recovery_steps);
 
             // Return to Trapezoidal after sufficient smooth steps
             if self.smooth_steps >= self.recovery_steps && !self.at_breakpoint {
@@ -623,6 +777,139 @@ impl Default for TrapGearController {
 #[cfg(test)]
 mod trapgear_controller_tests {
     use super::*;
+
+    #[test]
+    fn snapshot_round_trip_preserves_active_detector_phase_exactly() {
+        let mut source = TrapGearController::new();
+        for sample in [0.0, 1.0, 0.0, 1.0, 0.0, 1.0] {
+            source.update(&[sample], 1.0e-9);
+        }
+        source.set_at_breakpoint(true);
+        assert_eq!(source.current_method(), IntegrationMethod::Gear2);
+
+        let snapshot = source.capture_snapshot();
+        TrapGearController::validate_snapshot(&snapshot, &[1.0])
+            .expect("captured active detector validates");
+        assert_eq!(snapshot.sign_change_count, [1]);
+        assert!(snapshot.prev_sign_valid[0]);
+        assert!(snapshot.at_breakpoint);
+
+        let mut restored = TrapGearController::new();
+        restored.force_method(IntegrationMethod::BackwardEuler);
+        restored.update(&[99.0], 2.0e-9);
+        restored
+            .restore_snapshot(&snapshot, &[1.0])
+            .expect("active detector restores");
+        assert_eq!(restored.capture_snapshot(), snapshot);
+
+        assert_eq!(
+            source.update(&[0.0], 1.0e-9),
+            restored.update(&[0.0], 1.0e-9)
+        );
+        assert_eq!(source.capture_snapshot(), restored.capture_snapshot());
+        assert_eq!(
+            source.update(&[1.0], 1.0e-9),
+            restored.update(&[1.0], 1.0e-9)
+        );
+        assert_eq!(source.capture_snapshot(), restored.capture_snapshot());
+    }
+
+    #[test]
+    fn snapshot_validation_rejects_corruption_before_restore_mutates() {
+        let mut source = TrapGearController::new();
+        source.restart_from(&[1.0, 2.0]);
+        let valid = source.capture_snapshot();
+        TrapGearController::validate_snapshot(&valid, &[1.0, 2.0])
+            .expect("canonical restart detector validates");
+
+        let mut destination = TrapGearController::new();
+        destination.update(&[7.0], 1.0e-9);
+        let destination_before = destination.capture_snapshot();
+
+        let mut bad_shape = valid.clone();
+        bad_shape.prev_signs.pop();
+        assert!(
+            destination
+                .restore_snapshot(&bad_shape, &[1.0, 2.0])
+                .expect_err("shape mismatch is rejected")
+                .contains("length")
+        );
+        assert_eq!(destination.capture_snapshot(), destination_before);
+
+        let mut bad_method = valid.clone();
+        bad_method.current_method = IntegrationMethod::TrapGear;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_method, &[1.0, 2.0])
+                .expect_err("hybrid effective method is rejected")
+                .contains("effective method")
+        );
+
+        let mut bad_value = valid.clone();
+        bad_value.prev_values[0] = Value::NAN;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_value, &[Value::NAN, 2.0])
+                .expect_err("non-finite previous value is rejected")
+                .contains("not finite")
+        );
+
+        let mut bad_boundary = valid.clone();
+        bad_boundary.prev_values[0] = -0.0;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_boundary, &[0.0, 2.0])
+                .expect_err("non-exact accepted boundary is rejected")
+                .contains("exactly match")
+        );
+
+        let mut bad_count = valid.clone();
+        bad_count.prev_sign_valid.fill(true);
+        bad_count.sign_change_count[0] = TRAPGEAR_OSCILLATION_THRESHOLD;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_count, &[1.0, 2.0])
+                .expect_err("threshold-reaching count is rejected")
+                .contains("threshold")
+        );
+
+        let mut bad_uninitialized_lane = valid.clone();
+        bad_uninitialized_lane.sign_change_count[0] = 1;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_uninitialized_lane, &[1.0, 2.0])
+                .expect_err("uninitialized count is rejected")
+                .contains("uninitialized lane")
+        );
+
+        let mut bad_mixed_validity = valid.clone();
+        bad_mixed_validity.prev_sign_valid[0] = true;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_mixed_validity, &[1.0, 2.0])
+                .expect_err("mixed validity is rejected")
+                .contains("mixes")
+        );
+
+        let mut bad_smooth = valid;
+        bad_smooth.smooth_steps = TRAPGEAR_RECOVERY_STEPS + 1;
+        assert!(
+            TrapGearController::validate_snapshot(&bad_smooth, &[1.0, 2.0])
+                .expect_err("oversized smooth count is rejected")
+                .contains("recovery bound")
+        );
+    }
+
+    #[test]
+    fn snapshot_allows_canonical_inactive_state_and_caps_smooth_provenance() {
+        let inactive = TrapGearController::new().capture_snapshot();
+        TrapGearController::validate_snapshot(&inactive, &[4.0, 5.0])
+            .expect("pre-first-update detector may accompany an accepted solution");
+
+        let mut smooth = TrapGearController::new();
+        smooth.update(&[1.0], 1.0e-9);
+        for _ in 0..16 {
+            smooth.update(&[1.0], 1.0e-9);
+        }
+        let snapshot = smooth.capture_snapshot();
+        assert_eq!(snapshot.smooth_steps, TRAPGEAR_RECOVERY_STEPS);
+        TrapGearController::validate_snapshot(&snapshot, &[1.0])
+            .expect("saturated smooth detector validates");
+    }
 
     #[test]
     fn ignores_voltage_tolerance_scale_sign_noise() {
