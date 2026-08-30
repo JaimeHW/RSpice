@@ -56,6 +56,45 @@ impl Engine {
         )
     }
 
+    /// Give each physical `.OPTIONS RSHUNT` resistor a stable contributor
+    /// identity without inventing an authored element.  All node shunts are
+    /// mechanisms of the synthetic `RSHUNT` owner, so `DNO(RSHUNT)` remains a
+    /// useful whole-option sum.  The readable stem comes from the canonical
+    /// node spelling while the domain-separated digest prevents punctuation
+    /// normalization or truncation from merging distinct nodes.
+    fn global_shunt_noise_identity(node_name: &str) -> crate::analysis::NoiseSourceIdentity {
+        const MAX_READABLE_BYTES: usize = 80;
+        let mut readable = String::with_capacity(MAX_READABLE_BYTES);
+        for byte in node_name.bytes() {
+            let mapped = if byte.is_ascii_alphanumeric() {
+                byte as char
+            } else {
+                '_'
+            };
+            if mapped == '_' && readable.ends_with('_') {
+                continue;
+            }
+            if readable.len() == MAX_READABLE_BYTES {
+                break;
+            }
+            readable.push(mapped);
+        }
+        let readable = readable.trim_matches('_');
+        let readable = if readable.is_empty() {
+            "NODE"
+        } else {
+            readable
+        };
+
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"rspice-noise-rshunt-node-v1\0");
+        hasher.update(node_name.as_bytes());
+        let digest = hasher.finalize().to_hex();
+        let mechanism = format!("NODE_{readable}_{}", &digest.as_str()[..16]);
+        debug_assert!(crate::analysis::is_persistable_noise_mechanism(&mechanism));
+        crate::analysis::NoiseSourceIdentity::mechanism("RSHUNT", mechanism)
+    }
+
     /// Evaluate one elementary PSD without allowing invalid numerical
     /// evidence to masquerade as an inactive source.
     pub(in crate::engine) fn evaluated_noise_density(
@@ -922,6 +961,45 @@ impl Engine {
         let mut absolute_temperatures = HashMap::new();
         let mut bsim4_series_noise_conductances: HashMap<String, Value> = HashMap::new();
 
+        // `.OPTIONS RSHUNT` is an authored physical resistor from every
+        // electrical node to ground, not a numerical conditioning aid.  Its
+        // independent Norton sources therefore belong in every analysis that
+        // consumes this shared catalog.  Private DAE state rows are excluded
+        // exactly as they are by the global-shunt matrix stamp; GMIN remains
+        // absent because it is a solver aid rather than physical circuitry.
+        let shunt_conductance = circuit.global_shunt_conductance();
+        if shunt_conductance != 0.0 {
+            if !shunt_conductance.is_finite() || shunt_conductance < 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "RSHUNT noise conductance must be finite and nonnegative, got {shunt_conductance:e} S"
+                )));
+            }
+            let shunt_resistance = 1.0 / shunt_conductance;
+            if !shunt_resistance.is_finite() || shunt_resistance <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "RSHUNT resistance is not representable for conductance {shunt_conductance:e} S"
+                )));
+            }
+            let node_names = circuit.node_names_sorted();
+            for node_index in 0..circuit.num_nodes() {
+                if circuit.is_non_electrical_state_matrix_index(node_index) {
+                    continue;
+                }
+                let node = node_index + 1;
+                let fallback_name;
+                let node_name = if let Some(name) = node_names.get(node_index) {
+                    name.as_str()
+                } else {
+                    fallback_name = format!("N{node}");
+                    &fallback_name
+                };
+                noise_sources.push(
+                    NoiseSource::thermal("RSHUNT".to_owned(), node, 0, shunt_resistance)
+                        .with_identity(Self::global_shunt_noise_identity(node_name)),
+                );
+            }
+        }
+
         for bsim3 in &circuit.bsim3v3.devices {
             noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3));
         }
@@ -1275,7 +1353,11 @@ impl Engine {
             } else {
                 f64::INFINITY
             };
-            if resistance <= 0.0 || !resistance.is_finite() || resistance >= 1e12 {
+            // A large but finite physical resistance still has a representable
+            // Johnson-Nyquist density.  Reject only states that cannot describe
+            // a positive finite resistance; an arbitrary magnitude cutoff
+            // silently deletes real noise from high-impedance circuits.
+            if resistance <= 0.0 || !resistance.is_finite() {
                 continue;
             }
 
@@ -2814,6 +2896,125 @@ mod tests {
             crate::engine::SimulationConfig::default()
                 .with_spice_dialect(crate::engine::SpiceDialect::Xyce),
         )
+    }
+
+    #[test]
+    fn rshunt_noise_is_one_independent_norton_source_per_electrical_node() {
+        let mut circuit = crate::CircuitData::new();
+        let out = circuit.get_or_create_node("out");
+        let private_state = circuit.get_or_create_node("XMEM.__state");
+        let sense = circuit.get_or_create_node("sense-node");
+        circuit.non_electrical_state_nodes.insert(private_state);
+        circuit.global_shunt_conductance = 1.0e-3;
+
+        let collected =
+            Engine::try_collect_noise_sources(&circuit, &vec![0.0; circuit.matrix_size()])
+                .expect("physical RSHUNT sources collect");
+        assert!(collected.correlated.is_empty());
+        assert_eq!(collected.elementary.len(), 2);
+        assert_eq!(collected.elementary_absolute_temperatures, vec![None, None]);
+
+        let temperature = 300.15;
+        let expected = 4.0 * crate::constants::K_BOLTZMANN * temperature * 1.0e-3;
+        let mut mechanisms = std::collections::HashSet::new();
+        for source in &collected.elementary {
+            assert_eq!(source.identity.device, "RSHUNT");
+            let mechanism = source
+                .identity
+                .mechanism
+                .as_deref()
+                .expect("each node shunt has its own mechanism");
+            assert!(crate::analysis::is_persistable_noise_mechanism(mechanism));
+            assert!(mechanisms.insert(mechanism));
+            assert_eq!(source.node_neg, 0);
+            assert!(source.node_pos == out || source.node_pos == sense);
+            assert_ne!(source.node_pos, private_state);
+            let density = Engine::evaluated_noise_density(source, 1.0e3, temperature)
+                .expect("RSHUNT density evaluates");
+            assert!((density / expected - 1.0).abs() < 2.0e-15);
+        }
+        assert!(
+            mechanisms.iter().any(|name| name.contains("out")),
+            "the contributor label must retain a readable canonical node stem"
+        );
+        assert!(
+            mechanisms.iter().any(|name| name.contains("sense_node")),
+            "punctuated node names must remain recognizable after canonicalization"
+        );
+    }
+
+    #[test]
+    fn one_kilohm_rshunt_matches_voltage_and_short_circuit_current_psd() {
+        let temperature = 300.15;
+        let resistance = 1.0e3;
+        let voltage_netlist = Netlist::parse(
+            "RSHUNT output-noise oracle\n\
+             IQUIET out 0 0\n\
+             .OPTIONS RSHUNT=1k\n\
+             .END\n",
+        )
+        .expect("voltage-noise deck parses");
+        let voltage = Engine::default()
+            .run_noise(&voltage_netlist, 1, &[1.0e3], temperature)
+            .expect("RSHUNT output noise solves");
+        let expected_voltage = 4.0 * crate::constants::K_BOLTZMANN * temperature * resistance;
+        assert!((voltage[0].output_noise_density / expected_voltage - 1.0).abs() < 1.0e-10);
+
+        let current_netlist = Netlist::parse(
+            "RSHUNT port-noise oracle\n\
+             VPORT out 0 0\n\
+             .OPTIONS RSHUNT=1k\n\
+             .END\n",
+        )
+        .expect("current-noise deck parses");
+        let current = Engine::default()
+            .run_port_noise_correlation(
+                &current_netlist,
+                &["VPORT".to_owned()],
+                &[1.0e3],
+                temperature,
+            )
+            .expect("RSHUNT port noise solves");
+        let expected_current = 4.0 * crate::constants::K_BOLTZMANN * temperature / resistance;
+        let actual_current = current[0].current_correlation[0][0];
+        assert_eq!(actual_current.im, 0.0);
+        assert!((actual_current.re / expected_current - 1.0).abs() < 1.0e-10);
+    }
+
+    #[test]
+    fn numerical_gmin_is_not_a_noise_source_and_high_resistance_noise_is_retained() {
+        let quiet_netlist = Netlist::parse(
+            "GMIN is conditioning only\n\
+             RQUIET out 0 1k NOISY=0\n\
+             .END\n",
+        )
+        .expect("quiet deck parses");
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.gmin_target = 1.0e-3;
+        let quiet = Engine::new(config)
+            .run_noise(&quiet_netlist, 1, &[1.0e3], 300.15)
+            .expect("conditioned quiet circuit solves");
+        assert_eq!(quiet[0].output_noise_density, 0.0);
+        assert!(quiet[0].contributions.is_empty());
+
+        let high_resistance_netlist = Netlist::parse(
+            "High resistance remains noisy\n\
+             R1 out 0 1e15\n\
+             .END\n",
+        )
+        .expect("high-resistance deck parses");
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&high_resistance_netlist)
+            .expect("high-resistance circuit builds");
+        let (sources, correlated) =
+            Engine::collect_noise_sources(&circuit, &vec![0.0; circuit.matrix_size()]);
+        assert!(correlated.is_empty());
+        let source = sources
+            .iter()
+            .find(|source| source.identity.device.eq_ignore_ascii_case("R1"))
+            .expect("finite high resistance must retain thermal noise");
+        assert!((source.parameter / 1.0e15 - 1.0).abs() < 2.0e-15);
     }
 
     #[test]

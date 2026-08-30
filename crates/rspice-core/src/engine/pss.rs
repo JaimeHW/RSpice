@@ -848,7 +848,9 @@ impl Engine {
         config: PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_state_abort(netlist, config, abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine
+            .run_pss_with_state_abort(netlist, config, abort)
             .map(|(result, _, _, _)| result)
     }
 
@@ -874,15 +876,17 @@ impl Engine {
         dc_seed: &PssDcOperatingPointSeed,
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_state_and_frozen_sources_abort(
-            netlist,
-            config,
-            &std::collections::BTreeSet::new(),
-            false,
-            Some(dc_seed),
-            abort,
-        )
-        .map(|(result, _, _, _)| result)
+        let engine = self.resolved_for_netlist(netlist);
+        engine
+            .run_pss_with_state_and_frozen_sources_abort(
+                netlist,
+                config,
+                &std::collections::BTreeSet::new(),
+                false,
+                Some(dc_seed),
+                abort,
+            )
+            .map(|(result, _, _, _)| result)
     }
 
     /// Solve PSS and retain the exact numerical state required by dependent
@@ -893,9 +897,10 @@ impl Engine {
         config: PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PssOperatingPoint, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
         let retained_config = config.clone();
         let (analysis, _, _, shooting_state) =
-            self.run_pss_with_state_abort(netlist, config, abort)?;
+            engine.run_pss_with_state_abort(netlist, config, abort)?;
         PssOperatingPoint::try_from_parts(retained_config, analysis, shooting_state)
     }
 
@@ -918,8 +923,9 @@ impl Engine {
         dc_seed: &PssDcOperatingPointSeed,
         abort: &dyn AbortSignal,
     ) -> Result<PssOperatingPoint, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
         let retained_config = config.clone();
-        let (analysis, _, _, shooting_state) = self.run_pss_with_state_and_frozen_sources_abort(
+        let (analysis, _, _, shooting_state) = engine.run_pss_with_state_and_frozen_sources_abort(
             netlist,
             config,
             &std::collections::BTreeSet::new(),
@@ -953,7 +959,8 @@ impl Engine {
         config: PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
-        self.run_pss_with_frozen_source_continuation_state_abort(netlist, config, &[], abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pss_with_frozen_source_continuation_state_resolved(netlist, config, &[], abort)
     }
 
     /// Run PSS with selected independent source waveforms frozen at their
@@ -987,6 +994,25 @@ impl Engine {
         frozen_source_names: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pss_with_frozen_source_continuation_state_resolved(
+            netlist,
+            config,
+            frozen_source_names,
+            abort,
+        )
+    }
+
+    /// Resolved implementation shared by both public continuation-state
+    /// boundaries.  Callers must resolve `.OPTIONS` before entering so the
+    /// checkpoint identity and both periodic traversals see one configuration.
+    fn run_pss_with_frozen_source_continuation_state_resolved(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        frozen_source_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -996,10 +1022,9 @@ impl Engine {
         // authenticate the same snapshot after both expensive traversals.
         let authenticated_netlist_identity = Self::pss_continuation_netlist_identity(netlist)?;
         let authenticated_fingerprint = super::transient::netlist_fingerprint(netlist);
-        let engine = self.resolved_for_netlist(netlist);
         let continuation_config = config.clone();
         let frozen_source_set = Self::validate_pss_frozen_source_names(frozen_source_names)?;
-        let (analysis, mut circuit, mut matrix, shooting_state) = engine
+        let (analysis, mut circuit, mut matrix, shooting_state) = self
             .run_pss_with_state_and_frozen_sources_abort(
                 netlist,
                 config,
@@ -1029,10 +1054,10 @@ impl Engine {
 
         let period = analysis.period;
         let max_step = period / continuation_config.points_per_period as Value;
-        engine.pss_set_reactive_state(&mut circuit, &shooting_state);
-        let seed = engine.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+        self.pss_set_reactive_state(&mut circuit, &shooting_state);
+        let seed = self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
         let mut trace = PssStateTrace::default();
-        engine.pss_run_tran_internal(
+        self.pss_run_tran_internal(
             &mut circuit,
             &mut matrix,
             seed,
@@ -1053,15 +1078,13 @@ impl Engine {
                 "PSS continuation state could not capture the converged orbit endpoint".to_string(),
             )
         })?;
-        let lte_reference = engine.config.transient_lte_reference.unwrap_or_else(|| {
-            engine
-                .config
-                .spice_dialect
-                .default_transient_lte_reference()
-        });
+        let lte_reference = self
+            .config
+            .transient_lte_reference
+            .unwrap_or_else(|| self.config.spice_dialect.default_transient_lte_reference());
         let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
-            engine.transient_lte_reltol(),
-            engine.transient_lte_abstol(),
+            self.transient_lte_reltol(),
+            self.transient_lte_abstol(),
             lte_reference,
         );
         for solution in &trace.solutions {
@@ -1070,7 +1093,7 @@ impl Engine {
         let checkpoint = TransientCheckpoint::capture(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
-            super::transient::simulation_checkpoint_identity(&engine.config),
+            super::transient::simulation_checkpoint_identity(&self.config),
             0.0,
             endpoint,
             &circuit,

@@ -81,7 +81,8 @@ impl Engine {
         offsets: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
-        self.run_pnoise_oscillator_impl(netlist, config, offsets, None, abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_oscillator_impl(netlist, config, offsets, None, abort)
     }
 
     /// Compute oscillator phase noise from an exact retained shooting-PSS
@@ -95,7 +96,8 @@ impl Engine {
         operating_point: &super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
-        self.run_pnoise_oscillator_impl(netlist, config, offsets, Some(operating_point), abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_oscillator_impl(netlist, config, offsets, Some(operating_point), abort)
     }
 
     fn run_pnoise_oscillator_impl(
