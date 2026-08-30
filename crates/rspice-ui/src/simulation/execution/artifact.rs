@@ -758,12 +758,22 @@ impl PeriodicStateArtifact {
 
     fn validate(&self) -> Result<(), ExecutionArtifactError> {
         let analysis = self.operating_point.analysis();
-        rspice_core::engine::PssOperatingPoint::try_from_parts(
-            self.operating_point.config().clone(),
-            analysis.clone(),
-            self.operating_point.shooting_state().to_vec(),
-        )
-        .map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
+        let validation = if let Some(identity) = self.operating_point.producer_identity() {
+            rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+                identity.clone(),
+                self.operating_point.config().clone(),
+                analysis.clone(),
+                self.operating_point.shooting_state_basis().to_vec(),
+                self.operating_point.shooting_state().to_vec(),
+            )
+        } else {
+            rspice_core::engine::PssOperatingPoint::try_from_parts(
+                self.operating_point.config().clone(),
+                analysis.clone(),
+                self.operating_point.shooting_state().to_vec(),
+            )
+        };
+        validation.map_err(|error| ExecutionArtifactError::InvalidPayload(error.to_string()))?;
 
         if self.floquet_evidence != analysis.result.floquet_evidence
             || self.floquet_orbit_kind != analysis.result.floquet_orbit_kind
@@ -853,7 +863,21 @@ impl PeriodicStateArtifact {
         let analysis = self.operating_point.analysis();
         let config = self.operating_point.config();
         let result = &analysis.result;
-        let mut writer = CanonicalWriter::new("rspice.periodic-state-artifact/v2");
+        let mut writer =
+            CanonicalWriter::new(if self.operating_point.producer_identity().is_some() {
+                "rspice.periodic-state-artifact/v3"
+            } else {
+                "rspice.periodic-state-artifact/v2"
+            });
+        if let Some(identity) = self.operating_point.producer_identity() {
+            let (version, semantic_netlist, resolved_simulation, pss_config, retained_state) =
+                identity.canonical_parts();
+            writer.usize(version as usize);
+            writer.string(semantic_netlist);
+            writer.string(resolved_simulation);
+            writer.string(pss_config);
+            writer.string(retained_state);
+        }
         writer.f64(config.fundamental_freq);
         writer.usize(config.num_harmonics);
         writer.f64(config.tstab);
@@ -917,6 +941,12 @@ impl PeriodicStateArtifact {
         encode_complex_values(&mut writer, &analysis.floquet_multipliers);
         writer.bool(analysis.is_stable);
         writer.bool(self.analysis_is_stable);
+        if self.operating_point.producer_identity().is_some() {
+            writer.sequence(self.operating_point.shooting_state_basis().len());
+            for name in self.operating_point.shooting_state_basis() {
+                writer.string(name);
+            }
+        }
         writer.sequence(self.operating_point.shooting_state().len());
         for value in self.operating_point.shooting_state() {
             writer.f64(*value);
@@ -1762,6 +1792,10 @@ impl ResolvedExecutionDependencies {
                         );
                         ExecutionArtifactPayloadTransferMetadata::PeriodicState(Box::new(
                             PeriodicStateTransferMetadata {
+                                producer_identity: periodic
+                                    .operating_point
+                                    .producer_identity()
+                                    .cloned(),
                                 config_fundamental_freq: config.fundamental_freq,
                                 config_num_harmonics: config.num_harmonics,
                                 config_tstab: config.tstab,
@@ -1809,6 +1843,10 @@ impl ResolvedExecutionDependencies {
                                 analysis_floquet_imag,
                                 is_stable: analysis.is_stable,
                                 analysis_is_stable: periodic.analysis_is_stable,
+                                shooting_state_basis: periodic
+                                    .operating_point
+                                    .shooting_state_basis()
+                                    .to_vec(),
                                 shooting_state,
                             },
                         ))
@@ -2079,15 +2117,26 @@ impl ResolvedExecutionDependencies {
                             points_per_period: metadata.config_points_per_period,
                             verbose: metadata.config_verbose,
                         };
-                        let operating_point =
+                        let operating_point = if let Some(producer_identity) =
+                            metadata.producer_identity
+                        {
+                            rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+                                producer_identity,
+                                config,
+                                analysis,
+                                metadata.shooting_state_basis,
+                                shooting_state,
+                            )
+                        } else {
                             rspice_core::engine::PssOperatingPoint::try_from_parts(
                                 config,
                                 analysis,
                                 shooting_state,
                             )
-                            .map_err(|error| {
-                                ExecutionArtifactError::InvalidPayload(error.to_string())
-                            })?;
+                        }
+                        .map_err(|error| {
+                            ExecutionArtifactError::InvalidPayload(error.to_string())
+                        })?;
                         let periodic = PeriodicStateArtifact {
                             operating_point: Arc::new(operating_point),
                             result_floquet_real,
@@ -2262,6 +2311,8 @@ struct PeriodicWaveformTransferMetadata {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct PeriodicStateTransferMetadata {
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::PssOperatingPointIdentity>,
     config_fundamental_freq: f64,
     config_num_harmonics: usize,
     config_tstab: f64,
@@ -2305,6 +2356,8 @@ struct PeriodicStateTransferMetadata {
     is_stable: bool,
     #[serde(default)]
     analysis_is_stable: bool,
+    #[serde(default)]
+    shooting_state_basis: Vec<String>,
     shooting_state: TransferBufferRef,
 }
 

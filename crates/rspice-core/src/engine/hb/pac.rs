@@ -202,6 +202,9 @@ impl Engine {
         if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
+        if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+        }
 
         let input_name = config
             .input_source
@@ -299,6 +302,9 @@ impl Engine {
 
         if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
+        if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
         }
 
         let solve_operating_point = operating_point.is_none();

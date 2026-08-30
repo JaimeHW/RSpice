@@ -108,6 +108,52 @@ fn periodic_result() -> SimulationResult {
     }
 }
 
+fn authenticated_periodic_result() -> SimulationResult {
+    let netlist = rspice_core::netlist::Netlist::parse(
+        "* authenticated artifact PSS fixture\n\
+         V1 in 0 DC 1\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         C1 out 0 1p\n\
+         .end\n",
+    )
+    .unwrap();
+    let config = rspice_core::analysis::PssConfig::new(1.0)
+        .with_harmonics(8)
+        .with_tolerance(1.0e-6)
+        .with_max_iterations(100)
+        .with_tstab_periods(10)
+        .with_points_per_period(16);
+    let operating_point = rspice_core::engine::Engine::default()
+        .run_pss_operating_point_with_abort(&netlist, config, &rspice_core::abort_signal::NoAbort)
+        .unwrap();
+    assert!(operating_point.producer_identity().is_some());
+    let result = &operating_point.analysis().result;
+    let waveforms = result
+        .node_names
+        .iter()
+        .zip(&result.waveforms)
+        .map(|(node_name, waveform)| {
+            (
+                format!("V({node_name})"),
+                WaveformData::new_time_domain(
+                    format!("V({node_name})"),
+                    result.time.clone(),
+                    waveform.values.clone(),
+                ),
+            )
+        })
+        .collect();
+    SimulationResult::Transient {
+        time: result.time.clone(),
+        waveforms,
+        measurements: Vec::new(),
+        periodic_state: Some(Arc::new(operating_point)),
+        convergence: Default::default(),
+        events: Default::default(),
+    }
+}
+
 fn hb_spec() -> AnalysisSpec {
     AnalysisSpec::HarmonicBalance {
         tones: vec![crate::simulation::multi_run::HbToneSpec {
@@ -779,6 +825,100 @@ fn periodic_state_transfer_round_trips_and_rejects_tamper_or_config_drift() {
         ResolvedExecutionDependencies::decode_transfer(&metadata, tampered),
         Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
     ));
+}
+
+#[test]
+fn authenticated_periodic_state_transfer_preserves_identity_and_rejects_tamper() {
+    let producer = AnalysisInstanceId::new();
+    let revision = ObjectRevision::new(10).unwrap();
+    let snapshot = digest(24);
+    let config_digest = digest(25);
+    let binding = PreparedDependencyBinding::periodic_state(producer, revision, config_digest);
+    let artifact = ExecutionArtifactEnvelope::from_periodic_result(
+        snapshot,
+        producer,
+        revision,
+        config_digest,
+        &pss_spec(PssMethod::Shooting),
+        &authenticated_periodic_result(),
+    )
+    .unwrap()
+    .unwrap();
+    let resolved = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding],
+        &HashMap::from([(producer, artifact)]),
+    )
+    .unwrap();
+    let original_identity = resolved
+        .periodic_state()
+        .unwrap()
+        .operating_point()
+        .producer_identity()
+        .cloned()
+        .unwrap();
+
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone())
+        .expect("authenticated PSS state reconstructs through artifact transport");
+    assert_eq!(
+        restored
+            .periodic_state()
+            .unwrap()
+            .operating_point()
+            .producer_identity(),
+        Some(&original_identity)
+    );
+    assert_eq!(
+        restored
+            .periodic_state()
+            .unwrap()
+            .operating_point()
+            .shooting_state_basis(),
+        ["C:C1"]
+    );
+
+    let mut state_tamper = buffers.clone();
+    state_tamper.last_mut().unwrap()[0] += 0.5;
+    let error = ResolvedExecutionDependencies::decode_transfer(&metadata, state_tamper)
+        .expect_err("transported shooting-state tamper must fail core authentication");
+    assert!(
+        matches!(error, ExecutionArtifactError::InvalidPayload(_))
+            && error
+                .to_string()
+                .contains("numerical payload does not match"),
+        "{error}"
+    );
+
+    fn tamper_retained_identity(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                if let Some(serde_json::Value::Object(identity)) =
+                    object.get_mut("producer_identity")
+                {
+                    identity.insert(
+                        "retained_state_identity".to_owned(),
+                        serde_json::Value::String("0".repeat(64)),
+                    );
+                    return true;
+                }
+                object.values_mut().any(tamper_retained_identity)
+            }
+            serde_json::Value::Array(values) => values.iter_mut().any(tamper_retained_identity),
+            _ => false,
+        }
+    }
+
+    let mut identity_tamper: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    assert!(tamper_retained_identity(&mut identity_tamper));
+    let identity_tamper = serde_json::to_string(&identity_tamper).unwrap();
+    let error = ResolvedExecutionDependencies::decode_transfer(&identity_tamper, buffers)
+        .expect_err("transported producer identity tamper must fail closed");
+    assert!(
+        matches!(error, ExecutionArtifactError::InvalidPayload(_))
+            || matches!(error, ExecutionArtifactError::Transport(_)),
+        "{error}"
+    );
 }
 
 #[test]

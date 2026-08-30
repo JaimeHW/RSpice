@@ -470,6 +470,9 @@ impl Engine {
         if let Some(PnoiseOperatingPoint::HarmonicBalance(point)) = &operating_point {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
         }
+        if let Some(PnoiseOperatingPoint::Shooting(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+        }
 
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         let num_nodes = circuit.num_nodes();
@@ -530,6 +533,9 @@ impl Engine {
 
         if let Some(PnoiseOperatingPoint::HarmonicBalance(point)) = &operating_point {
             point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
+        if let Some(PnoiseOperatingPoint::Shooting(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
         }
 
         let solve_operating_point = operating_point.is_none();

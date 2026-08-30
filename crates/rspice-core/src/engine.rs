@@ -104,6 +104,7 @@ pub use hb::{
 pub use health::EngineHealthReport;
 pub use pss::{
     PssAnalysisResult, PssContinuationState, PssDcOperatingPointSeed, PssError, PssOperatingPoint,
+    PssOperatingPointIdentity,
 };
 pub use pss_noise::OscPnoiseResult;
 pub use result::{
