@@ -456,6 +456,23 @@ impl StateSpaceFilter {
         Ok(output)
     }
 
+    /// Evaluate and publish a DC-equilibrium candidate for transient startup.
+    ///
+    /// The equilibrium is solved into temporary storage and becomes eligible
+    /// for [`Self::commit`] only after both the solve and output evaluation
+    /// complete successfully. Repeated Newton passes therefore replace the
+    /// candidate, while a failed or skipped final pass cannot commit stale
+    /// state. Order-zero filters remain stateless.
+    pub(crate) fn dc_candidate(&mut self, input: f64) -> Result<f64, LaplaceError> {
+        self.candidate_valid = false;
+        let (equilibrium, output) = self.dc_equilibrium(input)?;
+        if let Some(equilibrium) = equilibrium {
+            self.state.copy_from_slice(&equilibrium);
+            self.candidate_valid = true;
+        }
+        Ok(output)
+    }
+
     /// Commit the most recently evaluated candidate.
     pub fn commit(&mut self) {
         if self.candidate_valid {
@@ -558,6 +575,10 @@ impl StateSpaceFilter {
 
     /// Get DC output (s=0) for a given input
     pub fn dc_output(&self, input: f64) -> Result<f64, LaplaceError> {
+        self.dc_equilibrium(input).map(|(_, output)| output)
+    }
+
+    fn dc_equilibrium(&self, input: f64) -> Result<(Option<Vec<f64>>, f64), LaplaceError> {
         self.validate_structure()?;
         if !input.is_finite() {
             return Err(LaplaceError::InvalidEvaluation(
@@ -565,7 +586,7 @@ impl StateSpaceFilter {
             ));
         }
         if self.order == 0 {
-            return checked_product(self.d, input, "DC output");
+            return checked_product(self.d, input, "DC output").map(|output| (None, output));
         }
 
         let matrix = self
@@ -575,7 +596,8 @@ impl StateSpaceFilter {
             .collect();
         let rhs = self.b.iter().map(|value| *value * input).collect();
         let equilibrium = solve_real_system(matrix, rhs, "DC equilibrium")?;
-        checked_state_output(&self.c, &equilibrium, self.d, input)
+        let output = checked_state_output(&self.c, &equilibrium, self.d, input)?;
+        Ok((Some(equilibrium), output))
     }
 
     /// Reset all accepted and speculative state to zero for a new analysis.
@@ -1309,6 +1331,76 @@ endmodule
         restored
             .validate_checkpoint_ready()
             .expect("deserialization must not recreate an in-flight candidate");
+    }
+
+    #[test]
+    fn dc_candidate_commits_only_the_final_successful_pass() {
+        let mut filter = StateSpaceFilter::integrator(1.0).expect("filter definition");
+        assert_eq!(filter.checkpoint().state, vec![0.0]);
+
+        assert_eq!(filter.dc_candidate(4.0).expect("first DC candidate"), 4.0);
+        assert_eq!(filter.state, vec![4.0]);
+        assert_eq!(filter.checkpoint().state, vec![0.0]);
+
+        assert_eq!(
+            filter.dc_candidate(6.0).expect("replacement DC candidate"),
+            6.0
+        );
+        filter.commit();
+        assert_eq!(filter.checkpoint().state, vec![6.0]);
+
+        filter.dc_candidate(7.0).expect("speculative DC candidate");
+        filter
+            .dc_candidate(f64::NAN)
+            .expect_err("a failed final pass must invalidate the prior candidate");
+        filter.commit();
+        assert_eq!(filter.checkpoint().state, vec![6.0]);
+
+        filter
+            .dc_candidate(8.0)
+            .expect("candidate before skipped pass");
+        filter.begin_evaluation();
+        filter.commit();
+        assert_eq!(filter.checkpoint().state, vec![6.0]);
+
+        assert_eq!(filter.dc_output(9.0).expect("read-only DC output"), 9.0);
+        filter.commit();
+        assert_eq!(filter.checkpoint().state, vec![6.0]);
+    }
+
+    #[test]
+    fn dc_candidate_is_atomic_and_order_zero_remains_stateless() {
+        let mut singular = StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 0.0])
+            .expect("ideal integrator is valid for transient analysis");
+        singular
+            .set_initial_state(&[7.0])
+            .expect("matching accepted state");
+        let before = singular.state.clone();
+        singular
+            .dc_candidate(1.0)
+            .expect_err("singular DC equilibrium must fail");
+        assert_eq!(singular.state, before);
+        assert!(!singular.candidate_valid);
+        singular.commit();
+        assert_eq!(singular.checkpoint().state, vec![7.0]);
+
+        let mut output_overflow =
+            StateSpaceFilter::new(vec![vec![-1.0]], vec![1.0], vec![f64::MAX], f64::MAX)
+                .expect("finite state-space realization");
+        output_overflow
+            .set_initial_state(&[5.0])
+            .expect("matching accepted state");
+        output_overflow
+            .dc_candidate(1.0)
+            .expect_err("non-finite output must not publish the solved equilibrium");
+        assert_eq!(output_overflow.state, vec![5.0]);
+        assert!(!output_overflow.candidate_valid);
+
+        let mut stateless = StateSpaceFilter::unity_gain();
+        assert_eq!(stateless.dc_candidate(3.0).unwrap(), 3.0);
+        assert!(!stateless.candidate_valid);
+        stateless.commit();
+        assert!(stateless.checkpoint().state.is_empty());
     }
 
     #[test]

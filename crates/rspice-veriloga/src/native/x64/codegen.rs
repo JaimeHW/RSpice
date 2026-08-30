@@ -9274,6 +9274,7 @@ mod tests {
 
         ctx.analysis_type = 2;
         ctx.timestep = 0.5;
+        ctx.integration_active = 1;
         let transient = f(&ctx, std::ptr::null());
         let repeated = f(&ctx, std::ptr::null());
         assert!(

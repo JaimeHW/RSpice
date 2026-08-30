@@ -5097,6 +5097,46 @@ fn native_device_executes_laplace_current_without_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_laplace_transient_operating_point_seeds_first_positive_step() {
+    let model = laplace_current_model();
+    let mut device = native_contract_try_new("LAP_OP_SEED1", model, &[1, 0])
+        .expect("Laplace model uses native JIT");
+    assert!(device.is_using_native());
+    device
+        .try_begin_analysis(2)
+        .expect("begin transient with inactive integration");
+
+    device.update_voltages(&[4.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("t=0 Laplace operating-point evaluation")[0]
+            .to_bits(),
+        4.0_f64.to_bits()
+    );
+
+    device.update_voltages(&[6.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("replacement t=0 Newton evaluation")[0]
+            .to_bits(),
+        6.0_f64.to_bits()
+    );
+    device
+        .try_advance_state()
+        .expect("accept final operating-point candidate");
+
+    device.set_timestep(0.5);
+    device.update_voltages(&[2.0]);
+    let first_step = device
+        .try_evaluate()
+        .expect("first positive transient step after operating point")[0];
+    assert!((first_step - (14.0 / 3.0)).abs() <= 1.0e-12);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_executes_zi_current_without_fallback() {
     let model = zi_current_model();
     assert_eq!(

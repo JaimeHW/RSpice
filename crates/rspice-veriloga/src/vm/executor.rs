@@ -875,9 +875,16 @@ impl<'a> Vm<'a> {
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop()?;
                 let result = if self.context.analysis_type == 2 {
-                    // Transient analysis
                     if let Some(filter) = self.context.laplace_filters.get_mut(*filter_id) {
-                        filter.step(input, self.context.timestep).map_err(|error| {
+                        let result = if self.context.integration.active {
+                            filter.step(input, self.context.timestep)
+                        } else {
+                            // The transient operating-point pass has no
+                            // integration formula. Solve an equilibrium
+                            // candidate that acceptance can seed as history.
+                            filter.dc_candidate(input)
+                        };
+                        result.map_err(|error| {
                             VmError::InvalidNumericResult(format!(
                                 "Laplace filter {filter_id}: {error}"
                             ))
@@ -1297,6 +1304,7 @@ mod tests {
         let mut transient_context = VmContext::default();
         transient_context.analysis_type = 2;
         transient_context.timestep = 1.0;
+        transient_context.integration = IntegrationCoefficients::backward_euler(1.0);
         transient_context.laplace_filters.push(
             crate::laplace::StateSpaceFilter::new(vec![vec![1.0]], vec![1.0], vec![1.0], 0.0)
                 .expect("well-formed state-space filter"),
@@ -1308,6 +1316,42 @@ mod tests {
         .expect_err("singular transient state solve must fail");
         assert!(matches!(error, VmError::InvalidNumericResult(_)));
         assert!(error.to_string().contains("transient"));
+    }
+
+    #[test]
+    fn transient_laplace_inactive_integration_seeds_the_first_step_on_acceptance() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.timestep = 0.0;
+        context.integration = IntegrationCoefficients::inactive();
+        context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::integrator(1.0)
+                .expect("first-order low-pass realization"),
+        );
+        let program = |input| vec![Instruction::PushConst(input), Instruction::LaplaceState(0)];
+
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            execute_with_context(&mut context, program(4.0)).expect("t=0 DC candidate"),
+            4.0
+        );
+        assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
+
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            execute_with_context(&mut context, program(6.0)).expect("replacement t=0 DC candidate"),
+            6.0
+        );
+        context
+            .advance_state()
+            .expect("accept the final operating-point candidate");
+        assert_eq!(context.laplace_filters[0].checkpoint().state, vec![6.0]);
+
+        context.set_timestep(0.5);
+        context.begin_stateful_evaluation();
+        let first_step = execute_with_context(&mut context, program(2.0))
+            .expect("first positive transient step");
+        assert!((first_step - (14.0 / 3.0)).abs() <= 1.0e-12);
     }
 
     #[test]

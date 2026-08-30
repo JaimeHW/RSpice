@@ -957,8 +957,10 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 
     let filters =
         unsafe { std::slice::from_raw_parts_mut(ctx.laplace_filters, ctx.laplace_filters_len) };
-    let result = if ctx.analysis_type == 2 {
+    let result = if ctx.analysis_type == 2 && ctx.integration_active != 0 {
         filters[filter_id].step(input, ctx.timestep)
+    } else if ctx.analysis_type == 2 {
+        filters[filter_id].dc_candidate(input)
     } else {
         filters[filter_id].dc_output(input)
     };
@@ -2254,6 +2256,34 @@ mod tests {
             ctx.take_runtime_error().is_none(),
             "dispatch error retrieval must clear the context status"
         );
+    }
+
+    #[test]
+    fn laplace_native_helper_seeds_inactive_transient_equilibrium_on_acceptance() {
+        let mut filters = [crate::laplace::StateSpaceFilter::integrator(1.0)
+            .expect("first-order low-pass realization")];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.timestep = 0.0;
+        ctx.integration_active = 0;
+        ctx.laplace_filters = filters.as_mut_ptr();
+        ctx.laplace_filters_len = filters.len();
+
+        filters[0].begin_evaluation();
+        assert_eq!(unsafe { rspice_laplace_step_native(4.0, &ctx, 0) }, 4.0);
+        assert_eq!(filters[0].checkpoint().state, vec![0.0]);
+
+        filters[0].begin_evaluation();
+        assert_eq!(unsafe { rspice_laplace_step_native(6.0, &ctx, 0) }, 6.0);
+        filters[0].commit();
+        assert_eq!(filters[0].checkpoint().state, vec![6.0]);
+
+        ctx.timestep = 0.5;
+        ctx.integration_active = 1;
+        filters[0].begin_evaluation();
+        let first_step = unsafe { rspice_laplace_step_native(2.0, &ctx, 0) };
+        assert!((first_step - (14.0 / 3.0)).abs() <= 1.0e-12);
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
