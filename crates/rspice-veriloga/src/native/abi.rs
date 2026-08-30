@@ -859,9 +859,9 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 /// call.
 #[unsafe(export_name = "rspice_zi_step_native")]
 pub unsafe extern "C" fn rspice_zi_step_native(
-    input: f64,
+    operands: *const f64,
     ctx: *const EvalContext,
-    filter_id: usize,
+    descriptor: usize,
 ) -> f64 {
     if ctx.is_null() {
         set_native_context_error_ptr(
@@ -872,6 +872,28 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     }
 
     let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native zi helper missing operands; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let Some(layout) = crate::codegen::ZiRuntimeLayout::from_native_descriptor(descriptor) else {
+        set_native_context_error(
+            ctx,
+            "native zi helper received an invalid runtime layout descriptor; no interpreter fallback",
+        );
+        return 0.0;
+    };
+    let Ok(operand_count) = layout.validate_operand_budget() else {
+        set_native_context_error(
+            ctx,
+            "native zi helper rejected an over-budget runtime layout; no interpreter fallback",
+        );
+        return 0.0;
+    };
+    let filter_id = layout.filter_id;
     if ctx.zi_filters.is_null() {
         set_native_context_error(
             ctx,
@@ -892,8 +914,121 @@ pub unsafe extern "C" fn rspice_zi_step_native(
         return 0.0;
     }
 
+    let operands = unsafe { std::slice::from_raw_parts(operands, operand_count) };
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.zi_filters, ctx.zi_filters_len) };
-    filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
+    if !filters[filter_id].definition_is_frozen() {
+        match layout.freeze_filter(operands) {
+            Ok(filter) => filters[filter_id] = filter,
+            Err(error) => {
+                ctx.record_invalid_numeric_result(format!(
+                    "native zi filter {filter_id} definition freeze failed: {error}"
+                ));
+                return 0.0;
+            }
+        }
+    }
+    let input = operands[operands.len() - 2];
+    let transition = operands[operands.len() - 1];
+    match filters[filter_id].eval_with_transition_constraint(
+        input,
+        ctx.time,
+        ctx.analysis_type == 2,
+        transition,
+        layout.direct_assignment,
+    ) {
+        Ok(value) => {
+            if ctx.analysis_type == 2 && !ctx.timer_event_bound.is_null() {
+                match filters[filter_id].next_sample_step_bound(ctx.time) {
+                    Ok(bound) => {
+                        let event_time = ctx.time + bound;
+                        let current = unsafe { &mut *ctx.timer_event_bound };
+                        *current = current.min(event_time);
+                    }
+                    Err(error) => {
+                        ctx.record_invalid_numeric_result(format!(
+                            "native zi filter {filter_id} breakpoint failed: {error}"
+                        ));
+                        return 0.0;
+                    }
+                }
+            }
+            value
+        }
+        Err(error) => {
+            ctx.record_invalid_numeric_result(format!(
+                "native zi filter {filter_id} evaluation failed: {error}"
+            ));
+            0.0
+        }
+    }
+}
+
+#[unsafe(export_name = "rspice_zi_derivative_native")]
+pub unsafe extern "C" fn rspice_zi_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    descriptor: usize,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native zi derivative helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let ctx = unsafe { &*ctx };
+    let Some(layout) = crate::codegen::ZiRuntimeLayout::from_native_descriptor(descriptor) else {
+        set_native_context_error(
+            ctx,
+            "native zi derivative helper received an invalid runtime layout descriptor; no interpreter fallback",
+        );
+        return 0.0;
+    };
+    let Ok(operand_count) = layout.validate_operand_budget() else {
+        set_native_context_error(
+            ctx,
+            "native zi derivative helper rejected an over-budget runtime layout; no interpreter fallback",
+        );
+        return 0.0;
+    };
+    let filter_id = layout.filter_id;
+    if operands.is_null() || ctx.zi_filters.is_null() || filter_id >= ctx.zi_filters_len {
+        set_native_context_error(
+            ctx,
+            format!("native zi derivative helper has invalid operands or filter {filter_id}"),
+        );
+        return 0.0;
+    }
+    let operands = unsafe { std::slice::from_raw_parts(operands, operand_count) };
+    let filters = unsafe { std::slice::from_raw_parts_mut(ctx.zi_filters, ctx.zi_filters_len) };
+    if !filters[filter_id].definition_is_frozen() {
+        match layout.freeze_filter(operands) {
+            Ok(filter) => filters[filter_id] = filter,
+            Err(error) => {
+                ctx.record_invalid_numeric_result(format!(
+                    "native zi filter {filter_id} definition freeze failed: {error}"
+                ));
+                return 0.0;
+            }
+        }
+    }
+    let derivative = operands[operands.len() - 2];
+    let transition = operands[operands.len() - 1];
+    match filters[filter_id].eval_derivative_with_constraint(
+        derivative,
+        ctx.time,
+        ctx.analysis_type == 2,
+        transition,
+        layout.direct_assignment,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            ctx.record_invalid_numeric_result(format!(
+                "native zi filter {filter_id} derivative failed: {error}"
+            ));
+            0.0
+        }
+    }
 }
 
 fn invalid_native_integration_context(
@@ -1952,8 +2087,12 @@ mod tests {
     #[test]
     fn zi_native_helper_records_runtime_error_for_missing_storage() {
         let ctx = empty_eval_context();
+        let operands = [1.0, 1.0, 1.0, 0.0, 1.25, 0.0];
+        let descriptor = crate::codegen::ZiRuntimeLayout::unit_coefficients(0)
+            .native_descriptor()
+            .expect("unit Zi descriptor");
 
-        let value = unsafe { rspice_zi_step_native(1.25, &ctx, 0) };
+        let value = unsafe { rspice_zi_step_native(operands.as_ptr(), &ctx, descriptor) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
         let error = ctx

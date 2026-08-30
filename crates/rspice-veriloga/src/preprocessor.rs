@@ -882,6 +882,25 @@ impl Preprocessor {
                         seen_true.pop();
                         output.push_source("\n", &current_path, line_num + 1);
                     }
+                    "default_transition" => {
+                        if include_line {
+                            if rest.trim().is_empty() {
+                                return Err(PreprocessorError::new(
+                                    "`default_transition` requires a constant expression",
+                                    self.current_file.clone(),
+                                    line_num + 1,
+                                ));
+                            }
+                            let expanded = self.expand_macros_at(
+                                rest.trim(),
+                                line_num + 1,
+                                provider.limits().max_expanded_bytes,
+                            )?;
+                            let retained = format!("__rspice_default_transition ({expanded});");
+                            output.push_source(&retained, &current_path, line_num + 1);
+                        }
+                        output.push_source("\n", &current_path, line_num + 1);
+                    }
                     _ => unreachable!("is_known_directive() filtered the directive set"),
                 }
             } else if include_line {
@@ -959,7 +978,15 @@ impl Preprocessor {
     fn is_known_directive(name: &str) -> bool {
         matches!(
             name,
-            "include" | "define" | "undef" | "ifdef" | "ifndef" | "else" | "elsif" | "endif"
+            "include"
+                | "define"
+                | "undef"
+                | "ifdef"
+                | "ifndef"
+                | "else"
+                | "elsif"
+                | "endif"
+                | "default_transition"
         )
     }
 

@@ -32,6 +32,94 @@ pub struct Vm<'a> {
     pub stack: Vec<f64>,
 }
 
+/// Evaluate a Zi value directly from its canonical operand slice. Browser-WASM
+/// helpers use this entry rather than copying a variable-length definition into
+/// the VM's heap-backed stack.
+pub(crate) fn execute_zi_state(
+    context: &mut VmContext,
+    layout: crate::codegen::ZiRuntimeLayout,
+    operands: &[f64],
+) -> Result<f64, VmError> {
+    let operand_count = layout.validate_operand_budget().map_err(|error| {
+        VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+    })?;
+    if operands.len() != operand_count {
+        return Err(VmError::InvalidInstruction("invalid zi operand count"));
+    }
+    let input = operands[operands.len() - 2];
+    let transition = operands[operands.len() - 1];
+    let filter_id = layout.filter_id;
+    let filter = context
+        .zi_filters
+        .get_mut(filter_id)
+        .ok_or(VmError::InvalidInstruction("missing zi filter"))?;
+    if !filter.definition_is_frozen() {
+        *filter = layout.freeze_filter(operands).map_err(|error| {
+            VmError::InvalidNumericResult(format!(
+                "zi filter {filter_id} definition freeze failed: {error}"
+            ))
+        })?;
+    }
+    let time = context.time;
+    let transient = context.analysis_type == 2;
+    context
+        .zi_filters
+        .get_mut(filter_id)
+        .ok_or(VmError::InvalidInstruction("missing zi filter"))?
+        .eval_with_transition_constraint(
+            input,
+            time,
+            transient,
+            transition,
+            layout.direct_assignment,
+        )
+        .map_err(|error| VmError::InvalidNumericResult(format!("zi filter {filter_id}: {error}")))
+}
+
+/// Read-only Zi derivative counterpart to [`execute_zi_state`].
+pub(crate) fn execute_zi_state_derivative(
+    context: &mut VmContext,
+    layout: crate::codegen::ZiRuntimeLayout,
+    operands: &[f64],
+) -> Result<f64, VmError> {
+    let operand_count = layout.validate_operand_budget().map_err(|error| {
+        VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+    })?;
+    if operands.len() != operand_count {
+        return Err(VmError::InvalidInstruction(
+            "invalid zi derivative operand count",
+        ));
+    }
+    let derivative = operands[operands.len() - 2];
+    let transition = operands[operands.len() - 1];
+    let filter_id = layout.filter_id;
+    let filter = context
+        .zi_filters
+        .get_mut(filter_id)
+        .ok_or(VmError::InvalidInstruction("missing zi filter"))?;
+    if !filter.definition_is_frozen() {
+        *filter = layout.freeze_filter(operands).map_err(|error| {
+            VmError::InvalidNumericResult(format!(
+                "zi filter {filter_id} definition freeze failed: {error}"
+            ))
+        })?;
+    }
+    let time = context.time;
+    let transient = context.analysis_type == 2;
+    context
+        .zi_filters
+        .get(filter_id)
+        .ok_or(VmError::InvalidInstruction("missing zi filter"))?
+        .eval_derivative_with_constraint(
+            derivative,
+            time,
+            transient,
+            transition,
+            layout.direct_assignment,
+        )
+        .map_err(|error| VmError::InvalidNumericResult(format!("zi filter {filter_id}: {error}")))
+}
+
 impl<'a> Vm<'a> {
     /// Create a new VM with the given context.
     pub fn new(context: &'a mut VmContext) -> Self {
@@ -157,14 +245,29 @@ impl<'a> Vm<'a> {
                     0.0
                 });
             }
-            Instruction::ZiState(filter_id) => {
-                let input = self.pop()?;
-                let time = self.context.time;
-                let transient = self.context.analysis_type == 2;
-                let output = match self.context.zi_filters.get_mut(*filter_id) {
-                    Some(filter) => filter.eval(input, time, transient),
-                    None => return Err(VmError::InvalidInstruction("missing zi filter")),
-                };
+            Instruction::ZiState(layout) => {
+                let operand_count = layout.validate_operand_budget().map_err(|error| {
+                    VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+                })?;
+                if self.stack.len() < operand_count {
+                    return Err(VmError::StackUnderflow("ZiState"));
+                }
+                let start = self.stack.len() - operand_count;
+                let output = execute_zi_state(self.context, *layout, &self.stack[start..])?;
+                self.stack.truncate(start);
+                self.stack.push(output);
+            }
+            Instruction::ZiStateDerivative(layout) => {
+                let operand_count = layout.validate_operand_budget().map_err(|error| {
+                    VmError::InvalidNumericResult(format!("Zi runtime layout rejected: {error}"))
+                })?;
+                if self.stack.len() < operand_count {
+                    return Err(VmError::StackUnderflow("ZiStateDerivative"));
+                }
+                let start = self.stack.len() - operand_count;
+                let output =
+                    execute_zi_state_derivative(self.context, *layout, &self.stack[start..])?;
+                self.stack.truncate(start);
                 self.stack.push(output);
             }
             Instruction::PushTemperature => {
@@ -1031,13 +1134,36 @@ mod tests {
 
     #[test]
     fn missing_zi_filter_is_a_vm_error() {
-        let err = execute(vec![Instruction::PushConst(1.0), Instruction::ZiState(0)])
-            .expect_err("missing zi filter must not evaluate as zero");
+        let err = execute(vec![
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.0),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.0),
+            Instruction::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
+        ])
+        .expect_err("missing zi filter must not evaluate as zero");
 
         assert!(
             matches!(err, VmError::InvalidInstruction(_)),
             "expected invalid instruction error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn zi_runtime_rejects_an_over_budget_layout_before_stack_arithmetic() {
+        let layout = crate::codegen::ZiRuntimeLayout {
+            filter_id: 0,
+            numerator: crate::codegen::ZiPolynomialLayout::Coefficients { len: 1020 },
+            denominator: crate::codegen::ZiPolynomialLayout::Coefficients { len: 1 },
+            direct_assignment: false,
+        };
+        let error = execute(vec![Instruction::ZiState(layout)])
+            .expect_err("a tampered over-budget Zi instruction must fail closed");
+
+        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        assert!(error.to_string().contains("platform-uniform maximum 1024"));
     }
 
     #[test]

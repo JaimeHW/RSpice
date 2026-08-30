@@ -18,6 +18,7 @@ mod model;
 
 pub use model::{
     AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator, ColumnAxis,
-    CompiledBranchSource, CompiledModel, CompiledNoiseSource, CompiledParameter, Instruction,
-    JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram,
+    CompiledBranchSource, CompiledModel, CompiledNoiseSource, CompiledParameter,
+    CompiledZiFilterDefinition, CompiledZiPolynomial, Instruction, JacobianEntry, LookupTable,
+    StampIndex, StampLocation, StampProgram, ZiPolynomialLayout, ZiRuntimeLayout,
 };

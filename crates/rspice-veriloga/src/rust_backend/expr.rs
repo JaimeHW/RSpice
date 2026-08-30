@@ -1159,7 +1159,8 @@ fn lowered_variable_is_constant_zero(variable: &LoweredVariable) -> bool {
 fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
     let mut children = Vec::new();
     match kind {
-        HirExprKind::Number { .. }
+        HirExprKind::NullArgument
+        | HirExprKind::Number { .. }
         | HirExprKind::StringLiteral { .. }
         | HirExprKind::Identifier { .. }
         | HirExprKind::BranchAccess { .. }
@@ -1194,8 +1195,17 @@ fn expression_children(kind: &HirExprKind) -> Vec<ExprId> {
             children.push(*expr);
             push_laplace_children(kind, &mut children);
         }
-        HirExprKind::Zi { expr, kind } => {
+        HirExprKind::Zi {
+            expr,
+            kind,
+            period,
+            transition,
+            first_transition,
+        } => {
             children.push(*expr);
+            children.push(*period);
+            children.extend(transition.iter().copied());
+            children.extend(first_transition.iter().copied());
             push_zi_children(kind, &mut children);
         }
         HirExprKind::NoiseSource { operands, .. } => {

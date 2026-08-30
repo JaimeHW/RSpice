@@ -41,7 +41,7 @@ use crate::native::abi::{
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
     rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
     rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_step_native,
+    rspice_zi_derivative_native, rspice_zi_step_native,
 };
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
@@ -955,7 +955,8 @@ impl FunctionCompiler {
                 }
                 NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
                 NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
-                NativeOp::ZiState(filter_id) => self.emit_zi_state(filter_id)?,
+                NativeOp::ZiState(layout) => self.emit_zi_state(layout)?,
+                NativeOp::ZiStateDerivative(layout) => self.emit_zi_derivative_state(layout)?,
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
                 NativeOp::TransitionState(filter_id) => self.emit_transition_state(filter_id)?,
                 NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
@@ -2996,16 +2997,75 @@ impl FunctionCompiler {
         self.emit_context_filter_helper_call(target, filter_id, rspice_laplace_step_native)
     }
 
-    fn emit_zi_state(&mut self, filter_id: usize) -> JitResult<()> {
-        if self.depth == 0 {
+    fn emit_zi_state(&mut self, layout: crate::codegen::ZiRuntimeLayout) -> JitResult<()> {
+        let operand_count =
+            layout
+                .validate_operand_budget()
+                .map_err(|error| JitError::Encoding {
+                    model: MODEL.into(),
+                    detail: error.to_string().into(),
+                })?;
+        if self.depth < operand_count {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
-                detail: "zi state requires stack depth 1, found 0".into(),
+                detail: format!(
+                    "zi state requires stack depth {operand_count}, found {}",
+                    self.depth
+                )
+                .into(),
             });
         }
+        let descriptor = layout
+            .native_descriptor()
+            .ok_or_else(|| JitError::Encoding {
+                model: MODEL.into(),
+                detail: "Zi runtime layout exceeds the native descriptor limits".into(),
+            })?;
+        let target = self.register_stack[self.depth - operand_count];
+        self.emit_operand_context_filter_helper_call(
+            target,
+            operand_count,
+            descriptor,
+            rspice_zi_step_native,
+        );
+        self.drop_stack_values(operand_count - 1)
+    }
 
-        let target = self.register_stack[self.depth - 1];
-        self.emit_context_filter_helper_call(target, filter_id, rspice_zi_step_native)
+    fn emit_zi_derivative_state(
+        &mut self,
+        layout: crate::codegen::ZiRuntimeLayout,
+    ) -> JitResult<()> {
+        let operand_count =
+            layout
+                .validate_operand_budget()
+                .map_err(|error| JitError::Encoding {
+                    model: MODEL.into(),
+                    detail: error.to_string().into(),
+                })?;
+        if self.depth < operand_count {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "zi derivative state requires stack depth {operand_count}, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+        let descriptor = layout
+            .native_descriptor()
+            .ok_or_else(|| JitError::Encoding {
+                model: MODEL.into(),
+                detail: "Zi derivative runtime layout exceeds the native descriptor limits".into(),
+            })?;
+        let target = self.register_stack[self.depth - operand_count];
+        self.emit_operand_context_filter_helper_call(
+            target,
+            operand_count,
+            descriptor,
+            rspice_zi_derivative_native,
+        );
+        self.drop_stack_values(operand_count - 1)
     }
 
     fn emit_timer_state(&mut self, timer_id: usize) -> JitResult<()> {
@@ -5446,7 +5506,11 @@ mod tests {
             ("table-lookup", NativeOp::TableLookup(0), false),
             ("table-derivative", NativeOp::TableDerivative(0), false),
             ("laplace", NativeOp::LaplaceState(0), false),
-            ("zi", NativeOp::ZiState(0), false),
+            (
+                "zi",
+                NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
+                false,
+            ),
             ("timer", NativeOp::TimerState(0), false),
             ("transition", NativeOp::TransitionState(0), false),
             ("slew", NativeOp::SlewState(0), false),
@@ -5515,7 +5579,10 @@ mod tests {
             ("table-lookup", NativeOp::TableLookup(0)),
             ("table-derivative", NativeOp::TableDerivative(0)),
             ("laplace", NativeOp::LaplaceState(0)),
-            ("zi", NativeOp::ZiState(0)),
+            (
+                "zi",
+                NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
+            ),
             ("timer", NativeOp::TimerState(0)),
             ("transition", NativeOp::TransitionState(0)),
             ("slew", NativeOp::SlewState(0)),
@@ -9337,7 +9404,12 @@ mod tests {
                 instructions: vec![
                     Instruction::PushConst(2.0),
                     Instruction::PushConst(1.0),
-                    Instruction::ZiState(0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
                     Instruction::Add,
                 ],
             },
@@ -9350,7 +9422,8 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
 
-        let mut filters = [ZiFilter::new(vec![0.25], vec![1.0, -0.75], 1.0e-6)];
+        let mut filters =
+            [ZiFilter::new(vec![0.25], vec![1.0, -0.75], 1.0e-6).expect("valid zi test filter")];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.zi_filters = filters.as_mut_ptr();
         ctx.zi_filters_len = filters.len();
@@ -9371,12 +9444,12 @@ mod tests {
             "native zi helper must preserve Newton re-evaluation idempotence"
         );
         assert!((first - 2.25).abs() < 1.0e-12, "first zi sample: {first}");
-        filters[0].commit(ctx.time);
+        filters[0].commit(ctx.time).expect("commit first sample");
 
         ctx.time = 0.5e-6;
         let held = f(&ctx, std::ptr::null());
         assert!((held - 2.25).abs() < 1.0e-12, "held zi output: {held}");
-        filters[0].commit(ctx.time);
+        filters[0].commit(ctx.time).expect("commit held point");
 
         ctx.time = 1.0e-6;
         let next = f(&ctx, std::ptr::null());

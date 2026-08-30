@@ -14,9 +14,9 @@
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
     EquationId, ExprId, HirAnalogOperator, HirCrossDirection, HirExprKind, HirLaplaceKind,
-    HirLimiterArgument, HirZiKind, MirEquationKind, MirModel, NodeId,
+    HirLimiterArgument, MirEquationKind, MirModel, NodeId,
 };
-use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
+use crate::codegen::{BytecodeProgram, CompiledModel, Instruction, ZiRuntimeLayout};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -29,6 +29,13 @@ pub(crate) enum EntryKind {
     StampValue,
     Jacobian,
     ReactiveJacobian,
+}
+
+const fn entry_kind_has_direct_zi_assignment(entry_kind: EntryKind) -> bool {
+    matches!(
+        entry_kind,
+        EntryKind::StampValue | EntryKind::Jacobian | EntryKind::ReactiveJacobian
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,7 +97,8 @@ pub(crate) enum NativeOp {
     LimiterPrevious(usize),
     LimiterStore(usize),
     LaplaceState(usize),
-    ZiState(usize),
+    ZiState(ZiRuntimeLayout),
+    ZiStateDerivative(ZiRuntimeLayout),
     TimerState(usize),
     TransitionState(usize),
     SlewState(usize),
@@ -1192,7 +1200,9 @@ impl CanonicalStateOperator {
             (Self::Slew, Instruction::SlewState(slot)) => Some(*slot),
             (Self::Absdelay, Instruction::AbsDelayState(slot)) => Some(*slot),
             (Self::Laplace, Instruction::LaplaceState(slot)) => Some(*slot),
-            (Self::Zi, Instruction::ZiState(slot)) => Some(*slot),
+            (Self::Zi, Instruction::ZiState(layout) | Instruction::ZiStateDerivative(layout)) => {
+                Some(layout.filter_id)
+            }
             (Self::Cross, Instruction::CrossState(slot))
             | (Self::Cross, Instruction::LastCrossingState(slot)) => Some(*slot),
             (Self::Above, Instruction::AboveState(slot)) => Some(*slot),
@@ -1516,7 +1526,8 @@ fn collect_canonical_state_exprs(
             })?;
 
     match &expression.kind {
-        HirExprKind::Number { .. }
+        HirExprKind::NullArgument
+        | HirExprKind::Number { .. }
         | HirExprKind::StringLiteral { .. }
         | HirExprKind::Identifier { .. }
         | HirExprKind::BranchAccess { .. }
@@ -1572,8 +1583,21 @@ fn collect_canonical_state_exprs(
                 }
             }
         }
-        HirExprKind::Zi { expr, kind } => {
+        HirExprKind::Zi {
+            expr,
+            kind,
+            period,
+            transition,
+            first_transition,
+        } => {
             collect_canonical_state_exprs(model, mir, *expr, operator, slots)?;
+            collect_canonical_state_exprs(model, mir, *period, operator, slots)?;
+            if let Some(transition) = transition {
+                collect_canonical_state_exprs(model, mir, *transition, operator, slots)?;
+            }
+            if let Some(first_transition) = first_transition {
+                collect_canonical_state_exprs(model, mir, *first_transition, operator, slots)?;
+            }
             match kind {
                 crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles } => {
                     collect_canonical_state_expr_list(model, mir, zeros, operator, slots)?;
@@ -2042,21 +2066,35 @@ impl NativeProgram {
                     )?;
                     ops.push(NativeOp::LaplaceState(*filter_id));
                 }
-                Instruction::ZiState(filter_id) => {
+                Instruction::ZiState(layout) | Instruction::ZiStateDerivative(layout) => {
                     validate_index(
                         model.clone(),
                         "ZiState filter",
-                        *filter_id,
+                        layout.filter_id,
                         limits.zi_filter_count,
                     )?;
+                    let operand_count =
+                        layout
+                            .validate_operand_budget()
+                            .map_err(|error| JitError::Lowering {
+                                model: model.clone(),
+                                detail: error.to_string().into(),
+                            })?;
                     require_stack(
                         model.clone(),
                         entry_kind,
                         instruction_name(instruction),
                         depth,
-                        1,
+                        operand_count,
                     )?;
-                    ops.push(NativeOp::ZiState(*filter_id));
+                    depth -= operand_count - 1;
+                    ops.push(
+                        if matches!(instruction, Instruction::ZiStateDerivative(_)) {
+                            NativeOp::ZiStateDerivative(*layout)
+                        } else {
+                            NativeOp::ZiState(*layout)
+                        },
+                    );
                 }
                 Instruction::TimerState(timer_id) => {
                     require_stack(
@@ -2904,15 +2942,29 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             },
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator(expression.id, op),
             HirExprKind::Laplace { expr, .. } => self.lower_laplace_operator(expression.id, *expr),
-            HirExprKind::Zi { expr, .. } => self.lower_zi_operator(expression.id, *expr),
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => self.lower_zi_operator(
+                expression.id,
+                *expr,
+                kind,
+                *period,
+                *transition,
+                *first_transition,
+            ),
             HirExprKind::NoiseSource {
                 source, operands, ..
             } => self.lower_noise_source(source.as_str(), operands.as_slice()),
-            HirExprKind::StringLiteral { .. } | HirExprKind::ArrayLiteral { .. } => Err(self
-                .unsupported(format!(
-                    "expression kind {}",
-                    expression_kind_name(&expression.kind)
-                ))),
+            HirExprKind::NullArgument
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::ArrayLiteral { .. } => Err(self.unsupported(format!(
+                "expression kind {}",
+                expression_kind_name(&expression.kind)
+            ))),
         }
     }
 
@@ -3181,12 +3233,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_derivative(&mut self, expr_id: ExprId, wrt: CanonicalDerivativeAxis) -> JitResult<()> {
-        if self.expr_derivative_is_zero(expr_id, wrt)? {
+        let expression = self.expression(expr_id)?;
+        let scheduled_zi = matches!(expression.kind, HirExprKind::Zi { .. })
+            || matches!(
+                &expression.kind,
+                HirExprKind::Call { name, .. }
+                    if matches!(normalize_intrinsic_name(name).as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd")
+            );
+        if !scheduled_zi && self.expr_derivative_is_zero(expr_id, wrt)? {
             return self.push(NativeOp::Const(0.0));
         }
-        let expression = self.expression(expr_id)?;
         match &expression.kind {
-            HirExprKind::Number { .. }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. } => self.push(NativeOp::Const(0.0)),
@@ -3232,7 +3291,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
             HirExprKind::Laplace { expr, kind } => self.lower_laplace_derivative(*expr, kind, wrt),
-            HirExprKind::Zi { expr, kind } => self.lower_zi_derivative(*expr, kind, wrt),
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => self.lower_zi_derivative(
+                expression.id,
+                *expr,
+                kind,
+                *period,
+                *transition,
+                *first_transition,
+                wrt,
+            ),
         }
     }
 
@@ -3242,12 +3315,19 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if self.expr_second_derivative_is_zero(expr_id, first, second)? {
+        let expression = self.expression(expr_id)?;
+        let scheduled_zi = matches!(expression.kind, HirExprKind::Zi { .. })
+            || matches!(
+                &expression.kind,
+                HirExprKind::Call { name, .. }
+                    if matches!(normalize_intrinsic_name(name).as_str(), "zi_zp" | "zi_zd" | "zi_np" | "zi_nd")
+            );
+        if !scheduled_zi && self.expr_second_derivative_is_zero(expr_id, first, second)? {
             return self.push(NativeOp::Const(0.0));
         }
-        let expression = self.expression(expr_id)?;
         match &expression.kind {
-            HirExprKind::Number { .. }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. }
@@ -3297,10 +3377,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 let gain = self.laplace_kind_dc_gain(kind)?;
                 self.lower_scaled_second_derivative(*expr, first, second, gain)
             }
-            HirExprKind::Zi { expr, kind } => {
-                let gain = self.zi_kind_dc_gain(kind)?;
-                self.lower_scaled_second_derivative(*expr, first, second, gain)
-            }
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => self.lower_zi_second_derivative(
+                expression.id,
+                *expr,
+                kind,
+                *period,
+                *transition,
+                *first_transition,
+                first,
+                second,
+            ),
         }
     }
 
@@ -3313,7 +3405,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<()> {
         let expression = self.expression(expr_id)?;
         match &expression.kind {
-            HirExprKind::Number { .. }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. }
@@ -3427,7 +3520,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let expression = self.expression(expr_id)?;
         match &expression.kind {
-            HirExprKind::Number { .. }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. } => Ok(true),
@@ -3489,7 +3583,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let expression = self.expression(expr_id)?;
         match &expression.kind {
-            HirExprKind::Number { .. }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::ArrayLiteral { .. }
             | HirExprKind::NoiseSource { .. }
@@ -4664,7 +4759,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_laplace_call_derivative(normalized.as_str(), name, args, wrt)
             }
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
-                self.lower_zi_call_derivative(normalized.as_str(), name, args, wrt)
+                self.lower_zi_call_derivative(expr_id, name, args, wrt)
             }
             "limit" => self.lower_limit_derivative(name, args, wrt),
             "table_model" => self.lower_table_model_derivative(expr_id, name, args, wrt),
@@ -4835,7 +4930,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     second,
                 ),
             "zi_zp" | "zi_zd" | "zi_np" | "zi_nd" => {
-                self.lower_zi_call_second_derivative(normalized.as_str(), name, args, first, second)
+                self.lower_zi_call_second_derivative(expr_id, name, args, first, second)
             }
             "limit" => {
                 self.require_intrinsic_arity_range(name, args, 1, 2)?;
@@ -6077,123 +6172,133 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_zi_derivative(
         &mut self,
+        expr_id: ExprId,
         expr: ExprId,
-        kind: &HirZiKind,
+        kind: &crate::canonical_ir::HirZiKind,
+        period: ExprId,
+        transition: Option<ExprId>,
+        first_transition: Option<ExprId>,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        let gain = self.zi_kind_dc_gain(kind)?;
-        self.lower_scaled_derivative(expr, wrt, gain)
+        let slot = self.zi_derivative_slot(expr_id)?;
+        let (numerator, denominator) = self.lower_zi_kind_definition(kind)?;
+        self.lower(period)?;
+        self.lower_optional_zi_constant(first_transition, 0.0)?;
+        self.lower_derivative(expr, wrt)?;
+        self.lower_optional_zi_constant(transition, self.mir.default_transition)?;
+        self.append_zi_state(
+            ZiRuntimeLayout {
+                filter_id: slot,
+                numerator,
+                denominator,
+                direct_assignment: self.zi_site_is_direct(),
+            },
+            true,
+        )
     }
 
     fn lower_zi_call_derivative(
         &mut self,
-        normalized: &str,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if args.len() != 4 {
+        if !(4..=6).contains(&args.len()) {
             return Err(self.unsupported(format!(
-                "analog operator {name} expects four operands, found {}",
+                "analog operator {name} expects four to six operands, found {}",
                 args.len()
             )));
         }
-        let gain = match normalized {
-            "zi_zp" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_zp",
-                    product_one_minus(&zeros),
-                    product_one_minus(&poles),
-                )?
-            }
-            "zi_zd" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_zd",
-                    product_one_minus(&zeros),
-                    sum_values(&denominator),
-                )?
-            }
-            "zi_np" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_np",
-                    sum_values(&numerator),
-                    product_one_minus(&poles),
-                )?
-            }
-            "zi_nd" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_nd",
-                    sum_values(&numerator),
-                    sum_values(&denominator),
-                )?
-            }
-            _ => unreachable!("caller filters canonical zi names"),
-        };
-        self.lower_scaled_derivative(args[0], wrt, gain)
+        let slot = self.zi_derivative_slot(expr_id)?;
+        let (numerator, denominator) = self.lower_zi_call_definition(name, args)?;
+        self.lower(args[3])?;
+        self.lower_optional_zi_constant(args.get(5).copied(), 0.0)?;
+        self.lower_derivative(args[0], wrt)?;
+        self.lower_optional_zi_constant(args.get(4).copied(), self.mir.default_transition)?;
+        self.append_zi_state(
+            ZiRuntimeLayout {
+                filter_id: slot,
+                numerator,
+                denominator,
+                direct_assignment: self.zi_site_is_direct(),
+            },
+            true,
+        )
     }
 
     fn lower_zi_call_second_derivative(
         &mut self,
-        normalized: &str,
+        expr_id: ExprId,
         name: &str,
         args: &[ExprId],
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
-        if args.len() != 4 {
+        if !(4..=6).contains(&args.len()) {
             return Err(self.unsupported(format!(
-                "analog operator {name} expects four operands, found {}",
+                "analog operator {name} expects four to six operands, found {}",
                 args.len()
             )));
         }
-        let gain = match normalized {
-            "zi_zp" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_zp",
-                    product_one_minus(&zeros),
-                    product_one_minus(&poles),
-                )?
-            }
-            "zi_zd" => {
-                let zeros = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_zd",
-                    product_one_minus(&zeros),
-                    sum_values(&denominator),
-                )?
-            }
-            "zi_np" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let poles = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_np",
-                    sum_values(&numerator),
-                    product_one_minus(&poles),
-                )?
-            }
-            "zi_nd" => {
-                let numerator = self.constant_array_values(args[1])?;
-                let denominator = self.constant_array_values(args[2])?;
-                self.checked_filter_dc_gain(
-                    "zi_nd",
-                    sum_values(&numerator),
-                    sum_values(&denominator),
-                )?
-            }
-            _ => unreachable!("caller filters canonical zi names"),
+        let slot = self.zi_derivative_slot(expr_id)?;
+        let (numerator, denominator) = self.lower_zi_call_definition(name, args)?;
+        self.lower(args[3])?;
+        self.lower_optional_zi_constant(args.get(5).copied(), 0.0)?;
+        self.lower_second_derivative(args[0], first, second)?;
+        self.lower_optional_zi_constant(args.get(4).copied(), self.mir.default_transition)?;
+        self.append_zi_state(
+            ZiRuntimeLayout {
+                filter_id: slot,
+                numerator,
+                denominator,
+                direct_assignment: self.zi_site_is_direct(),
+            },
+            true,
+        )
+    }
+
+    fn lower_zi_second_derivative(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        kind: &crate::canonical_ir::HirZiKind,
+        period: ExprId,
+        transition: Option<ExprId>,
+        first_transition: Option<ExprId>,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        let slot = self.zi_derivative_slot(expr_id)?;
+        let (numerator, denominator) = self.lower_zi_kind_definition(kind)?;
+        self.lower(period)?;
+        self.lower_optional_zi_constant(first_transition, 0.0)?;
+        self.lower_second_derivative(expr, first, second)?;
+        self.lower_optional_zi_constant(transition, self.mir.default_transition)?;
+        self.append_zi_state(
+            ZiRuntimeLayout {
+                filter_id: slot,
+                numerator,
+                denominator,
+                direct_assignment: self.zi_site_is_direct(),
+            },
+            true,
+        )
+    }
+
+    fn zi_derivative_slot(&self, expr_id: ExprId) -> JitResult<usize> {
+        let Some(slot) = self.limits.canonical_zi_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator zi derivative expression {expr_id} filter slot"
+            )));
         };
-        self.lower_scaled_second_derivative(args[0], first, second, gain)
+        validate_index(
+            self.model.clone(),
+            "ZiState derivative filter",
+            slot,
+            self.limits.zi_filter_count,
+        )?;
+        Ok(slot)
     }
 
     fn lower_scaled_derivative(
@@ -6259,34 +6364,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn zi_kind_dc_gain(&self, kind: &HirZiKind) -> JitResult<f64> {
-        match kind {
-            HirZiKind::ZeroPole { zeros, poles } => self.checked_filter_dc_gain(
-                "zi_zp",
-                self.constant_expr_product_one_minus(zeros)?,
-                self.constant_expr_product_one_minus(poles)?,
-            ),
-            HirZiKind::ZeroDenominator { zeros, denominator } => self.checked_filter_dc_gain(
-                "zi_zd",
-                self.constant_expr_product_one_minus(zeros)?,
-                self.constant_expr_sum(denominator)?,
-            ),
-            HirZiKind::NumeratorPole { numerator, poles } => self.checked_filter_dc_gain(
-                "zi_np",
-                self.constant_expr_sum(numerator)?,
-                self.constant_expr_product_one_minus(poles)?,
-            ),
-            HirZiKind::NumeratorDenominator {
-                numerator,
-                denominator,
-            } => self.checked_filter_dc_gain(
-                "zi_nd",
-                self.constant_expr_sum(numerator)?,
-                self.constant_expr_sum(denominator)?,
-            ),
-        }
-    }
-
     fn constant_array_values(&self, expr_id: ExprId) -> JitResult<Vec<f64>> {
         match &self.expression(expr_id)?.kind {
             HirExprKind::ArrayLiteral { elements } => elements
@@ -6340,25 +6417,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn constant_expr_sum(&self, exprs: &[ExprId]) -> JitResult<f64> {
-        exprs
-            .iter()
-            .map(|expr| self.constant_expr_value(*expr))
-            .try_fold(0.0, |acc, value| Ok(acc + value?))
-    }
-
     fn constant_expr_product_negated(&self, exprs: &[ExprId]) -> JitResult<f64> {
         exprs
             .iter()
             .map(|expr| self.constant_expr_value(*expr))
             .try_fold(1.0, |acc, value| Ok(acc * -value?))
-    }
-
-    fn constant_expr_product_one_minus(&self, exprs: &[ExprId]) -> JitResult<f64> {
-        exprs
-            .iter()
-            .map(|expr| self.constant_expr_value(*expr))
-            .try_fold(1.0, |acc, value| Ok(acc * (1.0 - value?)))
     }
 
     fn constant_number(&self, expr_id: ExprId) -> Option<f64> {
@@ -6722,29 +6785,218 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_zi_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let [expr, _, _, _] = args else {
+        if !(4..=6).contains(&args.len()) {
             return Err(self.unsupported(format!(
-                "analog operator zi expects four operands, found {}",
+                "analog operator zi expects four to six operands, found {}",
                 args.len()
             )));
+        }
+        let expression = self.expression(expr_id)?;
+        let name = match &expression.kind {
+            HirExprKind::Call { name, .. } => name.to_string(),
+            _ => "zi".to_string(),
         };
-        self.lower_zi_operator(expr_id, *expr)
+        let (numerator, denominator) = self.lower_zi_call_definition(&name, args)?;
+        self.lower(args[3])?;
+        self.lower_optional_zi_constant(args.get(5).copied(), 0.0)?;
+        self.lower(args[0])?;
+        self.lower_optional_zi_constant(args.get(4).copied(), self.mir.default_transition)?;
+        let slot = self.zi_derivative_slot(expr_id)?;
+        self.append_zi_state(
+            ZiRuntimeLayout {
+                filter_id: slot,
+                numerator,
+                denominator,
+                direct_assignment: self.zi_site_is_direct(),
+            },
+            false,
+        )
     }
 
-    fn lower_zi_operator(&mut self, expr_id: ExprId, expr: ExprId) -> JitResult<()> {
-        let Some(slot) = self.limits.canonical_zi_slot(expr_id) else {
-            return Err(self.unsupported(format!(
-                "analog operator zi expression {expr_id} filter slot"
-            )));
-        };
-        validate_index(
-            self.model.clone(),
-            "ZiState filter",
-            slot,
-            self.limits.zi_filter_count,
-        )?;
+    fn lower_zi_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        kind: &crate::canonical_ir::HirZiKind,
+        period: ExprId,
+        transition: Option<ExprId>,
+        first_transition: Option<ExprId>,
+    ) -> JitResult<()> {
+        let (numerator, denominator) = self.lower_zi_kind_definition(kind)?;
+        self.lower(period)?;
+        self.lower_optional_zi_constant(first_transition, 0.0)?;
         self.lower(expr)?;
-        self.ops.push(NativeOp::ZiState(slot));
+        self.lower_optional_zi_constant(transition, self.mir.default_transition)?;
+        let slot = self.zi_derivative_slot(expr_id)?;
+        self.append_zi_state(
+            ZiRuntimeLayout {
+                filter_id: slot,
+                numerator,
+                denominator,
+                direct_assignment: self.zi_site_is_direct(),
+            },
+            false,
+        )
+    }
+
+    fn lower_zi_call_definition(
+        &mut self,
+        name: &str,
+        args: &[ExprId],
+    ) -> JitResult<(
+        crate::codegen::ZiPolynomialLayout,
+        crate::codegen::ZiPolynomialLayout,
+    )> {
+        let normalized = normalize_intrinsic_name(name);
+        let (numerator_roots, denominator_roots) = match normalized.as_str() {
+            "zi_zp" => (true, true),
+            "zi_zd" => (true, false),
+            "zi_np" => (false, true),
+            "zi_nd" => (false, false),
+            _ => {
+                return Err(self.unsupported(format!("unknown canonical Zi operator {name}")));
+            }
+        };
+        let numerator = self.lower_zi_polynomial_arg(args[1], numerator_roots, numerator_roots)?;
+        let denominator =
+            self.lower_zi_polynomial_arg(args[2], denominator_roots, denominator_roots)?;
+        Ok((numerator, denominator))
+    }
+
+    fn lower_zi_kind_definition(
+        &mut self,
+        kind: &crate::canonical_ir::HirZiKind,
+    ) -> JitResult<(
+        crate::codegen::ZiPolynomialLayout,
+        crate::codegen::ZiPolynomialLayout,
+    )> {
+        use crate::canonical_ir::HirZiKind;
+        match kind {
+            HirZiKind::ZeroPole { zeros, poles } => Ok((
+                self.lower_zi_polynomial_elements(zeros, true)?,
+                self.lower_zi_polynomial_elements(poles, true)?,
+            )),
+            HirZiKind::ZeroDenominator { zeros, denominator } => Ok((
+                self.lower_zi_polynomial_elements(zeros, true)?,
+                self.lower_zi_polynomial_elements(denominator, false)?,
+            )),
+            HirZiKind::NumeratorPole { numerator, poles } => Ok((
+                self.lower_zi_polynomial_elements(numerator, false)?,
+                self.lower_zi_polynomial_elements(poles, true)?,
+            )),
+            HirZiKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => Ok((
+                self.lower_zi_polynomial_elements(numerator, false)?,
+                self.lower_zi_polynomial_elements(denominator, false)?,
+            )),
+        }
+    }
+
+    fn lower_zi_polynomial_arg(
+        &mut self,
+        argument: ExprId,
+        roots: bool,
+        allow_null: bool,
+    ) -> JitResult<crate::codegen::ZiPolynomialLayout> {
+        let expression = self.expression(argument)?;
+        let elements = match &expression.kind {
+            HirExprKind::NullArgument if allow_null => Vec::new(),
+            HirExprKind::NullArgument => {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: self.model.clone(),
+                    detail: format!(
+                        "Zi expression {argument} uses a null argument where the LRM does not authorize one"
+                    )
+                    .into(),
+                });
+            }
+            HirExprKind::ArrayLiteral { elements } => elements.clone(),
+            _ => vec![argument],
+        };
+        self.lower_zi_polynomial_elements(&elements, roots)
+    }
+
+    fn lower_zi_polynomial_elements(
+        &mut self,
+        elements: &[ExprId],
+        roots: bool,
+    ) -> JitResult<crate::codegen::ZiPolynomialLayout> {
+        if roots && !elements.len().is_multiple_of(2) {
+            return Err(JitError::InvalidCanonicalIr {
+                model: self.model.clone(),
+                detail: format!(
+                    "Zi pole/zero definition requires real/imaginary pairs, got {} scalar value(s)",
+                    elements.len()
+                )
+                .into(),
+            });
+        }
+        for element in elements {
+            if matches!(self.expression(*element)?.kind, HirExprKind::NullArgument) {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: self.model.clone(),
+                    detail: "null values are not permitted inside a Zi vector literal".into(),
+                });
+            }
+            self.lower(*element)?;
+        }
+        Ok(if roots {
+            crate::codegen::ZiPolynomialLayout::Roots {
+                len: elements.len() / 2,
+            }
+        } else {
+            crate::codegen::ZiPolynomialLayout::Coefficients {
+                len: elements.len(),
+            }
+        })
+    }
+
+    fn lower_optional_zi_constant(
+        &mut self,
+        expression: Option<ExprId>,
+        default: f64,
+    ) -> JitResult<()> {
+        match expression {
+            Some(expression)
+                if matches!(self.expression(expression)?.kind, HirExprKind::NullArgument) =>
+            {
+                Err(JitError::InvalidCanonicalIr {
+                    model: self.model.clone(),
+                    detail: "Zi period/transition/t0 arguments may not be null".into(),
+                })
+            }
+            Some(expression) => self.lower(expression),
+            None => self.push(NativeOp::Const(default)),
+        }
+    }
+
+    fn zi_site_is_direct(&self) -> bool {
+        entry_kind_has_direct_zi_assignment(self.entry_kind)
+    }
+
+    fn append_zi_state(&mut self, layout: ZiRuntimeLayout, derivative: bool) -> JitResult<()> {
+        let operands =
+            layout
+                .validate_operand_budget()
+                .map_err(|error| JitError::InvalidCanonicalIr {
+                    model: self.model.clone(),
+                    detail: error.to_string().into(),
+                })?;
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical Zi state",
+            self.depth,
+            operands,
+        )?;
+        self.depth -= operands - 1;
+        self.ops.push(if derivative {
+            NativeOp::ZiStateDerivative(layout)
+        } else {
+            NativeOp::ZiState(layout)
+        });
         Ok(())
     }
 
@@ -8139,6 +8391,7 @@ fn is_flow_access(access: &str) -> bool {
 fn expression_kind_name(kind: &HirExprKind) -> &'static str {
     match kind {
         HirExprKind::Number { .. } => "number",
+        HirExprKind::NullArgument => "null argument",
         HirExprKind::StringLiteral { .. } => "string literal",
         HirExprKind::Identifier { .. } => "identifier",
         HirExprKind::SystemFunction { .. } => "system function",
@@ -8337,6 +8590,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::LimiterStore(_) => "LimiterStore",
         NativeOp::LaplaceState(_) => "LaplaceState",
         NativeOp::ZiState(_) => "ZiState",
+        NativeOp::ZiStateDerivative(_) => "ZiStateDerivative",
         NativeOp::TimerState(_) => "TimerState",
         NativeOp::TransitionState(_) => "TransitionState",
         NativeOp::SlewState(_) => "SlewState",
@@ -9296,11 +9550,14 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::TableDerivative(_)
         | NativeOp::LimiterPrevious(_)
         | NativeOp::LaplaceState(_)
-        | NativeOp::ZiState(_)
         | NativeOp::WhiteNoise
         | NativeOp::DdtState(_)
         | NativeOp::DdtJacobian
         | NativeOp::IdtJacobian => (1, 1),
+
+        NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) => {
+            (layout.operand_count(), 1)
+        }
 
         NativeOp::Add
         | NativeOp::Sub
@@ -9429,16 +9686,8 @@ fn first_or(values: &[f64], default: f64) -> f64 {
     values.first().copied().unwrap_or(default)
 }
 
-fn sum_values(values: &[f64]) -> f64 {
-    values.iter().sum()
-}
-
 fn product_negated(values: &[f64]) -> f64 {
     values.iter().map(|value| -*value).product()
-}
-
-fn product_one_minus(values: &[f64]) -> f64 {
-    values.iter().map(|value| 1.0 - *value).product()
 }
 
 fn format_current_pair(pos: usize, neg: usize) -> String {
@@ -9474,6 +9723,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::PushMfactor => "PushMfactor",
         Instruction::PushPortConnected(_) => "PushPortConnected",
         Instruction::ZiState(_) => "ZiState",
+        Instruction::ZiStateDerivative(_) => "ZiStateDerivative",
         Instruction::Add => "Add",
         Instruction::Sub => "Sub",
         Instruction::Mul => "Mul",
@@ -9767,6 +10017,7 @@ mod tests {
         };
         let analyzed = AnalyzedModule {
             name: module_name.into(),
+            default_transition: 1.0e-9,
             ports: vec![
                 AnalyzedPort {
                     name: "p".into(),
@@ -14626,7 +14877,15 @@ endmodule
     #[test]
     fn lowers_zi_state_when_filter_count_is_known() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushTemperature, Instruction::ZiState(0)],
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.0),
+                Instruction::ZiState(ZiRuntimeLayout::unit_coefficients(0)),
+            ],
         };
 
         let lowered = NativeProgram::from_bytecode(
@@ -14639,15 +14898,55 @@ endmodule
 
         assert_eq!(
             lowered.ops(),
-            &[NativeOp::LoadTemperature, NativeOp::ZiState(0)]
+            &[
+                NativeOp::Const(1.0),
+                NativeOp::Const(1.0),
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.0),
+                NativeOp::LoadTemperature,
+                NativeOp::Const(0.0),
+                NativeOp::ZiState(ZiRuntimeLayout::unit_coefficients(0)),
+            ]
         );
-        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.max_stack_depth(), 6);
+    }
+
+    #[test]
+    fn canonical_zi_directness_is_owned_by_the_entry_kind() {
+        for entry_kind in [
+            EntryKind::Assignment,
+            EntryKind::ParameterDefault,
+            EntryKind::StaticCondition,
+        ] {
+            assert!(
+                !entry_kind_has_direct_zi_assignment(entry_kind),
+                "{entry_kind:?} must not impose the direct-branch transition rule"
+            );
+        }
+        for entry_kind in [
+            EntryKind::StampValue,
+            EntryKind::Jacobian,
+            EntryKind::ReactiveJacobian,
+        ] {
+            assert!(
+                entry_kind_has_direct_zi_assignment(entry_kind),
+                "{entry_kind:?} must impose the direct-branch transition rule"
+            );
+        }
     }
 
     #[test]
     fn lowering_rejects_zi_state_outside_known_filters() {
         let program = BytecodeProgram {
-            instructions: vec![Instruction::PushTemperature, Instruction::ZiState(1)],
+            instructions: vec![
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(1.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushTemperature,
+                Instruction::PushConst(0.0),
+                Instruction::ZiState(ZiRuntimeLayout::unit_coefficients(1)),
+            ],
         };
 
         let error = NativeProgram::from_bytecode(

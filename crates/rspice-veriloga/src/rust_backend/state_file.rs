@@ -1108,7 +1108,8 @@ fn collect_canonical_parameter_default_references(
                 visit(*element)?;
             }
         }
-        HirExprKind::Number { .. }
+        HirExprKind::NullArgument
+        | HirExprKind::Number { .. }
         | HirExprKind::StringLiteral { .. }
         | HirExprKind::BranchAccess { .. }
         | HirExprKind::NamedBranchAccess { .. }

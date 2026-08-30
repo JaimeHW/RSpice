@@ -21,6 +21,8 @@ use crate::jit::expr::{
 use crate::jit::ssa::{Instruction, Program};
 
 pub(crate) const WASM_JIT_EVAL_HELPER_IMPORT: &str = "eval_op_v1";
+/// Frame-relative, bounded variable-arity helper capability.
+pub(crate) const WASM_JIT_SLICE_HELPER_IMPORT: &str = "eval_op_slice_v1";
 /// Frame-free unary transcendental capability.
 ///
 /// `exp` and `ln` dominate every semiconductor model's inner loop, so they do
@@ -45,16 +47,18 @@ const ENTRY_TYPE_INDEX: u32 = 0;
 const HELPER_TYPE_INDEX: u32 = 1;
 const MATH1_TYPE_INDEX: u32 = 2;
 const MATH2_TYPE_INDEX: u32 = 3;
+const SLICE_HELPER_TYPE_INDEX: u32 = 4;
 const HELPER_FUNCTION_INDEX: u32 = 0;
 const MATH1_FUNCTION_INDEX: u32 = 1;
 const MATH2_FUNCTION_INDEX: u32 = 2;
+const SLICE_HELPER_FUNCTION_INDEX: u32 = 3;
 /// Imported functions occupy the low indices, so generated entries start after
 /// the whole capability surface.
-const ENTRY_FUNCTION_INDEX: u32 = 3;
-/// Entry signature plus the three capability signatures.
-const CAPABILITY_TYPE_COUNT: u32 = 4;
-/// Linear memory plus the three imported capability functions.
-const CAPABILITY_IMPORT_COUNT: u32 = 4;
+const ENTRY_FUNCTION_INDEX: u32 = 4;
+/// Entry signature plus the four capability signatures.
+const CAPABILITY_TYPE_COUNT: u32 = 5;
+/// Linear memory plus the four imported capability functions.
+const CAPABILITY_IMPORT_COUNT: u32 = 5;
 const FRAME_LOCAL: u32 = 0;
 
 /// Declare the type section every generated module shares.
@@ -82,6 +86,17 @@ fn encode_capability_types(module: &mut Module) {
     types
         .ty()
         .function([ValType::I32, ValType::F64, ValType::F64], [ValType::F64]);
+    types.ty().function(
+        [
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I32,
+            ValType::I64,
+            ValType::I32,
+        ],
+        [ValType::F64],
+    );
     module.section(&types);
 }
 
@@ -113,6 +128,11 @@ fn encode_capability_imports(module: &mut Module) {
         WASM_JIT_IMPORT_MODULE,
         WASM_JIT_MATH2_IMPORT,
         wasm_encoder::EntityType::Function(MATH2_TYPE_INDEX),
+    );
+    imports.import(
+        WASM_JIT_IMPORT_MODULE,
+        WASM_JIT_SLICE_HELPER_IMPORT,
+        wasm_encoder::EntityType::Function(SLICE_HELPER_TYPE_INDEX),
     );
     module.section(&imports);
 }
@@ -876,11 +896,12 @@ fn verify_value_module_shape(
                 const I32: wasmparser::ValType = wasmparser::ValType::I32;
                 const I64: wasmparser::ValType = wasmparser::ValType::I64;
                 const F64: wasmparser::ValType = wasmparser::ValType::F64;
-                let expected: [(&[wasmparser::ValType], &[wasmparser::ValType]); 4] = [
+                let expected: [(&[wasmparser::ValType], &[wasmparser::ValType]); 5] = [
                     (&[I32], &[I32]),
                     (&[I32, I32, I32, I32, I64, F64, F64, F64, F64, F64], &[F64]),
                     (&[I32, F64], &[F64]),
                     (&[I32, F64, F64], &[F64]),
+                    (&[I32, I32, I32, I32, I64, I32], &[F64]),
                 ];
                 if entries.len() != expected.len()
                     || entries
@@ -907,9 +928,9 @@ fn verify_value_module_shape(
                     };
                     flattened.push(import);
                 }
-                if flattened.len() != 4 {
+                if flattened.len() != 5 {
                     return Err(WasmJitError::Contract(
-                        "value module must import exactly memory, eval_op_v1, math1_v1, and math2_v1"
+                        "value module must import exactly memory, eval_op_v1, math1_v1, math2_v1, and eval_op_slice_v1"
                             .into(),
                     ));
                 }
@@ -946,6 +967,11 @@ fn verify_value_module_shape(
                     ),
                     (&flattened[2], WASM_JIT_MATH1_IMPORT, MATH1_TYPE_INDEX),
                     (&flattened[3], WASM_JIT_MATH2_IMPORT, MATH2_TYPE_INDEX),
+                    (
+                        &flattened[4],
+                        WASM_JIT_SLICE_HELPER_IMPORT,
+                        SLICE_HELPER_TYPE_INDEX,
+                    ),
                 ] {
                     if import.module != WASM_JIT_IMPORT_MODULE
                         || import.name != name
@@ -1545,6 +1571,19 @@ fn emit_helper_call(
     }
 
     let descriptor = helper_descriptor(op)?;
+    if let NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) = op {
+        let operand_count = layout.validate_operand_budget().map_err(|error| {
+            WasmJitError::Encoding(format!("Zi runtime layout rejected: {error}"))
+        })?;
+        if operands.len() != operand_count {
+            return Err(WasmJitError::Encoding(format!(
+                "Zi lowering supplied {} operands for a layout requiring {}",
+                operands.len(),
+                operand_count
+            )));
+        }
+        return emit_slice_helper_call(body, descriptor, operands, result);
+    }
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(descriptor.opcode));
     body.instruction(&WasmInstruction::I32Const(descriptor.aux0));
@@ -1558,6 +1597,80 @@ fn emit_helper_call(
         }
     }
     body.instruction(&WasmInstruction::Call(HELPER_FUNCTION_INDEX));
+    emit_checked_helper_result(body, result)
+}
+
+fn emit_slice_helper_call(
+    body: &mut Function,
+    descriptor: HelperDescriptor,
+    operands: &[crate::jit::ssa::ValueId],
+    result: crate::jit::ssa::ValueId,
+) -> WasmJitResult<()> {
+    if operands.len() > WASM_JIT_MAX_SLICE_OPERANDS {
+        return Err(WasmJitError::Encoding(format!(
+            "variable-arity browser helper requires {} operands, exceeding the bounded maximum {}",
+            operands.len(),
+            WASM_JIT_MAX_SLICE_OPERANDS
+        )));
+    }
+    let operand_bytes = operands
+        .len()
+        .checked_mul(std::mem::size_of::<f64>())
+        .ok_or_else(|| WasmJitError::Encoding("slice-helper frame size overflow".into()))?;
+    let required_frame_bytes = usize::try_from(WASM_JIT_SLICE_OPERANDS_OFFSET)
+        .ok()
+        .and_then(|offset| offset.checked_add(operand_bytes))
+        .and_then(|bytes| i32::try_from(bytes).ok())
+        .ok_or_else(|| WasmJitError::Encoding("slice-helper frame size exceeds wasm32".into()))?;
+
+    // A short frame must fail before the first store, avoiding a WebAssembly
+    // trap and preserving the normal status-based error path.
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Load(i32_mem(FRAME_BYTE_LEN_OFFSET)));
+    body.instruction(&WasmInstruction::I32Const(required_frame_bytes));
+    body.instruction(&WasmInstruction::I32LtU);
+    body.instruction(&WasmInstruction::If(BlockType::Empty));
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_ABI_MISMATCH));
+    body.instruction(&WasmInstruction::I32Store(i32_mem(
+        FRAME_ERROR_STATUS_OFFSET,
+    )));
+    body.instruction(&WasmInstruction::I32Const(WASM_JIT_STATUS_ABI_MISMATCH));
+    body.instruction(&WasmInstruction::Return);
+    body.instruction(&WasmInstruction::End);
+
+    for (index, _) in operands.iter().enumerate() {
+        let offset = usize::try_from(WASM_JIT_SLICE_OPERANDS_OFFSET)
+            .ok()
+            .and_then(|base| {
+                index
+                    .checked_mul(std::mem::size_of::<f64>())
+                    .and_then(|delta| base.checked_add(delta))
+            })
+            .and_then(|offset| u64::try_from(offset).ok())
+            .ok_or_else(|| WasmJitError::Encoding("slice-helper operand offset overflow".into()))?;
+        body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+        emit_operand(body, operands, index)?;
+        body.instruction(&WasmInstruction::F64Store(f64_mem(offset)));
+    }
+
+    body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
+    body.instruction(&WasmInstruction::I32Const(descriptor.opcode));
+    body.instruction(&WasmInstruction::I32Const(descriptor.aux0));
+    body.instruction(&WasmInstruction::I32Const(descriptor.aux1));
+    body.instruction(&WasmInstruction::I64Const(descriptor.aux2));
+    body.instruction(&WasmInstruction::I32Const(
+        i32::try_from(operands.len())
+            .map_err(|_| WasmJitError::Encoding("slice-helper operand count exceeds i32".into()))?,
+    ));
+    body.instruction(&WasmInstruction::Call(SLICE_HELPER_FUNCTION_INDEX));
+    emit_checked_helper_result(body, result)
+}
+
+fn emit_checked_helper_result(
+    body: &mut Function,
+    result: crate::jit::ssa::ValueId,
+) -> WasmJitResult<()> {
     let result_local = value_local(result.index())?;
     body.instruction(&WasmInstruction::LocalSet(result_local));
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
@@ -1575,7 +1688,7 @@ fn emit_helper_call(
     Ok(())
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct HelperDescriptor {
     opcode: i32,
     aux0: i32,
@@ -1624,7 +1737,24 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::LimiterPrevious(index) => set_index(&mut descriptor, 411, index)?,
         NativeOp::LimiterStore(index) => set_index(&mut descriptor, 412, index)?,
         NativeOp::LaplaceState(index) => set_index(&mut descriptor, 420, index)?,
-        NativeOp::ZiState(index) => set_index(&mut descriptor, 421, index)?,
+        NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) => {
+            let operand_count = layout.validate_operand_budget().map_err(|error| {
+                WasmJitError::Encoding(format!("Zi runtime layout rejected: {error}"))
+            })?;
+            debug_assert!(operand_count <= WASM_JIT_MAX_SLICE_OPERANDS);
+            descriptor.opcode = if matches!(op, NativeOp::ZiStateDerivative(_)) {
+                429
+            } else {
+                421
+            };
+            descriptor.aux0 = i32::try_from(layout.filter_id).map_err(|_| {
+                WasmJitError::Encoding("Zi filter slot exceeds the signed browser ABI".into())
+            })?;
+            descriptor.aux1 = encode_zi_layout_descriptor(layout).ok_or_else(|| {
+                WasmJitError::Encoding("Zi runtime layout exceeds browser descriptor limits".into())
+            })?;
+            descriptor.aux2 = 0;
+        }
         NativeOp::TimerState(index) => set_index(&mut descriptor, 422, index)?,
         NativeOp::TransitionState(index) => set_index(&mut descriptor, 423, index)?,
         NativeOp::SlewState(index) => set_index(&mut descriptor, 424, index)?,
@@ -1846,7 +1976,8 @@ fn f64_mem(offset: u64) -> MemArg {
     }
 }
 
-/// Bind the frame-free transcendental capabilities for an execution test.
+/// Bind the shared slice and frame-free transcendental capabilities for an
+/// execution test.
 ///
 /// Every module the emitter produces imports these, so each of the crate's
 /// independent-engine harnesses needs them; the bodies are the same production
@@ -1854,6 +1985,13 @@ fn f64_mem(offset: u64) -> MemArg {
 /// browser about what `exp` means.
 #[cfg(test)]
 pub(super) fn define_test_math_imports<T>(linker: &mut wasmi::Linker<T>) {
+    linker
+        .func_wrap(
+            WASM_JIT_IMPORT_MODULE,
+            WASM_JIT_SLICE_HELPER_IMPORT,
+            |_: i32, _: i32, _: i32, _: i32, _: i64, _: i32| -> f64 { 0.0 },
+        )
+        .expect("define slice helper import");
     linker
         .func_wrap(
             WASM_JIT_IMPORT_MODULE,
@@ -2545,6 +2683,26 @@ mod tests {
     }
 
     #[test]
+    fn zi_slice_helper_enforces_its_exact_browser_resource_bound() {
+        let at_limit = crate::codegen::ZiRuntimeLayout {
+            filter_id: 0,
+            numerator: crate::codegen::ZiPolynomialLayout::Coefficients { len: 1019 },
+            denominator: crate::codegen::ZiPolynomialLayout::Coefficients { len: 1 },
+            direct_assignment: false,
+        };
+        assert_eq!(at_limit.operand_count(), WASM_JIT_MAX_SLICE_OPERANDS);
+        helper_descriptor(NativeOp::ZiState(at_limit)).expect("1,024 operands are supported");
+
+        let over_limit = crate::codegen::ZiRuntimeLayout {
+            numerator: crate::codegen::ZiPolynomialLayout::Coefficients { len: 1020 },
+            ..at_limit
+        };
+        let error = helper_descriptor(NativeOp::ZiState(over_limit))
+            .expect_err("1,025 operands must fail closed");
+        assert!(error.to_string().contains("platform-uniform maximum 1024"));
+    }
+
+    #[test]
     fn every_canonical_native_op_family_has_a_wasm_translation() {
         let mut ops = vec![
             NativeOp::Const(1.0),
@@ -2592,7 +2750,8 @@ mod tests {
             NativeOp::LimiterPrevious(0),
             NativeOp::LimiterStore(0),
             NativeOp::LaplaceState(0),
-            NativeOp::ZiState(0),
+            NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
+            NativeOp::ZiStateDerivative(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
             NativeOp::TimerState(0),
             NativeOp::TransitionState(0),
             NativeOp::SlewState(0),

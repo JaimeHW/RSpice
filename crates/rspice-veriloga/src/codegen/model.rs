@@ -30,6 +30,8 @@ pub struct CodeGenerator {
     pub(super) timer_state_count: std::cell::Cell<usize>,
     /// Collected z-domain filters (`zi_*`).
     pub(super) zi_filters: std::cell::RefCell<Vec<crate::zfilter::ZiFilter>>,
+    pub(super) zi_filter_definitions: std::cell::RefCell<Vec<CompiledZiFilterDefinition>>,
+    pub(super) zi_sites: std::cell::RefCell<std::collections::HashMap<crate::ir::ZiSiteId, usize>>,
 }
 
 /// Compiled device model ready for simulation
@@ -70,8 +72,276 @@ pub struct CompiledModel {
     pub laplace_filters: Vec<StateSpaceFilter>,
     /// Z-domain (sampled-data) filters
     pub zi_filters: Vec<crate::zfilter::ZiFilter>,
+    /// Per-site definition programs retained in the compiled artifact for
+    /// validation and backend planning. Executable value/derivative programs
+    /// also carry flattened operands so each site can freeze lazily at its
+    /// first correctly ordered evaluation.
+    #[serde(default)]
+    pub zi_filter_definitions: Vec<CompiledZiFilterDefinition>,
     /// Small-signal noise sources extracted from contributions
     pub noise_sources: Vec<CompiledNoiseSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CompiledZiPolynomial {
+    Coefficients(Vec<BytecodeProgram>),
+    Roots(Vec<(BytecodeProgram, BytecodeProgram)>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledZiFilterDefinition {
+    pub numerator: CompiledZiPolynomial,
+    pub denominator: CompiledZiPolynomial,
+    pub period: BytecodeProgram,
+    pub first_transition: BytecodeProgram,
+}
+
+/// Stack layout of one Zi polynomial's lazy-freeze operands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ZiPolynomialLayout {
+    Coefficients { len: usize },
+    Roots { len: usize },
+}
+
+impl ZiPolynomialLayout {
+    pub fn checked_value_count(self) -> Option<usize> {
+        match self {
+            Self::Coefficients { len } => Some(len),
+            Self::Roots { len } => len.checked_mul(2),
+        }
+    }
+
+    pub fn value_count(self) -> usize {
+        self.checked_value_count().unwrap_or(usize::MAX)
+    }
+
+    pub fn definition_len(self) -> usize {
+        match self {
+            Self::Coefficients { len } | Self::Roots { len } => len,
+        }
+    }
+
+    pub fn is_roots(self) -> bool {
+        matches!(self, Self::Roots { .. })
+    }
+}
+
+/// Runtime metadata shared by VM and native Zi helpers. Operand order is
+/// numerator values, denominator values, period, first-transition time,
+/// input/action, then dynamic transition time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ZiRuntimeLayout {
+    pub filter_id: usize,
+    pub numerator: ZiPolynomialLayout,
+    pub denominator: ZiPolynomialLayout,
+    pub direct_assignment: bool,
+}
+
+impl ZiRuntimeLayout {
+    pub const fn unit_coefficients(filter_id: usize) -> Self {
+        Self {
+            filter_id,
+            numerator: ZiPolynomialLayout::Coefficients { len: 1 },
+            denominator: ZiPolynomialLayout::Coefficients { len: 1 },
+            direct_assignment: false,
+        }
+    }
+
+    pub fn checked_operand_count(self) -> Option<usize> {
+        self.numerator
+            .checked_value_count()?
+            .checked_add(self.denominator.checked_value_count()?)?
+            .checked_add(crate::zfilter::ZI_FIXED_RUNTIME_OPERANDS)
+    }
+
+    pub fn validate_operand_budget(self) -> Result<usize, crate::zfilter::ZiFilterError> {
+        let numerator = self.numerator.checked_value_count().ok_or_else(|| {
+            crate::zfilter::ZiFilterError::InvalidDefinition(
+                "Zi numerator root scalar count overflows usize".into(),
+            )
+        })?;
+        let denominator = self.denominator.checked_value_count().ok_or_else(|| {
+            crate::zfilter::ZiFilterError::InvalidDefinition(
+                "Zi denominator root scalar count overflows usize".into(),
+            )
+        })?;
+        crate::zfilter::validate_zi_runtime_operand_budget("Zi filter", numerator, denominator)
+    }
+
+    pub fn operand_count(self) -> usize {
+        self.checked_operand_count().unwrap_or(usize::MAX)
+    }
+
+    /// Pack the layout into the native helper's third machine-word argument.
+    /// Native execution is 64-bit; limits are checked instead of truncating.
+    pub fn native_descriptor(self) -> Option<usize> {
+        const FIELD_MASK: usize = (1 << 14) - 1;
+        self.validate_operand_budget().ok()?;
+        if usize::BITS < 64
+            || self.filter_id > u32::MAX as usize
+            || self.numerator.definition_len() > FIELD_MASK
+            || self.denominator.definition_len() > FIELD_MASK
+        {
+            return None;
+        }
+        let mut packed = self.filter_id;
+        packed |= self.numerator.definition_len() << 32;
+        packed |= usize::from(self.numerator.is_roots()) << 46;
+        packed |= self.denominator.definition_len() << 47;
+        packed |= usize::from(self.denominator.is_roots()) << 61;
+        packed |= usize::from(self.direct_assignment) << 62;
+        Some(packed)
+    }
+
+    pub fn from_native_descriptor(packed: usize) -> Option<Self> {
+        if usize::BITS < 64 || packed >> 63 != 0 {
+            return None;
+        }
+        let numerator_len = (packed >> 32) & ((1 << 14) - 1);
+        let denominator_len = (packed >> 47) & ((1 << 14) - 1);
+        let layout = Self {
+            filter_id: packed & u32::MAX as usize,
+            numerator: if (packed >> 46) & 1 == 0 {
+                ZiPolynomialLayout::Coefficients { len: numerator_len }
+            } else {
+                ZiPolynomialLayout::Roots { len: numerator_len }
+            },
+            denominator: if (packed >> 61) & 1 == 0 {
+                ZiPolynomialLayout::Coefficients {
+                    len: denominator_len,
+                }
+            } else {
+                ZiPolynomialLayout::Roots {
+                    len: denominator_len,
+                }
+            },
+            direct_assignment: (packed >> 62) & 1 != 0,
+        };
+        layout.validate_operand_budget().ok()?;
+        Some(layout)
+    }
+
+    pub fn freeze_filter(
+        self,
+        operands: &[f64],
+    ) -> Result<crate::zfilter::ZiFilter, crate::zfilter::ZiFilterError> {
+        let operand_count = self.validate_operand_budget()?;
+        if operands.len() != operand_count {
+            return Err(crate::zfilter::ZiFilterError::InvalidDefinition(format!(
+                "lazy Zi definition expected {} operands, got {}",
+                operand_count,
+                operands.len()
+            )));
+        }
+        let numerator_values = self.numerator.checked_value_count().ok_or_else(|| {
+            crate::zfilter::ZiFilterError::InvalidDefinition(
+                "Zi numerator root scalar count overflows usize".into(),
+            )
+        })?;
+        let denominator_values = self.denominator.checked_value_count().ok_or_else(|| {
+            crate::zfilter::ZiFilterError::InvalidDefinition(
+                "Zi denominator root scalar count overflows usize".into(),
+            )
+        })?;
+        let numerator = freeze_zi_polynomial(self.numerator, &operands[..numerator_values])?;
+        let denominator = freeze_zi_polynomial(
+            self.denominator,
+            &operands[numerator_values..numerator_values + denominator_values],
+        )?;
+        let period_index = numerator_values + denominator_values;
+        let period = operands[period_index];
+        let first_transition = operands[period_index + 1];
+        crate::zfilter::ZiFilter::new_with_timing(numerator, denominator, period, first_transition)
+    }
+}
+
+fn freeze_zi_polynomial(
+    layout: ZiPolynomialLayout,
+    values: &[f64],
+) -> Result<Vec<f64>, crate::zfilter::ZiFilterError> {
+    match layout {
+        ZiPolynomialLayout::Coefficients { len } => {
+            if values.len() != len {
+                return Err(crate::zfilter::ZiFilterError::InvalidDefinition(format!(
+                    "Zi coefficient definition expected {len} values, got {}",
+                    values.len()
+                )));
+            }
+            Ok(values.to_vec())
+        }
+        ZiPolynomialLayout::Roots { len } => {
+            let scalar_count = len.checked_mul(2).ok_or_else(|| {
+                crate::zfilter::ZiFilterError::InvalidDefinition(
+                    "Zi root scalar count overflows usize".into(),
+                )
+            })?;
+            if values.len() != scalar_count {
+                return Err(crate::zfilter::ZiFilterError::InvalidDefinition(format!(
+                    "Zi root definition expected {} scalar values, got {}",
+                    scalar_count,
+                    values.len()
+                )));
+            }
+            crate::zfilter::z_roots_to_coefficients(
+                &values
+                    .chunks_exact(2)
+                    .map(|pair| (pair[0], pair[1]))
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(crate::zfilter::ZiFilterError::InvalidDefinition)
+        }
+    }
+}
+
+#[cfg(test)]
+mod zi_runtime_layout_tests {
+    use super::{ZiPolynomialLayout, ZiRuntimeLayout};
+
+    #[test]
+    fn shared_operand_budget_accepts_boundary_and_rejects_one_over() {
+        let at_limit = ZiRuntimeLayout {
+            filter_id: 0,
+            numerator: ZiPolynomialLayout::Coefficients { len: 1019 },
+            denominator: ZiPolynomialLayout::Coefficients { len: 1 },
+            direct_assignment: false,
+        };
+        assert_eq!(
+            at_limit.validate_operand_budget().unwrap(),
+            crate::zfilter::MAX_ZI_RUNTIME_OPERANDS
+        );
+        assert!(at_limit.native_descriptor().is_some());
+
+        let over_limit = ZiRuntimeLayout {
+            numerator: ZiPolynomialLayout::Coefficients { len: 1020 },
+            ..at_limit
+        };
+        let error = over_limit.validate_operand_budget().unwrap_err();
+        assert!(error.to_string().contains("platform-uniform maximum 1024"));
+        assert!(over_limit.native_descriptor().is_none());
+        assert!(over_limit.freeze_filter(&[]).is_err());
+    }
+
+    #[test]
+    fn mixed_roots_and_coefficients_use_scalar_slots_and_overflow_fails_closed() {
+        let mixed = ZiRuntimeLayout {
+            filter_id: 0,
+            numerator: ZiPolynomialLayout::Roots { len: 509 },
+            denominator: ZiPolynomialLayout::Coefficients { len: 2 },
+            direct_assignment: false,
+        };
+        assert_eq!(mixed.validate_operand_budget().unwrap(), 1024);
+
+        let overflow = ZiRuntimeLayout {
+            numerator: ZiPolynomialLayout::Roots { len: usize::MAX },
+            ..mixed
+        };
+        assert!(overflow.checked_operand_count().is_none());
+        assert!(overflow.validate_operand_budget().is_err());
+        assert!(overflow.native_descriptor().is_none());
+
+        let packed_over_limit = (1020_usize << 32) | (1_usize << 47);
+        assert!(ZiRuntimeLayout::from_native_descriptor(packed_over_limit).is_none());
+    }
 }
 
 /// Compiled noise source: PSD evaluated at the operating point, injected
@@ -331,8 +601,12 @@ pub enum Instruction {
     PushMfactor,
     /// Push whether an external terminal is connected on this instance.
     PushPortConnected(usize),
-    /// Z-domain filter: pop the input, push the sampled-data output
-    ZiState(usize),
+    /// Z-domain filter: lazily freeze its leading definition operands, then
+    /// pop transition time and input and push sampled output.
+    ZiState(ZiRuntimeLayout),
+    /// Read-only exact Jacobian view of a Zi site. It never writes the site's
+    /// sample candidate or accepted state.
+    ZiStateDerivative(ZiRuntimeLayout),
     /// Binary operations
     Add,
     Sub,

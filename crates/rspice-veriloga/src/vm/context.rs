@@ -14,9 +14,13 @@
 //! would change results.
 
 use super::error::VmError;
-use super::filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
+use super::filters::{
+    CrossCheckpoint, CrossDetector, DelayBuffer, DelayCheckpoint, SlewCheckpoint, SlewFilter,
+    TransitionCheckpoint, TransitionFilter,
+};
 use crate::codegen::LookupTable;
-use crate::laplace::StateSpaceFilter;
+use crate::laplace::{LaplaceCheckpoint, StateSpaceFilter};
+use crate::zfilter::ZiCheckpoint;
 
 pub const CURRENT_PAIR_GROUND: usize = usize::MAX;
 
@@ -234,6 +238,25 @@ pub struct VmContext {
     pub(crate) timer_event_bound: f64,
 }
 
+/// Accepted, trajectory-affecting VM state. Solver proposals, integration
+/// coefficients, terminal values, and other recomputable caches are excluded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VmAcceptedCheckpoint {
+    pub time: f64,
+    pub variables: Vec<f64>,
+    pub state_values_prev: Vec<f64>,
+    pub state_values_older: Vec<f64>,
+    pub state_derivatives_prev: Vec<f64>,
+    pub state_initialized: Vec<bool>,
+    pub delay_buffers: Vec<DelayCheckpoint>,
+    pub transition_filters: Vec<TransitionCheckpoint>,
+    pub slew_filters: Vec<SlewCheckpoint>,
+    pub cross_detectors: Vec<CrossCheckpoint>,
+    pub laplace_filters: Vec<LaplaceCheckpoint>,
+    pub zi_filters: Vec<ZiCheckpoint>,
+    pub timer_event_bound: Option<f64>,
+}
+
 impl Default for VmContext {
     fn default() -> Self {
         Self {
@@ -402,7 +425,34 @@ impl VmContext {
     }
 
     /// Advance state for a new timestep (copy current to prev).
-    pub fn advance_state(&mut self) {
+    pub fn advance_state(&mut self) -> Result<(), VmError> {
+        self.validate_advance_state()?;
+        self.apply_validated_advance_state();
+        Ok(())
+    }
+
+    /// Validate every fallible accepted-state action without mutating the VM.
+    pub(crate) fn validate_advance_state(&self) -> Result<(), VmError> {
+        // Validate every sampled-filter commit before mutating any accepted
+        // state. The second pass is deliberately infallible, preserving the
+        // all-or-nothing contract without cloning filter histories (and
+        // allocating) on every accepted timestep.
+        let time = self.time;
+        for (filter_id, filter) in self.zi_filters.iter().enumerate() {
+            filter.validate_commit(time).map_err(|error| {
+                VmError::InvalidNumericResult(format!(
+                    "zi filter {filter_id} commit failed: {error}"
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Apply an accepted-state action after the circuit has validated every
+    /// runtime-compiled instance. This phase is deliberately infallible.
+    pub(crate) fn apply_validated_advance_state(&mut self) {
+        let time = self.time;
         self.state_values_older.clone_from(&self.state_values_prev);
         self.state_values_prev.clone_from(&self.state_values);
         self.state_derivatives_prev
@@ -422,11 +472,288 @@ impl VmContext {
         for filter in &mut self.laplace_filters {
             filter.commit();
         }
-        // Commit sampled-data filter candidates for the accepted step.
-        let time = self.time;
         for filter in &mut self.zi_filters {
-            filter.commit(time);
+            filter.apply_validated_commit(time);
         }
+    }
+
+    pub(crate) fn accepted_checkpoint(&self) -> Result<VmAcceptedCheckpoint, VmError> {
+        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        for (index, state) in self.delay_buffers.iter().enumerate() {
+            state
+                .validate_checkpoint_ready()
+                .map_err(|error| invalid(format!("delay {index}: {error}")))?;
+        }
+        for (index, state) in self.transition_filters.iter().enumerate() {
+            state
+                .validate_checkpoint_ready()
+                .map_err(|error| invalid(format!("transition {index}: {error}")))?;
+        }
+        for (index, state) in self.slew_filters.iter().enumerate() {
+            state
+                .validate_checkpoint_ready()
+                .map_err(|error| invalid(format!("slew {index}: {error}")))?;
+        }
+        for (index, state) in self.cross_detectors.iter().enumerate() {
+            state
+                .validate_checkpoint_ready()
+                .map_err(|error| invalid(format!("cross {index}: {error}")))?;
+        }
+        for (index, state) in self.laplace_filters.iter().enumerate() {
+            state
+                .validate_checkpoint_ready()
+                .map_err(|error| invalid(format!("Laplace filter {index}: {error}")))?;
+        }
+        for (index, state) in self.zi_filters.iter().enumerate() {
+            state
+                .validate_checkpoint_ready()
+                .map_err(|error| invalid(format!("Zi filter {index}: {error}")))?;
+        }
+        let checkpoint = VmAcceptedCheckpoint {
+            time: self.time,
+            variables: self.variables.clone(),
+            state_values_prev: self.state_values_prev.clone(),
+            state_values_older: self.state_values_older.clone(),
+            state_derivatives_prev: self.state_derivatives_prev.clone(),
+            state_initialized: self.state_initialized.clone(),
+            delay_buffers: self
+                .delay_buffers
+                .iter()
+                .map(DelayBuffer::checkpoint)
+                .collect(),
+            transition_filters: self
+                .transition_filters
+                .iter()
+                .map(TransitionFilter::checkpoint)
+                .collect(),
+            slew_filters: self
+                .slew_filters
+                .iter()
+                .map(SlewFilter::checkpoint)
+                .collect(),
+            cross_detectors: self
+                .cross_detectors
+                .iter()
+                .map(CrossDetector::checkpoint)
+                .collect(),
+            laplace_filters: self
+                .laplace_filters
+                .iter()
+                .map(StateSpaceFilter::checkpoint)
+                .collect(),
+            zi_filters: self
+                .zi_filters
+                .iter()
+                .map(|filter| filter.checkpoint())
+                .collect(),
+            timer_event_bound: self
+                .timer_event_step_bound()
+                .map(|_| self.timer_event_bound),
+        };
+        self.validate_accepted_checkpoint(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    pub(crate) fn validate_accepted_checkpoint(
+        &self,
+        checkpoint: &VmAcceptedCheckpoint,
+    ) -> Result<(), VmError> {
+        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        if !checkpoint.time.is_finite() || checkpoint.time < 0.0 {
+            return Err(invalid(
+                "checkpoint time must be finite and non-negative".into(),
+            ));
+        }
+        if checkpoint.variables.len() != self.variables.len()
+            || checkpoint.state_values_prev.len() != self.state_values.len()
+            || checkpoint.state_values_older.len() != self.state_values.len()
+            || checkpoint.state_derivatives_prev.len() != self.state_derivatives.len()
+            || checkpoint.state_initialized.len() != self.state_initialized.len()
+            || checkpoint.delay_buffers.len() != self.delay_buffers.len()
+            || checkpoint.transition_filters.len() != self.transition_filters.len()
+            || checkpoint.slew_filters.len() != self.slew_filters.len()
+            || checkpoint.cross_detectors.len() != self.cross_detectors.len()
+            || checkpoint.laplace_filters.len() != self.laplace_filters.len()
+            || checkpoint.zi_filters.len() != self.zi_filters.len()
+        {
+            return Err(invalid(
+                "checkpoint VM/operator shape does not match the device".into(),
+            ));
+        }
+        if checkpoint.variables.iter().any(|value| value.is_nan())
+            || checkpoint
+                .state_values_prev
+                .iter()
+                .chain(&checkpoint.state_values_older)
+                .chain(&checkpoint.state_derivatives_prev)
+                .any(|value| !value.is_finite())
+        {
+            return Err(invalid(
+                "checkpoint VM state contains an invalid numeric value".into(),
+            ));
+        }
+        if checkpoint
+            .timer_event_bound
+            .is_some_and(|bound| !bound.is_finite() || bound <= checkpoint.time)
+        {
+            return Err(invalid(
+                "checkpoint timer bound must be finite and strictly future".into(),
+            ));
+        }
+        for (index, (target, state)) in self
+            .delay_buffers
+            .iter()
+            .zip(&checkpoint.delay_buffers)
+            .enumerate()
+        {
+            let _ = target;
+            DelayBuffer::validate_checkpoint(state)
+                .map_err(|error| invalid(format!("delay {index}: {error}")))?;
+            if state
+                .samples
+                .last()
+                .is_some_and(|(time, _)| *time > checkpoint.time)
+            {
+                return Err(invalid(format!(
+                    "delay {index} contains a sample later than checkpoint time"
+                )));
+            }
+        }
+        for (index, state) in checkpoint.transition_filters.iter().enumerate() {
+            TransitionFilter::validate_checkpoint(state)
+                .map_err(|error| invalid(format!("transition {index}: {error}")))?;
+        }
+        for (index, state) in checkpoint.slew_filters.iter().enumerate() {
+            SlewFilter::validate_checkpoint(state)
+                .map_err(|error| invalid(format!("slew {index}: {error}")))?;
+            if state.prev_time > checkpoint.time {
+                return Err(invalid(format!(
+                    "slew {index} accepted time is later than checkpoint time"
+                )));
+            }
+        }
+        for (index, state) in checkpoint.cross_detectors.iter().enumerate() {
+            CrossDetector::validate_checkpoint(state)
+                .map_err(|error| invalid(format!("cross {index}: {error}")))?;
+            if state.initialized && state.time > checkpoint.time {
+                return Err(invalid(format!(
+                    "cross {index} accepted time is later than checkpoint time"
+                )));
+            }
+        }
+        for (index, (filter, state)) in self
+            .laplace_filters
+            .iter()
+            .zip(&checkpoint.laplace_filters)
+            .enumerate()
+        {
+            filter
+                .validate_checkpoint(state)
+                .map_err(|error| invalid(format!("Laplace filter {index}: {error}")))?;
+        }
+        for (index, (filter, state)) in self
+            .zi_filters
+            .iter()
+            .zip(&checkpoint.zi_filters)
+            .enumerate()
+        {
+            filter
+                .validate_checkpoint(state)
+                .map_err(|error| invalid(format!("Zi filter {index}: {error}")))?;
+            if state
+                .accepted_time
+                .is_some_and(|time| time != checkpoint.time)
+            {
+                return Err(invalid(format!(
+                    "Zi filter {index} accepted time does not equal checkpoint time"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_accepted_checkpoint(&mut self, checkpoint: &VmAcceptedCheckpoint) {
+        self.time = checkpoint.time;
+        self.variables.clone_from(&checkpoint.variables);
+        self.state_values.clone_from(&checkpoint.state_values_prev);
+        self.state_values_prev
+            .clone_from(&checkpoint.state_values_prev);
+        self.state_values_older
+            .clone_from(&checkpoint.state_values_older);
+        self.state_derivatives
+            .clone_from(&checkpoint.state_derivatives_prev);
+        self.state_derivatives_prev
+            .clone_from(&checkpoint.state_derivatives_prev);
+        self.state_initialized
+            .clone_from(&checkpoint.state_initialized);
+        for (target, state) in self.delay_buffers.iter_mut().zip(&checkpoint.delay_buffers) {
+            target.restore_checkpoint(state);
+        }
+        for (target, state) in self
+            .transition_filters
+            .iter_mut()
+            .zip(&checkpoint.transition_filters)
+        {
+            target.restore_checkpoint(state);
+        }
+        for (target, state) in self.slew_filters.iter_mut().zip(&checkpoint.slew_filters) {
+            target.restore_checkpoint(state);
+        }
+        for (target, state) in self
+            .cross_detectors
+            .iter_mut()
+            .zip(&checkpoint.cross_detectors)
+        {
+            target.restore_checkpoint(state);
+        }
+        for (target, state) in self
+            .laplace_filters
+            .iter_mut()
+            .zip(&checkpoint.laplace_filters)
+        {
+            target.restore_checkpoint(state);
+        }
+        for (target, state) in self.zi_filters.iter_mut().zip(&checkpoint.zi_filters) {
+            target.restore_checkpoint(state);
+        }
+        self.timestep = 0.0;
+        self.integration = IntegrationCoefficients::inactive();
+        self.analysis_type = 2;
+        self.evaluation_mode = VerilogAEvaluationMode::NewtonLimited;
+        self.limiter_active = 0;
+        self.analysis_initial_step = false;
+        self.analysis_final_step = false;
+        self.timer_event_bound = checkpoint.timer_event_bound.unwrap_or(f64::INFINITY);
+    }
+
+    /// Invalidate speculative zi candidates before each complete device
+    /// evaluation. Only candidates recreated by the final Newton pass may be
+    /// committed when the point is accepted.
+    pub(crate) fn begin_zi_evaluation(&mut self) {
+        for filter in &mut self.zi_filters {
+            filter.begin_evaluation();
+        }
+    }
+
+    /// Tightest exact sampled-filter edge after the current time.
+    pub(crate) fn zi_filter_step_bound(&self) -> Result<Option<f64>, VmError> {
+        self.zi_filters
+            .iter()
+            .enumerate()
+            .filter(|(_, filter)| filter.participates_in_transient_schedule())
+            .map(|(filter_id, filter)| {
+                filter.next_sample_step_bound(self.time).map_err(|error| {
+                    VmError::InvalidNumericResult(format!(
+                        "zi filter {filter_id} breakpoint failed: {error}"
+                    ))
+                })
+            })
+            .try_fold(None, |minimum, bound| {
+                let bound = bound?;
+                Ok(Some(
+                    minimum.map_or(bound, |current: f64| current.min(bound)),
+                ))
+            })
     }
 
     /// Set the timestep for transient analysis.
@@ -681,7 +1008,8 @@ impl VmContext {
 
 #[cfg(test)]
 mod tests {
-    use super::VerilogAEvaluationMode;
+    use super::{VerilogAEvaluationMode, VmContext};
+    use crate::zfilter::ZiFilter;
 
     #[test]
     fn limiter_mode_defaults_are_analysis_safe() {
@@ -708,5 +1036,198 @@ mod tests {
         assert!(VerilogAEvaluationMode::NewtonLimited.limiting_enabled());
         assert!(!VerilogAEvaluationMode::StaticProbe.limiting_enabled());
         assert!(!VerilogAEvaluationMode::SmallSignal.limiting_enabled());
+    }
+
+    #[test]
+    fn zi_multi_filter_commit_is_atomic_without_cloning_histories() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.time = 0.0;
+        context.zi_filters = vec![
+            ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap(),
+            ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap(),
+        ];
+        context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
+        context.zi_filters[1].eval(3.0, 0.0, true).unwrap();
+        context.zi_filters[1].begin_evaluation();
+
+        assert!(context.advance_state().is_err());
+        let first_error = context.zi_filters[0]
+            .eval(9.0, 0.5, true)
+            .expect_err("first filter must not commit before second filter validation fails");
+        assert!(first_error.to_string().contains("sample edge"));
+
+        context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
+        context.zi_filters[1].eval(3.0, 0.0, true).unwrap();
+        context.advance_state().unwrap();
+        assert_eq!(context.zi_filters[0].eval(9.0, 0.5, true).unwrap(), 2.0);
+        assert_eq!(context.zi_filters[1].eval(9.0, 0.5, true).unwrap(), 3.0);
+    }
+
+    #[test]
+    fn duplicate_zi_acceptance_leaves_every_vm_history_unchanged() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.time = 0.0;
+        context.zi_filters = vec![ZiFilter::new(vec![1.0, 0.25], vec![1.0, -0.5], 1.0).unwrap()];
+        context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
+        context.advance_state().unwrap();
+
+        context.state_values = vec![11.0];
+        context.state_values_prev = vec![22.0];
+        context.state_values_older = vec![33.0];
+        context.state_derivatives = vec![44.0];
+        context.state_derivatives_prev = vec![55.0];
+        context.state_initialized = vec![true];
+
+        context.allocate_delay_buffers(1);
+        context.delay_buffers[0].eval(0.25, 4.0, 0.1);
+        context.allocate_transition_filters(1);
+        context.transition_filters[0].eval(3.0, 0.25, 0.0, 1.0, 1.0);
+        context.allocate_slew_filters(1);
+        context.slew_filters[0].eval(5.0, 0.25, 1.0, 1.0);
+        context.allocate_cross_detectors(1);
+        context.cross_detectors[0].eval(1.0, 0.25, 0);
+        context
+            .laplace_filters
+            .push(crate::laplace::StateSpaceFilter::integrator(1.0).unwrap());
+        context.laplace_filters[0].step(6.0, 0.25).unwrap();
+        context.zi_filters[0].eval(9.0, 0.0, true).unwrap();
+
+        let before = format!("{context:#?}");
+        let error = context
+            .advance_state()
+            .expect_err("duplicate Zi acceptance must fail before any context commit");
+        assert!(
+            error.to_string().contains("already accepted"),
+            "got: {error}"
+        );
+        assert_eq!(
+            format!("{context:#?}"),
+            before,
+            "Zi, integration, delay, transition, slew, crossing, and Laplace histories must remain atomic"
+        );
+    }
+
+    #[test]
+    fn dormant_zi_slot_neither_schedules_nor_advances_placeholder_clock() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.time = 0.0;
+        context.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 0.25).unwrap()];
+
+        assert_eq!(context.zi_filter_step_bound().unwrap(), None);
+        context.advance_state().unwrap();
+        assert_eq!(context.zi_filter_step_bound().unwrap(), None);
+
+        assert_eq!(
+            context.zi_filters[0].eval(2.0, 0.0, true).unwrap(),
+            2.0,
+            "the dormant commit must leave the t=0 sample pending"
+        );
+        assert_eq!(context.zi_filter_step_bound().unwrap(), Some(0.25));
+        context.advance_state().unwrap();
+        assert_eq!(context.zi_filter_step_bound().unwrap(), Some(0.25));
+    }
+
+    #[test]
+    fn accepted_checkpoint_refuses_every_speculative_operator_candidate() {
+        let mut context = VmContext::default();
+        context.time = 0.0;
+        context.analysis_type = 2;
+        context.allocate_delay_buffers(1);
+        context.delay_buffers[0].eval(0.0, 1.0, 0.25);
+        let error = context
+            .accepted_checkpoint()
+            .expect_err("an in-flight delay candidate must block checkpoint capture");
+        assert!(error.to_string().contains("in-flight Newton candidate"));
+
+        context.delay_buffers[0].commit();
+        context.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap()];
+        context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
+        let error = context
+            .accepted_checkpoint()
+            .expect_err("an in-flight Zi candidate must block checkpoint capture");
+        assert!(error.to_string().contains("in-flight Newton candidate"));
+    }
+
+    #[test]
+    fn zi_iir_checkpoint_resume_is_bit_identical_between_and_on_sample_edges() {
+        let mut original = VmContext::default();
+        original.analysis_type = 2;
+        original.zi_filters =
+            vec![ZiFilter::new_with_timing(vec![0.5, 0.25], vec![1.0, -0.5], 1.0, 0.0).unwrap()];
+        original.time = 0.0;
+        original.zi_filters[0]
+            .eval_with_transition(2.0, 0.0, true, 0.5)
+            .unwrap();
+        original.advance_state().unwrap();
+
+        let between_checkpoint = original.accepted_checkpoint().unwrap();
+        let mut resumed = VmContext::default();
+        resumed.analysis_type = 2;
+        resumed.zi_filters =
+            vec![ZiFilter::new_with_timing(vec![0.5, 0.25], vec![1.0, -0.5], 1.0, 0.0).unwrap()];
+        resumed
+            .validate_accepted_checkpoint(&between_checkpoint)
+            .unwrap();
+        resumed.restore_accepted_checkpoint(&between_checkpoint);
+
+        original.time = 0.25;
+        resumed.time = 0.25;
+        let original_between = original.zi_filters[0]
+            .eval_with_transition(9.0, 0.25, true, 0.5)
+            .unwrap();
+        let resumed_between = resumed.zi_filters[0]
+            .eval_with_transition(9.0, 0.25, true, 0.5)
+            .unwrap();
+        assert_eq!(original_between.to_bits(), resumed_between.to_bits());
+        original.advance_state().unwrap();
+        resumed.advance_state().unwrap();
+
+        original.time = 1.0;
+        resumed.time = 1.0;
+        let original_edge = original.zi_filters[0]
+            .eval_with_transition(4.0, 1.0, true, 0.5)
+            .unwrap();
+        let resumed_edge = resumed.zi_filters[0]
+            .eval_with_transition(4.0, 1.0, true, 0.5)
+            .unwrap();
+        assert_eq!(original_edge.to_bits(), resumed_edge.to_bits());
+        original.advance_state().unwrap();
+        resumed.advance_state().unwrap();
+        assert_eq!(
+            original.accepted_checkpoint().unwrap(),
+            resumed.accepted_checkpoint().unwrap()
+        );
+    }
+
+    #[test]
+    fn transition_ramp_and_sub_attosecond_bound_survive_accepted_snapshot() {
+        let mut original = VmContext::default();
+        original.analysis_type = 2;
+        original.time = 0.0;
+        original.allocate_transition_filters(1);
+        original.transition_filters[0].eval(1.0, 0.0, 0.0, 1.0, 1.0);
+        original.advance_state().unwrap();
+        original.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 5.0e-19).unwrap()];
+        original.zi_filters[0].eval(1.0, 0.0, true).unwrap();
+        original.advance_state().unwrap();
+        assert_eq!(original.zi_filter_step_bound().unwrap(), Some(5.0e-19));
+
+        let checkpoint = original.accepted_checkpoint().unwrap();
+        let mut resumed = VmContext::default();
+        resumed.analysis_type = 2;
+        resumed.allocate_transition_filters(1);
+        resumed.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 5.0e-19).unwrap()];
+        resumed.validate_accepted_checkpoint(&checkpoint).unwrap();
+        resumed.restore_accepted_checkpoint(&checkpoint);
+        assert_eq!(resumed.zi_filter_step_bound().unwrap(), Some(5.0e-19));
+
+        original.time = 0.25;
+        resumed.time = 0.25;
+        let expected = original.transition_filters[0].eval(1.0, 0.25, 0.0, 1.0, 1.0);
+        let actual = resumed.transition_filters[0].eval(1.0, 0.25, 0.0, 1.0, 1.0);
+        assert_eq!(expected.to_bits(), actual.to_bits());
     }
 }

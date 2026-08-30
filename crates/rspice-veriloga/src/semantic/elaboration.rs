@@ -424,7 +424,6 @@ impl<'a> HierarchyElaborator<'a> {
                 .map(|contribution| rewrite_contribution(contribution, &scope))
                 .collect::<CompileResult<Vec<_>>>()?,
         );
-
         module_stack.push(instance.module.clone());
         let nested = self.append_instances(child_source, &scope, module_stack, path);
         module_stack.pop();
@@ -811,7 +810,9 @@ fn mapped_optional_parameter(
 
 fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResult<Expression> {
     Ok(match expression {
-        Expression::Number(_) | Expression::StringLit(_) => expression.clone(),
+        Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {
+            expression.clone()
+        }
         Expression::Identifier(identifier) => Expression::Identifier(Identifier {
             name: scope
                 .parameters
@@ -1095,9 +1096,19 @@ fn rewrite_analog_operator(
             expr: Box::new(rewrite_expression(expr, scope)?),
             span: *span,
         },
-        AnalogOperator::Zi { kind, expr, span } => AnalogOperator::Zi {
+        AnalogOperator::Zi {
+            kind,
+            expr,
+            period,
+            transition,
+            first_transition,
+            span,
+        } => AnalogOperator::Zi {
             kind: rewrite_zi_kind(kind, scope)?,
             expr: Box::new(rewrite_expression(expr, scope)?),
+            period: Box::new(rewrite_expression(period, scope)?),
+            transition: optional(transition)?,
+            first_transition: optional(first_transition)?,
             span: *span,
         },
     })

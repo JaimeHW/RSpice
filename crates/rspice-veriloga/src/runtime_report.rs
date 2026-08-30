@@ -193,6 +193,15 @@ impl RuntimeCompileReport {
             });
         }
 
+        for (index, filter) in self.model.zi_filters.iter().enumerate() {
+            filter.validate_integrity().map_err(|error| {
+                RuntimeArtifactIntegrityError::InvalidZiFilterState {
+                    index,
+                    detail: error.to_string(),
+                }
+            })?;
+        }
+
         if let Err(diagnostics) = self.canonical_ir.validate() {
             return Err(RuntimeArtifactIntegrityError::InvalidCanonicalIr {
                 diagnostics: diagnostics
@@ -774,6 +783,8 @@ pub enum RuntimeArtifactIntegrityError {
     },
     #[error("canonical IR validation failed: {}", .diagnostics.join("; "))]
     InvalidCanonicalIr { diagnostics: Vec<String> },
+    #[error("compiled model Zi filter {index} failed integrity validation: {detail}")]
+    InvalidZiFilterState { index: usize, detail: String },
     #[error("ABI module '{abi}' does not match canonical module '{canonical}'")]
     AbiModuleMismatch { abi: String, canonical: String },
     #[error("ABI surface does not match the canonical model")]

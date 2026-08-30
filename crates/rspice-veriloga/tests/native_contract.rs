@@ -1087,7 +1087,7 @@ module native_zi_current(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6);
+        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6, 0.0);
         I(p, n) <+ y;
     end
 endmodule
@@ -2414,7 +2414,11 @@ fn native_device_with_canonical_ir_executes_zi_current_without_fallback() {
 module native_canonical_zi_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6);
+    real y;
+    analog begin
+        y = zi_nd(V(p, n), {0.25}, {1.0, -0.75}, 1.0e-6, 0.0);
+        I(p, n) <+ y;
+    end
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2442,7 +2446,7 @@ endmodule
         "DC currents: {currents:?}"
     );
 
-    device.set_analysis_type(2);
+    device.try_begin_analysis(2).unwrap();
     device.set_timestep(0.5e-6);
 
     device.set_time(0.0);
@@ -2455,7 +2459,7 @@ endmodule
         .expect("canonical zi repeated sample succeeds")[0];
     assert_eq!(first.to_bits(), repeated.to_bits());
     assert!((first - 0.25).abs() < 1.0e-12, "first sample: {first}");
-    device.advance_state();
+    device.try_advance_state().unwrap();
 
     device.set_time(0.5e-6);
     device.update_voltages(&[1.0]);
@@ -2493,7 +2497,7 @@ endmodule
         .expect("canonical cross DC evaluation succeeds");
     assert_eq!(dc_currents[0], 0.0);
 
-    device.set_analysis_type(2);
+    device.try_begin_analysis(2).unwrap();
     for (time, voltage, expected) in [(0.0, -1.0, 0.0), (0.5, 1.0, 1.0), (1.0, 2.0, 0.0)] {
         device.set_time(time);
         device.update_voltages(&[voltage]);
@@ -2534,7 +2538,7 @@ endmodule
         .try_evaluate()
         .expect("canonical below-threshold above evaluation succeeds");
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
-    device.advance_state();
+    device.try_advance_state().unwrap();
 
     device.set_time(1.0);
     device.update_voltages(&[2.0]);
@@ -3328,7 +3332,7 @@ fn native_device_executes_above_assignments_without_fallback() {
         .expect("native below-threshold above evaluation succeeds");
     assert_eq!(device.variable("gate"), Some(0.0));
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
-    device.advance_state();
+    device.try_advance_state().unwrap();
 
     device.set_time(1.0);
     device.update_voltages(&[2.0]);
@@ -5049,7 +5053,7 @@ fn native_device_executes_zi_current_without_fallback() {
     );
     assert_eq!(device.variable("y"), Some(2.0));
 
-    device.set_analysis_type(2);
+    device.try_begin_analysis(2).unwrap();
     device.set_timestep(0.5e-6);
 
     device.set_time(0.0);
@@ -5062,7 +5066,7 @@ fn native_device_executes_zi_current_without_fallback() {
         .expect("native zi repeated sample succeeds")[0];
     assert_eq!(first.to_bits(), repeated.to_bits());
     assert!((first - 0.25).abs() < 1.0e-12, "first sample: {first}");
-    device.advance_state();
+    device.try_advance_state().unwrap();
 
     device.set_time(0.5e-6);
     device.update_voltages(&[1.0]);
@@ -5070,7 +5074,7 @@ fn native_device_executes_zi_current_without_fallback() {
         .try_evaluate()
         .expect("native zi hold evaluation succeeds")[0];
     assert!((held - 0.25).abs() < 1.0e-12, "held output: {held}");
-    device.advance_state();
+    device.try_advance_state().unwrap();
 
     device.set_time(1.0e-6);
     device.update_voltages(&[1.0]);

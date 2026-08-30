@@ -240,6 +240,9 @@ impl From<LimiterArgument> for HirLimiterArgument {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HirExprKind {
+    /// An explicitly omitted positional argument (`,,`). Only operators whose
+    /// LRM grammar assigns meaning to a null argument may retain this node.
+    NullArgument,
     Number {
         value: f64,
         raw: SmolStr,
@@ -298,6 +301,9 @@ pub enum HirExprKind {
     Zi {
         expr: ExprId,
         kind: HirZiKind,
+        period: ExprId,
+        transition: Option<ExprId>,
+        first_transition: Option<ExprId>,
     },
     NoiseSource {
         source: SmolStr,
@@ -445,6 +451,10 @@ pub struct HirModel {
     pub source_digest: SmolStr,
     pub compiler_version: SmolStr,
     pub feature_flags: Vec<SmolStr>,
+    /// Effective module-scoped `default_transition` value in seconds.
+    /// Zero is legal and denotes an abrupt transition.
+    #[serde(default = "canonical_default_transition")]
+    pub default_transition: f64,
     pub ports: Vec<HirPort>,
     pub parameters: Vec<HirParameter>,
     pub variables: Vec<HirVariable>,
@@ -566,6 +576,7 @@ impl HirModel {
             source_digest: metadata.source_digest.clone(),
             compiler_version: metadata.compiler_version.clone(),
             feature_flags: metadata.feature_flags.clone(),
+            default_transition: module.default_transition,
             ports: module
                 .ports
                 .iter()
@@ -639,6 +650,16 @@ impl HirModel {
             ));
         }
 
+        if !self.default_transition.is_finite() || self.default_transition < 0.0 {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR default_transition must be finite and non-negative, got {}",
+                    self.default_transition
+                ),
+            ));
+        }
+
         validate_dense_port_ids(&mut diagnostics, &self.ports);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
@@ -698,7 +719,9 @@ impl HirModel {
         value_symbols: &HashSet<SmolStr>,
     ) {
         match &expression.kind {
-            HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {}
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. } => {}
             HirExprKind::Identifier { name } => {
                 self.validate_identifier(diagnostics, expression, name, value_symbols);
             }
@@ -717,8 +740,12 @@ impl HirModel {
                     ));
                 }
             }
-            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+            HirExprKind::SystemFunction { args, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "arg", args);
+            }
+            HirExprKind::Call { name, args } => {
+                self.validate_expression_child_list(diagnostics, expression, "arg", args);
+                self.validate_zi_call_budget(diagnostics, expression, name, args);
             }
             HirExprKind::Binary { left, right, .. } => {
                 self.validate_expression_child(diagnostics, expression, "left", *left);
@@ -749,8 +776,26 @@ impl HirModel {
                 self.validate_expression_child(diagnostics, expression, "expr", *expr);
                 self.validate_laplace_children(diagnostics, expression, kind);
             }
-            HirExprKind::Zi { expr, kind } => {
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => {
                 self.validate_expression_child(diagnostics, expression, "expr", *expr);
+                self.validate_expression_child(diagnostics, expression, "period", *period);
+                if let Some(child) = transition {
+                    self.validate_expression_child(diagnostics, expression, "transition", *child);
+                }
+                if let Some(child) = first_transition {
+                    self.validate_expression_child(
+                        diagnostics,
+                        expression,
+                        "first_transition",
+                        *child,
+                    );
+                }
                 self.validate_zi_children(diagnostics, expression, kind);
             }
             HirExprKind::NoiseSource { operands, .. } => {
@@ -966,10 +1011,11 @@ impl HirModel {
         expression: &HirExpression,
         kind: &HirZiKind,
     ) {
-        match kind {
+        let (operator, numerator_scalars, denominator_scalars) = match kind {
             HirZiKind::ZeroPole { zeros, poles } => {
                 self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
                 self.validate_expression_child_list(diagnostics, expression, "poles", poles);
+                ("zi_zp", zeros.len(), poles.len())
             }
             HirZiKind::ZeroDenominator { zeros, denominator } => {
                 self.validate_expression_child_list(diagnostics, expression, "zeros", zeros);
@@ -979,6 +1025,7 @@ impl HirModel {
                     "denominator",
                     denominator,
                 );
+                ("zi_zd", zeros.len(), denominator.len())
             }
             HirZiKind::NumeratorPole { numerator, poles } => {
                 self.validate_expression_child_list(
@@ -988,6 +1035,7 @@ impl HirModel {
                     numerator,
                 );
                 self.validate_expression_child_list(diagnostics, expression, "poles", poles);
+                ("zi_np", numerator.len(), poles.len())
             }
             HirZiKind::NumeratorDenominator {
                 numerator,
@@ -1005,7 +1053,57 @@ impl HirModel {
                     "denominator",
                     denominator,
                 );
+                ("zi_nd", numerator.len(), denominator.len())
             }
+        };
+        if let Err(error) = crate::zfilter::validate_zi_runtime_operand_budget(
+            operator,
+            numerator_scalars,
+            denominator_scalars,
+        ) {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                error.to_string(),
+                expression.span,
+            ));
+        }
+    }
+
+    fn validate_zi_call_budget(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        name: &SmolStr,
+        args: &[ExprId],
+    ) {
+        if !matches!(
+            name.to_ascii_lowercase().as_str(),
+            "zi_zp" | "zi_zd" | "zi_np" | "zi_nd"
+        ) || args.len() < 3
+        {
+            return;
+        }
+        let scalar_count = |id: ExprId| {
+            self.expressions
+                .get(usize::from(id))
+                .map(|child| match &child.kind {
+                    HirExprKind::NullArgument => 0,
+                    HirExprKind::ArrayLiteral { elements } => elements.len(),
+                    _ => 1,
+                })
+        };
+        let (Some(numerator), Some(denominator)) = (scalar_count(args[1]), scalar_count(args[2]))
+        else {
+            return;
+        };
+        if let Err(error) =
+            crate::zfilter::validate_zi_runtime_operand_budget(name, numerator, denominator)
+        {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                error.to_string(),
+                expression.span,
+            ));
         }
     }
 
@@ -1842,6 +1940,7 @@ impl HirLowerer {
 
     fn lower_expr_kind(&mut self, expr: &Expression) -> HirExprKind {
         match expr {
+            Expression::NullArgument(_) => HirExprKind::NullArgument,
             Expression::Number(number) => HirExprKind::Number {
                 value: number.value,
                 raw: number.raw.clone(),
@@ -2047,10 +2146,20 @@ impl HirLowerer {
                     kind: self.lower_laplace_kind(kind),
                 };
             }
-            AnalogOperator::Zi { kind, expr, .. } => {
+            AnalogOperator::Zi {
+                kind,
+                expr,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
                 return HirExprKind::Zi {
                     expr: self.lower_expr(expr).id,
                     kind: self.lower_zi_kind(kind),
+                    period: self.lower_expr(period).id,
+                    transition: self.lower_optional_expr_id(transition),
+                    first_transition: self.lower_optional_expr_id(first_transition),
                 };
             }
         };
@@ -2146,6 +2255,7 @@ fn contribution_kind(indirect: bool, is_current: bool) -> HirContributionKind {
 
 fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
     match kind {
+        HirExprKind::NullArgument => "null_argument",
         HirExprKind::Number { .. } => "number",
         HirExprKind::StringLiteral { .. } => "string",
         HirExprKind::Identifier { .. } => "identifier",
@@ -2166,6 +2276,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
 
 fn expression_kind(expr: &Expression) -> SmolStr {
     match expr {
+        Expression::NullArgument(_) => "null_argument",
         Expression::Number(_) => "number",
         Expression::StringLit(_) => "string",
         Expression::Identifier(_) => "identifier",
@@ -2181,6 +2292,10 @@ fn expression_kind(expr: &Expression) -> SmolStr {
         Expression::NoiseSource(_) => "noise_source",
     }
     .into()
+}
+
+const fn canonical_default_transition() -> f64 {
+    1.0e-9
 }
 
 fn builtin_constant_value(name: &str) -> Option<f64> {

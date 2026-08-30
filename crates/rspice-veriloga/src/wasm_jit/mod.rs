@@ -19,7 +19,8 @@ mod runtime;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use abi::WasmJitEvalFrame;
 pub use abi::{
-    WASM_JIT_EVAL_FRAME_BYTES, WASM_JIT_FRAME_MAGIC, WASM_JIT_STATUS_ABI_MISMATCH,
+    WASM_JIT_EVAL_FRAME_BYTES, WASM_JIT_FRAME_MAGIC, WASM_JIT_MAX_EVAL_FRAME_BYTES,
+    WASM_JIT_MAX_SLICE_OPERANDS, WASM_JIT_SLICE_OPERANDS_OFFSET, WASM_JIT_STATUS_ABI_MISMATCH,
     WASM_JIT_STATUS_OK, WASM_JIT_STATUS_RUNTIME_ERROR,
 };
 #[cfg(target_arch = "wasm32")]
@@ -29,7 +30,9 @@ pub use dispatch::install_browser_dispatcher;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) use executable::{WasmJitExecutable, WasmJitExecutableEntry};
 #[cfg(target_arch = "wasm32")]
-pub use runtime::{WasmJitRuntimeSession, eval_op_v1, math1_v1, math2_v1, with_runtime_session};
+pub use runtime::{
+    WasmJitRuntimeSession, eval_op_slice_v1, eval_op_v1, math1_v1, math2_v1, with_runtime_session,
+};
 
 use std::borrow::Cow;
 
@@ -47,12 +50,12 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 4;
+pub const WASM_JIT_ABI_VERSION: u32 = 5;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
 /// runtime frames.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 4;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 5;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

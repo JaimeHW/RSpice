@@ -25,12 +25,113 @@ fn autodiff_fold(expr: IrExpr) -> IrExpr {
     crate::ir::autodiff::simplify(expr)
 }
 
-/// Map a z-root expansion failure into a compile error
-fn zi_root_error(message: String) -> crate::error::CompileError {
-    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-        "zi filter roots: {message}"
-    )))
-    .into()
+fn zi_polynomial_is_wholly_constant(definition: &crate::ir::ZiPolynomialDefinition) -> bool {
+    match definition {
+        crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
+            values.iter().all(|value| matches!(value, IrExpr::Const(_)))
+        }
+        crate::ir::ZiPolynomialDefinition::Roots(values) => {
+            values.iter().all(|(real, imaginary)| {
+                matches!(real, IrExpr::Const(_)) && matches!(imaginary, IrExpr::Const(_))
+            })
+        }
+    }
+}
+
+fn zi_polynomial_scalar_count(
+    definition: &crate::ir::ZiPolynomialDefinition,
+) -> Result<usize, crate::zfilter::ZiFilterError> {
+    match definition {
+        crate::ir::ZiPolynomialDefinition::Coefficients(values) => Ok(values.len()),
+        crate::ir::ZiPolynomialDefinition::Roots(values) => {
+            values.len().checked_mul(2).ok_or_else(|| {
+                crate::zfilter::ZiFilterError::InvalidDefinition(
+                    "Zi complex-root scalar count overflows usize".into(),
+                )
+            })
+        }
+    }
+}
+
+fn validate_zi_polynomial_budget(
+    operator: &str,
+    numerator: &crate::ir::ZiPolynomialDefinition,
+    denominator: &crate::ir::ZiPolynomialDefinition,
+) -> CompileResult<()> {
+    let numerator = zi_polynomial_scalar_count(numerator).map_err(|error| {
+        CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string()))
+    })?;
+    let denominator = zi_polynomial_scalar_count(denominator).map_err(|error| {
+        CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string()))
+    })?;
+    crate::zfilter::validate_zi_runtime_operand_budget(operator, numerator, denominator)
+        .map(|_| ())
+        .map_err(|error| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string())).into()
+        })
+}
+
+fn expand_constant_zi_polynomial(
+    definition: &crate::ir::ZiPolynomialDefinition,
+) -> Result<Vec<f64>, String> {
+    match definition {
+        crate::ir::ZiPolynomialDefinition::Coefficients(values) => Ok(values
+            .iter()
+            .map(|value| match value {
+                IrExpr::Const(value) => Ok(*value),
+                _ => Err("Zi coefficient unexpectedly remained dynamic".to_string()),
+            })
+            .collect::<Result<Vec<_>, _>>()?),
+        crate::ir::ZiPolynomialDefinition::Roots(values) => {
+            let roots = values
+                .iter()
+                .map(|(real, imaginary)| match (real, imaginary) {
+                    (IrExpr::Const(real), IrExpr::Const(imaginary)) => Ok((*real, *imaginary)),
+                    _ => Err("Zi root unexpectedly remained dynamic".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            crate::zfilter::z_roots_to_coefficients(&roots)
+        }
+    }
+}
+
+/// Eagerly validate a Zi definition only when every frozen argument is known
+/// at compile time. Any parameter-, variable-, or circuit-dependent operand
+/// remains deferred to the per-instance analysis-start freeze.
+fn validate_wholly_constant_zi_definition(
+    operator: &str,
+    numerator: &crate::ir::ZiPolynomialDefinition,
+    denominator: &crate::ir::ZiPolynomialDefinition,
+    period: &IrExpr,
+    first_transition: &IrExpr,
+) -> CompileResult<()> {
+    let (IrExpr::Const(period), IrExpr::Const(first_transition)) = (period, first_transition)
+    else {
+        return Ok(());
+    };
+    if !zi_polynomial_is_wholly_constant(numerator)
+        || !zi_polynomial_is_wholly_constant(denominator)
+    {
+        return Ok(());
+    }
+    let numerator = expand_constant_zi_polynomial(numerator).map_err(|error| {
+        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+            "{operator} numerator: {error}"
+        )))
+    })?;
+    let denominator = expand_constant_zi_polynomial(denominator).map_err(|error| {
+        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+            "{operator} denominator: {error}"
+        )))
+    })?;
+    crate::zfilter::ZiFilter::new_with_timing(numerator, denominator, *period, *first_transition)
+        .map(|_| ())
+        .map_err(|error| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                "{operator}: {error}"
+            )))
+            .into()
+        })
 }
 
 fn laplace_error(
@@ -197,6 +298,8 @@ pub struct ConversionContext {
     num_terminals: usize,
     /// Number of internal nodes
     num_internal: usize,
+    /// Effective file-scoped default transition time in seconds.
+    default_transition: f64,
 }
 
 impl ConversionContext {
@@ -263,6 +366,7 @@ impl ConversionContext {
             arrays,
             num_terminals,
             num_internal,
+            default_transition: module.default_transition,
         }
     }
 
@@ -305,6 +409,10 @@ impl ConversionContext {
     pub fn num_nodes(&self) -> usize {
         self.num_terminals + self.num_internal
     }
+
+    pub fn default_transition(&self) -> f64 {
+        self.default_transition
+    }
 }
 
 /// Expression converter
@@ -312,12 +420,27 @@ impl ConversionContext {
 /// Converts AST expressions to IR expressions using the provided context.
 pub struct ExprConverter<'a> {
     ctx: &'a ConversionContext,
+    direct_zi_assignment: bool,
 }
 
 impl<'a> ExprConverter<'a> {
     /// Create a new expression converter
     pub fn new(ctx: &'a ConversionContext) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            direct_zi_assignment: false,
+        }
+    }
+
+    /// Convert the complete right-hand side of an analog contribution.
+    /// Every Zi node in this expression tree is subject to the VAMS-2023
+    /// section 4.5.12 strictly-positive transition-time rule.
+    pub(crate) fn convert_contribution(&self, expr: &Expression) -> CompileResult<IrExpr> {
+        Self {
+            ctx: self.ctx,
+            direct_zi_assignment: true,
+        }
+        .convert(expr)
     }
 
     /// Array layout (base, lower, len) by name
@@ -355,6 +478,12 @@ impl<'a> ExprConverter<'a> {
             Expression::Unary(unary) => self.convert_unary(unary),
             Expression::Conditional(cond) => self.convert_conditional(cond),
             Expression::Call(call) => self.convert_call(call),
+            Expression::NullArgument(_) => Err(CodeGenError::new(
+                CodeGenErrorKind::InvalidExpression(
+                    "null positional argument is only legal in the zeros operand of zi_zp/zi_zd and corresponding Laplace forms".into(),
+                ),
+            )
+            .into()),
             Expression::BranchAccess(access) => self.convert_branch_access(access),
             Expression::ArrayAccess(access) => {
                 let Some((base, lower, len)) = self.ctx.array(&access.array) else {
@@ -1125,7 +1254,10 @@ impl<'a> ExprConverter<'a> {
             "laplace_zp" => {
                 validate_arg_range(&call.name, call.args.len(), 3, Some(3))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let zeros = self.const_complex_pairs(require_arg(1)?)?;
+                let zeros = match require_arg(1)? {
+                    Expression::NullArgument(_) => Vec::new(),
+                    value => self.const_complex_pairs(value)?,
+                };
                 let poles = self.const_complex_pairs(require_arg(2)?)?;
                 validate_laplace_roots("laplace_zp", &zeros, &poles)?;
                 Ok(IrExpr::LaplaceZP {
@@ -1140,7 +1272,10 @@ impl<'a> ExprConverter<'a> {
                 // zeros (pairs) + denominator coefficients: expand the
                 // zeros into a numerator polynomial
                 let expr = self.convert(require_arg(0)?)?;
-                let zeros = self.const_complex_pairs(require_arg(1)?)?;
+                let zeros = match require_arg(1)? {
+                    Expression::NullArgument(_) => Vec::new(),
+                    value => self.const_complex_pairs(value)?,
+                };
                 let denominator = self.const_real_array(require_arg(2)?)?;
                 let numerator = crate::laplace::roots_to_polynomial(&zeros).map_err(|e| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
@@ -1174,69 +1309,81 @@ impl<'a> ExprConverter<'a> {
                     denominator,
                 })
             }
-            // Z-domain filters: zi_xx(expr, num, den, T). Coefficient
-            // arrays ascend in z^-1; zero/pole pair lists expand into
-            // polynomials. The sample period must fold to a constant
-            // (per-instance periods would reshape the filter state).
+            // Z-domain filters. Constant arguments are retained as programs
+            // and frozen per instance at the beginning of each analysis.
             "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => {
-                validate_arg_range(&call.name, call.args.len(), 4, Some(4))?;
+                validate_arg_range(&call.name, call.args.len(), 4, Some(6))?;
+                self.validate_raw_zi_operand_budget(&call.name, require_arg(1)?, require_arg(2)?)?;
                 let expr = self.convert(require_arg(0)?)?;
                 let (numerator, denominator) = match call.name.as_str() {
                     "zi_nd" => (
-                        self.const_real_array(require_arg(1)?)?,
-                        self.const_real_array(require_arg(2)?)?,
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_array(require_arg(1)?, false)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_array(require_arg(2)?, false)?,
+                        ),
                     ),
                     "zi_zp" => (
-                        crate::zfilter::z_roots_to_coefficients(
-                            &self.const_complex_pairs(require_arg(1)?)?,
-                        )
-                        .map_err(zi_root_error)?,
-                        crate::zfilter::z_roots_to_coefficients(
-                            &self.const_complex_pairs(require_arg(2)?)?,
-                        )
-                        .map_err(zi_root_error)?,
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_pairs(require_arg(1)?, true)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_pairs(require_arg(2)?, false)?,
+                        ),
                     ),
                     "zi_zd" => (
-                        crate::zfilter::z_roots_to_coefficients(
-                            &self.const_complex_pairs(require_arg(1)?)?,
-                        )
-                        .map_err(zi_root_error)?,
-                        self.const_real_array(require_arg(2)?)?,
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_pairs(require_arg(1)?, true)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_array(require_arg(2)?, false)?,
+                        ),
                     ),
                     _ => (
-                        self.const_real_array(require_arg(1)?)?,
-                        crate::zfilter::z_roots_to_coefficients(
-                            &self.const_complex_pairs(require_arg(2)?)?,
-                        )
-                        .map_err(zi_root_error)?,
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_array(require_arg(1)?, false)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_pairs(require_arg(2)?, false)?,
+                        ),
                     ),
                 };
-                if denominator.first().copied().unwrap_or(0.0) == 0.0 {
-                    return Err(
-                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "{}: leading denominator coefficient must be nonzero",
-                            call.name
-                        )))
-                        .into(),
-                    );
-                }
-                let period = match autodiff_fold(self.convert(require_arg(3)?)?) {
-                    IrExpr::Const(t) if t > 0.0 && t.is_finite() => t,
-                    _ => {
-                        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                            format!(
-                                "{}: the sample period must be a positive compile-time constant",
-                                call.name
-                            ),
+                validate_zi_polynomial_budget(&call.name, &numerator, &denominator)?;
+                let period =
+                    self.zi_definition_arg(require_arg(3)?, &call.name, "sample period")?;
+                let transition = match call.args.get(4) {
+                    Some(Expression::NullArgument(_)) => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            format!("{} transition-time argument may not be null", call.name),
                         ))
                         .into());
                     }
+                    Some(value) => self.convert(value)?,
+                    None => IrExpr::Const(self.ctx.default_transition()),
                 };
+                let first_transition = match call.args.get(5) {
+                    Some(value) => {
+                        self.zi_definition_arg(value, &call.name, "first transition time")?
+                    }
+                    None => IrExpr::Const(0.0),
+                };
+                validate_wholly_constant_zi_definition(
+                    &call.name,
+                    &numerator,
+                    &denominator,
+                    &period,
+                    &first_transition,
+                )?;
                 Ok(IrExpr::ZiFilter {
+                    site: crate::ir::ZiSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     numerator,
                     denominator,
-                    period,
+                    period: Box::new(period),
+                    transition: Box::new(transition),
+                    first_transition: Box::new(first_transition),
+                    direct_assignment: self.direct_zi_assignment,
                 })
             }
             _ => Err(
@@ -1305,6 +1452,90 @@ impl<'a> ExprConverter<'a> {
             .collect()
     }
 
+    fn zi_definition_arg(
+        &self,
+        expression: &Expression,
+        operator: &str,
+        role: &str,
+    ) -> CompileResult<IrExpr> {
+        if matches!(expression, Expression::NullArgument(_)) {
+            return Err(
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} {role} argument may not be null"
+                )))
+                .into(),
+            );
+        }
+        // VAMS-2023 §4.5.14 freezes a dynamic expression passed to a
+        // constant argument at analysis start. Preserve the complete safe
+        // runtime program here; lifecycle initialization evaluates it once.
+        Ok(autodiff_fold(self.convert(expression)?))
+    }
+
+    fn validate_raw_zi_operand_budget(
+        &self,
+        operator: &str,
+        numerator: &Expression,
+        denominator: &Expression,
+    ) -> CompileResult<()> {
+        let scalar_count = |expression: &Expression| match expression {
+            Expression::NullArgument(_) => 0,
+            Expression::ArrayLiteral(array) => array.elements.len(),
+            _ => 1,
+        };
+        crate::zfilter::validate_zi_runtime_operand_budget(
+            operator,
+            scalar_count(numerator),
+            scalar_count(denominator),
+        )
+        .map(|_| ())
+        .map_err(|error| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string())).into()
+        })
+    }
+
+    fn zi_real_array(
+        &self,
+        expression: &Expression,
+        allow_null: bool,
+    ) -> CompileResult<Vec<IrExpr>> {
+        if matches!(expression, Expression::NullArgument(_)) {
+            if allow_null {
+                return Ok(Vec::new());
+            }
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "null filter operand is not authorized at this position".into(),
+            ))
+            .into());
+        }
+        let elements: Vec<&Expression> = match expression {
+            Expression::ArrayLiteral(array) => array.elements.iter().collect(),
+            other => vec![other],
+        };
+        elements
+            .into_iter()
+            .map(|value| self.zi_definition_arg(value, "zi filter", "coefficient/root"))
+            .collect()
+    }
+
+    fn zi_complex_pairs(
+        &self,
+        expression: &Expression,
+        allow_null: bool,
+    ) -> CompileResult<Vec<(IrExpr, IrExpr)>> {
+        let values = self.zi_real_array(expression, allow_null)?;
+        if !values.len().is_multiple_of(2) {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "zi pole/zero vectors must contain (real, imaginary) pairs".into(),
+            ))
+            .into());
+        }
+        Ok(values
+            .chunks_exact(2)
+            .map(|pair| (pair[0].clone(), pair[1].clone()))
+            .collect())
+    }
+
     /// Evaluate the already-unpacked coefficient expressions carried by the
     /// public analog-operator AST.
     fn const_real_expressions(&self, expressions: &[Expression]) -> CompileResult<Vec<f64>> {
@@ -1335,6 +1566,30 @@ impl<'a> ExprConverter<'a> {
         Ok(values
             .chunks_exact(2)
             .map(|pair| (pair[0], pair[1]))
+            .collect())
+    }
+
+    fn zi_real_expressions(&self, expressions: &[Expression]) -> CompileResult<Vec<IrExpr>> {
+        expressions
+            .iter()
+            .map(|expression| self.zi_definition_arg(expression, "zi filter", "coefficient/root"))
+            .collect()
+    }
+
+    fn zi_complex_expression_pairs(
+        &self,
+        expressions: &[Expression],
+    ) -> CompileResult<Vec<(IrExpr, IrExpr)>> {
+        let values = self.zi_real_expressions(expressions)?;
+        if !values.len().is_multiple_of(2) {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "zi pole/zero vectors must contain (real, imaginary) pairs".into(),
+            ))
+            .into());
+        }
+        Ok(values
+            .chunks_exact(2)
+            .map(|pair| (pair[0].clone(), pair[1].clone()))
             .collect())
     }
 
@@ -1578,9 +1833,108 @@ impl<'a> ExprConverter<'a> {
                     }
                 }
             }
-            AnalogOperator::Zi { expr, .. } => {
-                // The public Zi AST remains a separate legacy parity item.
-                self.convert(expr)
+            AnalogOperator::Zi {
+                kind,
+                expr,
+                period,
+                transition,
+                first_transition,
+                span,
+            } => {
+                let (operator, raw_numerator, raw_denominator) = match kind {
+                    crate::ast::ZiKind::ZeroPole { zeros, poles } => {
+                        ("zi_zp", zeros.len(), poles.len())
+                    }
+                    crate::ast::ZiKind::ZeroDenominator { zeros, denominator } => {
+                        ("zi_zd", zeros.len(), denominator.len())
+                    }
+                    crate::ast::ZiKind::NumeratorPole { numerator, poles } => {
+                        ("zi_np", numerator.len(), poles.len())
+                    }
+                    crate::ast::ZiKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => ("zi_nd", numerator.len(), denominator.len()),
+                };
+                crate::zfilter::validate_zi_runtime_operand_budget(
+                    operator,
+                    raw_numerator,
+                    raw_denominator,
+                )
+                .map_err(|error| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string()))
+                })?;
+                let expr = Box::new(self.convert(expr)?);
+                let (_, numerator, denominator) = match kind {
+                    crate::ast::ZiKind::ZeroPole { zeros, poles } => (
+                        "zi_zp",
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_expression_pairs(zeros)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_expression_pairs(poles)?,
+                        ),
+                    ),
+                    crate::ast::ZiKind::ZeroDenominator { zeros, denominator } => (
+                        "zi_zd",
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_expression_pairs(zeros)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_expressions(denominator)?,
+                        ),
+                    ),
+                    crate::ast::ZiKind::NumeratorPole { numerator, poles } => (
+                        "zi_np",
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_expressions(numerator)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Roots(
+                            self.zi_complex_expression_pairs(poles)?,
+                        ),
+                    ),
+                    crate::ast::ZiKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => (
+                        "zi_nd",
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_expressions(numerator)?,
+                        ),
+                        crate::ir::ZiPolynomialDefinition::Coefficients(
+                            self.zi_real_expressions(denominator)?,
+                        ),
+                    ),
+                };
+                validate_zi_polynomial_budget(operator, &numerator, &denominator)?;
+                let period = self.zi_definition_arg(period, operator, "sample period")?;
+                let transition = transition
+                    .as_deref()
+                    .map(|value| self.convert(value))
+                    .transpose()?
+                    .unwrap_or(IrExpr::Const(self.ctx.default_transition()));
+                let first_transition = first_transition
+                    .as_deref()
+                    .map(|value| self.zi_definition_arg(value, operator, "first transition time"))
+                    .transpose()?
+                    .unwrap_or(IrExpr::Const(0.0));
+                validate_wholly_constant_zi_definition(
+                    operator,
+                    &numerator,
+                    &denominator,
+                    &period,
+                    &first_transition,
+                )?;
+                Ok(IrExpr::ZiFilter {
+                    site: crate::ir::ZiSiteId::from_span(*span),
+                    expr,
+                    numerator,
+                    denominator,
+                    period: Box::new(period),
+                    transition: Box::new(transition),
+                    first_transition: Box::new(first_transition),
+                    direct_assignment: self.direct_zi_assignment,
+                })
             }
         }
     }
@@ -1821,7 +2175,7 @@ impl<'a> ExprConverter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{LaplaceKind, NumberLit};
+    use crate::ast::{BinaryExpr, ConditionalExpr, LaplaceKind, NumberLit, ZiKind};
     use crate::source::Span;
 
     fn number(value: f64) -> Expression {
@@ -1841,6 +2195,7 @@ mod tests {
             arrays: HashMap::new(),
             num_terminals: 0,
             num_internal: 0,
+            default_transition: 1.0e-9,
         }
     }
 
@@ -1892,5 +2247,155 @@ mod tests {
             .convert(&nonconjugate)
             .expect_err("public AST must validate conjugate roots");
         assert!(error.to_string().contains("no conjugate partner"));
+    }
+
+    #[test]
+    fn public_zi_ast_lowers_with_the_same_definition_validation() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let valid = Expression::AnalogOperator(AnalogOperator::Zi {
+            kind: ZiKind::NumeratorDenominator {
+                numerator: vec![number(0.25)],
+                denominator: vec![number(1.0), number(-0.75)],
+            },
+            expr: Box::new(number(2.0)),
+            period: Box::new(number(1.0e-6)),
+            transition: None,
+            first_transition: None,
+            span: Span::dummy(),
+        });
+        assert!(matches!(
+            converter.convert(&valid).expect("valid public Zi AST"),
+            IrExpr::ZiFilter { .. }
+        ));
+
+        let invalid = Expression::AnalogOperator(AnalogOperator::Zi {
+            kind: ZiKind::NumeratorDenominator {
+                numerator: vec![number(1.0)],
+                denominator: vec![number(0.0)],
+            },
+            expr: Box::new(number(1.0)),
+            period: Box::new(number(1.0e-6)),
+            transition: None,
+            first_transition: None,
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&invalid)
+            .expect_err("public Zi AST must reject zero a0");
+        assert!(error.to_string().contains("a0 must be nonzero"));
+    }
+
+    #[test]
+    fn public_zi_nodes_with_dummy_spans_receive_distinct_site_ordinals() {
+        let unit_zi = |input| {
+            Expression::AnalogOperator(AnalogOperator::Zi {
+                kind: ZiKind::NumeratorDenominator {
+                    numerator: vec![number(1.0)],
+                    denominator: vec![number(1.0)],
+                },
+                expr: Box::new(number(input)),
+                period: Box::new(number(1.0e-6)),
+                transition: Some(Box::new(number(0.0))),
+                first_transition: None,
+                span: Span::dummy(),
+            })
+        };
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let assignment = converter
+            .convert(&unit_zi(3.0))
+            .expect("assignment Zi lowers independently");
+        let IrExpr::ZiFilter {
+            direct_assignment: assignment_direct,
+            ..
+        } = assignment
+        else {
+            panic!("assignment expression must remain Zi");
+        };
+        assert!(!assignment_direct);
+
+        let wrapped = Expression::Conditional(ConditionalExpr {
+            condition: Box::new(number(1.0)),
+            then_expr: Box::new(Expression::Binary(BinaryExpr {
+                op: BinaryOp::Mul,
+                left: Box::new(number(2.0)),
+                right: Box::new(unit_zi(4.0)),
+                span: Span::dummy(),
+            })),
+            else_expr: Box::new(number(0.0)),
+            span: Span::dummy(),
+        });
+        let contribution = converter
+            .convert_contribution(&wrapped)
+            .expect("wrapped contribution Zi lowers independently");
+        let IrExpr::Conditional(_, then_expr, _) = contribution else {
+            panic!("contribution wrapper must remain conditional");
+        };
+        let IrExpr::Binary(_, _, contribution_zi) = then_expr.as_ref() else {
+            panic!("contribution then-arm must remain arithmetic");
+        };
+        let IrExpr::ZiFilter {
+            direct_assignment: contribution_direct,
+            ..
+        } = contribution_zi.as_ref()
+        else {
+            panic!("wrapped contribution operand must remain Zi");
+        };
+        assert!(*contribution_direct);
+
+        let expression = Expression::Binary(BinaryExpr {
+            op: BinaryOp::Add,
+            left: Box::new(unit_zi(1.0)),
+            right: Box::new(unit_zi(2.0)),
+            span: Span::dummy(),
+        });
+        let mut converted = converter
+            .convert(&expression)
+            .expect("independent public Zi nodes lower");
+        let mut next = 0;
+        crate::ir::autodiff::assign_zi_site_ordinals(&mut converted, &mut next);
+
+        let IrExpr::Binary(_, left, right) = converted else {
+            panic!("binary public expression must remain binary");
+        };
+        let IrExpr::ZiFilter { site: left, .. } = left.as_ref() else {
+            panic!("left operand must remain Zi");
+        };
+        let IrExpr::ZiFilter { site: right, .. } = right.as_ref() else {
+            panic!("right operand must remain Zi");
+        };
+        assert_ne!(left, right, "equal/dummy spans must not alias Zi state");
+        assert_eq!(left.ordinal, 0);
+        assert_eq!(right.ordinal, 1);
+    }
+
+    #[test]
+    fn public_zi_ast_obeys_the_shared_runtime_operand_ceiling() {
+        let build = |numerator_len| {
+            Expression::AnalogOperator(AnalogOperator::Zi {
+                kind: ZiKind::NumeratorDenominator {
+                    numerator: (0..numerator_len).map(|_| number(1.0)).collect(),
+                    denominator: vec![number(1.0)],
+                },
+                expr: Box::new(number(1.0)),
+                period: Box::new(number(1.0e-6)),
+                transition: None,
+                first_transition: None,
+                span: Span::dummy(),
+            })
+        };
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        converter
+            .convert(&build(1019))
+            .expect("public Zi AST at exactly 1,024 operands is supported");
+        let error = converter
+            .convert(&build(1020))
+            .expect_err("public Zi AST over the shared ceiling must fail");
+        assert!(
+            error.to_string().contains("platform-uniform maximum 1024"),
+            "got: {error}"
+        );
     }
 }

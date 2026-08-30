@@ -34,7 +34,7 @@
 
 use crate::canonical_ir::CanonicalIrArtifact;
 use crate::codegen::{CompiledModel, Instruction, StampIndex};
-use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
+use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmAcceptedCheckpoint, VmContext, VmError};
 #[cfg(feature = "native")]
 use crate::vm::{terminal_pair_current_endpoints, terminal_pair_current_len};
 use smol_str::SmolStr;
@@ -54,6 +54,63 @@ enum NativeValueEntry {
     ReactiveJacobian { stamp: usize, entry: usize },
     NoisePsd(usize),
     NoiseExponent(usize),
+}
+
+#[cfg(test)]
+mod runtime_checkpoint_codec_tests {
+    use super::{RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint};
+    use crate::vm::VmAcceptedCheckpoint;
+
+    #[test]
+    fn accepted_runtime_word_payload_round_trips_ieee_bits_and_rejects_trailing_data() {
+        let checkpoint = VerilogADeviceCheckpoint {
+            instance_name: "x1".into(),
+            model_name: "model".into(),
+            source_digest: "0123456789abcdef".repeat(4).into(),
+            shape_identity: "fedcba9876543210".repeat(4).into(),
+            state_version: RUNTIME_CHECKPOINT_STATE_VERSION,
+            accepted: VmAcceptedCheckpoint {
+                time: f64::MIN_POSITIVE,
+                variables: vec![-0.0, f64::INFINITY],
+                state_values_prev: vec![f64::from_bits(1)],
+                state_values_older: vec![-f64::MIN_POSITIVE],
+                state_derivatives_prev: vec![1.0 / 3.0],
+                state_initialized: vec![true],
+                delay_buffers: Vec::new(),
+                transition_filters: Vec::new(),
+                slew_filters: Vec::new(),
+                cross_detectors: Vec::new(),
+                laplace_filters: Vec::new(),
+                zi_filters: Vec::new(),
+                timer_event_bound: Some(f64::MIN_POSITIVE * 2.0),
+            },
+            prev_discontinuity: true,
+        };
+        let words = checkpoint.to_words();
+        let decoded = VerilogADeviceCheckpoint::from_words(
+            checkpoint.instance_name.clone(),
+            checkpoint.model_name.clone(),
+            checkpoint.source_digest.clone(),
+            checkpoint.shape_identity.clone(),
+            &words,
+        )
+        .expect("canonical accepted payload decodes");
+        assert_eq!(decoded, checkpoint);
+
+        let mut trailing = words;
+        trailing.push(0);
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &trailing,
+            )
+            .expect_err("trailing words must fail closed")
+            .contains("trailing words")
+        );
+    }
 }
 
 #[cfg(feature = "native")]
@@ -320,6 +377,353 @@ pub struct VerilogADevice {
     wasm_jit_model: std::sync::Arc<WasmJitExecutable>,
     /// $discontinuity level at the last accepted timestep (edge detector)
     prev_discontinuity: bool,
+}
+
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 1;
+
+/// Versioned accepted runtime state for one compiled Verilog-A instance.
+/// Compiled programs, topology, and solver caches are intentionally absent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerilogADeviceCheckpoint {
+    pub instance_name: SmolStr,
+    pub model_name: SmolStr,
+    pub source_digest: SmolStr,
+    pub shape_identity: SmolStr,
+    pub state_version: u32,
+    pub accepted: VmAcceptedCheckpoint,
+    pub prev_discontinuity: bool,
+}
+
+impl VerilogADeviceCheckpoint {
+    /// Exact, endian-independent word representation used by the outer
+    /// portable checkpoint format. Floating-point values are stored by IEEE
+    /// bits, preserving signed zero and every accepted finite value exactly.
+    pub fn to_words(&self) -> Vec<u64> {
+        let mut encoder = CheckpointWordEncoder::default();
+        encoder.word(u64::from(self.state_version));
+        encoder.boolean(self.prev_discontinuity);
+        encoder.float(self.accepted.time);
+        encoder.floats(&self.accepted.variables);
+        encoder.floats(&self.accepted.state_values_prev);
+        encoder.floats(&self.accepted.state_values_older);
+        encoder.floats(&self.accepted.state_derivatives_prev);
+        encoder.booleans(&self.accepted.state_initialized);
+        encoder.word(self.accepted.delay_buffers.len() as u64);
+        for delay in &self.accepted.delay_buffers {
+            encoder.word(delay.samples.len() as u64);
+            for &(time, value) in &delay.samples {
+                encoder.float(time);
+                encoder.float(value);
+            }
+        }
+        encoder.word(self.accepted.transition_filters.len() as u64);
+        for state in &self.accepted.transition_filters {
+            encoder.float(state.output);
+            encoder.float(state.target);
+            encoder.float(state.start_time);
+            encoder.float(state.end_time);
+            encoder.float(state.start_value);
+        }
+        encoder.word(self.accepted.slew_filters.len() as u64);
+        for state in &self.accepted.slew_filters {
+            encoder.float(state.output);
+            encoder.float(state.prev_time);
+        }
+        encoder.word(self.accepted.cross_detectors.len() as u64);
+        for state in &self.accepted.cross_detectors {
+            encoder.float(state.value);
+            encoder.float(state.time);
+            encoder.word(match state.side {
+                -1 => 0,
+                0 => 1,
+                1 => 2,
+                _ => u64::MAX,
+            });
+            encoder.float(state.last_event_time);
+            encoder.float(state.last_crossing_time);
+            encoder.boolean(state.initialized);
+        }
+        encoder.word(self.accepted.laplace_filters.len() as u64);
+        for state in &self.accepted.laplace_filters {
+            encoder.floats(&state.state);
+        }
+        encoder.word(self.accepted.zi_filters.len() as u64);
+        for state in &self.accepted.zi_filters {
+            encoder.boolean(state.definition_frozen);
+            encoder.floats(&state.num);
+            encoder.floats(&state.den);
+            encoder.float(state.period);
+            encoder.float(state.first_transition);
+            encoder.floats(&state.x_hist);
+            encoder.floats(&state.y_hist);
+            encoder.float(state.held);
+            encoder.float(state.ramp_start_time);
+            encoder.float(state.ramp_end_time);
+            encoder.float(state.ramp_start_value);
+            encoder.word(state.next_sample_index);
+            encoder.optional_float(state.accepted_time);
+            encoder.boolean(state.transient_active);
+            encoder.boolean(state.transient_seen);
+        }
+        encoder.optional_float(self.accepted.timer_event_bound);
+        encoder.words
+    }
+
+    pub fn from_words(
+        instance_name: SmolStr,
+        model_name: SmolStr,
+        source_digest: SmolStr,
+        shape_identity: SmolStr,
+        words: &[u64],
+    ) -> Result<Self, String> {
+        use crate::laplace::LaplaceCheckpoint;
+        use crate::vm::{CrossCheckpoint, DelayCheckpoint, SlewCheckpoint, TransitionCheckpoint};
+        use crate::zfilter::ZiCheckpoint;
+
+        let mut decoder = CheckpointWordDecoder::new(words);
+        let state_version = decoder.u32("state version")?;
+        if state_version != RUNTIME_CHECKPOINT_STATE_VERSION {
+            return Err(format!(
+                "unsupported runtime Verilog-A state version {state_version}"
+            ));
+        }
+        let prev_discontinuity = decoder.boolean("previous discontinuity")?;
+        let time = decoder.float("accepted time")?;
+        let variables = decoder.floats("variables")?;
+        let state_values_prev = decoder.floats("previous state values")?;
+        let state_values_older = decoder.floats("older state values")?;
+        let state_derivatives_prev = decoder.floats("previous state derivatives")?;
+        let state_initialized = decoder.booleans("state initialization flags")?;
+
+        let delay_count = decoder.length("delay buffers", 1)?;
+        let mut delay_buffers = Vec::with_capacity(delay_count);
+        for index in 0..delay_count {
+            let count = decoder.length(&format!("delay {index} samples"), 2)?;
+            let mut samples = Vec::with_capacity(count);
+            for sample in 0..count {
+                samples.push((
+                    decoder.float(&format!("delay {index} sample {sample} time"))?,
+                    decoder.float(&format!("delay {index} sample {sample} value"))?,
+                ));
+            }
+            delay_buffers.push(DelayCheckpoint { samples });
+        }
+
+        let transition_count = decoder.length("transition filters", 5)?;
+        let mut transition_filters = Vec::with_capacity(transition_count);
+        for index in 0..transition_count {
+            transition_filters.push(TransitionCheckpoint {
+                output: decoder.float(&format!("transition {index} output"))?,
+                target: decoder.float(&format!("transition {index} target"))?,
+                start_time: decoder.float(&format!("transition {index} start time"))?,
+                end_time: decoder.float(&format!("transition {index} end time"))?,
+                start_value: decoder.float(&format!("transition {index} start value"))?,
+            });
+        }
+
+        let slew_count = decoder.length("slew filters", 2)?;
+        let mut slew_filters = Vec::with_capacity(slew_count);
+        for index in 0..slew_count {
+            slew_filters.push(SlewCheckpoint {
+                output: decoder.float(&format!("slew {index} output"))?,
+                prev_time: decoder.float(&format!("slew {index} previous time"))?,
+            });
+        }
+
+        let cross_count = decoder.length("cross detectors", 6)?;
+        let mut cross_detectors = Vec::with_capacity(cross_count);
+        for index in 0..cross_count {
+            cross_detectors.push(CrossCheckpoint {
+                value: decoder.float(&format!("cross {index} value"))?,
+                time: decoder.float(&format!("cross {index} time"))?,
+                side: match decoder.word(&format!("cross {index} side"))? {
+                    0 => -1,
+                    1 => 0,
+                    2 => 1,
+                    value => return Err(format!("cross {index} side tag {value} is invalid")),
+                },
+                last_event_time: decoder.float(&format!("cross {index} last event"))?,
+                last_crossing_time: decoder.float(&format!("cross {index} last crossing"))?,
+                initialized: decoder.boolean(&format!("cross {index} initialized"))?,
+            });
+        }
+
+        let laplace_count = decoder.length("Laplace filters", 1)?;
+        let mut laplace_filters = Vec::with_capacity(laplace_count);
+        for index in 0..laplace_count {
+            laplace_filters.push(LaplaceCheckpoint {
+                state: decoder.floats(&format!("Laplace filter {index} state"))?,
+            });
+        }
+
+        let zi_count = decoder.length("Zi filters", 12)?;
+        let mut zi_filters = Vec::with_capacity(zi_count);
+        for index in 0..zi_count {
+            zi_filters.push(ZiCheckpoint {
+                definition_frozen: decoder.boolean(&format!("Zi filter {index} frozen"))?,
+                num: decoder.floats(&format!("Zi filter {index} numerator"))?,
+                den: decoder.floats(&format!("Zi filter {index} denominator"))?,
+                period: decoder.float(&format!("Zi filter {index} period"))?,
+                first_transition: decoder.float(&format!("Zi filter {index} first transition"))?,
+                x_hist: decoder.floats(&format!("Zi filter {index} input history"))?,
+                y_hist: decoder.floats(&format!("Zi filter {index} output history"))?,
+                held: decoder.float(&format!("Zi filter {index} held output"))?,
+                ramp_start_time: decoder.float(&format!("Zi filter {index} ramp start time"))?,
+                ramp_end_time: decoder.float(&format!("Zi filter {index} ramp end time"))?,
+                ramp_start_value: decoder.float(&format!("Zi filter {index} ramp start value"))?,
+                next_sample_index: decoder.word(&format!("Zi filter {index} sample index"))?,
+                accepted_time: decoder
+                    .optional_float(&format!("Zi filter {index} accepted time"))?,
+                transient_active: decoder.boolean(&format!("Zi filter {index} active"))?,
+                transient_seen: decoder.boolean(&format!("Zi filter {index} seen"))?,
+            });
+        }
+        let timer_event_bound = decoder.optional_float("timer event bound")?;
+        decoder.finish()?;
+        Ok(Self {
+            instance_name,
+            model_name,
+            source_digest,
+            shape_identity,
+            state_version,
+            accepted: VmAcceptedCheckpoint {
+                time,
+                variables,
+                state_values_prev,
+                state_values_older,
+                state_derivatives_prev,
+                state_initialized,
+                delay_buffers,
+                transition_filters,
+                slew_filters,
+                cross_detectors,
+                laplace_filters,
+                zi_filters,
+                timer_event_bound,
+            },
+            prev_discontinuity,
+        })
+    }
+
+    pub fn retained_value_count(&self) -> usize {
+        self.to_words().len()
+    }
+}
+
+#[derive(Default)]
+struct CheckpointWordEncoder {
+    words: Vec<u64>,
+}
+
+impl CheckpointWordEncoder {
+    fn word(&mut self, value: u64) {
+        self.words.push(value);
+    }
+    fn boolean(&mut self, value: bool) {
+        self.word(u64::from(value));
+    }
+    fn float(&mut self, value: f64) {
+        self.word(value.to_bits());
+    }
+    fn floats(&mut self, values: &[f64]) {
+        self.word(values.len() as u64);
+        self.words
+            .extend(values.iter().map(|value| value.to_bits()));
+    }
+    fn booleans(&mut self, values: &[bool]) {
+        self.word(values.len() as u64);
+        self.words
+            .extend(values.iter().map(|value| u64::from(*value)));
+    }
+    fn optional_float(&mut self, value: Option<f64>) {
+        self.boolean(value.is_some());
+        if let Some(value) = value {
+            self.float(value);
+        }
+    }
+}
+
+struct CheckpointWordDecoder<'a> {
+    words: &'a [u64],
+    cursor: usize,
+}
+
+impl<'a> CheckpointWordDecoder<'a> {
+    fn new(words: &'a [u64]) -> Self {
+        Self { words, cursor: 0 }
+    }
+    fn remaining(&self) -> usize {
+        self.words.len().saturating_sub(self.cursor)
+    }
+    fn word(&mut self, name: &str) -> Result<u64, String> {
+        let value = self
+            .words
+            .get(self.cursor)
+            .copied()
+            .ok_or_else(|| format!("runtime Verilog-A payload ended before {name}"))?;
+        self.cursor += 1;
+        Ok(value)
+    }
+    fn u32(&mut self, name: &str) -> Result<u32, String> {
+        u32::try_from(self.word(name)?).map_err(|_| format!("{name} exceeds u32"))
+    }
+    fn boolean(&mut self, name: &str) -> Result<bool, String> {
+        match self.word(name)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            value => Err(format!("{name} boolean tag {value} is invalid")),
+        }
+    }
+    fn float(&mut self, name: &str) -> Result<f64, String> {
+        Ok(f64::from_bits(self.word(name)?))
+    }
+    fn length(&mut self, name: &str, words_per_entry: usize) -> Result<usize, String> {
+        let length = usize::try_from(self.word(&format!("{name} count"))?)
+            .map_err(|_| format!("{name} count exceeds this platform"))?;
+        let required = length
+            .checked_mul(words_per_entry)
+            .ok_or_else(|| format!("{name} size overflows"))?;
+        if required > self.remaining() {
+            return Err(format!(
+                "{name} declares {length} entries but only {} payload words remain",
+                self.remaining()
+            ));
+        }
+        Ok(length)
+    }
+    fn floats(&mut self, name: &str) -> Result<Vec<f64>, String> {
+        let length = self.length(name, 1)?;
+        let mut values = Vec::with_capacity(length);
+        for index in 0..length {
+            values.push(self.float(&format!("{name} value {index}"))?);
+        }
+        Ok(values)
+    }
+    fn booleans(&mut self, name: &str) -> Result<Vec<bool>, String> {
+        let length = self.length(name, 1)?;
+        let mut values = Vec::with_capacity(length);
+        for index in 0..length {
+            values.push(self.boolean(&format!("{name} value {index}"))?);
+        }
+        Ok(values)
+    }
+    fn optional_float(&mut self, name: &str) -> Result<Option<f64>, String> {
+        if self.boolean(&format!("{name} present"))? {
+            Ok(Some(self.float(name)?))
+        } else {
+            Ok(None)
+        }
+    }
+    fn finish(self) -> Result<(), String> {
+        if self.cursor == self.words.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "runtime Verilog-A payload has {} trailing words",
+                self.words.len() - self.cursor
+            ))
+        }
+    }
 }
 
 /// Pre-computed matrix indices for fast stamping
@@ -683,6 +1087,16 @@ impl VerilogADevice {
         )
     }
 
+    #[cfg(feature = "native")]
+    fn native_runtime_error_to_vm(error: crate::native::NativeRuntimeError) -> VmError {
+        match error.kind {
+            crate::native::NativeRuntimeErrorKind::NativeJit => VmError::NativeJit(error.message),
+            crate::native::NativeRuntimeErrorKind::InvalidNumericResult => {
+                VmError::InvalidNumericResult(error.message)
+            }
+        }
+    }
+
     #[cfg(feature = "native-bytecode-contract-tests")]
     fn try_native_compile(
         model: &std::sync::Arc<CompiledModel>,
@@ -857,17 +1271,28 @@ impl VerilogADevice {
     }
 
     /// Maximum next transient step requested by `$bound_step` or a scheduled
-    /// timer event during the latest evaluation.
+    /// timer/zi sample event during the latest evaluation.
     pub fn transient_bound_step(&self) -> Option<f64> {
+        self.try_transient_bound_step().unwrap_or_else(|error| {
+            panic!(
+                "Verilog-A device '{}' model '{}' transient breakpoint failed: {}",
+                self.name, self.model.name, error
+            )
+        })
+    }
+
+    /// Checked transient bound for callers that surface event-scheduling
+    /// errors instead of panicking.
+    pub fn try_transient_bound_step(&self) -> Result<Option<f64>, VmError> {
         let model_bound = self
             .variable("$bound_step")
             .filter(|bound| bound.is_finite() && *bound > 0.0);
-        match (model_bound, self.context.timer_event_step_bound()) {
-            (Some(model), Some(timer)) => Some(model.min(timer)),
-            (Some(model), None) => Some(model),
-            (None, Some(timer)) => Some(timer),
-            (None, None) => None,
-        }
+        let timer_bound = self.context.timer_event_step_bound();
+        let zi_bound = self.context.zi_filter_step_bound()?;
+        Ok([model_bound, timer_bound, zi_bound]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min))
     }
 
     /// Whether `$discontinuity` fired during the latest evaluation
@@ -995,6 +1420,9 @@ impl VerilogADevice {
         self.validate_parameter_value(i, value, false)?;
         self.context.set_param(i, value);
         self.context.mark_param_given(i);
+        for filter in &mut self.context.zi_filters {
+            filter.invalidate_definition();
+        }
         Ok(true)
     }
 
@@ -1238,6 +1666,9 @@ impl VerilogADevice {
     /// Checked dependent-parameter default evaluation. A malformed or stale
     /// compiled default program must not become a numeric zero.
     pub fn try_resolve_parameter_defaults(&mut self) -> Result<(), VmError> {
+        for filter in &mut self.context.zi_filters {
+            filter.invalidate_definition();
+        }
         for i in 0..self.model.parameters.len() {
             if self.context.is_param_given(i) {
                 continue;
@@ -1477,6 +1908,29 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Explicitly begin a fresh analysis on a reusable device instance.
+    /// Stateful sampled operators and their frozen constant arguments are
+    /// invalidated even when the analysis code is unchanged from the
+    /// preceding run. Each logical Zi site freezes lazily on its first ordered
+    /// execution, after any preceding local assignments have run.
+    pub fn try_begin_analysis(&mut self, analysis: u8) -> Result<(), VmError> {
+        self.try_set_analysis_type(analysis)?;
+        for filter in &mut self.context.zi_filters {
+            filter.invalidate_definition();
+        }
+        Ok(())
+    }
+
+    /// Panicking compatibility wrapper for [`Self::try_begin_analysis`].
+    pub fn begin_analysis(&mut self, analysis: u8) {
+        self.try_begin_analysis(analysis).unwrap_or_else(|error| {
+            panic!(
+                "Verilog-A device '{}' model '{}' analysis begin failed: {}",
+                self.name, self.model.name, error
+            )
+        });
+    }
+
     /// Mark whether the current evaluation is the first and/or final point
     /// of its analysis. A single-point analysis legitimately sets both.
     pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
@@ -1514,10 +1968,125 @@ impl VerilogADevice {
 
     /// Commit integrator state after an accepted timestep
     pub fn advance_state(&mut self) {
-        // Snapshot the $discontinuity level so the next step reports only
-        // rising edges (a level-true region must not pin tiny steps)
-        self.prev_discontinuity = self.discontinuity_pending();
-        self.context.advance_state();
+        self.try_advance_state().unwrap_or_else(|error| {
+            panic!(
+                "Verilog-A device '{}' model '{}' state commit failed: {}",
+                self.name, self.model.name, error
+            )
+        });
+    }
+
+    /// Checked accepted-state commit. Sampled filters refuse a commit that
+    /// crossed or failed to evaluate a required sample edge.
+    pub fn try_advance_state(&mut self) -> Result<(), VmError> {
+        self.validate_advance_state()?;
+        self.apply_validated_advance_state();
+        Ok(())
+    }
+
+    /// Validate an accepted-state commit without mutating this instance.
+    pub fn validate_advance_state(&self) -> Result<(), VmError> {
+        self.context.validate_advance_state()
+    }
+
+    /// Apply a commit only after all runtime instances in the circuit have
+    /// passed [`Self::validate_advance_state`].
+    pub fn apply_validated_advance_state(&mut self) {
+        let discontinuity = self.discontinuity_pending();
+        self.context.apply_validated_advance_state();
+        self.prev_discontinuity = discontinuity;
+    }
+
+    pub fn checkpoint_state(&self) -> Result<VerilogADeviceCheckpoint, VmError> {
+        let checkpoint = VerilogADeviceCheckpoint {
+            instance_name: self.name.clone(),
+            model_name: self.model.name.clone(),
+            source_digest: self.model.source_digest.clone(),
+            shape_identity: self.checkpoint_shape_identity(),
+            state_version: RUNTIME_CHECKPOINT_STATE_VERSION,
+            accepted: self.context.accepted_checkpoint()?,
+            prev_discontinuity: self.prev_discontinuity,
+        };
+        self.validate_checkpoint_state(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    pub fn validate_checkpoint_state(
+        &self,
+        checkpoint: &VerilogADeviceCheckpoint,
+    ) -> Result<(), VmError> {
+        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        if checkpoint.state_version != RUNTIME_CHECKPOINT_STATE_VERSION {
+            return Err(invalid(format!(
+                "unsupported runtime checkpoint state version {}",
+                checkpoint.state_version
+            )));
+        }
+        if checkpoint.instance_name != self.name
+            || checkpoint.model_name != self.model.name
+            || checkpoint.source_digest != self.model.source_digest
+            || checkpoint.shape_identity != self.checkpoint_shape_identity()
+        {
+            return Err(invalid(
+                "runtime checkpoint device identity or resolved shape does not match".into(),
+            ));
+        }
+        let bound_step_index = self
+            .model
+            .variable_names
+            .iter()
+            .position(|name| name == "$bound_step");
+        for (index, value) in checkpoint.accepted.variables.iter().copied().enumerate() {
+            let allowed_bound_infinity = Some(index) == bound_step_index && value == f64::INFINITY;
+            if !value.is_finite() && !allowed_bound_infinity {
+                return Err(invalid(format!(
+                    "checkpoint variable {index} is non-finite outside the $bound_step sentinel"
+                )));
+            }
+        }
+        self.context
+            .validate_accepted_checkpoint(&checkpoint.accepted)
+    }
+
+    /// Infallible injection after collection-wide validation.
+    pub fn apply_validated_checkpoint_state(&mut self, checkpoint: &VerilogADeviceCheckpoint) {
+        self.context
+            .restore_accepted_checkpoint(&checkpoint.accepted);
+        self.prev_discontinuity = checkpoint.prev_discontinuity;
+    }
+
+    fn checkpoint_shape_identity(&self) -> SmolStr {
+        let mut hasher = blake3::Hasher::new();
+        let mut add_bytes = |bytes: &[u8]| {
+            hasher.update(&(bytes.len() as u64).to_le_bytes());
+            hasher.update(bytes);
+        };
+        add_bytes(self.model.name.as_bytes());
+        add_bytes(self.model.source_digest.as_bytes());
+        add_bytes(self.name.as_bytes());
+        for value in [
+            self.node_mapping.len(),
+            self.internal_node_indices.len(),
+            self.branch_current_indices.len(),
+            self.context.variables.len(),
+            self.context.state_values.len(),
+            self.context.delay_buffers.len(),
+            self.context.transition_filters.len(),
+            self.context.slew_filters.len(),
+            self.context.cross_detectors.len(),
+            self.context.laplace_filters.len(),
+            self.context.zi_filters.len(),
+        ] {
+            hasher.update(&(value as u64).to_le_bytes());
+        }
+        for value in &self.context.parameters {
+            hasher.update(&value.to_bits().to_le_bytes());
+        }
+        hasher.update(&self.context.param_given);
+        for value in &self.node_mapping {
+            hasher.update(&(*value as u64).to_le_bytes());
+        }
+        SmolStr::new(hasher.finalize().to_hex().as_str())
     }
 
     /// Whether `$discontinuity` newly fired since the last accepted step
@@ -1619,7 +2188,11 @@ impl VerilogADevice {
             .any(|program| program.static_condition.is_some());
 
         if has_static_conditions {
-            let context = &mut self.context;
+            // Static-activation discovery is speculative. Run it on a full
+            // context clone so lazy Zi definition freezes and state candidates
+            // in assignment expressions cannot leak into accepted state.
+            let mut refresh_context = self.context.clone();
+            let context = &mut refresh_context;
             let mut vm = Vm::new(context);
             Self::run_assignment_pass(&mut vm, model, native)?;
 
@@ -1686,7 +2259,8 @@ impl VerilogADevice {
             .any(|program| program.static_condition.is_some());
 
         if has_static_conditions {
-            let context = &mut self.context;
+            let mut refresh_context = self.context.clone();
+            let context = &mut refresh_context;
             let mut vm = Vm::new(context);
             Self::run_assignment_pass(&mut vm, model, wasm)?;
             for (idx, program) in model.stamp_programs.iter().enumerate() {
@@ -1856,7 +2430,8 @@ impl VerilogADevice {
         let mut branch_active = vec![false; model.branch_sources.len()];
 
         {
-            let context = &mut self.context;
+            let mut refresh_context = self.context.clone();
+            let context = &mut refresh_context;
             let mut bytecode_vm = Vm::new(context);
             // Static guards may reference instance-static variables (e.g.
             // BSIM4rdsMod derived from the rdsmod parameter); run the
@@ -2432,14 +3007,7 @@ impl VerilogADevice {
                 ));
             }
             if let Some(error) = ctx.take_native_runtime_error() {
-                return Err(match error.kind {
-                    crate::native::NativeRuntimeErrorKind::NativeJit => {
-                        VmError::NativeJit(error.message)
-                    }
-                    crate::native::NativeRuntimeErrorKind::InvalidNumericResult => {
-                        VmError::InvalidNumericResult(error.message)
-                    }
-                });
+                return Err(Self::native_runtime_error_to_vm(error));
             }
         }
 
@@ -2471,6 +3039,7 @@ impl VerilogADevice {
     #[inline]
     fn begin_evaluation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
         self.context.evaluation_mode = mode;
+        self.context.begin_zi_evaluation();
         if mode.limiting_enabled() {
             self.context.limiter_active = 0;
         }
@@ -2705,8 +3274,8 @@ impl VerilogADevice {
                 .run_noise_exponent(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
         };
-        if let Some(error) = ctx.take_runtime_error() {
-            return Err(VmError::NativeJit(error));
+        if let Some(error) = ctx.take_native_runtime_error() {
+            return Err(Self::native_runtime_error_to_vm(error));
         }
         Ok(value)
     }
@@ -3052,8 +3621,8 @@ impl VerilogADevice {
         let vars_ptr = vm.context.variables.as_mut_ptr();
         ctx.clear_runtime_error();
         native.run_assignments(&ctx, vars_ptr);
-        if let Some(error) = ctx.take_runtime_error() {
-            return Err(VmError::NativeJit(error));
+        if let Some(error) = ctx.take_native_runtime_error() {
+            return Err(Self::native_runtime_error_to_vm(error));
         }
         Ok(())
     }
@@ -3093,8 +3662,8 @@ impl VerilogADevice {
                     .into(),
             ));
         }
-        if let Some(error) = ctx.take_runtime_error() {
-            return Err(VmError::NativeJit(error));
+        if let Some(error) = ctx.take_native_runtime_error() {
+            return Err(Self::native_runtime_error_to_vm(error));
         }
         Ok(())
     }
@@ -3625,8 +4194,8 @@ impl VerilogADevice {
                         .into(),
                 ));
             }
-            if let Some(error) = ctx.take_runtime_error() {
-                return Err(VmError::NativeJit(error));
+            if let Some(error) = ctx.take_native_runtime_error() {
+                return Err(Self::native_runtime_error_to_vm(error));
             }
         }
 

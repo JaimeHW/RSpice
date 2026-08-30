@@ -829,12 +829,49 @@ fn collect_expr_variable_ids(
             | HirExprKind::ArrayLiteral { elements: args } => stack.extend(args.iter().copied()),
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
-            HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => stack.push(*expr),
+            HirExprKind::Laplace { expr, .. } => stack.push(*expr),
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => {
+                stack.extend([*expr, *period]);
+                stack.extend(transition.iter().copied());
+                stack.extend(first_transition.iter().copied());
+                push_zi_children(kind, &mut stack);
+            }
             HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),
-            HirExprKind::Number { .. }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::BranchAccess { .. }
             | HirExprKind::NamedBranchAccess { .. } => {}
+        }
+    }
+}
+
+fn push_zi_children(kind: &crate::canonical_ir::HirZiKind, stack: &mut Vec<ExprId>) {
+    match kind {
+        crate::canonical_ir::HirZiKind::ZeroPole { zeros, poles } => {
+            stack.extend(zeros.iter().copied());
+            stack.extend(poles.iter().copied());
+        }
+        crate::canonical_ir::HirZiKind::ZeroDenominator { zeros, denominator } => {
+            stack.extend(zeros.iter().copied());
+            stack.extend(denominator.iter().copied());
+        }
+        crate::canonical_ir::HirZiKind::NumeratorPole { numerator, poles } => {
+            stack.extend(numerator.iter().copied());
+            stack.extend(poles.iter().copied());
+        }
+        crate::canonical_ir::HirZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => {
+            stack.extend(numerator.iter().copied());
+            stack.extend(denominator.iter().copied());
         }
     }
 }
@@ -1028,7 +1065,9 @@ fn expr_is_instance_static(
             | HirExprKind::BranchAccess { .. }
             | HirExprKind::NamedBranchAccess { .. } => return false,
             HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),
-            HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {}
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. } => {}
         }
     }
     true

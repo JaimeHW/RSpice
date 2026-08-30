@@ -641,6 +641,7 @@ fn expr_ref(hir: &HirModel, id: ExprId) -> HirExprRef {
 
 fn expression_kind_label(kind: &HirExprKind) -> &'static str {
     match kind {
+        HirExprKind::NullArgument => "null_argument",
         HirExprKind::Number { .. } => "number",
         HirExprKind::StringLiteral { .. } => "string",
         HirExprKind::Identifier { .. } => "identifier",
@@ -692,8 +693,21 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
             | HirExprKind::ArrayLiteral { elements: args } => stack.extend(args.iter().copied()),
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => push_analog_children(op, &mut stack),
-            HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => stack.push(*expr),
-            HirExprKind::Number { .. }
+            HirExprKind::Laplace { expr, .. } => stack.push(*expr),
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => {
+                stack.extend([*expr, *period]);
+                stack.extend(transition.iter().copied());
+                stack.extend(first_transition.iter().copied());
+                push_zi_children(kind, &mut stack);
+            }
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::Identifier { .. }
             | HirExprKind::BranchAccess { .. }
@@ -763,6 +777,30 @@ pub(super) fn string_literal(hir: &HirModel, id: ExprId) -> Option<SmolStr> {
     match &hir.expressions[usize::from(id)].kind {
         HirExprKind::StringLiteral { value } => Some(value.clone()),
         _ => None,
+    }
+}
+
+fn push_zi_children(kind: &super::HirZiKind, stack: &mut Vec<ExprId>) {
+    match kind {
+        super::HirZiKind::ZeroPole { zeros, poles } => {
+            stack.extend(zeros.iter().copied());
+            stack.extend(poles.iter().copied());
+        }
+        super::HirZiKind::ZeroDenominator { zeros, denominator } => {
+            stack.extend(zeros.iter().copied());
+            stack.extend(denominator.iter().copied());
+        }
+        super::HirZiKind::NumeratorPole { numerator, poles } => {
+            stack.extend(numerator.iter().copied());
+            stack.extend(poles.iter().copied());
+        }
+        super::HirZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => {
+            stack.extend(numerator.iter().copied());
+            stack.extend(denominator.iter().copied());
+        }
     }
 }
 

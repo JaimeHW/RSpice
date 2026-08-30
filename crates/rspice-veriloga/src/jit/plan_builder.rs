@@ -709,7 +709,8 @@ fn canonical_expr_contains_ddt(
             op: HirAnalogOperator::Ddt { .. },
         } => Ok(true),
         HirExprKind::Call { name, .. } if canonical_is_ddt_call(name.as_str()) => Ok(true),
-        HirExprKind::Number { .. }
+        HirExprKind::NullArgument
+        | HirExprKind::Number { .. }
         | HirExprKind::StringLiteral { .. }
         | HirExprKind::Identifier { .. }
         | HirExprKind::BranchAccess { .. }
@@ -743,8 +744,24 @@ fn canonical_expr_contains_ddt(
             }
             canonical_laplace_kind_contains_ddt(model, mir, kind)
         }
-        HirExprKind::Zi { expr, kind } => {
-            if canonical_expr_contains_ddt(model, mir, *expr)? {
+        HirExprKind::Zi {
+            expr,
+            kind,
+            period,
+            transition,
+            first_transition,
+        } => {
+            if canonical_expr_contains_ddt(model, mir, *expr)?
+                || canonical_expr_contains_ddt(model, mir, *period)?
+                || transition
+                    .map(|expr| canonical_expr_contains_ddt(model, mir, expr))
+                    .transpose()?
+                    .unwrap_or(false)
+                || first_transition
+                    .map(|expr| canonical_expr_contains_ddt(model, mir, expr))
+                    .transpose()?
+                    .unwrap_or(false)
+            {
                 return Ok(true);
             }
             canonical_zi_kind_contains_ddt(model, mir, kind)
@@ -914,6 +931,7 @@ fn canonical_expr_ref(
 
 fn canonical_expr_ref_kind(kind: &HirExprKind) -> &'static str {
     match kind {
+        HirExprKind::NullArgument => "null_argument",
         HirExprKind::Number { .. } => "number",
         HirExprKind::StringLiteral { .. } => "string",
         HirExprKind::Identifier { .. } => "identifier",
@@ -1546,7 +1564,8 @@ fn canonical_expr_contains_noise(
         {
             Ok(true)
         }
-        HirExprKind::Number { .. }
+        HirExprKind::NullArgument
+        | HirExprKind::Number { .. }
         | HirExprKind::StringLiteral { .. }
         | HirExprKind::Identifier { .. }
         | HirExprKind::BranchAccess { .. }
@@ -1577,7 +1596,22 @@ fn canonical_expr_contains_noise(
             Ok(canonical_expr_contains_noise(model, mir, *expr)?
                 || canonical_laplace_kind_contains_noise(model, mir, kind)?)
         }
-        HirExprKind::Zi { expr, kind } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+        HirExprKind::Zi {
+            expr,
+            kind,
+            period,
+            transition,
+            first_transition,
+        } => Ok(canonical_expr_contains_noise(model, mir, *expr)?
+            || canonical_expr_contains_noise(model, mir, *period)?
+            || transition
+                .map(|expr| canonical_expr_contains_noise(model, mir, expr))
+                .transpose()?
+                .unwrap_or(false)
+            || first_transition
+                .map(|expr| canonical_expr_contains_noise(model, mir, expr))
+                .transpose()?
+                .unwrap_or(false)
             || canonical_zi_kind_contains_noise(model, mir, kind)?),
     }
 }
@@ -2137,6 +2171,7 @@ fn append_canonical_expr(mir: &mut MirModel, kind: HirExprKind, span: SourceSpan
 
 fn canonical_expr_kind_name(kind: &HirExprKind) -> &'static str {
     match kind {
+        HirExprKind::NullArgument => "null_argument",
         HirExprKind::Number { .. } => "number",
         HirExprKind::StringLiteral { .. } => "string",
         HirExprKind::Identifier { .. } => "identifier",
@@ -4192,6 +4227,7 @@ fn mark_variable_live(index: usize, live: &mut [bool], changed: &mut bool) {
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
+#[cfg(feature = "native")]
 pub(crate) fn lower_assignment_step(
     model: &CompiledModel,
     step: &AssignmentStep,

@@ -36,7 +36,16 @@ impl<'a> Parser<'a> {
             // Attribute instances may precede any top-level item
             let attributes = self.parse_attributes()?;
 
-            if self.check(TokenKind::Module) || self.check(TokenKind::Macromodule) {
+            if self.check_identifier_text("__rspice_default_transition") {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `default_transition`".to_string(),
+                    )));
+                }
+                items.push(Item::DefaultTransition(
+                    self.parse_default_transition_directive()?,
+                ));
+            } else if self.check(TokenKind::Module) || self.check(TokenKind::Macromodule) {
                 let mut module = self.parse_module()?;
                 let mut combined_attributes = attributes;
                 combined_attributes.append(&mut module.attributes);
@@ -60,6 +69,25 @@ impl<'a> Parser<'a> {
         Ok(SourceFile {
             items,
             span: start_span.extend(end_span),
+        })
+    }
+
+    fn check_identifier_text(&self, expected: &str) -> bool {
+        self.check(TokenKind::Identifier) && self.current().text.as_deref() == Some(expected)
+    }
+
+    fn parse_default_transition_directive(
+        &mut self,
+    ) -> Result<DefaultTransitionDirective, ParseError> {
+        let start = self.current_span();
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+        let value = self.parse_expression()?;
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::Semicolon)?;
+        Ok(DefaultTransitionDirective {
+            value,
+            span: start.extend(self.previous_span()),
         })
     }
 
@@ -620,6 +648,20 @@ impl<'a> Parser<'a> {
             };
             let name = self.expect_identifier("parameter name")?;
 
+            let mut dimensions = Vec::new();
+            while self.match_token(TokenKind::LBracket) {
+                let dim_start = self.previous_span();
+                let dim_lo = self.parse_expression()?;
+                self.expect(TokenKind::Colon)?;
+                let dim_hi = self.parse_expression()?;
+                self.expect(TokenKind::RBracket)?;
+                dimensions.push(ArrayDimension {
+                    start: dim_lo,
+                    end: dim_hi,
+                    span: dim_start.extend(self.previous_span()),
+                });
+            }
+
             // Optional default value
             let default = if self.match_token(TokenKind::Assign_) {
                 Some(self.parse_expression()?)
@@ -655,6 +697,7 @@ impl<'a> Parser<'a> {
             decls.push(ParameterDecl {
                 param_type,
                 name: name.into(),
+                dimensions,
                 default,
                 range,
                 units: units.clone(),
@@ -2132,8 +2175,16 @@ impl<'a> Parser<'a> {
 
         if !self.check(TokenKind::RParen) {
             loop {
-                args.push(self.parse_expression()?);
+                if self.check(TokenKind::Comma) {
+                    args.push(Expression::NullArgument(self.current_span()));
+                } else {
+                    args.push(self.parse_expression()?);
+                }
                 if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                if self.check(TokenKind::RParen) {
+                    args.push(Expression::NullArgument(self.current_span()));
                     break;
                 }
             }

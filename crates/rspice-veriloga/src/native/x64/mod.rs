@@ -5773,6 +5773,7 @@ endmodule
             branch_sources: Vec::new(),
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
+            zi_filter_definitions: Vec::new(),
             noise_sources: Vec::new(),
         }
     }

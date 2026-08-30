@@ -8,11 +8,21 @@
 use std::mem::{offset_of, size_of};
 
 use super::WASM_JIT_ABI_VERSION;
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::codegen::ZiPolynomialLayout;
+use crate::codegen::ZiRuntimeLayout;
 
 pub const WASM_JIT_FRAME_MAGIC: u32 = 0x5253_574a; // "RSWJ"
 pub const WASM_JIT_STATUS_OK: i32 = 0;
 pub const WASM_JIT_STATUS_ABI_MISMATCH: i32 = -1;
 pub const WASM_JIT_STATUS_RUNTIME_ERROR: i32 = -2;
+/// Fixed start of the authenticated, frame-relative variable-arity operand
+/// region. The stable header remains independently addressable at its original
+/// offsets.
+pub const WASM_JIT_SLICE_OPERANDS_OFFSET: u32 = 160;
+/// Browser helper resource limit. This carries 1,020 coefficient values or 510
+/// complex-root tuples in addition to Zi's four fixed runtime operands.
+pub const WASM_JIT_MAX_SLICE_OPERANDS: usize = crate::zfilter::MAX_ZI_RUNTIME_OPERANDS;
 
 /// Stable header shared by Rust and every secondary WebAssembly module.
 ///
@@ -64,6 +74,27 @@ pub(crate) struct WasmJitEvalFrame {
     pub m_factor: f64,
 }
 
+/// Complete primary-module dispatch allocation. Generated modules receive a
+/// pointer to `frame` and address variable-arity helper operands immediately
+/// after the stable header. Keeping the storage inline makes the capability
+/// frame-relative and allocation-free; no secondary module supplies a pointer.
+#[repr(C, align(8))]
+pub(crate) struct WasmJitDispatchFrame {
+    pub frame: WasmJitEvalFrame,
+    pub slice_operands: [f64; WASM_JIT_MAX_SLICE_OPERANDS],
+}
+
+impl WasmJitDispatchFrame {
+    #[cfg(any(target_arch = "wasm32", test))]
+    pub fn new(mut frame: WasmJitEvalFrame) -> Self {
+        frame.byte_len = WASM_JIT_MAX_EVAL_FRAME_BYTES;
+        Self {
+            frame,
+            slice_operands: [0.0; WASM_JIT_MAX_SLICE_OPERANDS],
+        }
+    }
+}
+
 impl Default for WasmJitEvalFrame {
     fn default() -> Self {
         Self {
@@ -107,6 +138,7 @@ impl Default for WasmJitEvalFrame {
 }
 
 pub const WASM_JIT_EVAL_FRAME_BYTES: u32 = size_of::<WasmJitEvalFrame>() as u32;
+pub const WASM_JIT_MAX_EVAL_FRAME_BYTES: u32 = size_of::<WasmJitDispatchFrame>() as u32;
 pub const FRAME_MAGIC_OFFSET: u64 = offset_of!(WasmJitEvalFrame, magic) as u64;
 pub const FRAME_ABI_VERSION_OFFSET: u64 = offset_of!(WasmJitEvalFrame, abi_version) as u64;
 pub const FRAME_BYTE_LEN_OFFSET: u64 = offset_of!(WasmJitEvalFrame, byte_len) as u64;
@@ -158,7 +190,11 @@ pub const FRAME_TIME_OFFSET: u64 = offset_of!(WasmJitEvalFrame, time) as u64;
 pub const FRAME_M_FACTOR_OFFSET: u64 = offset_of!(WasmJitEvalFrame, m_factor) as u64;
 
 const _: () = {
+    assert!(WASM_JIT_MAX_SLICE_OPERANDS == crate::zfilter::MAX_ZI_RUNTIME_OPERANDS);
     assert!(WASM_JIT_EVAL_FRAME_BYTES == 160);
+    assert!(WASM_JIT_SLICE_OPERANDS_OFFSET == WASM_JIT_EVAL_FRAME_BYTES);
+    assert!(offset_of!(WasmJitDispatchFrame, slice_operands) == 160);
+    assert!(WASM_JIT_MAX_EVAL_FRAME_BYTES == 8_352);
     assert!(FRAME_RESULT_OFFSET == 16);
     assert!(FRAME_SESSION_TOKEN_OFFSET == 28);
     assert!(FRAME_PARAMETERS_PTR_OFFSET == 32);
@@ -169,6 +205,59 @@ const _: () = {
     assert!(FRAME_TEMPERATURE_OFFSET == 128);
     assert!(FRAME_M_FACTOR_OFFSET == 152);
 };
+
+const ZI_LAYOUT_LENGTH_MASK: usize = (1 << 14) - 1;
+
+/// Browser-specific 31-bit Zi descriptor. Unlike the native descriptor, this
+/// never passes through a machine-word-sized value and is therefore identical
+/// on wasm32 and 64-bit hosts. The filter slot travels separately in `aux0`.
+pub(crate) fn encode_zi_layout_descriptor(layout: ZiRuntimeLayout) -> Option<i32> {
+    layout.validate_operand_budget().ok()?;
+    let numerator_len = layout.numerator.definition_len();
+    let denominator_len = layout.denominator.definition_len();
+    if numerator_len > ZI_LAYOUT_LENGTH_MASK || denominator_len > ZI_LAYOUT_LENGTH_MASK {
+        return None;
+    }
+    let mut packed = u32::try_from(numerator_len).ok()?;
+    packed |= u32::from(layout.numerator.is_roots()) << 14;
+    packed |= u32::try_from(denominator_len).ok()? << 15;
+    packed |= u32::from(layout.denominator.is_roots()) << 29;
+    packed |= u32::from(layout.direct_assignment) << 30;
+    i32::try_from(packed).ok()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn decode_zi_layout_descriptor(
+    filter_id: usize,
+    packed: i32,
+) -> Option<ZiRuntimeLayout> {
+    let packed = u32::try_from(packed).ok()?;
+    if packed >> 31 != 0 {
+        return None;
+    }
+    let numerator_len = usize::try_from(packed & ((1 << 14) - 1)).ok()?;
+    let denominator_len = usize::try_from((packed >> 15) & ((1 << 14) - 1)).ok()?;
+    let layout = ZiRuntimeLayout {
+        filter_id,
+        numerator: if (packed >> 14) & 1 == 0 {
+            ZiPolynomialLayout::Coefficients { len: numerator_len }
+        } else {
+            ZiPolynomialLayout::Roots { len: numerator_len }
+        },
+        denominator: if (packed >> 29) & 1 == 0 {
+            ZiPolynomialLayout::Coefficients {
+                len: denominator_len,
+            }
+        } else {
+            ZiPolynomialLayout::Roots {
+                len: denominator_len,
+            }
+        },
+        direct_assignment: (packed >> 30) & 1 != 0,
+    };
+    layout.validate_operand_budget().ok()?;
+    Some(layout)
+}
 
 #[cfg(test)]
 mod tests {
@@ -185,5 +274,30 @@ mod tests {
         assert_eq!(FRAME_VARIABLES_LEN_OFFSET, 100);
         assert_eq!(FRAME_PROGRAM_ACTIVE_LEN_OFFSET, 116);
         assert_eq!(FRAME_JACOBIANS_LEN_OFFSET, 124);
+        assert_eq!(WASM_JIT_SLICE_OPERANDS_OFFSET, 160);
+        assert_eq!(WASM_JIT_MAX_EVAL_FRAME_BYTES, 8_352);
+        let dispatch = WasmJitDispatchFrame::new(frame);
+        assert_eq!(dispatch.frame.byte_len, WASM_JIT_MAX_EVAL_FRAME_BYTES);
+        assert_eq!(dispatch.slice_operands.len(), WASM_JIT_MAX_SLICE_OPERANDS);
+    }
+
+    #[test]
+    fn browser_zi_descriptor_is_machine_word_independent() {
+        let layout = ZiRuntimeLayout {
+            filter_id: 7,
+            numerator: ZiPolynomialLayout::Roots { len: 31 },
+            denominator: ZiPolynomialLayout::Coefficients { len: 19 },
+            direct_assignment: true,
+        };
+        let packed = encode_zi_layout_descriptor(layout).expect("representable browser layout");
+        assert_eq!(decode_zi_layout_descriptor(7, packed), Some(layout));
+        assert!(decode_zi_layout_descriptor(7, -1).is_none());
+
+        let over_budget = ZiRuntimeLayout {
+            numerator: ZiPolynomialLayout::Coefficients { len: 1_020 },
+            denominator: ZiPolynomialLayout::Coefficients { len: 1 },
+            ..layout
+        };
+        assert!(encode_zi_layout_descriptor(over_budget).is_none());
     }
 }

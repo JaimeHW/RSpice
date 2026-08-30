@@ -10,10 +10,15 @@ mod executor;
 mod filters;
 
 pub use context::{
-    CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmContext,
-    terminal_pair_current_endpoints, terminal_pair_current_index, terminal_pair_current_len,
+    CURRENT_PAIR_GROUND, IntegrationCoefficients, VerilogAEvaluationMode, VmAcceptedCheckpoint,
+    VmContext, terminal_pair_current_endpoints, terminal_pair_current_index,
+    terminal_pair_current_len,
 };
 pub use error::VmError;
 pub use executor::Vm;
-pub(crate) use filters::timer_event_evaluation;
+#[cfg(all(feature = "wasm-jit", any(target_arch = "wasm32", test)))]
+pub(crate) use executor::{execute_zi_state, execute_zi_state_derivative};
+pub(crate) use filters::{
+    CrossCheckpoint, DelayCheckpoint, SlewCheckpoint, TransitionCheckpoint, timer_event_evaluation,
+};
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};

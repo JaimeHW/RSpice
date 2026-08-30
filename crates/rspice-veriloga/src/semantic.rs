@@ -69,6 +69,12 @@ pub struct SemanticAnalyzer {
     /// Nesting depth of runtime-bounded loops (contributions inside them
     /// are not representable and must error)
     runtime_loop_depth: usize,
+    /// Nesting depth of control flow whose selector can change during an
+    /// analysis. Stateful analog operators such as `zi_*` must execute on
+    /// every Newton iteration and are therefore illegal beneath such a guard
+    /// (VAMS-2023 section 4.5.15).
+    dynamic_analog_operator_guard_depth: usize,
+    current_default_transition: f64,
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
     /// Hidden system-task variables ($bound_step, $discontinuity)
@@ -95,6 +101,8 @@ impl Default for SemanticAnalyzer {
 }
 
 impl SemanticAnalyzer {
+    pub const SIMULATOR_DEFAULT_TRANSITION: f64 = 1.0e-9;
+
     pub fn new() -> Self {
         Self {
             disciplines: DisciplineDb::with_standard(),
@@ -111,6 +119,8 @@ impl SemanticAnalyzer {
             invariant_consts: HashMap::new(),
             inline_depth: 0,
             runtime_loop_depth: 0,
+            dynamic_analog_operator_guard_depth: 0,
+            current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
             arrays: HashMap::new(),
             task_vars: HashMap::new(),
             unfiltered_initial_step_guards: Vec::new(),
@@ -136,9 +146,29 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Second pass: analyze modules
+        // Second pass: analyze modules in declaration order while applying
+        // the file-scoped default-transition setting.
+        let mut default_transition = Self::SIMULATOR_DEFAULT_TRANSITION;
         for item in &source.items {
-            if let Item::Module(module) = item {
+            if let Item::DefaultTransition(directive) = item {
+                let Some(value) = Self::eval_const_with(&directive.value, &HashMap::new()) else {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(
+                            "`default_transition` requires a numeric constant expression".into(),
+                        ),
+                        directive.span,
+                    )));
+                };
+                if !value.is_finite() || value < 0.0 {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(format!(
+                            "`default_transition` must be finite and non-negative, got {value}"
+                        )),
+                        directive.span,
+                    )));
+                }
+                default_transition = value;
+            } else if let Item::Module(module) = item {
                 if let Some(first_defined) = module_spans.insert(module.name.clone(), module.span) {
                     return Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::DuplicateSymbol {
@@ -161,8 +191,10 @@ impl SemanticAnalyzer {
                 self.invariant_consts.clear();
                 self.inline_depth = 0;
                 self.runtime_loop_depth = 0;
+                self.dynamic_analog_operator_guard_depth = 0;
+                self.current_default_transition = default_transition;
 
-                match self.analyze_module(module) {
+                match self.analyze_module(module, default_transition) {
                     Ok(analyzed) => {
                         modules.insert(module.name.clone(), analyzed);
                     }
@@ -295,9 +327,14 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
-    fn analyze_module(&mut self, module: &Module) -> CompileResult<AnalyzedModule> {
+    fn analyze_module(
+        &mut self,
+        module: &Module,
+        default_transition: f64,
+    ) -> CompileResult<AnalyzedModule> {
         let mut analyzed = AnalyzedModule {
             name: module.name.clone(),
+            default_transition,
             ports: Vec::new(),
             parameters: Vec::new(),
             param_aliases: Vec::new(),
@@ -523,6 +560,15 @@ impl SemanticAnalyzer {
             .zip(parameter_scopes)
             .zip(parameter_also_model)
         {
+            if !param.dimensions.is_empty() {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter array '{}' is retained with its declared dimensions, but array-valued parameter storage and instance overrides are not implemented",
+                        param.name
+                    )),
+                    param.span,
+                )));
+            }
             if scope == ParameterScope::Model || also_model {
                 let default_reads_instance = param.default.as_ref().is_some_and(|expression| {
                     Self::references_parameter_without_model_storage(
@@ -1420,6 +1466,7 @@ impl SemanticAnalyzer {
                 .any(|element| Self::expr_contains_identifier(element, expected)),
             Expression::Number(_)
             | Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
@@ -1456,6 +1503,7 @@ impl SemanticAnalyzer {
                 .any(|element| Self::expr_contains_call(element, expected)),
             Expression::Number(_)
             | Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
@@ -1495,6 +1543,7 @@ impl SemanticAnalyzer {
                 .iter()
                 .any(|element| Self::expr_contains_number_close(element, expected)),
             Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
@@ -1662,6 +1711,7 @@ impl SemanticAnalyzer {
             AnalogStatement::Conditional(cond) => {
                 let condition =
                     self.lower_expression_with_side_effects(&cond.condition, module, sink)?;
+                let dynamic_condition = !self.expression_is_simulation_invariant(&condition);
                 let cond_type = self.infer_type(&condition)?;
                 if !cond_type.is_condition() {
                     self.record_error_at(
@@ -1688,7 +1738,14 @@ impl SemanticAnalyzer {
 
                 self.guard_stack.push(condition.clone());
                 self.open_region();
-                self.analyze_statement(&cond.then_branch, module, sink)?;
+                if dynamic_condition {
+                    self.dynamic_analog_operator_guard_depth += 1;
+                }
+                let then_result = self.analyze_statement(&cond.then_branch, module, sink);
+                if dynamic_condition {
+                    self.dynamic_analog_operator_guard_depth -= 1;
+                }
+                then_result?;
                 let then_body = self.close_region();
                 self.guard_stack.pop();
 
@@ -1696,7 +1753,14 @@ impl SemanticAnalyzer {
                 if let Some(else_branch) = &cond.else_branch {
                     self.guard_stack.push(Self::not_expr(condition.clone()));
                     self.open_region();
-                    self.analyze_statement(else_branch, module, sink)?;
+                    if dynamic_condition {
+                        self.dynamic_analog_operator_guard_depth += 1;
+                    }
+                    let else_result = self.analyze_statement(else_branch, module, sink);
+                    if dynamic_condition {
+                        self.dynamic_analog_operator_guard_depth -= 1;
+                    }
+                    else_result?;
                     else_body = self.close_region();
                     self.guard_stack.pop();
                 }
@@ -1714,6 +1778,7 @@ impl SemanticAnalyzer {
                 // them so arm bodies cannot perturb later guards.
                 let selector =
                     self.lower_expression_with_side_effects(&case_stmt.expr, module, sink)?;
+                let mut dynamic_case = !self.expression_is_simulation_invariant(&selector);
                 // The structured form keeps the comparisons as written; a case
                 // arm's condition is evaluated once at its branch, so the
                 // snapshot the flat form needs would only be a variable the
@@ -1728,6 +1793,7 @@ impl SemanticAnalyzer {
                     let mut unsnapshotted_match: Option<Expression> = None;
                     for m in &item.matches {
                         let m_lowered = self.lower_expression_with_side_effects(m, module, sink)?;
+                        dynamic_case |= !self.expression_is_simulation_invariant(&m_lowered);
                         let eq =
                             Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered.clone());
                         item_match = Some(match item_match {
@@ -1786,7 +1852,14 @@ impl SemanticAnalyzer {
 
                     self.guard_stack.push(guard);
                     self.open_region();
-                    self.analyze_statement(&item.statement, module, sink)?;
+                    if dynamic_case {
+                        self.dynamic_analog_operator_guard_depth += 1;
+                    }
+                    let arm_result = self.analyze_statement(&item.statement, module, sink);
+                    if dynamic_case {
+                        self.dynamic_analog_operator_guard_depth -= 1;
+                    }
+                    arm_result?;
                     let body = self.close_region();
                     self.guard_stack.pop();
                     arms.push((unsnapshotted_match, body));
@@ -1803,13 +1876,27 @@ impl SemanticAnalyzer {
                         Some(prior) => {
                             self.guard_stack.push(Self::not_expr(prior));
                             self.open_region();
-                            self.analyze_statement(default, module, sink)?;
+                            if dynamic_case {
+                                self.dynamic_analog_operator_guard_depth += 1;
+                            }
+                            let default_result = self.analyze_statement(default, module, sink);
+                            if dynamic_case {
+                                self.dynamic_analog_operator_guard_depth -= 1;
+                            }
+                            default_result?;
                             chain = self.close_region();
                             self.guard_stack.pop();
                         }
                         None => {
                             self.open_region();
-                            self.analyze_statement(default, module, sink)?;
+                            if dynamic_case {
+                                self.dynamic_analog_operator_guard_depth += 1;
+                            }
+                            let default_result = self.analyze_statement(default, module, sink);
+                            if dynamic_case {
+                                self.dynamic_analog_operator_guard_depth -= 1;
+                            }
+                            default_result?;
                             chain = self.close_region();
                         }
                     }
@@ -1829,74 +1916,84 @@ impl SemanticAnalyzer {
                 }
             }
             AnalogStatement::For(for_stmt) => {
-                self.analyze_for(for_stmt, module, sink)?;
+                self.dynamic_analog_operator_guard_depth += 1;
+                let result = self.analyze_for(for_stmt, module, sink);
+                self.dynamic_analog_operator_guard_depth -= 1;
+                result?;
             }
             AnalogStatement::Repeat(repeat) => {
+                self.dynamic_analog_operator_guard_depth += 1;
                 let count_expr =
-                    self.lower_expression_with_side_effects(&repeat.count, module, sink)?;
-                match self.eval_const_invariant(&count_expr) {
-                    Some(count) if (count as usize) <= Self::MAX_UNROLL_ITERATIONS => {
-                        for _ in 0..(count as usize) {
-                            self.analyze_statement(&repeat.body, module, sink)?;
+                    self.lower_expression_with_side_effects(&repeat.count, module, sink);
+                let result = count_expr.and_then(|count_expr| {
+                    match self.eval_const_invariant(&count_expr) {
+                        Some(count) if (count as usize) <= Self::MAX_UNROLL_ITERATIONS => {
+                            for _ in 0..(count as usize) {
+                                self.analyze_statement(&repeat.body, module, sink)?;
+                            }
+                            Ok(())
                         }
-                    }
-                    Some(count) => {
-                        return Err(CompileError::Semantic(SemanticError::new(
+                        Some(count) => Err(CompileError::Semantic(SemanticError::new(
                             SemanticErrorKind::InvalidAnalogOperator(format!(
                                 "repeat count {count} exceeds the unroll limit"
                             )),
                             repeat.span,
-                        )));
+                        ))),
+                        // Runtime-dependent count: lower to a runtime loop with
+                        // a synthesized counter
+                        None => self.lower_runtime_repeat(repeat, count_expr, module, sink),
                     }
-                    // Runtime-dependent count: lower to a runtime loop with
-                    // a synthesized counter
-                    None => self.lower_runtime_repeat(repeat, count_expr, module, sink)?,
-                }
+                });
+                self.dynamic_analog_operator_guard_depth -= 1;
+                result?;
             }
             AnalogStatement::While(while_stmt) => {
+                self.dynamic_analog_operator_guard_depth += 1;
                 let condition =
-                    self.lower_expression_with_side_effects(&while_stmt.condition, module, sink)?;
-                match self.eval_const_invariant(&condition) {
-                    Some(0.0) => {} // statically dead loop
-                    Some(_) => {
-                        return Err(CompileError::Semantic(SemanticError::new(
+                    self.lower_expression_with_side_effects(&while_stmt.condition, module, sink);
+                let result =
+                    condition.and_then(|condition| match self.eval_const_invariant(&condition) {
+                        Some(0.0) => Ok(()), // statically dead loop
+                        Some(_) => Err(CompileError::Semantic(SemanticError::new(
                             SemanticErrorKind::InvalidAnalogOperator(
                                 "while loop condition is constant-true (infinite loop)".into(),
                             ),
                             while_stmt.span,
-                        )));
-                    }
-                    None => {
-                        // Runtime condition: lower to a runtime loop
-                        let cond_type = self.infer_type(&condition)?;
-                        if !cond_type.is_condition() {
-                            self.record_error_at(
-                                SemanticErrorKind::InvalidCondition {
-                                    found: cond_type.to_string(),
-                                },
-                                while_stmt.span,
-                            );
+                        ))),
+                        None => {
+                            // Runtime condition: lower to a runtime loop
+                            let cond_type = self.infer_type(&condition)?;
+                            if !cond_type.is_condition() {
+                                self.record_error_at(
+                                    SemanticErrorKind::InvalidCondition {
+                                        found: cond_type.to_string(),
+                                    },
+                                    while_stmt.span,
+                                );
+                            }
+                            // The structured loop sits inside whatever conditional
+                            // region encloses it, so folding the guard in again
+                            // would only add a read of a snapshot variable that the
+                            // region body never assigns.
+                            let unguarded = condition.clone();
+                            let condition = self.fold_guard_into_condition(condition);
+                            let (body, regions) =
+                                self.analyze_loop_body(&while_stmt.body, None, module)?;
+                            self.record_region(AnalyzedRegion::Loop {
+                                condition: unguarded,
+                                body: regions,
+                                span: while_stmt.span,
+                            });
+                            sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
+                                condition,
+                                body,
+                                span: while_stmt.span,
+                            }));
+                            Ok(())
                         }
-                        // The structured loop sits inside whatever conditional
-                        // region encloses it, so folding the guard in again
-                        // would only add a read of a snapshot variable that the
-                        // region body never assigns.
-                        let unguarded = condition.clone();
-                        let condition = self.fold_guard_into_condition(condition);
-                        let (body, regions) =
-                            self.analyze_loop_body(&while_stmt.body, None, module)?;
-                        self.record_region(AnalyzedRegion::Loop {
-                            condition: unguarded,
-                            body: regions,
-                            span: while_stmt.span,
-                        });
-                        sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
-                            condition,
-                            body,
-                            span: while_stmt.span,
-                        }));
-                    }
-                }
+                    });
+                self.dynamic_analog_operator_guard_depth -= 1;
+                result?;
             }
             AnalogStatement::EventControl(event_ctrl) => {
                 let unfiltered_initial_step = matches!(
@@ -1917,7 +2014,10 @@ impl SemanticAnalyzer {
                 if let Some(name) = initial_guard_name {
                     self.unfiltered_initial_step_guards.push(name);
                 }
-                self.analyze_statement(&event_ctrl.statement, module, sink)?;
+                self.dynamic_analog_operator_guard_depth += 1;
+                let body_result = self.analyze_statement(&event_ctrl.statement, module, sink);
+                self.dynamic_analog_operator_guard_depth -= 1;
+                body_result?;
                 if unfiltered_initial_step {
                     self.unfiltered_initial_step_guards.pop();
                 }
@@ -2618,6 +2718,8 @@ impl SemanticAnalyzer {
             self.resolve_contribution_target(&contrib.target, module, contrib.span)?;
         self.validate_branch_access_compatible(&contrib.target, contrib.span)?;
 
+        self.validate_direct_zi_contribution(&contrib.value, contrib.span)?;
+
         let expression = self.lower_expression_with_side_effects(&contrib.value, module, sink)?;
         let expr_type = self.infer_type(&expression)?;
         if !expr_type.is_numeric() && expr_type != ValueType::Unknown {
@@ -2653,6 +2755,246 @@ impl SemanticAnalyzer {
             span: contrib.span,
         });
 
+        Ok(())
+    }
+
+    fn validate_direct_zi_contribution(
+        &self,
+        expression: &Expression,
+        span: Span,
+    ) -> CompileResult<()> {
+        match expression {
+            Expression::Call(call) => {
+                if is_zi_operator_name(&call.name) {
+                    self.validate_direct_zi_site(call.name.as_str(), call.args.get(4), span)?;
+                }
+                for argument in &call.args {
+                    self.validate_direct_zi_contribution(argument, span)?;
+                }
+            }
+            Expression::AnalogOperator(AnalogOperator::Zi { transition, .. }) => {
+                self.validate_direct_zi_site("zi operator", transition.as_deref(), span)?;
+                self.validate_direct_zi_analog_children(expression, span)?;
+            }
+            Expression::AnalogOperator(_) => {
+                self.validate_direct_zi_analog_children(expression, span)?;
+            }
+            Expression::Binary(binary) => {
+                self.validate_direct_zi_contribution(&binary.left, span)?;
+                self.validate_direct_zi_contribution(&binary.right, span)?;
+            }
+            Expression::Unary(unary) => {
+                self.validate_direct_zi_contribution(&unary.operand, span)?;
+            }
+            Expression::Conditional(conditional) => {
+                self.validate_direct_zi_contribution(&conditional.condition, span)?;
+                self.validate_direct_zi_contribution(&conditional.then_expr, span)?;
+                self.validate_direct_zi_contribution(&conditional.else_expr, span)?;
+            }
+            Expression::SystemFunction(function) => {
+                for argument in &function.args {
+                    self.validate_direct_zi_contribution(argument, span)?;
+                }
+            }
+            Expression::ArrayAccess(access) => {
+                self.validate_direct_zi_contribution(&access.index, span)?;
+            }
+            Expression::ArrayLiteral(array) => {
+                for element in &array.elements {
+                    self.validate_direct_zi_contribution(element, span)?;
+                }
+            }
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::NullArgument(_)
+            | Expression::Identifier(_)
+            | Expression::BranchAccess(_) => {}
+            Expression::NoiseSource(noise) => match noise {
+                NoiseSource::White { power, .. } => {
+                    self.validate_direct_zi_contribution(power, span)?;
+                }
+                NoiseSource::Flicker {
+                    power, exponent, ..
+                } => {
+                    self.validate_direct_zi_contribution(power, span)?;
+                    self.validate_direct_zi_contribution(exponent, span)?;
+                }
+                NoiseSource::Table { data, .. } => {
+                    for value in data {
+                        self.validate_direct_zi_contribution(value, span)?;
+                    }
+                }
+            },
+        }
+        Ok(())
+    }
+
+    fn validate_direct_zi_analog_children(
+        &self,
+        expression: &Expression,
+        span: Span,
+    ) -> CompileResult<()> {
+        let Expression::AnalogOperator(operator) = expression else {
+            return Ok(());
+        };
+        let visit = |child: &Expression| self.validate_direct_zi_contribution(child, span);
+        match operator {
+            AnalogOperator::Limit {
+                proposed,
+                candidate,
+                type_metadata,
+                ..
+            } => {
+                visit(proposed)?;
+                visit(candidate)?;
+                if let Some(value) = type_metadata {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::LimiterArgument { .. } => {}
+            AnalogOperator::Ddt { expr, abstol, .. } => {
+                visit(expr)?;
+                if let Some(value) = abstol {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::Idt {
+                expr,
+                ic,
+                assert_val,
+                abstol,
+                ..
+            } => {
+                visit(expr)?;
+                for value in [ic, assert_val, abstol].into_iter().flatten() {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+                ..
+            } => {
+                visit(expr)?;
+                for value in [ic, modulus, offset, abstol].into_iter().flatten() {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::Ddx { expr, .. }
+            | AnalogOperator::Limexp { expr, .. }
+            | AnalogOperator::LastCrossing { expr, .. } => visit(expr)?,
+            AnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+                ..
+            } => {
+                visit(expr)?;
+                visit(delay)?;
+                if let Some(value) = max_delay {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+                ..
+            } => {
+                visit(expr)?;
+                for value in [delay, rise, fall, tolerance].into_iter().flatten() {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+                ..
+            } => {
+                visit(expr)?;
+                for value in [max_rise, max_fall].into_iter().flatten() {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::Laplace { expr, kind, .. } => {
+                visit(expr)?;
+                let (first, second) = match kind {
+                    LaplaceKind::ZeroPole { zeros, poles } => (zeros, poles),
+                    LaplaceKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
+                    LaplaceKind::NumeratorPole { numerator, poles } => (numerator, poles),
+                    LaplaceKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => (numerator, denominator),
+                };
+                for value in first.iter().chain(second) {
+                    visit(value)?;
+                }
+            }
+            AnalogOperator::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+                ..
+            } => {
+                visit(expr)?;
+                let (first, second) = match kind {
+                    ZiKind::ZeroPole { zeros, poles } => (zeros, poles),
+                    ZiKind::ZeroDenominator { zeros, denominator } => (zeros, denominator),
+                    ZiKind::NumeratorPole { numerator, poles } => (numerator, poles),
+                    ZiKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => (numerator, denominator),
+                };
+                for value in first.iter().chain(second) {
+                    visit(value)?;
+                }
+                visit(period)?;
+                if let Some(value) = transition {
+                    visit(value)?;
+                }
+                if let Some(value) = first_transition {
+                    visit(value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_direct_zi_site(
+        &self,
+        name: &str,
+        transition: Option<&Expression>,
+        contribution_span: Span,
+    ) -> CompileResult<()> {
+        let statically_invalid = match transition {
+            None => (self.current_default_transition == 0.0)
+                .then_some("the effective `default_transition` is zero".to_string()),
+            Some(Expression::NullArgument(_)) => {
+                Some("the transition argument is null".to_string())
+            }
+            Some(value) => self.eval_const_invariant(value).and_then(|value| {
+                (!value.is_finite() || value <= 0.0)
+                    .then_some(format!("the transition expression evaluates to {value}"))
+            }),
+        };
+        if let Some(reason) = statically_invalid {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "{name} cannot be contributed directly to an analog branch because {reason}; its transition time must evaluate strictly positive, or the Zi result must first be assigned to an intermediate variable (VAMS-2023 section 4.5.12)"
+                )),
+                contribution_span,
+            )));
+        }
         Ok(())
     }
 
@@ -3455,6 +3797,7 @@ impl SemanticAnalyzer {
         Ok(match expr {
             Expression::Number(_)
             | Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_) => expr.clone(),
             Expression::SystemFunction(function) => Expression::SystemFunction(SystemFunction {
@@ -3708,9 +4051,24 @@ impl SemanticAnalyzer {
                 expr: self.materialize_output_function_calls_box(expr, module, sink)?,
                 span: *span,
             },
-            AnalogOperator::Zi { kind, expr, span } => AnalogOperator::Zi {
+            AnalogOperator::Zi {
+                kind,
+                expr,
+                period,
+                transition,
+                first_transition,
+                span,
+            } => AnalogOperator::Zi {
                 kind: self.materialize_output_function_calls_in_zi_kind(kind, module, sink)?,
                 expr: self.materialize_output_function_calls_box(expr, module, sink)?,
+                period: self.materialize_output_function_calls_box(period, module, sink)?,
+                transition: self
+                    .materialize_output_function_calls_opt_box(transition, module, sink)?,
+                first_transition: self.materialize_output_function_calls_opt_box(
+                    first_transition,
+                    module,
+                    sink,
+                )?,
                 span: *span,
             },
         })
@@ -3901,6 +4259,7 @@ impl SemanticAnalyzer {
             }
             Expression::Number(_)
             | Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_) => false,
         }
@@ -3961,8 +4320,11 @@ impl SemanticAnalyzer {
                 self.expression_contains_output_function_call(expr)
                     || self.laplace_kind_contains_output_function_call(kind)
             }
-            AnalogOperator::Zi { kind, expr, .. } => {
+            AnalogOperator::Zi {
+                kind, expr, period, ..
+            } => {
                 self.expression_contains_output_function_call(expr)
+                    || self.expression_contains_output_function_call(period)
                     || self.zi_kind_contains_output_function_call(kind)
             }
             AnalogOperator::Absdelay {
@@ -4100,7 +4462,9 @@ impl SemanticAnalyzer {
                 Some(subst) => subst,
                 None => expr.clone(),
             },
-            Expression::Number(_) | Expression::StringLit(_) => expr.clone(),
+            Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {
+                expr.clone()
+            }
             Expression::BranchAccess(access) => {
                 self.validate_branch_access_compatible(access, access.span())?;
                 expr.clone()
@@ -4116,12 +4480,24 @@ impl SemanticAnalyzer {
                 operand: Box::new(self.lower_expression(&u.operand)?),
                 span: u.span,
             }),
-            Expression::Conditional(c) => Expression::Conditional(ConditionalExpr {
-                condition: Box::new(self.lower_expression(&c.condition)?),
-                then_expr: Box::new(self.lower_expression(&c.then_expr)?),
-                else_expr: Box::new(self.lower_expression(&c.else_expr)?),
-                span: c.span,
-            }),
+            Expression::Conditional(c) => {
+                let condition = self.lower_expression(&c.condition)?;
+                let dynamic_condition = !self.expression_is_simulation_invariant(&condition);
+                if dynamic_condition {
+                    self.dynamic_analog_operator_guard_depth += 1;
+                }
+                let then_result = self.lower_expression(&c.then_expr);
+                let else_result = self.lower_expression(&c.else_expr);
+                if dynamic_condition {
+                    self.dynamic_analog_operator_guard_depth -= 1;
+                }
+                Expression::Conditional(ConditionalExpr {
+                    condition: Box::new(condition),
+                    then_expr: Box::new(then_result?),
+                    else_expr: Box::new(else_result?),
+                    span: c.span,
+                })
+            }
             Expression::SystemFunction(f) => {
                 self.validate_limit_call(f)?;
                 if let Some(limit) = self.lower_custom_limit_call(f)? {
@@ -4140,6 +4516,27 @@ impl SemanticAnalyzer {
             }
             Expression::Call(call) => {
                 self.validate_builtin_call_arity(call)?;
+                self.validate_null_arguments(call)?;
+                if is_zi_operator_name(&call.name) {
+                    self.validate_zi_operand_budget(call)?;
+                    self.validate_zi_definition_purity(call)?;
+                }
+
+                if is_zi_operator_name(&call.name)
+                    && (self.dynamic_analog_operator_guard_depth != 0 || self.inline_depth != 0)
+                {
+                    let context = if self.inline_depth != 0 {
+                        "inside a user-defined analog function"
+                    } else {
+                        "under runtime control flow"
+                    };
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(format!(
+                            "zi_* analog operators must be evaluated on every Newton iteration and cannot appear {context} (VAMS-2023 section 4.5.15)"
+                        )),
+                        call.span,
+                    )));
+                }
 
                 // Nature access functions other than V/I (Pwr, Temp, ...)
                 // parse as calls; rewrite them into branch accesses.
@@ -4192,11 +4589,20 @@ impl SemanticAnalyzer {
                     }
                     self.inline_function(&call.name, &call.args, call.span)?
                 } else {
-                    let args = call
+                    let mut args = call
                         .args
                         .iter()
                         .map(|a| self.lower_expression(a))
                         .collect::<CompileResult<Vec<_>>>()?;
+                    // Materialize the declaration-order-scoped default now.
+                    // Hierarchy flattening may later combine modules authored
+                    // under different directives into one analyzed module.
+                    if is_zi_operator_name(&call.name) && args.len() == 4 {
+                        args.push(Self::number_expr(
+                            self.current_default_transition,
+                            call.span,
+                        ));
+                    }
                     Expression::Call(CallExpr {
                         name: call.name.clone(),
                         args,
@@ -4245,8 +4651,229 @@ impl SemanticAnalyzer {
                     span: a.span,
                 })
             }
+            Expression::AnalogOperator(AnalogOperator::Zi { span, .. })
+                if self.dynamic_analog_operator_guard_depth != 0 || self.inline_depth != 0 =>
+            {
+                let context = if self.inline_depth != 0 {
+                    "inside a user-defined analog function"
+                } else {
+                    "under runtime control flow"
+                };
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "zi_* analog operators must be evaluated on every Newton iteration and cannot appear {context} (VAMS-2023 section 4.5.15)"
+                    )),
+                    *span,
+                )));
+            }
+            Expression::AnalogOperator(AnalogOperator::Zi {
+                kind,
+                expr,
+                period,
+                transition,
+                first_transition,
+                span,
+            }) => {
+                self.validate_public_zi_operand_budget(kind, *span)?;
+                Expression::AnalogOperator(AnalogOperator::Zi {
+                    kind: kind.clone(),
+                    expr: Box::new(self.lower_expression(expr)?),
+                    period: Box::new(self.lower_expression(period)?),
+                    transition: Some(Box::new(match transition {
+                        Some(transition) => self.lower_expression(transition)?,
+                        None => Self::number_expr(self.current_default_transition, *span),
+                    })),
+                    first_transition: first_transition
+                        .as_ref()
+                        .map(|value| self.lower_expression(value))
+                        .transpose()?
+                        .map(Box::new),
+                    span: *span,
+                })
+            }
             Expression::AnalogOperator(_) | Expression::NoiseSource(_) => expr.clone(),
         })
+    }
+
+    fn validate_zi_definition_purity(&self, call: &CallExpr) -> CompileResult<()> {
+        for (index, argument) in call.args.iter().enumerate() {
+            if matches!(index, 1 | 2 | 3 | 5) {
+                Self::validate_zi_freeze_expression(argument, &call.name, index)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_zi_operand_budget(&self, call: &CallExpr) -> CompileResult<()> {
+        let scalar_count = |expression: &Expression| match expression {
+            Expression::NullArgument(_) => 0,
+            Expression::ArrayLiteral(array) => array.elements.len(),
+            _ => 1,
+        };
+        self.validate_zi_scalar_budget(
+            &call.name,
+            scalar_count(&call.args[1]),
+            scalar_count(&call.args[2]),
+            call.span,
+        )
+    }
+
+    fn validate_public_zi_operand_budget(&self, kind: &ZiKind, span: Span) -> CompileResult<()> {
+        let (operator, numerator, denominator) = match kind {
+            ZiKind::ZeroPole { zeros, poles } => ("zi_zp", zeros.len(), poles.len()),
+            ZiKind::ZeroDenominator { zeros, denominator } => {
+                ("zi_zd", zeros.len(), denominator.len())
+            }
+            ZiKind::NumeratorPole { numerator, poles } => ("zi_np", numerator.len(), poles.len()),
+            ZiKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => ("zi_nd", numerator.len(), denominator.len()),
+        };
+        self.validate_zi_scalar_budget(operator, numerator, denominator, span)
+    }
+
+    fn validate_zi_scalar_budget(
+        &self,
+        operator: &str,
+        numerator: usize,
+        denominator: usize,
+        span: Span,
+    ) -> CompileResult<()> {
+        crate::zfilter::validate_zi_runtime_operand_budget(operator, numerator, denominator)
+            .map(|_| ())
+            .map_err(|error| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(error.to_string()),
+                    span,
+                ))
+            })
+    }
+
+    fn validate_zi_freeze_expression(
+        expression: &Expression,
+        operator: &str,
+        argument_index: usize,
+    ) -> CompileResult<()> {
+        let reject = |detail: String, span: Span| {
+            Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "{operator} constant argument {} must be side-effect-free and deterministic for analysis-start freezing: {detail}",
+                    argument_index + 1
+                )),
+                span,
+            )))
+        };
+        match expression {
+            Expression::Number(_)
+            | Expression::StringLit(_)
+            | Expression::NullArgument(_)
+            | Expression::Identifier(_)
+            | Expression::BranchAccess(_) => Ok(()),
+            Expression::Binary(binary) => {
+                Self::validate_zi_freeze_expression(&binary.left, operator, argument_index)?;
+                Self::validate_zi_freeze_expression(&binary.right, operator, argument_index)
+            }
+            Expression::Unary(unary) => {
+                Self::validate_zi_freeze_expression(&unary.operand, operator, argument_index)
+            }
+            Expression::Conditional(conditional) => {
+                Self::validate_zi_freeze_expression(
+                    &conditional.condition,
+                    operator,
+                    argument_index,
+                )?;
+                Self::validate_zi_freeze_expression(
+                    &conditional.then_expr,
+                    operator,
+                    argument_index,
+                )?;
+                Self::validate_zi_freeze_expression(
+                    &conditional.else_expr,
+                    operator,
+                    argument_index,
+                )
+            }
+            Expression::ArrayAccess(access) => {
+                Self::validate_zi_freeze_expression(&access.index, operator, argument_index)
+            }
+            Expression::ArrayLiteral(array) => {
+                for element in &array.elements {
+                    Self::validate_zi_freeze_expression(element, operator, argument_index)?;
+                }
+                Ok(())
+            }
+            Expression::SystemFunction(function) => {
+                let normalized = function.name.to_ascii_lowercase();
+                if normalized.contains("random")
+                    || normalized.starts_with("$dist_")
+                    || normalized.starts_with("$rdist_")
+                    || normalized == "$limit"
+                {
+                    return reject(
+                        format!(
+                            "system function '{}' is stateful or nondeterministic",
+                            function.name
+                        ),
+                        function.span,
+                    );
+                }
+                for argument in &function.args {
+                    Self::validate_zi_freeze_expression(argument, operator, argument_index)?;
+                }
+                Ok(())
+            }
+            Expression::Call(nested) => {
+                let normalized = nested.name.to_ascii_lowercase();
+                if matches!(
+                    normalized.as_str(),
+                    "ddt"
+                        | "idt"
+                        | "idtmod"
+                        | "transition"
+                        | "slew"
+                        | "absdelay"
+                        | "cross"
+                        | "last_crossing"
+                        | "above"
+                        | "timer"
+                        | "laplace_zp"
+                        | "laplace_zd"
+                        | "laplace_np"
+                        | "laplace_nd"
+                        | "zi_zp"
+                        | "zi_zd"
+                        | "zi_np"
+                        | "zi_nd"
+                        | "white_noise"
+                        | "flicker_noise"
+                        | "noise_table"
+                ) {
+                    return reject(
+                        format!(
+                            "nested operator '{}' is stateful or nondeterministic",
+                            nested.name
+                        ),
+                        nested.span,
+                    );
+                }
+                for argument in &nested.args {
+                    Self::validate_zi_freeze_expression(argument, operator, argument_index)?;
+                }
+                Ok(())
+            }
+            Expression::AnalogOperator(AnalogOperator::Limexp { expr, .. }) => {
+                Self::validate_zi_freeze_expression(expr, operator, argument_index)
+            }
+            Expression::AnalogOperator(analog) => reject(
+                format!("nested analog operator at {:?} is stateful", analog.span()),
+                analog.span(),
+            ),
+            Expression::NoiseSource(noise) => reject(
+                "a noise source is nondeterministic in this context".into(),
+                noise.span(),
+            ),
+        }
     }
 
     /// Validate the selector and callable contract of named `$limit` forms.
@@ -4470,6 +5097,31 @@ impl SemanticAnalyzer {
             )));
         }
 
+        Ok(())
+    }
+
+    fn validate_null_arguments(&self, call: &CallExpr) -> CompileResult<()> {
+        let normalized = call.name.to_ascii_lowercase();
+        for (index, argument) in call.args.iter().enumerate() {
+            if !matches!(argument, Expression::NullArgument(_)) {
+                continue;
+            }
+            let authorized = index == 1
+                && matches!(
+                    normalized.as_str(),
+                    "zi_zp" | "zi_zd" | "laplace_zp" | "laplace_zd"
+                );
+            if !authorized {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "{} argument {} may not be null; only the zeros operand of zi_zp/zi_zd and laplace_zp/laplace_zd authorizes an adjacent-comma null",
+                        call.name,
+                        index + 1
+                    )),
+                    argument.span(),
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -4698,18 +5350,34 @@ impl SemanticAnalyzer {
                     &cond.condition,
                     "analog function body",
                 )?;
+                let dynamic_condition = !self.expression_is_simulation_invariant(&condition);
                 let then_guard = match guard {
                     Some(g) => Self::binary_expr(BinaryOp::And, g.clone(), condition.clone()),
                     None => condition.clone(),
                 };
-                self.exec_function_statement(&cond.then_branch, Some(&then_guard))?;
+                if dynamic_condition {
+                    self.dynamic_analog_operator_guard_depth += 1;
+                }
+                let then_result =
+                    self.exec_function_statement(&cond.then_branch, Some(&then_guard));
+                if dynamic_condition {
+                    self.dynamic_analog_operator_guard_depth -= 1;
+                }
+                then_result?;
                 if let Some(else_branch) = &cond.else_branch {
                     let not_cond = Self::not_expr(condition);
                     let else_guard = match guard {
                         Some(g) => Self::binary_expr(BinaryOp::And, g.clone(), not_cond),
                         None => not_cond,
                     };
-                    self.exec_function_statement(else_branch, Some(&else_guard))?;
+                    if dynamic_condition {
+                        self.dynamic_analog_operator_guard_depth += 1;
+                    }
+                    let else_result = self.exec_function_statement(else_branch, Some(&else_guard));
+                    if dynamic_condition {
+                        self.dynamic_analog_operator_guard_depth -= 1;
+                    }
+                    else_result?;
                 }
             }
             AnalogStatement::Case(case_stmt) => {
@@ -4919,6 +5587,13 @@ impl SemanticAnalyzer {
         match expr {
             Expression::Number(_) => Ok(ValueType::Real),
             Expression::StringLit(_) => Ok(ValueType::String),
+            Expression::NullArgument(span) => Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidExpression(
+                    "a null argument is legal only in the zero-vector position of zi_zp, zi_zd, laplace_zp, or laplace_zd"
+                        .into(),
+                ),
+                *span,
+            ))),
             Expression::Identifier(ident) => {
                 if let Some(sym) = self.symbols.lookup(&ident.name) {
                     Ok(sym.value_type)
@@ -4997,6 +5672,15 @@ impl SemanticAnalyzer {
     /// instances may override parameters.
     fn eval_const(&self, expr: &Expression) -> Option<f64> {
         Self::eval_const_with(expr, &self.param_consts)
+    }
+
+    /// Whether an expression is fixed for the duration of an analysis.
+    /// Model parameters may differ between instances, but each resolved
+    /// parameter value is constant while that instance is evaluated, so it is
+    /// legal as an analog-operator control expression even though it is not
+    /// safe for compile-time code-shape folding.
+    fn expression_is_simulation_invariant(&self, expr: &Expression) -> bool {
+        self.eval_const(expr).is_some()
     }
 
     /// Constant evaluation that only resolves instance-invariant values.
@@ -5355,6 +6039,7 @@ impl SemanticAnalyzer {
             }
             Expression::Number(_)
             | Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => {}
@@ -5368,7 +6053,7 @@ impl SemanticAnalyzer {
     ) -> bool {
         match expr {
             Expression::Identifier(id) => names.contains(&id.name),
-            Expression::Number(_) | Expression::StringLit(_) => false,
+            Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => false,
             Expression::Binary(b) => {
                 Self::references_identifiers(&b.left, names)
                     || Self::references_identifiers(&b.right, names)
@@ -5481,6 +6166,7 @@ impl SemanticAnalyzer {
             }),
             Expression::Number(_)
             | Expression::StringLit(_)
+            | Expression::NullArgument(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
@@ -5502,6 +6188,13 @@ impl SemanticAnalyzer {
 
 fn is_global_ground_name(name: &str) -> bool {
     name == "0"
+}
+
+fn is_zi_operator_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "zi_zp" | "zi_zd" | "zi_np" | "zi_nd"
+    )
 }
 
 // ============================================================================

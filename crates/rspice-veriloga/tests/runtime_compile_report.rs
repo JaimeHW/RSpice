@@ -10,6 +10,18 @@ use rspice_veriloga::{
 
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
 
+const ZI_STATE_SOURCE: &str = r#"
+module zi_state(p, n);
+  inout p, n;
+  electrical p, n;
+  real sampled;
+  analog begin
+    sampled = zi_nd(V(p, n), {1.0, 0.25}, {1.0, -0.5}, 1.0e-6, 0.0);
+    I(p, n) <+ sampled;
+  end
+endmodule
+"#;
+
 fn compiler() -> VerilogACompiler {
     VerilogACompiler::new(CompilerOptions::default())
 }
@@ -387,6 +399,44 @@ fn integrity_validation_rejects_cross_artifact_digest_drift() {
             artifact: "compiled model",
             ..
         }
+    ));
+}
+
+#[test]
+fn runtime_report_deserialization_rejects_malformed_zi_history() {
+    let report = compiler()
+        .compile_runtime(ZI_STATE_SOURCE, Some("zi_state"))
+        .expect("compile Zi runtime report");
+    let mut encoded = serde_json::to_value(report).expect("serialize Zi runtime report");
+    encoded["model"]["zi_filters"][0]["x_hist"] = serde_json::json!([0.0]);
+
+    let error = serde_json::from_value::<rspice_veriloga::RuntimeCompileReport>(encoded)
+        .expect_err("malformed compiled-model Zi history must fail deserialization");
+    assert!(
+        error.to_string().contains("input history length"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn integrity_validation_reports_the_compiled_zi_filter_index() {
+    let mut report = compiler()
+        .compile_runtime(ZI_STATE_SOURCE, Some("zi_state"))
+        .expect("compile Zi runtime report");
+    let filter = report
+        .model
+        .zi_filters
+        .get_mut(0)
+        .expect("Zi model owns one filter placeholder");
+    filter.eval(1.0, 0.0, true).unwrap();
+    filter.commit(0.0).unwrap();
+
+    let error = report
+        .validate_integrity()
+        .expect_err("dirty state beneath an unfrozen definition must fail integrity");
+    assert!(matches!(
+        error,
+        RuntimeArtifactIntegrityError::InvalidZiFilterState { index: 0, .. }
     ));
 }
 

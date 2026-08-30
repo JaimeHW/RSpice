@@ -311,6 +311,9 @@ pub enum SemanticErrorKind {
     #[error("Invalid analog operator context: {0}")]
     InvalidAnalogOperator(String),
 
+    #[error("Invalid expression: {0}")]
+    InvalidExpression(String),
+
     #[error("Circular dependency in {0}")]
     CircularDependency(String),
 
@@ -351,6 +354,7 @@ impl SemanticErrorKind {
             Self::InvalidCondition { .. } => "VA-SEM-INVALID-CONDITION",
             Self::IncompatibleDisciplines(_, _) => "VA-SEM-INCOMPATIBLE-DISCIPLINES",
             Self::InvalidAnalogOperator(_) => "VA-SEM-INVALID-ANALOG-OPERATOR",
+            Self::InvalidExpression(_) => "VA-SEM-INVALID-EXPRESSION",
             Self::CircularDependency(_) => "VA-SEM-CIRCULAR-DEPENDENCY",
             Self::MissingAttribute(_) => "VA-SEM-MISSING-ATTRIBUTE",
             Self::ArgumentCountMismatch { .. } => "VA-SEM-ARGUMENT-COUNT",

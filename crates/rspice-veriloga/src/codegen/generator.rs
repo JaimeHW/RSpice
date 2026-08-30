@@ -52,6 +52,8 @@ impl CodeGenerator {
             cross_detector_count: std::cell::Cell::new(0),
             timer_state_count: std::cell::Cell::new(0),
             zi_filters: std::cell::RefCell::new(Vec::new()),
+            zi_filter_definitions: std::cell::RefCell::new(Vec::new()),
+            zi_sites: std::cell::RefCell::new(HashMap::new()),
         }
     }
 
@@ -213,6 +215,8 @@ impl CodeGenerator {
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
         self.zi_filters.borrow_mut().clear();
+        self.zi_filter_definitions.borrow_mut().clear();
+        self.zi_sites.borrow_mut().clear();
         self.limit_state_count.set(0);
         self.delay_buffer_count.set(0);
         self.transition_filter_count.set(0);
@@ -314,6 +318,7 @@ impl CodeGenerator {
                 .collect(),
             laplace_filters: Vec::new(),
             zi_filters: Vec::new(),
+            zi_filter_definitions: Vec::new(),
             noise_sources: Vec::new(),
         };
 
@@ -382,6 +387,7 @@ impl CodeGenerator {
         model.laplace_filters = self.laplace_filters.take();
         model.lookup_tables = self.lookup_tables.take();
         model.zi_filters = self.zi_filters.take();
+        model.zi_filter_definitions = self.zi_filter_definitions.take();
 
         Ok(model)
     }
@@ -662,6 +668,111 @@ impl CodeGenerator {
         let id = counter.get();
         counter.set(id + 1);
         id
+    }
+
+    fn compile_zi_polynomial(
+        &self,
+        definition: &crate::ir::ZiPolynomialDefinition,
+        emit_ctx: &EmitContext,
+    ) -> CompileResult<CompiledZiPolynomial> {
+        Ok(match definition {
+            crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
+                CompiledZiPolynomial::Coefficients(
+                    values
+                        .iter()
+                        .map(|value| self.compile_expr(value, emit_ctx))
+                        .collect::<CompileResult<Vec<_>>>()?,
+                )
+            }
+            crate::ir::ZiPolynomialDefinition::Roots(values) => CompiledZiPolynomial::Roots(
+                values
+                    .iter()
+                    .map(|(real, imaginary)| {
+                        Ok((
+                            self.compile_expr(real, emit_ctx)?,
+                            self.compile_expr(imaginary, emit_ctx)?,
+                        ))
+                    })
+                    .collect::<CompileResult<Vec<_>>>()?,
+            ),
+        })
+    }
+
+    fn emit_zi_polynomial_operands(
+        &self,
+        definition: &crate::ir::ZiPolynomialDefinition,
+        emit_ctx: &EmitContext,
+        program: &mut BytecodeProgram,
+    ) -> CompileResult<ZiPolynomialLayout> {
+        match definition {
+            crate::ir::ZiPolynomialDefinition::Coefficients(values) => {
+                for value in values {
+                    self.emit_expr(value, emit_ctx, program)?;
+                }
+                Ok(ZiPolynomialLayout::Coefficients { len: values.len() })
+            }
+            crate::ir::ZiPolynomialDefinition::Roots(values) => {
+                for (real, imaginary) in values {
+                    self.emit_expr(real, emit_ctx, program)?;
+                    self.emit_expr(imaginary, emit_ctx, program)?;
+                }
+                Ok(ZiPolynomialLayout::Roots { len: values.len() })
+            }
+        }
+    }
+
+    fn zi_site_slot(
+        &self,
+        site: crate::ir::ZiSiteId,
+        numerator: &crate::ir::ZiPolynomialDefinition,
+        denominator: &crate::ir::ZiPolynomialDefinition,
+        period: &IrExpr,
+        first_transition: &IrExpr,
+        emit_ctx: &EmitContext,
+    ) -> CompileResult<usize> {
+        let scalar_count = |definition: &crate::ir::ZiPolynomialDefinition| match definition {
+            crate::ir::ZiPolynomialDefinition::Coefficients(values) => Some(values.len()),
+            crate::ir::ZiPolynomialDefinition::Roots(values) => values.len().checked_mul(2),
+        };
+        let numerator_scalars = scalar_count(numerator).ok_or_else(|| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "Zi numerator root scalar count overflows usize".into(),
+            ))
+        })?;
+        let denominator_scalars = scalar_count(denominator).ok_or_else(|| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "Zi denominator root scalar count overflows usize".into(),
+            ))
+        })?;
+        crate::zfilter::validate_zi_runtime_operand_budget(
+            "Zi filter",
+            numerator_scalars,
+            denominator_scalars,
+        )
+        .map_err(|error| {
+            CodeGenError::new(CodeGenErrorKind::InvalidExpression(error.to_string()))
+        })?;
+        if let Some(slot) = self.zi_sites.borrow().get(&site).copied() {
+            return Ok(slot);
+        }
+        let definition = CompiledZiFilterDefinition {
+            numerator: self.compile_zi_polynomial(numerator, emit_ctx)?,
+            denominator: self.compile_zi_polynomial(denominator, emit_ctx)?,
+            period: self.compile_expr(period, emit_ctx)?,
+            first_transition: self.compile_expr(first_transition, emit_ctx)?,
+        };
+        let slot = self.zi_filter_definitions.borrow().len();
+        self.zi_filter_definitions.borrow_mut().push(definition);
+        let mut placeholder =
+            crate::zfilter::ZiFilter::new(vec![1.0], vec![1.0], 1.0).map_err(|error| {
+                CodeGenError::new(CodeGenErrorKind::Internal(format!(
+                    "failed to create internal Zi placeholder: {error}"
+                )))
+            })?;
+        placeholder.invalidate_definition();
+        self.zi_filters.borrow_mut().push(placeholder);
+        self.zi_sites.borrow_mut().insert(site, slot);
+        Ok(slot)
     }
 
     /// Emit bytecode for an expression
@@ -1070,22 +1181,72 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::PushConst(0.0));
             }
             IrExpr::ZiFilter {
+                site,
                 expr,
                 numerator,
                 denominator,
                 period,
+                transition,
+                first_transition,
+                direct_assignment,
             } => {
+                let filter_id = self.zi_site_slot(
+                    *site,
+                    numerator,
+                    denominator,
+                    period,
+                    first_transition,
+                    emit_ctx,
+                )?;
+                let numerator = self.emit_zi_polynomial_operands(numerator, emit_ctx, program)?;
+                let denominator =
+                    self.emit_zi_polynomial_operands(denominator, emit_ctx, program)?;
+                self.emit_expr(period, emit_ctx, program)?;
+                self.emit_expr(first_transition, emit_ctx, program)?;
                 self.emit_expr(expr, emit_ctx, program)?;
-                let filter_id = {
-                    let mut filters = self.zi_filters.borrow_mut();
-                    filters.push(crate::zfilter::ZiFilter::new(
-                        numerator.clone(),
-                        denominator.clone(),
-                        *period,
-                    ));
-                    filters.len() - 1
-                };
-                program.instructions.push(Instruction::ZiState(filter_id));
+                self.emit_expr(transition, emit_ctx, program)?;
+                program
+                    .instructions
+                    .push(Instruction::ZiState(ZiRuntimeLayout {
+                        filter_id,
+                        numerator,
+                        denominator,
+                        direct_assignment: *direct_assignment,
+                    }));
+            }
+            IrExpr::ZiFilterDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let filter_id = self.zi_site_slot(
+                    *site,
+                    numerator,
+                    denominator,
+                    period,
+                    first_transition,
+                    emit_ctx,
+                )?;
+                let numerator = self.emit_zi_polynomial_operands(numerator, emit_ctx, program)?;
+                let denominator =
+                    self.emit_zi_polynomial_operands(denominator, emit_ctx, program)?;
+                self.emit_expr(period, emit_ctx, program)?;
+                self.emit_expr(first_transition, emit_ctx, program)?;
+                self.emit_expr(expr, emit_ctx, program)?;
+                self.emit_expr(transition, emit_ctx, program)?;
+                program
+                    .instructions
+                    .push(Instruction::ZiStateDerivative(ZiRuntimeLayout {
+                        filter_id,
+                        numerator,
+                        denominator,
+                        direct_assignment: *direct_assignment,
+                    }));
             }
             IrExpr::FlickerNoise {
                 power: _,

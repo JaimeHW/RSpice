@@ -33,6 +33,13 @@ pub struct DelayBuffer {
     candidate: Option<(f64, f64)>,
 }
 
+/// Accepted transport-delay history. Speculative Newton candidates are never
+/// part of a checkpoint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DelayCheckpoint {
+    pub samples: Vec<(f64, f64)>,
+}
+
 /// Evaluate a Verilog-A timer and return both its event level and the next
 /// absolute event time that the transient stepper must not skip.
 ///
@@ -232,6 +239,53 @@ impl DelayBuffer {
         self.write_pos = 0;
         self.candidate = None;
     }
+
+    pub(crate) fn checkpoint(&self) -> DelayCheckpoint {
+        let mut samples = Vec::with_capacity(self.count);
+        for index in 0..self.count {
+            let physical = if self.count == self.capacity {
+                (self.write_pos + index) % self.capacity
+            } else {
+                index
+            };
+            samples.push(self.samples[physical]);
+        }
+        DelayCheckpoint { samples }
+    }
+
+    pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
+        if self.candidate.is_some() {
+            return Err("delay has an in-flight Newton candidate".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_checkpoint(checkpoint: &DelayCheckpoint) -> Result<(), String> {
+        let mut previous = None;
+        for (index, &(time, value)) in checkpoint.samples.iter().enumerate() {
+            if !time.is_finite() || !value.is_finite() {
+                return Err(format!("delay sample {index} is not finite"));
+            }
+            if previous.is_some_and(|accepted| time <= accepted) {
+                return Err(format!(
+                    "delay sample times are not strictly increasing at sample {index}"
+                ));
+            }
+            previous = Some(time);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint(&mut self, checkpoint: &DelayCheckpoint) {
+        let capacity = checkpoint.samples.len().max(2);
+        self.capacity = capacity;
+        self.samples.clear();
+        self.samples.resize(capacity, (0.0, 0.0));
+        self.samples[..checkpoint.samples.len()].copy_from_slice(&checkpoint.samples);
+        self.count = checkpoint.samples.len();
+        self.write_pos = self.count % capacity;
+        self.candidate = None;
+    }
 }
 
 #[cfg(test)]
@@ -351,6 +405,15 @@ struct TransitionState {
     pub start_value: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransitionCheckpoint {
+    pub output: f64,
+    pub target: f64,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub start_value: f64,
+}
+
 impl Default for TransitionState {
     fn default() -> Self {
         Self {
@@ -425,12 +488,64 @@ impl TransitionFilter {
             self.candidate_valid = false;
         }
     }
+
+    pub(crate) fn checkpoint(&self) -> TransitionCheckpoint {
+        TransitionCheckpoint {
+            output: self.committed.output,
+            target: self.committed.target,
+            start_time: self.committed.start_time,
+            end_time: self.committed.end_time,
+            start_value: self.committed.start_value,
+        }
+    }
+
+    pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
+        if self.candidate_valid {
+            return Err("transition has an in-flight Newton candidate".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_checkpoint(checkpoint: &TransitionCheckpoint) -> Result<(), String> {
+        let values = [
+            checkpoint.output,
+            checkpoint.target,
+            checkpoint.start_time,
+            checkpoint.end_time,
+            checkpoint.start_value,
+        ];
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err("transition accepted state is not finite".into());
+        }
+        if checkpoint.end_time < checkpoint.start_time {
+            return Err("transition end time precedes its start time".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint(&mut self, checkpoint: &TransitionCheckpoint) {
+        self.committed = TransitionState {
+            output: checkpoint.output,
+            target: checkpoint.target,
+            start_time: checkpoint.start_time,
+            end_time: checkpoint.end_time,
+            start_value: checkpoint.start_value,
+        };
+        self.candidate = self.committed;
+        self.candidate_valid = false;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 struct SlewState {
     output: f64,
     prev_time: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SlewCheckpoint {
+    pub output: f64,
+    pub prev_time: f64,
 }
 
 /// Slew rate filter for limiting rate of change.
@@ -481,6 +596,36 @@ impl SlewFilter {
             self.candidate_valid = false;
         }
     }
+
+    pub(crate) fn checkpoint(&self) -> SlewCheckpoint {
+        SlewCheckpoint {
+            output: self.committed.output,
+            prev_time: self.committed.prev_time,
+        }
+    }
+
+    pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
+        if self.candidate_valid {
+            return Err("slew has an in-flight Newton candidate".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_checkpoint(checkpoint: &SlewCheckpoint) -> Result<(), String> {
+        if !checkpoint.output.is_finite() || !checkpoint.prev_time.is_finite() {
+            return Err("slew accepted state is not finite".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint(&mut self, checkpoint: &SlewCheckpoint) {
+        self.committed = SlewState {
+            output: checkpoint.output,
+            prev_time: checkpoint.prev_time,
+        };
+        self.candidate = self.committed;
+        self.candidate_valid = false;
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -491,6 +636,16 @@ struct CrossState {
     last_event_time: f64,
     last_crossing_time: f64,
     initialized: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossCheckpoint {
+    pub value: f64,
+    pub time: f64,
+    pub side: i8,
+    pub last_event_time: f64,
+    pub last_crossing_time: f64,
+    pub initialized: bool,
 }
 
 impl Default for CrossState {
@@ -708,5 +863,54 @@ impl CrossDetector {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+    }
+
+    pub(crate) fn checkpoint(&self) -> CrossCheckpoint {
+        CrossCheckpoint {
+            value: self.committed.value,
+            time: self.committed.time,
+            side: self.committed.side,
+            last_event_time: self.committed.last_event_time,
+            last_crossing_time: self.committed.last_crossing_time,
+            initialized: self.committed.initialized,
+        }
+    }
+
+    pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), String> {
+        if self.candidate_valid {
+            return Err("cross detector has an in-flight Newton candidate".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_checkpoint(checkpoint: &CrossCheckpoint) -> Result<(), String> {
+        if !(-1..=1).contains(&checkpoint.side) {
+            return Err("cross side is outside -1..=1".into());
+        }
+        if !checkpoint.value.is_finite()
+            || !checkpoint.time.is_finite()
+            || !(checkpoint.last_event_time.is_finite()
+                || checkpoint.last_event_time == f64::NEG_INFINITY)
+            || !checkpoint.last_crossing_time.is_finite()
+        {
+            return Err("cross accepted state is malformed".into());
+        }
+        if checkpoint.last_crossing_time < -1.0 {
+            return Err("cross last-crossing sentinel is invalid".into());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint(&mut self, checkpoint: &CrossCheckpoint) {
+        self.committed = CrossState {
+            value: checkpoint.value,
+            time: checkpoint.time,
+            side: checkpoint.side,
+            last_event_time: checkpoint.last_event_time,
+            last_crossing_time: checkpoint.last_crossing_time,
+            initialized: checkpoint.initialized,
+        };
+        self.candidate = self.committed;
+        self.candidate_valid = false;
     }
 }

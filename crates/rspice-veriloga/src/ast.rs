@@ -22,6 +22,10 @@ pub struct SourceFile {
 /// Top-level item in a source file
 #[derive(Debug, Clone)]
 pub enum Item {
+    /// Global Verilog-AMS default-transition compiler directive. The
+    /// preprocessor retains it as a typed top-level item so
+    /// declaration-order scope is not lost before semantic analysis.
+    DefaultTransition(DefaultTransitionDirective),
     /// Module definition
     Module(Module),
     /// Discipline definition
@@ -32,6 +36,13 @@ pub enum Item {
     ConnectModule(Module),
     /// Paramset definition
     ParamSet(ParamSetDef),
+}
+
+/// One global default-transition directive.
+#[derive(Debug, Clone)]
+pub struct DefaultTransitionDirective {
+    pub value: Expression,
+    pub span: Span,
 }
 
 /// Module definition
@@ -129,6 +140,11 @@ pub struct ParameterDecl {
     pub param_type: ParamType,
     /// Parameter name
     pub name: SmolStr,
+    /// Fixed declaration dimensions. These are retained even on compiler
+    /// configurations whose external parameter ABI does not yet implement
+    /// array-valued overrides, so they can fail closed with a precise
+    /// diagnostic instead of being silently treated as scalars.
+    pub dimensions: Vec<ArrayDimension>,
     /// Default value
     pub default: Option<Expression>,
     /// Range constraint
@@ -588,6 +604,10 @@ pub enum Expression {
     Conditional(ConditionalExpr),
     /// Function call
     Call(CallExpr),
+    /// Explicitly omitted positional argument (for example the null zeros
+    /// operand in `zi_zp(x,,p,T)`). Legality is operator-specific and is
+    /// checked by semantic analysis.
+    NullArgument(Span),
     /// Branch access: V(a, b), I(a, b)
     BranchAccess(BranchAccess),
     /// Array access: `arr[i]`
@@ -611,6 +631,7 @@ impl Expression {
             Expression::Unary(u) => u.span,
             Expression::Conditional(c) => c.span,
             Expression::Call(c) => c.span,
+            Expression::NullArgument(span) => *span,
             Expression::BranchAccess(b) => b.span(),
             Expression::ArrayAccess(a) => a.span,
             Expression::ArrayLiteral(a) => a.span,
@@ -834,6 +855,15 @@ pub enum AnalogOperator {
     Zi {
         kind: ZiKind,
         expr: Box<Expression>,
+        /// Sample-period constant argument, evaluated and frozen at analysis
+        /// start. Its frozen value must be finite and greater than zero.
+        period: Box<Expression>,
+        /// Dynamic output transition time. Omission uses the effective
+        /// global `default_transition` setting.
+        transition: Option<Box<Expression>>,
+        /// First-transition constant argument, evaluated and frozen at
+        /// analysis start. Omission means zero.
+        first_transition: Option<Box<Expression>>,
         span: Span,
     },
 }

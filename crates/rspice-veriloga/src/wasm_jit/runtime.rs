@@ -1,4 +1,4 @@
-//! Primary-module implementation of the versioned scalar helper capability.
+//! Primary-module implementation of the versioned helper capabilities.
 
 use crate::codegen::Instruction;
 use crate::jit::expr::{
@@ -6,13 +6,17 @@ use crate::jit::expr::{
     constant_dynamic_variable_slot, constant_extremum, constant_integer_binary,
     constant_unary_math,
 };
-use crate::vm::{Vm, VmContext};
+use crate::vm::{Vm, VmContext, execute_zi_state, execute_zi_state_derivative};
 
 #[cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
 
 #[cfg(target_arch = "wasm32")]
-use super::abi::{WASM_JIT_FRAME_MAGIC, WASM_JIT_STATUS_RUNTIME_ERROR, WasmJitEvalFrame};
+use super::abi::{
+    WASM_JIT_FRAME_MAGIC, WASM_JIT_MAX_EVAL_FRAME_BYTES, WASM_JIT_SLICE_OPERANDS_OFFSET,
+    WASM_JIT_STATUS_ABI_MISMATCH, WASM_JIT_STATUS_RUNTIME_ERROR, WasmJitEvalFrame,
+};
+use super::abi::{WASM_JIT_MAX_SLICE_OPERANDS, decode_zi_layout_descriptor};
 #[cfg(target_arch = "wasm32")]
 use super::{WASM_JIT_ABI_VERSION, WASM_JIT_EVAL_FRAME_BYTES};
 
@@ -177,6 +181,11 @@ fn evaluate_stateful_helper(
     operands: [f64; 5],
     session: &mut WasmJitRuntimeSession,
 ) -> Result<f64, HelperError> {
+    if matches!(opcode, 421 | 429) {
+        return Err(session.fail(
+            "WASM JIT Zi operation reached the five-operand scalar helper; the slice helper is required",
+        ));
+    }
     let index = u32::try_from(aux0)
         .ok()
         .and_then(|value| usize::try_from(value).ok())
@@ -214,15 +223,6 @@ fn evaluate_stateful_helper(
                 "Laplace filter",
             )?;
             (Instruction::LaplaceState(index), 1)
-        }
-        421 => {
-            require_slot(
-                session,
-                index,
-                session.context.zi_filters.len(),
-                "ZI filter",
-            )?;
-            (Instruction::ZiState(index), 1)
         }
         422 => (Instruction::TimerState(index), 4),
         423 => {
@@ -295,7 +295,72 @@ fn evaluate_stateful_helper(
         }
         _ => return Err(HelperError::InvalidOpcode),
     };
-    session.execute_instruction(instruction.0, &operands[..instruction.1])
+    let operands = operands.get(..instruction.1).ok_or_else(|| {
+        session.fail(format!(
+            "WASM JIT scalar helper opcode {opcode} requires {} operands, exceeding its five-lane ABI",
+            instruction.1
+        ))
+    })?;
+    session.execute_instruction(instruction.0, operands)
+}
+
+fn evaluate_slice_helper_with_session(
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operands: &[f64],
+    session: &mut WasmJitRuntimeSession,
+) -> Result<f64, HelperError> {
+    if operands.len() > WASM_JIT_MAX_SLICE_OPERANDS {
+        return Err(session.fail(format!(
+            "WASM JIT slice helper received {} operands, exceeding the bounded maximum {}",
+            operands.len(),
+            WASM_JIT_MAX_SLICE_OPERANDS
+        )));
+    }
+    let storage = match opcode {
+        421 => "ZI filter",
+        429 => "ZI derivative filter",
+        _ => {
+            return Err(session.fail(format!(
+                "WASM JIT slice helper opcode {opcode} is not allowlisted"
+            )));
+        }
+    };
+    if aux2 != 0 {
+        return Err(session.fail("WASM JIT Zi slice helper received nonzero reserved metadata"));
+    }
+    let filter_id = u32::try_from(aux0)
+        .ok()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| session.fail("WASM JIT Zi slice helper has a negative filter slot"))?;
+    let layout = decode_zi_layout_descriptor(filter_id, aux1)
+        .ok_or_else(|| session.fail("WASM JIT Zi slice helper received an invalid layout"))?;
+    let operand_count = layout
+        .validate_operand_budget()
+        .map_err(|error| session.fail(format!("WASM JIT Zi layout rejected: {error}")))?;
+    if operands.len() != operand_count {
+        return Err(session.fail(format!(
+            "WASM JIT Zi slice helper layout requires {} operands, received {}",
+            operand_count,
+            operands.len()
+        )));
+    }
+    require_slot(
+        session,
+        filter_id,
+        session.context.zi_filters.len(),
+        storage,
+    )?;
+    let result = match opcode {
+        421 => execute_zi_state(&mut session.context, layout, operands),
+        429 => execute_zi_state_derivative(&mut session.context, layout, operands),
+        _ => unreachable!(),
+    };
+    result
+        .map_err(|error| format!("WASM JIT helper Zi operation failed: {error}"))
+        .map_err(|detail| session.fail(detail))
 }
 
 fn require_slot(
@@ -466,6 +531,7 @@ fn unary(code: i32) -> Result<UnaryMathOp, HelperError> {
 
 #[cfg(target_arch = "wasm32")]
 struct ActiveRuntimeSession {
+    frame_offset: u32,
     token: u32,
     generation: u32,
     session: WasmJitRuntimeSession,
@@ -511,6 +577,7 @@ pub fn with_runtime_session<R>(
     frame.session_generation = generation;
     ACTIVE_RUNTIME_SESSION.with(|active| {
         *active.borrow_mut() = Some(ActiveRuntimeSession {
+            frame_offset,
             token,
             generation,
             session,
@@ -563,6 +630,7 @@ pub fn eval_op_v1(
                 .ok_or(HelperError::StatefulRuntimeUnavailable)?;
             if token == 0
                 || generation == 0
+                || active.frame_offset != frame_offset
                 || active.token != token
                 || active.generation != generation
             {
@@ -581,6 +649,63 @@ pub fn eval_op_v1(
     } else {
         evaluate_helper(opcode, aux0, aux1, aux2, operands, variables)
     };
+    match result {
+        Ok(value) => value,
+        Err(_) => {
+            frame.error_status = WASM_JIT_STATUS_RUNTIME_ERROR;
+            0.0
+        }
+    }
+}
+
+/// Variable-arity host capability for bounded stateful operations.
+///
+/// Operands reside in the authenticated trailing region of `frame_offset`;
+/// callers supply only the count, never a linear-memory pointer. ABI v5
+/// allowlists Zi value and derivative operations on this capability.
+#[cfg(target_arch = "wasm32")]
+pub fn eval_op_slice_v1(
+    frame_offset: u32,
+    opcode: i32,
+    aux0: i32,
+    aux1: i32,
+    aux2: i64,
+    operand_count: i32,
+) -> f64 {
+    let operand_count = match u32::try_from(operand_count)
+        .ok()
+        .and_then(|count| usize::try_from(count).ok())
+        .filter(|count| *count <= WASM_JIT_MAX_SLICE_OPERANDS)
+    {
+        Some(count) => count,
+        None => {
+            unsafe { record_frame_status(frame_offset, WASM_JIT_STATUS_ABI_MISMATCH) };
+            return 0.0;
+        }
+    };
+    let Some((frame, operands)) =
+        (unsafe { validated_frame_and_slice_operands(frame_offset, operand_count) })
+    else {
+        unsafe { record_frame_status(frame_offset, WASM_JIT_STATUS_ABI_MISMATCH) };
+        return 0.0;
+    };
+    let token = frame.session_token;
+    let generation = frame.session_generation;
+    let result = ACTIVE_RUNTIME_SESSION.with(|active| {
+        let mut active = active.borrow_mut();
+        let active = active
+            .as_mut()
+            .ok_or(HelperError::StatefulRuntimeUnavailable)?;
+        if token == 0
+            || generation == 0
+            || active.frame_offset != frame_offset
+            || active.token != token
+            || active.generation != generation
+        {
+            return Err(HelperError::StatefulRuntimeUnavailable);
+        }
+        evaluate_slice_helper_with_session(opcode, aux0, aux1, aux2, operands, &mut active.session)
+    });
     match result {
         Ok(value) => value,
         Err(_) => {
@@ -621,19 +746,71 @@ fn is_stateful_opcode(opcode: i32) -> bool {
 #[cfg(target_arch = "wasm32")]
 unsafe fn validated_frame(frame_offset: u32) -> Option<&'static mut WasmJitEvalFrame> {
     let memory_bytes = core::arch::wasm32::memory_size(0).checked_mul(65_536)?;
-    let frame_start = usize::try_from(frame_offset).ok()?;
-    let frame_end = frame_start.checked_add(WASM_JIT_EVAL_FRAME_BYTES as usize)?;
-    if frame_start % align_of::<WasmJitEvalFrame>() != 0 || frame_end > memory_bytes {
-        return None;
-    }
-    let frame = unsafe { &mut *(frame_start as *mut WasmJitEvalFrame) };
-    if frame.magic != WASM_JIT_FRAME_MAGIC
-        || frame.abi_version != WASM_JIT_ABI_VERSION
-        || frame.byte_len < WASM_JIT_EVAL_FRAME_BYTES
+    let frame = unsafe { validated_frame_header(frame_offset, memory_bytes) }?;
+    if frame.byte_len < WASM_JIT_EVAL_FRAME_BYTES || frame.byte_len > WASM_JIT_MAX_EVAL_FRAME_BYTES
     {
         return None;
     }
+    let frame_start = usize::try_from(frame_offset).ok()?;
+    let frame_end = frame_start.checked_add(usize::try_from(frame.byte_len).ok()?)?;
+    if frame_end > memory_bytes {
+        return None;
+    }
     Some(frame)
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe fn validated_frame_header(
+    frame_offset: u32,
+    memory_bytes: usize,
+) -> Option<&'static mut WasmJitEvalFrame> {
+    let frame_start = usize::try_from(frame_offset).ok()?;
+    let header_end = frame_start.checked_add(WASM_JIT_EVAL_FRAME_BYTES as usize)?;
+    if frame_start % align_of::<WasmJitEvalFrame>() != 0 || header_end > memory_bytes {
+        return None;
+    }
+    let frame = unsafe { &mut *(frame_start as *mut WasmJitEvalFrame) };
+    if frame.magic != WASM_JIT_FRAME_MAGIC || frame.abi_version != WASM_JIT_ABI_VERSION {
+        return None;
+    }
+    Some(frame)
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe fn record_frame_status(frame_offset: u32, status: i32) {
+    let Some(memory_bytes) = core::arch::wasm32::memory_size(0).checked_mul(65_536) else {
+        return;
+    };
+    if let Some(frame) = unsafe { validated_frame_header(frame_offset, memory_bytes) } {
+        frame.error_status = status;
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+unsafe fn validated_frame_and_slice_operands(
+    frame_offset: u32,
+    operand_count: usize,
+) -> Option<(&'static mut WasmJitEvalFrame, &'static [f64])> {
+    if operand_count > WASM_JIT_MAX_SLICE_OPERANDS {
+        return None;
+    }
+    let frame = unsafe { validated_frame(frame_offset) }?;
+    let operand_bytes = operand_count.checked_mul(size_of::<f64>())?;
+    let required_len = usize::try_from(WASM_JIT_SLICE_OPERANDS_OFFSET)
+        .ok()?
+        .checked_add(operand_bytes)?;
+    if usize::try_from(frame.byte_len).ok()? < required_len {
+        return None;
+    }
+    let operands_start = usize::try_from(frame_offset)
+        .ok()?
+        .checked_add(usize::try_from(WASM_JIT_SLICE_OPERANDS_OFFSET).ok()?)?;
+    let operands = if operand_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(operands_start as *const f64, operand_count) }
+    };
+    Some((frame, operands))
 }
 
 /// Last frame that passed full validation, and the memory size it was checked
@@ -649,6 +826,7 @@ unsafe fn validated_frame(frame_offset: u32) -> Option<&'static mut WasmJitEvalF
 struct ValidatedFrameCache {
     frame_offset: u32,
     memory_bytes: usize,
+    byte_len: u32,
     variables_ptr: u32,
     variables_len: u32,
 }
@@ -685,7 +863,9 @@ unsafe fn validated_frame_and_variables(
             let unchanged = VALIDATED_FRAME.with(|slot| {
                 let entry = slot.take();
                 let unchanged = entry.as_ref().is_some_and(|entry| {
-                    entry.variables_ptr == variables_ptr && entry.variables_len == variables_len
+                    entry.byte_len == frame.byte_len
+                        && entry.variables_ptr == variables_ptr
+                        && entry.variables_len == variables_len
                 });
                 slot.set(entry);
                 unchanged
@@ -711,6 +891,7 @@ unsafe fn validated_frame_and_variables(
         slot.set(Some(ValidatedFrameCache {
             frame_offset,
             memory_bytes,
+            byte_len: validated.0.byte_len,
             variables_ptr: validated.0.variables_ptr,
             variables_len: validated.0.variables_len,
         }));
@@ -724,8 +905,8 @@ unsafe fn validate_frame_and_variables_uncached(
     memory_bytes: usize,
 ) -> Option<(&'static mut WasmJitEvalFrame, &'static [f64])> {
     let frame_start = usize::try_from(frame_offset).ok()?;
-    let frame_end = frame_start.checked_add(WASM_JIT_EVAL_FRAME_BYTES as usize)?;
     let frame = unsafe { validated_frame(frame_offset) }?;
+    let frame_end = frame_start.checked_add(usize::try_from(frame.byte_len).ok()?)?;
     let variables_start = usize::try_from(frame.variables_ptr).ok()?;
     let variables_len = usize::try_from(frame.variables_len).ok()?;
     let variable_bytes = variables_len.checked_mul(size_of::<f64>())?;
@@ -860,6 +1041,78 @@ mod tests {
             session
                 .take_error()
                 .is_some_and(|error| error.contains("not fully preallocated"))
+        );
+    }
+
+    #[test]
+    fn zi_slice_helper_accepts_six_operands_and_scalar_helper_rejects_it() {
+        let layout = crate::codegen::ZiRuntimeLayout::unit_coefficients(0);
+        let descriptor = super::super::abi::encode_zi_layout_descriptor(layout)
+            .expect("unit Zi browser descriptor");
+        let mut context = VmContext::default();
+        context.zi_filters.push(
+            crate::zfilter::ZiFilter::new(vec![1.0], vec![1.0], 1.0)
+                .expect("valid placeholder Zi filter"),
+        );
+        let mut session = WasmJitRuntimeSession::new(context);
+        let operands = [1.0, 1.0, 1.0, 0.0, 2.5, 0.0];
+        assert_eq!(
+            evaluate_slice_helper_with_session(421, 0, descriptor, 0, &operands, &mut session,),
+            Ok(2.5)
+        );
+        let derivative_operands = [1.0, 1.0, 1.0, 0.0, 3.0, 0.0];
+        assert_eq!(
+            evaluate_slice_helper_with_session(
+                429,
+                0,
+                descriptor,
+                0,
+                &derivative_operands,
+                &mut session,
+            ),
+            Ok(3.0)
+        );
+        assert_eq!(session.scratch_stack.capacity(), 8);
+
+        assert_eq!(
+            evaluate_helper_with_session(421, 0, descriptor, 0, [0.0; 5], &[], Some(&mut session),),
+            Err(HelperError::StatefulRuntimeFailed)
+        );
+        assert!(
+            session
+                .take_error()
+                .is_some_and(|error| error.contains("slice helper is required"))
+        );
+    }
+
+    #[test]
+    fn zi_slice_helper_fails_closed_on_descriptor_and_count_mismatch() {
+        let layout = crate::codegen::ZiRuntimeLayout::unit_coefficients(0);
+        let descriptor = super::super::abi::encode_zi_layout_descriptor(layout)
+            .expect("unit Zi browser descriptor");
+        let mut context = VmContext::default();
+        context.zi_filters.push(
+            crate::zfilter::ZiFilter::new(vec![1.0], vec![1.0], 1.0)
+                .expect("valid placeholder Zi filter"),
+        );
+        let mut session = WasmJitRuntimeSession::new(context);
+        assert_eq!(
+            evaluate_slice_helper_with_session(421, 0, descriptor, 0, &[1.0; 5], &mut session,),
+            Err(HelperError::StatefulRuntimeFailed)
+        );
+        assert!(
+            session
+                .take_error()
+                .is_some_and(|error| error.contains("requires 6 operands, received 5"))
+        );
+        assert_eq!(
+            evaluate_slice_helper_with_session(421, 0, descriptor, 1, &[1.0; 6], &mut session,),
+            Err(HelperError::StatefulRuntimeFailed)
+        );
+        assert!(
+            session
+                .take_error()
+                .is_some_and(|error| error.contains("nonzero reserved metadata"))
         );
     }
 }

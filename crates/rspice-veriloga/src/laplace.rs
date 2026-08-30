@@ -69,6 +69,14 @@ pub struct StateSpaceFilter {
     order: usize,
 }
 
+/// Accepted dynamic state for a compiled Laplace realization. The immutable
+/// realization matrices remain in the compiled device and are shape-checked
+/// before these values are injected.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaplaceCheckpoint {
+    pub state: Vec<f64>,
+}
+
 impl StateSpaceFilter {
     /// Create a new state-space filter from coefficients
     pub fn new(a: Vec<Vec<f64>>, b: Vec<f64>, c: Vec<f64>, d: f64) -> Result<Self, LaplaceError> {
@@ -388,6 +396,52 @@ impl StateSpaceFilter {
     /// Commit the most recently evaluated candidate.
     pub fn commit(&mut self) {
         self.state_prev.clone_from(&self.state);
+    }
+
+    pub(crate) fn checkpoint(&self) -> LaplaceCheckpoint {
+        LaplaceCheckpoint {
+            state: self.state_prev.clone(),
+        }
+    }
+
+    pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), LaplaceError> {
+        self.validate_structure()?;
+        if self
+            .state
+            .iter()
+            .zip(&self.state_prev)
+            .any(|(candidate, accepted)| candidate.to_bits() != accepted.to_bits())
+        {
+            return Err(LaplaceError::InvalidEvaluation(
+                "Laplace filter has an in-flight Newton candidate".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_checkpoint(
+        &self,
+        checkpoint: &LaplaceCheckpoint,
+    ) -> Result<(), LaplaceError> {
+        self.validate_structure()?;
+        if checkpoint.state.len() != self.order {
+            return Err(LaplaceError::InvalidDefinition(format!(
+                "checkpoint state length is {}, expected {}",
+                checkpoint.state.len(),
+                self.order
+            )));
+        }
+        if checkpoint.state.iter().any(|value| !value.is_finite()) {
+            return Err(LaplaceError::InvalidDefinition(
+                "checkpoint state contains a non-finite value".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint(&mut self, checkpoint: &LaplaceCheckpoint) {
+        self.state_prev.copy_from_slice(&checkpoint.state);
+        self.state.copy_from_slice(&checkpoint.state);
     }
 
     fn step_checked(&mut self, input: f64, h: f64) -> Result<f64, LaplaceError> {

@@ -38,6 +38,7 @@ pub struct SemanticWarning {
 #[derive(Debug, Clone)]
 pub struct AnalyzedModule {
     pub name: SmolStr,
+    pub default_transition: f64,
     pub ports: Vec<AnalyzedPort>,
     pub parameters: Vec<AnalyzedParameter>,
     /// Parameter aliases (aliasparam): alternate instance-facing names

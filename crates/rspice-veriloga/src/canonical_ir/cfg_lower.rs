@@ -270,6 +270,7 @@ fn hir_expr_is_instance_static(
     };
     let recurse = |id| hir_expr_is_instance_static(hir, id, static_variables);
     match &expression.kind {
+        HirExprKind::NullArgument => false,
         HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => true,
         HirExprKind::Identifier { name } => {
             hir.parameters
@@ -2143,6 +2144,7 @@ fn unary_intrinsic(name: &str) -> Option<CfgUnaryOp> {
 
 fn kind_label(kind: &HirExprKind) -> &'static str {
     match kind {
+        HirExprKind::NullArgument => "null argument",
         HirExprKind::Number { .. } => "number",
         HirExprKind::StringLiteral { .. } => "string literal",
         HirExprKind::Identifier { .. } => "identifier",

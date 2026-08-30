@@ -25,7 +25,7 @@ use crate::native::abi::{
     rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
     rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
     rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_step_native,
+    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
 };
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
@@ -1234,11 +1234,48 @@ impl FunctionCompiler {
                 filter_id,
                 rspice_laplace_step_native as *const () as usize,
             )?,
-            NativeOp::ZiState(filter_id) => self.emit_scalar_context_helper(
-                prepared,
-                filter_id,
-                rspice_zi_step_native as *const () as usize,
-            )?,
+            NativeOp::ZiState(layout) => {
+                let operands =
+                    layout
+                        .validate_operand_budget()
+                        .map_err(|error| JitError::Encoding {
+                            model: "native-aarch64".into(),
+                            detail: error.to_string().into(),
+                        })?;
+                self.emit_operand_context_helper(
+                    prepared,
+                    operands,
+                    layout
+                        .native_descriptor()
+                        .ok_or_else(|| JitError::Encoding {
+                            model: "native-aarch64".into(),
+                            detail: "Zi runtime layout exceeds the native descriptor limits".into(),
+                        })?,
+                    rspice_zi_step_native as *const () as usize,
+                )?;
+            }
+            NativeOp::ZiStateDerivative(layout) => {
+                let operands =
+                    layout
+                        .validate_operand_budget()
+                        .map_err(|error| JitError::Encoding {
+                            model: "native-aarch64".into(),
+                            detail: error.to_string().into(),
+                        })?;
+                self.emit_operand_context_helper(
+                    prepared,
+                    operands,
+                    layout
+                        .native_descriptor()
+                        .ok_or_else(|| JitError::Encoding {
+                            model: "native-aarch64".into(),
+                            detail:
+                                "Zi derivative runtime layout exceeds the native descriptor limits"
+                                    .into(),
+                        })?,
+                    rspice_zi_derivative_native as *const () as usize,
+                )?;
+            }
             NativeOp::TimerState(timer_id) => self.emit_operand_context_helper(
                 prepared,
                 4,

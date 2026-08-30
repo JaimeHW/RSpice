@@ -192,7 +192,12 @@ fn artifact_diagnostics(
             hir.module_name, mir.module_name
         )));
     }
-
+    if hir.default_transition.to_bits() != mir.default_transition.to_bits() {
+        diagnostics.push(artifact_error(format!(
+            "HIR default_transition {} must match MIR default_transition {}",
+            hir.default_transition, mir.default_transition
+        )));
+    }
     validate_hir_mir_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_ground_nodes(&mut diagnostics, hir, mir);
     validate_hir_mir_value_symbols(&mut diagnostics, hir, mir);
@@ -546,7 +551,12 @@ fn hir_summary(hir: &HirModel) -> String {
     writeln!(out, "source_digest={}", enc_str(&hir.source_digest)).expect("write to string");
     writeln!(out, "compiler_version={}", enc_str(&hir.compiler_version)).expect("write to string");
     writeln!(out, "feature_flags={}", join_smol(&hir.feature_flags)).expect("write to string");
-
+    writeln!(
+        out,
+        "default_transition={}",
+        f64_label(hir.default_transition)
+    )
+    .expect("write to string");
     for port in &hir.ports {
         write_hir_port(&mut out, port);
     }
@@ -580,6 +590,12 @@ fn mir_summary(mir: &MirModel) -> String {
     let mut out = String::new();
     writeln!(out, "mir").expect("write to string");
     writeln!(out, "module_name={}", enc_str(&mir.module_name)).expect("write to string");
+    writeln!(
+        out,
+        "default_transition={}",
+        f64_label(mir.default_transition)
+    )
+    .expect("write to string");
     for node in &mir.nodes {
         write_mir_node(&mut out, node);
     }
@@ -873,6 +889,7 @@ fn expr_ref_label(expr: Option<&HirExprRef>) -> String {
 
 fn hir_expr_kind_label(kind: &HirExprKind) -> String {
     match kind {
+        HirExprKind::NullArgument => "null_argument".to_string(),
         HirExprKind::Number { value, raw } => {
             format!("number value:{} raw:{}", f64_label(*value), enc_str(raw))
         }
@@ -938,8 +955,21 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
         HirExprKind::Laplace { expr, kind } => {
             format!("laplace expr:{} {}", expr.index(), laplace_kind_label(kind))
         }
-        HirExprKind::Zi { expr, kind } => {
-            format!("zi expr:{} {}", expr.index(), zi_kind_label(kind))
+        HirExprKind::Zi {
+            expr,
+            kind,
+            period,
+            transition,
+            first_transition,
+        } => {
+            format!(
+                "zi expr:{} period:{} transition:{} first_transition:{} {}",
+                expr.index(),
+                period.index(),
+                option_expr_id(*transition),
+                option_expr_id(*first_transition),
+                zi_kind_label(kind)
+            )
         }
         HirExprKind::NoiseSource {
             source,

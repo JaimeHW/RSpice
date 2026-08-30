@@ -116,6 +116,8 @@ pub struct MirModel {
     pub state_slots: Vec<MirStateSlot>,
     pub equations: Vec<MirEquation>,
     pub expressions: Vec<HirExpression>,
+    #[serde(default = "canonical_default_transition")]
+    pub default_transition: f64,
     pub value_symbols: Vec<SmolStr>,
     pub ground_nodes: Vec<SmolStr>,
 }
@@ -215,6 +217,7 @@ impl MirModel {
             state_slots: Vec::new(),
             equations,
             expressions: hir.expressions.clone(),
+            default_transition: hir.default_transition,
             value_symbols: sorted_value_symbols(hir),
             ground_nodes: hir.ground_nodes.clone(),
         };
@@ -236,6 +239,15 @@ impl MirModel {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::MirValidation,
                 "MIR model must have at least one node",
+            ));
+        }
+        if !self.default_transition.is_finite() || self.default_transition < 0.0 {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::MirValidation,
+                format!(
+                    "MIR default_transition must be finite and non-negative, got {}",
+                    self.default_transition
+                ),
             ));
         }
 
@@ -279,6 +291,10 @@ impl MirModel {
             Err(diagnostics)
         }
     }
+}
+
+const fn canonical_default_transition() -> f64 {
+    1.0e-9
 }
 
 const fn default_true() -> bool {
@@ -808,6 +824,7 @@ fn node_name(nodes: &[MirNode], id: NodeId) -> Option<&str> {
 
 fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
     match kind {
+        HirExprKind::NullArgument => "null_argument",
         HirExprKind::Number { .. } => "number",
         HirExprKind::StringLiteral { .. } => "string",
         HirExprKind::Identifier { .. } => "identifier",
@@ -840,7 +857,9 @@ fn validate_expressions(
 
     for expression in expressions {
         match &expression.kind {
-            HirExprKind::Number { .. } | HirExprKind::StringLiteral { .. } => {}
+            HirExprKind::NullArgument
+            | HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. } => {}
             HirExprKind::Identifier { name } => {
                 validate_identifier(diagnostics, expression, name, &value_symbols);
             }
@@ -871,8 +890,12 @@ fn validate_expressions(
                     ));
                 }
             }
-            HirExprKind::SystemFunction { args, .. } | HirExprKind::Call { args, .. } => {
+            HirExprKind::SystemFunction { args, .. } => {
                 validate_expression_child_list(diagnostics, expressions, expression, "arg", args);
+            }
+            HirExprKind::Call { name, args } => {
+                validate_expression_child_list(diagnostics, expressions, expression, "arg", args);
+                validate_zi_call_budget(diagnostics, expressions, expression, name, args);
             }
             HirExprKind::Binary { left, right, .. } => {
                 validate_expression_child(diagnostics, expressions, expression, "left", *left);
@@ -1010,9 +1033,34 @@ fn validate_expressions(
                     }
                 }
             }
-            HirExprKind::Zi { expr, kind } => {
+            HirExprKind::Zi {
+                expr,
+                kind,
+                period,
+                transition,
+                first_transition,
+            } => {
                 validate_expression_child(diagnostics, expressions, expression, "expr", *expr);
-                match kind {
+                validate_expression_child(diagnostics, expressions, expression, "period", *period);
+                if let Some(child) = transition {
+                    validate_expression_child(
+                        diagnostics,
+                        expressions,
+                        expression,
+                        "transition",
+                        *child,
+                    );
+                }
+                if let Some(child) = first_transition {
+                    validate_expression_child(
+                        diagnostics,
+                        expressions,
+                        expression,
+                        "first_transition",
+                        *child,
+                    );
+                }
+                let (operator, numerator_scalars, denominator_scalars) = match kind {
                     super::hir::HirZiKind::ZeroPole { zeros, poles } => {
                         validate_expression_child_list(
                             diagnostics,
@@ -1028,6 +1076,7 @@ fn validate_expressions(
                             "poles",
                             poles,
                         );
+                        ("zi_zp", zeros.len(), poles.len())
                     }
                     super::hir::HirZiKind::ZeroDenominator { zeros, denominator } => {
                         validate_expression_child_list(
@@ -1044,6 +1093,7 @@ fn validate_expressions(
                             "denominator",
                             denominator,
                         );
+                        ("zi_zd", zeros.len(), denominator.len())
                     }
                     super::hir::HirZiKind::NumeratorPole { numerator, poles } => {
                         validate_expression_child_list(
@@ -1060,6 +1110,7 @@ fn validate_expressions(
                             "poles",
                             poles,
                         );
+                        ("zi_np", numerator.len(), poles.len())
                     }
                     super::hir::HirZiKind::NumeratorDenominator {
                         numerator,
@@ -1079,10 +1130,60 @@ fn validate_expressions(
                             "denominator",
                             denominator,
                         );
+                        ("zi_nd", numerator.len(), denominator.len())
                     }
+                };
+                if let Err(error) = crate::zfilter::validate_zi_runtime_operand_budget(
+                    operator,
+                    numerator_scalars,
+                    denominator_scalars,
+                ) {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::MirValidation,
+                        error.to_string(),
+                        expression.span,
+                    ));
                 }
             }
         }
+    }
+}
+
+fn validate_zi_call_budget(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    expressions: &[HirExpression],
+    expression: &HirExpression,
+    name: &SmolStr,
+    args: &[ExprId],
+) {
+    if !matches!(
+        name.to_ascii_lowercase().as_str(),
+        "zi_zp" | "zi_zd" | "zi_np" | "zi_nd"
+    ) || args.len() < 3
+    {
+        return;
+    }
+    let scalar_count = |id: ExprId| {
+        expressions
+            .get(usize::from(id))
+            .map(|child| match &child.kind {
+                HirExprKind::NullArgument => 0,
+                HirExprKind::ArrayLiteral { elements } => elements.len(),
+                _ => 1,
+            })
+    };
+    let (Some(numerator), Some(denominator)) = (scalar_count(args[1]), scalar_count(args[2]))
+    else {
+        return;
+    };
+    if let Err(error) =
+        crate::zfilter::validate_zi_runtime_operand_budget(name, numerator, denominator)
+    {
+        diagnostics.push(IrDiagnostic::error(
+            CompilerPhase::MirValidation,
+            error.to_string(),
+            expression.span,
+        ));
     }
 }
 

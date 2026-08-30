@@ -10,6 +10,37 @@ use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
 
+/// Stable identity of one logical Zi operator in the source tree. The same
+/// identity is retained by value and every generated Jacobian expression so
+/// they share one history, candidate, clock, and breakpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ZiSiteId {
+    pub source: u32,
+    pub start: u32,
+    pub end: u32,
+    /// Deterministic preorder ordinal assigned during executable-IR
+    /// construction. This disambiguates independently authored public-AST
+    /// nodes that carry the same (often dummy) span.
+    pub ordinal: u32,
+}
+
+impl ZiSiteId {
+    pub fn from_span(span: crate::source::Span) -> Self {
+        Self {
+            source: span.source.raw(),
+            start: span.start,
+            end: span.end,
+            ordinal: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ZiPolynomialDefinition {
+    Coefficients(Vec<IrExpr>),
+    Roots(Vec<(IrExpr, IrExpr)>),
+}
+
 /// Compiled device model in IR form
 #[derive(Debug, Clone)]
 pub struct DeviceIR {
@@ -373,10 +404,27 @@ pub enum IrExpr {
     /// `period` seconds and the difference equation output holds between
     /// samples. Coefficients ascend in z⁻¹.
     ZiFilter {
+        site: ZiSiteId,
         expr: Box<IrExpr>,
-        numerator: Vec<f64>,
-        denominator: Vec<f64>,
-        period: f64,
+        numerator: ZiPolynomialDefinition,
+        denominator: ZiPolynomialDefinition,
+        period: Box<IrExpr>,
+        transition: Box<IrExpr>,
+        first_transition: Box<IrExpr>,
+        direct_assignment: bool,
+    },
+    /// Exact Jacobian action of a zi filter. It uses the same schedule as the
+    /// value filter but applies H(1), b0/a0, or zero according to analysis and
+    /// whether the current point is a sample edge.
+    ZiFilterDerivative {
+        site: ZiSiteId,
+        expr: Box<IrExpr>,
+        numerator: ZiPolynomialDefinition,
+        denominator: ZiPolynomialDefinition,
+        period: Box<IrExpr>,
+        transition: Box<IrExpr>,
+        first_transition: Box<IrExpr>,
+        direct_assignment: bool,
     },
     /// ddx(expr, V(node)) / ddx(expr, V(a,b)) - symbolic partial
     /// derivative w.r.t. a node potential or a branch potential
@@ -626,6 +674,8 @@ impl DeviceIR {
         // IR, in order
         let mut items = Vec::with_capacity(module.statements.len());
         Self::convert_statements(&module.statements, &converter, &mut items)?;
+        let mut zi_site_ordinal = 0_u32;
+        autodiff::assign_zi_site_ordinals_in_items(&mut items, &mut zi_site_ordinal);
         ir.assignments = items;
 
         // Pre-pass over contributions: parse branch refs and register a
@@ -714,7 +764,7 @@ impl DeviceIR {
         let mut shadow_roots: HashSet<SmolStr> = HashSet::new();
         let mut second_shadow_roots: HashSet<SmolStr> = HashSet::new();
         for contrib in &module.contributions {
-            let expr = converter.convert(&contrib.expression)?;
+            let expr = converter.convert_contribution(&contrib.expression)?;
             autodiff::collect_var_names(&expr, &mut shadow_roots);
             autodiff::collect_ddx_operand_names_in_expr(&expr, &mut second_shadow_roots);
         }
@@ -741,7 +791,8 @@ impl DeviceIR {
         // Convert contributions to equations
         for (contrib, branch_ref) in module.contributions.iter().zip(parsed_contribs) {
             // Convert the expression
-            let expr = converter.convert(&contrib.expression)?;
+            let mut expr = converter.convert_contribution(&contrib.expression)?;
+            autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
             let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
@@ -1071,6 +1122,7 @@ impl DeviceIR {
                 | IrExpr::LaplaceZP { expr, .. }
                 | IrExpr::LaplaceND { expr, .. }
                 | IrExpr::ZiFilter { expr, .. }
+                | IrExpr::ZiFilterDerivative { expr, .. }
                 | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
                 IrExpr::Cross {
                     expr,
@@ -1714,6 +1766,7 @@ pub mod autodiff {
             | IrExpr::LaplaceZP { expr, .. }
             | IrExpr::LaplaceND { expr, .. }
             | IrExpr::ZiFilter { expr, .. }
+            | IrExpr::ZiFilterDerivative { expr, .. }
             | IrExpr::Ddx { expr, .. } => recurse(expr),
             IrExpr::DdtCompanion(e) | IrExpr::IdtCompanion(e) => recurse(e),
             IrExpr::TableDerivative { input, .. } => recurse(input),
@@ -2416,15 +2469,42 @@ pub mod autodiff {
                 neg: *neg,
             },
             IrExpr::ZiFilter {
+                site,
                 expr,
                 numerator,
                 denominator,
                 period,
+                transition,
+                first_transition,
+                direct_assignment,
             } => IrExpr::ZiFilter {
+                site: *site,
                 expr: Box::new(map_expr(expr, f)),
                 numerator: numerator.clone(),
                 denominator: denominator.clone(),
-                period: *period,
+                period: Box::new(map_expr(period, f)),
+                transition: Box::new(map_expr(transition, f)),
+                first_transition: Box::new(map_expr(first_transition, f)),
+                direct_assignment: *direct_assignment,
+            },
+            IrExpr::ZiFilterDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => IrExpr::ZiFilterDerivative {
+                site: *site,
+                expr: Box::new(map_expr(expr, f)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+                period: Box::new(map_expr(period, f)),
+                transition: Box::new(map_expr(transition, f)),
+                first_transition: Box::new(map_expr(first_transition, f)),
+                direct_assignment: *direct_assignment,
             },
             IrExpr::VarIndexed {
                 array,
@@ -2440,6 +2520,50 @@ pub mod autodiff {
                 index: Box::new(map_expr(index, f)),
             },
             other => other.clone(),
+        }
+    }
+
+    pub(crate) fn assign_zi_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
+        *expr = map_expr(expr, &mut |node| match node {
+            IrExpr::ZiFilter {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => {
+                let mut assigned = *site;
+                assigned.ordinal = *next;
+                *next = next.checked_add(1).expect("Zi site ordinal overflow");
+                Some(IrExpr::ZiFilter {
+                    site: assigned,
+                    expr: expr.clone(),
+                    numerator: numerator.clone(),
+                    denominator: denominator.clone(),
+                    period: period.clone(),
+                    transition: transition.clone(),
+                    first_transition: first_transition.clone(),
+                    direct_assignment: *direct_assignment,
+                })
+            }
+            _ => None,
+        });
+    }
+
+    pub(crate) fn assign_zi_site_ordinals_in_items(items: &mut [IrAssignmentItem], next: &mut u32) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assignment) => {
+                    assign_zi_site_ordinals(&mut assignment.expr, next);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    assign_zi_site_ordinals(condition, next);
+                    assign_zi_site_ordinals_in_items(body, next);
+                }
+            }
         }
     }
 
@@ -2948,25 +3072,49 @@ pub mod autodiff {
             | IrExpr::Slew { expr, .. }
             | IrExpr::AbsDelay { expr, .. } => differentiate(expr),
 
-            // Sampled-data filters: DC small-signal gain H(1) times the
-            // inner derivative (the residual stays exact; the held-output
-            // approximation only shapes convergence, like the laplace
-            // filters below)
+            // Sampled-data filters have a time-dependent exact Jacobian:
+            // H(1) in equilibrium, b0/a0 on an edge, and zero while holding.
             IrExpr::ZiFilter {
+                site,
                 expr,
                 numerator,
                 denominator,
-                ..
-            } => {
-                let num: f64 = numerator.iter().sum();
-                let den: f64 = denominator.iter().sum();
-                let gain = checked_filter_dc_gain(num, den);
-                IrExpr::Binary(
-                    BinaryOp::Mul,
-                    Box::new(IrExpr::Const(gain)),
-                    Box::new(differentiate(expr)),
-                )
-            }
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => IrExpr::ZiFilterDerivative {
+                site: *site,
+                expr: Box::new(differentiate(expr)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+                period: period.clone(),
+                transition: transition.clone(),
+                first_transition: first_transition.clone(),
+                direct_assignment: *direct_assignment,
+            },
+            // Differentiation is only run once per Jacobian axis in normal
+            // construction. Retain the schedule action if a transformed IR
+            // is differentiated again.
+            IrExpr::ZiFilterDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+                period,
+                transition,
+                first_transition,
+                direct_assignment,
+            } => IrExpr::ZiFilterDerivative {
+                site: *site,
+                expr: Box::new(differentiate(expr)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+                period: period.clone(),
+                transition: transition.clone(),
+                first_transition: first_transition.clone(),
+                direct_assignment: *direct_assignment,
+            },
 
             // Laplace filters: DC small-signal gain times the inner
             // derivative

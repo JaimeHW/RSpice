@@ -978,7 +978,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 7);
+    assert_eq!(metadata.schema_version, 8);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -1134,12 +1134,13 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=7"));
+    assert!(first.contains("schema_version=8"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));
     assert!(first.contains("hir_digest="));
     assert!(first.contains("mir_digest="));
+    assert!(!first.contains("direct_zi_sites"));
     assert!(first.contains("hir module=tiny_res ports=2 parameters=1 contributions=1"));
     assert!(first.contains("mir nodes=2 equations=1"));
 }
@@ -1966,6 +1967,7 @@ fn hir_lowering_preserves_laplace_operand_groups() {
     };
     let analyzed = AnalyzedModule {
         name: "laplace_filter".into(),
+        default_transition: 1.0e-9,
         ports: vec![
             AnalyzedPort {
                 name: "p".into(),
@@ -2063,6 +2065,7 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
     };
     let analyzed = AnalyzedModule {
         name: "typed_ops".into(),
+        default_transition: 1.0e-9,
         ports: vec![
             AnalyzedPort {
                 name: "p".into(),

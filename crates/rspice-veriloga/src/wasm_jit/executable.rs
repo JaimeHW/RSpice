@@ -372,8 +372,9 @@ impl WasmJitExecutable {
         context: &mut crate::vm::VmContext,
         frame: super::WasmJitEvalFrame,
     ) -> Result<super::WasmJitEvalFrame, String> {
-        let mut frame = frame;
-        let frame_offset = pointer_offset((&mut frame as *mut super::WasmJitEvalFrame).cast())?;
+        let mut dispatch_frame = super::abi::WasmJitDispatchFrame::new(frame);
+        let frame_offset =
+            pointer_offset((&mut dispatch_frame.frame as *mut super::WasmJitEvalFrame).cast())?;
         let session = super::WasmJitRuntimeSession::new(std::mem::take(context));
         let (dispatch, mut session) = super::with_runtime_session(frame_offset, session, || {
             super::dispatch_model_entry(&self.cache_key, export, frame_offset)
@@ -390,13 +391,13 @@ impl WasmJitExecutable {
                 "secondary module export '{export}' returned status {status}"
             ));
         }
-        if frame.error_status != super::WASM_JIT_STATUS_OK {
+        if dispatch_frame.frame.error_status != super::WASM_JIT_STATUS_OK {
             return Err(format!(
                 "secondary module export '{export}' recorded runtime status {}",
-                frame.error_status
+                dispatch_frame.frame.error_status
             ));
         }
-        Ok(frame)
+        Ok(dispatch_frame.frame)
     }
 }
 
