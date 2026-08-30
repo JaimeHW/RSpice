@@ -35,6 +35,7 @@ impl HbSolver {
         state: &mut HbSolverState,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, HbError> {
+        self.validate_configuration()?;
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
@@ -1313,7 +1314,7 @@ mod linear_solve_tests {
 
         assert!(matches!(
             solver.solve_dc_operating_point(&mut state),
-            Err(HbError::InvalidCircuit(_))
+            Err(HbError::InvalidConfig(_))
         ));
     }
 

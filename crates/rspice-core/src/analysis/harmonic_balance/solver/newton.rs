@@ -805,12 +805,12 @@ impl ExactHbOperator<'_> {
             let row_harmonic = if row_local == 0 {
                 0
             } else {
-                (row_local + 1) / 2
+                row_local.div_ceil(2)
             };
             let column_harmonic = if column_local == 0 {
                 0
             } else {
-                (column_local + 1) / 2
+                column_local.div_ceil(2)
             };
             if row_harmonic != column_harmonic {
                 return;
@@ -908,6 +908,7 @@ impl HbSolver {
         abort: &dyn AbortSignal,
         dc_seed_policy: HbDcSeedPolicy,
     ) -> Result<(), HbError> {
+        self.validate_configuration()?;
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }

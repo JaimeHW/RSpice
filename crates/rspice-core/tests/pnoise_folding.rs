@@ -17,6 +17,46 @@ const K_B: f64 = 1.380649e-23;
 const T_REF: f64 = 300.15;
 
 #[test]
+fn direct_pnoise_resolves_deck_temperature() {
+    let resistance = 2.0e3;
+    let temperature = 400.0;
+    let netlist = Netlist::parse(
+        "deck-temperature pnoise\n\
+         r1 out 0 2k\n\
+         .options temp=126.85\n\
+         .end\n",
+    )
+    .expect("temperature deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("direct pnoise resolves deck temperature");
+    let expected = 4.0 * K_B * temperature * resistance;
+    assert!(
+        (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
+        "deck TEMP must set periodic thermal noise: got {:.6e}, want {expected:.6e}",
+        result.output_noise[0]
+    );
+}
+
+#[test]
+fn direct_pnoise_applies_hb_local_options_and_rejects_invalid_modes() {
+    let base = "HB-local pnoise gate\nr1 out 0 1k\n.end\n";
+    let mut zero_budget = Netlist::parse(base).expect("base deck parses");
+    zero_budget.options.nonlin_hb_maxstep = Some(0);
+    let error = Engine::new(SimulationConfig::default())
+        .run_pnoise(&zero_budget, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect_err("a zero NONLIN-HB MAXSTEP must fail at the pnoise boundary");
+    assert!(error.to_string().contains("MAXSTEP must be at least 1"));
+
+    let unsupported_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=2\n.end"))
+        .expect("typed TAHB deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pnoise(&unsupported_tahb, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect_err("an unsupported TAHB mode must fail at the pnoise boundary");
+    assert!(error.to_string().contains("TAHB=2"));
+}
+
+#[test]
 fn pnoise_preserves_dc_and_rejects_negative_or_nonfinite_offsets() {
     let netlist = Netlist::parse("* offset validation\nr1 out 0 1k\n.end\n").expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
@@ -136,7 +176,7 @@ r1 out 0 10k rm temp=27 dtemp=-1000
 }
 
 #[test]
-fn pnoise_mos_and_jfet_dtemp_match_equivalent_ambient_temperature() {
+fn pnoise_mos_dtemp_matches_ambient_while_inexact_jfet_scaling_fails_closed() {
     let run_contributors = |deck: &str, temperature: f64| {
         let netlist = Netlist::parse(deck).expect("device deck parses");
         let config = SimulationConfig {
@@ -224,38 +264,22 @@ j1 d g 0 jn
 .end
 ";
     let jfet_dtemp = jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn dtemp=150");
-    let jfet_hot_contributors = run_contributors(jfet_ambient, T_REF + 150.0);
-    let jfet_offset_contributors = run_contributors(&jfet_dtemp, T_REF);
-    let jfet_hot = contribution(&jfet_hot_contributors, "Njfet#0 channel thermal");
-    let jfet_offset = contribution(&jfet_offset_contributors, "Njfet#0 channel thermal");
-    assert!(
-        (jfet_offset - jfet_hot).abs() <= 1.0e-10 * jfet_hot,
-        "JFET DTEMP channel noise must equal the same absolute ambient temperature: {jfet_offset:.6e} vs {jfet_hot:.6e}"
-    );
-    let jfet_temp_priority =
-        jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn temp=150 dtemp=-1000");
-    let jfet_absolute_contributors = run_contributors(jfet_ambient, 423.15);
-    let jfet_priority_contributors = run_contributors(&jfet_temp_priority, T_REF);
-    let jfet_extreme_contributors = run_contributors(&jfet_temp_priority, 1.0e20);
-    let jfet_absolute = contribution(&jfet_absolute_contributors, "Njfet#0 channel thermal");
-    let jfet_priority = contribution(&jfet_priority_contributors, "Njfet#0 channel thermal");
-    let jfet_extreme_ambient = contribution(&jfet_extreme_contributors, "Njfet#0 channel thermal");
-    assert!(
-        (jfet_priority - jfet_absolute).abs() <= 1.0e-10 * jfet_absolute,
-        "JFET TEMP must set the absolute channel-noise temperature and outrank DTEMP: {jfet_priority:.6e} vs {jfet_absolute:.6e}"
-    );
-    assert_eq!(
-        jfet_extreme_ambient.to_bits(),
-        jfet_priority.to_bits(),
-        "JFET TEMP must not be reconstructed through a lossy ambient-relative offset"
-    );
-    for label in ["j1.__rd thermal", "j1.__rs thermal"] {
-        let ordinary = contribution(&jfet_priority_contributors, label);
-        let extreme = contribution(&jfet_extreme_contributors, label);
-        assert_eq!(
-            extreme.to_bits(),
-            ordinary.to_bits(),
-            "JFET {label} must retain the parent device's absolute TEMP"
+    let jfet_temp = jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn temp=150 dtemp=-1000");
+    for (deck, temperature) in [
+        (jfet_ambient, T_REF + 150.0),
+        (jfet_dtemp.as_str(), T_REF),
+        (jfet_temp.as_str(), T_REF),
+    ] {
+        let netlist = Netlist::parse(deck).expect("temperature-scaled JFET deck parses");
+        let error = Engine::new(SimulationConfig {
+            temperature,
+            ..SimulationConfig::default()
+        })
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "d", None, None, 0)
+        .expect_err("PNoise must not publish a JFET state with incomplete temperature scaling");
+        assert!(
+            error.to_string().contains("temperature-scaled"),
+            "JFET temperature capability failure must be explicit: {error}"
         );
     }
 }

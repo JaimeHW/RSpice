@@ -23,6 +23,59 @@ fn run_pac(deck: &str, config: PacConfig) -> PacAnalysisResult {
     engine.run_pac(&netlist, config).expect("PAC completes")
 }
 
+fn one_point_pac_config(input: &str, output: &str) -> PacConfig {
+    PacConfig::new()
+        .with_fundamental(F0)
+        .with_sweep(1.0e4, 1.0e4, 1)
+        .with_sweep_type(rspice_core::analysis::pac::PacSweepType::Linear)
+        .with_sidebands(0, 0)
+        .with_input_source(input)
+        .with_output_node(output)
+}
+
+#[test]
+fn direct_pac_resolves_deck_rshunt_before_circuit_elaboration() {
+    let deck = "\
+* RSHUNT is the only physical return path
+iin 0 out dc 0
+.options rshunt=2k
+.end
+";
+    let analysis = run_pac(deck, one_point_pac_config("iin", "out"));
+    let transfer = analysis
+        .result
+        .conversion_matrix
+        .get(0, 0, 0)
+        .expect("the one-point PAC transfer is retained");
+    assert!(
+        (transfer - Complex64::new(2.0e3, 0.0)).norm() <= 1.0e-12,
+        "deck RSHUNT must produce its exact transimpedance, got {transfer}"
+    );
+}
+
+#[test]
+fn direct_pac_applies_hb_local_options_and_rejects_invalid_modes() {
+    let base = "\
+* PAC HB-local option gate
+iin 0 out dc 0
+r1 out 0 1k
+.end
+";
+    let mut zero_budget = Netlist::parse(base).expect("base deck parses");
+    zero_budget.options.nonlin_hb_maxstep = Some(0);
+    let error = Engine::new(SimulationConfig::default())
+        .run_pac(&zero_budget, one_point_pac_config("iin", "out"))
+        .expect_err("a zero NONLIN-HB MAXSTEP must fail at the PAC boundary");
+    assert!(error.to_string().contains("MAXSTEP must be at least 1"));
+
+    let unsupported_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=1\n.end"))
+        .expect("typed TAHB deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pac(&unsupported_tahb, one_point_pac_config("iin", "out"))
+        .expect_err("an unsupported TAHB mode must fail at the PAC boundary");
+    assert!(error.to_string().contains("TAHB=1"));
+}
+
 #[test]
 fn linear_rc_pac_matches_the_ac_transfer_at_signed_sideband_frequencies() {
     // RC corner exactly at 1 MHz: H(f) = 1 / (1 + j f/fc) with fc = 1 MHz.

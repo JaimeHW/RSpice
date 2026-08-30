@@ -5612,7 +5612,9 @@ impl Engine {
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
                         | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. } => Some(spec.clone()),
+                        | crate::netlist::SourceSpec::Am { .. }
+                        | crate::netlist::SourceSpec::TrNoise { .. }
+                        | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
                         _ => None,
                     };
                     circuit.voltage_sources.add_with_ac_spec_and_pwl_waveform(
@@ -5656,7 +5658,9 @@ impl Engine {
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
                         | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. } => Some(spec.clone()),
+                        | crate::netlist::SourceSpec::Am { .. }
+                        | crate::netlist::SourceSpec::TrNoise { .. }
+                        | crate::netlist::SourceSpec::TrRandom { .. } => Some(spec.clone()),
                         _ => None,
                     };
                     circuit.current_sources.add_with_ac_spec_and_pwl_waveform(

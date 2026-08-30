@@ -63,7 +63,11 @@ impl Engine {
         config: PacConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(netlist, config, None, abort)
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pac_impl(netlist, config, None, abort)
     }
 
     /// Run periodic AC from an exact previously converged shooting-PSS
@@ -76,7 +80,11 @@ impl Engine {
         operating_point: &super::super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pac_impl(
             netlist,
             config,
             Some(PacOperatingPoint::Shooting(operating_point)),
@@ -94,7 +102,11 @@ impl Engine {
         operating_point: &HbOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pac_impl(
             netlist,
             config,
             Some(PacOperatingPoint::HarmonicBalance(operating_point)),
@@ -172,6 +184,20 @@ impl Engine {
             )));
         }
 
+        let mut hb_config = match &operating_point {
+            Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
+            _ => HbConfig::new(config.fundamental_freq)
+                .with_harmonics(op_harmonics)
+                .with_oversample(4),
+        };
+        // PAC's tolerances govern the nonlinear periodic operating point.
+        // The subsequent sideband systems use deterministic direct solves and
+        // therefore have no iterative tolerance of their own.
+        hb_config.tolerance = config.reltol;
+        hb_config.abstol = config.abstol;
+        let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
+        self.hb_validate_config(&hb_config)?;
+
         let input_name = config
             .input_source
             .clone()
@@ -235,21 +261,11 @@ impl Engine {
             )));
         }
 
-        let mut hb_config = match &operating_point {
-            Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
-            _ => HbConfig::new(config.fundamental_freq)
-                .with_harmonics(op_harmonics)
-                .with_oversample(4),
-        };
-        self.ensure_analysis_points(hb_config.fft_size())?;
-        // PAC's tolerances govern the nonlinear periodic operating point.
-        // The subsequent sideband systems use deterministic direct solves and
-        // therefore have no iterative tolerance of their own.
-        hb_config.tolerance = config.reltol;
-        hb_config.abstol = config.abstol;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
-        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
+        let mut solver = HbSolver::try_new(hb_config.clone(), num_nodes).map_err(|error| {
+            SimulationError::Circuit(format!("PAC solver construction failed: {error}"))
+        })?;
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 

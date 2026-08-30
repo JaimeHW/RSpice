@@ -147,16 +147,11 @@ impl HbOperatingPoint {
         iterations: usize,
         residual_norm: Value,
     ) -> Result<Self, SimulationError> {
-        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
-            return Err(SimulationError::Circuit(
-                "retained HB state has an invalid fundamental frequency".to_owned(),
-            ));
-        }
-        if config.num_harmonics == 0 {
-            return Err(SimulationError::Circuit(
-                "retained HB state has no harmonic basis".to_owned(),
-            ));
-        }
+        config.validate().map_err(|error| {
+            SimulationError::Circuit(format!(
+                "retained HB state has an invalid configuration: {error}"
+            ))
+        })?;
         if !residual_norm.is_finite() || residual_norm < 0.0 {
             return Err(SimulationError::Circuit(
                 "retained HB state has an invalid residual norm".to_owned(),
@@ -169,7 +164,9 @@ impl HbOperatingPoint {
                 node_names.len()
             )));
         }
-        let expected_harmonics = config.num_harmonics.saturating_add(1);
+        let expected_harmonics = config.num_harmonics.checked_add(1).ok_or_else(|| {
+            SimulationError::Circuit("retained HB harmonic basis exceeds this platform".to_owned())
+        })?;
         let mut seen = std::collections::HashSet::with_capacity(node_names.len());
         for (node, spectrum) in node_names.iter().zip(&spectral_state) {
             if node.is_empty() || node.trim() != node {
@@ -354,7 +351,6 @@ pub struct HbAnalysisResult {
 }
 
 const HB_NORTON_G: Value = 1e6; // Rs = 1 uOhm for stiff source conversion in nonlinear HB.
-const HB_ZERO_SENSE_TOL: Value = 1e-12;
 
 #[derive(Debug, Clone, Copy)]
 struct HbCurrentSwitchControl {
@@ -405,6 +401,9 @@ impl Engine {
         config: &HbConfig,
         node_names: &[String],
     ) -> Result<HbSolverState, SimulationError> {
+        config.validate().map_err(|error| {
+            SimulationError::Circuit(format!("dependent HB configuration is invalid: {error}"))
+        })?;
         let analysis = operating_point.analysis();
         let result = &analysis.result;
         if !result.frequency.is_finite() || result.frequency <= 0.0 {
@@ -428,7 +427,12 @@ impl Engine {
             )));
         }
 
-        let mut fft = HbFft::with_size(config.num_harmonics, config.fft_size());
+        let fft_size = config.checked_fft_size().map_err(|error| {
+            SimulationError::Circuit(format!("dependent HB collocation grid is invalid: {error}"))
+        })?;
+        let mut fft = HbFft::try_with_size(config.num_harmonics, fft_size).map_err(|error| {
+            SimulationError::Circuit(format!("dependent HB FFT construction failed: {error}"))
+        })?;
         let sample_count = fft.size();
         let mut state = HbSolverState::new(node_names.len(), config.num_harmonics);
         for (target_index, target_name) in node_names.iter().enumerate() {
@@ -543,36 +547,17 @@ impl Engine {
     }
 
     fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {
-        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
-            return Err(HbError::InvalidConfig(
-                "Fundamental frequency must be finite and positive".to_string(),
-            )
-            .into());
-        }
-        if config.num_harmonics == 0 {
-            return Err(
-                HbError::InvalidConfig("Must have at least one harmonic".to_string()).into(),
-            );
-        }
-
-        let minimum_points = config.minimum_collocation_points().ok_or_else(|| {
-            HbError::InvalidConfig(format!(
-                "harmonic count {} exceeds the addressable collocation grid",
-                config.num_harmonics
-            ))
+        config
+            .validate()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let fft_size = config
+            .checked_fft_size()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let spectral_components = config.num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidConfig("num_harmonics exceeds the addressable spectrum".to_owned())
         })?;
-        if let Some(points) = config.collocation_points
-            && (points % 2 == 0 || points < minimum_points)
-        {
-            return Err(HbError::InvalidConfig(format!(
-                "collocation grid must be odd and contain at least {} points for {} harmonics; found {points}",
-                minimum_points,
-                config.num_harmonics
-            ))
-            .into());
-        }
-        self.ensure_analysis_points(config.fft_size())?;
-        self.ensure_analysis_points(config.num_harmonics.saturating_add(1))?;
+        self.ensure_analysis_points(fft_size)?;
+        self.ensure_analysis_points(spectral_components)?;
         Ok(())
     }
 
@@ -649,7 +634,9 @@ impl Engine {
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
         // Create solver
-        let mut solver = HbSolver::new(config.clone(), num_nodes);
+        let mut solver = HbSolver::try_new(config.clone(), num_nodes).map_err(|error| {
+            SimulationError::Circuit(format!("HB solver construction failed: {error}"))
+        })?;
 
         // Set node names from circuit's node map
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
@@ -976,14 +963,15 @@ mod tests {
     }
 
     #[test]
-    fn pulse_source_uses_the_exact_configured_collocation_grid() {
-        let config = HbConfig::new(10.0e3)
+    fn pulse_source_coefficients_are_analytic_and_grid_invariant() {
+        let minimal_grid = HbConfig::new(10.0e3)
             .with_harmonics(50)
             .with_collocation_points(101);
+        let oversized_grid = minimal_grid.clone().with_collocation_points(401);
         let pulse = SourceSpec::Pulse {
             v1: 1.0,
             v2: 2.0,
-            delay: 0.0,
+            delay: 1.234_567e-6,
             rise: 10.0e-6,
             fall: 10.0e-6,
             width: 40.0e-6,
@@ -991,27 +979,33 @@ mod tests {
             pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
-        let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &config, &[1])
+        let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &minimal_grid, &[1])
             .expect("periodic pulse spectrum");
+        let oversized =
+            Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &oversized_grid, &[1])
+                .expect("same pulse on an oversized collocation grid");
 
-        assert!((spectrum.dc - 1.499_950_985_197_529_7).abs() < 1.0e-14);
+        assert_eq!(spectrum.dc, oversized.dc);
+        assert_eq!(spectrum.harmonics, oversized.harmonics);
+        assert!((spectrum.dc - 1.5).abs() < 1.0e-15);
         let (_, h1_amplitude, h1_phase) = spectrum.harmonics[0];
         let h1 = Complex64::from_polar(h1_amplitude, h1_phase);
+        let envelope = (2.0 / std::f64::consts::PI) * (std::f64::consts::PI / 10.0).sin()
+            / (std::f64::consts::PI / 10.0);
+        let center = 30.0e-6 + 1.234_567e-6;
+        let expected_h1 =
+            Complex64::from_polar(envelope, -std::f64::consts::TAU * center / 100.0e-6);
         assert!(
-            (h1.re - -1.935_850_060_379_601_7e-1).abs() < 1.0e-12,
-            "h1={h1:?}"
+            (h1 - expected_h1).norm() < 1.0e-14,
+            "h1={h1:?}, expected={expected_h1:?}"
         );
-        assert!(
-            (h1.im - -5.955_525_013_998_652e-1).abs() < 1.0e-12,
-            "h1={h1:?}"
-        );
-        let h2 = spectrum
+        let h2_norm = spectrum
             .harmonics
             .iter()
             .find(|(harmonic, _, _)| *harmonic == 2)
             .map(|(_, amplitude, phase)| Complex64::from_polar(*amplitude, *phase))
-            .expect("minimal odd grid aliases the continuous even harmonic onto the grid");
-        assert!(h2.norm() > 1.0e-4);
+            .map_or(0.0, |phasor| phasor.norm());
+        assert!(h2_norm < 1.0e-14, "symmetric trapezoid h2={h2_norm}");
     }
 
     #[test]

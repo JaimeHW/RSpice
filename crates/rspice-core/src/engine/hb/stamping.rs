@@ -540,7 +540,7 @@ impl Engine {
             }
 
             for (harmonic, amplitude, phase) in spectrum.harmonics {
-                if amplitude.abs() > 1e-30 {
+                if amplitude != 0.0 {
                     if np > 0 {
                         // Current leaves at + terminal.
                         solver.add_harmonic_source(np - 1, harmonic, -amplitude, phase);

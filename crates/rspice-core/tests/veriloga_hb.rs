@@ -12,33 +12,29 @@ fn write_model(name: &str, source: &str) -> String {
 }
 
 #[test]
-fn veriloga_hb_runtime_errors_are_simulation_errors_not_panics() {
+fn dynamic_and_noisy_veriloga_fails_closed_until_hb_metadata_is_exact() {
     let model = write_model(
-        "runtime_oob",
+        "dynamic_noise",
         r#"
 `include "disciplines.vams"
 
-module va_hb_oob(p, n);
+module va_hb_dynamic_noise(p, n);
     inout p, n;
     electrical p, n;
-    real w[1:4];
-    integer i;
-    analog begin
-        i = (V(p, n) > 0.5) ? 5 : 1;
-        w[i] = 1.0e-3;
-        I(p, n) <+ w[i] * V(p, n);
-    end
+    parameter real g = 1.0e-3;
+    parameter real c = 1.0e-12;
+    analog I(p, n) <+ g * V(p, n) + ddt(c * V(p, n))
+        + white_noise(1.0e-18, "thermal");
 endmodule
 "#,
     );
 
     let deck = format!(
-        "* veriloga HB runtime diagnostic\n\
+        "* veriloga HB exact-capability diagnostic\n\
          V1 in 0 DC 1 SIN(1 0 1meg)\n\
          R1 in 0 1k\n\
-         C1 in 0 1p\n\
-         XBAD in 0 va_hb_oob\n\
-         .va \"{model}\" va_hb_oob\n\
+         XVA in 0 va_hb_dynamic_noise\n\
+         .va \"{model}\" va_hb_dynamic_noise\n\
          .end\n"
     );
 
@@ -50,11 +46,12 @@ endmodule
 
     let _ = std::fs::remove_file(model);
 
-    let result = result.expect("Verilog-A HB runtime errors must not panic");
-    let err = result.expect_err("HB runtime error must be reported to the caller");
+    let result = result.expect("unsupported Verilog-A HB capability must not panic");
+    let err = result.expect_err("HB must not omit Verilog-A charge or noise contributions");
     let text = err.to_string();
     assert!(
-        text.contains("Verilog-A") && (text.contains("Array index 5") || text.contains("[1:4]")),
-        "diagnostic should identify the Verilog-A HB array bounds error, got: {text}"
+        text.contains("runtime Verilog-A")
+            && text.contains("exact HB charge/noise capability metadata"),
+        "diagnostic should identify the unavailable exact Verilog-A HB capability, got: {text}"
     );
 }

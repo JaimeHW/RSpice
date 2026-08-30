@@ -4,16 +4,31 @@ use super::*;
 use std::f64::consts::PI;
 
 impl HbSolver {
-    /// Create a new HB solver
+    /// Create a new HB solver from a configuration already authenticated by
+    /// the caller.
+    ///
+    /// New code should use [`Self::try_new`]. This compatibility constructor
+    /// never panics for a malformed configuration; it retains the validation
+    /// error and every numerical solve returns that typed error before using
+    /// the placeholder storage.
     pub fn new(config: HbConfig, num_nodes: usize) -> Self {
-        let num_harmonics = config.num_harmonics;
-        let fft = match config.collocation_points {
-            Some(points) => HbFft::with_size(num_harmonics, points),
-            None => HbFft::new(num_harmonics, config.oversample_factor),
-        };
+        match Self::try_new(config.clone(), num_nodes) {
+            Ok(solver) => solver,
+            Err(HbError::InvalidConfig(error)) => Self::invalid(config, error),
+            Err(error) => Self::invalid(config, HbConfigError::new("config", error.to_string())),
+        }
+    }
 
-        Self {
+    /// Validate the complete HB numerical contract and construct a solver.
+    pub fn try_new(config: HbConfig, num_nodes: usize) -> Result<Self, HbError> {
+        config.validate()?;
+        let num_harmonics = config.num_harmonics;
+        let fft_size = config.checked_fft_size()?;
+        let fft = HbFft::try_with_size(num_harmonics, fft_size)?;
+
+        Ok(Self {
             config,
+            configuration_error: None,
             fft,
             num_nodes,
             num_harmonics,
@@ -31,7 +46,39 @@ impl HbSolver {
             nonlinear_noise_temperatures: Vec::new(),
             #[cfg(feature = "veriloga")]
             veriloga_nonlinear_devices: Vec::new(),
+        })
+    }
+
+    fn invalid(config: HbConfig, error: HbConfigError) -> Self {
+        let fft = HbFft::minimal();
+        Self {
+            config,
+            configuration_error: Some(error),
+            fft,
+            num_nodes: 0,
+            num_harmonics: 1,
+            num_branches: 0,
+            g_matrix: Vec::new(),
+            c_matrix: Vec::new(),
+            l_matrix: Vec::new(),
+            voltage_source_branches: Vec::new(),
+            voltage_source_branch_names: Vec::new(),
+            periodic_mna_branches: Vec::new(),
+            periodic_mna_branch_names: Vec::new(),
+            node_names: Vec::new(),
+            source_spectra: Vec::new(),
+            nonlinear_devices: Vec::new(),
+            nonlinear_noise_temperatures: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            veriloga_nonlinear_devices: Vec::new(),
         }
+    }
+
+    pub(super) fn validate_configuration(&self) -> Result<(), HbError> {
+        if let Some(error) = &self.configuration_error {
+            return Err(HbError::InvalidConfig(error.clone()));
+        }
+        self.config.validate().map_err(HbError::from)
     }
 
     /// Get number of harmonics
@@ -1119,6 +1166,7 @@ impl HbSolver {
     /// Builds Y = G + jωC + 1/(jωL) and augments with MNA branch equations for
     /// ideal voltage sources when present.
     pub fn solve_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
+        self.validate_configuration()?;
         self.validate_linear_storage(state)?;
         let exact_mna = !self.periodic_mna_branches.is_empty();
         if exact_mna {

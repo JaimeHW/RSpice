@@ -164,6 +164,78 @@ r1 out 0 1e18
 }
 
 #[test]
+fn subpicovolt_hb_drive_is_not_reclassified_as_zero() {
+    let deck = "\
+* exact source topology must be invariant under physical scaling
+v1 in 0 sin(0 1e-15 1meg)
+r1 in out 1k
+r2 out 0 1k
+.end
+";
+    let result = run_hb(deck, 1.0e6, 2);
+    let input = coefficient(&result, "in", 1);
+    let output = coefficient(&result, "out", 1);
+
+    assert!(input.norm() > 0.0, "the authored 1 fV drive was erased");
+    assert!(
+        (output / input - num_complex::Complex64::new(0.5, 0.0)).norm() < 1.0e-12,
+        "scaled divider transfer changed: input={input}, output={output}"
+    );
+}
+
+#[test]
+fn distortion_metadata_preserves_the_wrapped_hb_waveform() {
+    let bare = run_hb(
+        "wrapped-source reference\n\
+         v1 out 0 sin(0.25 0.1 1meg)\n\
+         r1 out 0 1k\n\
+         .end\n",
+        1.0e6,
+        2,
+    );
+    let wrapped = run_hb(
+        "wrapped distortion source\n\
+         v1 out 0 sin(0.25 0.1 1meg) distof1 2m 30\n\
+         r1 out 0 1k\n\
+         .end\n",
+        1.0e6,
+        2,
+    );
+
+    for harmonic in 0..=2 {
+        assert_eq!(
+            coefficient(&wrapped, "out", harmonic),
+            coefficient(&bare, "out", harmonic),
+            "DISTOF metadata changed HB harmonic {harmonic}"
+        );
+    }
+}
+
+#[test]
+fn unsupported_time_waveforms_fail_instead_of_becoming_dc() {
+    for (source, waveform, expected) in [
+        ("v1", "exp(0 1 1n 1n 2n 1n)", "EXP is not periodic"),
+        ("v1", "pwl(0 0 1u 1 2u 0) r=0", "periodic PWL"),
+        ("v1", "trnoise(1m 1n 0 0)", "TRNOISE is stochastic"),
+        ("i1", "trrandom(2 1u 2u 3 4)", "TRRANDOM is stochastic"),
+    ] {
+        let deck =
+            format!("unsupported HB waveform\n{source} out 0 {waveform}\nr1 out 0 1k\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("unsupported waveform deck parses");
+        let error = match Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
+        {
+            Ok(_) => panic!("unsupported HB waveform {waveform} must not silently become DC"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains(expected),
+            "unexpected waveform error for {waveform}: {error}"
+        );
+    }
+}
+
+#[test]
 fn floating_linear_hb_component_is_reported_as_singular() {
     let deck = "\
 * The driven component is grounded; f1-f2 is a separate floating island.

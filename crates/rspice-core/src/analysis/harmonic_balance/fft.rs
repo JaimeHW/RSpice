@@ -8,6 +8,7 @@ use num_complex::Complex64;
 use rustfft::{Fft, FftDirection, FftPlanner};
 use std::sync::Arc;
 
+use super::config::{HbConfigError, MAX_HB_COLLOCATION_POINTS};
 use crate::Value;
 
 /// FFT/IFFT processor for Harmonic Balance
@@ -47,27 +48,82 @@ impl HbFft {
     /// * `num_harmonics` - Number of harmonics (not including DC)
     /// * `oversample` - Oversampling factor (typically 2 or 4)
     ///
-    /// The oversampling factor is floored at 2: below that the top
-    /// harmonics collide with the conjugate half of the spectrum and would
-    /// be silently dropped from the solution representation.
+    /// The caller must provide an oversampling factor of at least two; below
+    /// that the top harmonics collide with the conjugate half of the spectrum.
+    /// Untrusted callers should use [`Self::try_new`].
+    #[deprecated(note = "use HbFft::try_new so malformed grids return HbConfigError")]
     pub fn new(num_harmonics: usize, oversample: usize) -> Self {
-        let min_size = (num_harmonics + 1) * oversample.max(2);
-        let fft_size = min_size.next_power_of_two();
+        Self::try_new(num_harmonics, oversample)
+            .expect("HbFft::new requires a prevalidated harmonic-balance configuration")
+    }
 
-        Self::with_size(num_harmonics, fft_size)
+    /// Create an FFT processor after checked grid arithmetic.
+    pub fn try_new(num_harmonics: usize, oversample: usize) -> Result<Self, HbConfigError> {
+        if oversample < 2 {
+            return Err(HbConfigError::new(
+                "oversample_factor",
+                "must be at least two",
+            ));
+        }
+        let min_size = num_harmonics
+            .checked_add(1)
+            .and_then(|components| components.checked_mul(oversample))
+            .ok_or_else(|| {
+                HbConfigError::new(
+                    "oversample_factor",
+                    "overflows the addressable collocation grid",
+                )
+            })?;
+        let fft_size = min_size.checked_next_power_of_two().ok_or_else(|| {
+            HbConfigError::new(
+                "oversample_factor",
+                "requires a collocation grid too large for this platform",
+            )
+        })?;
+
+        Self::try_with_size(num_harmonics, fft_size)
     }
 
     /// Create a processor with an exact collocation-grid size.
+    #[deprecated(note = "use HbFft::try_with_size so malformed grids return HbConfigError")]
     pub fn with_size(num_harmonics: usize, fft_size: usize) -> Self {
+        Self::try_with_size(num_harmonics, fft_size)
+            .expect("HbFft::with_size requires a prevalidated collocation grid")
+    }
+
+    /// Create a processor with an exact, checked collocation-grid size.
+    pub fn try_with_size(num_harmonics: usize, fft_size: usize) -> Result<Self, HbConfigError> {
+        if num_harmonics == 0 {
+            return Err(HbConfigError::new("num_harmonics", "must be at least one"));
+        }
         let minimum_size = num_harmonics
             .checked_mul(2)
             .and_then(|value| value.checked_add(1))
-            .expect("HB harmonic count exceeds the addressable collocation grid");
-        assert!(
-            fft_size >= minimum_size,
-            "HB collocation grid must represent DC and ± every configured harmonic"
-        );
+            .ok_or_else(|| {
+                HbConfigError::new(
+                    "num_harmonics",
+                    "overflows the addressable collocation grid",
+                )
+            })?;
+        if fft_size < minimum_size {
+            return Err(HbConfigError::new(
+                "collocation_points",
+                format!("collocation grid must contain at least {minimum_size} points"),
+            ));
+        }
+        if fft_size > MAX_HB_COLLOCATION_POINTS {
+            return Err(HbConfigError::new(
+                "collocation_points",
+                format!(
+                    "requires {fft_size} points, above the supported limit {MAX_HB_COLLOCATION_POINTS}"
+                ),
+            ));
+        }
 
+        Ok(Self::from_valid_size(num_harmonics, fft_size))
+    }
+
+    fn from_valid_size(num_harmonics: usize, fft_size: usize) -> Self {
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft(fft_size, FftDirection::Forward);
         let ifft = planner.plan_fft(fft_size, FftDirection::Inverse);
@@ -83,6 +139,10 @@ impl HbFft {
             ifft,
             scratch: vec![Complex64::new(0.0, 0.0); scratch_len],
         }
+    }
+
+    pub(crate) fn minimal() -> Self {
+        Self::from_valid_size(1, 4)
     }
 
     #[inline]
@@ -219,7 +279,7 @@ impl HbFft {
 
 impl Clone for HbFft {
     fn clone(&self) -> Self {
-        Self::with_size(self.num_harmonics, self.fft_size)
+        Self::from_valid_size(self.num_harmonics, self.fft_size)
     }
 }
 
@@ -229,7 +289,7 @@ mod tests {
 
     #[test]
     fn odd_minimal_grid_round_trips_the_highest_harmonic() {
-        let mut fft = HbFft::with_size(5, 11);
+        let mut fft = HbFft::try_with_size(5, 11).expect("fixture grid is valid");
         let mut spectrum = vec![Complex64::new(0.0, 0.0); 6];
         spectrum[0] = Complex64::new(0.75, 0.0);
         spectrum[5] = Complex64::new(-0.2, 0.35);

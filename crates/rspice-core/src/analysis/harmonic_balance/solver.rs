@@ -4,7 +4,7 @@
 //! Solves the frequency-domain circuit equations: G*X + jω*C*X + F_NL(X) = I_S
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use super::config::HbConfig;
+use super::config::{HbConfig, HbConfigError};
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralBranchCurrent, SpectralVoltage};
 use crate::Value;
@@ -64,6 +64,8 @@ pub enum HbError {
     SingularMatrix,
     /// Invalid circuit configuration
     InvalidCircuit(String),
+    /// Invalid numerical solver configuration.
+    InvalidConfig(HbConfigError),
     /// FFT operation failed
     FftError(String),
 }
@@ -84,12 +86,19 @@ impl std::fmt::Display for HbError {
             }
             Self::SingularMatrix => write!(f, "Singular Jacobian matrix"),
             Self::InvalidCircuit(msg) => write!(f, "Invalid circuit: {}", msg),
+            Self::InvalidConfig(error) => write!(f, "Invalid HB config: {error}"),
             Self::FftError(msg) => write!(f, "FFT error: {}", msg),
         }
     }
 }
 
 impl std::error::Error for HbError {}
+
+impl From<HbConfigError> for HbError {
+    fn from(error: HbConfigError) -> Self {
+        Self::InvalidConfig(error)
+    }
+}
 
 /// Harmonic Balance solver state
 #[derive(Debug)]
@@ -733,6 +742,11 @@ impl VoltageSourceBranch {
 pub struct HbSolver {
     /// Configuration
     config: HbConfig,
+
+    /// Authentication failure retained by the backwards-compatible
+    /// infallible constructor. Numerical entry points return this as a typed
+    /// error before touching the placeholder FFT or storage.
+    configuration_error: Option<HbConfigError>,
 
     /// FFT processor
     fft: HbFft,

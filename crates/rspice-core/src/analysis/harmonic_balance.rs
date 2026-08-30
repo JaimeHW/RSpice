@@ -40,7 +40,7 @@ pub mod nonlinear;
 mod result;
 mod solver;
 
-pub use config::{HbConfig, HbTone};
+pub use config::{HbConfig, HbConfigError, HbTone};
 pub use fft::HbFft;
 pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};
 pub use nonlinear::{HbBjt, HbBjtType, HbDevice, HbDeviceCollection, HbDiode, HbMosType, HbMosfet};

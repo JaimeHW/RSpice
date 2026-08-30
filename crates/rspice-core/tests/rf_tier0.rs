@@ -568,3 +568,33 @@ fn harmonic_balance_drives_a_port_the_same_way_the_transient_does() {
         "HB DC {hb_dc} V vs settled transient {referee} V on the same port drive"
     );
 }
+
+#[test]
+fn rf_port_and_wrapped_waveform_add_before_exact_source_registration() {
+    let fundamental = 1.0e6;
+    let netlist = Netlist::parse(
+        "summed RF and waveform drive\n\
+         V1 in 0 SIN(0 0.1 1meg) portnum 1 z0 50 pwr=50u freq=1meg\n\
+         R1 in 0 1k\n\
+         .end\n",
+    )
+    .expect("summed RF source deck parses");
+    let result = engine()
+        .run_hb(&netlist, HbConfig::new(fundamental).with_harmonics(2))
+        .expect("same-harmonic source components are merged before MNA registration");
+    let input = result
+        .result
+        .spectral_voltages
+        .iter()
+        .find(|spectrum| spectrum.node_name.eq_ignore_ascii_case("in"))
+        .expect("input spectrum retained")
+        .coefficients[1];
+
+    // SIN is -j on the cosine-referenced HB boundary. The annotated port is
+    // +1 at zero phase, and sqrt(4*50u*50) = 0.1 V peak.
+    let expected = num_complex::Complex64::new(0.1, -0.1);
+    assert!(
+        (input - expected).norm() < 1.0e-14,
+        "summed source phasor is {input}, expected {expected}"
+    );
+}

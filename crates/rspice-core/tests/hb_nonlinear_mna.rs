@@ -253,3 +253,75 @@ r1 out 0 1k
         );
     }
 }
+
+#[test]
+fn nonlinear_hb_rejects_device_models_it_would_otherwise_downgrade() {
+    let cases = [
+        (
+            "\
+* diode breakdown cannot be reduced to a basic exponential
+v1 out 0 dc 1
+d1 out 0 dmod
+.model dmod d (is=1e-14 bv=5 ibv=1u)
+.end
+",
+            "diodes requiring breakdown",
+        ),
+        (
+            "\
+* complete Gummel-Poon is not the reduced HB Ebers-Moll kernel
+vcc c 0 dc 5
+vb b 0 dc 0.7
+q1 c b 0 qmod
+.model qmod npn (is=1e-16 bf=100 ikf=1m)
+.end
+",
+            "native BJT/VBIC",
+        ),
+        (
+            "\
+* MOS2 equations cannot be routed through the HB MOS1 kernel
+vd d 0 dc 1
+vg g 0 dc 1
+m1 d g 0 0 mmod l=1u w=10u
+.model mmod nmos (level=2 vto=0.5 kp=1m)
+.end
+",
+            "non-LEVEL=1",
+        ),
+        (
+            "\
+* Parker-Skellern JFET2 cannot be routed through Shichman-Hodges
+vd d 0 dc 1
+vg g 0 dc 0
+j1 d g 0 jmod
+.model jmod njf (level=2 vto=-1 beta=1m)
+.end
+",
+            "non-Shichman-Hodges",
+        ),
+        (
+            "\
+* stateful switch hysteresis has no exact HB state evolution
+v1 out 0 dc 1
+vc ctrl 0 dc 0
+s1 out 0 ctrl 0 smod
+.model smod sw (vt=0 vh=0.1 ron=1 roff=1meg)
+.end
+",
+            "requiring hysteretic",
+        ),
+    ];
+
+    for (deck, expected_capability) in cases {
+        let netlist = Netlist::parse(deck).expect("unsupported nonlinear model deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(1))
+            .expect_err("HB must not silently downgrade a nonlinear device model");
+        let message = error.to_string();
+        assert!(
+            message.contains(expected_capability),
+            "failure must identify missing capability '{expected_capability}': {message}"
+        );
+    }
+}

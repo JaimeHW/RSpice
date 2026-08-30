@@ -309,7 +309,11 @@ impl Engine {
         max_sideband: i32,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
-        self.run_pnoise_impl(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_impl(
             netlist,
             fundamental_freq,
             offsets,
@@ -336,13 +340,17 @@ impl Engine {
         operating_point: &super::super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if operating_point.config().is_autonomous() {
             return Err(SimulationError::Circuit(
                 "driven pnoise cannot consume an autonomous PSS operating point; use oscillator pnoise"
                     .to_string(),
             ));
         }
-        self.run_pnoise_impl(
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_impl(
             netlist,
             operating_point.analysis().result.frequency,
             offsets,
@@ -370,7 +378,11 @@ impl Engine {
         operating_point: &HbOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
-        self.run_pnoise_impl(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_impl(
             netlist,
             operating_point.config().fundamental_freq,
             offsets,
@@ -428,6 +440,34 @@ impl Engine {
         let sideband_count = (max_sideband as usize).saturating_mul(2).saturating_add(1);
         self.ensure_analysis_points(sideband_count)?;
 
+        let span = (max_sideband as usize).saturating_mul(2);
+        let op_harmonics = span.max(8);
+        if let Some(operating_point) = &operating_point
+            && op_harmonics
+                > match operating_point {
+                    PnoiseOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
+                    PnoiseOperatingPoint::HarmonicBalance(point) => {
+                        point.spectral_harmonic_capacity()
+                    }
+                }
+        {
+            let capacity = match operating_point {
+                PnoiseOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
+                PnoiseOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
+            };
+            return Err(SimulationError::Circuit(format!(
+                "pnoise requires {op_harmonics} periodic harmonics for its sideband span, but the retained periodic state has capacity {capacity}"
+            )));
+        }
+        let hb_config = match &operating_point {
+            Some(PnoiseOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
+            _ => HbConfig::new(fundamental_freq)
+                .with_harmonics(op_harmonics)
+                .with_oversample(4),
+        };
+        let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
+        self.hb_validate_config(&hb_config)?;
+
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
         let num_nodes = circuit.num_nodes();
         if num_nodes == 0 {
@@ -456,36 +496,12 @@ impl Engine {
             )));
         }
 
-        let span = (max_sideband as usize).saturating_mul(2);
-        let op_harmonics = span.max(8);
-        if let Some(operating_point) = &operating_point
-            && op_harmonics
-                > match operating_point {
-                    PnoiseOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
-                    PnoiseOperatingPoint::HarmonicBalance(point) => {
-                        point.spectral_harmonic_capacity()
-                    }
-                }
-        {
-            let capacity = match operating_point {
-                PnoiseOperatingPoint::Shooting(point) => point.spectral_harmonic_capacity(),
-                PnoiseOperatingPoint::HarmonicBalance(point) => point.spectral_harmonic_capacity(),
-            };
-            return Err(SimulationError::Circuit(format!(
-                "pnoise requires {op_harmonics} periodic harmonics for its sideband span, but the retained periodic state has capacity {capacity}"
-            )));
-        }
-        let hb_config = match &operating_point {
-            Some(PnoiseOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
-            _ => HbConfig::new(fundamental_freq)
-                .with_harmonics(op_harmonics)
-                .with_oversample(4),
-        };
-        self.ensure_analysis_points(hb_config.fft_size())?;
         self.ensure_result_shape(op_harmonics.saturating_add(1), num_nodes.saturating_mul(2))?;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
-        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
+        let mut solver = HbSolver::try_new(hb_config.clone(), num_nodes).map_err(|error| {
+            SimulationError::Circuit(format!("pnoise solver construction failed: {error}"))
+        })?;
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 
