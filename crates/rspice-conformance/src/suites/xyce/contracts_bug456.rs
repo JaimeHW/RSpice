@@ -343,6 +343,7 @@ impl Bug456Role {
             (
                 Bug456Case::ConverterUnpacked
                     | Bug456Case::ConverterOutput
+                    | Bug456Case::EmitterGear
                     | Bug456Case::EmitterTrapGear
                     | Bug456Case::SimpleUnpacked,
                 Bug456Member::Owner
