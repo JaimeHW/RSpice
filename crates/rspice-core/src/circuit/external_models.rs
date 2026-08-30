@@ -1827,20 +1827,21 @@ impl CircuitData {
 
     /// Commit build-time generated Verilog-A integrator state after acceptance.
     #[cfg(feature = "veriloga-builtins-base")]
-    pub fn accept_generated_veriloga_timestep(&mut self) {
-        self.generated_veriloga_devices.accept_timestep();
+    pub fn accept_generated_veriloga_timestep(&mut self) -> Result<(), String> {
+        self.generated_veriloga_devices.advance_state()
     }
 
     pub(crate) fn generated_veriloga_checkpoint_states(
         &self,
-    ) -> Vec<crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint> {
+    ) -> Result<Vec<crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint>, String>
+    {
         #[cfg(feature = "veriloga-builtins-base")]
         {
-            self.generated_veriloga_devices.checkpoint_states()
+            self.generated_veriloga_devices.accepted_checkpoint_states()
         }
         #[cfg(not(feature = "veriloga-builtins-base"))]
         {
-            Vec::new()
+            Ok(Vec::new())
         }
     }
 

@@ -363,9 +363,15 @@ pub(crate) struct StampState<const DDT: usize, const IDT: usize> {
 	pub(crate) ddt_derivative_current: [f64; DDT],
 	pub(crate) ddt_derivative_previous: [f64; DDT],
 	pub(crate) idt_current: [f64; IDT],
+	pub(crate) idt_candidate_previous: [f64; IDT],
+	pub(crate) idt_input_current: [f64; IDT],
 	pub(crate) idt_previous: [f64; IDT],
+	pub(crate) idt_older: [f64; IDT],
+	pub(crate) idt_input_previous: [f64; IDT],
 	pub(crate) ddt_initialized: [bool; DDT],
 	pub(crate) idt_initialized: [bool; IDT],
+	pub(crate) ddt_candidate_valid: [bool; DDT],
+	pub(crate) idt_candidate_valid: [bool; IDT],
 }
 
 impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
@@ -562,9 +568,8 @@ impl Instance {
 	pub const DDT_STATE_COUNT: usize = 11;
 	pub const IDT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "0eec7e57126e83a45f8557512c458795f77bff6bfffa6e56a7009a181b4957d1";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "af1d91b0857f21a91cb61f548df09ea9bedd1efb3677ee0d510e1270c6db88b4";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
-	pub const DDT_EPSILON: f64 = 1.0e-20;
 
 	pub fn new(nodes: &[usize]) -> Self {
 		assert_eq!(nodes.len(), Self::NODE_COUNT, "generated Verilog-A node count mismatch");
@@ -597,17 +602,23 @@ impl Instance {
 		values.extend_from_slice(&self.stamp_state.ddt_derivative_current);
 		values.extend_from_slice(&self.stamp_state.ddt_derivative_previous);
 		values.extend_from_slice(&self.stamp_state.idt_current);
+		values.extend_from_slice(&self.stamp_state.idt_candidate_previous);
+		values.extend_from_slice(&self.stamp_state.idt_input_current);
 		values.extend_from_slice(&self.stamp_state.idt_previous);
-		let mut flags = Vec::with_capacity(11);
+		values.extend_from_slice(&self.stamp_state.idt_older);
+		values.extend_from_slice(&self.stamp_state.idt_input_previous);
+		let mut flags = Vec::with_capacity(22);
 		flags.extend_from_slice(&self.stamp_state.ddt_initialized);
 		flags.extend_from_slice(&self.stamp_state.idt_initialized);
+		flags.extend_from_slice(&self.stamp_state.ddt_candidate_valid);
+		flags.extend_from_slice(&self.stamp_state.idt_candidate_valid);
 		GeneratedVerilogARollbackState { values, flags }
 	}
 
 	#[doc(hidden)]
 	pub fn restore_rollback_state(&mut self, state: &GeneratedVerilogARollbackState) {
 		debug_assert_eq!(state.values.len(), 55);
-		debug_assert_eq!(state.flags.len(), 11);
+		debug_assert_eq!(state.flags.len(), 22);
 		let mut rollback_values = state.values.as_slice();
 		let (field, remaining) = rollback_values.split_at(Self::DDT_STATE_COUNT);
 		self.stamp_state.ddt_current.copy_from_slice(field);
@@ -628,7 +639,19 @@ impl Instance {
 		self.stamp_state.idt_current.copy_from_slice(field);
 		rollback_values = remaining;
 		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
+		self.stamp_state.idt_candidate_previous.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
+		self.stamp_state.idt_input_current.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_previous.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
+		self.stamp_state.idt_older.copy_from_slice(field);
+		rollback_values = remaining;
+		let (field, remaining) = rollback_values.split_at(Self::IDT_STATE_COUNT);
+		self.stamp_state.idt_input_previous.copy_from_slice(field);
 		rollback_values = remaining;
 		let mut rollback_flags = state.flags.as_slice();
 		let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);
@@ -636,6 +659,12 @@ impl Instance {
 		rollback_flags = remaining;
 		let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
 		self.stamp_state.idt_initialized.copy_from_slice(field);
+		rollback_flags = remaining;
+		let (field, remaining) = rollback_flags.split_at(Self::DDT_STATE_COUNT);
+		self.stamp_state.ddt_candidate_valid.copy_from_slice(field);
+		rollback_flags = remaining;
+		let (field, remaining) = rollback_flags.split_at(Self::IDT_STATE_COUNT);
+		self.stamp_state.idt_candidate_valid.copy_from_slice(field);
 		rollback_flags = remaining;
 		debug_assert!(rollback_values.is_empty());
 		debug_assert!(rollback_flags.is_empty());
@@ -649,6 +678,8 @@ impl Instance {
 			ddt_derivative_previous: self.stamp_state.ddt_derivative_previous.to_vec(),
 			ddt_initialized: self.stamp_state.ddt_initialized.to_vec(),
 			idt_previous: self.stamp_state.idt_previous.to_vec(),
+			idt_older: self.stamp_state.idt_older.to_vec(),
+			idt_input_previous: self.stamp_state.idt_input_previous.to_vec(),
 			idt_initialized: self.stamp_state.idt_initialized.to_vec(),
 			limiter_anchor: Vec::new(),
 			limiter_initialized: Vec::new(),
@@ -660,10 +691,10 @@ impl Instance {
 		if state.ddt_previous.len() != Self::DDT_STATE_COUNT || state.ddt_older.len() != Self::DDT_STATE_COUNT || state.ddt_derivative_previous.len() != Self::DDT_STATE_COUNT || state.ddt_initialized.len() != Self::DDT_STATE_COUNT {
 			return Err(format!("generated ddt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::DDT_STATE_COUNT, state.ddt_previous.len(), state.ddt_older.len(), state.ddt_derivative_previous.len(), state.ddt_initialized.len()));
 		}
-		if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
-			return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_initialized.len()));
+		if state.idt_previous.len() != Self::IDT_STATE_COUNT || state.idt_older.len() != Self::IDT_STATE_COUNT || state.idt_input_previous.len() != Self::IDT_STATE_COUNT || state.idt_initialized.len() != Self::IDT_STATE_COUNT {
+			return Err(format!("generated idt checkpoint shape mismatch: expected {}, found {} / {} / {} / {}", Self::IDT_STATE_COUNT, state.idt_previous.len(), state.idt_older.len(), state.idt_input_previous.len(), state.idt_initialized.len()));
 		}
-		if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
+		if state.ddt_previous.iter().chain(&state.ddt_older).chain(&state.ddt_derivative_previous).chain(&state.idt_previous).chain(&state.idt_older).chain(&state.idt_input_previous).chain(&state.limiter_anchor).any(|value| !value.is_finite()) {
 			return Err("generated Verilog-A checkpoint contains non-finite persistent state".to_string());
 		}
 		Ok(())
@@ -680,7 +711,13 @@ impl Instance {
 		self.stamp_state.ddt_initialized.copy_from_slice(&state.ddt_initialized);
 		self.stamp_state.idt_previous.copy_from_slice(&state.idt_previous);
 		self.stamp_state.idt_current.copy_from_slice(&state.idt_previous);
+		self.stamp_state.idt_candidate_previous.copy_from_slice(&state.idt_previous);
+		self.stamp_state.idt_older.copy_from_slice(&state.idt_older);
+		self.stamp_state.idt_input_previous.copy_from_slice(&state.idt_input_previous);
+		self.stamp_state.idt_input_current.copy_from_slice(&state.idt_input_previous);
 		self.stamp_state.idt_initialized.copy_from_slice(&state.idt_initialized);
+		self.stamp_state.ddt_candidate_valid.fill(false);
+		self.stamp_state.idt_candidate_valid.fill(false);
 		Ok(())
 	}
 
@@ -842,69 +879,124 @@ impl Instance {
 
 	#[inline]
 	pub fn set_timepoint(&mut self, time: f64, timestep: f64, ddt_coefficients: GeneratedDdtCoefficients) {
+		if !self.ddt_coefficients.active && ddt_coefficients.active {
+			self.promote_operating_point_candidates();
+		} else {
+			self.normalize_integration_candidates();
+		}
 		self.time = time;
 		self.timestep = timestep;
 		self.ddt_coefficients = ddt_coefficients;
 	}
 
 	#[inline]
-	pub fn accept_timestep(&mut self) {
+	pub fn begin_stateful_evaluation(&mut self) {
+		self.normalize_integration_candidates();
+	}
+
+	pub fn validate_advance_state(&self) -> Result<(), String> {
 		let mut index = 0usize;
 		while index < Self::DDT_STATE_COUNT {
-			self.stamp_state.ddt_older[index] = self.stamp_state.ddt_previous[index];
-			self.stamp_state.ddt_previous[index] = self.stamp_state.ddt_current[index];
-			self.stamp_state.ddt_derivative_previous[index] = self.stamp_state.ddt_derivative_current[index];
-			self.stamp_state.ddt_initialized[index] = true;
+			for (lane, value) in [("previous", self.stamp_state.ddt_previous[index]), ("older", self.stamp_state.ddt_older[index]), ("derivative_previous", self.stamp_state.ddt_derivative_previous[index])] {
+				if !value.is_finite() {
+					return Err(format!("generated ddt accepted state slot {index} lane {lane} is non-finite"));
+				}
+			}
+			if self.stamp_state.ddt_candidate_valid[index] && (!self.stamp_state.ddt_current[index].is_finite() || !self.stamp_state.ddt_derivative_current[index].is_finite()) {
+				return Err(format!("generated ddt candidate state slot {index} is non-finite"));
+			}
 			index += 1;
 		}
 		let mut index = 0usize;
 		while index < Self::IDT_STATE_COUNT {
-			self.stamp_state.idt_previous[index] = self.stamp_state.idt_current[index];
-			self.stamp_state.idt_initialized[index] = true;
+			for (lane, value) in [("previous", self.stamp_state.idt_previous[index]), ("older", self.stamp_state.idt_older[index]), ("input_previous", self.stamp_state.idt_input_previous[index])] {
+				if !value.is_finite() {
+					return Err(format!("generated idt accepted state slot {index} lane {lane} is non-finite"));
+				}
+			}
+			if self.stamp_state.idt_candidate_valid[index] && (!self.stamp_state.idt_current[index].is_finite() || !self.stamp_state.idt_candidate_previous[index].is_finite() || !self.stamp_state.idt_input_current[index].is_finite()) {
+				return Err(format!("generated idt candidate state slot {index} is non-finite"));
+			}
+			index += 1;
+		}
+		Ok(())
+	}
+
+	pub fn apply_validated_advance_state(&mut self) {
+		debug_assert!(self.validate_advance_state().is_ok());
+		let mut index = 0usize;
+		while index < Self::DDT_STATE_COUNT {
+			if self.stamp_state.ddt_candidate_valid[index] {
+				self.stamp_state.ddt_older[index] = if self.stamp_state.ddt_initialized[index] { self.stamp_state.ddt_previous[index] } else { self.stamp_state.ddt_current[index] };
+				self.stamp_state.ddt_previous[index] = self.stamp_state.ddt_current[index];
+				self.stamp_state.ddt_derivative_previous[index] = self.stamp_state.ddt_derivative_current[index];
+				self.stamp_state.ddt_initialized[index] = true;
+			}
+			self.stamp_state.ddt_current[index] = self.stamp_state.ddt_previous[index];
+			self.stamp_state.ddt_derivative_current[index] = self.stamp_state.ddt_derivative_previous[index];
+			self.stamp_state.ddt_candidate_valid[index] = false;
+			index += 1;
+		}
+		let mut index = 0usize;
+		while index < Self::IDT_STATE_COUNT {
+			if self.stamp_state.idt_candidate_valid[index] {
+				self.stamp_state.idt_older[index] = if self.stamp_state.idt_initialized[index] { self.stamp_state.idt_previous[index] } else { self.stamp_state.idt_candidate_previous[index] };
+				self.stamp_state.idt_previous[index] = self.stamp_state.idt_current[index];
+				self.stamp_state.idt_input_previous[index] = self.stamp_state.idt_input_current[index];
+				self.stamp_state.idt_initialized[index] = true;
+			}
+			self.stamp_state.idt_current[index] = self.stamp_state.idt_previous[index];
+			self.stamp_state.idt_candidate_previous[index] = self.stamp_state.idt_previous[index];
+			self.stamp_state.idt_input_current[index] = self.stamp_state.idt_input_previous[index];
+			self.stamp_state.idt_candidate_valid[index] = false;
 			index += 1;
 		}
 	}
 
-	#[inline]
-	pub(crate) fn eval_ddt(&mut self, slot: usize, value: f64) -> f64 {
-		debug_assert!(slot < Self::DDT_STATE_COUNT, "generated ddt state slot out of range");
-		let previous = if self.stamp_state.ddt_initialized[slot] {
-			self.stamp_state.ddt_previous[slot]
-		} else {
-			value
-		};
-		let older = if self.stamp_state.ddt_initialized[slot] {
-			self.stamp_state.ddt_older[slot]
-		} else {
-			value
-		};
-		self.stamp_state.ddt_current[slot] = value;
-		if self.ddt_coefficients.active {
-			let result = value * self.ddt_coefficients.derivative_scale
-				- previous * self.ddt_coefficients.previous_value_scale
-				- older * self.ddt_coefficients.older_value_scale
-				- self.stamp_state.ddt_derivative_previous[slot] * self.ddt_coefficients.previous_derivative_scale;
-			self.stamp_state.ddt_derivative_current[slot] = result;
-			result
-		} else {
-			self.stamp_state.ddt_current[slot] = value;
-			self.stamp_state.ddt_previous[slot] = value;
-			self.stamp_state.ddt_older[slot] = value;
-			self.stamp_state.ddt_derivative_current[slot] = 0.0;
-			self.stamp_state.ddt_derivative_previous[slot] = 0.0;
-			self.stamp_state.ddt_initialized[slot] = true;
-			0.0
+	fn normalize_integration_candidates(&mut self) {
+		let mut index = 0usize;
+		while index < Self::DDT_STATE_COUNT {
+			self.stamp_state.ddt_current[index] = self.stamp_state.ddt_previous[index];
+			self.stamp_state.ddt_derivative_current[index] = self.stamp_state.ddt_derivative_previous[index];
+			self.stamp_state.ddt_candidate_valid[index] = false;
+			index += 1;
+		}
+		let mut index = 0usize;
+		while index < Self::IDT_STATE_COUNT {
+			self.stamp_state.idt_current[index] = self.stamp_state.idt_previous[index];
+			self.stamp_state.idt_candidate_previous[index] = self.stamp_state.idt_previous[index];
+			self.stamp_state.idt_input_current[index] = self.stamp_state.idt_input_previous[index];
+			self.stamp_state.idt_candidate_valid[index] = false;
+			index += 1;
 		}
 	}
 
-	#[inline]
-	pub(crate) fn ddt_jacobian(&self, derivative: f64) -> f64 {
-		if self.ddt_coefficients.active {
-			derivative * self.ddt_coefficients.derivative_scale
-		} else {
-			0.0
+	fn promote_operating_point_candidates(&mut self) {
+		let mut index = 0usize;
+		while index < Self::DDT_STATE_COUNT {
+			let finite = self.stamp_state.ddt_previous[index].is_finite() && self.stamp_state.ddt_older[index].is_finite() && self.stamp_state.ddt_derivative_previous[index].is_finite() && self.stamp_state.ddt_current[index].is_finite() && self.stamp_state.ddt_derivative_current[index].is_finite();
+			if self.stamp_state.ddt_candidate_valid[index] && finite {
+				self.stamp_state.ddt_older[index] = if self.stamp_state.ddt_initialized[index] { self.stamp_state.ddt_previous[index] } else { self.stamp_state.ddt_current[index] };
+				self.stamp_state.ddt_previous[index] = self.stamp_state.ddt_current[index];
+				self.stamp_state.ddt_derivative_previous[index] = self.stamp_state.ddt_derivative_current[index];
+				self.stamp_state.ddt_initialized[index] = true;
+			}
+			index += 1;
 		}
+		let mut index = 0usize;
+		while index < Self::IDT_STATE_COUNT {
+			let finite = self.stamp_state.idt_previous[index].is_finite() && self.stamp_state.idt_older[index].is_finite() && self.stamp_state.idt_input_previous[index].is_finite() && self.stamp_state.idt_current[index].is_finite() && self.stamp_state.idt_candidate_previous[index].is_finite() && self.stamp_state.idt_input_current[index].is_finite();
+			if self.stamp_state.idt_candidate_valid[index] && finite {
+				self.stamp_state.idt_older[index] = if self.stamp_state.idt_initialized[index] { self.stamp_state.idt_previous[index] } else { self.stamp_state.idt_candidate_previous[index] };
+				self.stamp_state.idt_previous[index] = self.stamp_state.idt_current[index];
+				self.stamp_state.idt_input_previous[index] = self.stamp_state.idt_input_current[index];
+				self.stamp_state.idt_initialized[index] = true;
+			}
+			index += 1;
+		}
+		self.normalize_integration_candidates();
 	}
+
 	#[inline]
 	pub fn limiter_converged(&self) -> bool {
 		true

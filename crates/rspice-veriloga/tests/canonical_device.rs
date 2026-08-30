@@ -1154,6 +1154,10 @@ dynamic_instance.stamp(&ctx, &mut dynamic_stamper);
 assert_eq!(dynamic_sink[9], 8.0, "static plus ddt residual: {dynamic_sink:?}");
 
 let mut static_instance = instance();
+let mut physical_sink = [0.0; 10];
+let mut physical_stamper = runtime::GeneratedStamper { sink: Some(&mut physical_sink) };
+static_instance.begin_stateful_evaluation();
+static_instance.stamp(&ctx, &mut physical_stamper);
 let rollback_before = static_instance.capture_rollback_state();
 runtime::set_dynamic_operators_enabled(false);
 let mut static_sink = [0.0; 10];
@@ -1166,6 +1170,96 @@ assert_eq!(rollback_after, rollback_before, "static DAE probe mutated trial hist
 "#;
     run_generated_main("static DAE current probe", &state, &stamp, &noise, body)
         .unwrap_or_else(|report| panic!("static DAE current probe failed:\n{report}"));
+}
+
+#[test]
+fn generated_ddt_idt_candidates_are_transactional_and_skipped_retry_is_canonical() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module integrated_dynamic_current(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ ddt(V(p, n));
+        I(p, n) <+ idt(V(p, n), 1.0);
+    end
+endmodule
+"#,
+        "transactional ddt and idt",
+    );
+    let body = r#"
+fn stamp(instance: &mut device::state::Instance, voltage: f64) {
+    let voltages = [voltage, 0.0];
+    let ctx = runtime::GeneratedEvalContext { voltages: &voltages, temperature: 300.15 };
+    let mut sink = [0.0; 10];
+    let mut stamper = runtime::GeneratedStamper { sink: Some(&mut sink) };
+    instance.stamp(&ctx, &mut stamper);
+}
+
+let mut instance = device::state::Instance::new(&[0, 1]);
+instance.finalize_parameters().unwrap();
+instance.set_timepoint(0.0, 0.0, runtime::GeneratedDdtCoefficients::inactive());
+instance.begin_stateful_evaluation();
+stamp(&mut instance, 2.0);
+let before_promotion = instance.capture_persistent_state();
+assert!(!before_promotion.ddt_initialized[0]);
+assert!(!before_promotion.idt_initialized[0]);
+
+let backward_euler = runtime::GeneratedDdtCoefficients {
+    active: true,
+    derivative_scale: 2.0,
+    previous_value_scale: 2.0,
+    older_value_scale: 0.0,
+    previous_derivative_scale: 0.0,
+};
+instance.set_timepoint(0.5, 0.5, backward_euler);
+let promoted = instance.capture_persistent_state();
+assert_eq!(promoted.ddt_previous, vec![2.0]);
+assert_eq!(promoted.ddt_older, vec![2.0]);
+assert_eq!(promoted.idt_previous, vec![1.0]);
+assert_eq!(promoted.idt_older, vec![1.0]);
+assert_eq!(promoted.idt_input_previous, vec![2.0]);
+
+instance.begin_stateful_evaluation();
+stamp(&mut instance, 4.0);
+assert_eq!(instance.capture_persistent_state(), promoted, "candidate escaped before acceptance");
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+let accepted = instance.capture_persistent_state();
+assert_eq!(accepted.ddt_previous, vec![4.0]);
+assert_eq!(accepted.ddt_older, vec![2.0]);
+assert_eq!(accepted.ddt_derivative_previous, vec![4.0]);
+assert_eq!(accepted.idt_previous, vec![3.0]);
+assert_eq!(accepted.idt_older, vec![1.0]);
+assert_eq!(accepted.idt_input_previous, vec![4.0]);
+
+instance.begin_stateful_evaluation();
+stamp(&mut instance, f64::NAN);
+instance.begin_stateful_evaluation();
+runtime::set_dynamic_operators_enabled(false);
+stamp(&mut instance, 9.0);
+runtime::set_dynamic_operators_enabled(true);
+instance.validate_advance_state().unwrap();
+instance.apply_validated_advance_state();
+assert_eq!(instance.capture_persistent_state(), accepted, "failed candidate or skipped retry leaked into accepted state");
+let canonical = instance.capture_rollback_state();
+assert!(canonical.values.iter().all(|value| value.is_finite()));
+assert_eq!(canonical.flags, vec![true, true, false, false]);
+
+let mut malformed_op = device::state::Instance::new(&[0, 1]);
+malformed_op.finalize_parameters().unwrap();
+malformed_op.set_timepoint(0.0, 0.0, runtime::GeneratedDdtCoefficients::inactive());
+malformed_op.begin_stateful_evaluation();
+stamp(&mut malformed_op, f64::NAN);
+malformed_op.set_timepoint(0.5, 0.5, backward_euler);
+let malformed_promoted = malformed_op.capture_persistent_state();
+assert!(!malformed_promoted.ddt_initialized[0]);
+assert!(!malformed_promoted.idt_initialized[0]);
+assert!(malformed_promoted.ddt_previous.iter().all(|value| value.is_finite()));
+assert!(malformed_promoted.idt_previous.iter().all(|value| value.is_finite()));
+"#;
+    run_generated_main("transactional ddt and idt", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("transactional ddt/idt probe failed:\n{report}"));
 }
 
 #[test]
@@ -2923,60 +3017,94 @@ pub mod runtime {
         }
     }
 
+    #[derive(Debug, Clone, Copy)]
+    pub struct GeneratedIdtCandidate {
+        pub value: f64,
+        pub jacobian_scale: f64,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct GeneratedIdtCandidateError;
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct GeneratedDdtCandidateError;
+
+    #[allow(clippy::too_many_arguments)]
     pub fn rspice_eval_idt<const STATE_COUNT: usize>(
         current: &mut [f64; STATE_COUNT],
-        previous: &mut [f64; STATE_COUNT],
-        initialized: &mut [bool; STATE_COUNT],
-        active: bool,
-        step: f64,
+        candidate_previous: &mut [f64; STATE_COUNT],
+        input_current: &mut [f64; STATE_COUNT],
+        previous: &[f64; STATE_COUNT],
+        older: &[f64; STATE_COUNT],
+        input_previous: &[f64; STATE_COUNT],
+        initialized: &[bool; STATE_COUNT],
+        candidate_valid: &mut [bool; STATE_COUNT],
+        coefficients: GeneratedDdtCoefficients,
         slot: usize,
         value: f64,
         ic: f64,
-    ) -> f64 {
-        let started_from = if initialized[slot] { previous[slot] } else { ic };
-        let total = if active { started_from + value * step } else { ic };
-        current[slot] = total;
-        if !active {
-            previous[slot] = total;
-            initialized[slot] = true;
+    ) -> Result<GeneratedIdtCandidate, GeneratedIdtCandidateError> {
+        candidate_valid[slot] = false;
+        let base = if initialized[slot] { previous[slot] } else { ic };
+        let older = if initialized[slot] { older[slot] } else { base };
+        let previous_input = if initialized[slot] { input_previous[slot] } else { value };
+        let (total, jacobian_scale) = if coefficients.active {
+            if coefficients.derivative_scale == 0.0 {
+                return Err(GeneratedIdtCandidateError);
+            }
+            (
+                (value
+                    + coefficients.previous_value_scale * base
+                    + coefficients.older_value_scale * older
+                    + coefficients.previous_derivative_scale * previous_input)
+                    / coefficients.derivative_scale,
+                1.0 / coefficients.derivative_scale,
+            )
+        } else {
+            (ic, 0.0)
+        };
+        if !total.is_finite() || !jacobian_scale.is_finite() {
+            return Err(GeneratedIdtCandidateError);
         }
-        total
+        current[slot] = total;
+        candidate_previous[slot] = base;
+        input_current[slot] = value;
+        candidate_valid[slot] = true;
+        Ok(GeneratedIdtCandidate { value: total, jacobian_scale })
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
         current: &mut [f64; STATE_COUNT],
-        previous: &mut [f64; STATE_COUNT],
-        older: &mut [f64; STATE_COUNT],
-        initialized: &mut [bool; STATE_COUNT],
+        previous: &[f64; STATE_COUNT],
+        older: &[f64; STATE_COUNT],
+        initialized: &[bool; STATE_COUNT],
         derivative_current: &mut [f64; STATE_COUNT],
-        derivative_previous: &mut [f64; STATE_COUNT],
-        active: bool,
-        scale: f64,
-        previous_value_scale: f64,
-        older_value_scale: f64,
-        previous_derivative_scale: f64,
+        derivative_previous: &[f64; STATE_COUNT],
+        candidate_valid: &mut [bool; STATE_COUNT],
+        coefficients: GeneratedDdtCoefficients,
         slot: usize,
         value: f64,
-    ) -> f64 {
+    ) -> Result<f64, GeneratedDdtCandidateError> {
+        candidate_valid[slot] = false;
         let previous_value = if initialized[slot] { previous[slot] } else { value };
         let older_value = if initialized[slot] { older[slot] } else { value };
-        current[slot] = value;
-        if active {
-            let result = value * scale
-                - previous_value * previous_value_scale
-                - older_value * older_value_scale
-                - derivative_previous[slot] * previous_derivative_scale;
-            derivative_current[slot] = result;
-            result
+        let previous_derivative = if initialized[slot] { derivative_previous[slot] } else { 0.0 };
+        let result = if coefficients.active {
+            value * coefficients.derivative_scale
+                - previous_value * coefficients.previous_value_scale
+                - older_value * coefficients.older_value_scale
+                - previous_derivative * coefficients.previous_derivative_scale
         } else {
-            previous[slot] = value;
-            older[slot] = value;
-            derivative_current[slot] = 0.0;
-            derivative_previous[slot] = 0.0;
-            initialized[slot] = true;
             0.0
+        };
+        if !result.is_finite() {
+            return Err(GeneratedDdtCandidateError);
         }
+        current[slot] = value;
+        derivative_current[slot] = result;
+        candidate_valid[slot] = true;
+        Ok(result)
     }
 
     #[derive(Copy, Clone)]
@@ -3154,6 +3282,8 @@ pub mod runtime {
         pub ddt_derivative_previous: Vec<Value>,
         pub ddt_initialized: Vec<bool>,
         pub idt_previous: Vec<Value>,
+        pub idt_older: Vec<Value>,
+        pub idt_input_previous: Vec<Value>,
         pub idt_initialized: Vec<bool>,
         pub limiter_anchor: Vec<Value>,
         pub limiter_initialized: Vec<bool>,
@@ -3199,6 +3329,8 @@ pub mod runtime {
         pub fn dynamic_operators_enabled(&self) -> bool {
             DYNAMIC_OPERATORS_ENABLED.load(std::sync::atomic::Ordering::SeqCst)
         }
+        pub fn report_ddt_candidate_error(&self, _slot: usize, _source: GeneratedDdtCandidateError) {}
+        pub fn report_idt_candidate_error(&self, _slot: usize, _source: GeneratedIdtCandidateError) {}
     }
 
     #[derive(Default)]

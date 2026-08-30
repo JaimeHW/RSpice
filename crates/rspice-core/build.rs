@@ -7,7 +7,7 @@ use std::path::{Component, Path};
 mod build_support;
 use build_support::verify_declared_generated_file;
 
-const MANIFEST_SCHEMA_VERSION: u32 = 6;
+const MANIFEST_SCHEMA_VERSION: u32 = 7;
 const MANIFEST_FILE_NAME: &str = "manifest.txt";
 const REGENERATE_COMMAND: &str = "cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins";
 

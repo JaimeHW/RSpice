@@ -1250,12 +1250,19 @@ d1 out 0 dcmc
         "generated checkpoint carries the seam solution bit-exactly"
     );
 
-    let upgraded_legacy_text = checkpoint_text
+    let generated_prefix = checkpoint_text
         .lines()
         .take_while(|line| !line.starts_with("generated_veriloga_state_available "))
         .collect::<Vec<_>>()
-        .join("\n")
-        + "\ngenerated_veriloga_state_available 0\ngenerated_veriloga_states 0\n";
+        .join("\n");
+    let following_sections = checkpoint_text
+        .lines()
+        .skip_while(|line| !line.starts_with("runtime_veriloga_state_available "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let upgraded_legacy_text = format!(
+        "{generated_prefix}\ngenerated_veriloga_state_available 0\ngenerated_veriloga_states 0\n{following_sections}\n"
+    );
     let legacy = TransientCheckpoint::from_text(&upgraded_legacy_text)
         .expect("the upgraded legacy checkpoint parses with unavailable generated state");
     let legacy_error = engine

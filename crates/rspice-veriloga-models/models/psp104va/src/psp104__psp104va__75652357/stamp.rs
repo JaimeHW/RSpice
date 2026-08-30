@@ -14373,25 +14373,27 @@ impl Instance {
         let ddt_scale = move || ddt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
         let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
-        let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
             if dynamic_operators_enabled {
-                rspice_eval_ddt(
-                &mut ddt_state.ddt_current,
-                &mut ddt_state.ddt_previous,
-                &mut ddt_state.ddt_older,
-                &mut ddt_state.ddt_initialized,
-                &mut ddt_state.ddt_derivative_current,
-                &mut ddt_state.ddt_derivative_previous,
-                ddt_active,
-                ddt_coefficients.derivative_scale,
-                ddt_coefficients.previous_value_scale,
-                ddt_coefficients.older_value_scale,
-                ddt_coefficients.previous_derivative_scale,
-                slot,
-                value,
-                )
+                match rspice_eval_ddt(
+                    &mut ddt_state.ddt_current,
+                    &ddt_state.ddt_previous,
+                    &ddt_state.ddt_older,
+                    &ddt_state.ddt_initialized,
+                    &mut ddt_state.ddt_derivative_current,
+                    &ddt_state.ddt_derivative_previous,
+                    &mut ddt_state.ddt_candidate_valid,
+                    ddt_coefficients,
+                    slot,
+                    value,
+                ) {
+                    Ok(result) => result,
+                    Err(source) => {
+                        ctx.report_ddt_candidate_error(slot, source);
+                        0.0
+                    }
+                }
             } else {
                 0.0
             }

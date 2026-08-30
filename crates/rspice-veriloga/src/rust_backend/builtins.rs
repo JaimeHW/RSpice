@@ -1319,7 +1319,7 @@ fn generated_workspace_resources(
         u64::from(ddt_state_count != 0) * 6 + u64::from(idt_state_count != 0) * 3;
 
     Ok(GeneratedBuiltinWorkspaceResources {
-        abi_version: 2,
+        abi_version: 3,
         variable_count,
         node_count,
         branch_count,
@@ -1408,8 +1408,8 @@ fn derivative_matrix_payload_bytes(
 }
 
 fn stamp_state_payload_bytes(ddt_state_count: usize, idt_state_count: usize) -> u128 {
-    let f64_bytes = (ddt_state_count as u128 * 5 + idt_state_count as u128 * 2) * 8;
-    let bool_bytes = ddt_state_count as u128 + idt_state_count as u128;
+    let f64_bytes = (ddt_state_count as u128 * 5 + idt_state_count as u128 * 6) * 8;
+    let bool_bytes = ddt_state_count as u128 * 2 + idt_state_count as u128 * 2;
     let bytes = f64_bytes + bool_bytes;
     if bytes == 0 { 0 } else { (bytes + 7) & !7 }
 }
@@ -2157,7 +2157,7 @@ mod tests {
         ];
 
         let resources = generated_workspace_resources(&device).expect("workspace resources");
-        assert_eq!(resources.abi_version, 2);
+        assert_eq!(resources.abi_version, 3);
         assert_eq!(resources.transient_active_node_rows, 2);
         assert_eq!(resources.transient_active_branch_rows, 0);
         assert_eq!(resources.reactive_active_node_rows, 1);
@@ -2168,7 +2168,7 @@ mod tests {
             resources.legacy_dense_workspace_payload_bytes_per_instance,
             464
         );
-        assert_eq!(resources.stamp_state_payload_bytes_per_instance, 104);
+        assert_eq!(resources.stamp_state_payload_bytes_per_instance, 136);
         assert_eq!(resources.stamp_state_heap_allocations_per_instance, 1);
         assert_eq!(resources.stamp_state_pointer_slots_per_instance, 1);
         assert_eq!(
@@ -2785,7 +2785,7 @@ fn write_registry(
     }
     out.push_str("    }\n");
     out.push('\n');
-    out.push_str("    pub fn accept_timestep(&mut self) {\n");
+    out.push_str("    pub fn begin_stateful_evaluation(&mut self) {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");
     } else {
@@ -2793,7 +2793,40 @@ fn write_registry(
         for (index, feature) in feature_names.iter().enumerate() {
             writeln!(
                 out,
-                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.accept_timestep(),"
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.begin_stateful_evaluation(),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str("    pub fn validate_advance_state(&self) -> Result<(), String> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str("        Ok(())\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.validate_advance_state(),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n");
+    out.push('\n');
+    out.push_str("    pub fn apply_validated_advance_state(&mut self) {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+    } else {
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.apply_validated_advance_state(),"
             )?;
         }
         out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");

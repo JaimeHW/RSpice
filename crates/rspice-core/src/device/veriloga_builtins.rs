@@ -160,6 +160,9 @@ pub struct BuiltinVerilogAInstance {
     /// purely resistive model, which is also what says it has no charge to
     /// hold a timestep to.
     dynamic_charge_third_back: Vec<Value>,
+    /// Number of generated `idt` slots, retained so the packed rollback flag
+    /// lanes can be decoded without allocating a persistent-state snapshot.
+    dynamic_idt_state_count: usize,
     kind: builtins::GeneratedBuiltinKind,
 }
 
@@ -197,11 +200,16 @@ struct GeneratedDdtLanes<'a> {
     previous: &'a [Value],
     older: &'a [Value],
     derivative_previous: &'a [Value],
+    candidate_valid: &'a [bool],
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
 impl<'a> GeneratedDdtLanes<'a> {
-    fn of(state: &'a GeneratedVerilogARollbackState, ddt_len: usize) -> Option<Self> {
+    fn of(
+        state: &'a GeneratedVerilogARollbackState,
+        ddt_len: usize,
+        idt_len: usize,
+    ) -> Option<Self> {
         if ddt_len == 0 {
             return None;
         }
@@ -212,11 +220,16 @@ impl<'a> GeneratedDdtLanes<'a> {
         let older = lanes.next()?;
         let _derivative_current = lanes.next()?;
         let derivative_previous = lanes.next()?;
+        let candidate_valid_offset = ddt_len.checked_add(idt_len)?;
+        let candidate_valid = state
+            .flags
+            .get(candidate_valid_offset..candidate_valid_offset.checked_add(ddt_len)?)?;
         Some(Self {
             current,
             previous,
             older,
             derivative_previous,
+            candidate_valid,
         })
     }
 }
@@ -348,6 +361,15 @@ impl BuiltinVerilogADevices {
             .iter()
             .map(BuiltinVerilogAInstance::checkpoint_state)
             .collect()
+    }
+
+    pub(crate) fn accepted_checkpoint_states(
+        &self,
+    ) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
+        for device in &self.devices {
+            device.validate_checkpoint_boundary()?;
+        }
+        Ok(self.checkpoint_states())
     }
 
     pub(crate) fn validate_checkpoint_states(
@@ -521,10 +543,19 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
-    pub(crate) fn accept_timestep(&mut self) {
-        for device in &mut self.devices {
-            device.accept_timestep();
+    pub(crate) fn advance_state(&mut self) -> Result<(), String> {
+        for device in &self.devices {
+            device.validate_advance_state().map_err(|source| {
+                format!(
+                    "generated Verilog-A instance '{}' ({}) cannot accept state: {source}",
+                    device.instance_name, device.model_name
+                )
+            })?;
         }
+        for device in &mut self.devices {
+            device.apply_validated_advance_state();
+        }
+        Ok(())
     }
 
     pub(crate) fn stamp_ac_real_all(
@@ -569,6 +600,43 @@ impl BuiltinVerilogADevices {
 
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogAInstance {
+    fn validate_checkpoint_boundary(&self) -> Result<(), String> {
+        let ddt_len = self.dynamic_charge_third_back.len();
+        let idt_len = self.dynamic_idt_state_count;
+        let rollback = self.kind.capture_rollback_state();
+        let candidate_offset = ddt_len.checked_add(idt_len).ok_or_else(|| {
+            format!(
+                "generated Verilog-A instance '{}' state shape overflow",
+                self.instance_name
+            )
+        })?;
+        let candidate_count = candidate_offset;
+        let candidate_end = candidate_offset
+            .checked_add(candidate_count)
+            .ok_or_else(|| {
+                format!(
+                    "generated Verilog-A instance '{}' state shape overflow",
+                    self.instance_name
+                )
+            })?;
+        let candidates = rollback
+            .flags
+            .get(candidate_offset..candidate_end)
+            .ok_or_else(|| {
+                format!(
+                    "generated Verilog-A instance '{}' has malformed rollback state",
+                    self.instance_name
+                )
+            })?;
+        if candidates.iter().any(|valid| *valid) {
+            return Err(format!(
+                "generated Verilog-A instance '{}' ({}) has an in-flight DDT/IDT candidate; checkpoint capture requires an accepted boundary",
+                self.instance_name, self.model_name
+            ));
+        }
+        Ok(())
+    }
+
     fn checkpoint_state(&self) -> GeneratedVerilogAInstanceCheckpoint {
         GeneratedVerilogAInstanceCheckpoint {
             instance_name: self.instance_name.clone(),
@@ -669,6 +737,9 @@ impl BuiltinVerilogAInstance {
         }
         let kind = builtins::instantiate(model_name, &nodes, &branches, overrides)?
             .ok_or_else(|| format!("'{model_name}' is not compiled into this binary"))?;
+        let persistent_shape = kind.capture_persistent_state();
+        let ddt_state_count = persistent_shape.ddt_previous.len();
+        let idt_state_count = persistent_shape.idt_previous.len();
         Ok(Self {
             model_name,
             instance_name: instance_name.into(),
@@ -685,10 +756,8 @@ impl BuiltinVerilogAInstance {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_anchor: None,
-            dynamic_charge_third_back: vec![
-                0.0;
-                kind.capture_persistent_state().ddt_previous.len()
-            ],
+            dynamic_charge_third_back: vec![0.0; ddt_state_count],
+            dynamic_idt_state_count: idt_state_count,
             kind,
         })
     }
@@ -1060,6 +1129,9 @@ impl BuiltinVerilogAInstance {
             simparams,
             evaluation_mode,
         );
+        if ctx.dynamic_operators_enabled() {
+            self.kind.begin_stateful_evaluation();
+        }
         if evaluation_mode == GeneratedEvaluationMode::StaticDaeProbe {
             // OneStep history capture evaluates only F(x)-B(t), with dynamic
             // operators intentionally suppressed. It is not a physical
@@ -1115,20 +1187,31 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub(crate) fn accept_timestep(&mut self) {
+    fn validate_advance_state(&self) -> Result<(), String> {
+        self.kind.validate_advance_state()
+    }
+
+    #[inline]
+    fn apply_validated_advance_state(&mut self) {
         // The rotation about to run promotes older to previous and drops what
         // older held, so this is the only moment the fourth charge point still
         // exists. Taking it here is what lets an order-two truncation estimate
         // read four accepted points from a model that stores two.
         if !self.dynamic_charge_third_back.is_empty() {
             let retiring = self.kind.capture_rollback_state();
-            if let Some(lanes) =
-                GeneratedDdtLanes::of(&retiring, self.dynamic_charge_third_back.len())
-            {
-                self.dynamic_charge_third_back.copy_from_slice(lanes.older);
+            if let Some(lanes) = GeneratedDdtLanes::of(
+                &retiring,
+                self.dynamic_charge_third_back.len(),
+                self.dynamic_idt_state_count,
+            ) {
+                for (index, third_back) in self.dynamic_charge_third_back.iter_mut().enumerate() {
+                    if lanes.candidate_valid[index] {
+                        *third_back = lanes.older[index];
+                    }
+                }
             }
         }
-        self.kind.accept_timestep();
+        self.kind.apply_validated_advance_state();
     }
 
     /// Dynamic charge of this instance at `voltages`, with its accepted history.
@@ -1151,7 +1234,7 @@ impl BuiltinVerilogAInstance {
     ) -> Option<GeneratedDynamicCharges> {
         let ddt_len = self.dynamic_charge_third_back.len();
         let accepted = self.kind.capture_rollback_state();
-        let accepted = GeneratedDdtLanes::of(&accepted, ddt_len)?;
+        let accepted = GeneratedDdtLanes::of(&accepted, ddt_len, self.dynamic_idt_state_count)?;
         let previous = accepted.previous.to_vec();
         let older = accepted.older.to_vec();
         let companion_previous = accepted.derivative_previous.to_vec();
@@ -1184,7 +1267,7 @@ impl BuiltinVerilogAInstance {
             )
             .ok()?;
         let probed = probe.kind.capture_rollback_state();
-        let probed = GeneratedDdtLanes::of(&probed, ddt_len)?;
+        let probed = GeneratedDdtLanes::of(&probed, ddt_len, self.dynamic_idt_state_count)?;
         Some(GeneratedDynamicCharges {
             current: probed.current.to_vec(),
             previous,
@@ -1225,6 +1308,9 @@ impl BuiltinVerilogAInstance {
             num_nodes,
             self.static_stamp_cache.as_ref(),
         );
+        if ctx.dynamic_operators_enabled() {
+            self.kind.begin_stateful_evaluation();
+        }
         self.kind.stamp(&ctx, &mut stamper);
         match ctx.take_evaluation_error() {
             Some(error) => Err(error),
@@ -1430,6 +1516,9 @@ pub(crate) fn instantiate_builtin_scoped(
     else {
         return Ok(None);
     };
+    let persistent_shape = kind.capture_persistent_state();
+    let ddt_state_count = persistent_shape.ddt_previous.len();
+    let idt_state_count = persistent_shape.idt_previous.len();
 
     Ok(Some(BuiltinVerilogAInstance {
         model_name: descriptor_name,
@@ -1447,7 +1536,8 @@ pub(crate) fn instantiate_builtin_scoped(
         initial_off_seed_pending: true,
         initial_off_seed_evaluations: 0,
         initial_off_seed_anchor: None,
-        dynamic_charge_third_back: vec![0.0; kind.capture_persistent_state().ddt_previous.len()],
+        dynamic_charge_third_back: vec![0.0; ddt_state_count],
+        dynamic_idt_state_count: idt_state_count,
         kind,
     }))
 }
@@ -1801,6 +1891,65 @@ mod tests {
                 "failed restore must not partially mutate live generated devices"
             );
         }
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn generated_state_acceptance_validates_every_instance_before_applying_any() {
+        let mut devices = checkpoint_test_devices();
+        let first_ddt_count = devices.devices[0].dynamic_charge_third_back.len();
+        assert!(first_ddt_count > 0, "DIODE_CMC must exercise ddt state");
+
+        let mut first = devices.devices[0].kind.capture_rollback_state();
+        first.values[0] = 9.0;
+        first.values[first_ddt_count * 3] = 2.0;
+        first.flags[first_ddt_count] = true;
+        devices.devices[0].kind.restore_rollback_state(&first);
+
+        let second_ddt_count = devices.devices[1].dynamic_charge_third_back.len();
+        let mut second = devices.devices[1].kind.capture_rollback_state();
+        second.values[second_ddt_count] = f64::INFINITY;
+        devices.devices[1].kind.restore_rollback_state(&second);
+
+        let before = devices.capture_rollback_state();
+        let error = devices
+            .advance_state()
+            .expect_err("non-finite accepted state must reject the whole transaction");
+        assert!(
+            error.contains("d2"),
+            "error must identify the failing instance: {error}"
+        );
+        assert_eq!(
+            devices.capture_rollback_state(),
+            before,
+            "validation failure must not partially apply an earlier instance"
+        );
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn generated_checkpoint_capture_rejects_in_flight_candidates() {
+        let mut devices = checkpoint_test_devices();
+        devices
+            .accepted_checkpoint_states()
+            .expect("fresh devices are at an accepted boundary");
+
+        let ddt_count = devices.devices[0].dynamic_charge_third_back.len();
+        let idt_count = devices.devices[0].dynamic_idt_state_count;
+        assert!(ddt_count > 0, "DIODE_CMC must exercise ddt state");
+        let mut speculative = devices.devices[0].kind.capture_rollback_state();
+        speculative.flags[ddt_count + idt_count] = true;
+        devices.devices[0].kind.restore_rollback_state(&speculative);
+
+        let error = devices
+            .accepted_checkpoint_states()
+            .expect_err("an in-flight generated candidate is not an accepted boundary");
+        assert!(error.contains("in-flight DDT/IDT candidate"), "{error}");
+
+        devices.devices[0].kind.begin_stateful_evaluation();
+        devices
+            .accepted_checkpoint_states()
+            .expect("beginning a fresh evaluation clears stale candidate validity");
     }
 
     #[cfg(feature = "veriloga-builtins-base")]

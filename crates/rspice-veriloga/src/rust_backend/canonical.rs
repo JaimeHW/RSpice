@@ -2697,12 +2697,17 @@ impl ModelPlan {
             let _ = writeln!(out, "{pad}let ddt_scale = move || ddt_scale_value;");
         }
         if wants.idt_scale {
-            // Zero where there is no step, which is what makes an integral
-            // contribute nothing to the Jacobian at an operating point rather
-            // than an arbitrary multiple of the last timestep.
+            // The generalized integration rule defines ddt(y) = input, so the
+            // exact idt Jacobian is the reciprocal of the current derivative
+            // scale. Candidate evaluation reports malformed active rules; this
+            // expression stays finite while that error propagates to the stamp
+            // boundary.
             let _ = writeln!(
                 out,
-                "{pad}let idt_scale_value = if self.ddt_coefficients.active && ctx.dynamic_operators_enabled() {{ self.timestep }} else {{ 0.0 }};\n\
+                "{pad}let idt_scale_value = if self.ddt_coefficients.active && ctx.dynamic_operators_enabled() && self.ddt_coefficients.derivative_scale.is_finite() && self.ddt_coefficients.derivative_scale != 0.0 {{\n\
+                 {pad}    let inverse = 1.0 / self.ddt_coefficients.derivative_scale;\n\
+                 {pad}    if inverse.is_finite() {{ inverse }} else {{ 0.0 }}\n\
+                 {pad}}} else {{ 0.0 }};\n\
                  {pad}let idt_scale = move || idt_scale_value;"
             );
         }
@@ -2728,20 +2733,29 @@ impl ModelPlan {
             let _ = writeln!(
                 out,
                 "{pad}let dynamic_operators_enabled = ctx.dynamic_operators_enabled();\n\
-                 {pad}let idt_active = self.ddt_coefficients.active;\n\
-                 {pad}let idt_step = self.timestep;\n\
+                 {pad}let idt_coefficients = self.ddt_coefficients;\n\
                  {pad}let mut idt = |slot: usize, value: f64, ic: f64| -> f64 {{\n\
                  {pad}    if dynamic_operators_enabled {{\n\
-                 {pad}        rspice_eval_idt(\n\
-                 {pad}        &mut ddt_state.idt_current,\n\
-                 {pad}        &mut ddt_state.idt_previous,\n\
-                 {pad}        &mut ddt_state.idt_initialized,\n\
-                 {pad}        idt_active,\n\
-                 {pad}        idt_step,\n\
-                 {pad}        slot,\n\
-                 {pad}        value,\n\
-                 {pad}        ic,\n\
-                 {pad}        )\n\
+                 {pad}        match rspice_eval_idt(\n\
+                 {pad}            &mut ddt_state.idt_current,\n\
+                 {pad}            &mut ddt_state.idt_candidate_previous,\n\
+                 {pad}            &mut ddt_state.idt_input_current,\n\
+                 {pad}            &ddt_state.idt_previous,\n\
+                 {pad}            &ddt_state.idt_older,\n\
+                 {pad}            &ddt_state.idt_input_previous,\n\
+                 {pad}            &ddt_state.idt_initialized,\n\
+                 {pad}            &mut ddt_state.idt_candidate_valid,\n\
+                 {pad}            idt_coefficients,\n\
+                 {pad}            slot,\n\
+                 {pad}            value,\n\
+                 {pad}            ic,\n\
+                 {pad}        ) {{\n\
+                 {pad}            Ok(candidate) => candidate.value,\n\
+                 {pad}            Err(source) => {{\n\
+                 {pad}                ctx.report_idt_candidate_error(slot, source);\n\
+                 {pad}                0.0\n\
+                 {pad}            }}\n\
+                 {pad}        }}\n\
                  {pad}    }} else if ddt_state.idt_initialized[slot] {{\n\
                  {pad}        ddt_state.idt_current[slot]\n\
                  {pad}    }} else {{\n\
@@ -2767,25 +2781,27 @@ impl ModelPlan {
             let _ = writeln!(
                 out,
                 "{pad}let dynamic_operators_enabled = ctx.dynamic_operators_enabled();\n\
-                 {pad}let ddt_active = self.ddt_coefficients.active;\n\
                  {pad}let ddt_coefficients = self.ddt_coefficients;\n\
                  {pad}let mut ddt = |slot: usize, value: f64| -> f64 {{\n\
                  {pad}    if dynamic_operators_enabled {{\n\
-                 {pad}        rspice_eval_ddt(\n\
-                 {pad}        &mut ddt_state.ddt_current,\n\
-                 {pad}        &mut ddt_state.ddt_previous,\n\
-                 {pad}        &mut ddt_state.ddt_older,\n\
-                 {pad}        &mut ddt_state.ddt_initialized,\n\
-                 {pad}        &mut ddt_state.ddt_derivative_current,\n\
-                 {pad}        &mut ddt_state.ddt_derivative_previous,\n\
-                 {pad}        ddt_active,\n\
-                 {pad}        ddt_coefficients.derivative_scale,\n\
-                 {pad}        ddt_coefficients.previous_value_scale,\n\
-                 {pad}        ddt_coefficients.older_value_scale,\n\
-                 {pad}        ddt_coefficients.previous_derivative_scale,\n\
-                 {pad}        slot,\n\
-                 {pad}        value,\n\
-                 {pad}        )\n\
+                 {pad}        match rspice_eval_ddt(\n\
+                 {pad}            &mut ddt_state.ddt_current,\n\
+                 {pad}            &ddt_state.ddt_previous,\n\
+                 {pad}            &ddt_state.ddt_older,\n\
+                 {pad}            &ddt_state.ddt_initialized,\n\
+                 {pad}            &mut ddt_state.ddt_derivative_current,\n\
+                 {pad}            &ddt_state.ddt_derivative_previous,\n\
+                 {pad}            &mut ddt_state.ddt_candidate_valid,\n\
+                 {pad}            ddt_coefficients,\n\
+                 {pad}            slot,\n\
+                 {pad}            value,\n\
+                 {pad}        ) {{\n\
+                 {pad}            Ok(result) => result,\n\
+                 {pad}            Err(source) => {{\n\
+                 {pad}                ctx.report_ddt_candidate_error(slot, source);\n\
+                 {pad}                0.0\n\
+                 {pad}            }}\n\
+                 {pad}        }}\n\
                  {pad}    }} else {{\n\
                  {pad}        0.0\n\
                  {pad}    }}\n\

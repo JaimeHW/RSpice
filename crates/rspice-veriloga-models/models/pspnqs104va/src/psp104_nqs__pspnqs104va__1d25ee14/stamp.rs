@@ -14581,24 +14581,36 @@ impl Instance {
         let branch_unknown_flows = [ctx.branch_current(self.branches[0]), ctx.branch_current(self.branches[1]), ctx.branch_current(self.branches[2]), ctx.branch_current(self.branches[3]), ctx.branch_current(self.branches[4]), ctx.branch_current(self.branches[5]), ctx.branch_current(self.branches[6]), ctx.branch_current(self.branches[7]), ctx.branch_current(self.branches[8]), ctx.branch_current(self.branches[9]), ctx.branch_current(self.branches[10]), ctx.branch_current(self.branches[11]), ctx.branch_current(self.branches[12]), ctx.branch_current(self.branches[13]), ctx.branch_current(self.branches[14]), ctx.branch_current(self.branches[15]), ctx.branch_current(self.branches[16]), ctx.branch_current(self.branches[17]), ctx.branch_current(self.branches[18]), ctx.branch_current(self.branches[19]), ctx.branch_current(self.branches[20]), ctx.branch_current(self.branches[21]), ctx.branch_current(self.branches[22]), ctx.branch_current(self.branches[23]), ctx.branch_current(self.branches[24])];
         let ddt_scale_value = if ctx.dynamic_operators_enabled() { self.ddt_coefficients.derivative_scale } else { 0.0 };
         let ddt_scale = move || ddt_scale_value;
-        let idt_scale_value = if self.ddt_coefficients.active && ctx.dynamic_operators_enabled() { self.timestep } else { 0.0 };
+        let idt_scale_value = if self.ddt_coefficients.active && ctx.dynamic_operators_enabled() && self.ddt_coefficients.derivative_scale.is_finite() && self.ddt_coefficients.derivative_scale != 0.0 {
+            let inverse = 1.0 / self.ddt_coefficients.derivative_scale;
+            if inverse.is_finite() { inverse } else { 0.0 }
+        } else { 0.0 };
         let idt_scale = move || idt_scale_value;
         let ddt_state = self.stamp_state.as_mut();
         let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
-        let idt_active = self.ddt_coefficients.active;
-        let idt_step = self.timestep;
+        let idt_coefficients = self.ddt_coefficients;
         let mut idt = |slot: usize, value: f64, ic: f64| -> f64 {
             if dynamic_operators_enabled {
-                rspice_eval_idt(
-                &mut ddt_state.idt_current,
-                &mut ddt_state.idt_previous,
-                &mut ddt_state.idt_initialized,
-                idt_active,
-                idt_step,
-                slot,
-                value,
-                ic,
-                )
+                match rspice_eval_idt(
+                    &mut ddt_state.idt_current,
+                    &mut ddt_state.idt_candidate_previous,
+                    &mut ddt_state.idt_input_current,
+                    &ddt_state.idt_previous,
+                    &ddt_state.idt_older,
+                    &ddt_state.idt_input_previous,
+                    &ddt_state.idt_initialized,
+                    &mut ddt_state.idt_candidate_valid,
+                    idt_coefficients,
+                    slot,
+                    value,
+                    ic,
+                ) {
+                    Ok(candidate) => candidate.value,
+                    Err(source) => {
+                        ctx.report_idt_candidate_error(slot, source);
+                        0.0
+                    }
+                }
             } else if ddt_state.idt_initialized[slot] {
                 ddt_state.idt_current[slot]
             } else {
@@ -14606,25 +14618,27 @@ impl Instance {
             }
         };
         let dynamic_operators_enabled = ctx.dynamic_operators_enabled();
-        let ddt_active = self.ddt_coefficients.active;
         let ddt_coefficients = self.ddt_coefficients;
         let mut ddt = |slot: usize, value: f64| -> f64 {
             if dynamic_operators_enabled {
-                rspice_eval_ddt(
-                &mut ddt_state.ddt_current,
-                &mut ddt_state.ddt_previous,
-                &mut ddt_state.ddt_older,
-                &mut ddt_state.ddt_initialized,
-                &mut ddt_state.ddt_derivative_current,
-                &mut ddt_state.ddt_derivative_previous,
-                ddt_active,
-                ddt_coefficients.derivative_scale,
-                ddt_coefficients.previous_value_scale,
-                ddt_coefficients.older_value_scale,
-                ddt_coefficients.previous_derivative_scale,
-                slot,
-                value,
-                )
+                match rspice_eval_ddt(
+                    &mut ddt_state.ddt_current,
+                    &ddt_state.ddt_previous,
+                    &ddt_state.ddt_older,
+                    &ddt_state.ddt_initialized,
+                    &mut ddt_state.ddt_derivative_current,
+                    &ddt_state.ddt_derivative_previous,
+                    &mut ddt_state.ddt_candidate_valid,
+                    ddt_coefficients,
+                    slot,
+                    value,
+                ) {
+                    Ok(result) => result,
+                    Err(source) => {
+                        ctx.report_ddt_candidate_error(slot, source);
+                        0.0
+                    }
+                }
             } else {
                 0.0
             }

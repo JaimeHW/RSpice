@@ -88,13 +88,15 @@ use super::{
 /// and persistent trajectory-policy runtime needed to continue the next
 /// proposed interval exactly. Earlier files remain readable, but an arbitrary
 /// proposal fails closed instead of reconstructing missing runtime state; only
-/// an authenticated normalized-restart phase may resume.
-const FORMAT_VERSION: u32 = 21;
+/// an authenticated normalized-restart phase may resume. Version 22 expands
+/// generated Verilog-A `idt` history to the generalized BE/Trap/Gear contract.
+const FORMAT_VERSION: u32 = 22;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
 const EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION: u32 = 21;
+const GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION: u32 = 22;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -2674,6 +2676,7 @@ fn read_generated_state_rows(
 
 fn read_generated_veriloga_states(
     lines: &mut CheckpointLines<'_>,
+    checkpoint_version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<GeneratedVerilogAInstanceCheckpoint>, String> {
     let header = lines
@@ -2705,9 +2708,15 @@ fn read_generated_veriloga_states(
             .ok_or_else(|| format!("generated state row {row} is missing state version"))?
             .parse::<u32>()
             .map_err(|_| format!("generated state row {row} has invalid state version"))?;
-        if state_version != GENERATED_PERSISTENT_STATE_VERSION {
+        let expected_state_version =
+            if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+                GENERATED_PERSISTENT_STATE_VERSION
+            } else {
+                1
+            };
+        if state_version != expected_state_version {
             return Err(format!(
-                "generated state row {row} uses unsupported persistent-state version {state_version}"
+                "generated state row {row} uses unsupported persistent-state version {state_version}; checkpoint format {checkpoint_version} requires version {expected_state_version}"
             ));
         }
         if let Some(extra) = fields.next() {
@@ -2715,9 +2724,28 @@ fn read_generated_veriloga_states(
         }
 
         let (mut ddt, ddt_initialized) = read_generated_state_rows(lines, "ddt_state", 3, budget)?;
-        let (mut idt, idt_initialized) = read_generated_state_rows(lines, "idt_state", 1, budget)?;
+        let idt_value_columns =
+            if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+                3
+            } else {
+                1
+            };
+        let (mut idt, idt_initialized) =
+            read_generated_state_rows(lines, "idt_state", idt_value_columns, budget)?;
         let (mut limiter, limiter_initialized) =
             read_generated_state_rows(lines, "limiter_state", 1, budget)?;
+        let idt_previous = idt.remove(0);
+        let (idt_older, idt_input_previous) =
+            if checkpoint_version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+                (idt.remove(0), idt.remove(0))
+            } else {
+                // Persistent-state v1 did not retain enough IDT history to resume
+                // the generalized BE/TR/Gear recurrence exactly. These rows are
+                // consumed for legacy parse compatibility, then discarded by the
+                // caller and represented as unavailable state so injection fails
+                // closed rather than fabricating accepted history.
+                (Vec::new(), Vec::new())
+            };
         states.push(GeneratedVerilogAInstanceCheckpoint {
             instance_name: copy_checkpoint_string(
                 instance_name,
@@ -2736,7 +2764,9 @@ fn read_generated_veriloga_states(
                 ddt_older: ddt.remove(0),
                 ddt_derivative_previous: ddt.remove(0),
                 ddt_initialized,
-                idt_previous: idt.remove(0),
+                idt_previous,
+                idt_older,
+                idt_input_previous,
                 idt_initialized,
                 limiter_anchor: limiter.remove(0),
                 limiter_initialized,
@@ -4493,6 +4523,8 @@ impl TransientCheckpoint {
             if state.ddt_previous.len() != state.ddt_older.len()
                 || state.ddt_previous.len() != state.ddt_derivative_previous.len()
                 || state.ddt_previous.len() != state.ddt_initialized.len()
+                || state.idt_previous.len() != state.idt_older.len()
+                || state.idt_previous.len() != state.idt_input_previous.len()
                 || state.idt_previous.len() != state.idt_initialized.len()
                 || state.limiter_anchor.len() != state.limiter_initialized.len()
             {
@@ -4506,6 +4538,8 @@ impl TransientCheckpoint {
                 .chain(&state.ddt_older)
                 .chain(&state.ddt_derivative_previous)
                 .chain(&state.idt_previous)
+                .chain(&state.idt_older)
+                .chain(&state.idt_input_previous)
                 .chain(&state.limiter_anchor)
                 .any(|value| !value.is_finite())
             {
@@ -4759,7 +4793,7 @@ impl TransientCheckpoint {
             xspice_resume_blockers,
             xspice_instance_states,
             generated_veriloga_state_available: true,
-            generated_veriloga_instance_states: circuit.generated_veriloga_checkpoint_states(),
+            generated_veriloga_instance_states: circuit.generated_veriloga_checkpoint_states()?,
             runtime_veriloga_state_available: true,
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states,
@@ -5604,6 +5638,8 @@ impl TransientCheckpoint {
                 .saturating_add(state.ddt_derivative_previous.len())
                 .saturating_add(state.ddt_initialized.len())
                 .saturating_add(state.idt_previous.len())
+                .saturating_add(state.idt_older.len())
+                .saturating_add(state.idt_input_previous.len())
                 .saturating_add(state.idt_initialized.len())
                 .saturating_add(state.limiter_anchor.len())
                 .saturating_add(state.limiter_initialized.len());
@@ -6066,8 +6102,10 @@ impl TransientCheckpoint {
             out.push_str(&format!("idt_state {}\n", state.idt_previous.len()));
             for index in 0..state.idt_previous.len() {
                 out.push_str(&format!(
-                    "{} {}\n",
+                    "{} {} {} {}\n",
                     state.idt_previous[index],
+                    state.idt_older[index],
+                    state.idt_input_previous[index],
                     u8::from(state.idt_initialized[index])
                 ));
             }
@@ -6722,10 +6760,16 @@ impl TransientCheckpoint {
                         "generated Verilog-A availability line has extra field '{extra}'"
                     ));
                 }
-                (
-                    available,
-                    read_generated_veriloga_states(&mut lines, budget)?,
-                )
+                let states = read_generated_veriloga_states(&mut lines, version, budget)?;
+                if version >= GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION {
+                    (available, states)
+                } else {
+                    // Formats 7..=21 remain parseable, but their generated
+                    // persistent-state v1 payload cannot reconstruct the
+                    // accepted generalized IDT history introduced in v22.
+                    // Preserve a fail-closed resume representation.
+                    (false, Vec::new())
+                }
             } else {
                 (false, Vec::new())
             };
@@ -7534,6 +7578,8 @@ mod tests {
                     ddt_derivative_previous: vec![3.0, -4.0],
                     ddt_initialized: vec![true, false],
                     idt_previous: vec![5.5],
+                    idt_older: vec![4.25],
+                    idt_input_previous: vec![-1.125],
                     idt_initialized: vec![true],
                     limiter_anchor: vec![-0.75],
                     limiter_initialized: vec![true],
@@ -7863,6 +7909,38 @@ mod tests {
             }
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
                 break;
+            }
+            if version < GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION
+                && line.starts_with("generated_veriloga_state ")
+            {
+                let (prefix, _) = line
+                    .rsplit_once(' ')
+                    .expect("generated state header has a version");
+                output.push_str(prefix);
+                output.push_str(" 1\n");
+                continue;
+            }
+            if version < GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION
+                && line.starts_with("idt_state ")
+            {
+                output.push_str(line);
+                output.push('\n');
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("generated IDT state count")
+                    .parse::<usize>()
+                    .expect("numeric generated IDT state count");
+                for _ in 0..count {
+                    let row = lines.next().expect("complete generated IDT state row");
+                    let fields = row.split_whitespace().collect::<Vec<_>>();
+                    assert_eq!(fields.len(), 4, "current generated IDT state row");
+                    output.push_str(fields[0]);
+                    output.push(' ');
+                    output.push_str(fields[3]);
+                    output.push('\n');
+                }
+                continue;
             }
             if version < RUNTIME_VERILOGA_FORMAT_VERSION
                 && line.starts_with("runtime_veriloga_state_available ")
@@ -9243,6 +9321,25 @@ mod tests {
     }
 
     #[test]
+    fn version_twenty_one_generated_state_parses_but_resume_state_fails_closed() {
+        let legacy = TransientCheckpoint::from_text(&legacy_text(
+            &sample(),
+            GENERATED_STATEFUL_TRANSACTION_FORMAT_VERSION - 1,
+        ))
+        .expect("persistent-state v1 generated payload remains parseable");
+        assert!(
+            !legacy.generated_veriloga_state_available,
+            "v1 lacks generalized IDT input/older history and cannot be resume-authoritative"
+        );
+        assert!(legacy.generated_veriloga_instance_states.is_empty());
+
+        let upgraded = TransientCheckpoint::from_text(&legacy.to_text())
+            .expect("fail-closed legacy representation re-serializes canonically");
+        assert!(!upgraded.generated_veriloga_state_available);
+        assert!(upgraded.generated_veriloga_instance_states.is_empty());
+    }
+
+    #[test]
     fn checkpoint_rejects_non_finite_solution_and_lte_reference_values() {
         for non_finite in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
             let mut checkpoint = sample();
@@ -9309,8 +9406,13 @@ mod tests {
         }
 
         let err = TransientCheckpoint::from_text(&text.replace(
-            &format!("generated_veriloga_state xgen1 generated_model {identity} 1"),
-            &format!("generated_veriloga_state xgen1 generated_model {identity} 2"),
+            &format!(
+                "generated_veriloga_state xgen1 generated_model {identity} {GENERATED_PERSISTENT_STATE_VERSION}"
+            ),
+            &format!(
+                "generated_veriloga_state xgen1 generated_model {identity} {}",
+                GENERATED_PERSISTENT_STATE_VERSION + 1
+            ),
         ))
         .expect_err("unknown generated persistent-state versions must fail closed");
         assert!(

@@ -6404,6 +6404,13 @@ impl SemanticAnalyzer {
             return true;
         }
         match expr {
+            // Every resolved parameter is fixed on the instance even when its
+            // default comes from an elaboration-time service such as
+            // `$simparam` and therefore cannot be numerically folded here.
+            Expression::Identifier(identifier) => self
+                .symbols
+                .lookup(&identifier.name)
+                .is_some_and(|symbol| symbol.kind == SymbolKind::Parameter),
             Expression::Unary(unary) => self.expression_is_simulation_invariant(&unary.operand),
             Expression::Binary(binary) => {
                 self.expression_is_simulation_invariant(&binary.left)

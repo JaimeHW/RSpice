@@ -117,6 +117,8 @@ fn stateful_operator_under_model_and_connectivity_guards_is_analysis_invariant()
         r#"
             parameter integer TNOIMOD = 0 from [0:3];
             parameter integer TNODEOUT = 1;
+            parameter real minr = $simparam("minr", 1.0e-3);
+            parameter real rbi0 = 0.0;
             analog begin
                 case (TNOIMOD)
                     0: I(p, n) <+ 0.0;
@@ -129,6 +131,8 @@ fn stateful_operator_under_model_and_connectivity_guards_is_analysis_invariant()
                         end
                     end
                 endcase
+                if (rbi0 >= minr && rbi0 > 0.0)
+                    I(p, n) <+ ddt(V(p, n));
             end
         "#,
     );

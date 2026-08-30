@@ -13,7 +13,7 @@
 /// versioned runtime catalog descriptors emitted for schematic consumers.
 /// This makes the manifest authenticate both generated source and its reusable
 /// compilation-artifact boundary.
-pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 6;
+pub const GENERATED_BUILTIN_MANIFEST_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GeneratedBuiltinManifestFile {

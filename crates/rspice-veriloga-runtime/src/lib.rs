@@ -609,62 +609,81 @@ pub fn rspice_limited_exp_derivative(x: f64) -> f64 {
     }
 }
 
-/// Evaluate one generated `idt` state slot.
-///
-/// A non-integrating step returns and records the initial condition, so the
-/// next integrating step starts there rather than at a value left by the last
-/// operating-point solve.
+/// Evaluate one generated `idt` Newton candidate without publishing it as
+/// accepted history.
 #[doc(hidden)]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn rspice_eval_idt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
-    active: bool,
-    step: f64,
+    candidate_previous: &mut [f64; STATE_COUNT],
+    input_current: &mut [f64; STATE_COUNT],
+    previous: &[f64; STATE_COUNT],
+    older: &[f64; STATE_COUNT],
+    input_previous: &[f64; STATE_COUNT],
+    initialized: &[bool; STATE_COUNT],
+    candidate_valid: &mut [bool; STATE_COUNT],
+    coefficients: GeneratedDdtCoefficients,
     slot: usize,
     value: f64,
     ic: f64,
-) -> f64 {
+) -> Result<GeneratedIdtCandidate, GeneratedIdtCandidateError> {
     debug_assert!(slot < STATE_COUNT, "generated idt state slot out of range");
-    let started_from = if initialized[slot] {
-        previous[slot]
+    candidate_valid[slot] = false;
+    let history = GeneratedIdtAcceptedHistory {
+        initialized: initialized[slot],
+        integral_previous: previous[slot],
+        integral_older: older[slot],
+        input_previous: input_previous[slot],
+    };
+    let candidate = evaluate_generated_idt_candidate(coefficients, value, ic, history)?;
+    current[slot] = candidate.value;
+    candidate_previous[slot] = if history.initialized {
+        history.integral_previous
     } else {
         ic
     };
-    let total = if active {
-        started_from + value * step
-    } else {
-        ic
-    };
-    current[slot] = total;
-    if !active {
-        previous[slot] = total;
-        initialized[slot] = true;
-    }
-    total
+    input_current[slot] = value;
+    candidate_valid[slot] = true;
+    Ok(candidate)
 }
 
-/// Evaluate one generated `ddt` state slot.
+/// Evaluate one generated `ddt` Newton candidate without publishing it as
+/// accepted history.
 #[doc(hidden)]
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
-    previous: &mut [f64; STATE_COUNT],
-    older: &mut [f64; STATE_COUNT],
-    initialized: &mut [bool; STATE_COUNT],
+    previous: &[f64; STATE_COUNT],
+    older: &[f64; STATE_COUNT],
+    initialized: &[bool; STATE_COUNT],
     derivative_current: &mut [f64; STATE_COUNT],
-    derivative_previous: &mut [f64; STATE_COUNT],
-    active: bool,
-    scale: f64,
-    previous_value_scale: f64,
-    older_value_scale: f64,
-    previous_derivative_scale: f64,
+    derivative_previous: &[f64; STATE_COUNT],
+    candidate_valid: &mut [bool; STATE_COUNT],
+    coefficients: GeneratedDdtCoefficients,
     slot: usize,
     value: f64,
-) -> f64 {
+) -> Result<f64, GeneratedDdtCandidateError> {
     debug_assert!(slot < STATE_COUNT, "generated ddt state slot out of range");
+    candidate_valid[slot] = false;
+    for (field, operand) in [
+        ("input", value),
+        ("accepted previous value", previous[slot]),
+        ("accepted older value", older[slot]),
+        ("accepted previous derivative", derivative_previous[slot]),
+        ("derivative scale", coefficients.derivative_scale),
+        ("previous-value scale", coefficients.previous_value_scale),
+        ("older-value scale", coefficients.older_value_scale),
+        (
+            "previous-derivative scale",
+            coefficients.previous_derivative_scale,
+        ),
+    ] {
+        if !operand.is_finite() {
+            return Err(GeneratedDdtCandidateError::NonFiniteInput { field });
+        }
+    }
     let previous_value = if initialized[slot] {
         previous[slot]
     } else {
@@ -675,22 +694,26 @@ pub fn rspice_eval_ddt<const STATE_COUNT: usize>(
     } else {
         value
     };
-    current[slot] = value;
-    if active {
-        let result = value * scale
-            - previous_value * previous_value_scale
-            - older_value * older_value_scale
-            - derivative_previous[slot] * previous_derivative_scale;
-        derivative_current[slot] = result;
-        result
+    let previous_derivative = if initialized[slot] {
+        derivative_previous[slot]
     } else {
-        previous[slot] = value;
-        older[slot] = value;
-        derivative_current[slot] = 0.0;
-        derivative_previous[slot] = 0.0;
-        initialized[slot] = true;
         0.0
+    };
+    let result = if coefficients.active {
+        value * coefficients.derivative_scale
+            - previous_value * coefficients.previous_value_scale
+            - older_value * coefficients.older_value_scale
+            - previous_derivative * coefficients.previous_derivative_scale
+    } else {
+        0.0
+    };
+    if !result.is_finite() {
+        return Err(GeneratedDdtCandidateError::NonFiniteResult);
     }
+    current[slot] = value;
+    derivative_current[slot] = result;
+    candidate_valid[slot] = true;
+    Ok(result)
 }
 
 /// One literal or referenced bound in generated parameter metadata.
@@ -1064,6 +1087,26 @@ impl std::fmt::Display for GeneratedIdtCandidateError {
 
 impl std::error::Error for GeneratedIdtCandidateError {}
 
+/// Malformed numeric input to one generated `ddt` candidate evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedDdtCandidateError {
+    NonFiniteInput { field: &'static str },
+    NonFiniteResult,
+}
+
+impl std::fmt::Display for GeneratedDdtCandidateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFiniteInput { field } => {
+                write!(f, "generated ddt {field} must be finite")
+            }
+            Self::NonFiniteResult => f.write_str("generated ddt produced a non-finite derivative"),
+        }
+    }
+}
+
+impl std::error::Error for GeneratedDdtCandidateError {}
+
 /// Evaluate one generalized `idt` candidate without mutating accepted state.
 ///
 /// For an active companion rule, this algebraically inverts the same
@@ -1168,6 +1211,8 @@ pub struct GeneratedVerilogAPersistentState {
     pub ddt_derivative_previous: Vec<Value>,
     pub ddt_initialized: Vec<bool>,
     pub idt_previous: Vec<Value>,
+    pub idt_older: Vec<Value>,
+    pub idt_input_previous: Vec<Value>,
     pub idt_initialized: Vec<bool>,
     pub limiter_anchor: Vec<Value>,
     pub limiter_initialized: Vec<bool>,
@@ -1184,7 +1229,7 @@ pub struct GeneratedVerilogARollbackState {
     pub flags: Vec<bool>,
 }
 
-pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 1;
+pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 2;
 
 /// Persistent state plus exact generated-model and instance provenance.
 #[derive(Debug, Clone, PartialEq)]
@@ -1216,6 +1261,14 @@ pub enum GeneratedEvaluationError {
         iterations: usize,
         limit: usize,
     },
+    DdtCandidate {
+        slot: usize,
+        source: GeneratedDdtCandidateError,
+    },
+    IdtCandidate {
+        slot: usize,
+        source: GeneratedIdtCandidateError,
+    },
 }
 
 impl std::fmt::Display for GeneratedEvaluationError {
@@ -1229,6 +1282,12 @@ impl std::fmt::Display for GeneratedEvaluationError {
                 f,
                 "generated Verilog-A {phase} exceeded its analog-loop limit: {iterations} iterations (limit {limit})"
             ),
+            Self::DdtCandidate { slot, source } => {
+                write!(f, "generated Verilog-A ddt slot {slot} failed: {source}")
+            }
+            Self::IdtCandidate { slot, source } => {
+                write!(f, "generated Verilog-A idt slot {slot} failed: {source}")
+            }
         }
     }
 }
@@ -1748,6 +1807,28 @@ impl<'a> GeneratedEvalContext<'a> {
                     phase,
                     iterations,
                     limit,
+                }));
+        }
+    }
+
+    #[inline]
+    pub fn report_ddt_candidate_error(&self, slot: usize, source: GeneratedDdtCandidateError) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::DdtCandidate {
+                    slot,
+                    source,
+                }));
+        }
+    }
+
+    #[inline]
+    pub fn report_idt_candidate_error(&self, slot: usize, source: GeneratedIdtCandidateError) {
+        if self.evaluation_error.get().is_none() {
+            self.evaluation_error
+                .set(Some(GeneratedEvaluationError::IdtCandidate {
+                    slot,
+                    source,
                 }));
         }
     }
@@ -6679,6 +6760,106 @@ mod fixed_lane_tests {
         let canonical =
             GeneratedDdtCoefficients::from_companion_values(2.0, 2.0, 0.0, false, true, 0.25);
         assert_eq!(canonical.previous_derivative_scale, 1.0);
+    }
+
+    #[test]
+    fn generated_ddt_helper_publishes_only_finite_candidates() {
+        let coefficients = GeneratedDdtCoefficients {
+            active: true,
+            derivative_scale: 2.0,
+            previous_value_scale: 2.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        };
+        let mut current = [1.0];
+        let previous = [3.0];
+        let older = [2.0];
+        let initialized = [true];
+        let mut derivative_current = [0.5];
+        let derivative_previous = [1.0];
+        let mut candidate_valid = [false];
+
+        assert_eq!(
+            rspice_eval_ddt(
+                &mut current,
+                &previous,
+                &older,
+                &initialized,
+                &mut derivative_current,
+                &derivative_previous,
+                &mut candidate_valid,
+                coefficients,
+                0,
+                5.0,
+            ),
+            Ok(4.0)
+        );
+        assert_eq!(current, [5.0]);
+        assert_eq!(derivative_current, [4.0]);
+        assert_eq!(candidate_valid, [true]);
+
+        assert!(
+            rspice_eval_ddt(
+                &mut current,
+                &previous,
+                &older,
+                &initialized,
+                &mut derivative_current,
+                &derivative_previous,
+                &mut candidate_valid,
+                coefficients,
+                0,
+                f64::NAN,
+            )
+            .is_err()
+        );
+        assert_eq!(current, [5.0], "failed evaluation must not publish payload");
+        assert_eq!(derivative_current, [4.0]);
+        assert_eq!(candidate_valid, [false]);
+    }
+
+    #[test]
+    fn generated_idt_helper_keeps_accepted_history_immutable() {
+        let coefficients = GeneratedDdtCoefficients {
+            active: true,
+            derivative_scale: 4.0,
+            previous_value_scale: 4.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 1.0,
+        };
+        let mut current = [0.0];
+        let mut candidate_previous = [0.0];
+        let mut input_current = [0.0];
+        let previous = [2.0];
+        let older = [1.0];
+        let input_previous = [3.0];
+        let initialized = [true];
+        let mut candidate_valid = [false];
+
+        let candidate = rspice_eval_idt(
+            &mut current,
+            &mut candidate_previous,
+            &mut input_current,
+            &previous,
+            &older,
+            &input_previous,
+            &initialized,
+            &mut candidate_valid,
+            coefficients,
+            0,
+            1.0,
+            0.25,
+        )
+        .expect("finite trapezoidal candidate");
+        assert_eq!(candidate.value, 3.0);
+        assert_eq!(candidate.jacobian_scale, 0.25);
+        assert_eq!(current, [3.0]);
+        assert_eq!(candidate_previous, previous);
+        assert_eq!(input_current, [1.0]);
+        assert_eq!(candidate_valid, [true]);
+        assert_eq!(previous, [2.0]);
+        assert_eq!(older, [1.0]);
+        assert_eq!(input_previous, [3.0]);
     }
 
     #[test]

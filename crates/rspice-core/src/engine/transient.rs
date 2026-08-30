@@ -7326,7 +7326,9 @@ impl Engine {
                     }
                     #[cfg(feature = "veriloga-builtins-base")]
                     if circuit.has_generated_veriloga_devices() {
-                        circuit.accept_generated_veriloga_timestep();
+                        circuit
+                            .accept_generated_veriloga_timestep()
+                            .map_err(SimulationError::Circuit)?;
                     }
 
                     // XSPICE voltage outputs are projected only when their
@@ -7766,7 +7768,9 @@ impl Engine {
             };
             #[cfg(feature = "veriloga-builtins-base")]
             if circuit.has_generated_veriloga_devices() {
-                circuit.accept_generated_veriloga_timestep();
+                circuit
+                    .accept_generated_veriloga_timestep()
+                    .map_err(SimulationError::Circuit)?;
             }
 
             if fixed_method.is_none() {
