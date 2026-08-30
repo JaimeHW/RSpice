@@ -2899,7 +2899,6 @@ impl VerilogADevice {
 
         self.begin_evaluation(mode);
         self.context.clear_currents();
-        self.context.clear_timer_event_bound();
         // Pre-reserve so the currents pointer stays stable while native
         // snapshots reference it across pushes
         self.context
@@ -2973,8 +2972,6 @@ impl VerilogADevice {
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
         self.begin_evaluation(mode);
-        self.context.clear_timer_event_bound();
-
         let stamp_count = self.model.stamp_programs.len();
         if self.fused_program_active.len() != stamp_count {
             return Err(VmError::WasmJit(format!(
@@ -3023,8 +3020,6 @@ impl VerilogADevice {
         mode: crate::vm::VerilogAEvaluationMode,
     ) -> Result<Vec<f64>, VmError> {
         self.begin_evaluation(mode);
-        self.context.clear_timer_event_bound();
-
         let model = &self.model;
         let native = self.native_model.as_ref();
         let stamp_count = model.stamp_programs.len();
@@ -3095,6 +3090,11 @@ impl VerilogADevice {
     fn begin_evaluation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
         self.context.evaluation_mode = mode;
         self.context.begin_zi_evaluation();
+        // Event constraints describe the latest complete device pass. A
+        // later pass can legitimately move a parameterized timer or Zi edge
+        // outward, so retaining the previous minimum would permanently pin
+        // the solver to a stale breakpoint.
+        self.context.clear_timer_event_bound();
         if mode.limiting_enabled() {
             self.context.limiter_active = 0;
         }
