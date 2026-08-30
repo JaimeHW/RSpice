@@ -67,6 +67,30 @@ endmodule
 }
 
 #[test]
+fn zero_delay_absdelay_preserves_history_for_a_later_parameter_change() {
+    let mut device = device(
+        r#"
+`include "disciplines.vams"
+module dynamic_delay_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real td = 0.0;
+    analog I(p, n) <+ absdelay(V(p, n), td);
+endmodule
+"#,
+    );
+    device.set_analysis_type(2);
+
+    for (time, voltage) in [(0.0, 1.0), (1.0, 2.0)] {
+        assert_eq!(evaluate(&mut device, time, voltage), voltage);
+        device.advance_state();
+    }
+
+    assert!(device.set_parameter("td", 2.0));
+    assert_eq!(evaluate(&mut device, 2.0, 3.0), 1.0);
+}
+
+#[test]
 fn transition_restarts_each_candidate_from_accepted_state() {
     let mut device = device(
         r#"

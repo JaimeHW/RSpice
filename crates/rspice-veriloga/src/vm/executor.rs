@@ -621,7 +621,7 @@ impl<'a> Vm<'a> {
                         .resize_with(*buffer_id + 1, Default::default);
                 }
 
-                let result = if !is_transient || delay_time <= 0.0 {
+                let result = if !is_transient {
                     current_value
                 } else {
                     self.context.delay_buffers[*buffer_id].eval(
@@ -1283,6 +1283,41 @@ mod tests {
         assert!(
             matches!(err, VmError::InvalidInstruction(_)),
             "expected invalid instruction error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn zero_delay_transient_evaluation_preserves_history_for_a_later_dynamic_delay() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        let program = |input, delay| {
+            vec![
+                Instruction::PushConst(input),
+                Instruction::PushConst(delay),
+                Instruction::AbsDelayState(0),
+            ]
+        };
+
+        for (time, input) in [(0.0, 1.0), (1.0, 2.0)] {
+            context.time = time;
+            context.begin_stateful_evaluation();
+            assert_eq!(
+                execute_with_context(&mut context, program(input, 0.0))
+                    .expect("zero-delay transient candidate"),
+                input
+            );
+            context
+                .advance_state()
+                .expect("accept zero-delay transient candidate");
+        }
+
+        context.time = 2.0;
+        context.begin_stateful_evaluation();
+        assert_eq!(
+            execute_with_context(&mut context, program(3.0, 2.0))
+                .expect("dynamic positive-delay evaluation"),
+            1.0,
+            "the zero-delay passes must still populate accepted transport history"
         );
     }
 

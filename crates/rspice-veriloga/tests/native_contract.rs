@@ -3529,6 +3529,47 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_zero_delay_absdelay_preserves_history_for_a_later_parameter_change() {
+    let source = r#"
+`include "disciplines.vams"
+module native_dynamic_delay_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real td = 0.0;
+    analog I(p, n) <+ absdelay(V(p, n), td);
+endmodule
+"#;
+    let model = compile(source);
+    let mut device = native_contract_try_new("DLYDYN1", model, &[1, 0])
+        .expect("dynamic absdelay model uses native JIT");
+    assert!(device.is_using_native());
+    device.set_analysis_type(2);
+
+    for (time, voltage) in [(0.0, 1.0), (1.0, 2.0)] {
+        device.set_time(time);
+        device.update_voltages(&[voltage]);
+        assert_eq!(
+            device
+                .try_evaluate()
+                .expect("zero-delay native evaluation")[0],
+            voltage
+        );
+        device.advance_state();
+    }
+
+    assert!(device.set_parameter("td", 2.0));
+    device.set_time(2.0);
+    device.update_voltages(&[3.0]);
+    assert_eq!(
+        device
+            .try_evaluate()
+            .expect("positive-delay native evaluation")[0],
+        1.0
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_executes_cross_assignments_without_fallback() {
     let model = cross_assignment_model();
     let mut device =
