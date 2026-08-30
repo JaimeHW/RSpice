@@ -5375,21 +5375,12 @@ impl Engine {
 
             let postloop_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             if !converged {
-                retry_count += 1;
-                if lte_estimator.uses_accepted_solution_reference() {
-                    xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
-                }
-                self.record_convergence(|quality| quality.record_timestep_reduction());
-                let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
-                    xyce_min_order
-                } else {
-                    native_order_after_restart(current_method)
-                };
-                trap_order = xyce_rejected_attempt_order(
-                    xyce_iteration_error_control,
-                    step_trap_order,
-                    recovery_order,
-                );
+                // The retry count describes rejected timestep attempts, not
+                // every failed pass through plain Newton. GMIN continuation
+                // can still recover this same candidate and send it through
+                // the ordinary LTE decision below, so retain only a local
+                // ordinal until every in-step nonlinear rescue has failed.
+                let nonlinear_failure_ordinal = retry_count.saturating_add(1);
 
                 // Diagnostic logging for debugging convergence issues
                 static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -5445,7 +5436,7 @@ impl Engine {
                 let xyce_level1_core_only = self.config.spice_dialect == SpiceDialect::Xyce
                     && circuit.has_only_xyce_core_inductors()
                     && !circuit.has_xyce_core_level2();
-                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                if nonlinear_failure_ordinal >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
                     // Xyce returns a failed transient DampedNewton/NOX solve
                     // directly to StepErrorControl. RSpice's post-solver GMIN
                     // deformation is not part of that path; under ERROPTION=1
@@ -5501,7 +5492,7 @@ impl Engine {
                             "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
                             t,
                             dt,
-                            retry_count,
+                            nonlinear_failure_ordinal,
                         );
                     }
                     new_solution = rescued;
@@ -5512,6 +5503,21 @@ impl Engine {
             }
 
             if !converged {
+                retry_count = retry_count.saturating_add(1);
+                if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_step_failure_count = xyce_step_failure_count.saturating_add(1);
+                }
+                self.record_convergence(|quality| quality.record_timestep_reduction());
+                let recovery_order = if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_min_order
+                } else {
+                    native_order_after_restart(current_method)
+                };
+                trap_order = xyce_rejected_attempt_order(
+                    xyce_iteration_error_control,
+                    step_trap_order,
+                    recovery_order,
+                );
                 total_failed_attempts += 1;
                 if self.node_voltage_convergence_met(&solution, &new_solution, num_nodes) {
                     // Voltage settled but a device/residual criterion held the
