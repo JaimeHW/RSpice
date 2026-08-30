@@ -6140,6 +6140,258 @@ fn bug_61_noindex_header_wrapper_runs_without_reference_oracle() {
 }
 
 #[test]
+fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_without_sidecars() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for file_name in ["lead_bsrc_gear.cir", "lead_bsrc_trap.cir"] {
+        let relative_path = format!("Netlists/LEAD_CURRENTS/{file_name}");
+        let deck = XyceDeck {
+            path: root.join(&relative_path),
+            relative_path,
+            section: XyceDeckSection::Netlists,
+        };
+        let plan = runner
+            .static_tran_plan_for_deck(&deck)
+            .unwrap_or_else(|error| panic!("{file_name} should qualify structurally: {error}"));
+        let measurements = plan
+            .authored_fail_value_oracle()
+            .unwrap_or_else(|| panic!("{file_name} should use the authored FAILVALUE oracle"));
+
+        assert_eq!(
+            measurements
+                .iter()
+                .map(|measurement| measurement.name.as_str())
+                .collect::<Vec<_>>(),
+            ["MAXMAG1", "TOTALRMS1", "MAXMAG2", "TOTALRMS2"]
+        );
+        assert!(
+            measurements
+                .iter()
+                .all(|measurement| measurement.failure_limit.to_bits() == 1.0e-6_f64.to_bits())
+        );
+        assert_eq!(
+            plan.result_contract(),
+            XYCE_SELF_VERIFIED_MEASUREMENT_TRAN_CONTRACT
+        );
+
+        let result = runner.run_test(&deck.path);
+        assert!(
+            result.passed && !result.expected_unsupported && !result.upstream_excluded,
+            "{file_name} should execute under its authored FAILVALUE oracle: {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(
+            result.contract,
+            XYCE_SELF_VERIFIED_MEASUREMENT_TRAN_CONTRACT
+        );
+    }
+}
+
+#[test]
+fn authored_fail_value_admission_rejects_nonordinary_and_competing_oracle_shapes() {
+    let source = "authored FAILVALUE admission\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.TRAN 1u 10u\n\
+.MEASURE TRAN AVG_OUT AVG V(out) FAILVALUE=2\n\
+.END\n";
+    let mut netlist =
+        XyceTestRunner::parse_xyce_netlist(source, Path::new("authored-failvalue-admission.cir"))
+            .expect("typed FAILVALUE fixture parses");
+    let steps = XyceTestRunner::step_commands(&netlist).expect("fixture has valid STEP shape");
+    assert_eq!(
+        XyceTestRunner::authored_fail_value_tran_measurements(
+            &netlist, &steps, false, false, false,
+        )
+        .expect("ordinary typed measurement qualifies")
+        .len(),
+        1
+    );
+
+    netlist.measurements[0].analysis = "tRaN".to_string();
+    assert!(
+        XyceTestRunner::authored_fail_value_tran_measurements(
+            &netlist, &steps, false, false, false,
+        )
+        .is_some(),
+        "analysis-domain matching is deliberately case-insensitive"
+    );
+    netlist.measurements[0].analysis = "TRAN_CONT".to_string();
+    assert!(
+        XyceTestRunner::authored_fail_value_tran_measurements(
+            &netlist, &steps, false, false, false,
+        )
+        .is_none()
+    );
+    netlist.measurements[0].analysis = "TRAN".to_string();
+    netlist.measurements[0].fail_value = None;
+    assert!(
+        XyceTestRunner::authored_fail_value_tran_measurements(
+            &netlist, &steps, false, false, false,
+        )
+        .is_none()
+    );
+    netlist.measurements[0].fail_value = Some(2.0);
+    netlist.analyses.push(AnalysisCommand::Op);
+    assert!(
+        XyceTestRunner::authored_fail_value_tran_measurements(
+            &netlist, &steps, false, false, false,
+        )
+        .is_none()
+    );
+    netlist.analyses.pop();
+
+    for (has_remeasure, has_waveform, has_measurement) in [
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+    ] {
+        assert!(
+            XyceTestRunner::authored_fail_value_tran_measurements(
+                &netlist,
+                &steps,
+                has_remeasure,
+                has_waveform,
+                has_measurement,
+            )
+            .is_none()
+        );
+    }
+
+    let stepped = XyceTestRunner::parse_xyce_netlist(
+        &source.replace(".END", ".STEP PARAM scale LIST 1 2\n.END"),
+        Path::new("authored-failvalue-stepped.cir"),
+    )
+    .expect("stepped typed FAILVALUE fixture parses");
+    let steps = XyceTestRunner::step_commands(&stepped).expect("STEP fixture is typed");
+    assert!(!steps.is_empty());
+    assert!(
+        XyceTestRunner::authored_fail_value_tran_measurements(
+            &stepped, &steps, false, false, false,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn authored_fail_value_discovery_does_not_require_a_print_card() {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-xyce-authored-failvalue-discovery-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    ));
+    let relative = "Netlists/MEASURE/authored-failvalue.cir";
+    let deck_path = root.join(relative);
+    fs::create_dir_all(deck_path.parent().expect("deck parent"))
+        .expect("create authored FAILVALUE fixture directory");
+    fs::write(
+        &deck_path,
+        "authored FAILVALUE without PRINT\n\
+V1 out 0 1\n\
+R1 out 0 1\n\
+.TRAN 1u 10u\n\
+.MEASURE TRAN AVG_OUT AVG V(out) FAILVALUE=2\n\
+.END\n",
+    )
+    .expect("write authored FAILVALUE fixture");
+
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let deck = XyceDeck {
+        path: deck_path,
+        relative_path: relative.to_string(),
+        section: XyceDeckSection::Netlists,
+    };
+    let plan = runner
+        .static_tran_plan_for_deck(&deck)
+        .expect("typed measurement-only deck qualifies without PRINT");
+    assert!(plan.print.is_none());
+    assert!(plan.authored_fail_value_oracle().is_some());
+    assert_eq!(
+        plan.result_contract(),
+        XYCE_SELF_VERIFIED_MEASUREMENT_TRAN_CONTRACT
+    );
+
+    fs::remove_dir_all(&root).expect("remove authored FAILVALUE fixture");
+}
+
+#[test]
+fn authored_fail_value_verifier_rejects_altered_result_contract_fields() {
+    let expected = vec![
+        XyceAuthoredFailValueMeasurement {
+            name: "first".to_string(),
+            failure_limit: 1.0e-6,
+        },
+        XyceAuthoredFailValueMeasurement {
+            name: "second".to_string(),
+            failure_limit: 2.0e-6,
+        },
+    ];
+    let result =
+        |name: &str, raw_value: Value, failure_limit: Value| rspice_core::analysis::MeasureResult {
+            name: name.to_string(),
+            value: Some(raw_value),
+            raw_value: Some(raw_value),
+            error: None,
+            passed: true,
+            expected: None,
+            tolerance: None,
+            failure_limit: Some(failure_limit),
+            failure_limit_exceeded: false,
+            event_axis: None,
+        };
+    let actual = vec![
+        result("first", 1.0e-9, 1.0e-6),
+        result("second", 2.0e-9, 2.0e-6),
+    ];
+    assert!(XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &actual).is_ok());
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &actual[..1]).is_err()
+    );
+
+    let mut altered = actual.clone();
+    altered.swap(0, 1);
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err()
+    );
+    let mut altered = actual.clone();
+    altered[0].name = "renamed".to_string();
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err()
+    );
+    let mut altered = actual.clone();
+    altered[0].failure_limit = Some(1.0e-5);
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err()
+    );
+    let mut altered = actual.clone();
+    altered[0].passed = false;
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err()
+    );
+    let mut altered = actual.clone();
+    altered[0].failure_limit_exceeded = true;
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err()
+    );
+    let mut altered = actual.clone();
+    altered[0].raw_value = Some(expected[0].failure_limit);
+    assert!(altered[0].passed && !altered[0].failure_limit_exceeded);
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err(),
+        "the oracle must independently reject a forged passing verdict at the inclusive limit"
+    );
+    let mut altered = actual;
+    altered[0].raw_value = Some(Value::NAN);
+    assert!(
+        XyceTestRunner::validate_authored_fail_value_tran_results(&expected, &altered).is_err()
+    );
+}
+
+#[test]
 fn scalar_tran_measurement_adapter_executes_one_mt0_and_fails_hard_on_bad_oracles() {
     let root = std::env::temp_dir().join(format!(
         "rspice-xyce-scalar-tran-execution-{}-{}",

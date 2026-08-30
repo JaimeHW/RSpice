@@ -370,7 +370,38 @@ impl XyceTestRunner {
         let source =
             Self::source_with_wrapper_paramfile_bindings(&source, &deck.path, requires_wrapper)?;
 
-        let print_output = if scalar_measurement_candidate {
+        let mut netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let tran = Self::single_tran_analysis(&netlist)?;
+        let steps = Self::step_commands(&netlist)?;
+        // A statement-wide FAILVALUE is an authored scalar oracle: when every
+        // ordinary TRAN measurement carries one, successful finite results
+        // below their exact typed limits can verify the deck without an
+        // external waveform or measurement sidecar. Decide this before
+        // interpreting output cards because measurement retention and
+        // evaluation are independent of .PRINT.
+        let authored_fail_value_measurements = if purpose
+            == XyceStaticTranPlanPurpose::AbsoluteOracle
+            && !requires_wrapper
+            && !output_override
+            && !has_static_tran_oracle
+        {
+            let measurement_reference_paths = self.measurement_reference_paths(&deck.path, "mt")?;
+            let has_remeasure_input = Self::tran_remeasure_path_from_wrapper(&deck.path)?.is_some();
+            Self::authored_fail_value_tran_measurements(
+                &netlist,
+                &steps,
+                has_remeasure_input,
+                false,
+                !measurement_reference_paths.is_empty(),
+            )
+        } else {
+            None
+        };
+
+        let print_output = if authored_fail_value_measurements.is_some() {
+            None
+        } else if scalar_measurement_candidate {
             authored_primary_print_output
         } else if output_override {
             Some(
@@ -385,10 +416,6 @@ impl XyceTestRunner {
         let print = print_output.as_ref().map(|request| XycePrintRequest {
             probes: request.probes.clone(),
         });
-        let mut netlist = Self::parse_xyce_netlist(&source, &deck.path)
-            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
-        let tran = Self::single_tran_analysis(&netlist)?;
-        let steps = Self::step_commands(&netlist)?;
         let scalar_measurement_only = scalar_measurement_candidate;
         if scalar_measurement_only {
             Self::normalize_scalar_tran_measurement_file_paths(&mut netlist)?;
@@ -465,7 +492,7 @@ impl XyceTestRunner {
         } else {
             None
         };
-        if !scalar_measurement_only {
+        if !scalar_measurement_only && authored_fail_value_measurements.is_none() {
             Self::validate_static_tran_reference_requirement(
                 purpose,
                 contract,
@@ -529,6 +556,8 @@ impl XyceTestRunner {
             }
         } else if let Some(reference_path) = reference_path {
             XyceStaticTranOracle::Waveform(reference_path)
+        } else if let Some(measurements) = authored_fail_value_measurements {
+            XyceStaticTranOracle::AuthoredFailValue { measurements }
         } else {
             XyceStaticTranOracle::None
         };

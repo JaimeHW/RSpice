@@ -3552,6 +3552,108 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    pub(super) fn authored_fail_value_tran_measurements(
+        netlist: &Netlist,
+        steps: &[StepCommand],
+        has_remeasure_input: bool,
+        has_waveform_oracle: bool,
+        has_measurement_oracle: bool,
+    ) -> Option<Vec<XyceAuthoredFailValueMeasurement>> {
+        if has_remeasure_input
+            || has_waveform_oracle
+            || has_measurement_oracle
+            || !steps.is_empty()
+            || netlist.analyses.len() != 1
+            || !matches!(netlist.analyses[0], AnalysisCommand::Tran { .. })
+            || netlist.measurements.is_empty()
+            || netlist.measurements.iter().any(|measurement| {
+                !measurement.analysis.eq_ignore_ascii_case("TRAN")
+                    || measurement.fail_value.is_none()
+            })
+        {
+            return None;
+        }
+
+        netlist
+            .measurements
+            .iter()
+            .map(|measurement| {
+                Some(XyceAuthoredFailValueMeasurement {
+                    name: measurement.name.clone(),
+                    failure_limit: measurement.fail_value?,
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn validate_authored_fail_value_tran_results(
+        expected: &[XyceAuthoredFailValueMeasurement],
+        actual: &[rspice_core::analysis::MeasureResult],
+    ) -> Result<(), String> {
+        if actual.len() != expected.len() {
+            return Err(format!(
+                "authored FAILVALUE result count mismatch: expected {}, got {}",
+                expected.len(),
+                actual.len()
+            ));
+        }
+
+        for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
+            if actual.name != expected.name {
+                return Err(format!(
+                    "authored FAILVALUE result {index} name mismatch: expected '{}', got '{}'",
+                    expected.name, actual.name
+                ));
+            }
+            let Some(raw_value) = actual.raw_value else {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' has no computed raw value",
+                    expected.name
+                ));
+            };
+            if !raw_value.is_finite() {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' has non-finite raw value {raw_value}",
+                    expected.name
+                ));
+            }
+            let Some(actual_limit) = actual.failure_limit else {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' did not echo its typed failure limit",
+                    expected.name
+                ));
+            };
+            if actual_limit.to_bits() != expected.failure_limit.to_bits() {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' failure-limit mismatch: expected {:e}, got {:e}",
+                    expected.name, expected.failure_limit, actual_limit
+                ));
+            }
+            if raw_value.abs() >= expected.failure_limit {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' raw magnitude {:e} meets or exceeds its authored limit {:e}",
+                    expected.name,
+                    raw_value.abs(),
+                    expected.failure_limit
+                ));
+            }
+            if !actual.passed {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' did not pass",
+                    expected.name
+                ));
+            }
+            if actual.failure_limit_exceeded {
+                return Err(format!(
+                    "authored FAILVALUE result {index} '{}' exceeded its failure limit",
+                    expected.name
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     pub(super) fn validate_static_tran_analysis_contract(
         netlist: &Netlist,
         tran: &XyceTranAnalysis,

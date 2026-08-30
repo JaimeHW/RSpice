@@ -5508,6 +5508,12 @@ impl XyceTestRunner {
             }
         };
 
+        if plan.is_authored_fail_value_measurement_only() {
+            return self.run_static_authored_fail_value_tran_measurement_plan(
+                deck, &plan, &netlist, start,
+            );
+        }
+
         if plan.is_scalar_measurement_only() {
             if let Err(error) = Self::normalize_scalar_tran_measurement_file_paths(&mut netlist) {
                 return self.failure_result(deck, start, contract, error, Vec::new());
@@ -5985,6 +5991,94 @@ impl XyceTestRunner {
             }
             self.failure_result(deck, start, contract, message, Vec::new())
         }
+    }
+
+    pub(super) fn run_static_authored_fail_value_tran_measurement_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.result_contract();
+        let Some(expected) = plan.authored_fail_value_oracle() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "authored FAILVALUE TRAN execution received an invalid oracle shape".to_string(),
+                Vec::new(),
+            );
+        };
+
+        let transient = match self.run_transient_family_netlist(plan, netlist, start, None, None) {
+            Ok(transient) => transient,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(error) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("authored FAILVALUE TRAN simulation error: {error}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if let Err(error) = Self::validate_transient_result_time_grid(&transient) {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("authored FAILVALUE TRAN result grid is invalid: {error}"),
+                Vec::new(),
+            );
+        }
+        let measurements = rspice_core::analysis::evaluate_tran_measurements(netlist, &transient);
+
+        // Simulation, measurement evaluation, and typed verification share
+        // one per-test deadline rather than receiving independent budgets.
+        let deadline = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        if deadline.is_aborted() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "authored FAILVALUE TRAN shared deadline expired before verification ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                Vec::new(),
+            );
+        }
+        if let Err(error) = Self::validate_authored_fail_value_tran_results(expected, &measurements)
+        {
+            return self.failure_result(deck, start, contract, error, Vec::new());
+        }
+        if deadline.is_aborted() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "authored FAILVALUE TRAN shared deadline expired after verification ({}ms)",
+                    self.config.max_time_per_test_ms
+                ),
+                Vec::new(),
+            );
+        }
+
+        self.passed_result(deck, start, contract)
     }
 
     pub(super) fn run_static_scalar_tran_measurement_plan(

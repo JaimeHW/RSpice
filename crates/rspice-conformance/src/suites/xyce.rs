@@ -136,6 +136,7 @@ const XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE: f64 = 1.0e-12;
 const XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE: f64 = 1.0e-12;
 const XYCE_VERIFY_COMP_NO_PRINTED_PROBE: &str =
     "Xyce integrated-RMS *COMP contract has no directive for a printed probe";
+const XYCE_SELF_VERIFIED_MEASUREMENT_TRAN_CONTRACT: &str = "self_verified_measure_tran";
 const XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT: &str =
     "nonlinear_core_model_step_reference_wrapper";
 const XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT: &str =
@@ -8657,6 +8658,15 @@ enum XyceStaticTranOracle {
         tolerance: XyceFileCompareTolerance,
         input: XyceScalarTranMeasurementInput,
     },
+    AuthoredFailValue {
+        measurements: Vec<XyceAuthoredFailValueMeasurement>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct XyceAuthoredFailValueMeasurement {
+    name: String,
+    failure_limit: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8697,6 +8707,10 @@ impl XyceStaticTranPlan {
         matches!(self.oracle, XyceStaticTranOracle::ScalarMeasurements { .. })
     }
 
+    fn is_authored_fail_value_measurement_only(&self) -> bool {
+        matches!(self.oracle, XyceStaticTranOracle::AuthoredFailValue { .. })
+    }
+
     fn require_print(&self, consumer: &str) -> Result<&XycePrintRequest, String> {
         self.print
             .as_ref()
@@ -8711,6 +8725,9 @@ impl XyceStaticTranPlan {
             )),
             XyceStaticTranOracle::ScalarMeasurements { .. } => Err(format!(
                 "{consumer} requires a waveform oracle, but this plan has a scalar measurement oracle"
+            )),
+            XyceStaticTranOracle::AuthoredFailValue { .. } => Err(format!(
+                "{consumer} requires a waveform oracle, but this plan has an authored FAILVALUE oracle"
             )),
         }
     }
@@ -8729,9 +8746,11 @@ impl XyceStaticTranPlan {
                 *reference_path = path;
                 Ok(())
             }
-            XyceStaticTranOracle::None | XyceStaticTranOracle::ScalarMeasurements { .. } => Err(
-                format!("{consumer} cannot replace a non-waveform transient oracle"),
-            ),
+            XyceStaticTranOracle::None
+            | XyceStaticTranOracle::ScalarMeasurements { .. }
+            | XyceStaticTranOracle::AuthoredFailValue { .. } => Err(format!(
+                "{consumer} cannot replace a non-waveform transient oracle"
+            )),
         }
     }
 
@@ -8748,7 +8767,18 @@ impl XyceStaticTranPlan {
                 tolerance,
                 input,
             } => Some((reference_paths, *tolerance, input)),
-            XyceStaticTranOracle::None | XyceStaticTranOracle::Waveform(_) => None,
+            XyceStaticTranOracle::None
+            | XyceStaticTranOracle::Waveform(_)
+            | XyceStaticTranOracle::AuthoredFailValue { .. } => None,
+        }
+    }
+
+    fn authored_fail_value_oracle(&self) -> Option<&[XyceAuthoredFailValueMeasurement]> {
+        match &self.oracle {
+            XyceStaticTranOracle::AuthoredFailValue { measurements } => Some(measurements),
+            XyceStaticTranOracle::None
+            | XyceStaticTranOracle::Waveform(_)
+            | XyceStaticTranOracle::ScalarMeasurements { .. } => None,
         }
     }
 
@@ -8794,6 +8824,27 @@ impl XyceStaticTranPlan {
                     ));
                 }
                 self.require_print("waveform transient plan")?;
+                Ok(())
+            }
+            XyceStaticTranOracle::AuthoredFailValue { measurements } => {
+                if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
+                    || requires_wrapper
+                    || measurements.is_empty()
+                    || self.output_override
+                    || !self.steps.is_empty()
+                    || self.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+                    || !matches!(
+                        self.contract,
+                        XyceStaticTranContract::PlainStatic
+                            | XyceStaticTranContract::PlainCsv
+                            | XyceStaticTranContract::PlainCsd
+                    )
+                {
+                    return Err(
+                        "authored FAILVALUE TRAN oracle requires an ordinary, absolute, unstepped, pointwise plan with at least one typed measurement and no output override"
+                            .to_string(),
+                    );
+                }
                 Ok(())
             }
             XyceStaticTranOracle::None => {
@@ -8915,6 +8966,25 @@ impl XyceStaticTranPlan {
                 }
                 Ok(())
             }
+            XyceStaticTranOracle::AuthoredFailValue { measurements } => {
+                if measurements.is_empty()
+                    || !self.steps.is_empty()
+                    || self.output_override
+                    || self.comparison_mode != XyceStaticTranComparisonMode::Pointwise
+                    || !matches!(
+                        self.contract,
+                        XyceStaticTranContract::PlainStatic
+                            | XyceStaticTranContract::PlainCsv
+                            | XyceStaticTranContract::PlainCsd
+                    )
+                {
+                    return Err(
+                        "authored FAILVALUE TRAN execution requires an ordinary unstepped, pointwise plan with at least one typed measurement"
+                            .to_string(),
+                    );
+                }
+                Ok(())
+            }
             XyceStaticTranOracle::None
                 if self.contract == XyceStaticTranContract::WrapperNoIndexHeader =>
             {
@@ -8929,6 +8999,9 @@ impl XyceStaticTranPlan {
     }
 
     fn result_contract(&self) -> &'static str {
+        if self.is_authored_fail_value_measurement_only() {
+            return XYCE_SELF_VERIFIED_MEASUREMENT_TRAN_CONTRACT;
+        }
         if self.is_scalar_measurement_only() {
             return "wrapper_scalar_measure_tran";
         }
