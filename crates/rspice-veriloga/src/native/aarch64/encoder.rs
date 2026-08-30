@@ -280,6 +280,7 @@ impl A64Encoder {
         self.variable_shift_x(0x9AC0_2000, destination, value, count)
     }
 
+    #[cfg(test)]
     pub(crate) fn asrv_x(&mut self, destination: XReg, value: XReg, count: XReg) -> JitResult<()> {
         self.variable_shift_x(0x9AC0_2800, destination, value, count)
     }
