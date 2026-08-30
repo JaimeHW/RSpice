@@ -30,6 +30,7 @@ default = ["circuit-suites"]
 # default build so compile cost remains bounded.
 circuit-suites = [
     "veriloga-model-bsimsoi-va",
+    "veriloga-model-juncap200",
     "veriloga-builtins-noise",
     "veriloga-model-vbic13",
     "veriloga-model-vbic13-3t-et",
@@ -55,6 +56,13 @@ veriloga-model-bsimsoi-va = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-model-bsimsoi-va",
 ]
+# Forward the canonical JUNCAP 200.7.0 artifact independently so the Xyce
+# suite can exercise diode LEVEL=200 without compiling the complete compact-
+# model catalog.
+veriloga-model-juncap200 = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-juncap200",
+]
 veriloga-model-vbic13 = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-model-vbic13",
@@ -71,6 +79,7 @@ veriloga-builtins-models = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-builtins-models",
     "veriloga-model-bsimsoi-va",
+    "veriloga-model-juncap200",
     "veriloga-model-vbic13",
     "veriloga-model-vbic13-3t-et",
     "veriloga-model-vbic13-4t",
