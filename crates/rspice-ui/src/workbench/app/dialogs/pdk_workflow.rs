@@ -2122,7 +2122,7 @@ pub(crate) fn run_model_import_worker_request_value(
     use js_sys::{Array, Object, Reflect, Uint8Array};
     use wasm_bindgen::JsValue;
 
-    let metadata = Reflect::get(&request, &JsValue::from_str("metadata")).map_err(|error| error)?;
+    let metadata = Reflect::get(&request, &JsValue::from_str("metadata"))?;
     let metadata: BrowserModelImportWorkerMetadata = serde_wasm_bindgen::from_value(metadata)
         .map_err(|error| JsValue::from_str(&format!("Invalid model-import metadata: {error}")))?;
     if metadata.protocol_version != BROWSER_MODEL_IMPORT_PROTOCOL_VERSION {

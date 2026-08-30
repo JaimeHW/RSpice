@@ -58,11 +58,13 @@ enum BrowserPdkPublicationIntent {
         message: String,
         after_commit: AfterBrowserPdkCommit,
     },
-    Settings {
-        previous: PdkConfig,
-        model_libraries: ModelLibraryManager,
-        loaded: usize,
-    },
+    Settings(Box<BrowserPdkSettingsIntent>),
+}
+
+struct BrowserPdkSettingsIntent {
+    previous: PdkConfig,
+    model_libraries: ModelLibraryManager,
+    loaded: usize,
 }
 
 enum BrowserPdkCompletion {
@@ -73,7 +75,7 @@ enum BrowserPdkCompletion {
     Publication {
         operation_generation: u64,
         candidate: PdkConfig,
-        intent: BrowserPdkPublicationIntent,
+        intent: Box<BrowserPdkPublicationIntent>,
         result: Result<BrowserPdkConfigReceipt, String>,
     },
     RejectedSettingsRollback {
@@ -143,11 +145,11 @@ impl RSpiceApp {
         start_publication(
             ctx,
             candidate,
-            BrowserPdkPublicationIntent::Settings {
+            BrowserPdkPublicationIntent::Settings(Box::new(BrowserPdkSettingsIntent {
                 previous: self.state.pdk_config.clone(),
                 model_libraries,
                 loaded,
-            },
+            })),
         )
     }
 
@@ -222,7 +224,7 @@ impl RSpiceApp {
                     ctx,
                     operation_generation,
                     candidate,
-                    intent,
+                    *intent,
                     result,
                 ),
                 BrowserPdkCompletion::RejectedSettingsRollback {
@@ -363,11 +365,12 @@ impl RSpiceApp {
                             .push_user_message(ConsoleMessage::info(message.clone()));
                         self.state.ui.toasts.success(ctx, title, message);
                     }
-                    BrowserPdkPublicationIntent::Settings {
-                        previous,
-                        model_libraries,
-                        loaded,
-                    } => {
+                    BrowserPdkPublicationIntent::Settings(settings) => {
+                        let BrowserPdkSettingsIntent {
+                            previous,
+                            model_libraries,
+                            loaded,
+                        } = *settings;
                         let publication = if self.state.project_lifecycle.project_open {
                             publish_model_library_set_candidate(
                                 &mut self.state,
@@ -591,7 +594,7 @@ fn start_publication(
                     .push_back(BrowserPdkCompletion::Publication {
                         operation_generation,
                         candidate: completion_candidate,
-                        intent,
+                        intent: Box::new(intent),
                         result: result.map_err(|error| error.to_string()),
                     });
             });

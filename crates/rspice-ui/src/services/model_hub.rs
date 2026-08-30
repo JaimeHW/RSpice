@@ -81,7 +81,7 @@ impl ModelHubStoreHandle {
             // reaches one asks it what it holds rather than assuming.
             Ok(Self::Mirrored(std::sync::Arc::new(
                 crate::state::model_hub::durable::MirroredModelHubStore::new(Box::new(
-                    crate::state::model_hub::durable::BrowserPackMirror::default(),
+                    crate::state::model_hub::durable::BrowserPackMirror,
                 )),
             )))
         }

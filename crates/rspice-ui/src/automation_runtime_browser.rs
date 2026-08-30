@@ -307,15 +307,14 @@ impl BrowserAutomationRuntime {
                             break;
                         }
                     }
-                    RuntimeEvent::State { state, .. }
-                        if matches!(
-                            state,
+                    RuntimeEvent::State {
+                        state:
                             RuntimeState::Cancelled
-                                | RuntimeState::Completed
-                                | RuntimeState::Failed
-                                | RuntimeState::Terminated
-                        ) =>
-                    {
+                            | RuntimeState::Completed
+                            | RuntimeState::Failed
+                            | RuntimeState::Terminated,
+                        ..
+                    } => {
                         self.active_limits = None;
                     }
                     _ => {}

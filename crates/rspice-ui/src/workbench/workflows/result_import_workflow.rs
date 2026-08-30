@@ -1669,7 +1669,7 @@ pub(crate) fn poll_browser_result_dataset_import(state: &mut AppState) -> bool {
             let bytes = file
                 .original_bytes
                 .as_deref()
-                .unwrap_or_else(|| file.contents.as_bytes());
+                .unwrap_or(file.contents.as_bytes());
             match stage_imported_result_dataset(state, &file.name, bytes) {
                 Ok(()) => true,
                 Err(error) => {

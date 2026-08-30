@@ -352,11 +352,11 @@ impl ModelHubStore for MemoryModelHubStore {
     }
 
     fn commit_pack(&self, staged: StagedPack) -> Result<InstalledPack, ModelHubError> {
-        // Exhaustive rather than a `let ... else`: the browser build compiles
-        // only the memory variant, where a fallible binding would be dead.
+        #[cfg(target_arch = "wasm32")]
+        let StagingHandle::Memory(nonce) = &staged.handle;
+        #[cfg(not(target_arch = "wasm32"))]
         let nonce = match &staged.handle {
             StagingHandle::Memory(nonce) => nonce,
-            #[cfg(not(target_arch = "wasm32"))]
             StagingHandle::Directory(_) => {
                 return Err(ModelHubError::Storage(
                     "staged bytes belong to a different store".to_owned(),

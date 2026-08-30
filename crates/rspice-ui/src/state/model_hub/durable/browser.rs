@@ -566,6 +566,8 @@ fn await_transaction(
     }
 }
 
+type RetainedCallbacks = Vec<wasm_bindgen::closure::Closure<dyn FnMut()>>;
+
 thread_local! {
     /// Handlers the browser still owns.
     ///
@@ -574,14 +576,14 @@ thread_local! {
     /// operation that armed it can no longer fire. Every operation here is
     /// bounded by [`ASYNC_TIMEOUT_MS`], and the list is drained from the front
     /// once it grows past what a healthy session ever holds at once.
-    static RETAINED: std::cell::RefCell<Vec<Vec<wasm_bindgen::closure::Closure<dyn FnMut()>>>> =
+    static RETAINED: std::cell::RefCell<Vec<RetainedCallbacks>> =
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// The most in-flight operations one session keeps handlers for.
 const MAX_RETAINED_OPERATIONS: usize = 64;
 
-fn retain(callbacks: Vec<wasm_bindgen::closure::Closure<dyn FnMut()>>) {
+fn retain(callbacks: RetainedCallbacks) {
     RETAINED.with(|retained| {
         let mut retained = retained.borrow_mut();
         if retained.len() >= MAX_RETAINED_OPERATIONS {
