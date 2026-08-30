@@ -2338,69 +2338,85 @@ impl Engine {
             return Vec::new();
         }
 
-        let mut blockers = Vec::new();
-        let mut block = |present: bool, description: &'static str| {
+        fn block_if_present(blockers: &mut Vec<String>, present: bool, description: &'static str) {
             if present {
                 blockers.push(description.to_string());
             }
-        };
-        block(
+        }
+
+        let mut blockers = Vec::new();
+        block_if_present(
+            &mut blockers,
             !circuit.jfets.is_empty(),
             "JFET accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.mosfets.is_empty(),
             "classic MOSFET accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.vdmoses.is_empty(),
             "VDMOS accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             circuit.has_b3soi_devices(),
             "B3SOI DD/FD/PD accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             circuit.has_bsim3v3_devices(),
             "BSIM3v3 accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             circuit.has_bsim4v8_devices(),
             "BSIM4v8 accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.ekv26s.is_empty(),
             "EKV2.6 accepted transient integration history is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.ekv3s.is_empty(),
             "EKV3 accepted limiter and bypass state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             circuit.capacitors.has_solution_dependent_values(),
             "solution-dependent capacitor accepted expression state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             circuit.resistors.thermal.iter().any(Option::is_some),
             "thermal resistor accepted temperature state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.coupled_inductor_pairs.is_empty(),
             "coupled-inductor accepted integration state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.multi_winding_transformers.is_empty(),
             "multi-winding transformer accepted integration state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.jiles_atherton_inductors.is_empty(),
             "Jiles-Atherton accepted magnetic state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.xyce_core_groups.is_empty(),
             "Xyce nonlinear-core accepted magnetic state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             circuit
                 .behavioral_sources
                 .voltage_sources
@@ -2413,11 +2429,13 @@ impl Engine {
                     .any(|source| source.program.sdt_count != 0),
             "behavioral-source accepted SDT state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.vswitches.is_empty(),
             "voltage-controlled switch accepted hysteresis state is not checkpointed",
         );
-        block(
+        block_if_present(
+            &mut blockers,
             !circuit.iswitches.is_empty(),
             "current-controlled switch accepted hysteresis state is not checkpointed",
         );
