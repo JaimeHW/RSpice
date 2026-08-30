@@ -187,6 +187,7 @@ mod tests {
             parameters: Vec::new(),
             num_variables,
             variable_names: Vec::new(),
+            event_state_variables: Vec::new(),
             assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),

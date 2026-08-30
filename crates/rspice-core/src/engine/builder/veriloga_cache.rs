@@ -6,7 +6,8 @@ use super::*;
 // Version 17 adds exact legacy Laplace Jacobian semantics.
 // Version 18 retains exact transfer-function DC actions in compiled Laplace filters.
 // Version 19 adds signed slew IR, runtime, and checkpoint semantics.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 19;
+// Version 20 adds transactional event-state variable metadata.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 20;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -2138,8 +2139,8 @@ endmodule
     }
 
     #[test]
-    fn disk_cache_discards_pre_parameter_scope_records() {
-        let root = unique_test_root("stale-parameter-scope-version");
+    fn disk_cache_discards_pre_event_state_records() {
+        let root = unique_test_root("stale-event-state-version");
         let source_path = root.join("model.va");
         std::fs::create_dir_all(&root).expect("create temporary cache root");
         let entry = compiled_entry(&source_path);
@@ -2151,7 +2152,7 @@ endmodule
         let file = std::fs::File::open(&cache_path).expect("open current cache record");
         let mut record: serde_json::Value =
             serde_json::from_reader(file).expect("decode current cache record");
-        record["version"] = serde_json::Value::from(15_u32);
+        record["version"] = serde_json::Value::from(19_u32);
         let file = std::fs::File::create(&cache_path).expect("replace cache record version");
         serde_json::to_writer(file, &record).expect("encode stale cache record");
 
@@ -2159,7 +2160,7 @@ endmodule
             load_model_from_disk_locked(&source_path, &cache_root)
                 .expect("stale-version cache load is recoverable")
                 .is_none(),
-            "pre-parameter-scope cache records must force a miss"
+            "pre-event-state cache records must force a miss"
         );
         assert!(
             !cache_path.exists(),

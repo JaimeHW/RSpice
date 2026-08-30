@@ -130,6 +130,94 @@ endmodule
 }
 
 #[test]
+fn event_controlled_variables_are_newton_transactional_and_resume_exactly() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module transactional_event_counter(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(cross(V(p, n), +1)) count = count + 1.0;
+        I(p, n) <+ count;
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+
+    assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
+    device.advance_state();
+
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 1.0);
+    assert_eq!(
+        evaluate(&mut device, 1.0, 1.0),
+        1.0,
+        "a repeated Newton pass must replay from accepted procedural state"
+    );
+    assert_eq!(
+        evaluate(&mut device, 1.0, -0.5),
+        0.0,
+        "a retreating Newton pass must discard the rejected crossing update"
+    );
+    device.advance_state();
+
+    assert_eq!(evaluate(&mut device, 2.0, 1.0), 1.0);
+    device.advance_state();
+    let checkpoint = device.checkpoint_state().unwrap();
+
+    let mut restored = model.device("A1", &[1, 0]);
+    restored.validate_checkpoint_state(&checkpoint).unwrap();
+    restored.apply_validated_checkpoint_state(&checkpoint);
+    assert_eq!(evaluate(&mut restored, 3.0, -1.0), 1.0);
+    restored.advance_state();
+    assert_eq!(evaluate(&mut restored, 4.0, 1.0), 2.0);
+    assert_eq!(evaluate(&mut restored, 4.0, 1.0), 2.0);
+}
+
+#[test]
+fn checkpoint_before_acceptance_excludes_step_event_variable_candidates() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module transactional_initial_step(p, n);
+    inout p, n;
+    electrical p, n;
+    real count;
+    analog begin
+        @(initial_step("tran")) count = count + 1.0;
+        I(p, n) <+ count;
+    end
+endmodule
+"#,
+    );
+    let count_index = model
+        .variable_names
+        .iter()
+        .position(|name| name == "count")
+        .expect("counter variable is present");
+    let mut device = model.device("A1", &[1, 0]);
+    device.set_analysis_type(2);
+    device.set_analysis_step(true, false);
+    device.update_voltages(&[0.0]);
+
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.0);
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.0);
+    assert_eq!(
+        device.checkpoint_state().unwrap().accepted.variables[count_index],
+        0.0,
+        "a pre-accept checkpoint must retain the prior accepted counter"
+    );
+
+    device.advance_state();
+    assert_eq!(
+        device.checkpoint_state().unwrap().accepted.variables[count_index],
+        1.0
+    );
+}
+
+#[test]
 fn step_events_follow_phase_and_analysis_filters() {
     let model = DeviceFixture::compile(
         r#"

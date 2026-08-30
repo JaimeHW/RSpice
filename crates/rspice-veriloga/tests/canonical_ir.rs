@@ -3054,6 +3054,7 @@ fn hir_lowering_preserves_laplace_operand_groups() {
         parameters: Vec::new(),
         param_aliases: Vec::new(),
         variables: Vec::new(),
+        event_state_variables: Vec::new(),
         branches: Vec::new(),
         contributions: vec![AnalyzedContribution {
             branch: "p,n".into(),
@@ -3152,6 +3153,7 @@ fn hir_lowering_preserves_typed_analog_operator_slots() {
         parameters: Vec::new(),
         param_aliases: Vec::new(),
         variables: Vec::new(),
+        event_state_variables: Vec::new(),
         branches: Vec::new(),
         contributions: vec![AnalyzedContribution {
             branch: "p,n".into(),

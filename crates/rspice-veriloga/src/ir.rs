@@ -103,6 +103,9 @@ pub struct DeviceIR {
     pub parameters: Vec<ParamDef>,
     /// Internal variables (state)
     pub variables: Vec<VarDef>,
+    /// Sorted, duplicate-free variable slots written from event-controlled
+    /// procedural bodies.
+    pub event_state_variables: Vec<usize>,
     /// Variable assignments and runtime loops (in execution order)
     pub assignments: Vec<IrAssignmentItem>,
     /// Array variables (elements are contiguous slots in `variables`)
@@ -611,6 +614,23 @@ impl DeviceIR {
     pub fn from_analyzed(module: &AnalyzedModule) -> crate::error::CompileResult<Self> {
         use crate::expr_converter::{ConversionContext, ExprConverter};
 
+        if module
+            .event_state_variables
+            .iter()
+            .any(|&slot| slot >= module.variables.len())
+            || module
+                .event_state_variables
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(crate::error::CompileError::CodeGen(
+                crate::error::CodeGenError::new(crate::error::CodeGenErrorKind::Internal(
+                    "event-state variable metadata must be sorted, unique, and within the module variable layout"
+                        .into(),
+                )),
+            ));
+        }
+
         if let Some(parameter) = module
             .parameters
             .iter()
@@ -633,6 +653,7 @@ impl DeviceIR {
             internal_nodes: Vec::new(),
             parameters: Vec::new(),
             variables: Vec::new(),
+            event_state_variables: module.event_state_variables.clone(),
             assignments: Vec::new(),
             arrays: Vec::new(),
             equations: Vec::new(),

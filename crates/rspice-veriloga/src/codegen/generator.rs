@@ -307,6 +307,7 @@ impl CodeGenerator {
             parameters,
             num_variables: ir.variables.len(),
             variable_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
+            event_state_variables: ir.event_state_variables.clone(),
             assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),

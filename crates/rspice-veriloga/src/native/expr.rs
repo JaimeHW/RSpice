@@ -10276,6 +10276,7 @@ mod tests {
             parameters: Vec::new(),
             param_aliases: Vec::new(),
             variables: Vec::new(),
+            event_state_variables: Vec::new(),
             branches: Vec::new(),
             contributions: vec![contribution.clone()],
             statements: Vec::new(),

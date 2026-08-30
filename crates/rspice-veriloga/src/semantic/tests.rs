@@ -217,6 +217,90 @@ fn event_operators_remain_legal_in_event_expressions_but_not_in_event_bodies() {
 }
 
 #[test]
+fn event_control_records_only_body_writes_and_covers_dynamic_arrays() {
+    let module = analyze_one(&module_src(
+        r#"
+            integer selector;
+            real values[0:2];
+            real scalar, ordinary;
+            analog begin
+                ordinary = V(p, n);
+                @(cross(V(p, n), +1)) begin
+                    scalar = scalar + 1.0;
+                    values[1] = scalar;
+                    values[selector] = scalar;
+                end
+                I(p, n) <+ ordinary + scalar + values[0];
+            end
+        "#,
+    ));
+
+    let scalar = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "scalar")
+        .expect("scalar slot");
+    let ordinary = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "ordinary")
+        .expect("ordinary slot");
+    let selector = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "selector")
+        .expect("selector slot");
+    let array = module.arrays.get("values").expect("array layout");
+    let mut expected = vec![scalar];
+    expected.extend(array.base..array.base + array.len);
+    expected.sort_unstable();
+    expected.dedup();
+
+    assert_eq!(module.event_state_variables, expected);
+    assert!(!module.event_state_variables.contains(&ordinary));
+    assert!(!module.event_state_variables.contains(&selector));
+    assert!(
+        module
+            .variables
+            .iter()
+            .enumerate()
+            .filter(|(_, variable)| variable.name.starts_with("__guard"))
+            .all(|(slot, _)| !module.event_state_variables.contains(&slot))
+    );
+}
+
+#[test]
+fn event_control_collects_runtime_loop_body_and_control_writes() {
+    let module = analyze_one(&module_src(
+        r#"
+            parameter integer limit = 2;
+            integer i;
+            real count;
+            analog begin
+                @(timer(0.0, 1.0e-9))
+                    for (i = 0; i < limit; i = i + 1)
+                        count = count + 1.0;
+                I(p, n) <+ count;
+            end
+        "#,
+    ));
+
+    let i = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "i")
+        .expect("loop variable slot");
+    let count = module
+        .variables
+        .iter()
+        .position(|variable| variable.name == "count")
+        .expect("count slot");
+    let mut expected = vec![i, count];
+    expected.sort_unstable();
+    assert_eq!(module.event_state_variables, expected);
+}
+
+#[test]
 fn nested_user_functions_cannot_hide_stateful_analog_operators() {
     let source = module_src(
         r#"

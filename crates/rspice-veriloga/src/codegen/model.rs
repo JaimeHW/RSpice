@@ -62,6 +62,11 @@ pub struct CompiledModel {
     /// Variable names (index-aligned with the runtime variable storage);
     /// used for operating-point reporting and debugging
     pub variable_names: Vec<SmolStr>,
+    /// Sorted, duplicate-free variable slots written by event-controlled
+    /// procedural bodies. Runtime instances use this metadata to isolate
+    /// speculative Newton evaluations from accepted-point state.
+    #[serde(default)]
+    pub event_state_variables: Vec<usize>,
     /// Evaluation steps (assignments and runtime loops), executed in order
     /// before the contributions
     pub assignment_steps: Vec<AssignmentStep>,

@@ -45,6 +45,11 @@ pub struct AnalyzedModule {
     /// resolving to entries of `parameters`
     pub param_aliases: Vec<AnalyzedParamAlias>,
     pub variables: Vec<AnalyzedVariable>,
+    /// Sorted, duplicate-free variable slots written by an event-controlled
+    /// procedural body. These slots require accepted/candidate lifecycle
+    /// handling at runtime; ordinary procedural variables deliberately remain
+    /// outside that transaction set.
+    pub event_state_variables: Vec<usize>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
     /// Ordered evaluation statements (assignments and runtime loops),

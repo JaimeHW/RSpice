@@ -381,6 +381,7 @@ impl SemanticAnalyzer {
             parameters: Vec::new(),
             param_aliases: Vec::new(),
             variables: Vec::new(),
+            event_state_variables: Vec::new(),
             branches: Vec::new(),
             contributions: Vec::new(),
             statements: Vec::new(),
@@ -2217,6 +2218,11 @@ impl SemanticAnalyzer {
                     self.event_guard(&event_ctrl.event, module, sink)?;
                 // Snapshot: the body must not perturb its own guard.
                 let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
+                // The guard snapshot is an evaluation-local implementation
+                // detail, not event-controlled procedural state. Start the
+                // write set after it has been emitted so only the event body
+                // participates in accepted/candidate transactions.
+                let body_start = sink.len();
                 let initial_guard_name = match &guard {
                     Expression::Identifier(identifier) if unfiltered_initial_step => {
                         Some(identifier.name.clone())
@@ -2231,6 +2237,7 @@ impl SemanticAnalyzer {
                 let body_result = self.analyze_statement(&event_ctrl.statement, module, sink);
                 self.dynamic_analog_operator_guard_depth -= 1;
                 body_result?;
+                Self::record_event_state_variables(&sink[body_start..], module);
                 if unfiltered_initial_step {
                     self.unfiltered_initial_step_guards.pop();
                 }
@@ -2555,6 +2562,48 @@ impl SemanticAnalyzer {
         }));
 
         Ok(Expression::Identifier(Identifier { name, span }))
+    }
+
+    /// Add every variable slot that an event-controlled statement can write.
+    ///
+    /// Runtime-indexed array writes conservatively cover the array's complete
+    /// contiguous storage because the selected element is not known until an
+    /// evaluation runs. Loop bodies are recursive assignment streams and are
+    /// walked here rather than relying on source-level control-flow shape.
+    fn record_event_state_variables(statements: &[AnalyzedStatement], module: &mut AnalyzedModule) {
+        fn collect(
+            statements: &[AnalyzedStatement],
+            module: &AnalyzedModule,
+            slots: &mut Vec<usize>,
+        ) {
+            for statement in statements {
+                match statement {
+                    AnalyzedStatement::Assignment(assignment) => {
+                        if assignment.index.is_some() {
+                            if let Some(array) = module.arrays.get(&assignment.target) {
+                                slots.extend(array.base..array.base.saturating_add(array.len));
+                            } else {
+                                // Semantic lowering creates indexed writes
+                                // only for registered arrays. If that internal
+                                // invariant is ever broken, treating every
+                                // slot as transactional is the conservative
+                                // behavior and cannot leak speculative state.
+                                slots.extend(0..module.variables.len());
+                            }
+                        } else {
+                            slots.push(assignment.var_index);
+                        }
+                    }
+                    AnalyzedStatement::Loop(loop_) => collect(&loop_.body, module, slots),
+                }
+            }
+        }
+
+        let mut slots = std::mem::take(&mut module.event_state_variables);
+        collect(statements, module, &mut slots);
+        slots.sort_unstable();
+        slots.dedup();
+        module.event_state_variables = slots;
     }
 
     /// AND the enclosing guard into a runtime loop condition so a guarded

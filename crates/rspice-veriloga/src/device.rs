@@ -1314,6 +1314,7 @@ impl VerilogADevice {
         }
         context.param_given = vec![0; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
+        context.configure_event_state_variables(&model.event_state_variables)?;
         // Stateful runtime data referenced by the bytecode lives in the
         // per-instance context (the model stays immutable and shared)
         context.lookup_tables = model.lookup_tables.clone();
@@ -6004,6 +6005,9 @@ endmodule
         }
         context.param_given = vec![0; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
+        context
+            .configure_event_state_variables(&model.event_state_variables)
+            .expect("native test model event-state layout configures");
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
         context.zi_filters = model.zi_filters.clone();

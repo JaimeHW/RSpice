@@ -389,6 +389,22 @@ impl<'a> HierarchyElaborator<'a> {
             scope.variables.insert(original, variable.name.clone());
             self.flattened.variables.push(variable);
         }
+        for &slot in &child.event_state_variables {
+            if slot >= child.variables.len() {
+                return Err(internal_error(format!(
+                    "child module '{}' event-state variable slot {slot} exceeds its {} variable slots",
+                    child.name,
+                    child.variables.len()
+                )));
+            }
+            self.flattened.event_state_variables.push(
+                variable_base
+                    .checked_add(slot)
+                    .ok_or_else(|| internal_error("hierarchy event-state index overflow".into()))?,
+            );
+        }
+        self.flattened.event_state_variables.sort_unstable();
+        self.flattened.event_state_variables.dedup();
         for (name, array) in &child.arrays {
             let mapped_name = self.fresh_name(name);
             scope.arrays.insert(name.clone(), mapped_name.clone());

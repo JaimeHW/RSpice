@@ -63,6 +63,52 @@ endmodule
 }
 
 #[test]
+fn event_state_metadata_survives_hierarchy_elaboration_and_codegen() {
+    let source = r#"
+`include "disciplines.vams"
+module child(p, n);
+    inout p, n;
+    electrical p, n;
+    real child_count, child_ordinary;
+    analog begin
+        child_ordinary = V(p, n);
+        @(cross(V(p, n), +1)) child_count = child_count + 1.0;
+        I(p, n) <+ child_count + child_ordinary;
+    end
+endmodule
+module parent(p, n);
+    inout p, n;
+    electrical p, n;
+    real parent_count, parent_ordinary;
+    child u1(p, n);
+    analog begin
+        parent_ordinary = V(p, n);
+        @(timer(0.0, 1.0e-9)) parent_count = parent_count + 1.0;
+    end
+endmodule
+"#;
+    let model = VerilogACompiler::new(CompilerOptions::default())
+        .compile_module(source, Some("parent"))
+        .expect("event-state hierarchy compiles");
+
+    assert_eq!(model.event_state_variables.len(), 2);
+    assert!(
+        model
+            .event_state_variables
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+    );
+    let names = model
+        .event_state_variables
+        .iter()
+        .map(|&slot| model.variable_names[slot].as_str())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"parent_count"));
+    assert!(names.iter().any(|name| name.contains("child_count")));
+    assert!(names.iter().all(|name| !name.contains("ordinary")));
+}
+
+#[test]
 fn constants_header_supplies_physical_constants() {
     let model = compile(
         r#"

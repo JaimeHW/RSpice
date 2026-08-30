@@ -234,6 +234,17 @@ pub struct VmContext {
     pub param_given: Vec<u8>,
     /// Variable values (indexed by variable)
     pub variables: Vec<f64>,
+    /// Sorted variable slots whose values persist only after an accepted
+    /// point because they are written by analog event-control bodies.
+    ///
+    /// These slots use [`Self::accepted_event_variables`] as their committed
+    /// lane. Ordinary procedural variables remain evaluation-local and are
+    /// deliberately not copied on every Newton pass.
+    event_state_indices: Vec<usize>,
+    /// Accepted values corresponding one-for-one with
+    /// [`Self::event_state_indices`]. Runtime-only: checkpoints retain the
+    /// canonical full variable vector after overlaying this committed lane.
+    accepted_event_variables: Vec<f64>,
     /// Current simulation time
     pub time: f64,
     /// Temperature in Kelvin
@@ -331,6 +342,8 @@ impl Default for VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            event_state_indices: Vec::new(),
+            accepted_event_variables: Vec::new(),
             time: 0.0,
             temperature: 300.15, // 27C default
             state_values: Vec::new(),
@@ -377,6 +390,8 @@ impl VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            event_state_indices: Vec::new(),
+            accepted_event_variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
             state_values: Vec::new(),
@@ -421,6 +436,8 @@ impl VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            event_state_indices: Vec::new(),
+            accepted_event_variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
             state_values: Vec::new(),
@@ -465,6 +482,8 @@ impl VmContext {
             parameters: Vec::new(),
             param_given: Vec::new(),
             variables: Vec::new(),
+            event_state_indices: Vec::new(),
+            accepted_event_variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
             state_values: vec![0.0; num_states],
@@ -494,6 +513,77 @@ impl VmContext {
         }
     }
 
+    /// Configure the procedural-variable slots whose values are committed
+    /// transactionally with analog operator state.
+    pub(crate) fn configure_event_state_variables(
+        &mut self,
+        indices: &[usize],
+    ) -> Result<(), VmError> {
+        let mut previous = None;
+        for (position, &index) in indices.iter().enumerate() {
+            if index >= self.variables.len() {
+                return Err(VmError::InvalidRuntimeConfiguration(format!(
+                    "event-state variable index {index} at position {position} exceeds variable storage length {}",
+                    self.variables.len()
+                )));
+            }
+            if previous.is_some_and(|prior| prior >= index) {
+                return Err(VmError::InvalidRuntimeConfiguration(
+                    "event-state variable indices must be sorted and unique".into(),
+                ));
+            }
+            previous = Some(index);
+        }
+
+        self.event_state_indices.clear();
+        self.event_state_indices.extend_from_slice(indices);
+        self.accepted_event_variables.clear();
+        self.accepted_event_variables
+            .extend(indices.iter().map(|&index| self.variables[index]));
+        Ok(())
+    }
+
+    fn validate_event_state_layout(&self) -> Result<(), VmError> {
+        let invalid = |message: String| VmError::InvalidNumericResult(message);
+        if self.event_state_indices.len() != self.accepted_event_variables.len() {
+            return Err(invalid(
+                "accepted event-variable storage shape is inconsistent".into(),
+            ));
+        }
+        let mut previous = None;
+        for (position, &index) in self.event_state_indices.iter().enumerate() {
+            if index >= self.variables.len() {
+                return Err(invalid(format!(
+                    "event-state variable index {index} at position {position} exceeds variable storage length {}",
+                    self.variables.len()
+                )));
+            }
+            if previous.is_some_and(|prior| prior >= index) {
+                return Err(invalid(
+                    "event-state variable indices are not sorted and unique".into(),
+                ));
+            }
+            previous = Some(index);
+        }
+        Ok(())
+    }
+
+    fn validate_event_state_candidate(&self) -> Result<(), VmError> {
+        self.validate_event_state_layout()?;
+        for (&index, &accepted) in self
+            .event_state_indices
+            .iter()
+            .zip(&self.accepted_event_variables)
+        {
+            if accepted.is_nan() || self.variables[index].is_nan() {
+                return Err(VmError::InvalidNumericResult(format!(
+                    "event-state variable {index} contains an invalid numeric value"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Advance state for a new timestep (copy current to prev).
     pub fn advance_state(&mut self) -> Result<(), VmError> {
         self.validate_advance_state()?;
@@ -514,6 +604,7 @@ impl VmContext {
                 "cannot commit invalid simulation time {time}"
             )));
         }
+        self.validate_event_state_candidate()?;
         let state_count = self.state_values.len();
         if self.state_values_prev.len() != state_count
             || self.state_values_older.len() != state_count
@@ -607,6 +698,13 @@ impl VmContext {
     /// runtime-compiled instance. This phase is deliberately infallible.
     pub(crate) fn apply_validated_advance_state(&mut self) {
         let time = self.time;
+        for (&index, accepted) in self
+            .event_state_indices
+            .iter()
+            .zip(&mut self.accepted_event_variables)
+        {
+            *accepted = self.variables[index];
+        }
         for index in 0..self.state_candidate_valid.len() {
             match self.state_candidate_valid[index] {
                 INTEGRATION_CANDIDATE_NONE => continue,
@@ -648,6 +746,7 @@ impl VmContext {
 
     pub(crate) fn accepted_checkpoint(&self) -> Result<VmAcceptedCheckpoint, VmError> {
         let invalid = |message: String| VmError::InvalidNumericResult(message);
+        self.validate_event_state_layout()?;
         if self.state_candidate_valid.len() != self.state_values.len()
             || self.state_older_candidate.len() != self.state_values.len()
         {
@@ -707,9 +806,17 @@ impl VmContext {
                 .validate_checkpoint_ready()
                 .map_err(|error| invalid(format!("Zi filter {index}: {error}")))?;
         }
+        let mut variables = self.variables.clone();
+        for (&index, &accepted) in self
+            .event_state_indices
+            .iter()
+            .zip(&self.accepted_event_variables)
+        {
+            variables[index] = accepted;
+        }
         let checkpoint = VmAcceptedCheckpoint {
             time: self.time,
-            variables: self.variables.clone(),
+            variables,
             state_values_prev: self.state_values_prev.clone(),
             state_values_older: self.state_values_older.clone(),
             state_derivatives_prev: self.state_derivatives_prev.clone(),
@@ -757,6 +864,7 @@ impl VmContext {
         checkpoint: &VmAcceptedCheckpoint,
     ) -> Result<(), VmError> {
         let invalid = |message: String| VmError::InvalidNumericResult(message);
+        self.validate_event_state_layout()?;
         if !checkpoint.time.is_finite() || checkpoint.time < 0.0 {
             return Err(invalid(
                 "checkpoint time must be finite and non-negative".into(),
@@ -873,6 +981,13 @@ impl VmContext {
     pub(crate) fn restore_accepted_checkpoint(&mut self, checkpoint: &VmAcceptedCheckpoint) {
         self.time = checkpoint.time;
         self.variables.clone_from(&checkpoint.variables);
+        for (&index, accepted) in self
+            .event_state_indices
+            .iter()
+            .zip(&mut self.accepted_event_variables)
+        {
+            *accepted = checkpoint.variables[index];
+        }
         self.state_values.clone_from(&checkpoint.state_values_prev);
         self.state_values_prev
             .clone_from(&checkpoint.state_values_prev);
@@ -939,6 +1054,7 @@ impl VmContext {
     /// language-defined zero state.
     pub(crate) fn reset_analysis_state(&mut self) {
         self.variables.fill(0.0);
+        self.accepted_event_variables.fill(0.0);
         self.time = 0.0;
         self.state_values.fill(0.0);
         self.state_values_prev.fill(0.0);
@@ -985,6 +1101,15 @@ impl VmContext {
     /// device evaluation. Only candidates recreated by the final Newton pass
     /// may be committed when the point is accepted.
     pub(crate) fn begin_stateful_evaluation(&mut self) {
+        for (&index, &accepted) in self
+            .event_state_indices
+            .iter()
+            .zip(&self.accepted_event_variables)
+        {
+            if let Some(variable) = self.variables.get_mut(index) {
+                *variable = accepted;
+            }
+        }
         for (status, older_candidate) in self
             .state_candidate_valid
             .iter_mut()
@@ -1321,6 +1446,9 @@ impl VmContext {
             self.variables.resize(index + 1, 0.0);
         }
         self.variables[index] = value;
+        if let Ok(position) = self.event_state_indices.binary_search(&index) {
+            self.accepted_event_variables[position] = value;
+        }
     }
 }
 
@@ -1508,6 +1636,90 @@ mod tests {
     }
 
     #[test]
+    fn event_variables_are_transactional_without_resetting_ordinary_variables() {
+        let mut context = VmContext {
+            variables: vec![10.0, 20.0, 30.0],
+            ..VmContext::default()
+        };
+        context
+            .configure_event_state_variables(&[1])
+            .expect("valid event-state layout configures");
+
+        context.variables[0] = 11.0;
+        context.variables[1] = 21.0;
+        context.begin_stateful_evaluation();
+        assert_eq!(context.variables, vec![11.0, 20.0, 30.0]);
+
+        context.variables[0] = 12.0;
+        context.variables[1] = 22.0;
+        context.advance_state().expect("candidate commits");
+
+        context.variables[0] = 13.0;
+        context.variables[1] = f64::NAN;
+        let checkpoint = context
+            .accepted_checkpoint()
+            .expect("even an invalid speculative event value is excluded from a checkpoint");
+        assert_eq!(
+            checkpoint.variables,
+            vec![13.0, 22.0, 30.0],
+            "only event-controlled slots must be overlaid from accepted state"
+        );
+
+        context.begin_stateful_evaluation();
+        assert_eq!(context.variables, vec![13.0, 22.0, 30.0]);
+    }
+
+    #[test]
+    fn event_variable_checkpoint_restore_rebuilds_the_committed_lane() {
+        let mut source = VmContext {
+            variables: vec![1.0, 2.0, 3.0],
+            ..VmContext::default()
+        };
+        source.configure_event_state_variables(&[0, 2]).unwrap();
+        source.variables = vec![4.0, 5.0, 6.0];
+        source.advance_state().unwrap();
+        let checkpoint = source.accepted_checkpoint().unwrap();
+
+        let mut restored = VmContext {
+            variables: vec![0.0; 3],
+            ..VmContext::default()
+        };
+        restored.configure_event_state_variables(&[0, 2]).unwrap();
+        restored.validate_accepted_checkpoint(&checkpoint).unwrap();
+        restored.restore_accepted_checkpoint(&checkpoint);
+        restored.variables[0] = 40.0;
+        restored.variables[1] = 50.0;
+        restored.variables[2] = 60.0;
+        restored.begin_stateful_evaluation();
+
+        assert_eq!(restored.variables, vec![4.0, 50.0, 6.0]);
+        restored.reset_analysis_state();
+        assert_eq!(restored.variables, vec![0.0; 3]);
+        assert_eq!(restored.accepted_event_variables, vec![0.0; 2]);
+    }
+
+    #[test]
+    fn malformed_event_variable_layout_is_rejected_without_mutation() {
+        let mut context = VmContext {
+            variables: vec![1.0, 2.0],
+            ..VmContext::default()
+        };
+        context.configure_event_state_variables(&[0]).unwrap();
+
+        for indices in [&[1, 1][..], &[1, 0][..], &[2][..]] {
+            let before = format!("{context:#?}");
+            let error = context
+                .configure_event_state_variables(indices)
+                .expect_err("malformed event-state metadata must fail");
+            assert!(
+                error.to_string().contains("event-state variable"),
+                "got: {error}"
+            );
+            assert_eq!(format!("{context:#?}"), before);
+        }
+    }
+
+    #[test]
     fn idtmod_wrap_returns_a_finite_common_branch_translation() {
         let (wrapped, rebase) = idtmod_wrapped_candidate(1.2, 1.0, 0.0).unwrap();
         assert!((wrapped - 0.2).abs() <= f64::EPSILON);
@@ -1674,6 +1886,7 @@ mod tests {
         context.state_derivatives_prev = vec![55.0];
         context.state_initialized = vec![true];
         context.state_candidate_valid = vec![0];
+        context.state_older_candidate = vec![0.0];
 
         context.allocate_delay_buffers(1);
         context.delay_buffers[0].eval(0.25, 4.0, 0.1);
