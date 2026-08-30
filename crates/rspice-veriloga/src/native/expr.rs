@@ -5931,6 +5931,39 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower_scaled_derivative(expr, wrt, gain)
     }
 
+    fn checked_filter_dc_gain(
+        &self,
+        operator: &str,
+        numerator: f64,
+        denominator: f64,
+    ) -> JitResult<f64> {
+        let invalid = |detail: String| JitError::InvalidCanonicalIr {
+            model: self.model.clone(),
+            detail: format!("{operator} {detail}").into(),
+        };
+        if !numerator.is_finite() || !denominator.is_finite() {
+            return Err(invalid(
+                "DC derivative gain has a non-finite coefficient product".into(),
+            ));
+        }
+        if denominator == 0.0 {
+            return Err(invalid(
+                "DC derivative is undefined because the denominator is zero at the evaluation point"
+                    .into(),
+            ));
+        }
+        let gain = numerator / denominator;
+        if !gain.is_finite() {
+            return Err(invalid(
+                "DC derivative gain is outside the representable f64 range".into(),
+            ));
+        }
+        if gain == 0.0 && numerator != 0.0 {
+            return Err(invalid("DC derivative gain underflows f64".into()));
+        }
+        Ok(gain)
+    }
+
     fn lower_laplace_call_derivative(
         &mut self,
         normalized: &str,
@@ -5948,22 +5981,38 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "laplace_zp" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_negated(&zeros), product_negated(&poles))
+                self.checked_filter_dc_gain(
+                    "laplace_zp",
+                    product_negated(&zeros),
+                    product_negated(&poles),
+                )?
             }
             "laplace_zd" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_negated(&zeros), first_or(&denominator, 1.0))
+                self.checked_filter_dc_gain(
+                    "laplace_zd",
+                    product_negated(&zeros),
+                    first_or(&denominator, 1.0),
+                )?
             }
             "laplace_np" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(first_or(&numerator, 0.0), product_negated(&poles))
+                self.checked_filter_dc_gain(
+                    "laplace_np",
+                    first_or(&numerator, 0.0),
+                    product_negated(&poles),
+                )?
             }
             "laplace_nd" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(first_or(&numerator, 0.0), first_or(&denominator, 1.0))
+                self.checked_filter_dc_gain(
+                    "laplace_nd",
+                    first_or(&numerator, 0.0),
+                    first_or(&denominator, 1.0),
+                )?
             }
             _ => unreachable!("caller filters canonical laplace names"),
         };
@@ -5988,22 +6037,38 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "laplace_zp" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_negated(&zeros), product_negated(&poles))
+                self.checked_filter_dc_gain(
+                    "laplace_zp",
+                    product_negated(&zeros),
+                    product_negated(&poles),
+                )?
             }
             "laplace_zd" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_negated(&zeros), first_or(&denominator, 1.0))
+                self.checked_filter_dc_gain(
+                    "laplace_zd",
+                    product_negated(&zeros),
+                    first_or(&denominator, 1.0),
+                )?
             }
             "laplace_np" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(first_or(&numerator, 0.0), product_negated(&poles))
+                self.checked_filter_dc_gain(
+                    "laplace_np",
+                    first_or(&numerator, 0.0),
+                    product_negated(&poles),
+                )?
             }
             "laplace_nd" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(first_or(&numerator, 0.0), first_or(&denominator, 1.0))
+                self.checked_filter_dc_gain(
+                    "laplace_nd",
+                    first_or(&numerator, 0.0),
+                    first_or(&denominator, 1.0),
+                )?
             }
             _ => unreachable!("caller filters canonical laplace names"),
         };
@@ -6037,22 +6102,38 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "zi_zp" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_one_minus(&zeros), product_one_minus(&poles))
+                self.checked_filter_dc_gain(
+                    "zi_zp",
+                    product_one_minus(&zeros),
+                    product_one_minus(&poles),
+                )?
             }
             "zi_zd" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_one_minus(&zeros), sum_values(&denominator))
+                self.checked_filter_dc_gain(
+                    "zi_zd",
+                    product_one_minus(&zeros),
+                    sum_values(&denominator),
+                )?
             }
             "zi_np" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(sum_values(&numerator), product_one_minus(&poles))
+                self.checked_filter_dc_gain(
+                    "zi_np",
+                    sum_values(&numerator),
+                    product_one_minus(&poles),
+                )?
             }
             "zi_nd" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(sum_values(&numerator), sum_values(&denominator))
+                self.checked_filter_dc_gain(
+                    "zi_nd",
+                    sum_values(&numerator),
+                    sum_values(&denominator),
+                )?
             }
             _ => unreachable!("caller filters canonical zi names"),
         };
@@ -6077,22 +6158,38 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "zi_zp" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_one_minus(&zeros), product_one_minus(&poles))
+                self.checked_filter_dc_gain(
+                    "zi_zp",
+                    product_one_minus(&zeros),
+                    product_one_minus(&poles),
+                )?
             }
             "zi_zd" => {
                 let zeros = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(product_one_minus(&zeros), sum_values(&denominator))
+                self.checked_filter_dc_gain(
+                    "zi_zd",
+                    product_one_minus(&zeros),
+                    sum_values(&denominator),
+                )?
             }
             "zi_np" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let poles = self.constant_array_values(args[2])?;
-                divide_dc_gain(sum_values(&numerator), product_one_minus(&poles))
+                self.checked_filter_dc_gain(
+                    "zi_np",
+                    sum_values(&numerator),
+                    product_one_minus(&poles),
+                )?
             }
             "zi_nd" => {
                 let numerator = self.constant_array_values(args[1])?;
                 let denominator = self.constant_array_values(args[2])?;
-                divide_dc_gain(sum_values(&numerator), sum_values(&denominator))
+                self.checked_filter_dc_gain(
+                    "zi_nd",
+                    sum_values(&numerator),
+                    sum_values(&denominator),
+                )?
             }
             _ => unreachable!("caller filters canonical zi names"),
         };
@@ -6136,49 +6233,57 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn laplace_kind_dc_gain(&self, kind: &HirLaplaceKind) -> JitResult<f64> {
         match kind {
-            HirLaplaceKind::ZeroPole { zeros, poles } => Ok(divide_dc_gain(
+            HirLaplaceKind::ZeroPole { zeros, poles } => self.checked_filter_dc_gain(
+                "laplace_zp",
                 self.constant_expr_product_negated(zeros)?,
                 self.constant_expr_product_negated(poles)?,
-            )),
-            HirLaplaceKind::ZeroDenominator { zeros, denominator } => Ok(divide_dc_gain(
+            ),
+            HirLaplaceKind::ZeroDenominator { zeros, denominator } => self.checked_filter_dc_gain(
+                "laplace_zd",
                 self.constant_expr_product_negated(zeros)?,
                 self.constant_expr_first_or(denominator, 1.0)?,
-            )),
-            HirLaplaceKind::NumeratorPole { numerator, poles } => Ok(divide_dc_gain(
+            ),
+            HirLaplaceKind::NumeratorPole { numerator, poles } => self.checked_filter_dc_gain(
+                "laplace_np",
                 self.constant_expr_first_or(numerator, 0.0)?,
                 self.constant_expr_product_negated(poles)?,
-            )),
+            ),
             HirLaplaceKind::NumeratorDenominator {
                 numerator,
                 denominator,
-            } => Ok(divide_dc_gain(
+            } => self.checked_filter_dc_gain(
+                "laplace_nd",
                 self.constant_expr_first_or(numerator, 0.0)?,
                 self.constant_expr_first_or(denominator, 1.0)?,
-            )),
+            ),
         }
     }
 
     fn zi_kind_dc_gain(&self, kind: &HirZiKind) -> JitResult<f64> {
         match kind {
-            HirZiKind::ZeroPole { zeros, poles } => Ok(divide_dc_gain(
+            HirZiKind::ZeroPole { zeros, poles } => self.checked_filter_dc_gain(
+                "zi_zp",
                 self.constant_expr_product_one_minus(zeros)?,
                 self.constant_expr_product_one_minus(poles)?,
-            )),
-            HirZiKind::ZeroDenominator { zeros, denominator } => Ok(divide_dc_gain(
+            ),
+            HirZiKind::ZeroDenominator { zeros, denominator } => self.checked_filter_dc_gain(
+                "zi_zd",
                 self.constant_expr_product_one_minus(zeros)?,
                 self.constant_expr_sum(denominator)?,
-            )),
-            HirZiKind::NumeratorPole { numerator, poles } => Ok(divide_dc_gain(
+            ),
+            HirZiKind::NumeratorPole { numerator, poles } => self.checked_filter_dc_gain(
+                "zi_np",
                 self.constant_expr_sum(numerator)?,
                 self.constant_expr_product_one_minus(poles)?,
-            )),
+            ),
             HirZiKind::NumeratorDenominator {
                 numerator,
                 denominator,
-            } => Ok(divide_dc_gain(
+            } => self.checked_filter_dc_gain(
+                "zi_nd",
                 self.constant_expr_sum(numerator)?,
                 self.constant_expr_sum(denominator)?,
-            )),
+            ),
         }
     }
 
@@ -9318,14 +9423,6 @@ fn branch_voltage_derivative(pos: Option<NodeId>, neg: Option<NodeId>, wrt: Node
         value -= 1.0;
     }
     value
-}
-
-fn divide_dc_gain(numerator: f64, denominator: f64) -> f64 {
-    if denominator.abs() > 1.0e-300 {
-        numerator / denominator
-    } else {
-        0.0
-    }
 }
 
 fn first_or(values: &[f64], default: f64) -> f64 {

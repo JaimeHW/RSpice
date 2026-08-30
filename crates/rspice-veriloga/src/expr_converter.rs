@@ -14,6 +14,7 @@ use crate::ast::{
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::{BranchRef, IrExpr, IrFunction};
 use crate::semantic::AnalyzedModule;
+use num_complex::Complex64;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::path::Path;
@@ -30,6 +31,48 @@ fn zi_root_error(message: String) -> crate::error::CompileError {
         "zi filter roots: {message}"
     )))
     .into()
+}
+
+fn laplace_error(
+    operator: &str,
+    error: crate::laplace::LaplaceError,
+) -> crate::error::CompileError {
+    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+        "{operator}: {error}"
+    )))
+    .into()
+}
+
+fn validate_laplace_coefficients(
+    operator: &str,
+    numerator_ascending: &[f64],
+    denominator_ascending: &[f64],
+) -> CompileResult<()> {
+    let mut numerator = numerator_ascending.to_vec();
+    numerator.reverse();
+    let mut denominator = denominator_ascending.to_vec();
+    denominator.reverse();
+    crate::laplace::StateSpaceFilter::from_transfer_function(&numerator, &denominator)
+        .map(|_| ())
+        .map_err(|error| laplace_error(operator, error))
+}
+
+fn validate_laplace_roots(
+    operator: &str,
+    zeros: &[(f64, f64)],
+    poles: &[(f64, f64)],
+) -> CompileResult<()> {
+    let zeros = zeros
+        .iter()
+        .map(|(real, imaginary)| Complex64::new(*real, *imaginary))
+        .collect::<Vec<_>>();
+    let poles = poles
+        .iter()
+        .map(|(real, imaginary)| Complex64::new(*real, *imaginary))
+        .collect::<Vec<_>>();
+    crate::laplace::StateSpaceFilter::from_poles_zeros(&poles, &zeros, 1.0)
+        .map(|_| ())
+        .map_err(|error| laplace_error(operator, error))
 }
 
 fn reject_flow_ddx_probe(access: &str) -> CompileResult<()> {
@@ -1072,12 +1115,7 @@ impl<'a> ExprConverter<'a> {
                 let expr = self.convert(require_arg(0)?)?;
                 let numerator = self.const_real_array(require_arg(1)?)?;
                 let denominator = self.const_real_array(require_arg(2)?)?;
-                if denominator.iter().all(|c| *c == 0.0) {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "laplace_nd denominator must be nonzero".into(),
-                    ))
-                    .into());
-                }
+                validate_laplace_coefficients("laplace_nd", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
                     expr: Box::new(expr),
                     numerator,
@@ -1089,6 +1127,7 @@ impl<'a> ExprConverter<'a> {
                 let expr = self.convert(require_arg(0)?)?;
                 let zeros = self.const_complex_pairs(require_arg(1)?)?;
                 let poles = self.const_complex_pairs(require_arg(2)?)?;
+                validate_laplace_roots("laplace_zp", &zeros, &poles)?;
                 Ok(IrExpr::LaplaceZP {
                     expr: Box::new(expr),
                     zeros,
@@ -1109,6 +1148,7 @@ impl<'a> ExprConverter<'a> {
                         e
                     )))
                 })?;
+                validate_laplace_coefficients("laplace_zd", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
                     expr: Box::new(expr),
                     numerator,
@@ -1127,6 +1167,7 @@ impl<'a> ExprConverter<'a> {
                         e
                     )))
                 })?;
+                validate_laplace_coefficients("laplace_np", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
                     expr: Box::new(expr),
                     numerator,
@@ -1262,6 +1303,39 @@ impl<'a> ExprConverter<'a> {
                 }
             })
             .collect()
+    }
+
+    /// Evaluate the already-unpacked coefficient expressions carried by the
+    /// public analog-operator AST.
+    fn const_real_expressions(&self, expressions: &[Expression]) -> CompileResult<Vec<f64>> {
+        expressions
+            .iter()
+            .map(|expression| match autodiff_fold(self.convert(expression)?) {
+                IrExpr::Const(value) => Ok(value),
+                _ => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                    "filter coefficients must be compile-time constants (parameter-dependent coefficients are not supported yet)"
+                        .into(),
+                ))
+                .into()),
+            })
+            .collect()
+    }
+
+    fn const_complex_expression_pairs(
+        &self,
+        expressions: &[Expression],
+    ) -> CompileResult<Vec<(f64, f64)>> {
+        let values = self.const_real_expressions(expressions)?;
+        if !values.len().is_multiple_of(2) {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "pole/zero vectors must contain (real, imaginary) pairs".into(),
+            ))
+            .into());
+        }
+        Ok(values
+            .chunks_exact(2)
+            .map(|pair| (pair[0], pair[1]))
+            .collect())
     }
 
     /// Evaluate an array-literal argument to constant (re, im) pairs
@@ -1443,8 +1517,69 @@ impl<'a> ExprConverter<'a> {
                     direction,
                 })
             }
-            AnalogOperator::Laplace { expr, .. } | AnalogOperator::Zi { expr, .. } => {
-                // Laplace/Z-transform filters - simplified to just expression
+            AnalogOperator::Laplace { kind, expr, .. } => {
+                let expr = Box::new(self.convert(expr)?);
+                match kind {
+                    crate::ast::LaplaceKind::ZeroPole { zeros, poles } => {
+                        let zeros = self.const_complex_expression_pairs(zeros)?;
+                        let poles = self.const_complex_expression_pairs(poles)?;
+                        validate_laplace_roots("laplace_zp", &zeros, &poles)?;
+                        Ok(IrExpr::LaplaceZP {
+                            expr,
+                            zeros,
+                            poles,
+                            gain: 1.0,
+                        })
+                    }
+                    crate::ast::LaplaceKind::ZeroDenominator { zeros, denominator } => {
+                        let zeros = self.const_complex_expression_pairs(zeros)?;
+                        let numerator =
+                            crate::laplace::roots_to_polynomial(&zeros).map_err(|error| {
+                                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                    "laplace_zd zeros: {error}"
+                                )))
+                            })?;
+                        let denominator = self.const_real_expressions(denominator)?;
+                        validate_laplace_coefficients("laplace_zd", &numerator, &denominator)?;
+                        Ok(IrExpr::LaplaceND {
+                            expr,
+                            numerator,
+                            denominator,
+                        })
+                    }
+                    crate::ast::LaplaceKind::NumeratorPole { numerator, poles } => {
+                        let numerator = self.const_real_expressions(numerator)?;
+                        let poles = self.const_complex_expression_pairs(poles)?;
+                        let denominator =
+                            crate::laplace::roots_to_polynomial(&poles).map_err(|error| {
+                                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                    "laplace_np poles: {error}"
+                                )))
+                            })?;
+                        validate_laplace_coefficients("laplace_np", &numerator, &denominator)?;
+                        Ok(IrExpr::LaplaceND {
+                            expr,
+                            numerator,
+                            denominator,
+                        })
+                    }
+                    crate::ast::LaplaceKind::NumeratorDenominator {
+                        numerator,
+                        denominator,
+                    } => {
+                        let numerator = self.const_real_expressions(numerator)?;
+                        let denominator = self.const_real_expressions(denominator)?;
+                        validate_laplace_coefficients("laplace_nd", &numerator, &denominator)?;
+                        Ok(IrExpr::LaplaceND {
+                            expr,
+                            numerator,
+                            denominator,
+                        })
+                    }
+                }
+            }
+            AnalogOperator::Zi { expr, .. } => {
+                // The public Zi AST remains a separate legacy parity item.
                 self.convert(expr)
             }
         }
@@ -1682,3 +1817,80 @@ impl<'a> ExprConverter<'a> {
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{LaplaceKind, NumberLit};
+    use crate::source::Span;
+
+    fn number(value: f64) -> Expression {
+        Expression::Number(NumberLit {
+            value,
+            raw: value.to_string().into(),
+            span: Span::dummy(),
+        })
+    }
+
+    fn empty_context() -> ConversionContext {
+        ConversionContext {
+            node_map: HashMap::new(),
+            branch_map: HashMap::new(),
+            param_map: HashMap::new(),
+            var_map: HashMap::new(),
+            arrays: HashMap::new(),
+            num_terminals: 0,
+            num_internal: 0,
+        }
+    }
+
+    #[test]
+    fn public_laplace_ast_is_lowered_instead_of_becoming_a_passthrough() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let expression = Expression::AnalogOperator(AnalogOperator::Laplace {
+            kind: LaplaceKind::NumeratorDenominator {
+                numerator: vec![number(1.0)],
+                denominator: vec![number(1.0), number(1.0)],
+            },
+            expr: Box::new(number(2.0)),
+            span: Span::dummy(),
+        });
+
+        let converted = converter
+            .convert(&expression)
+            .expect("valid public Laplace AST");
+        assert!(matches!(converted, IrExpr::LaplaceND { .. }));
+    }
+
+    #[test]
+    fn public_laplace_ast_refuses_improper_and_nonconjugate_definitions() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let improper = Expression::AnalogOperator(AnalogOperator::Laplace {
+            kind: LaplaceKind::NumeratorDenominator {
+                numerator: vec![number(1.0), number(2.0)],
+                denominator: vec![number(0.5)],
+            },
+            expr: Box::new(number(1.0)),
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&improper)
+            .expect_err("public AST must enforce proper transfer shape");
+        assert!(error.to_string().contains("improper transfer function"));
+
+        let nonconjugate = Expression::AnalogOperator(AnalogOperator::Laplace {
+            kind: LaplaceKind::ZeroPole {
+                zeros: vec![number(1.0), number(2.0), number(3.0), number(-2.0)],
+                poles: vec![number(-1.0), number(0.0), number(-2.0), number(0.0)],
+            },
+            expr: Box::new(number(1.0)),
+            span: Span::dummy(),
+        });
+        let error = converter
+            .convert(&nonconjugate)
+            .expect_err("public AST must validate conjugate roots");
+        assert!(error.to_string().contains("no conjugate partner"));
+    }
+}
