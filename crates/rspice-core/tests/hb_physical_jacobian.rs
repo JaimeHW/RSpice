@@ -83,6 +83,30 @@ RLOAD out 0 1e15
 .end
 ",
         ),
+        (
+            "zero-KP active MOS",
+            "\
+* zero-KP active MOS on a high-impedance node
+IIN 0 out DC 0
+VG gate 0 DC 1.5
+M1 out gate 0 0 NMOD W=7u L=2u
+RLOAD out 0 1e15
+.model NMOD NMOS LEVEL=1 VTO=0.7 KP=0 LAMBDA=0 IS=0 JS=0
+.end
+",
+        ),
+        (
+            "zero-BETA active JFET",
+            "\
+* zero-BETA active JFET on a high-impedance node
+IIN 0 out DC 0
+VG gate 0 DC 0
+J1 out gate 0 JMOD
+RLOAD out 0 1e15
+.model JMOD NJF VTO=-2 BETA=0 LAMBDA=0 IS=0
+.end
+",
+        ),
     ];
 
     for (kind, deck) in cases {
@@ -91,6 +115,126 @@ RLOAD out 0 1e15
         assert!(
             (transfer - expected).norm() <= 1.0e-9 * LOAD,
             "{kind} introduced a nonphysical cutoff shunt: got {transfer}, want {expected}"
+        );
+    }
+}
+
+#[test]
+fn level1_mos_nonunity_geometry_matches_the_ordinary_ac_derivative() {
+    let deck = "\
+* non-unity Level-1 geometry
+VDD vdd 0 DC 5
+VIN gate 0 DC 1.5
+RD vdd out 200
+M1 out gate 0 0 NMOD W=6u L=3u
+.model NMOD NMOS LEVEL=1 VTO=0.7 KP=1m LD=.5u LAMBDA=0 IS=0 JS=0
+.end
+";
+    let pac = pac_transfer(deck, "VIN", "out");
+    let ac_deck = deck.replace("VIN gate 0 DC 1.5", "VIN gate 0 DC 1.5 AC 1");
+    let ordinary = ac_voltage(&ac_deck, "out");
+    assert!(
+        (pac - ordinary).norm() <= 2.0e-8 * ordinary.norm(),
+        "non-unity W/Leff PAC derivative was {pac}, ordinary AC produced {ordinary}"
+    );
+
+    // beta=KP*W/(L-2*LD)=3mA/V^2 and gm=beta*(VGS-VTO)=2.4mS.
+    let expected = Complex64::new(-0.48, 0.0);
+    assert!(
+        (pac - expected).norm() <= 2.0e-6,
+        "non-unity W/Leff PAC derivative was {pac}, expected {expected}"
+    );
+}
+
+#[test]
+fn level1_subpicometer_effective_length_and_small_phi_match_ordinary_ac() {
+    let deck = "\
+* exact sub-picometer Leff and small PHI
+VDD vdd 0 DC 5
+VIN gate 0 DC 1.5
+VB bulk 0 DC -3e-15
+RD vdd out 200
+M1 out gate 0 bulk NMOD W=1p L=1.5p
+.model NMOD NMOS LEVEL=1 VTO=0.7 KP=1m LD=.5p GAMMA=1e6 PHI=1e-15 LAMBDA=0 IS=0 JS=0
+.end
+";
+    let pac = pac_transfer(deck, "VIN", "out");
+    let ac_deck = deck.replace("VIN gate 0 DC 1.5", "VIN gate 0 DC 1.5 AC 1");
+    let ordinary = ac_voltage(&ac_deck, "out");
+    assert!(
+        (pac - ordinary).norm() <= 2.0e-8 * ordinary.norm(),
+        "sub-picometer Leff/small-PHI PAC derivative was {pac}, ordinary AC produced {ordinary}"
+    );
+    assert!(
+        pac.re < -0.25 && pac.re > -0.35,
+        "fixture must exercise the intended finite strong-inversion gain, got {pac}"
+    );
+}
+
+#[test]
+fn exact_hb_switch_preserves_small_ron_large_roff_and_small_smooth() {
+    let off = pac_transfer(
+        "\
+* exact off-state voltage switch
+IIN 0 out DC 0
+VCTRL ctrl 0 DC -1
+S1 out 0 ctrl 0 SMOD
+RLOAD out 0 1e15
+.model SMOD VSWITCH (VT=0 VH=0 RON=1e-12 ROFF=1e15 SMOOTH=1e-12)
+.end
+",
+        "IIN",
+        "out",
+    );
+    let expected_off = Complex64::new(5.0e14, 0.0);
+    assert!(
+        (off - expected_off).norm() <= 1.0e-9 * expected_off.norm(),
+        "exact-HB off-state switch transfer was {off}, expected {expected_off}"
+    );
+
+    let on = pac_transfer(
+        "\
+* exact on-state voltage switch
+IIN 0 out DC 0
+VCTRL ctrl 0 DC 1
+S1 out 0 ctrl 0 SMOD
+RLOAD out 0 1e15
+.model SMOD VSWITCH (VT=0 VH=0 RON=1e-12 ROFF=1e15 SMOOTH=1e-12)
+.end
+",
+        "IIN",
+        "out",
+    );
+    let expected_on = Complex64::new(1.0e-12, 0.0);
+    assert!(
+        (on - expected_on).norm() <= 1.0e-9 * expected_on.norm(),
+        "exact-HB on-state switch transfer was {on}, expected {expected_on}"
+    );
+}
+
+#[test]
+fn exact_hb_rejects_stateful_and_xyce_curve_voltage_switches() {
+    for (parameters, expected) in [
+        ("VT=0 VH=.1 RON=1 ROFF=1e6 SMOOTH=.1", "hysteresis"),
+        ("ON=1 OFF=0 RON=1 ROFF=1e6", "Xyce ON/OFF curve"),
+    ] {
+        let deck = format!(
+            "* unsupported exact-HB switch semantics\nVCTRL ctrl 0 DC 0\nS1 out 0 ctrl 0 SMOD\nR1 out 0 1k\n.model SMOD VSWITCH ({parameters})\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("unsupported switch fixture parses");
+        let error = Engine::new(SimulationConfig::default())
+            .run_pac(
+                &netlist,
+                PacConfig::new()
+                    .with_fundamental(F0)
+                    .with_sweep(OFFSET, OFFSET, 1)
+                    .with_input_source("VCTRL")
+                    .with_output_node("out"),
+            )
+            .expect_err("unsupported switch semantics must fail before PAC solving");
+        assert!(
+            error.to_string().contains(expected),
+            "wrong exact-HB switch rejection for {parameters}: {error}"
         );
     }
 }

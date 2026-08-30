@@ -55,15 +55,16 @@ impl Engine {
             let gate = Self::hb_node_to_solver_index(mos.node_gate, num_nodes);
             let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
             let bulk = Self::hb_node_to_solver_index(mos.node_bulk, num_nodes);
-            let kp = mos.kp.max(1e-18);
+            let leff = mos.l - 2.0 * mos.ld;
+            let beta = mos.kp * mos.w / leff;
             let instance = match mos.mos_type {
                 crate::device::MosType::Nmos => NonlinearDeviceInstance::nmos(
-                    drain, gate, source, bulk, mos.vto, kp, mos.lambda,
+                    drain, gate, source, bulk, mos.vto, beta, mos.lambda,
                 ),
                 // The solver works in the polarity frame: the effective
                 // threshold is -VTO, which keeps depletion PMOS negative.
                 crate::device::MosType::Pmos => NonlinearDeviceInstance::pmos(
-                    drain, gate, source, bulk, -mos.vto, kp, mos.lambda,
+                    drain, gate, source, bulk, -mos.vto, beta, mos.lambda,
                 ),
             };
             // Effective bulk-junction zero-bias capacitances: explicit
@@ -91,14 +92,13 @@ impl Engine {
             };
             // Intrinsic channel charge: total oxide capacitance over the
             // effective (lateral-diffusion-shortened) channel.
-            let leff = (mos.l - 2.0 * mos.ld).max(1e-12);
             let instance = instance
                 .with_thermal_voltage(mos.vt)
                 .with_body_effect(mos.gamma, mos.phi)
                 .with_intrinsic_gate(mos.cox * mos.w * leff)
                 .with_bulk_junctions(
-                    DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
-                    DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
+                    DepletionCap::new_exact(cbs0, mos.pb, mos.mj, mos.fc),
+                    DepletionCap::new_exact(cbd0, mos.pb, mos.mj, mos.fc),
                     is_s,
                     is_d,
                 );
@@ -113,9 +113,9 @@ impl Engine {
 
             // Gate overlap capacitances are bias-independent in level 1:
             // stamp them as ordinary linear capacitors.
-            let cgs_ov = (mos.cgso * mos.w).max(0.0);
-            let cgd_ov = (mos.cgdo * mos.w).max(0.0);
-            let cgb_ov = (mos.cgbo * leff).max(0.0);
+            let cgs_ov = mos.cgso * mos.w;
+            let cgd_ov = mos.cgdo * mos.w;
+            let cgb_ov = mos.cgbo * leff;
             if cgs_ov > 0.0 {
                 self.hb_stamp_admittance(solver, mos.node_gate, mos.node_source, cgs_ov, false);
             }
@@ -131,7 +131,7 @@ impl Engine {
             let drain = Self::hb_node_to_solver_index(jfet.drain, num_nodes);
             let gate = Self::hb_node_to_solver_index(jfet.gate, num_nodes);
             let source = Self::hb_node_to_solver_index(jfet.source, num_nodes);
-            let beta = jfet.params.beta.max(1e-18);
+            let beta = jfet.params.beta;
             let instance = match jfet.jfet_type {
                 crate::device::JfetType::NJF => NonlinearDeviceInstance::njfet(
                     drain,
@@ -175,26 +175,6 @@ impl Engine {
             let ctrl_neg = Self::hb_node_to_solver_index(sw.ctrl_neg, num_nodes);
             solver.add_voltage_switch(
                 node_pos, node_neg, ctrl_pos, ctrl_neg, sw.vt, sw.vh, sw.ron, sw.roff, sw.smooth,
-            );
-        }
-
-        for sw in &circuit.iswitches {
-            let Ok(ctrl) = Self::hb_resolve_iswitch_control(circuit, sw, num_nodes) else {
-                continue;
-            };
-            let node_pos = Self::hb_node_to_solver_index(sw.node_pos, num_nodes);
-            let node_neg = Self::hb_node_to_solver_index(sw.node_neg, num_nodes);
-            solver.add_current_switch(
-                node_pos,
-                node_neg,
-                ctrl.ctrl_pos,
-                ctrl.ctrl_neg,
-                sw.it + ctrl.control_current_bias,
-                sw.ih,
-                sw.ron,
-                sw.roff,
-                sw.smooth,
-                HB_NORTON_G,
             );
         }
 

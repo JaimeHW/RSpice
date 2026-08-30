@@ -865,15 +865,6 @@ pub struct HbAnalysisResult {
     pub operating_point: HbOperatingPoint,
 }
 
-const HB_NORTON_G: Value = 1e6; // Rs = 1 uOhm for stiff source conversion in nonlinear HB.
-
-#[derive(Debug, Clone, Copy)]
-struct HbCurrentSwitchControl {
-    ctrl_pos: usize,
-    ctrl_neg: usize,
-    control_current_bias: Value,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct HbDriveTone {
     harmonic: usize,

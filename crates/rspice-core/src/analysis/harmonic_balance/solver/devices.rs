@@ -104,11 +104,19 @@ fn depletion_charge(cap: &DepletionCap, v: Value) -> (Value, Value) {
 
     if v < knee {
         let x = 1.0 - v / vj;
-        let q = cj0 * vj / (1.0 - m) * (1.0 - x.powf(1.0 - m));
+        let q = if m == 1.0 {
+            -cj0 * vj * x.ln()
+        } else {
+            cj0 * vj / (1.0 - m) * (1.0 - x.powf(1.0 - m))
+        };
         let c = cj0 * x.powf(-m);
         (q, c)
     } else {
-        let f1 = vj / (1.0 - m) * (1.0 - (1.0 - fc).powf(1.0 - m));
+        let f1 = if m == 1.0 {
+            -vj * (1.0 - fc).ln()
+        } else {
+            vj / (1.0 - m) * (1.0 - (1.0 - fc).powf(1.0 - m))
+        };
         let f2 = (1.0 - fc).powf(1.0 + m);
         let f3 = 1.0 - fc * (1.0 + m);
         let q = cj0 * (f1 + (f3 * (v - knee) + m / (2.0 * vj) * (v * v - knee * knee)) / f2);
@@ -578,8 +586,8 @@ impl NonlinearDeviceInstance {
     /// `gamma*(sqrt(phi + vsb) - sqrt(phi))` with the source-bulk voltage
     /// measured in the polarity frame from the effective source.
     pub(crate) fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
-        self.params.gamma = gamma.max(0.0);
-        self.params.phi = phi.max(1e-3);
+        self.params.gamma = gamma;
+        self.params.phi = phi;
         self
     }
 
@@ -877,8 +885,8 @@ impl NonlinearDeviceInstance {
     /// Body-effect threshold law and its derivative with respect to the
     /// effective source-bulk voltage.
     fn mos_threshold(&self, vsb: Value) -> (Value, Value) {
-        let gamma = self.params.gamma.max(0.0);
-        let phi = self.params.phi.max(1e-3);
+        let gamma = self.params.gamma;
+        let phi = self.params.phi;
         if gamma > 0.0 {
             let arg = phi + vsb;
             if arg > 0.0 {
@@ -1351,7 +1359,7 @@ impl NonlinearDeviceInstance {
         // Gate-bulk accumulation/depletion wedge on the raw overdrive
         // (Meyer's integrable single-variable piece): capacitance Cox in
         // deep accumulation, falling linearly to zero at threshold.
-        let phi = self.params.phi.max(1e-3);
+        let phi = self.params.phi;
         let (qgb, cgb_t) = if t >= 0.0 {
             (0.0, 0.0)
         } else if t >= -phi {
@@ -2060,6 +2068,22 @@ mod tests {
             assert!(
                 (c - expected).abs() < 1e-12 * expected,
                 "reverse-bias capacitance at {v} V: got {c:.6e}, want {expected:.6e}"
+            );
+        }
+    }
+
+    #[test]
+    fn unit_grading_coefficient_uses_the_exact_logarithmic_limit() {
+        let cap = DepletionCap::new_exact(10e-12, 0.7, 1.0, 0.5);
+        for voltage in [-2.0, -0.5, 0.1] {
+            let (charge, capacitance) = depletion_charge(&cap, voltage);
+            let x = 1.0 - voltage / cap.vj;
+            let expected_charge = -cap.cj0 * cap.vj * x.ln();
+            let expected_capacitance = cap.cj0 / x;
+            assert!((charge - expected_charge).abs() <= 8.0 * Value::EPSILON * charge.abs());
+            assert!(
+                (capacitance - expected_capacitance).abs()
+                    <= 8.0 * Value::EPSILON * capacitance.abs()
             );
         }
     }

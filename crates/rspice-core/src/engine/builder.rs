@@ -15,7 +15,7 @@ use crate::netlist::{
     reduce_supernode_topology,
 };
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
-use crate::{CircuitData, Netlist};
+use crate::{CircuitData, Netlist, Value};
 #[cfg(feature = "veriloga")]
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -96,6 +96,96 @@ fn map_build_parse_error(context: &str, error: ParseWithAbortError) -> Simulatio
             SimulationError::Netlist(format!("{context} error: {error}"))
         }
     }
+}
+
+fn validate_voltage_switch_physical_parameters(
+    switch: &crate::device::VoltageSwitch,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    if let Some(reason) = switch.physical_parameter_error() {
+        return Err(SimulationError::Circuit(format!(
+            "Voltage-controlled switch '{}' model '{}' has invalid physical parameters: {reason} (VT={}, VH={}, RON={}, ROFF={}, SMOOTH={})",
+            switch.name, model_name, switch.vt, switch.vh, switch.ron, switch.roff, switch.smooth
+        )));
+    }
+    Ok(())
+}
+
+fn validate_level1_mos_authored_parameters(
+    element_name: &str,
+    model_name: &str,
+    model_params: Option<&HashMap<String, Value>>,
+    instance_params: &[(String, Value)],
+) -> Result<(), SimulationError> {
+    if let Some(model_params) = model_params {
+        for (name, value) in model_params {
+            let requirement = match name.as_str() {
+                "VTO" | "VT0" | "VTH0" => Some("finite"),
+                "KP" | "GAMMA" | "LD" | "LAMBDA" | "IS" | "JS" | "CJ" | "CJ0" | "CJSW" | "CGSO"
+                | "CGDO" | "CGBO" | "CBD" | "CAPBD" | "CBS" | "CAPBS" => {
+                    Some("finite and nonnegative")
+                }
+                "L" | "W" | "PHI" | "PB" | "TOX" | "U0" | "UO" => Some("finite and positive"),
+                "MJ" | "MJSW" => Some("finite and in the interval [0, 1]"),
+                "FC" => Some("finite and in the interval [0, 1)"),
+                _ => None,
+            };
+            let Some(requirement) = requirement else {
+                continue;
+            };
+            let valid = match requirement {
+                "finite" => value.is_finite(),
+                "finite and nonnegative" => value.is_finite() && *value >= 0.0,
+                "finite and positive" => value.is_finite() && *value > 0.0,
+                "finite and in the interval [0, 1]" => {
+                    value.is_finite() && (0.0..=1.0).contains(value)
+                }
+                _ => value.is_finite() && (0.0..1.0).contains(value),
+            };
+            if !valid {
+                return Err(SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}' model '{model_name}' requires Level-1 parameter {name} to be {requirement}, got {value}"
+                )));
+            }
+        }
+    }
+
+    for (name, value) in instance_params {
+        let requirement = if matches!(name.as_str(), "W" | "L" | "M" | "MULT" | "NF") {
+            Some("finite and positive")
+        } else if matches!(name.as_str(), "AD" | "AS" | "PD" | "PS" | "NRD" | "NRS") {
+            Some("finite and nonnegative")
+        } else {
+            None
+        };
+        let Some(requirement) = requirement else {
+            continue;
+        };
+        let valid = if requirement == "finite and positive" {
+            value.is_finite() && *value > 0.0
+        } else {
+            value.is_finite() && *value >= 0.0
+        };
+        if !valid {
+            return Err(SimulationError::Circuit(format!(
+                "MOSFET '{element_name}' model '{model_name}' requires instance parameter {name} to be {requirement}, got {value}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_resolved_level1_mos(
+    mosfet: &crate::device::Mosfet,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    if let Some(reason) = mosfet.level1_physical_parameter_error() {
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{}' model '{}' has invalid resolved Level-1 parameters: {reason} (L={}, W={}, LD={}, KP={})",
+            mosfet.name, model_name, mosfet.l, mosfet.w, mosfet.ld, mosfet.kp
+        )));
+    }
+    Ok(())
 }
 
 fn check_circuit_resource_limits(
@@ -6328,6 +6418,14 @@ impl Engine {
                         _ => None,
                     }
                     .unwrap_or(1);
+                    if level == 1 {
+                        validate_level1_mos_authored_parameters(
+                            &element.name,
+                            model,
+                            params_map.as_ref(),
+                            instance_params,
+                        )?;
+                    }
                     // Which card the native routes below name in their
                     // diagnostics, and the deferred sets they must reject.
                     // Resolved once from whichever source supplied the
@@ -6753,6 +6851,9 @@ impl Engine {
                         )));
                     }
                     mosfet.set_temperature(temp_k, tnom_k);
+                    if level == 1 {
+                        validate_resolved_level1_mos(&mosfet, model)?;
+                    }
 
                     // The physical source temperature is the resolved
                     // instance temperature. TNOM only anchors model-parameter
@@ -7755,6 +7856,7 @@ impl Engine {
                         cn, // Control terminals
                     )
                     .with_params(&params_map);
+                    validate_voltage_switch_physical_parameters(&sw, model)?;
                     if let Some(state) = initial_state {
                         sw = sw.with_initial_state(map_switch_state(*state));
                     }

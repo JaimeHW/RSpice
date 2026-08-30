@@ -938,6 +938,13 @@ impl DepletionCap {
             fc: fc.clamp(0.0, 0.99),
         }
     }
+
+    /// Parameters already validated at the native Level-1 circuit boundary.
+    /// Unlike the compatibility constructor, this preserves every authored
+    /// value so exact HB does not silently project a valid model law.
+    pub(crate) fn new_exact(cj0: Value, vj: Value, m: Value, fc: Value) -> Self {
+        Self { cj0, vj, m, fc }
+    }
 }
 
 impl Default for DepletionCap {

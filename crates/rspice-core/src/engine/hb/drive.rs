@@ -569,7 +569,7 @@ impl Engine {
 
     pub(in crate::engine::hb) fn hb_unsupported_nonlinear_device_summary(
         circuit: &CircuitData,
-        num_nodes: usize,
+        _num_nodes: usize,
     ) -> Option<String> {
         let mut kinds: Vec<String> = Vec::new();
         let describe = |name: &str, count: usize| -> String {
@@ -608,6 +608,18 @@ impl Engine {
                 circuit.bjts.len(),
             ));
         }
+        let invalid_mos = circuit
+            .mosfets
+            .devices
+            .iter()
+            .filter(|mos| mos.level == 1 && mos.level1_physical_parameter_error().is_some())
+            .count();
+        if invalid_mos > 0 {
+            kinds.push(describe(
+                "LEVEL=1 MOS devices with invalid or nonrepresentable physical parameters",
+                invalid_mos,
+            ));
+        }
         let reduced_mos = circuit
             .mosfets
             .devices
@@ -644,21 +656,52 @@ impl Engine {
                 reduced_jfets,
             ));
         }
-        let reduced_vswitches = circuit
-            .vswitches
+        let invalid_jfets = circuit
+            .jfets
             .iter()
-            .filter(|switch| {
-                switch.vh != 0.0
-                    || switch.ron < 1.0e-6
-                    || switch.roff < 1.0e-6
-                    || switch.smooth < 1.0e-9
-                    || switch.roff > 1.0e12
+            .filter(|jfet| {
+                let params = &jfet.params;
+                !params.vto.is_finite()
+                    || !params.beta.is_finite()
+                    || params.beta < 0.0
+                    || !params.lambda.is_finite()
+                    || params.lambda < 0.0
+                    || !params.is.is_finite()
+                    || params.is < 0.0
+                    || !params.cgs.is_finite()
+                    || params.cgs < 0.0
+                    || !params.cgd.is_finite()
+                    || params.cgd < 0.0
+                    || !params.pb.is_finite()
+                    || params.pb <= 0.0
             })
             .count();
-        if reduced_vswitches > 0 {
+        if invalid_jfets > 0 {
             kinds.push(describe(
-                "voltage-controlled switches requiring hysteretic, hard-transition, or conductance-clamped equations not represented by exact HB",
-                reduced_vswitches,
+                "JFET devices with invalid physical parameters",
+                invalid_jfets,
+            ));
+        }
+        let invalid_vswitches = circuit
+            .vswitches
+            .iter()
+            .filter(|switch| switch.physical_parameter_error().is_some())
+            .count();
+        if invalid_vswitches > 0 {
+            kinds.push(describe(
+                "voltage-controlled switches with invalid or nonrepresentable physical parameters",
+                invalid_vswitches,
+            ));
+        }
+        let unsupported_vswitches = circuit
+            .vswitches
+            .iter()
+            .filter(|switch| switch.vh != 0.0 || switch.uses_xyce_curve_semantics())
+            .count();
+        if unsupported_vswitches > 0 {
+            kinds.push(describe(
+                "voltage-controlled switches requiring hysteresis or Xyce ON/OFF curve semantics not represented by exact HB",
+                unsupported_vswitches,
             ));
         }
         #[cfg(feature = "veriloga")]
@@ -691,15 +734,10 @@ impl Engine {
             ));
         }
 
-        let unsupported_iswitch = circuit
-            .iswitches
-            .iter()
-            .filter(|sw| Self::hb_resolve_iswitch_control(circuit, sw, num_nodes).is_err())
-            .count();
-        if unsupported_iswitch > 0 {
-            kinds.push(format!(
-                "{} current switch(es) (HB requires static control-source waveforms for ISwitch control branches)",
-                unsupported_iswitch
+        if !circuit.iswitches.is_empty() {
+            kinds.push(describe(
+                "current-controlled switches requiring exact control-branch current spectra",
+                circuit.iswitches.len(),
             ));
         }
         if !circuit.generic_switches.is_empty() {
@@ -773,109 +811,6 @@ impl Engine {
             kinds.dedup();
             Some(kinds.join(", "))
         }
-    }
-
-    pub(in crate::engine::hb) fn hb_extract_static_source_voltage(
-        spec: Option<&SourceSpec>,
-        fallback_dc: Value,
-    ) -> Option<Value> {
-        match spec {
-            None => Some(fallback_dc),
-            Some(SourceSpec::Distortion { inner, .. }) => {
-                Self::hb_extract_static_source_voltage(Some(inner), fallback_dc)
-            }
-            Some(SourceSpec::RfPort { inner, .. }) => {
-                Self::hb_extract_static_source_voltage(Some(inner), fallback_dc)
-            }
-            Some(SourceSpec::Dc(v)) => Some(*v),
-            Some(SourceSpec::DcAc {
-                dc_value,
-                ac_magnitude,
-                ..
-            }) if *ac_magnitude == 0.0 => Some(*dc_value),
-            Some(SourceSpec::DcTransient {
-                dc_value,
-                transient,
-            }) => Self::hb_extract_static_source_voltage(Some(transient), *dc_value),
-            Some(SourceSpec::DcAcTransient {
-                dc_value,
-                ac_magnitude,
-                transient,
-                ..
-            }) if *ac_magnitude == 0.0 => {
-                Self::hb_extract_static_source_voltage(Some(transient), *dc_value)
-            }
-            Some(SourceSpec::Ac { magnitude, .. }) if *magnitude == 0.0 => Some(0.0),
-            Some(SourceSpec::Sin {
-                offset, amplitude, ..
-            }) if *amplitude == 0.0 => Some(*offset),
-            Some(SourceSpec::Pulse { v1, v2, .. }) if *v2 == *v1 => Some(*v1),
-            Some(SourceSpec::Exp { v1, v2, .. }) if *v2 == *v1 => Some(*v1),
-            Some(SourceSpec::Pwl { points, .. }) => {
-                let first = points.first().map(|(_, value)| *value)?;
-                if points.iter().all(|(_, value)| *value == first) {
-                    Some(first)
-                } else {
-                    None
-                }
-            }
-            Some(SourceSpec::PwlFile { .. }) => None,
-            _ => None,
-        }
-    }
-
-    pub(in crate::engine::hb) fn hb_resolve_iswitch_control(
-        circuit: &CircuitData,
-        sw: &crate::device::CurrentSwitch,
-        num_nodes: usize,
-    ) -> Result<HbCurrentSwitchControl, ()> {
-        let Some(ctrl_branch_matrix_idx) = sw.ctrl_branch else {
-            return Err(());
-        };
-        if ctrl_branch_matrix_idx <= num_nodes {
-            return Err(());
-        }
-        let ctrl_branch_ordinal = ctrl_branch_matrix_idx - num_nodes;
-        let Some(vsrc_idx) = circuit
-            .voltage_sources
-            .branch_indices
-            .iter()
-            .position(|&ordinal| ordinal == ctrl_branch_ordinal)
-        else {
-            return Err(());
-        };
-
-        let dc = circuit
-            .voltage_sources
-            .dc_values
-            .get(vsrc_idx)
-            .copied()
-            .unwrap_or(0.0);
-        let ac_mag = circuit
-            .voltage_sources
-            .ac_magnitudes
-            .get(vsrc_idx)
-            .copied()
-            .unwrap_or(0.0);
-        let spec = circuit
-            .voltage_sources
-            .source_specs
-            .get(vsrc_idx)
-            .and_then(|s| s.as_ref());
-        if ac_mag != 0.0 {
-            return Err(());
-        }
-        let static_voltage = Self::hb_extract_static_source_voltage(spec, dc).ok_or(())?;
-
-        let ctrl_pos =
-            Self::hb_node_to_solver_index(circuit.voltage_sources.node_pos[vsrc_idx], num_nodes);
-        let ctrl_neg =
-            Self::hb_node_to_solver_index(circuit.voltage_sources.node_neg[vsrc_idx], num_nodes);
-        Ok(HbCurrentSwitchControl {
-            ctrl_pos,
-            ctrl_neg,
-            control_current_bias: static_voltage * HB_NORTON_G,
-        })
     }
 
     #[inline]

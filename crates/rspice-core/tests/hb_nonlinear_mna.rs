@@ -191,18 +191,6 @@ fn nonlinear_hb_fails_closed_before_solving_unrepresented_periodic_families() {
     let cases = [
         (
             "\
-* current switch requires its control branch current spectrum
-iin 0 out dc 0
-vctrl ctrl 0 dc 0
-w1 out 0 vctrl csw
-.model csw iswitch (ron=1 roff=1meg ion=1 ioff=0)
-r1 out 0 1k
-.end
-",
-            "current-controlled switches",
-        ),
-        (
-            "\
 * a VCCS requires a periodic controlled-source matrix stamp
 iin 0 in dc 0
 g1 out 0 in 0 2
@@ -252,6 +240,31 @@ r1 out 0 1k
             "failure must identify unsupported family '{expected_family}': {message}"
         );
     }
+}
+
+#[test]
+fn nonlinear_hb_rejects_every_current_switch_before_surrogate_stamping() {
+    let netlist = Netlist::parse(
+        "\
+* even a static control source needs its exact branch-current spectrum
+iin 0 out dc 0
+vctrl ctrl 0 dc 0
+w1 out 0 vctrl csw
+.model csw iswitch (ron=1 roff=1meg ion=1 ioff=0)
+r1 out 0 1k
+.end
+",
+    )
+    .expect("current-switch rejection fixture parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_hb(&netlist, HbConfig::new(F0).with_harmonics(1))
+        .expect_err("exact HB must not replace control current with a Norton voltage surrogate");
+    let message = error.to_string();
+    assert!(
+        message
+            .contains("current-controlled switches requiring exact control-branch current spectra"),
+        "rejection must identify the missing exact current spectrum: {message}"
+    );
 }
 
 #[test]
