@@ -58,12 +58,13 @@ enum NativeValueEntry {
 
 #[cfg(test)]
 mod runtime_checkpoint_codec_tests {
-    use super::{RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint};
-    use crate::vm::VmAcceptedCheckpoint;
+    use super::{
+        CheckpointWordEncoder, RUNTIME_CHECKPOINT_STATE_VERSION, VerilogADeviceCheckpoint,
+    };
+    use crate::vm::{SlewCheckpoint, VmAcceptedCheckpoint};
 
-    #[test]
-    fn accepted_runtime_word_payload_round_trips_ieee_bits_and_rejects_trailing_data() {
-        let checkpoint = VerilogADeviceCheckpoint {
+    fn checkpoint_with_slew_entries() -> VerilogADeviceCheckpoint {
+        VerilogADeviceCheckpoint {
             instance_name: "x1".into(),
             model_name: "model".into(),
             source_digest: "0123456789abcdef".repeat(4).into(),
@@ -78,14 +79,54 @@ mod runtime_checkpoint_codec_tests {
                 state_initialized: vec![true],
                 delay_buffers: Vec::new(),
                 transition_filters: Vec::new(),
-                slew_filters: Vec::new(),
+                slew_filters: vec![
+                    SlewCheckpoint {
+                        output: -0.0,
+                        prev_time: 1.25,
+                        initialized: false,
+                    },
+                    SlewCheckpoint {
+                        output: 3.5,
+                        prev_time: 2.5,
+                        initialized: true,
+                    },
+                ],
                 cross_detectors: Vec::new(),
                 laplace_filters: Vec::new(),
                 zi_filters: Vec::new(),
                 timer_event_bound: Some(f64::MIN_POSITIVE * 2.0),
             },
             prev_discontinuity: true,
-        };
+        }
+    }
+
+    fn minimal_legacy_v1_words() -> Vec<u64> {
+        let mut encoder = CheckpointWordEncoder::default();
+        encoder.word(1);
+        encoder.boolean(false);
+        encoder.float(4.0);
+        encoder.floats(&[]);
+        encoder.floats(&[]);
+        encoder.floats(&[]);
+        encoder.floats(&[]);
+        encoder.booleans(&[]);
+        encoder.word(0); // delay buffers
+        encoder.word(0); // transition filters
+        encoder.word(2); // legacy slew filters: output + previous time only
+        encoder.float(-0.0);
+        encoder.float(1.25);
+        encoder.float(3.5);
+        encoder.float(2.5);
+        encoder.word(0); // cross detectors
+        encoder.word(0); // Laplace filters
+        encoder.word(0); // Zi filters
+        encoder.optional_float(None);
+        encoder.words
+    }
+
+    #[test]
+    fn accepted_runtime_word_payload_round_trips_ieee_bits_and_rejects_trailing_data() {
+        let checkpoint = checkpoint_with_slew_entries();
         let words = checkpoint.to_words();
         let decoded = VerilogADeviceCheckpoint::from_words(
             checkpoint.instance_name.clone(),
@@ -96,6 +137,8 @@ mod runtime_checkpoint_codec_tests {
         )
         .expect("canonical accepted payload decodes");
         assert_eq!(decoded, checkpoint);
+        assert!(!decoded.accepted.slew_filters[0].initialized);
+        assert!(decoded.accepted.slew_filters[1].initialized);
 
         let mut trailing = words;
         trailing.push(0);
@@ -109,6 +152,85 @@ mod runtime_checkpoint_codec_tests {
             )
             .expect_err("trailing words must fail closed")
             .contains("trailing words")
+        );
+    }
+
+    #[test]
+    fn current_runtime_word_payload_rejects_malformed_slew_boolean_and_truncation() {
+        let checkpoint = checkpoint_with_slew_entries();
+        let words = checkpoint.to_words();
+
+        let first_slew_initialized = words
+            .windows(4)
+            .position(|window| {
+                window
+                    == [
+                        2,
+                        (-0.0_f64).to_bits(),
+                        1.25_f64.to_bits(),
+                        u64::from(false),
+                    ]
+            })
+            .expect("first slew entry has a unique serialized prefix")
+            + 3;
+        let mut malformed = words.clone();
+        malformed[first_slew_initialized] = 2;
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name.clone(),
+                checkpoint.model_name.clone(),
+                checkpoint.source_digest.clone(),
+                checkpoint.shape_identity.clone(),
+                &malformed,
+            )
+            .expect_err("non-boolean slew initialization tag must fail closed")
+            .contains("slew 0 initialized boolean tag 2 is invalid")
+        );
+
+        let slew_count = first_slew_initialized - 3;
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                checkpoint.instance_name,
+                checkpoint.model_name,
+                checkpoint.source_digest,
+                checkpoint.shape_identity,
+                &words[..slew_count + 3],
+            )
+            .expect_err("truncated three-word slew entry must fail closed")
+            .contains("slew filters declares 2 entries")
+        );
+    }
+
+    #[test]
+    fn legacy_v1_payload_is_fully_validated_without_migrating_slew_initialization() {
+        let words = minimal_legacy_v1_words();
+        VerilogADeviceCheckpoint::validate_legacy_v1_words(&words)
+            .expect("complete two-word legacy slew entries validate");
+
+        assert!(
+            VerilogADeviceCheckpoint::from_words(
+                "x1".into(),
+                "model".into(),
+                "source".into(),
+                "shape".into(),
+                &words,
+            )
+            .expect_err("the current decoder must not migrate legacy state")
+            .contains("unsupported runtime Verilog-A state version 1")
+        );
+
+        let mut malformed_boolean = words.clone();
+        malformed_boolean[1] = 2;
+        assert!(
+            VerilogADeviceCheckpoint::validate_legacy_v1_words(&malformed_boolean)
+                .expect_err("legacy boolean tags remain strict")
+                .contains("previous discontinuity boolean tag 2 is invalid")
+        );
+
+        assert!(
+            VerilogADeviceCheckpoint::validate_legacy_v1_words(&words[..12])
+                .expect_err("truncated two-word legacy slew entry must fail closed")
+                .contains("slew filters declares 2 entries")
         );
     }
 }
@@ -518,7 +640,7 @@ pub struct VerilogADevice {
     prev_discontinuity: bool,
 }
 
-pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 1;
+pub const RUNTIME_CHECKPOINT_STATE_VERSION: u32 = 2;
 
 /// Versioned accepted runtime state for one compiled Verilog-A instance.
 /// Compiled programs, topology, and solver caches are intentionally absent.
@@ -567,6 +689,7 @@ impl VerilogADeviceCheckpoint {
         for state in &self.accepted.slew_filters {
             encoder.float(state.output);
             encoder.float(state.prev_time);
+            encoder.boolean(state.initialized);
         }
         encoder.word(self.accepted.cross_detectors.len() as u64);
         for state in &self.accepted.cross_detectors {
@@ -660,12 +783,13 @@ impl VerilogADeviceCheckpoint {
             });
         }
 
-        let slew_count = decoder.length("slew filters", 2)?;
+        let slew_count = decoder.length("slew filters", 3)?;
         let mut slew_filters = Vec::with_capacity(slew_count);
         for index in 0..slew_count {
             slew_filters.push(SlewCheckpoint {
                 output: decoder.float(&format!("slew {index} output"))?,
                 prev_time: decoder.float(&format!("slew {index} previous time"))?,
+                initialized: decoder.boolean(&format!("slew {index} initialized"))?,
             });
         }
 
@@ -742,6 +866,94 @@ impl VerilogADeviceCheckpoint {
             },
             prev_discontinuity,
         })
+    }
+
+    /// Validate and consume a complete legacy version-1 runtime payload.
+    ///
+    /// Version 1 serialized each slew checkpoint as only `(output,
+    /// previous_time)`. It carried no initialization bit, so this method
+    /// deliberately returns no checkpoint and performs no migration. Callers
+    /// may use successful validation only to distinguish a well-formed legacy
+    /// payload from corrupt data before reporting that it cannot be resumed by
+    /// the current runtime.
+    pub fn validate_legacy_v1_words(words: &[u64]) -> Result<(), String> {
+        let mut decoder = CheckpointWordDecoder::new(words);
+        let state_version = decoder.u32("state version")?;
+        if state_version != 1 {
+            return Err(format!(
+                "legacy runtime Verilog-A payload requires state version 1, got {state_version}"
+            ));
+        }
+        decoder.boolean("previous discontinuity")?;
+        decoder.float("accepted time")?;
+        decoder.floats("variables")?;
+        decoder.floats("previous state values")?;
+        decoder.floats("older state values")?;
+        decoder.floats("previous state derivatives")?;
+        decoder.booleans("state initialization flags")?;
+
+        let delay_count = decoder.length("delay buffers", 1)?;
+        for index in 0..delay_count {
+            let count = decoder.length(&format!("delay {index} samples"), 2)?;
+            for sample in 0..count {
+                decoder.float(&format!("delay {index} sample {sample} time"))?;
+                decoder.float(&format!("delay {index} sample {sample} value"))?;
+            }
+        }
+
+        let transition_count = decoder.length("transition filters", 5)?;
+        for index in 0..transition_count {
+            decoder.float(&format!("transition {index} output"))?;
+            decoder.float(&format!("transition {index} target"))?;
+            decoder.float(&format!("transition {index} start time"))?;
+            decoder.float(&format!("transition {index} end time"))?;
+            decoder.float(&format!("transition {index} start value"))?;
+        }
+
+        let slew_count = decoder.length("slew filters", 2)?;
+        for index in 0..slew_count {
+            decoder.float(&format!("slew {index} output"))?;
+            decoder.float(&format!("slew {index} previous time"))?;
+        }
+
+        let cross_count = decoder.length("cross detectors", 6)?;
+        for index in 0..cross_count {
+            decoder.float(&format!("cross {index} value"))?;
+            decoder.float(&format!("cross {index} time"))?;
+            match decoder.word(&format!("cross {index} side"))? {
+                0..=2 => {}
+                value => return Err(format!("cross {index} side tag {value} is invalid")),
+            }
+            decoder.float(&format!("cross {index} last event"))?;
+            decoder.float(&format!("cross {index} last crossing"))?;
+            decoder.boolean(&format!("cross {index} initialized"))?;
+        }
+
+        let laplace_count = decoder.length("Laplace filters", 1)?;
+        for index in 0..laplace_count {
+            decoder.floats(&format!("Laplace filter {index} state"))?;
+        }
+
+        let zi_count = decoder.length("Zi filters", 12)?;
+        for index in 0..zi_count {
+            decoder.boolean(&format!("Zi filter {index} frozen"))?;
+            decoder.floats(&format!("Zi filter {index} numerator"))?;
+            decoder.floats(&format!("Zi filter {index} denominator"))?;
+            decoder.float(&format!("Zi filter {index} period"))?;
+            decoder.float(&format!("Zi filter {index} first transition"))?;
+            decoder.floats(&format!("Zi filter {index} input history"))?;
+            decoder.floats(&format!("Zi filter {index} output history"))?;
+            decoder.float(&format!("Zi filter {index} held output"))?;
+            decoder.float(&format!("Zi filter {index} ramp start time"))?;
+            decoder.float(&format!("Zi filter {index} ramp end time"))?;
+            decoder.float(&format!("Zi filter {index} ramp start value"))?;
+            decoder.word(&format!("Zi filter {index} sample index"))?;
+            decoder.optional_float(&format!("Zi filter {index} accepted time"))?;
+            decoder.boolean(&format!("Zi filter {index} active"))?;
+            decoder.boolean(&format!("Zi filter {index} seen"))?;
+        }
+        decoder.optional_float("timer event bound")?;
+        decoder.finish()
     }
 
     pub fn retained_value_count(&self) -> usize {
@@ -1188,7 +1400,9 @@ impl VerilogADevice {
                     Instruction::TransitionState(idx) => {
                         update_max(&mut max_transition_filter, *idx)
                     }
-                    Instruction::SlewState(idx) => update_max(&mut max_slew_filter, *idx),
+                    Instruction::SlewState(idx) | Instruction::SlewStateDerivative(idx) => {
+                        update_max(&mut max_slew_filter, *idx)
+                    }
                     Instruction::CrossState(idx)
                     | Instruction::AboveState(idx)
                     | Instruction::LastCrossingState(idx) => {

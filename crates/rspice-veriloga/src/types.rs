@@ -484,6 +484,7 @@ impl FunctionRegistry {
             FunctionSignature::analog_operator("idtmod", 4),
         );
         functions.insert("ddx".into(), FunctionSignature::analog_operator("ddx", 2));
+        functions.insert("slew".into(), FunctionSignature::analog_operator("slew", 3));
         functions.insert(
             "laplace_zp".into(),
             FunctionSignature::analog_operator("laplace_zp", 3),
@@ -571,5 +572,32 @@ impl FunctionRegistry {
 impl Default for FunctionRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FunctionRegistry;
+
+    #[test]
+    fn slew_signature_accepts_exactly_one_to_three_arguments() {
+        let registry = FunctionRegistry::new();
+        let signature = registry.get("slew").expect("slew is registered");
+
+        assert!(signature.is_analog_operator);
+        assert_eq!(signature.min_args(), 1);
+        assert_eq!(signature.max_args(), 3);
+        for arity in 1..=3 {
+            assert!(
+                (signature.min_args()..=signature.max_args()).contains(&arity),
+                "slew arity {arity} must be accepted"
+            );
+        }
+        for arity in [0, 4] {
+            assert!(
+                !(signature.min_args()..=signature.max_args()).contains(&arity),
+                "slew arity {arity} must be rejected"
+            );
+        }
     }
 }

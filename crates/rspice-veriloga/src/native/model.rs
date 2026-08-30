@@ -144,7 +144,9 @@ impl NativeRequiredStorage {
                     Instruction::TransitionState(index) => {
                         update_max(&mut max_transition_filter, *index);
                     }
-                    Instruction::SlewState(index) => update_max(&mut max_slew_filter, *index),
+                    Instruction::SlewState(index) | Instruction::SlewStateDerivative(index) => {
+                        update_max(&mut max_slew_filter, *index)
+                    }
                     Instruction::AbsDelayState(index) => update_max(&mut max_delay_buffer, *index),
                     Instruction::CrossState(index)
                     | Instruction::AboveState(index)

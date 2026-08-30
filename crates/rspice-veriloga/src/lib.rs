@@ -98,13 +98,6 @@ pub mod semantic;
 pub mod source;
 pub mod specialist;
 pub mod stdlib;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "slew normalization is wired into lowering and runtimes in the following tranche"
-    )
-)]
 mod timing_contract;
 pub mod types;
 pub mod virtual_source;

@@ -887,7 +887,7 @@ pub enum AnalogOperator {
         tolerance: Option<Box<Expression>>,
         span: Span,
     },
-    /// Slew rate limiter: slew(expr, max_rise, max_fall)
+    /// Slew rate limiter: slew(expr, max_pos_rate, max_neg_rate)
     Slew {
         expr: Box<Expression>,
         max_rise: Option<Box<Expression>>,

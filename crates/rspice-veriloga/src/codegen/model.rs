@@ -27,6 +27,9 @@ pub struct CodeGenerator {
     pub(super) transition_filter_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `slew`.
     pub(super) slew_filter_count: std::cell::Cell<usize>,
+    /// Stable logical slew site to transactional filter slot.
+    pub(super) slew_sites:
+        std::cell::RefCell<std::collections::HashMap<crate::ir::SlewSiteId, usize>>,
     /// Stateful slot allocator for `cross`.
     pub(super) cross_detector_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `timer`.
@@ -739,4 +742,10 @@ pub enum Instruction {
     /// Appended to preserve the serialized discriminants of all preceding
     /// bytecode instructions.
     LaplaceStateDerivative(usize),
+    /// Read-only exact Jacobian action of one `slew` candidate.
+    /// Stack: `[input, d_input, pos_rate, d_pos_rate, neg_rate, d_neg_rate]`
+    /// -> `[d_output]`.
+    ///
+    /// Appended to preserve every preceding serialized discriminant.
+    SlewStateDerivative(usize),
 }

@@ -90,8 +90,12 @@ use super::{
 /// proposal fails closed instead of reconstructing missing runtime state; only
 /// an authenticated normalized-restart phase may resume. Version 22 expands
 /// generated Verilog-A `idt` history to the generalized BE/Trap/Gear contract.
-const FORMAT_VERSION: u32 = 22;
+/// Version 23 adds explicit initialization state to runtime Verilog-A `slew`
+/// history so direct-transient startup is unambiguous and restart-exact.
+const FORMAT_VERSION: u32 = 23;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
+#[cfg(feature = "veriloga")]
+const RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION: u32 = 23;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
@@ -2779,13 +2783,15 @@ fn read_generated_veriloga_states(
 #[cfg(feature = "veriloga")]
 fn read_runtime_veriloga_states(
     lines: &mut CheckpointLines<'_>,
+    checkpoint_version: u32,
     budget: &mut CheckpointParseBudget,
-) -> Result<Vec<VerilogADeviceCheckpoint>, String> {
+) -> Result<(Vec<VerilogADeviceCheckpoint>, bool), String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
     let count = parse_count_header(header, "runtime_veriloga_states")?;
     let mut states = allocate_checkpoint_rows(lines, count, "runtime_veriloga_states", budget)?;
+    let legacy_v1 = checkpoint_version < RUNTIME_VERILOGA_SLEW_INITIALIZATION_FORMAT_VERSION;
     for row in 0..count {
         let line = lines
             .next()
@@ -2849,6 +2855,26 @@ fn read_runtime_veriloga_states(
             copy_checkpoint_string(source, "runtime Verilog-A source digest", budget)?
         };
         let shape = copy_checkpoint_string(shape, "runtime Verilog-A shape identity", budget)?;
+        if shape.len() != 64
+            || !shape
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(format!(
+                "runtime state row {row} has invalid shape identity"
+            ));
+        }
+        if legacy_v1 {
+            if state_version != 1 {
+                return Err(format!(
+                    "runtime state row {row} in checkpoint format {checkpoint_version} uses state version {state_version}, expected legacy version 1"
+                ));
+            }
+            VerilogADeviceCheckpoint::validate_legacy_v1_words(&words).map_err(|error| {
+                format!("runtime state row {row} legacy payload is invalid: {error}")
+            })?;
+            continue;
+        }
         let state = VerilogADeviceCheckpoint::from_words(
             instance.into(),
             model.into(),
@@ -2864,7 +2890,10 @@ fn read_runtime_veriloga_states(
         }
         states.push(state);
     }
-    Ok(states)
+    // Runtime state v1 did not record whether a slew slot was initialized.
+    // Its rows remain fully parseable for diagnostics, but cannot be promoted
+    // into an exact accepted-state representation under the v2 contract.
+    Ok((states, legacy_v1 && count != 0))
 }
 
 fn capture_runtime_blockers(
@@ -5097,7 +5126,7 @@ impl TransientCheckpoint {
     }
 
     /// Validate this checkpoint against a netlist before resuming.
-    pub fn validate_for(&self, netlist: &Netlist) -> Result<(), String> {
+    pub(crate) fn validate_for(&self, netlist: &Netlist) -> Result<(), String> {
         self.validate_numeric_state()?;
         let target_identity = netlist_checkpoint_identity(netlist)
             .expect("semantic netlist identity is available for every elaborated AST");
@@ -5132,7 +5161,7 @@ impl TransientCheckpoint {
     /// the legacy source-text fingerprint. All physical netlist semantics,
     /// output contracts, external dependencies, and trajectory-affecting
     /// transient controls remain identity-bound.
-    pub fn validate_for_restart(&self, netlist: &Netlist) -> Result<(), String> {
+    pub(crate) fn validate_for_restart(&self, netlist: &Netlist) -> Result<(), String> {
         self.validate_numeric_state()?;
         let target_identity = restart_checkpoint_identity(netlist)
             .expect("restart identity is available for every elaborated AST");
@@ -6773,7 +6802,8 @@ impl TransientCheckpoint {
             } else {
                 (false, Vec::new())
             };
-        let runtime_veriloga_state_available = if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
+        let parsed_runtime_veriloga_state_available = if version >= RUNTIME_VERILOGA_FORMAT_VERSION
+        {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing 'runtime_veriloga_state_available' line".to_string())?;
@@ -6799,11 +6829,19 @@ impl TransientCheckpoint {
             false
         };
         #[cfg(feature = "veriloga")]
-        let runtime_veriloga_instance_states = if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
-            read_runtime_veriloga_states(&mut lines, budget)?
-        } else {
-            Vec::new()
-        };
+        let (runtime_veriloga_state_available, runtime_veriloga_instance_states) =
+            if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
+                let (states, discarded_legacy_v1_rows) =
+                    read_runtime_veriloga_states(&mut lines, version, budget)?;
+                (
+                    parsed_runtime_veriloga_state_available && !discarded_legacy_v1_rows,
+                    states,
+                )
+            } else {
+                (false, Vec::new())
+            };
+        #[cfg(not(feature = "veriloga"))]
+        let runtime_veriloga_state_available = parsed_runtime_veriloga_state_available;
         #[cfg(not(feature = "veriloga"))]
         if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
             let header = lines
@@ -7982,6 +8020,64 @@ mod tests {
         output
     }
 
+    #[cfg(feature = "veriloga")]
+    fn runtime_veriloga_slew_words(
+        state_version: u32,
+        accepted_time: Value,
+        initialized: Option<bool>,
+    ) -> Vec<u64> {
+        let mut words = vec![
+            u64::from(state_version),
+            0, // previous discontinuity
+            accepted_time.to_bits(),
+            0, // variables
+            0, // previous state values
+            0, // older state values
+            0, // previous state derivatives
+            0, // state initialization flags
+            0, // delay buffers
+            0, // transition filters
+            1, // slew filters
+            (-0.0_f64).to_bits(),
+            accepted_time.to_bits(),
+        ];
+        if let Some(initialized) = initialized {
+            words.push(u64::from(initialized));
+        }
+        words.extend([
+            0, // cross detectors
+            0, // Laplace filters
+            0, // Zi filters
+            0, // optional timer-event bound
+        ]);
+        words
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn replace_empty_runtime_veriloga_tail(
+        text: String,
+        state_version: u32,
+        words: &[u64],
+    ) -> String {
+        let original = "runtime_veriloga_state_available 1\nruntime_veriloga_states 0\n";
+        assert_eq!(
+            text.matches(original).count(),
+            1,
+            "fixture must contain one empty runtime Verilog-A tail"
+        );
+        let mut replacement = format!(
+            "runtime_veriloga_state_available 1\nruntime_veriloga_states 1\n\
+             runtime_veriloga_state xlegacy legacy_model - {} {state_version}\n\
+             runtime_veriloga_words {}\n",
+            "0123456789abcdef".repeat(4),
+            words.len()
+        );
+        for word in words {
+            replacement.push_str(&format!("{word:016x}\n"));
+        }
+        text.replacen(original, &replacement, 1)
+    }
+
     #[test]
     fn authenticated_synthetic_origin_max_step_binding_is_exact_and_fails_closed() {
         let mut synthetic = sample();
@@ -9140,6 +9236,59 @@ mod tests {
             legacy.accepted_integration_runtime,
             AcceptedIntegrationRuntime::UnavailableLegacy
         ));
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn v22_legacy_runtime_veriloga_rows_are_validated_then_discarded() {
+        let checkpoint = sample();
+        let words = runtime_veriloga_slew_words(1, checkpoint.time, None);
+        let fixture = replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 22), 1, &words);
+
+        let restored = TransientCheckpoint::from_text(&fixture)
+            .expect("format-22 runtime Verilog-A v1 payload remains parseable");
+        assert!(
+            !restored.runtime_veriloga_state_available,
+            "v1 slew history has no initialization bit and cannot be exact resume state"
+        );
+        assert!(
+            restored.runtime_veriloga_instance_states.is_empty(),
+            "validated legacy rows must not be exposed as current accepted state"
+        );
+
+        let mut malformed_words = words;
+        malformed_words[1] = 2;
+        let malformed =
+            replace_empty_runtime_veriloga_tail(legacy_text(&checkpoint, 22), 1, &malformed_words);
+        let error = TransientCheckpoint::from_text(&malformed)
+            .expect_err("legacy runtime payload tags must still be fully validated");
+        assert!(
+            error.contains("legacy payload is invalid") && error.contains("boolean tag"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn v23_runtime_veriloga_slew_initialization_round_trips_exactly() {
+        let checkpoint = sample();
+        for initialized in [false, true] {
+            let state_version = rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION;
+            let words =
+                runtime_veriloga_slew_words(state_version, checkpoint.time, Some(initialized));
+            let fixture =
+                replace_empty_runtime_veriloga_tail(checkpoint.to_text(), state_version, &words);
+
+            let restored = TransientCheckpoint::from_text(&fixture)
+                .unwrap_or_else(|error| panic!("v23 initialized={initialized} failed: {error}"));
+            assert!(restored.runtime_veriloga_state_available);
+            assert_eq!(restored.runtime_veriloga_instance_states.len(), 1);
+            assert_eq!(
+                restored.to_text(),
+                fixture,
+                "v23 initialized={initialized} must preserve every nested payload word"
+            );
+        }
     }
 
     #[test]

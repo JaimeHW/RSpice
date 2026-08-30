@@ -108,6 +108,7 @@ pub(crate) enum NativeOp {
     TimerState(usize),
     TransitionState(usize),
     SlewState(usize),
+    SlewStateDerivative(usize),
     AbsDelayState(usize),
     CrossState(usize),
     AboveState(usize),
@@ -1203,7 +1204,9 @@ impl CanonicalStateOperator {
             }
             (Self::IdtMod, Instruction::IdtModState(slot)) => Some(*slot),
             (Self::Transition, Instruction::TransitionState(slot)) => Some(*slot),
-            (Self::Slew, Instruction::SlewState(slot)) => Some(*slot),
+            (Self::Slew, Instruction::SlewState(slot) | Instruction::SlewStateDerivative(slot)) => {
+                Some(*slot)
+            }
             (Self::Absdelay, Instruction::AbsDelayState(slot)) => Some(*slot),
             (
                 Self::Laplace,
@@ -1225,6 +1228,12 @@ impl CanonicalStateOperator {
 
     fn matches_call(self, name: &str, arg_count: usize) -> bool {
         let normalized = normalize_intrinsic_name(name);
+        // `slew(expr)` is specified to be an exact passthrough. It has no
+        // dynamic state and therefore must not consume (or try to correlate)
+        // a bytecode filter slot.
+        if matches!(self, Self::Slew) && normalized == "slew" && arg_count == 1 {
+            return false;
+        }
         if normalized == "idtmod" {
             return match self {
                 Self::Idt => arg_count <= 2,
@@ -1256,7 +1265,12 @@ impl CanonicalStateOperator {
                 },
             ) => true,
             (Self::Transition, HirAnalogOperator::Transition { .. }) => true,
-            (Self::Slew, HirAnalogOperator::Slew { .. }) => true,
+            (
+                Self::Slew,
+                HirAnalogOperator::Slew {
+                    max_rise: Some(_), ..
+                },
+            ) => true,
             (Self::Absdelay, HirAnalogOperator::Absdelay { .. }) => true,
             (Self::Cross, HirAnalogOperator::LastCrossing { .. }) => true,
             _ => false,
@@ -2153,6 +2167,17 @@ impl NativeProgram {
                     )?;
                     depth -= 2;
                     ops.push(NativeOp::SlewState(*filter_id));
+                }
+                Instruction::SlewStateDerivative(filter_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        6,
+                    )?;
+                    depth -= 5;
+                    ops.push(NativeOp::SlewStateDerivative(*filter_id));
                 }
                 Instruction::AbsDelayState(buffer_id) => {
                     require_stack(
@@ -3314,7 +3339,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::ArrayAccess { array, index } => {
                 self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
-            HirExprKind::AnalogOperator { op } => self.lower_analog_operator_derivative(op, wrt),
+            HirExprKind::AnalogOperator { op } => {
+                self.lower_analog_operator_derivative(expression.id, op, wrt)
+            }
             HirExprKind::Laplace { expr, kind } => self.lower_laplace_derivative(*expr, kind, wrt),
             HirExprKind::Zi {
                 expr,
@@ -3396,7 +3423,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.lower_array_access_second_derivative(array.as_str(), *index, first, second)
             }
             HirExprKind::AnalogOperator { op } => {
-                self.lower_analog_operator_second_derivative(op, first, second)
+                self.lower_analog_operator_second_derivative(expression.id, op, first, second)
             }
             HirExprKind::Laplace { expr, kind } => {
                 let gain = self.laplace_kind_dc_gain(kind)?;
@@ -3816,6 +3843,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "temperature" | "vt" | "thermal_vt" | "abstime" | "realtime" | "mfactor"
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
             | "flicker_noise" | "noise_table" | "noise_table_log" => Ok(true),
+            "slew" if (1..=3).contains(&args.len()) => {
+                for argument in args {
+                    if !self.expr_derivative_is_zero(*argument, wrt)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
             "abs"
             | "fabs"
             | "sqrt"
@@ -3843,7 +3878,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "ddt"
             | "idt"
             | "transition"
-            | "slew"
             | "absdelay"
                 if !args.is_empty() =>
             {
@@ -3879,6 +3913,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "simparam" | "param_given" | "port_connected" | "analysis" | "white_noise"
             | "flicker_noise" | "noise_table" | "noise_table_log" | "floor" | "ceil" | "abs"
             | "fabs" => Ok(true),
+            "slew" if (1..=3).contains(&args.len()) => {
+                for argument in args {
+                    if !self.expr_second_derivative_is_zero(*argument, first, second)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
             "sqrt"
             | "exp"
             | "ln"
@@ -3902,7 +3944,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             | "ddt"
             | "idt"
             | "transition"
-            | "slew"
             | "absdelay"
                 if !args.is_empty() =>
             {
@@ -3956,13 +3997,32 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "named limiter implicit {} derivative escaped its limiter body",
                 limiter_argument_name(*argument)
             ))),
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => {
+                let input_is_zero = self.expr_derivative_is_zero(*expr, wrt)?;
+                let rise_is_zero = match max_rise {
+                    Some(rate) => self.expr_derivative_is_zero(*rate, wrt)?,
+                    None => true,
+                };
+                let fall_is_zero = match max_fall {
+                    Some(rate) => self.expr_derivative_is_zero(*rate, wrt)?,
+                    // An omitted negative rate inherits the authored positive
+                    // rate, including its derivative.
+                    None => rise_is_zero,
+                };
+                Ok(input_is_zero && rise_is_zero && fall_is_zero)
+            }
             HirAnalogOperator::Ddt { expr, .. }
             | HirAnalogOperator::Idt { expr, .. }
             | HirAnalogOperator::IdtMod { expr, .. }
             | HirAnalogOperator::Limexp { expr }
             | HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. }
-            | HirAnalogOperator::Slew { expr, .. } => self.expr_derivative_is_zero(*expr, wrt),
+            | HirAnalogOperator::Transition { expr, .. } => {
+                self.expr_derivative_is_zero(*expr, wrt)
+            }
             HirAnalogOperator::Ddx { .. } | HirAnalogOperator::LastCrossing { .. } => Ok(false),
         }
     }
@@ -3987,12 +4047,27 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "named limiter implicit {} second derivative escaped its limiter body",
                 limiter_argument_name(*argument)
             ))),
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => {
+                let input_is_zero = self.expr_second_derivative_is_zero(*expr, first, second)?;
+                let rise_is_zero = match max_rise {
+                    Some(rate) => self.expr_second_derivative_is_zero(*rate, first, second)?,
+                    None => true,
+                };
+                let fall_is_zero = match max_fall {
+                    Some(rate) => self.expr_second_derivative_is_zero(*rate, first, second)?,
+                    None => rise_is_zero,
+                };
+                Ok(input_is_zero && rise_is_zero && fall_is_zero)
+            }
             HirAnalogOperator::Ddt { expr, .. }
             | HirAnalogOperator::Idt { expr, .. }
             | HirAnalogOperator::IdtMod { expr, .. }
             | HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. }
-            | HirAnalogOperator::Slew { expr, .. } => {
+            | HirAnalogOperator::Transition { expr, .. } => {
                 self.expr_second_derivative_is_zero(*expr, first, second)
             }
             HirAnalogOperator::Limexp { expr } => Ok(self
@@ -4777,9 +4852,21 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             }
             "ddt" => self.lower_ddt_derivative(name, args, wrt),
             "idt" | "idtmod" => self.lower_idt_derivative(name, args, wrt),
-            "transition" | "slew" | "absdelay" => {
-                self.lower_state_passthrough_derivative(name, args, wrt)
+            "slew" => {
+                let (expr, max_rise, max_fall) = match args {
+                    [expr] => (*expr, None, None),
+                    [expr, max_rise] => (*expr, Some(*max_rise), None),
+                    [expr, max_rise, max_fall] => (*expr, Some(*max_rise), Some(*max_fall)),
+                    _ => {
+                        return Err(self.unsupported(format!(
+                            "analog operator slew expects one to three operands, found {}",
+                            args.len()
+                        )));
+                    }
+                };
+                self.lower_slew_derivative_operator(expr_id, expr, max_rise, max_fall, wrt)
             }
+            "transition" | "absdelay" => self.lower_state_passthrough_derivative(name, args, wrt),
             "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd" => {
                 self.lower_laplace_call_derivative(normalized.as_str(), name, args, wrt)
             }
@@ -4941,7 +5028,23 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "ddt" | "idt" | "idtmod" => Err(self.unsupported(format!(
                 "second derivative of stateful intrinsic at expression {expr_id}"
             ))),
-            "transition" | "slew" | "absdelay" => {
+            "slew" => {
+                let (expr, max_rise, max_fall) = match args {
+                    [expr] => (*expr, None, None),
+                    [expr, max_rise] => (*expr, Some(*max_rise), None),
+                    [expr, max_rise, max_fall] => (*expr, Some(*max_rise), Some(*max_fall)),
+                    _ => {
+                        return Err(self.unsupported(format!(
+                            "analog operator slew expects one to three operands, found {}",
+                            args.len()
+                        )));
+                    }
+                };
+                self.lower_slew_second_derivative_operator(
+                    expr_id, expr, max_rise, max_fall, first, second,
+                )
+            }
+            "transition" | "absdelay" => {
                 let max_args = if normalized == "transition" { 5 } else { 3 };
                 self.require_intrinsic_arity_range(name, args, 1, max_args)?;
                 self.lower_second_derivative(args[0], first, second)
@@ -5884,6 +5987,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_analog_operator_derivative(
         &mut self,
+        expr_id: ExprId,
         op: &HirAnalogOperator,
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
@@ -5912,8 +6016,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.append_unary(NativeOp::IdtJacobian)
             }
             HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. }
-            | HirAnalogOperator::Slew { expr, .. } => self.lower_derivative(*expr, wrt),
+            | HirAnalogOperator::Transition { expr, .. } => self.lower_derivative(*expr, wrt),
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => self.lower_slew_derivative_operator(expr_id, *expr, *max_rise, *max_fall, wrt),
             HirAnalogOperator::Ddx { expr, probe } => {
                 self.lower_ddx_projection_derivative(*expr, *probe, wrt)
             }
@@ -5923,6 +6031,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
 
     fn lower_analog_operator_second_derivative(
         &mut self,
+        expr_id: ExprId,
         op: &HirAnalogOperator,
         first: CanonicalDerivativeAxis,
         second: CanonicalDerivativeAxis,
@@ -5957,10 +6066,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 },
             ),
             HirAnalogOperator::Absdelay { expr, .. }
-            | HirAnalogOperator::Transition { expr, .. }
-            | HirAnalogOperator::Slew { expr, .. } => {
+            | HirAnalogOperator::Transition { expr, .. } => {
                 self.lower_second_derivative(*expr, first, second)
             }
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+            } => self.lower_slew_second_derivative_operator(
+                expr_id, *expr, *max_rise, *max_fall, first, second,
+            ),
             HirAnalogOperator::LastCrossing { .. } => self.push(NativeOp::Const(0.0)),
             HirAnalogOperator::Ddx { expr, probe } => {
                 self.lower_ddx_projection_second_derivative(*expr, *probe, first, second)
@@ -6732,21 +6847,24 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         max_rise: Option<ExprId>,
         max_fall: Option<ExprId>,
     ) -> JitResult<()> {
+        if max_rise.is_none() && max_fall.is_none() {
+            return self.lower(expr);
+        }
         let Some(slot) = self.limits.canonical_slew_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator slew expression {expr_id} filter slot"
             )));
         };
         self.lower(expr)?;
-        if let Some(max_rise) = max_rise {
-            self.lower(max_rise)?;
-        } else {
-            self.push(NativeOp::Const(f64::INFINITY))?;
-        }
+        let max_rise = max_rise.ok_or_else(|| {
+            self.unsupported("slew negative rate cannot be authored without a positive rate")
+        })?;
+        self.lower(max_rise)?;
         if let Some(max_fall) = max_fall {
             self.lower(max_fall)?;
         } else {
-            self.push(NativeOp::Const(f64::INFINITY))?;
+            self.lower(max_rise)?;
+            self.append_unary(NativeOp::Neg)?;
         }
         require_stack(
             self.model.clone(),
@@ -6757,6 +6875,100 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         )?;
         self.depth -= 2;
         self.ops.push(NativeOp::SlewState(slot));
+        Ok(())
+    }
+
+    fn lower_slew_derivative_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        max_rise: Option<ExprId>,
+        max_fall: Option<ExprId>,
+        wrt: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if max_rise.is_none() && max_fall.is_none() {
+            return self.lower_derivative(expr, wrt);
+        }
+        let Some(slot) = self.limits.canonical_slew_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator slew expression {expr_id} derivative filter slot"
+            )));
+        };
+        let max_rise = max_rise.ok_or_else(|| {
+            self.unsupported("slew negative rate cannot be authored without a positive rate")
+        })?;
+        self.lower(expr)?;
+        self.lower_derivative(expr, wrt)?;
+        self.lower(max_rise)?;
+        self.lower_derivative(max_rise, wrt)?;
+        if let Some(max_fall) = max_fall {
+            self.lower(max_fall)?;
+            self.lower_derivative(max_fall, wrt)?;
+        } else {
+            self.lower(max_rise)?;
+            self.append_unary(NativeOp::Neg)?;
+            self.lower_derivative(max_rise, wrt)?;
+            self.append_unary(NativeOp::Neg)?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical slew derivative",
+            self.depth,
+            6,
+        )?;
+        self.depth -= 5;
+        self.ops.push(NativeOp::SlewStateDerivative(slot));
+        Ok(())
+    }
+
+    fn lower_slew_second_derivative_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        max_rise: Option<ExprId>,
+        max_fall: Option<ExprId>,
+        first: CanonicalDerivativeAxis,
+        second: CanonicalDerivativeAxis,
+    ) -> JitResult<()> {
+        if max_rise.is_none() && max_fall.is_none() {
+            return self.lower_second_derivative(expr, first, second);
+        }
+        let Some(slot) = self.limits.canonical_slew_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator slew expression {expr_id} second-derivative filter slot"
+            )));
+        };
+        let max_rise = max_rise.ok_or_else(|| {
+            self.unsupported("slew negative rate cannot be authored without a positive rate")
+        })?;
+
+        // SlewStateDerivative is a branch oracle as well as a first-order
+        // action. Supplying second derivatives as its payload evaluates the
+        // exact fixed-branch second derivative without depending on a primal
+        // helper having executed earlier in this pass.
+        self.lower(expr)?;
+        self.lower_second_derivative(expr, first, second)?;
+        self.lower(max_rise)?;
+        self.lower_second_derivative(max_rise, first, second)?;
+        if let Some(max_fall) = max_fall {
+            self.lower(max_fall)?;
+            self.lower_second_derivative(max_fall, first, second)?;
+        } else {
+            self.lower(max_rise)?;
+            self.append_unary(NativeOp::Neg)?;
+            self.lower_second_derivative(max_rise, first, second)?;
+            self.append_unary(NativeOp::Neg)?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical slew second derivative",
+            self.depth,
+            6,
+        )?;
+        self.depth -= 5;
+        self.ops.push(NativeOp::SlewStateDerivative(slot));
         Ok(())
     }
 
@@ -8636,6 +8848,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::TimerState(_) => "TimerState",
         NativeOp::TransitionState(_) => "TransitionState",
         NativeOp::SlewState(_) => "SlewState",
+        NativeOp::SlewStateDerivative(_) => "SlewStateDerivative",
         NativeOp::AbsDelayState(_) => "AbsDelayState",
         NativeOp::CrossState(_) => "CrossState",
         NativeOp::AboveState(_) => "AboveState",
@@ -9608,6 +9821,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::AboveState(_)
         | NativeOp::IdtModState(_) => (4, 1),
         NativeOp::CrossState(_) => (5, 1),
+        NativeOp::SlewStateDerivative(_) => (6, 1),
     }
 }
 
@@ -9805,6 +10019,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::AbsDelayState(_) => "AbsDelayState",
         Instruction::TransitionState(_) => "TransitionState",
         Instruction::SlewState(_) => "SlewState",
+        Instruction::SlewStateDerivative(_) => "SlewStateDerivative",
         Instruction::CrossState(_) => "CrossState",
         Instruction::LastCrossingState(_) => "LastCrossingState",
         Instruction::WhiteNoise => "WhiteNoise",
@@ -10608,6 +10823,51 @@ endmodule
                 "{name} derivative should square the single helper result"
             );
         }
+    }
+
+    #[test]
+    fn lowers_canonical_slew_dynamic_rate_derivative_when_input_derivative_is_zero() {
+        let source = r#"
+module mir_slew_dynamic_rate(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ slew(
+      $abstime > 0.0 ? 10.0 : 0.0,
+      1.0 + 0.25 * V(p, n),
+      -(1.0 + 0.25 * V(p, n))
+  );
+endmodule
+"#;
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect("compile canonical slew IR");
+        let root = artifact.mir.equations[0].expression.id;
+        let slots = [(root, 0)];
+        let program = NativeProgram::from_mir_expression_derivative(
+            "mir_slew_dynamic_rate",
+            EntryKind::Jacobian,
+            &artifact.mir,
+            crate::canonical_ir::EquationId::new(0),
+            root,
+            CanonicalDerivativeAxis::Node(NodeId::from(0)),
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_canonical_slew_slots(&slots),
+        )
+        .expect("lower dynamic-rate slew derivative");
+
+        assert!(
+            matches!(program.ops().last(), Some(NativeOp::SlewStateDerivative(0))),
+            "root={:#?}; lowered ops: {:#?}",
+            artifact.mir.expressions[usize::from(root)].kind,
+            program.ops()
+        );
+        assert!(
+            program
+                .ops()
+                .iter()
+                .any(|op| matches!(op, NativeOp::Const(value) if *value == 0.25)),
+            "dynamic positive-rate derivative must remain in {:#?}",
+            program.ops()
+        );
     }
 
     #[test]
@@ -14643,6 +14903,35 @@ endmodule
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 3);
+    }
+
+    #[test]
+    fn lowers_slew_derivative_as_independent_six_operand_branch_action() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(10.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(0.25),
+                Instruction::PushConst(-2.0),
+                Instruction::PushConst(-0.25),
+                Instruction::SlewStateDerivative(4),
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "slew-derivative-first",
+            EntryKind::Jacobian,
+            &program,
+            limits(0, 0),
+        )
+        .expect("slew derivative lowers without a preceding primal instruction");
+
+        assert!(matches!(
+            lowered.ops().last(),
+            Some(NativeOp::SlewStateDerivative(4))
+        ));
+        assert_eq!(lowered.max_stack_depth(), 6);
     }
 
     #[test]

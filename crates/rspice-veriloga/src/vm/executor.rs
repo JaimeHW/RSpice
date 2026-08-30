@@ -14,6 +14,7 @@ use super::{VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
+use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
 
 fn limited_exp(value: f64) -> f64 {
     const LIMIT: f64 = 80.0;
@@ -672,30 +673,77 @@ impl<'a> Vm<'a> {
                 let max_pos_slew = self.pop()?;
                 let input = self.pop()?;
                 let time = self.context.time;
-                let is_transient = self.context.analysis_type == 2;
 
-                let result = if !is_transient {
-                    input
-                } else {
-                    if self.context.slew_filters.len() <= *filter_id {
-                        self.context
-                            .slew_filters
-                            .resize_with(*filter_id + 1, Default::default);
+                let NormalizedSlewRates::Limited(rates) =
+                    normalize_slew_rates(Some(max_pos_slew), Some(max_neg_slew))
+                        .map_err(|error| VmError::InvalidNumericResult(format!("slew: {error}")))?
+                else {
+                    return Err(VmError::InvalidInstruction(
+                        "stateful slew instruction encoded passthrough rates",
+                    ));
+                };
+                if self.context.slew_filters.len() <= *filter_id {
+                    self.context
+                        .slew_filters
+                        .resize_with(*filter_id + 1, Default::default);
+                }
+                let analysis_type = self.context.analysis_type;
+                let filter = &mut self.context.slew_filters[*filter_id];
+                let result = match analysis_type {
+                    2 => filter.eval(input, time, rates),
+                    // DC and explicit initial-condition analysis establish
+                    // the seed promoted when transient integration starts.
+                    0 | 4 => filter.eval_operating_point(input, time),
+                    // AC/noise are read-only small-signal evaluations. They
+                    // must not publish an OP candidate or perturb checkpoint
+                    // readiness/later transient startup.
+                    1 | 3 => input,
+                    _ => {
+                        return Err(VmError::InvalidRuntimeConfiguration(format!(
+                            "slew received invalid analysis type {analysis_type}"
+                        )));
                     }
-                    let filter = &mut self.context.slew_filters[*filter_id];
-                    let max_pos = if max_pos_slew.is_finite() && max_pos_slew > 0.0 {
-                        max_pos_slew
-                    } else {
-                        f64::INFINITY
-                    };
-                    let max_neg = if max_neg_slew.is_finite() && max_neg_slew > 0.0 {
-                        max_neg_slew
-                    } else {
-                        f64::INFINITY
-                    };
-                    filter.eval(input, time, max_pos, max_neg)
                 };
 
+                self.stack.push(result);
+            }
+            Instruction::SlewStateDerivative(filter_id) => {
+                let max_neg_slew_derivative = self.pop()?;
+                let max_neg_slew = self.pop()?;
+                let max_pos_slew_derivative = self.pop()?;
+                let max_pos_slew = self.pop()?;
+                let input_derivative = self.pop()?;
+                let input = self.pop()?;
+                let NormalizedSlewRates::Limited(rates) =
+                    normalize_slew_rates(Some(max_pos_slew), Some(max_neg_slew)).map_err(
+                        |error| VmError::InvalidNumericResult(format!("slew derivative: {error}")),
+                    )?
+                else {
+                    return Err(VmError::InvalidInstruction(
+                        "stateful slew derivative encoded passthrough rates",
+                    ));
+                };
+                let filter = self
+                    .context
+                    .slew_filters
+                    .get(*filter_id)
+                    .ok_or(VmError::InvalidInstruction("missing slew filter"))?;
+                let result = match self.context.analysis_type {
+                    2 => filter.eval_derivative(
+                        input,
+                        input_derivative,
+                        max_pos_slew_derivative,
+                        max_neg_slew_derivative,
+                        self.context.time,
+                        rates,
+                    ),
+                    0 | 1 | 3 | 4 => input_derivative,
+                    analysis_type => {
+                        return Err(VmError::InvalidRuntimeConfiguration(format!(
+                            "slew derivative received invalid analysis type {analysis_type}"
+                        )));
+                    }
+                };
                 self.stack.push(result);
             }
 

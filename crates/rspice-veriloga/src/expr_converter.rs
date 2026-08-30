@@ -756,6 +756,7 @@ impl<'a> ExprConverter<'a> {
                     None
                 };
                 Ok(IrExpr::Slew {
+                    site: crate::ir::SlewSiteId::from_span(func.span),
                     expr: Box::new(expr),
                     max_pos_slew,
                     max_neg_slew,
@@ -1135,6 +1136,7 @@ impl<'a> ExprConverter<'a> {
                         .map(Box::new))
                 };
                 Ok(IrExpr::Slew {
+                    site: crate::ir::SlewSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     max_pos_slew: opt(1)?,
                     max_neg_slew: opt(2)?,
@@ -2068,17 +2070,31 @@ impl<'a> ExprConverter<'a> {
             // expression, which is a plausible wrong answer rather than a
             // refusal. No model source in models/veriloga/ uses any of them,
             // so refusing costs no catalog coverage.
-            AnalogOperator::Absdelay { .. }
-            | AnalogOperator::Transition { .. }
-            | AnalogOperator::Slew { .. } => {
+            AnalogOperator::Absdelay { .. } | AnalogOperator::Transition { .. } => {
                 Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                    "absdelay()/transition()/slew(): timing operators are not \
-                         lowered; their delay, smoothing and rate limits would be \
-                         silently ignored"
+                    "absdelay()/transition(): timing operators are not lowered; \
+                         their delay and smoothing would be silently ignored"
                         .into(),
                 ))
                 .into())
             }
+            AnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+                span,
+            } => Ok(IrExpr::Slew {
+                site: crate::ir::SlewSiteId::from_span(*span),
+                expr: Box::new(self.convert(expr)?),
+                max_pos_slew: max_rise
+                    .as_deref()
+                    .map(|value| self.convert(value).map(Box::new))
+                    .transpose()?,
+                max_neg_slew: max_fall
+                    .as_deref()
+                    .map(|value| self.convert(value).map(Box::new))
+                    .transpose()?,
+            }),
             AnalogOperator::LastCrossing { expr, edge, .. } => {
                 let direction = edge.map(|edge| match edge {
                     crate::ast::CrossDirection::Rising => 1,

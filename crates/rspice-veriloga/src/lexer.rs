@@ -131,7 +131,7 @@ pub enum TokenKind {
     Limexp,     // limexp(x)
     Absdelay,   // absdelay(x, delay)
     Transition, // transition(x, td, rise, fall)
-    Slew,       // slew(x, max_rise, max_fall)
+    Slew,       // slew(x, max_pos_rate, max_neg_rate)
     Laplace,    // Laplace transform operators
     Zi,         // z-transform operators
 

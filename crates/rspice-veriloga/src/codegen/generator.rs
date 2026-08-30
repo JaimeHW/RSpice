@@ -50,6 +50,7 @@ impl CodeGenerator {
             delay_buffer_count: std::cell::Cell::new(0),
             transition_filter_count: std::cell::Cell::new(0),
             slew_filter_count: std::cell::Cell::new(0),
+            slew_sites: std::cell::RefCell::new(HashMap::new()),
             cross_detector_count: std::cell::Cell::new(0),
             timer_state_count: std::cell::Cell::new(0),
             zi_filters: std::cell::RefCell::new(Vec::new()),
@@ -223,6 +224,7 @@ impl CodeGenerator {
         self.delay_buffer_count.set(0);
         self.transition_filter_count.set(0);
         self.slew_filter_count.set(0);
+        self.slew_sites.borrow_mut().clear();
         self.cross_detector_count.set(0);
         self.timer_state_count.set(0);
 
@@ -688,6 +690,15 @@ impl CodeGenerator {
         Ok(slot)
     }
 
+    fn slew_site_slot(&self, site: crate::ir::SlewSiteId) -> usize {
+        if let Some(slot) = self.slew_sites.borrow().get(&site).copied() {
+            return slot;
+        }
+        let slot = Self::allocate_slot(&self.slew_filter_count);
+        self.slew_sites.borrow_mut().insert(site, slot);
+        slot
+    }
+
     fn compile_zi_polynomial(
         &self,
         definition: &crate::ir::ZiPolynomialDefinition,
@@ -1119,30 +1130,75 @@ impl CodeGenerator {
                     .push(Instruction::TransitionState(filter_id));
             }
             IrExpr::Slew {
+                site,
                 expr,
                 max_pos_slew,
                 max_neg_slew,
             } => {
-                // slew(expr, max_pos_slew, max_neg_slew)
-                self.emit_expr(expr, emit_ctx, program)?;
-                // Emit max_pos_slew (default infinity = no limit)
-                if let Some(p) = max_pos_slew {
-                    self.emit_expr(p, emit_ctx, program)?;
-                } else {
-                    program
-                        .instructions
-                        .push(Instruction::PushConst(f64::INFINITY));
+                // With no authored rates the LRM defines an exact passthrough;
+                // do not allocate or touch state in that form.
+                if max_pos_slew.is_none() && max_neg_slew.is_none() {
+                    self.emit_expr(expr, emit_ctx, program)?;
+                    return Ok(());
                 }
-                // Emit max_neg_slew (default to max_pos_slew)
+                self.emit_expr(expr, emit_ctx, program)?;
+                let positive = max_pos_slew.as_ref().ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew negative rate cannot be authored without a positive rate".into(),
+                    ))
+                })?;
+                self.emit_expr(positive, emit_ctx, program)?;
                 if let Some(n) = max_neg_slew {
                     self.emit_expr(n, emit_ctx, program)?;
                 } else {
-                    program
-                        .instructions
-                        .push(Instruction::PushConst(f64::INFINITY));
+                    self.emit_expr(positive, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Neg);
                 }
-                let filter_id = Self::allocate_slot(&self.slew_filter_count);
+                let filter_id = self.slew_site_slot(*site);
                 program.instructions.push(Instruction::SlewState(filter_id));
+            }
+            IrExpr::SlewDerivative {
+                site,
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+            } => {
+                if max_pos_slew.is_none() && max_neg_slew.is_none() {
+                    self.emit_expr(input_derivative, emit_ctx, program)?;
+                    return Ok(());
+                }
+                let positive = max_pos_slew.as_ref().ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew negative rate cannot be authored without a positive rate".into(),
+                    ))
+                })?;
+                let positive_derivative = max_pos_slew_derivative.as_ref().ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "slew positive-rate derivative is missing".into(),
+                    ))
+                })?;
+                self.emit_expr(input, emit_ctx, program)?;
+                self.emit_expr(input_derivative, emit_ctx, program)?;
+                self.emit_expr(positive, emit_ctx, program)?;
+                self.emit_expr(positive_derivative, emit_ctx, program)?;
+                if let (Some(negative), Some(negative_derivative)) =
+                    (max_neg_slew, max_neg_slew_derivative)
+                {
+                    self.emit_expr(negative, emit_ctx, program)?;
+                    self.emit_expr(negative_derivative, emit_ctx, program)?;
+                } else {
+                    self.emit_expr(positive, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Neg);
+                    self.emit_expr(positive_derivative, emit_ctx, program)?;
+                    program.instructions.push(Instruction::Neg);
+                }
+                let filter_id = self.slew_site_slot(*site);
+                program
+                    .instructions
+                    .push(Instruction::SlewStateDerivative(filter_id));
             }
             IrExpr::Cross {
                 expr,
@@ -1611,5 +1667,143 @@ endmodule
                     Some(Instruction::LaplaceStateDerivative(0))
                 ))
         );
+    }
+}
+
+#[cfg(test)]
+mod slew_derivative_tests {
+    use super::*;
+    use crate::ast::BinaryOp;
+    use crate::ir::{DerivativeWrt, IrExpr, SlewSiteId, autodiff};
+
+    fn slew(site: SlewSiteId, derivative: bool) -> IrExpr {
+        if derivative {
+            IrExpr::SlewDerivative {
+                site,
+                input: Box::new(IrExpr::Voltage(0, usize::MAX)),
+                input_derivative: Box::new(IrExpr::Const(1.0)),
+                max_pos_slew: Some(Box::new(IrExpr::Const(2.0))),
+                max_pos_slew_derivative: Some(Box::new(IrExpr::Const(0.0))),
+                max_neg_slew: None,
+                max_neg_slew_derivative: None,
+            }
+        } else {
+            IrExpr::Slew {
+                site,
+                expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
+                max_pos_slew: Some(Box::new(IrExpr::Const(2.0))),
+                max_neg_slew: None,
+            }
+        }
+    }
+
+    #[test]
+    fn slew_derivative_and_primal_share_slot_when_derivative_compiles_first() {
+        let generator = CodeGenerator::new();
+        let emit_context = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: HashMap::new(),
+        };
+        let site = SlewSiteId::from_span(crate::source::Span::dummy());
+
+        let derivative = generator
+            .compile_expr(&slew(site, true), &emit_context)
+            .expect("compile derivative first");
+        let primal = generator
+            .compile_expr(&slew(site, false), &emit_context)
+            .expect("compile primal second");
+
+        assert!(matches!(
+            derivative.instructions.last(),
+            Some(Instruction::SlewStateDerivative(0))
+        ));
+        assert!(matches!(
+            primal.instructions.last(),
+            Some(Instruction::SlewState(0))
+        ));
+        assert_eq!(generator.slew_filter_count.get(), 1);
+        assert_eq!(
+            derivative
+                .instructions
+                .iter()
+                .filter(|instruction| matches!(instruction, Instruction::Neg))
+                .count(),
+            2,
+            "omitted negative rate and its derivative inherit the negated positive values"
+        );
+    }
+
+    #[test]
+    fn slew_without_rates_is_compiled_as_exact_passthrough_without_state() {
+        let generator = CodeGenerator::new();
+        let emit_context = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: HashMap::new(),
+        };
+        let program = generator
+            .compile_expr(
+                &IrExpr::Slew {
+                    site: SlewSiteId::from_span(crate::source::Span::dummy()),
+                    expr: Box::new(IrExpr::Const(3.0)),
+                    max_pos_slew: None,
+                    max_neg_slew: None,
+                },
+                &emit_context,
+            )
+            .expect("compile passthrough slew");
+
+        assert!(matches!(
+            program.instructions.as_slice(),
+            [Instruction::PushConst(3.0)]
+        ));
+        assert_eq!(generator.slew_filter_count.get(), 0);
+    }
+
+    #[test]
+    fn slew_higher_derivatives_preserve_dynamic_rate_dependence() {
+        let site = SlewSiteId::from_span(crate::source::Span::dummy());
+        let voltage = IrExpr::Voltage(0, usize::MAX);
+        let nonlinear_rate =
+            IrExpr::Binary(BinaryOp::Mul, Box::new(voltage.clone()), Box::new(voltage));
+        let primal = IrExpr::Slew {
+            site,
+            // Deliberately independent of the differentiation axis: the rate
+            // is the only source of the saturated-branch Jacobian.
+            expr: Box::new(IrExpr::Const(10.0)),
+            max_pos_slew: Some(Box::new(nonlinear_rate)),
+            max_neg_slew: None,
+        };
+        let first = autodiff::differentiate(&primal, &DerivativeWrt::Voltage(0));
+        let second = autodiff::differentiate(&first, &DerivativeWrt::Voltage(0));
+
+        let IrExpr::SlewDerivative {
+            input_derivative,
+            max_pos_slew_derivative,
+            ..
+        } = &first
+        else {
+            panic!("first slew derivative must retain a branch action");
+        };
+        assert!(matches!(input_derivative.as_ref(), IrExpr::Const(0.0)));
+        assert!(
+            !matches!(max_pos_slew_derivative.as_deref(), Some(IrExpr::Const(0.0))),
+            "dynamic rate derivative must not be optimized to zero"
+        );
+        assert!(matches!(second, IrExpr::SlewDerivative { .. }));
+
+        let generator = CodeGenerator::new();
+        let emit_context = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: HashMap::new(),
+        };
+        for derivative in [&first, &second] {
+            let program = generator
+                .compile_expr(derivative, &emit_context)
+                .expect("compile branch-exact slew derivative");
+            assert!(matches!(
+                program.instructions.last(),
+                Some(Instruction::SlewStateDerivative(0))
+            ));
+        }
     }
 }

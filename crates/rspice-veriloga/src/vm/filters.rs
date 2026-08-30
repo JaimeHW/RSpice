@@ -10,6 +10,8 @@
 //! the answer depend on iteration count. Each type therefore computes from the
 //! last accepted state and exposes a separate commit.
 
+use crate::timing_contract::SlewRateMagnitudes;
+
 /// A stateful operator's speculative primal result and its exact local
 /// coefficient with respect to the current input argument.
 ///
@@ -367,6 +369,12 @@ impl DelayBuffer {
 #[cfg(test)]
 mod tests {
     use super::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter, timer_event_evaluation};
+    use crate::timing_contract::SlewRateMagnitudes;
+
+    const TEST_SLEW_RATES: SlewRateMagnitudes = SlewRateMagnitudes {
+        rise: 0.5,
+        fall: 0.5,
+    };
 
     #[test]
     fn one_shot_timer_fires_once_and_requests_its_timepoint() {
@@ -501,30 +509,81 @@ mod tests {
     #[test]
     fn slew_candidate_reports_branch_exact_input_coefficient() {
         let mut slew = SlewFilter::default();
+        slew.eval_operating_point(0.0, 0.0);
+        slew.promote_operating_point_candidate();
         let accepted_before = slew.checkpoint();
 
-        let saturated = slew.eval_with_input_coefficient(1.0, 1.0, 0.5, 0.5);
+        let saturated = slew.eval_with_input_coefficient(1.0, 1.0, TEST_SLEW_RATES);
         assert_eq!(saturated.output, 0.5);
         assert_eq!(saturated.input_coefficient, 0.0);
         assert_eq!(slew.checkpoint(), accepted_before);
 
-        let unsaturated = slew.eval_with_input_coefficient(0.25, 1.0, 0.5, 0.5);
+        let unsaturated = slew.eval_with_input_coefficient(0.25, 1.0, TEST_SLEW_RATES);
         assert_eq!(unsaturated.output, 0.25);
         assert_eq!(unsaturated.input_coefficient, 1.0);
 
-        let boundary = slew.eval_with_input_coefficient(0.5, 1.0, 0.5, 0.5);
+        let boundary = slew.eval_with_input_coefficient(0.5, 1.0, TEST_SLEW_RATES);
         assert_eq!(boundary.output, 0.5);
         assert_eq!(boundary.input_coefficient, 1.0);
 
-        let no_time_advance = slew.eval_with_input_coefficient(1.0, 0.0, 0.5, 0.5);
+        let no_time_advance = slew.eval_with_input_coefficient(1.0, 0.0, TEST_SLEW_RATES);
         assert_eq!(no_time_advance.output, 0.0);
         assert_eq!(no_time_advance.input_coefficient, 0.0);
 
         let epsilon = 1.0e-6;
-        let upper = slew.eval(0.25 + epsilon, 1.0, 0.5, 0.5);
-        let lower = slew.eval(0.25 - epsilon, 1.0, 0.5, 0.5);
+        let upper = slew.eval(0.25 + epsilon, 1.0, TEST_SLEW_RATES);
+        let lower = slew.eval(0.25 - epsilon, 1.0, TEST_SLEW_RATES);
         let finite_difference = (upper - lower) / (2.0 * epsilon);
         assert!((finite_difference - unsaturated.input_coefficient).abs() <= 1.0e-9);
+    }
+
+    #[test]
+    fn slew_direct_transient_start_seeds_from_first_input() {
+        let mut slew = SlewFilter::default();
+        let evaluation = slew.eval_with_input_coefficient(7.0, 0.0, TEST_SLEW_RATES);
+        assert_eq!(evaluation.output, 7.0);
+        assert_eq!(evaluation.input_coefficient, 1.0);
+        slew.commit();
+
+        let falling = slew.eval_with_input_coefficient(0.0, 1.0, TEST_SLEW_RATES);
+        assert_eq!(falling.output, 6.5);
+        assert_eq!(falling.input_coefficient, 0.0);
+    }
+
+    #[test]
+    fn slew_operating_point_promotion_seeds_first_transient_candidate() {
+        let mut slew = SlewFilter::default();
+        assert_eq!(slew.eval_operating_point(5.0, 0.0), 5.0);
+        slew.promote_operating_point_candidate();
+
+        let candidate = slew.eval_with_input_coefficient(10.0, 0.25, TEST_SLEW_RATES);
+        assert_eq!(candidate.output, 5.125);
+        assert_eq!(candidate.input_coefficient, 0.0);
+    }
+
+    #[test]
+    fn slew_derivative_is_branch_exact_and_read_only() {
+        let mut slew = SlewFilter::default();
+        slew.eval_operating_point(0.0, 0.0);
+        slew.promote_operating_point_candidate();
+        let accepted = slew.checkpoint();
+
+        assert_eq!(
+            slew.eval_derivative(10.0, 3.0, 4.0, 5.0, 0.5, TEST_SLEW_RATES),
+            2.0,
+            "rising saturation uses dt times the positive-rate derivative"
+        );
+        assert_eq!(
+            slew.eval_derivative(-10.0, 3.0, 4.0, 5.0, 0.5, TEST_SLEW_RATES),
+            2.5,
+            "falling saturation uses dt times the authored negative-rate derivative"
+        );
+        assert_eq!(
+            slew.eval_derivative(0.1, 3.0, 4.0, 5.0, 0.5, TEST_SLEW_RATES),
+            3.0,
+            "unsaturated branch uses the input derivative"
+        );
+        assert_eq!(slew.checkpoint(), accepted);
     }
 
     #[test]
@@ -535,9 +594,11 @@ mod tests {
         assert_eq!(transition.eval(1.0, 1.0, 0.0, 2.0, 2.0), 0.0);
 
         let mut slew = SlewFilter::default();
-        assert_eq!(slew.eval(1.0, 1.0, 0.5, 0.5), 0.5);
-        assert_eq!(slew.eval(0.0, 1.0, 0.5, 0.5), 0.0);
-        assert_eq!(slew.eval(1.0, 1.0, 0.5, 0.5), 0.5);
+        slew.eval_operating_point(0.0, 0.0);
+        slew.promote_operating_point_candidate();
+        assert_eq!(slew.eval(1.0, 1.0, TEST_SLEW_RATES), 0.5);
+        assert_eq!(slew.eval(0.0, 1.0, TEST_SLEW_RATES), 0.0);
+        assert_eq!(slew.eval(1.0, 1.0, TEST_SLEW_RATES), 0.5);
 
         let mut cross = CrossDetector::default();
         assert_eq!(cross.eval(-1.0, 0.0, 1), 0.0);
@@ -786,12 +847,14 @@ impl TransitionFilter {
 struct SlewState {
     output: f64,
     prev_time: f64,
+    initialized: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SlewCheckpoint {
     pub output: f64,
     pub prev_time: f64,
+    pub initialized: bool,
 }
 
 /// Slew rate filter for limiting rate of change.
@@ -808,9 +871,8 @@ impl SlewFilter {
     }
 
     /// Update the filter with new input, limiting slew rate.
-    pub fn eval(&mut self, input: f64, time: f64, max_pos_slew: f64, max_neg_slew: f64) -> f64 {
-        self.eval_with_input_coefficient(input, time, max_pos_slew, max_neg_slew)
-            .output
+    pub(crate) fn eval(&mut self, input: f64, time: f64, rates: SlewRateMagnitudes) -> f64 {
+        self.eval_with_input_coefficient(input, time, rates).output
     }
 
     /// Evaluate a slew candidate and expose its exact local input coefficient
@@ -819,11 +881,9 @@ impl SlewFilter {
         &mut self,
         input: f64,
         time: f64,
-        max_pos_slew: f64,
-        max_neg_slew: f64,
+        rates: SlewRateMagnitudes,
     ) -> StatefulEvaluation {
-        let (state, evaluation) =
-            self.candidate_evaluation(input, time, max_pos_slew, max_neg_slew);
+        let (state, evaluation) = self.candidate_evaluation(input, time, rates);
         self.candidate = state;
         self.candidate_valid = true;
         evaluation
@@ -833,10 +893,23 @@ impl SlewFilter {
         &self,
         input: f64,
         time: f64,
-        max_pos_slew: f64,
-        max_neg_slew: f64,
+        rates: SlewRateMagnitudes,
     ) -> (SlewState, StatefulEvaluation) {
         let mut state = self.committed;
+        if !state.initialized {
+            state = SlewState {
+                output: input,
+                prev_time: time,
+                initialized: true,
+            };
+            return (
+                state,
+                StatefulEvaluation {
+                    output: input,
+                    input_coefficient: 1.0,
+                },
+            );
+        }
         let dt = time - state.prev_time;
         if dt <= 0.0 {
             return (
@@ -852,16 +925,17 @@ impl SlewFilter {
         let rate = delta / dt;
 
         // Apply slew rate limiting.
-        let (limited_rate, input_coefficient) = if rate > max_pos_slew {
-            (max_pos_slew, 0.0)
-        } else if rate < -max_neg_slew {
-            (-max_neg_slew, 0.0)
+        let (limited_rate, input_coefficient) = if rate > rates.rise {
+            (rates.rise, 0.0)
+        } else if rate < -rates.fall {
+            (-rates.fall, 0.0)
         } else {
             (rate, 1.0)
         };
 
         state.output += limited_rate * dt;
         state.prev_time = time;
+        state.initialized = true;
         (
             state,
             StatefulEvaluation {
@@ -869,6 +943,58 @@ impl SlewFilter {
                 input_coefficient,
             },
         )
+    }
+
+    /// Evaluate the exact local derivative of the current candidate without
+    /// changing accepted or speculative state. Rate derivatives retain their
+    /// source-level signs.
+    pub(crate) fn eval_derivative(
+        &self,
+        input: f64,
+        input_derivative: f64,
+        positive_rate_derivative: f64,
+        negative_rate_derivative: f64,
+        time: f64,
+        rates: SlewRateMagnitudes,
+    ) -> f64 {
+        if !self.committed.initialized {
+            return input_derivative;
+        }
+        let dt = time - self.committed.prev_time;
+        if dt <= 0.0 {
+            return 0.0;
+        }
+        let rate = (input - self.committed.output) / dt;
+        if rate > rates.rise {
+            positive_rate_derivative * dt
+        } else if rate < -rates.fall {
+            negative_rate_derivative * dt
+        } else {
+            input_derivative
+        }
+    }
+
+    /// Record the final operating-point Newton candidate without changing
+    /// accepted history. It is promoted only when integration becomes active.
+    pub(crate) fn eval_operating_point(&mut self, input: f64, time: f64) -> f64 {
+        self.candidate = SlewState {
+            output: input,
+            prev_time: time,
+            initialized: true,
+        };
+        self.candidate_valid = true;
+        input
+    }
+
+    pub(crate) fn promote_operating_point_candidate(&mut self) {
+        if self.candidate_valid
+            && self.candidate.output.is_finite()
+            && self.candidate.prev_time.is_finite()
+        {
+            self.committed = self.candidate;
+        }
+        self.candidate = self.committed;
+        self.candidate_valid = false;
     }
 
     pub fn commit(&mut self) {
@@ -891,6 +1017,7 @@ impl SlewFilter {
         Self::validate_checkpoint(&SlewCheckpoint {
             output: self.candidate.output,
             prev_time: self.candidate.prev_time,
+            initialized: self.candidate.initialized,
         })?;
         if self.candidate.prev_time != accepted_time {
             return Err(format!(
@@ -910,6 +1037,7 @@ impl SlewFilter {
         SlewCheckpoint {
             output: self.committed.output,
             prev_time: self.committed.prev_time,
+            initialized: self.committed.initialized,
         }
     }
 
@@ -931,6 +1059,7 @@ impl SlewFilter {
         self.committed = SlewState {
             output: checkpoint.output,
             prev_time: checkpoint.prev_time,
+            initialized: checkpoint.initialized,
         };
         self.candidate = self.committed;
         self.candidate_valid = false;

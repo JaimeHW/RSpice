@@ -5338,7 +5338,7 @@ endmodule
                     Instruction::TransitionState(idx) => {
                         update_max_slot(&mut max_transition_filter, *idx);
                     }
-                    Instruction::SlewState(idx) => {
+                    Instruction::SlewState(idx) | Instruction::SlewStateDerivative(idx) => {
                         update_max_slot(&mut max_slew_filter, *idx);
                     }
                     Instruction::CrossState(idx)

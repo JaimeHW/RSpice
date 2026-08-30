@@ -231,6 +231,17 @@ impl ExprEmitter<'_> {
                 let (expr, probe) = self.ddx_operands(args.as_slice())?;
                 self.lower_ddx_value(expr, probe, &base)?
             }
+            HirExprKind::Call { name, args } if name.eq_ignore_ascii_case("slew") => {
+                match args.as_slice() {
+                    [expr] => self.lower(*expr)?.value,
+                    [_, ..] => {
+                        return Err(self.unsupported(
+                        "rate-limited slew analog operator is unsupported by generated Rust; rate limiting cannot be degraded to a passthrough",
+                    ));
+                    }
+                    [] => return Err(self.unsupported("slew analog operator without an input")),
+                }
+            }
             HirExprKind::Call { name, .. } if is_noise_name(name.as_str()) => "0.0".to_string(),
             HirExprKind::Call { name, args } if is_intrinsic_name(name.as_str()) => {
                 self.lower_intrinsic_value(name.as_str(), args.as_slice(), &base)?
@@ -266,6 +277,21 @@ impl ExprEmitter<'_> {
             } => {
                 let arg = self.lower(*expr)?;
                 self.emit_value(&base, limexp_value_expr(&arg.value))
+            }
+            HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Slew {
+                        expr,
+                        max_rise: None,
+                        max_fall: None,
+                    },
+            } => self.lower(*expr)?.value,
+            HirExprKind::AnalogOperator {
+                op: HirAnalogOperator::Slew { .. },
+            } => {
+                return Err(self.unsupported(
+                    "rate-limited slew analog operator is unsupported by generated Rust; rate limiting cannot be degraded to a passthrough",
+                ));
             }
             other => {
                 return Err(self.unsupported(format!("expression kind {other:?}")));
@@ -368,12 +394,17 @@ impl ExprEmitter<'_> {
             }
             HirExprKind::AnalogOperator {
                 op:
+                    HirAnalogOperator::Slew {
+                        max_rise, max_fall, ..
+                    },
+            } if max_rise.is_some() || max_fall.is_some() => Ok(true),
+            HirExprKind::AnalogOperator {
+                op:
                     HirAnalogOperator::Ddt { .. }
                     | HirAnalogOperator::Idt { .. }
                     | HirAnalogOperator::IdtMod { .. }
                     | HirAnalogOperator::Absdelay { .. }
                     | HirAnalogOperator::Transition { .. }
-                    | HirAnalogOperator::Slew { .. }
                     | HirAnalogOperator::LastCrossing { .. },
             } => Ok(true),
             _ => expression_children(&expression.kind).into_iter().try_fold(

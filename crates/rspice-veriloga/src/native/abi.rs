@@ -16,6 +16,7 @@ use std::cell::UnsafeCell;
 
 use crate::array_index::{checked_array_slot, checked_rounded_i64};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
+use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
 
 const INTEGER_DESCRIPTOR_KIND_MASK: usize = 0xff;
 const INTEGER_DESCRIPTOR_PAYLOAD_SHIFT: u32 = 32;
@@ -1640,9 +1641,18 @@ pub unsafe extern "C" fn rspice_slew_state_native(
     let input = operands[0];
     let max_pos_slew = operands[1];
     let max_neg_slew = operands[2];
-    if ctx.analysis_type != 2 {
-        return input;
-    }
+    let NormalizedSlewRates::Limited(rates) =
+        (match normalize_slew_rates(Some(max_pos_slew), Some(max_neg_slew)) {
+            Ok(rates) => rates,
+            Err(error) => {
+                ctx.record_invalid_numeric_result(format!("slew: {error}"));
+                return 0.0;
+            }
+        })
+    else {
+        set_native_context_error(ctx, "stateful slew helper encoded passthrough rates");
+        return 0.0;
+    };
 
     if ctx.slew_filters.is_null() {
         set_native_context_error(
@@ -1664,19 +1674,101 @@ pub unsafe extern "C" fn rspice_slew_state_native(
         return 0.0;
     }
 
-    let max_pos = if max_pos_slew.is_finite() && max_pos_slew > 0.0 {
-        max_pos_slew
-    } else {
-        f64::INFINITY
-    };
-    let max_neg = if max_neg_slew.is_finite() && max_neg_slew > 0.0 {
-        max_neg_slew
-    } else {
-        f64::INFINITY
-    };
-
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.slew_filters, ctx.slew_filters_len) };
-    filters[filter_id].eval(input, ctx.time, max_pos, max_neg)
+    match ctx.analysis_type {
+        2 => filters[filter_id].eval(input, ctx.time, rates),
+        0 | 4 => filters[filter_id].eval_operating_point(input, ctx.time),
+        // Small-signal analyses observe a unity transfer from the first
+        // argument and never mutate accepted or candidate slew state.
+        1 | 3 => input,
+        _ => {
+            set_native_context_error(
+                ctx,
+                format!(
+                    "native slew helper received invalid analysis type {}",
+                    ctx.analysis_type
+                ),
+            );
+            0.0
+        }
+    }
+}
+
+/// Read-only exact local derivative of a native slew candidate.
+///
+/// # Safety
+/// Called from verified JIT code with a valid context and six operands in
+/// source/Jacobian order.
+#[unsafe(export_name = "rspice_slew_derivative_native")]
+pub unsafe extern "C" fn rspice_slew_derivative_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native slew derivative helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let ctx = unsafe { &*ctx };
+    if operands.is_null() {
+        set_native_context_error(
+            ctx,
+            "native slew derivative helper missing operands; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    let operands = unsafe { std::slice::from_raw_parts(operands, 6) };
+    let NormalizedSlewRates::Limited(rates) =
+        (match normalize_slew_rates(Some(operands[2]), Some(operands[4])) {
+            Ok(rates) => rates,
+            Err(error) => {
+                ctx.record_invalid_numeric_result(format!("slew derivative: {error}"));
+                return 0.0;
+            }
+        })
+    else {
+        set_native_context_error(
+            ctx,
+            "stateful slew derivative helper encoded passthrough rates",
+        );
+        return 0.0;
+    };
+    if ctx.slew_filters.is_null() || filter_id >= ctx.slew_filters_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native slew derivative helper filter {filter_id} outside available filter storage; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    match ctx.analysis_type {
+        2 => {
+            let filters =
+                unsafe { std::slice::from_raw_parts(ctx.slew_filters, ctx.slew_filters_len) };
+            filters[filter_id].eval_derivative(
+                operands[0],
+                operands[1],
+                operands[3],
+                operands[5],
+                ctx.time,
+                rates,
+            )
+        }
+        0 | 1 | 3 | 4 => operands[1],
+        analysis_type => {
+            set_native_context_error(
+                ctx,
+                format!(
+                    "native slew derivative helper received invalid analysis type {analysis_type}"
+                ),
+            );
+            0.0
+        }
+    }
 }
 
 /// External helper function for native x64 absolute-delay buffers.
@@ -2650,20 +2742,28 @@ mod tests {
     }
 
     #[test]
-    fn slew_native_helper_passes_input_through_outside_transient() {
-        let operands = [1.25, 2.0, 2.0];
-        let ctx = empty_eval_context();
-        ctx.clear_runtime_error();
+    fn slew_native_helper_is_read_only_in_ac_and_noise() {
+        let operands = [1.25, 2.0, -2.0];
+        for analysis_type in [1, 3] {
+            let mut filters = [SlewFilter::default()];
+            let mut ctx = empty_eval_context();
+            ctx.analysis_type = analysis_type;
+            ctx.slew_filters = filters.as_mut_ptr();
+            ctx.slew_filters_len = filters.len();
+            ctx.clear_runtime_error();
 
-        let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 7) };
+            let value = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
 
-        assert_eq!(value.to_bits(), 1.25_f64.to_bits());
-        assert!(ctx.take_runtime_error().is_none());
+            assert_eq!(value.to_bits(), 1.25_f64.to_bits());
+            assert!(filters[0].validate_checkpoint_ready().is_ok());
+            assert!(!filters[0].checkpoint().initialized);
+            assert!(ctx.take_runtime_error().is_none());
+        }
     }
 
     #[test]
     fn slew_native_helper_hard_fails_missing_transient_storage() {
-        let operands = [1.0, 2.0, 2.0];
+        let operands = [1.0, 2.0, -2.0];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
         ctx.clear_runtime_error();
@@ -2686,7 +2786,7 @@ mod tests {
 
     #[test]
     fn slew_native_helper_uses_vm_slew_filter_state() {
-        let operands = [10.0, 2.0, 2.0];
+        let mut operands = [0.0, 2.0, -2.0];
         let mut filters = [SlewFilter::default()];
         let mut ctx = empty_eval_context();
         ctx.analysis_type = 2;
@@ -2696,11 +2796,12 @@ mod tests {
 
         ctx.time = 0.0;
         assert_eq!(
-            unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
-            0.0_f64.to_bits()
+            unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) },
+            0.0
         );
         filters[0].commit();
 
+        operands[0] = 10.0;
         ctx.time = 0.5;
         let mid = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((mid - 1.0).abs() < 1.0e-12, "mid slew: {mid}");

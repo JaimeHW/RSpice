@@ -1534,6 +1534,15 @@ fn emit_helper_call(
         }
         return emit_slice_helper_call(body, descriptor, operands, result);
     }
+    if matches!(op, NativeOp::SlewStateDerivative(_)) {
+        if operands.len() != 6 {
+            return Err(WasmJitError::Encoding(format!(
+                "slew derivative lowering supplied {} operands; exactly 6 are required",
+                operands.len()
+            )));
+        }
+        return emit_slice_helper_call(body, descriptor, operands, result);
+    }
     body.instruction(&WasmInstruction::LocalGet(FRAME_LOCAL));
     body.instruction(&WasmInstruction::I32Const(descriptor.opcode));
     body.instruction(&WasmInstruction::I32Const(descriptor.aux0));
@@ -1709,6 +1718,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::TimerState(index) => set_index(&mut descriptor, 422, index)?,
         NativeOp::TransitionState(index) => set_index(&mut descriptor, 423, index)?,
         NativeOp::SlewState(index) => set_index(&mut descriptor, 424, index)?,
+        NativeOp::SlewStateDerivative(index) => set_index(&mut descriptor, 445, index)?,
         NativeOp::AbsDelayState(index) => set_index(&mut descriptor, 425, index)?,
         NativeOp::CrossState(index) => set_index(&mut descriptor, 426, index)?,
         NativeOp::AboveState(index) => set_index(&mut descriptor, 427, index)?,
@@ -2044,6 +2054,148 @@ mod tests {
         assert_eq!(descriptor.aux0, 7);
         assert_eq!(descriptor.aux1, 0);
         assert_eq!(descriptor.aux2, 0);
+    }
+
+    #[test]
+    fn generated_module_routes_signed_slew_derivative_through_opcode_445() {
+        const OPERANDS: [f64; 6] = [10.0, 0.0, 2.0, -0.25, -2.0, 0.5];
+        let mut ops = OPERANDS
+            .into_iter()
+            .map(NativeOp::Const)
+            .collect::<Vec<_>>();
+        ops.push(NativeOp::SlewStateDerivative(0));
+        let bytes = emit_verified_value_program(&program(ops, 6))
+            .expect("encode signed slew derivative module");
+
+        let engine = Engine::default();
+        let module = Module::new(&engine, bytes.as_slice())
+            .expect("compile signed slew derivative module in wasmi");
+        let mut store = Store::new(&engine, TestHostState::default());
+        let memory = Memory::new(&mut store, MemoryType::new(1, None))
+            .expect("allocate imported primary memory");
+        store.data_mut().memory = Some(memory);
+        let mut linker = Linker::new(&engine);
+        linker
+            .define(WASM_JIT_IMPORT_MODULE, WASM_JIT_MEMORY_IMPORT, memory)
+            .expect("define primary memory import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_EVAL_HELPER_IMPORT,
+                |_: i32,
+                 _: i32,
+                 _: i32,
+                 _: i32,
+                 _: i64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64,
+                 _: f64|
+                 -> f64 {
+                    panic!("six-operand slew derivative must use the slice helper")
+                },
+            )
+            .expect("define scalar helper import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_SLICE_HELPER_IMPORT,
+                |caller: Caller<'_, TestHostState>,
+                 frame_offset: i32,
+                 opcode: i32,
+                 aux0: i32,
+                 aux1: i32,
+                 aux2: i64,
+                 operand_count: i32|
+                 -> f64 {
+                    assert_eq!(frame_offset, 0);
+                    assert_eq!(opcode, 445);
+                    assert_eq!(aux0, 0);
+                    assert_eq!(aux1, 0);
+                    assert_eq!(aux2, 0);
+                    assert_eq!(operand_count, 6);
+                    let memory = caller.data().memory.expect("installed test memory");
+                    let bytes = memory.data(&caller);
+                    let base = usize::try_from(WASM_JIT_SLICE_OPERANDS_OFFSET)
+                        .expect("slice operand offset fits host usize");
+                    let actual = std::array::from_fn::<_, 6, _>(|index| {
+                        let offset = base + index * size_of::<f64>();
+                        f64::from_le_bytes(
+                            bytes[offset..offset + size_of::<f64>()]
+                                .try_into()
+                                .expect("complete slice operand"),
+                        )
+                    });
+                    for (index, (actual, expected)) in actual
+                        .iter()
+                        .copied()
+                        .zip(OPERANDS.iter().copied())
+                        .enumerate()
+                    {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "slice operand {index} changed sign or value"
+                        );
+                    }
+                    actual[3]
+                },
+            )
+            .expect("define signed slew derivative slice helper import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_MATH1_IMPORT,
+                |opcode: i32, value: f64| -> f64 { super::super::runtime::math1_v1(opcode, value) },
+            )
+            .expect("define unary math import");
+        linker
+            .func_wrap(
+                WASM_JIT_IMPORT_MODULE,
+                WASM_JIT_MATH2_IMPORT,
+                |opcode: i32, left: f64, right: f64| -> f64 {
+                    super::super::runtime::math2_v1(opcode, left, right)
+                },
+            )
+            .expect("define binary math import");
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .expect("instantiate signed slew derivative module");
+
+        let frame_len = usize::try_from(WASM_JIT_SLICE_OPERANDS_OFFSET)
+            .expect("slice operand offset fits host usize")
+            + OPERANDS.len() * size_of::<f64>();
+        let mut frame = vec![0_u8; frame_len];
+        frame[FRAME_MAGIC_OFFSET as usize..FRAME_MAGIC_OFFSET as usize + 4]
+            .copy_from_slice(&WASM_JIT_FRAME_MAGIC.to_le_bytes());
+        frame[FRAME_ABI_VERSION_OFFSET as usize..FRAME_ABI_VERSION_OFFSET as usize + 4]
+            .copy_from_slice(&WASM_JIT_ABI_VERSION.to_le_bytes());
+        frame[FRAME_BYTE_LEN_OFFSET as usize..FRAME_BYTE_LEN_OFFSET as usize + 4].copy_from_slice(
+            &u32::try_from(frame_len)
+                .expect("test frame length fits wasm32")
+                .to_le_bytes(),
+        );
+        memory
+            .write(&mut store, 0, &frame)
+            .expect("write signed slew derivative frame");
+
+        let entry = instance
+            .get_typed_func::<i32, i32>(&store, WASM_JIT_VALUE_EXPORT)
+            .expect("resolve signed slew derivative export");
+        assert_eq!(
+            entry
+                .call(&mut store, 0)
+                .expect("execute signed slew derivative"),
+            WASM_JIT_STATUS_OK
+        );
+        let result = f64::from_le_bytes(
+            memory.data(&store)
+                [FRAME_RESULT_OFFSET as usize..FRAME_RESULT_OFFSET as usize + size_of::<f64>()]
+                .try_into()
+                .expect("complete signed derivative result"),
+        );
+        assert_eq!(result.to_bits(), (-0.25_f64).to_bits());
     }
 
     #[test]
@@ -2729,6 +2881,7 @@ mod tests {
             NativeOp::TimerState(0),
             NativeOp::TransitionState(0),
             NativeOp::SlewState(0),
+            NativeOp::SlewStateDerivative(0),
             NativeOp::AbsDelayState(0),
             NativeOp::CrossState(0),
             NativeOp::AboveState(0),

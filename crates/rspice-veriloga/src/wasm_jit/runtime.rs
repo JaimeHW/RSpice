@@ -184,9 +184,9 @@ fn evaluate_stateful_helper(
     operands: [f64; 5],
     session: &mut WasmJitRuntimeSession,
 ) -> Result<f64, HelperError> {
-    if matches!(opcode, 421 | 429) {
+    if matches!(opcode, 421 | 429 | 445) {
         return Err(session.fail(
-            "WASM JIT Zi operation reached the five-operand scalar helper; the slice helper is required",
+            "WASM JIT variable-arity operation reached the five-operand scalar helper; the slice helper is required",
         ));
     }
     let index = u32::try_from(aux0)
@@ -331,6 +331,32 @@ fn evaluate_slice_helper_with_session(
             WASM_JIT_MAX_SLICE_OPERANDS
         )));
     }
+    if opcode == 445 {
+        if aux1 != 0 || aux2 != 0 {
+            return Err(session
+                .fail("WASM JIT slew derivative slice helper received nonzero reserved metadata"));
+        }
+        if operands.len() != 6 {
+            return Err(session.fail(format!(
+                "WASM JIT slew derivative slice helper requires 6 operands, received {}",
+                operands.len()
+            )));
+        }
+        let filter_id = u32::try_from(aux0)
+            .ok()
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| {
+                session.fail("WASM JIT slew derivative slice helper has a negative filter slot")
+            })?;
+        require_slot(
+            session,
+            filter_id,
+            session.context.slew_filters.len(),
+            "slew derivative filter",
+        )?;
+        return session.execute_instruction(Instruction::SlewStateDerivative(filter_id), operands);
+    }
+
     let storage = match opcode {
         421 => "ZI filter",
         429 => "ZI derivative filter",
@@ -1156,6 +1182,63 @@ mod tests {
             session
                 .take_error()
                 .is_some_and(|error| error.contains("not fully preallocated"))
+        );
+    }
+
+    #[test]
+    fn slew_derivative_slice_helper_uses_current_primal_and_dynamic_rate_derivative() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.allocate_slew_filters(1);
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let seeded = evaluate_helper_with_session(
+            424,
+            0,
+            0,
+            0,
+            [0.0, 1.0, -1.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("seed direct transient slew candidate");
+        assert_eq!(seeded.to_bits(), 0.0_f64.to_bits());
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept seeded slew state");
+        session.context_mut().time = 1.0;
+
+        // The input itself has zero derivative. The rising saturated branch
+        // must nevertheless retain dt*d(max_pos)/dx = 1*0.25.
+        let derivative = evaluate_slice_helper_with_session(
+            445,
+            0,
+            0,
+            0,
+            &[10.0, 0.0, 2.0, 0.25, -2.0, -0.25],
+            &mut session,
+        )
+        .expect("evaluate slew derivative through browser slice helper");
+        assert_eq!(derivative.to_bits(), 0.25_f64.to_bits());
+
+        assert_eq!(
+            evaluate_helper_with_session(
+                445,
+                0,
+                0,
+                0,
+                [10.0, 0.0, 2.0, 0.25, -2.0],
+                &[],
+                Some(&mut session),
+            ),
+            Err(HelperError::StatefulRuntimeFailed),
+            "six-operand slew derivatives must fail closed on the scalar ABI"
+        );
+        assert!(
+            session
+                .take_error()
+                .is_some_and(|error| error.contains("slice helper is required"))
         );
     }
 

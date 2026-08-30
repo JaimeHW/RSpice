@@ -160,7 +160,7 @@ fn dependent_default_clamp_model() -> rspice_veriloga::CompiledModel {
 module native_dependent_default_clamp(p, n);
     inout p, n;
     electrical p, n;
-    parameter real base = 4.0;
+    parameter real base = 2.0;
     parameter real limited = base * 3.0 from [1.0:10.0];
     analog I(p, n) <+ V(p, n) * limited;
 endmodule
@@ -378,7 +378,7 @@ module native_slew_assignment(p, n);
     electrical p, n;
     real y;
     analog begin
-        y = slew(V(p, n), 2.0, 2.0);
+        y = slew(V(p, n), 2.0, -2.0);
         I(p, n) <+ y;
     end
 endmodule
@@ -700,15 +700,15 @@ fn integer_bit_assignment_model() -> rspice_veriloga::CompiledModel {
 module native_integer_bit_assignment(p, n);
     inout p, n;
     electrical p, n;
-    real x;
-    real gain;
+    integer x;
+    integer gain;
     analog begin
-        x = V(p, n) + 8.75;
-        gain = (x << 1.0)
-             + ((-x) >> 1.0)
-             + (x & 6.0)
-             + (x | 3.0)
-             + (x ^ 5.0);
+        x = V(p, n) + 9;
+        gain = ((-x) >> 1)
+             - (x << 1)
+             - (x & 6)
+             - (x | 3)
+             - (x ^ 5);
         I(p, n) <+ gain;
     end
 endmodule
@@ -1331,8 +1331,12 @@ fn native_dependent_parameter_defaults_reject_declared_bound_violations() {
         "fixture must contain a bounded dependent default"
     );
 
-    let error = native_contract_try_new("DEPCLAMP1", model, &[1, 0])
-        .expect_err("an out-of-range dependent default must be rejected");
+    let mut device = native_contract_try_new("DEPCLAMP1", model, &[1, 0])
+        .expect("the in-range default must construct a native device");
+    assert!(device.set_parameter("base", 4.0));
+    let error = device
+        .try_resolve_parameter_defaults()
+        .expect_err("an override that drives a dependent default out of range must be rejected");
     assert!(
         matches!(error, rspice_veriloga::vm::VmError::ParameterValue(_)),
         "expected a parameter-value error, got {error:?}"
@@ -2240,7 +2244,7 @@ fn native_device_with_canonical_ir_executes_slew_current_without_fallback() {
 module native_canonical_slew_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ slew(V(p, n), 2.0, 2.0);
+    analog I(p, n) <+ slew(V(p, n), 2.0, -2.0);
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2253,16 +2257,189 @@ endmodule
             .expect("canonical slew current uses native JIT path");
     assert!(device.is_using_native());
     device.set_analysis_type(2);
-    device.update_voltages(&[10.0]);
 
-    for (time, expected) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
+    for (time, voltage, expected) in [(0.0, 0.0, 0.0), (0.5, 10.0, 1.0), (1.0, 10.0, 2.0)] {
         device.set_time(time);
+        device.update_voltages(&[voltage]);
         let currents = device
             .try_evaluate()
             .expect("canonical slew evaluation succeeds");
         assert!(
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
+        );
+        device.advance_state();
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_canonical_slew_seeds_both_op_and_direct_transient_startup() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_slew_startup(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n), 1.0, -1.0);
+endmodule
+"#;
+
+    let mut from_op = canonical_device_from_source("CSLEWOP1", source);
+    from_op.set_time(0.0);
+    from_op.update_voltages(&[5.0]);
+    assert_eq!(
+        from_op
+            .try_evaluate()
+            .expect("native slew operating point succeeds")[0]
+            .to_bits(),
+        5.0_f64.to_bits()
+    );
+    let op_jacobians = from_op
+        .try_compute_jacobian()
+        .expect("native slew operating-point Jacobian succeeds");
+    assert_eq!(op_jacobians.len(), 4, "jacobians={op_jacobians:?}");
+    assert!(
+        op_jacobians
+            .iter()
+            .all(|entry| entry.value.abs().to_bits() == 1.0_f64.to_bits()),
+        "jacobians={op_jacobians:?}"
+    );
+    from_op.set_analysis_type(2);
+    from_op.set_timestep(1.0);
+    from_op.set_time(1.0);
+    from_op.update_voltages(&[10.0]);
+    assert_eq!(
+        from_op
+            .try_evaluate()
+            .expect("native first transient candidate uses accepted OP")[0]
+            .to_bits(),
+        6.0_f64.to_bits()
+    );
+
+    let mut direct = canonical_device_from_source("CSLEWUIC1", source);
+    direct.set_analysis_type(2);
+    direct.set_timestep(1.0);
+    direct.set_time(0.0);
+    direct.update_voltages(&[5.0]);
+    assert_eq!(
+        direct
+            .try_evaluate()
+            .expect("native direct transient startup seeds from input")[0]
+            .to_bits(),
+        5.0_f64.to_bits()
+    );
+    direct.advance_state();
+    direct.set_time(1.0);
+    direct.update_voltages(&[10.0]);
+    assert_eq!(
+        direct
+            .try_evaluate()
+            .expect("native post-UIC slew candidate succeeds")[0]
+            .to_bits(),
+        6.0_f64.to_bits()
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_canonical_slew_seeds_op_and_uses_dynamic_rate_jacobian() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_slew_dynamic(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(
+        $abstime > 0.0 ? 10.0 : 0.0,
+        1.0 + 0.25 * V(p, n),
+        -(1.0 + 0.25 * V(p, n))
+    );
+endmodule
+"#;
+    let mut device = canonical_device_from_source("CSLEWDYN1", source);
+    assert!(device.is_using_native());
+
+    // Seed a nonzero operating point, promote it when transient integration
+    // starts, and verify the first candidate slews from that OP rather than
+    // from a default zero state.
+    device.set_time(0.0);
+    device.update_voltages(&[4.0]);
+    let dc = device
+        .try_evaluate()
+        .expect("canonical slew operating-point evaluation succeeds");
+    assert_eq!(dc[0].to_bits(), 0.0_f64.to_bits());
+    device.set_analysis_type(2);
+    device.set_timestep(1.0);
+    device.set_time(1.0);
+    device.update_voltages(&[4.0]);
+    let transient = device
+        .try_evaluate()
+        .expect("canonical dynamic-rate slew evaluation succeeds");
+    assert_eq!(transient[0].to_bits(), 2.0_f64.to_bits());
+
+    let jacobians = device
+        .try_compute_jacobian()
+        .expect("canonical dynamic-rate slew Jacobian succeeds");
+    assert_eq!(jacobians.len(), 4, "jacobians={jacobians:?}");
+    assert!(
+        jacobians
+            .iter()
+            .all(|entry| (entry.value.abs() - 0.25).abs() < 1.0e-12),
+        "input derivative is zero, but saturated rate derivative must remain: {jacobians:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_canonical_slew_rejects_invalid_dynamic_rate() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_slew_invalid(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n), V(p, n), -1.0);
+endmodule
+"#;
+    let mut device = canonical_device_from_source("CSLEWBAD1", source);
+    device.set_analysis_type(2);
+    device.update_voltages(&[-1.0]);
+
+    let error = device
+        .try_evaluate()
+        .expect_err("native slew must reject a nonpositive positive rate");
+    assert!(error.to_string().contains("slew"), "error={error}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_canonical_slew_ac_and_noise_are_read_only_and_checkpoint_ready() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_slew_small_signal(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n), 1.0, -1.0);
+endmodule
+"#;
+
+    for analysis in [1, 3] {
+        let mut device = canonical_device_from_source("CSLEWSS1", source);
+        device.set_analysis_type(analysis);
+        device.update_voltages(&[5.0]);
+        assert_eq!(
+            device
+                .try_evaluate()
+                .unwrap_or_else(|error| panic!("analysis {analysis} failed: {error}"))[0]
+                .to_bits(),
+            5.0_f64.to_bits()
+        );
+        let checkpoint = device
+            .checkpoint_state()
+            .unwrap_or_else(|error| panic!("analysis {analysis} checkpoint failed: {error}"));
+        assert_eq!(checkpoint.accepted.slew_filters.len(), 1);
+        assert!(!checkpoint.accepted.slew_filters[0].initialized);
+        assert_eq!(
+            checkpoint.accepted.slew_filters[0].output.to_bits(),
+            0.0_f64.to_bits()
         );
     }
 }
@@ -3045,7 +3222,11 @@ fn native_device_with_canonical_ir_executes_bitnot_current_without_fallback() {
 module native_canonical_bitnot_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ ~(V(p, n));
+    integer x;
+    analog begin
+        x = V(p, n);
+        I(p, n) <+ ~x;
+    end
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -3058,7 +3239,7 @@ endmodule
             .expect("canonical bit-not current uses native JIT path");
     assert!(device.is_using_native());
 
-    device.update_voltages(&[12.75]);
+    device.update_voltages(&[12.0]);
     let currents = device
         .try_evaluate()
         .expect("canonical bit-not current evaluation succeeds");
@@ -3465,10 +3646,10 @@ fn native_device_executes_slew_assignments_without_fallback() {
         native_contract_try_new("SLW1", model, &[1, 0]).expect("slew model uses native JIT");
     assert!(device.is_using_native());
     device.set_analysis_type(2);
-    device.update_voltages(&[10.0]);
 
-    for (time, expected) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
+    for (time, voltage, expected) in [(0.0, 0.0, 0.0), (0.5, 10.0, 1.0), (1.0, 10.0, 2.0)] {
         device.set_time(time);
+        device.update_voltages(&[voltage]);
         let currents = device
             .try_evaluate()
             .expect("native slew evaluation succeeds");
@@ -3976,17 +4157,14 @@ fn native_device_executes_integer_bit_assignments_without_fallback() {
     assert!(device.is_using_native());
     device.update_voltages(&[4.0]);
 
-    let x: f64 = 12.75;
-    let expected_gain = (((x as i64) << 1_i64) as f64)
-        + (((-x as i64) >> 1_i64) as f64)
-        + (((x as i64) & 6_i64) as f64)
-        + (((x as i64) | 3_i64) as f64)
-        + (((x as i64) ^ 5_i64) as f64);
+    let x = 13_i32;
+    let logical_right = ((-x) as u32 >> 1) as i32;
+    let expected_gain = f64::from(logical_right - (x << 1) - (x & 6) - (x | 3) - (x ^ 5));
     let currents = device
         .try_evaluate()
         .expect("native integer bit assignment evaluation succeeds");
 
-    assert_eq!(device.variable("x"), Some(x));
+    assert_eq!(device.variable("x"), Some(f64::from(x)));
     assert_eq!(device.variable("gain"), Some(expected_gain));
     assert!((currents[0] - expected_gain).abs() < 1e-12);
 }

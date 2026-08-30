@@ -1762,6 +1762,17 @@ impl<'a> CfgLowerer<'a> {
             return self.real_constant(0.0);
         }
         match (lowered.as_str(), args.len()) {
+            // With both optional rates omitted the LRM defines `slew` as an
+            // exact stateless passthrough, so the CFG can lower it directly.
+            ("slew", 1) => self.expr(args[0]),
+            ("slew", 2 | 3) => {
+                self.unsupported(
+                    span,
+                    "rate-limited slew operator; generated Rust cannot degrade it to a passthrough"
+                        .to_string(),
+                );
+                self.real_constant(0.0)
+            }
             // Keyed by the *call*, not by its argument. The other `ddt` path —
             // `HirAnalogOperator::Ddt`, below — always did, and so does the
             // state-slot allocation every backend reads, so keying this one by
@@ -1964,6 +1975,19 @@ impl<'a> CfgLowerer<'a> {
                         ic,
                     },
                 )
+            }
+            HirAnalogOperator::Slew {
+                expr,
+                max_rise: None,
+                max_fall: None,
+            } => self.expr(*expr),
+            HirAnalogOperator::Slew { .. } => {
+                self.unsupported(
+                    span,
+                    "rate-limited slew operator; generated Rust cannot degrade it to a passthrough"
+                        .to_string(),
+                );
+                self.real_constant(0.0)
             }
             HirAnalogOperator::Limit {
                 proposed,

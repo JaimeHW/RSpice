@@ -1478,6 +1478,123 @@ fn executable_and_generated_rust_backends_reject_parameter_arrays_until_abi_supp
 }
 
 #[test]
+fn slew_source_contract_accepts_one_to_three_arguments_and_rejects_other_arities() {
+    let compiler = VerilogACompiler::default();
+    for arguments in ["V(p, n)", "V(p, n), 1.0", "V(p, n), 1.0, -1.0"] {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+module slew_arity_ok(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew({arguments});
+endmodule
+"#
+        );
+        compiler
+            .compile_canonical_ir(&source)
+            .unwrap_or_else(|error| panic!("slew({arguments}) must compile: {error}"));
+    }
+
+    for arguments in ["", "V(p, n), 1.0, -1.0, 0.0"] {
+        let source = format!(
+            r#"
+`include "disciplines.vams"
+module slew_arity_bad(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew({arguments});
+endmodule
+"#
+        );
+        assert!(
+            compiler.compile_canonical_ir(&source).is_err(),
+            "slew({arguments}) must reject invalid arity"
+        );
+    }
+}
+
+#[test]
+fn generated_rust_fails_closed_for_slew_instead_of_emitting_a_passthrough() {
+    let source = r#"
+`include "disciplines.vams"
+module generated_rust_slew_unsupported(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n), 1.0, -1.0);
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("slew is preserved in canonical IR");
+    let error = rspice_veriloga::rust_backend::RustTranspiler::default()
+        .transpile(&artifact)
+        .expect_err("generated Rust must fail closed for unsupported slew state");
+
+    assert!(error.is_unsupported());
+    assert!(
+        error.message.contains("rate-limited slew"),
+        "error={error:?}"
+    );
+    assert!(
+        error.message.contains("cannot degrade it to a passthrough")
+            || error
+                .message
+                .contains("cannot be degraded to a passthrough"),
+        "error={error:?}"
+    );
+}
+
+#[test]
+fn generated_rust_supports_stateless_slew_passthrough_for_call_and_typed_nodes() {
+    let source = r#"
+`include "disciplines.vams"
+module generated_rust_slew_passthrough(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ slew(V(p, n));
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("compile stateless slew canonical IR");
+    rspice_veriloga::rust_backend::RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("one-argument slew call must transpile as its input");
+
+    // Exercise the typed HIR/MIR node path too. Source syntax currently
+    // preserves this intrinsic as a Call, while elaborated clients may supply
+    // the semantically equivalent AnalogOperator node.
+    let mut typed = artifact.clone();
+    let root = typed.mir.equations[0].expression.id;
+    let input = match &typed.hir.expressions[usize::from(root)].kind {
+        HirExprKind::Call { name, args } if name == "slew" && args.len() == 1 => args[0],
+        other => panic!("expected one-argument slew call, found {other:?}"),
+    };
+    let typed_kind = HirExprKind::AnalogOperator {
+        op: HirAnalogOperator::Slew {
+            expr: input,
+            max_rise: None,
+            max_fall: None,
+        },
+    };
+    typed.hir.expressions[usize::from(root)].kind = typed_kind.clone();
+    typed.mir.expressions[usize::from(root)].kind = typed_kind;
+    typed.hir.contributions[0].expression.kind = "analog_operator".into();
+    typed.mir.equations[0].expression.kind = "analog_operator".into();
+    let typed = CanonicalIrArtifact::from_parts_with_noise_plan(
+        typed.metadata.clone(),
+        typed.hir,
+        typed.mir,
+        typed.noise_sources.clone(),
+    )
+    .expect("reseal typed stateless slew artifact");
+    rspice_veriloga::rust_backend::RustTranspiler::default()
+        .transpile(&typed)
+        .expect("typed one-argument slew must transpile as its input");
+}
+
+#[test]
 fn canonical_parameter_array_contract_rejects_matching_default_and_metadata_tampering() {
     assert_matching_parameter_array_tamper_rejected(
         parameter_array_source(),

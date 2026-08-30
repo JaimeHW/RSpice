@@ -55,7 +55,7 @@ pub const WASM_JIT_ABI_VERSION: u32 = 6;
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
 /// runtime frames.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 6;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 7;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

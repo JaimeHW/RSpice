@@ -40,9 +40,10 @@ use crate::native::abi::{
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_slew_derivative_native, rspice_slew_state_native,
+    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
+    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_derivative_native,
+    rspice_zi_step_native,
 };
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
@@ -966,6 +967,9 @@ impl FunctionCompiler {
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
                 NativeOp::TransitionState(filter_id) => self.emit_transition_state(filter_id)?,
                 NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
+                NativeOp::SlewStateDerivative(filter_id) => {
+                    self.emit_slew_derivative_state(filter_id)?
+                }
                 NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
                 NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
                 NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
@@ -3021,6 +3025,28 @@ impl FunctionCompiler {
         let input = self.register_stack[self.depth - 3];
         self.emit_operand_context_filter_helper_call(input, 3, filter_id, rspice_slew_state_native);
         self.drop_stack_values(2)?;
+        Ok(())
+    }
+
+    fn emit_slew_derivative_state(&mut self, filter_id: usize) -> JitResult<()> {
+        if self.depth < 6 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "slew derivative state requires stack depth 6, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+        let input = self.register_stack[self.depth - 6];
+        self.emit_operand_context_filter_helper_call(
+            input,
+            6,
+            filter_id,
+            rspice_slew_derivative_native,
+        );
+        self.drop_stack_values(5)?;
         Ok(())
     }
 
@@ -9504,7 +9530,7 @@ mod tests {
                     Instruction::PushTemperature,
                     Instruction::PushConst(10.0),
                     Instruction::PushConst(2.0),
-                    Instruction::PushConst(2.0),
+                    Instruction::PushConst(-2.0),
                     Instruction::SlewState(0),
                     Instruction::Add,
                 ],
@@ -9534,17 +9560,17 @@ mod tests {
 
         ctx.time = 0.0;
         let first = f(&ctx, std::ptr::null());
-        assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+        assert_eq!(first.to_bits(), 320.0_f64.to_bits());
         filters[0].commit();
 
         ctx.time = 0.5;
         let mid = f(&ctx, std::ptr::null());
-        assert!((mid - 311.0).abs() < 1.0e-12, "mid slew: {mid}");
+        assert!((mid - 320.0).abs() < 1.0e-12, "mid slew: {mid}");
         filters[0].commit();
 
         ctx.time = 1.0;
         let done = f(&ctx, std::ptr::null());
-        assert!((done - 312.0).abs() < 1.0e-12, "done slew: {done}");
+        assert!((done - 320.0).abs() < 1.0e-12, "done slew: {done}");
     }
 
     #[test]

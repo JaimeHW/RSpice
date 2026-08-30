@@ -1001,6 +1001,9 @@ impl VmContext {
                     _ => {}
                 }
             }
+            for filter in &mut self.slew_filters {
+                filter.promote_operating_point_candidate();
+            }
         } else if self.integration != coefficients {
             // A candidate evaluated with different companion coefficients
             // cannot be accepted under the new integration rule.
@@ -1248,7 +1251,12 @@ impl VmContext {
 mod tests {
     use super::{IntegrationCoefficients, VerilogAEvaluationMode, VmContext};
     use crate::laplace::StateSpaceFilter;
+    use crate::timing_contract::SlewRateMagnitudes;
     use crate::zfilter::ZiFilter;
+
+    fn slew_rates(rise: f64, fall: f64) -> SlewRateMagnitudes {
+        SlewRateMagnitudes { rise, fall }
+    }
 
     #[test]
     fn limiter_mode_defaults_are_analysis_safe() {
@@ -1320,9 +1328,9 @@ mod tests {
         context.transition_filters[0].eval(2.0, 0.5, 0.0, 1.0, 1.0);
 
         context.allocate_slew_filters(1);
-        context.slew_filters[0].eval(1.0, 1.0, 0.5, 0.5);
+        context.slew_filters[0].eval(1.0, 1.0, slew_rates(0.5, 0.5));
         context.slew_filters[0].commit();
-        context.slew_filters[0].eval(2.0, 1.5, 0.5, 0.5);
+        context.slew_filters[0].eval(2.0, 1.5, slew_rates(0.5, 0.5));
 
         context.allocate_cross_detectors(1);
         context.cross_detectors[0].eval(-1.0, 0.0, 0);
@@ -1464,7 +1472,7 @@ mod tests {
         context.begin_stateful_evaluation();
         context.delay_buffers[0].eval(1.0, 1.0, 0.25);
         context.transition_filters[0].eval(1.0, 1.0, 0.0, 0.0, 0.0);
-        context.slew_filters[0].eval(1.0, 1.0, 10.0, 10.0);
+        context.slew_filters[0].eval(1.0, 1.0, slew_rates(10.0, 10.0));
         context.cross_detectors[0].eval(-1.0, 1.0, 0);
         context.laplace_filters[0].step(1.0, 0.25).unwrap();
         context.advance_state().unwrap();
@@ -1473,7 +1481,7 @@ mod tests {
         context.begin_stateful_evaluation();
         context.delay_buffers[0].eval(1.0, 9.0, 0.25);
         context.transition_filters[0].eval(9.0, 1.0, 0.0, 0.0, 0.0);
-        context.slew_filters[0].eval(9.0, 1.0, 10.0, 10.0);
+        context.slew_filters[0].eval(9.0, 1.0, slew_rates(10.0, 10.0));
         context.cross_detectors[0].eval(1.0, 1.0, 0);
         context.laplace_filters[0].step(9.0, 0.25).unwrap();
         context.request_timer_event(2.0);
@@ -1504,7 +1512,7 @@ mod tests {
         context.begin_stateful_evaluation();
         context.delay_buffers[0].eval(1.0, 2.0, 0.25);
         context.transition_filters[0].eval(3.0, f64::NAN, 0.0, 1.0, 1.0);
-        context.slew_filters[0].eval(4.0, 1.0, 10.0, 10.0);
+        context.slew_filters[0].eval(4.0, 1.0, slew_rates(10.0, 10.0));
         context.cross_detectors[0].eval(1.0, 1.0, 0);
         context.laplace_filters[0].step(5.0, 0.25).unwrap();
 
@@ -1556,7 +1564,7 @@ mod tests {
         context.allocate_transition_filters(1);
         context.transition_filters[0].eval(3.0, 0.25, 0.0, 1.0, 1.0);
         context.allocate_slew_filters(1);
-        context.slew_filters[0].eval(5.0, 0.25, 1.0, 1.0);
+        context.slew_filters[0].eval(5.0, 0.25, slew_rates(1.0, 1.0));
         context.allocate_cross_detectors(1);
         context.cross_detectors[0].eval(1.0, 0.25, 0);
         context

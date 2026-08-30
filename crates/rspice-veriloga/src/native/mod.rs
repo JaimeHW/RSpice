@@ -16,7 +16,8 @@ pub(crate) use crate::jit::{assignment, expr, model_plan, ssa, value_cache};
 pub use crate::jit::{JitError, JitResult};
 pub use abi::{
     EvalContext, rspice_absdelay_state_native, rspice_laplace_derivative_native,
-    rspice_laplace_step_native, rspice_limexp, rspice_limited_exp, rspice_slew_state_native,
+    rspice_laplace_step_native, rspice_limexp, rspice_limited_exp, rspice_slew_derivative_native,
+    rspice_slew_state_native,
     rspice_timer_state_native, rspice_transition_state_native, rspice_zi_derivative_native,
     rspice_zi_step_native,
 };

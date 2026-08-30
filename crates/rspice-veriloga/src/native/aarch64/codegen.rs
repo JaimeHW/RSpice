@@ -25,9 +25,10 @@ use crate::native::abi::{
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
     rspice_native_param_given_error, rspice_native_port_connected_error,
     rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_slew_derivative_native, rspice_slew_state_native,
+    rspice_table_derivative_native, rspice_table_lookup_native, rspice_tan, rspice_tanh,
+    rspice_timer_state_native, rspice_transition_state_native, rspice_zi_derivative_native,
+    rspice_zi_step_native,
 };
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
@@ -1298,6 +1299,12 @@ impl FunctionCompiler {
                 3,
                 filter_id,
                 rspice_slew_state_native as *const () as usize,
+            )?,
+            NativeOp::SlewStateDerivative(filter_id) => self.emit_operand_context_helper(
+                prepared,
+                6,
+                filter_id,
+                rspice_slew_derivative_native as *const () as usize,
             )?,
             NativeOp::AbsDelayState(buffer_id) => self.emit_operand_context_helper(
                 prepared,
@@ -2844,6 +2851,69 @@ fn register_allocation_error(detail: impl Into<String>) -> JitError {
     }
 }
 
+#[cfg(test)]
+mod cross_target_contract_tests {
+    use super::compile_value_function;
+    use crate::native::aarch64::calling_convention::HOST_ABI;
+    use crate::native::aarch64::encoder::{A64Encoder, XReg};
+    use crate::native::aarch64::verifier::verify_exact_function;
+    use crate::native::expr::{NativeOp, NativeProgram};
+
+    fn instruction_occurrences(bytes: &[u8], instruction: &[u8]) -> usize {
+        bytes
+            .chunks_exact(std::mem::size_of::<u32>())
+            .filter(|candidate| *candidate == instruction)
+            .count()
+    }
+
+    #[test]
+    fn slew_derivative_encodes_one_signed_six_operand_helper_call() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::Const(10.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(2.0),
+                NativeOp::Const(-0.25),
+                NativeOp::Const(-2.0),
+                NativeOp::Const(0.5),
+                NativeOp::SlewStateDerivative(0),
+            ],
+            6,
+            Vec::new(),
+            Vec::new(),
+        );
+        let bytes = compile_value_function(&program)
+            .expect("encode AArch64 signed slew derivative helper call");
+        verify_exact_function(&bytes, "signed slew derivative helper call")
+            .expect("verify AArch64 signed slew derivative helper call");
+
+        // Six f64 operands require one 48-byte, already 16-byte-aligned call
+        // frame. Seeing exactly one allocate/call/restore sequence makes the
+        // operand-count ABI executable on every host that can run the checked
+        // AArch64 encoder, without requiring an AArch64 emulator.
+        let mut signatures = A64Encoder::new();
+        signatures
+            .sub_x_imm(XReg::Sp, XReg::Sp, 48)
+            .expect("encode expected call-frame allocation");
+        signatures.blr(HOST_ABI.indirect_call_scratch);
+        signatures
+            .add_x_imm(XReg::Sp, XReg::Sp, 48)
+            .expect("encode expected call-frame restoration");
+        let signatures = signatures.into_bytes();
+        for (label, instruction) in [
+            ("48-byte allocation", &signatures[0..4]),
+            ("indirect helper call", &signatures[4..8]),
+            ("48-byte restoration", &signatures[8..12]),
+        ] {
+            assert_eq!(
+                instruction_occurrences(&bytes, instruction),
+                1,
+                "AArch64 slew derivative must contain exactly one {label}"
+            );
+        }
+    }
+}
+
 #[cfg(all(test, target_arch = "aarch64"))]
 mod tests {
     use super::{FunctionCompiler, PreparedInstruction};
@@ -3432,6 +3502,49 @@ mod tests {
 
         let ddt = program(vec![NativeOp::Const(1.0), NativeOp::DdtState(0)], 1);
         assert_eq!(execute(&ddt, &[]), 0.0);
+    }
+
+    #[test]
+    fn slew_derivative_helper_preserves_signed_rate_derivatives() {
+        let mut filters = [crate::vm::SlewFilter::default()];
+        let mut context = EvalContext::empty_for_test();
+        context.analysis_type = 2;
+        context.slew_filters = filters.as_mut_ptr();
+        context.slew_filters_len = filters.len();
+
+        let seed = program(
+            vec![
+                NativeOp::Const(0.0),
+                NativeOp::Const(2.0),
+                NativeOp::Const(-2.0),
+                NativeOp::SlewState(0),
+            ],
+            3,
+        );
+        assert_eq!(execute_with_context(&seed, &context, &[]), 0.0);
+        filters[0].commit();
+        let accepted = filters[0].checkpoint();
+        context.time = 1.0;
+
+        let derivative = program(
+            vec![
+                NativeOp::Const(10.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(2.0),
+                NativeOp::Const(-0.25),
+                NativeOp::Const(-2.0),
+                NativeOp::Const(0.5),
+                NativeOp::SlewStateDerivative(0),
+            ],
+            6,
+        );
+        assert_eq!(
+            execute_with_context(&derivative, &context, &[]).to_bits(),
+            (-0.25_f64).to_bits(),
+            "the rising branch must preserve the source-level derivative sign"
+        );
+        assert_eq!(filters[0].checkpoint(), accepted);
+        assert!(context.take_runtime_error().is_none());
     }
 
     #[cfg(target_arch = "aarch64")]

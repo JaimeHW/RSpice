@@ -61,6 +61,29 @@ impl LaplaceSiteId {
     }
 }
 
+/// Stable identity of one logical `slew` operator in the source tree. The
+/// primal expression and its generated Jacobian action retain this identity
+/// so both programs address one transactional filter candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SlewSiteId {
+    pub source: u32,
+    pub start: u32,
+    pub end: u32,
+    /// Deterministic preorder ordinal used to disambiguate equal spans.
+    pub ordinal: u32,
+}
+
+impl SlewSiteId {
+    pub fn from_span(span: crate::source::Span) -> Self {
+        Self {
+            source: span.source.raw(),
+            start: span.start,
+            end: span.end,
+            ordinal: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ZiPolynomialDefinition {
     Coefficients(Vec<IrExpr>),
@@ -352,9 +375,20 @@ pub enum IrExpr {
     /// Args: (expr, max_pos_slew, max_neg_slew)
     /// Limits the rate of change of the signal
     Slew {
+        site: SlewSiteId,
         expr: Box<IrExpr>,
         max_pos_slew: Option<Box<IrExpr>>,
         max_neg_slew: Option<Box<IrExpr>>,
+    },
+    /// Exact local derivative action of one `slew` candidate.
+    SlewDerivative {
+        site: SlewSiteId,
+        input: Box<IrExpr>,
+        input_derivative: Box<IrExpr>,
+        max_pos_slew: Option<Box<IrExpr>>,
+        max_pos_slew_derivative: Option<Box<IrExpr>>,
+        max_neg_slew: Option<Box<IrExpr>>,
+        max_neg_slew_derivative: Option<Box<IrExpr>>,
     },
     /// cross - threshold crossing detection
     /// Args: (expr, direction, time_tol, expr_tol)
@@ -739,8 +773,10 @@ impl DeviceIR {
         Self::convert_statements(&module.statements, &converter, &mut items)?;
         let mut zi_site_ordinal = 0_u32;
         let mut laplace_site_ordinal = 0_u32;
+        let mut slew_site_ordinal = 0_u32;
         autodiff::assign_zi_site_ordinals_in_items(&mut items, &mut zi_site_ordinal);
         autodiff::assign_laplace_site_ordinals_in_items(&mut items, &mut laplace_site_ordinal);
+        autodiff::assign_slew_site_ordinals_in_items(&mut items, &mut slew_site_ordinal);
         ir.assignments = items;
 
         // Pre-pass over contributions: parse branch refs and register a
@@ -859,6 +895,7 @@ impl DeviceIR {
             let mut expr = converter.convert_contribution(&contrib.expression)?;
             autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
             autodiff::assign_laplace_site_ordinals(&mut expr, &mut laplace_site_ordinal);
+            autodiff::assign_slew_site_ordinals(&mut expr, &mut slew_site_ordinal);
             let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
@@ -1184,7 +1221,6 @@ impl DeviceIR {
                     contains_ddt(expr) || contains_ddt(delay_time)
                 }
                 IrExpr::Transition { expr, .. }
-                | IrExpr::Slew { expr, .. }
                 | IrExpr::LaplaceZP { expr, .. }
                 | IrExpr::LaplaceND { expr, .. }
                 | IrExpr::LaplaceZPDerivative { expr, .. }
@@ -1192,6 +1228,32 @@ impl DeviceIR {
                 | IrExpr::ZiFilter { expr, .. }
                 | IrExpr::ZiFilterDerivative { expr, .. }
                 | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
+                IrExpr::Slew {
+                    expr,
+                    max_pos_slew,
+                    max_neg_slew,
+                    ..
+                } => {
+                    contains_ddt(expr)
+                        || max_pos_slew.as_deref().is_some_and(contains_ddt)
+                        || max_neg_slew.as_deref().is_some_and(contains_ddt)
+                }
+                IrExpr::SlewDerivative {
+                    input,
+                    input_derivative,
+                    max_pos_slew,
+                    max_pos_slew_derivative,
+                    max_neg_slew,
+                    max_neg_slew_derivative,
+                    ..
+                } => {
+                    contains_ddt(input)
+                        || contains_ddt(input_derivative)
+                        || max_pos_slew.as_deref().is_some_and(contains_ddt)
+                        || max_pos_slew_derivative.as_deref().is_some_and(contains_ddt)
+                        || max_neg_slew.as_deref().is_some_and(contains_ddt)
+                        || max_neg_slew_derivative.as_deref().is_some_and(contains_ddt)
+                }
                 IrExpr::Cross {
                     expr,
                     time_tol,
@@ -1830,7 +1892,6 @@ pub mod autodiff {
             IrExpr::TableLookup { input, .. } => recurse(input),
             IrExpr::AbsDelay { expr, .. } => recurse(expr),
             IrExpr::Transition { expr, .. }
-            | IrExpr::Slew { expr, .. }
             | IrExpr::LaplaceZP { expr, .. }
             | IrExpr::LaplaceND { expr, .. }
             | IrExpr::LaplaceZPDerivative { expr, .. }
@@ -1838,6 +1899,32 @@ pub mod autodiff {
             | IrExpr::ZiFilter { expr, .. }
             | IrExpr::ZiFilterDerivative { expr, .. }
             | IrExpr::Ddx { expr, .. } => recurse(expr),
+            IrExpr::Slew {
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+                ..
+            } => {
+                recurse(expr)
+                    | max_pos_slew.as_deref().map_or(0, recurse)
+                    | max_neg_slew.as_deref().map_or(0, recurse)
+            }
+            IrExpr::SlewDerivative {
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+                ..
+            } => {
+                recurse(input)
+                    | recurse(input_derivative)
+                    | max_pos_slew.as_deref().map_or(0, recurse)
+                    | max_pos_slew_derivative.as_deref().map_or(0, recurse)
+                    | max_neg_slew.as_deref().map_or(0, recurse)
+                    | max_neg_slew_derivative.as_deref().map_or(0, recurse)
+            }
             IrExpr::DdtCompanion(e) | IrExpr::IdtCompanion(e) => recurse(e),
             IrExpr::TableDerivative { input, .. } => recurse(input),
             // Event detectors and noise sources are piecewise constant
@@ -2525,13 +2612,36 @@ pub mod autodiff {
                 fall_time: fall_time.as_ref().map(|e| Box::new(map_expr(e, f))),
             },
             IrExpr::Slew {
+                site,
                 expr,
                 max_pos_slew,
                 max_neg_slew,
             } => IrExpr::Slew {
+                site: *site,
                 expr: Box::new(map_expr(expr, f)),
                 max_pos_slew: max_pos_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
                 max_neg_slew: max_neg_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
+            },
+            IrExpr::SlewDerivative {
+                site,
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+            } => IrExpr::SlewDerivative {
+                site: *site,
+                input: Box::new(map_expr(input, f)),
+                input_derivative: Box::new(map_expr(input_derivative, f)),
+                max_pos_slew: max_pos_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
+                max_pos_slew_derivative: max_pos_slew_derivative
+                    .as_ref()
+                    .map(|e| Box::new(map_expr(e, f))),
+                max_neg_slew: max_neg_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
+                max_neg_slew_derivative: max_neg_slew_derivative
+                    .as_ref()
+                    .map(|e| Box::new(map_expr(e, f))),
             },
             IrExpr::Ddx { expr, pos, neg } => IrExpr::Ddx {
                 expr: Box::new(map_expr(expr, f)),
@@ -2741,6 +2851,45 @@ pub mod autodiff {
                 IrAssignmentItem::Loop { condition, body } => {
                     assign_laplace_site_ordinals(condition, next);
                     assign_laplace_site_ordinals_in_items(body, next);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn assign_slew_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
+        *expr = map_expr(expr, &mut |node| match node {
+            IrExpr::Slew {
+                site,
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+            } => {
+                let mut assigned = *site;
+                assigned.ordinal = *next;
+                *next = next.checked_add(1).expect("slew site ordinal overflow");
+                Some(IrExpr::Slew {
+                    site: assigned,
+                    expr: expr.clone(),
+                    max_pos_slew: max_pos_slew.clone(),
+                    max_neg_slew: max_neg_slew.clone(),
+                })
+            }
+            _ => None,
+        });
+    }
+
+    pub(crate) fn assign_slew_site_ordinals_in_items(
+        items: &mut [IrAssignmentItem],
+        next: &mut u32,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assignment) => {
+                    assign_slew_site_ordinals(&mut assignment.expr, next);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    assign_slew_site_ordinals(condition, next);
+                    assign_slew_site_ordinals_in_items(body, next);
                 }
             }
         }
@@ -3212,11 +3361,56 @@ pub mod autodiff {
                 )
             }
 
-            // Smoothing filters pass DC small-signal through; their
-            // transient Jacobian approximation keeps the residual exact
-            IrExpr::Transition { expr, .. }
-            | IrExpr::Slew { expr, .. }
-            | IrExpr::AbsDelay { expr, .. } => differentiate(expr),
+            // Smoothing and delay operators pass DC small-signal through.
+            IrExpr::Transition { expr, .. } | IrExpr::AbsDelay { expr, .. } => differentiate(expr),
+
+            // `slew` has a branch-exact transient derivative: the first
+            // argument tracks directly when unsaturated, while a saturated
+            // candidate depends on the active rate operand and elapsed time.
+            IrExpr::Slew {
+                site,
+                expr,
+                max_pos_slew,
+                max_neg_slew,
+            } => IrExpr::SlewDerivative {
+                site: *site,
+                input: expr.clone(),
+                input_derivative: Box::new(differentiate(expr)),
+                max_pos_slew: max_pos_slew.clone(),
+                max_pos_slew_derivative: max_pos_slew
+                    .as_deref()
+                    .map(|rate| Box::new(differentiate(rate))),
+                max_neg_slew: max_neg_slew.clone(),
+                max_neg_slew_derivative: max_neg_slew
+                    .as_deref()
+                    .map(|rate| Box::new(differentiate(rate))),
+            },
+            // The same read-only branch action also represents higher fixed-
+            // branch derivatives. Preserve the primal branch operands and
+            // differentiate only the derivative payloads. This avoids the
+            // incorrect assumption that a derivative of a slew Jacobian is
+            // always zero when a dynamic rate is nonlinear.
+            IrExpr::SlewDerivative {
+                site,
+                input,
+                input_derivative,
+                max_pos_slew,
+                max_pos_slew_derivative,
+                max_neg_slew,
+                max_neg_slew_derivative,
+            } => IrExpr::SlewDerivative {
+                site: *site,
+                input: input.clone(),
+                input_derivative: Box::new(differentiate(input_derivative)),
+                max_pos_slew: max_pos_slew.clone(),
+                max_pos_slew_derivative: max_pos_slew_derivative
+                    .as_deref()
+                    .map(|derivative| Box::new(differentiate(derivative))),
+                max_neg_slew: max_neg_slew.clone(),
+                max_neg_slew_derivative: max_neg_slew_derivative
+                    .as_deref()
+                    .map(|derivative| Box::new(differentiate(derivative))),
+            },
 
             // Sampled-data filters have a time-dependent exact Jacobian:
             // H(1) in equilibrium, b0/a0 on an edge, and zero while holding.
