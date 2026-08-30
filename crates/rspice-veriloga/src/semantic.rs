@@ -766,6 +766,15 @@ impl SemanticAnalyzer {
         // localparam values so array bounds may reference them (their full
         // lowering to computed variables happens in Phase 9)
         for localparam in &module.localparams {
+            if !localparam.dimensions.is_empty() {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "localparam array '{}' is retained with its declared dimensions, but array-valued localparam storage and indexing are not implemented",
+                        localparam.name
+                    )),
+                    localparam.span,
+                )));
+            }
             if let Some(default) = &localparam.default {
                 if let Some(value) = self.eval_const(default) {
                     self.param_consts.insert(localparam.name.clone(), value);

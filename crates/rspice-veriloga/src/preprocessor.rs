@@ -278,6 +278,76 @@ impl PreprocessorError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacroArgumentDelimiter {
+    Invocation,
+    Parenthesis,
+    Brace,
+    Bracket,
+}
+
+impl MacroArgumentDelimiter {
+    const fn opening(self) -> char {
+        match self {
+            Self::Invocation | Self::Parenthesis => '(',
+            Self::Brace => '{',
+            Self::Bracket => '[',
+        }
+    }
+
+    const fn closing(self) -> char {
+        match self {
+            Self::Invocation | Self::Parenthesis => ')',
+            Self::Brace => '}',
+            Self::Bracket => ']',
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MacroArgumentParseError {
+    MissingInvocationClose,
+    UnterminatedString,
+    UnmatchedClosing(char),
+    MismatchedClosing {
+        found: char,
+        open: MacroArgumentDelimiter,
+    },
+    Unclosed(MacroArgumentDelimiter),
+}
+
+impl std::fmt::Display for MacroArgumentParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingInvocationClose => {
+                write!(f, "macro invocation is missing its closing ')'")
+            }
+            Self::UnterminatedString => {
+                write!(
+                    f,
+                    "macro invocation contains an unterminated string literal"
+                )
+            }
+            Self::UnmatchedClosing(found) => write!(
+                f,
+                "macro invocation contains unmatched closing delimiter '{found}'"
+            ),
+            Self::MismatchedClosing { found, open } => write!(
+                f,
+                "macro invocation closes '{}' with '{found}'; expected '{}'",
+                open.opening(),
+                open.closing()
+            ),
+            Self::Unclosed(open) => write!(
+                f,
+                "macro invocation has unclosed delimiter '{}'; expected '{}'",
+                open.opening(),
+                open.closing()
+            ),
+        }
+    }
+}
+
 /// Macro definition with optional parameters
 #[derive(Debug, Clone)]
 pub struct MacroDef {
@@ -1391,11 +1461,17 @@ impl Preprocessor {
                                     macro_def.params.len()
                                 ),
                                 self.current_file.clone(),
-                                0,
+                                line_num,
                             ));
                         }
                         chars.next(); // consume '('
-                        let args = Self::parse_macro_args(&mut chars);
+                        let args = Self::parse_macro_args(&mut chars).map_err(|error| {
+                            PreprocessorError::new(
+                                format!("Malformed arguments for macro `{}: {error}", name),
+                                self.current_file.clone(),
+                                line_num,
+                            )
+                        })?;
                         if args.len() != macro_def.params.len() {
                             return Err(PreprocessorError::new(
                                 format!(
@@ -1405,7 +1481,7 @@ impl Preprocessor {
                                     args.len()
                                 ),
                                 self.current_file.clone(),
-                                0,
+                                line_num,
                             ));
                         }
                         let remaining = max_expanded_bytes.saturating_sub(result.len());
@@ -1447,19 +1523,22 @@ impl Preprocessor {
     }
 
     /// Parse macro arguments from function-like invocation
-    fn parse_macro_args(chars: &mut std::iter::Peekable<std::str::Chars>) -> Vec<String> {
+    fn parse_macro_args(
+        chars: &mut std::iter::Peekable<std::str::Chars>,
+    ) -> Result<Vec<String>, MacroArgumentParseError> {
         let mut args = Vec::new();
         let mut current_arg = String::new();
-        let mut paren_depth = 1;
+        let mut delimiters = vec![MacroArgumentDelimiter::Invocation];
         let mut in_string = false;
 
         while let Some(ch) = chars.next() {
             if in_string {
                 current_arg.push(ch);
                 if ch == '\\' {
-                    if let Some(next) = chars.next() {
-                        current_arg.push(next);
-                    }
+                    let Some(next) = chars.next() else {
+                        return Err(MacroArgumentParseError::UnterminatedString);
+                    };
+                    current_arg.push(next);
                 } else if ch == '"' {
                     in_string = false;
                 }
@@ -1471,18 +1550,35 @@ impl Preprocessor {
                     current_arg.push(ch);
                 }
                 '(' => {
-                    paren_depth += 1;
+                    delimiters.push(MacroArgumentDelimiter::Parenthesis);
                     current_arg.push(ch);
                 }
-                ')' => {
-                    paren_depth -= 1;
-                    if paren_depth == 0 {
+                '{' => {
+                    delimiters.push(MacroArgumentDelimiter::Brace);
+                    current_arg.push(ch);
+                }
+                '[' => {
+                    delimiters.push(MacroArgumentDelimiter::Bracket);
+                    current_arg.push(ch);
+                }
+                ')' | '}' | ']' => {
+                    let Some(open) = delimiters.last().copied() else {
+                        return Err(MacroArgumentParseError::UnmatchedClosing(ch));
+                    };
+                    if open.closing() != ch {
+                        if open == MacroArgumentDelimiter::Invocation {
+                            return Err(MacroArgumentParseError::UnmatchedClosing(ch));
+                        }
+                        return Err(MacroArgumentParseError::MismatchedClosing { found: ch, open });
+                    }
+                    delimiters.pop();
+                    if open == MacroArgumentDelimiter::Invocation {
                         args.push(current_arg.trim().to_string());
-                        break;
+                        return Ok(args);
                     }
                     current_arg.push(ch);
                 }
-                ',' if paren_depth == 1 => {
+                ',' if delimiters.as_slice() == [MacroArgumentDelimiter::Invocation] => {
                     args.push(current_arg.trim().to_string());
                     current_arg.clear();
                 }
@@ -1490,7 +1586,16 @@ impl Preprocessor {
             }
         }
 
-        args
+        if in_string {
+            return Err(MacroArgumentParseError::UnterminatedString);
+        }
+        match delimiters.last().copied() {
+            Some(MacroArgumentDelimiter::Invocation) => {
+                Err(MacroArgumentParseError::MissingInvocationClose)
+            }
+            Some(open) => Err(MacroArgumentParseError::Unclosed(open)),
+            None => Err(MacroArgumentParseError::MissingInvocationClose),
+        }
     }
 }
 
@@ -1536,6 +1641,123 @@ mod tests {
     fn function_like_macro_nested_parens() {
         let out = pp("`define SQ(x) ((x)*(x))\nv = `SQ(f(a,b));\n");
         assert!(out.contains("v = ((f(a,b))*(f(a,b)));"), "got: {out}");
+    }
+
+    #[test]
+    fn function_like_macro_array_literal_is_one_argument() {
+        let out = pp("`define KEEP(x) x\nv = `KEEP({1.0, 2.0, 3.0});\n");
+        assert!(out.contains("v = {1.0, 2.0, 3.0};"), "got: {out}");
+    }
+
+    #[test]
+    fn function_like_macro_preserves_nested_delimiter_commas() {
+        let out = pp("`define PAIR(a,b) first=a; second=b\n\
+             `PAIR({f(1, 2), [3, {4, 5}]}, table[{6, 7}, g(8, 9)]);\n");
+        assert!(
+            out.contains("first={f(1, 2), [3, {4, 5}]}; second=table[{6, 7}, g(8, 9)];"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn function_like_macro_quoted_delimiters_commas_and_escapes_are_literal() {
+        let out = pp(r#"`define KEEP(x) x
+value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
+"#);
+        assert!(
+            out.contains(r#"value = "a, \"quoted\", {braces}, [brackets], (parentheses)";"#),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn multiline_balanced_array_arguments_expand_atomically() {
+        let out = pp("`define PAIR(a,b) first=a; second=b\n\
+             `PAIR({1.0,\n 2.0}, table[3,\n 4]);\n");
+        let normalized = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            normalized.contains("first={1.0, 2.0}; second=table[3, 4];"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn malformed_macro_argument_delimiters_fail_closed() {
+        let cases = [
+            ("value = `KEEP(1});\n", "unmatched closing delimiter '}'"),
+            ("value = `KEEP(1]);\n", "unmatched closing delimiter ']'"),
+            ("value = `KEEP({1]);\n", "closes '{' with ']'; expected '}'"),
+            ("value = `KEEP([1});\n", "closes '[' with '}'; expected ']'"),
+            (
+                "value = `KEEP({1, 2\n",
+                "unclosed delimiter '{'; expected '}'",
+            ),
+            (
+                "value = `KEEP([1, 2\n",
+                "unclosed delimiter '['; expected ']'",
+            ),
+        ];
+
+        for (invocation, expected) in cases {
+            let source = format!("`define KEEP(x) x\n{invocation}");
+            let error = Preprocessor::new()
+                .preprocess_source(&source)
+                .expect_err("malformed delimiters must not be expanded");
+            assert_eq!(error.line, 2, "wrong source line for {invocation:?}");
+            assert!(
+                error.message.contains(expected),
+                "unexpected diagnostic for {invocation:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_unused_macro_argument_cannot_disappear() {
+        let error = Preprocessor::new()
+            .preprocess_source("`define FIRST(used,unused) used\nvalue = `FIRST(1, {2]);\n")
+            .expect_err("an invalid unused argument must still be parsed");
+        assert_eq!(error.line, 2);
+        assert!(
+            error.message.contains("closes '{' with ']'; expected '}'"),
+            "unexpected diagnostic: {error}"
+        );
+    }
+
+    #[test]
+    fn unterminated_macro_invocations_report_the_invocation_line() {
+        let cases = [
+            ("value = `KEEP(1\n", "missing its closing ')'"),
+            (
+                "value = `KEEP(\"unterminated\n",
+                "unterminated string literal",
+            ),
+        ];
+        for (invocation, expected) in cases {
+            let source = format!("`define KEEP(x) x\n{invocation}");
+            let error = Preprocessor::new()
+                .preprocess_source(&source)
+                .expect_err("unterminated invocation must fail");
+            assert_eq!(error.line, 2, "wrong source line for {invocation:?}");
+            assert!(
+                error.message.contains(expected),
+                "unexpected diagnostic for {invocation:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_and_wrong_macro_arity_report_the_invocation_line() {
+        let missing = Preprocessor::new()
+            .preprocess_source("`define KEEP(x) x\nvalue = `KEEP;\n")
+            .expect_err("missing argument list must fail");
+        assert_eq!(missing.line, 2);
+        assert!(missing.message.contains("none were supplied"));
+
+        let wrong = Preprocessor::new()
+            .preprocess_source("`define PAIR(a,b) a+b\nvalue = `PAIR(1);\n")
+            .expect_err("wrong argument count must fail");
+        assert_eq!(wrong.line, 2);
+        assert!(wrong.message.contains("expects 2 argument(s), got 1"));
     }
 
     #[test]

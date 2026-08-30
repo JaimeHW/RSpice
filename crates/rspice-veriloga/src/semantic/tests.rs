@@ -218,6 +218,24 @@ fn localparam_becomes_computed_variable() {
 }
 
 #[test]
+fn dimensioned_localparam_fails_closed_instead_of_becoming_a_scalar() {
+    let error = analyze(&module_src(
+        r#"
+            localparam real taps[0:1] = {1.0, 2.0};
+            analog I(p, n) <+ taps[0] * V(p, n);
+            "#,
+    ))
+    .expect_err("dimensioned localparam storage is not implemented");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("localparam array 'taps'")
+            && message.contains("array-valued localparam storage and indexing are not implemented"),
+        "unexpected diagnostic: {message}"
+    );
+}
+
+#[test]
 fn variable_initializer_recorded() {
     let m = analyze_one(&module_src(
         r#"
