@@ -204,8 +204,8 @@ const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
         caret_back: 3,
     },
     FunctionEntry {
-        label: "thd(x)",
-        hint: "% distortion, one counted fundamental",
+        label: "thd(x, n, f0)",
+        hint: "% distortion; n and explicit f0 optional",
         insert: "thd()",
         caret_back: 1,
     },
