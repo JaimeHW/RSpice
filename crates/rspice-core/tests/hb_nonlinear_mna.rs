@@ -97,8 +97,8 @@ fn nonlinear_hb_retains_voltage_source_current_and_satisfies_kcl() {
     let voltage = coefficient(&result, "out", 1);
     let kcl = source.coefficients[1] + voltage / 1.0e3;
     assert!(
-        (voltage - Complex64::new(1.0, 0.0)).norm() <= 1.0e-9,
-        "ideal source fundamental must equal its authored 1 V peak: {voltage}"
+        (voltage - Complex64::new(0.0, -1.0)).norm() <= 1.0e-9,
+        "the cosine-reference phasor of an authored unit sine must be -j V: {voltage}"
     );
     assert!(
         kcl.norm() <= 1.0e-12,
