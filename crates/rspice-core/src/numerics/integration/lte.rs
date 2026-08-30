@@ -55,6 +55,39 @@ impl TransientLteReference {
     }
 }
 
+/// Current internal wire contract for accepted-boundary LTE estimator state.
+pub(crate) const ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION: u32 = 1;
+
+/// Versioned snapshot of the estimator state needed to make the next
+/// predictor and LTE decision identical after a transient restart.
+///
+/// This DTO deliberately represents only an accepted boundary. The
+/// candidate-local rollback checkpoint in [`LteEstimator`] is not persistent:
+/// capture and restore reject an estimator while such an attempt is active.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AcceptedBoundaryLteEstimatorCheckpoint {
+    pub(crate) version: u32,
+    pub(crate) solution_dimension: usize,
+    pub(crate) history_count: usize,
+    pub(crate) prev_solution: Vec<Value>,
+    pub(crate) prev_prev_solution: Vec<Value>,
+    pub(crate) prev_prev_prev_solution: Vec<Value>,
+    pub(crate) prev_dt: Value,
+    pub(crate) prev_prev_dt: Value,
+    pub(crate) reltol: Value,
+    pub(crate) abstol: Value,
+    pub(crate) reference: TransientLteReference,
+    pub(crate) accepted_reference_solution: Vec<Value>,
+    pub(crate) signal_global_reference: Value,
+    pub(crate) signal_local_reference: Vec<Value>,
+    pub(crate) method_order: u32,
+    pub(crate) xyce_order_two_difference: Vec<Value>,
+    pub(crate) xyce_order_two_difference_dt: Value,
+    pub(crate) xyce_attempt_dt: Value,
+    pub(crate) xyce_attempt_prev_dt: Value,
+    pub(crate) xyce_attempt_prev_prev_dt: Value,
+}
+
 /// Local Truncation Error (LTE) estimator for adaptive timestep
 ///
 /// Uses difference between predicted and calculated values to estimate
@@ -104,6 +137,61 @@ pub struct LteEstimator {
     xyce_attempt_prev_dt: Value,
     xyce_attempt_prev_prev_dt: Value,
     xyce_attempt_checkpoint: Option<(Value, Value, Value, u8)>,
+}
+
+fn validate_finite_lte_values(values: &[Value], name: &str) -> Result<(), String> {
+    if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+        return Err(format!(
+            "accepted-boundary LTE {name} contains a non-finite value at index {index}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_lte_vector_shape(values: &[Value], expected: usize, name: &str) -> Result<(), String> {
+    if values.len() != expected {
+        return Err(format!(
+            "accepted-boundary LTE {name} has length {}; expected {expected}",
+            values.len()
+        ));
+    }
+    validate_finite_lte_values(values, name)
+}
+
+fn validate_canonical_zero_lte_value(value: Value, name: &str) -> Result<(), String> {
+    if value.to_bits() != 0.0_f64.to_bits() {
+        return Err(format!("accepted-boundary LTE {name} must be canonical +0"));
+    }
+    Ok(())
+}
+
+fn validate_positive_lte_value(value: Value, name: &str) -> Result<(), String> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!(
+            "accepted-boundary LTE {name} must be finite and positive"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_nonnegative_lte_value(value: Value, name: &str) -> Result<(), String> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(format!(
+            "accepted-boundary LTE {name} must be finite and nonnegative"
+        ));
+    }
+    if value == 0.0 {
+        validate_canonical_zero_lte_value(value, name)?;
+    }
+    Ok(())
+}
+
+fn lte_values_bit_equal(left: &[Value], right: &[Value]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.to_bits() == right.to_bits())
 }
 
 impl LteEstimator {
@@ -157,6 +245,331 @@ impl LteEstimator {
             xyce_attempt_prev_prev_dt: 0.0,
             xyce_attempt_checkpoint: None,
         }
+    }
+
+    /// Capture a restart snapshot at an accepted solution boundary.
+    ///
+    /// `latest_accepted_solution` is supplied independently by the caller so
+    /// capture cannot bless a stale or mismatched estimator history. Equality
+    /// is bit-exact, including the sign of zero.
+    pub(crate) fn capture_accepted_boundary_checkpoint(
+        &self,
+        latest_accepted_solution: &[Value],
+    ) -> Result<AcceptedBoundaryLteEstimatorCheckpoint, String> {
+        let checkpoint = AcceptedBoundaryLteEstimatorCheckpoint {
+            version: ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION,
+            solution_dimension: latest_accepted_solution.len(),
+            history_count: self.history_count,
+            prev_solution: self.prev_solution.clone(),
+            prev_prev_solution: self.prev_prev_solution.clone(),
+            prev_prev_prev_solution: self.prev_prev_prev_solution.clone(),
+            prev_dt: self.prev_dt,
+            prev_prev_dt: self.prev_prev_dt,
+            reltol: self.reltol,
+            abstol: self.abstol,
+            reference: self.reference,
+            accepted_reference_solution: self.accepted_reference_solution.clone(),
+            signal_global_reference: self.signal_global_reference,
+            signal_local_reference: self.signal_local_reference.clone(),
+            method_order: self.method_order,
+            xyce_order_two_difference: self.xyce_order_two_difference.clone(),
+            xyce_order_two_difference_dt: self.xyce_order_two_difference_dt,
+            xyce_attempt_dt: self.xyce_attempt_dt,
+            xyce_attempt_prev_dt: self.xyce_attempt_prev_dt,
+            xyce_attempt_prev_prev_dt: self.xyce_attempt_prev_prev_dt,
+        };
+        self.validate_accepted_boundary_checkpoint(&checkpoint, latest_accepted_solution)?;
+        Ok(checkpoint)
+    }
+
+    /// Validate an accepted-boundary snapshot against this estimator's
+    /// configured reference mode and the caller-owned accepted solution.
+    pub(crate) fn validate_accepted_boundary_checkpoint(
+        &self,
+        checkpoint: &AcceptedBoundaryLteEstimatorCheckpoint,
+        latest_accepted_solution: &[Value],
+    ) -> Result<(), String> {
+        if self.xyce_attempt_checkpoint.is_some() {
+            return Err(
+                "cannot validate or restore an LTE checkpoint while an Xyce attempt is active"
+                    .to_string(),
+            );
+        }
+        if checkpoint.version != ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION {
+            return Err(format!(
+                "unsupported accepted-boundary LTE checkpoint version {} (runtime requires {})",
+                checkpoint.version, ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION
+            ));
+        }
+        if checkpoint.reference != self.reference {
+            return Err(format!(
+                "accepted-boundary LTE reference mode mismatch: checkpoint {:?}, runtime {:?}",
+                checkpoint.reference, self.reference
+            ));
+        }
+        for (checkpoint_value, runtime_value, name) in [
+            (checkpoint.reltol, self.reltol, "relative tolerance"),
+            (checkpoint.abstol, self.abstol, "absolute tolerance"),
+        ] {
+            validate_positive_lte_value(checkpoint_value, name)?;
+            if checkpoint_value.to_bits() != runtime_value.to_bits() {
+                return Err(format!(
+                    "accepted-boundary LTE {name} mismatch: checkpoint {checkpoint_value}, runtime {runtime_value}"
+                ));
+            }
+        }
+        if checkpoint.history_count > 3 {
+            return Err(format!(
+                "accepted-boundary LTE history count {} exceeds the supported maximum of 3",
+                checkpoint.history_count
+            ));
+        }
+        if checkpoint.solution_dimension != latest_accepted_solution.len() {
+            return Err(format!(
+                "accepted-boundary LTE solution dimension {} does not match the caller's latest accepted solution dimension {}",
+                checkpoint.solution_dimension,
+                latest_accepted_solution.len()
+            ));
+        }
+        validate_finite_lte_values(latest_accepted_solution, "latest accepted solution")?;
+
+        let history_shapes = [
+            (
+                &checkpoint.prev_solution,
+                usize::from(checkpoint.history_count >= 1) * checkpoint.solution_dimension,
+                "latest accepted solution history",
+            ),
+            (
+                &checkpoint.prev_prev_solution,
+                usize::from(checkpoint.history_count >= 2) * checkpoint.solution_dimension,
+                "second accepted solution history",
+            ),
+            (
+                &checkpoint.prev_prev_prev_solution,
+                usize::from(checkpoint.history_count >= 3) * checkpoint.solution_dimension,
+                "third accepted solution history",
+            ),
+        ];
+        for (values, expected, name) in history_shapes {
+            validate_lte_vector_shape(values, expected, name)?;
+        }
+        if checkpoint.history_count != 0
+            && !lte_values_bit_equal(&checkpoint.prev_solution, latest_accepted_solution)
+        {
+            return Err(
+                "accepted-boundary LTE latest history does not equal the caller's accepted solution"
+                    .to_string(),
+            );
+        }
+
+        match checkpoint.history_count {
+            0 | 1 => {
+                validate_canonical_zero_lte_value(checkpoint.prev_dt, "previous timestep")?;
+                validate_canonical_zero_lte_value(
+                    checkpoint.prev_prev_dt,
+                    "second previous timestep",
+                )?;
+            }
+            2 => {
+                validate_positive_lte_value(checkpoint.prev_dt, "previous timestep")?;
+                validate_canonical_zero_lte_value(
+                    checkpoint.prev_prev_dt,
+                    "second previous timestep",
+                )?;
+            }
+            3 => {
+                validate_positive_lte_value(checkpoint.prev_dt, "previous timestep")?;
+                validate_positive_lte_value(checkpoint.prev_prev_dt, "second previous timestep")?;
+            }
+            _ => unreachable!("history count was bounded above"),
+        }
+
+        let has_accepted_reference = checkpoint.reference != TransientLteReference::PredictorLocal;
+        let expected_reference_len =
+            usize::from(has_accepted_reference) * checkpoint.solution_dimension;
+        validate_lte_vector_shape(
+            &checkpoint.accepted_reference_solution,
+            expected_reference_len,
+            "accepted LTE reference solution",
+        )?;
+        if has_accepted_reference
+            && !lte_values_bit_equal(
+                &checkpoint.accepted_reference_solution,
+                latest_accepted_solution,
+            )
+        {
+            return Err(
+                "accepted LTE reference solution does not equal the caller's accepted solution"
+                    .to_string(),
+            );
+        }
+
+        validate_nonnegative_lte_value(
+            checkpoint.signal_global_reference,
+            "signal-global LTE reference",
+        )?;
+        match checkpoint.reference {
+            TransientLteReference::SignalGlobal => {
+                if !checkpoint.signal_local_reference.is_empty() {
+                    return Err(
+                        "signal-global LTE checkpoint contains signal-local references".to_string(),
+                    );
+                }
+                let accepted_max = latest_accepted_solution
+                    .iter()
+                    .map(|value| value.abs())
+                    .fold(0.0, Value::max);
+                if checkpoint.signal_global_reference < accepted_max {
+                    return Err(
+                        "signal-global LTE reference does not cover the latest accepted solution"
+                            .to_string(),
+                    );
+                }
+            }
+            TransientLteReference::SignalLocal => {
+                validate_canonical_zero_lte_value(
+                    checkpoint.signal_global_reference,
+                    "signal-global LTE reference",
+                )?;
+                validate_lte_vector_shape(
+                    &checkpoint.signal_local_reference,
+                    expected_reference_len,
+                    "signal-local LTE references",
+                )?;
+                for (index, (reference, accepted)) in checkpoint
+                    .signal_local_reference
+                    .iter()
+                    .zip(latest_accepted_solution)
+                    .enumerate()
+                {
+                    validate_nonnegative_lte_value(
+                        *reference,
+                        &format!("signal-local LTE reference {index}"),
+                    )?;
+                    if *reference < accepted.abs() {
+                        return Err(format!(
+                            "signal-local LTE reference {index} does not cover the latest accepted solution"
+                        ));
+                    }
+                }
+            }
+            TransientLteReference::PredictorLocal
+            | TransientLteReference::PointLocal
+            | TransientLteReference::PointGlobal => {
+                validate_canonical_zero_lte_value(
+                    checkpoint.signal_global_reference,
+                    "signal-global LTE reference",
+                )?;
+                if !checkpoint.signal_local_reference.is_empty() {
+                    return Err(
+                        "non-signal LTE checkpoint contains signal-local references".to_string()
+                    );
+                }
+            }
+        }
+
+        if !(1..=2).contains(&checkpoint.method_order) {
+            return Err(format!(
+                "accepted-boundary LTE method order {} is outside the supported range 1..=2",
+                checkpoint.method_order
+            ));
+        }
+        if checkpoint.xyce_order_two_difference.is_empty() {
+            validate_canonical_zero_lte_value(
+                checkpoint.xyce_order_two_difference_dt,
+                "order-two difference timestep",
+            )?;
+        } else {
+            if checkpoint.history_count != 3 {
+                return Err(
+                    "order-two LTE difference history requires three accepted solutions"
+                        .to_string(),
+                );
+            }
+            validate_lte_vector_shape(
+                &checkpoint.xyce_order_two_difference,
+                checkpoint.solution_dimension,
+                "order-two LTE difference history",
+            )?;
+            validate_positive_lte_value(
+                checkpoint.xyce_order_two_difference_dt,
+                "order-two difference timestep",
+            )?;
+        }
+
+        for (value, name) in [
+            (
+                checkpoint.xyce_attempt_dt,
+                "current OneStep psi coefficient",
+            ),
+            (
+                checkpoint.xyce_attempt_prev_dt,
+                "previous OneStep psi coefficient",
+            ),
+            (
+                checkpoint.xyce_attempt_prev_prev_dt,
+                "second previous OneStep psi coefficient",
+            ),
+        ] {
+            validate_nonnegative_lte_value(value, name)?;
+        }
+        if checkpoint.reference == TransientLteReference::PredictorLocal {
+            validate_canonical_zero_lte_value(
+                checkpoint.xyce_attempt_dt,
+                "current OneStep psi coefficient",
+            )?;
+            validate_canonical_zero_lte_value(
+                checkpoint.xyce_attempt_prev_dt,
+                "previous OneStep psi coefficient",
+            )?;
+            validate_canonical_zero_lte_value(
+                checkpoint.xyce_attempt_prev_prev_dt,
+                "second previous OneStep psi coefficient",
+            )?;
+        } else if (checkpoint.xyce_attempt_prev_dt > 0.0 && checkpoint.xyce_attempt_dt == 0.0)
+            || (checkpoint.xyce_attempt_prev_prev_dt > 0.0
+                && checkpoint.xyce_attempt_prev_dt == 0.0)
+        {
+            return Err(
+                "accepted-boundary OneStep psi coefficients have impossible zero provenance"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Restore an accepted-boundary snapshot after validating every field.
+    /// No estimator state is changed if validation fails.
+    pub(crate) fn restore_accepted_boundary_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedBoundaryLteEstimatorCheckpoint,
+        latest_accepted_solution: &[Value],
+    ) -> Result<(), String> {
+        self.validate_accepted_boundary_checkpoint(checkpoint, latest_accepted_solution)?;
+
+        self.prev_solution.clone_from(&checkpoint.prev_solution);
+        self.prev_prev_solution
+            .clone_from(&checkpoint.prev_prev_solution);
+        self.prev_prev_prev_solution
+            .clone_from(&checkpoint.prev_prev_prev_solution);
+        self.prev_dt = checkpoint.prev_dt;
+        self.prev_prev_dt = checkpoint.prev_prev_dt;
+        self.accepted_reference_solution
+            .clone_from(&checkpoint.accepted_reference_solution);
+        self.signal_global_reference = checkpoint.signal_global_reference;
+        self.signal_local_reference
+            .clone_from(&checkpoint.signal_local_reference);
+        self.history_count = checkpoint.history_count;
+        self.method_order = checkpoint.method_order;
+        self.xyce_order_two_difference
+            .clone_from(&checkpoint.xyce_order_two_difference);
+        self.xyce_order_two_difference_dt = checkpoint.xyce_order_two_difference_dt;
+        self.xyce_attempt_dt = checkpoint.xyce_attempt_dt;
+        self.xyce_attempt_prev_dt = checkpoint.xyce_attempt_prev_dt;
+        self.xyce_attempt_prev_prev_dt = checkpoint.xyce_attempt_prev_prev_dt;
+        debug_assert!(self.xyce_attempt_checkpoint.is_none());
+        Ok(())
     }
 
     #[inline]
@@ -617,6 +1030,10 @@ impl LteEstimator {
         if self.history_count < 3 {
             self.history_count += 1;
         }
+        // Every call to this shared record sink is an accepted boundary. Its
+        // pre-attempt rollback image is therefore no longer live state,
+        // including the force-accepted path that enters through `record()`.
+        self.xyce_attempt_checkpoint = None;
     }
 
     /// Estimate LTE using linear extrapolation vs actual value
@@ -1076,6 +1493,256 @@ mod lte_estimator_tests {
         estimator.seed_reference_prefix(initial, initial.len());
         estimator.record(accepted, 1.0);
         estimator
+    }
+
+    fn rich_accepted_boundary_estimator() -> (LteEstimator, Vec<Value>) {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalLocal,
+        );
+        estimator.seed_initial_solution(&[10.0, -2.0]);
+
+        estimator.begin_xyce_attempt(1.0, 1);
+        estimator.record_with_order(&[3.0, 4.0], 2, 1.0, 1);
+
+        estimator.begin_xyce_attempt(2.0, 2);
+        let latest = vec![5.0, 1.0];
+        estimator.record_with_order(&latest, latest.len(), 2.0, 2);
+        assert!(estimator.xyce_attempt_checkpoint.is_none());
+        (estimator, latest)
+    }
+
+    #[test]
+    fn accepted_boundary_checkpoint_restores_next_predictor_and_lte_bit_exactly() {
+        let (estimator, latest) = rich_accepted_boundary_estimator();
+        let checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&latest)
+            .expect("accepted-boundary state captures");
+        assert_eq!(
+            checkpoint.version,
+            ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION
+        );
+        assert_eq!(checkpoint.history_count, 3);
+        assert_eq!(checkpoint.xyce_order_two_difference, [-7.0, 6.0]);
+        assert_eq!(checkpoint.xyce_attempt_dt, 2.0);
+        assert_eq!(checkpoint.xyce_attempt_prev_dt, 1.0);
+        assert_eq!(checkpoint.xyce_attempt_prev_prev_dt, 0.0);
+
+        let expected_prediction = estimator
+            .predict_solution(0.75, IntegrationMethod::Trapezoidal, 2)
+            .expect("captured history predicts");
+        let expected_lte = estimator.estimate(&[5.25, 0.5], 0.75);
+        let expected_scale = estimator.recommend_scale(0.025);
+
+        let mut restored = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalLocal,
+        );
+        restored
+            .restore_accepted_boundary_checkpoint(&checkpoint, &latest)
+            .expect("validated checkpoint restores");
+        assert_eq!(
+            restored
+                .capture_accepted_boundary_checkpoint(&latest)
+                .expect("restored state recaptures"),
+            checkpoint
+        );
+        let restored_prediction = restored
+            .predict_solution(0.75, IntegrationMethod::Trapezoidal, 2)
+            .expect("restored history predicts");
+        assert!(lte_values_bit_equal(
+            &restored_prediction,
+            &expected_prediction
+        ));
+        let restored_lte = restored.estimate(&[5.25, 0.5], 0.75);
+        assert_eq!(restored_lte.0.to_bits(), expected_lte.0.to_bits());
+        assert_eq!(restored_lte.1, expected_lte.1);
+        assert_eq!(
+            restored.recommend_scale(0.025).to_bits(),
+            expected_scale.to_bits()
+        );
+    }
+
+    #[test]
+    fn accepted_boundary_checkpoint_rejects_active_attempts_without_mutation() {
+        let (mut source, latest) = rich_accepted_boundary_estimator();
+        let checkpoint = source
+            .capture_accepted_boundary_checkpoint(&latest)
+            .expect("idle source captures");
+        source.begin_xyce_attempt(3.0, 2);
+        let capture_error = source
+            .capture_accepted_boundary_checkpoint(&latest)
+            .expect_err("an in-flight rollback checkpoint must not serialize");
+        assert!(capture_error.contains("attempt is active"));
+
+        let mut target = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalLocal,
+        );
+        target.seed_initial_solution(&latest);
+        target.begin_xyce_attempt(0.5, 1);
+        let before = (
+            target.prev_solution.clone(),
+            target.xyce_attempt_dt,
+            target.xyce_attempt_prev_dt,
+            target.xyce_attempt_prev_prev_dt,
+            target.xyce_attempt_checkpoint,
+        );
+        let restore_error = target
+            .restore_accepted_boundary_checkpoint(&checkpoint, &latest)
+            .expect_err("restore into an in-flight estimator must fail closed");
+        assert!(restore_error.contains("attempt is active"));
+        assert_eq!(
+            (
+                target.prev_solution.clone(),
+                target.xyce_attempt_dt,
+                target.xyce_attempt_prev_dt,
+                target.xyce_attempt_prev_prev_dt,
+                target.xyce_attempt_checkpoint,
+            ),
+            before
+        );
+    }
+
+    #[test]
+    fn force_accepted_record_canonicalizes_attempt_state_before_capture() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalGlobal,
+        );
+        estimator.seed_initial_solution(&[0.0, 1.0]);
+        estimator.begin_xyce_attempt(0.5, 1);
+        assert!(estimator.xyce_attempt_checkpoint.is_some());
+
+        let latest = [2.0, -1.0];
+        estimator.record(&latest, 0.5);
+        assert!(estimator.xyce_attempt_checkpoint.is_none());
+        let checkpoint = estimator
+            .capture_accepted_boundary_checkpoint(&latest)
+            .expect("a force-accepted record must leave canonical boundary state");
+        assert_eq!(checkpoint.history_count, 2);
+        assert_eq!(checkpoint.xyce_attempt_dt, 0.5);
+        assert_eq!(checkpoint.xyce_attempt_prev_dt, 0.0);
+        assert_eq!(checkpoint.xyce_attempt_prev_prev_dt, 0.0);
+    }
+
+    #[test]
+    fn accepted_boundary_checkpoint_validates_shape_provenance_and_identity() {
+        let (estimator, latest) = rich_accepted_boundary_estimator();
+        let valid = estimator
+            .capture_accepted_boundary_checkpoint(&latest)
+            .expect("valid fixture captures");
+        let rejects = |checkpoint: &AcceptedBoundaryLteEstimatorCheckpoint, message: &str| {
+            let error = estimator
+                .validate_accepted_boundary_checkpoint(checkpoint, &latest)
+                .expect_err("corrupt accepted-boundary state must fail closed");
+            assert!(error.contains(message), "unexpected error: {error}");
+        };
+
+        let mut corrupt = valid.clone();
+        corrupt.version += 1;
+        rejects(&corrupt, "version");
+
+        let mut corrupt = valid.clone();
+        corrupt.history_count = 4;
+        rejects(&corrupt, "history count");
+
+        let mut corrupt = valid.clone();
+        corrupt.prev_prev_solution.pop();
+        rejects(&corrupt, "second accepted solution history");
+
+        let mut corrupt = valid.clone();
+        corrupt.prev_solution[0] = 6.0;
+        rejects(&corrupt, "does not equal");
+
+        let mut corrupt = valid.clone();
+        corrupt.prev_prev_dt = -0.0;
+        rejects(&corrupt, "positive");
+
+        let mut corrupt = valid.clone();
+        corrupt.accepted_reference_solution[0] = 6.0;
+        rejects(&corrupt, "reference solution does not equal");
+
+        let mut corrupt = valid.clone();
+        corrupt.signal_local_reference[0] = 4.0;
+        rejects(&corrupt, "does not cover");
+
+        let mut corrupt = valid.clone();
+        corrupt.method_order = 3;
+        rejects(&corrupt, "method order");
+
+        let mut corrupt = valid.clone();
+        corrupt.xyce_order_two_difference[0] = Value::NAN;
+        rejects(&corrupt, "non-finite");
+
+        let mut corrupt = valid.clone();
+        corrupt.xyce_attempt_prev_dt = 0.0;
+        corrupt.xyce_attempt_prev_prev_dt = 1.0;
+        rejects(&corrupt, "zero provenance");
+
+        let mut corrupt = valid;
+        corrupt.xyce_attempt_dt = Value::NAN;
+        rejects(&corrupt, "finite and nonnegative");
+
+        let latest_mismatch = [5.0, 1.5];
+        let error = estimator
+            .validate_accepted_boundary_checkpoint(
+                &estimator
+                    .capture_accepted_boundary_checkpoint(&latest)
+                    .expect("valid fixture captures"),
+                &latest_mismatch,
+            )
+            .expect_err("caller-owned accepted solution must be authoritative");
+        assert!(
+            error.contains("does not equal"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn accepted_boundary_checkpoint_enforces_reference_mode_and_canonical_empty_state() {
+        let empty = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PredictorLocal,
+        );
+        let latest = [1.0, -2.0];
+        let checkpoint = empty
+            .capture_accepted_boundary_checkpoint(&latest)
+            .expect("canonical empty estimator captures");
+        assert_eq!(checkpoint.solution_dimension, latest.len());
+        assert_eq!(checkpoint.history_count, 0);
+
+        let incompatible = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointLocal,
+        );
+        let error = incompatible
+            .validate_accepted_boundary_checkpoint(&checkpoint, &latest)
+            .expect_err("reference modes must agree");
+        assert!(error.contains("reference mode mismatch"));
+
+        let incompatible_tolerance = LteEstimator::with_tolerances_and_reference(
+            0.2,
+            1.0e-6,
+            TransientLteReference::PredictorLocal,
+        );
+        let error = incompatible_tolerance
+            .validate_accepted_boundary_checkpoint(&checkpoint, &latest)
+            .expect_err("configuration that changes the next LTE decision must agree");
+        assert!(error.contains("relative tolerance mismatch"));
+
+        let mut negative_zero = checkpoint;
+        negative_zero.prev_dt = -0.0;
+        let error = empty
+            .validate_accepted_boundary_checkpoint(&negative_zero, &latest)
+            .expect_err("unused provenance must use canonical positive zero");
+        assert!(error.contains("canonical +0"));
     }
 
     #[test]
