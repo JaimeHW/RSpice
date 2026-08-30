@@ -3571,6 +3571,8 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::super::super::Engine;
+    #[cfg(feature = "veriloga-builtins-base")]
+    use super::CollectedNoiseSources;
     use crate::Netlist;
 
     #[test]
