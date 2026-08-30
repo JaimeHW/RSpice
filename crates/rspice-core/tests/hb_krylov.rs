@@ -87,9 +87,12 @@ fn rectifier_dc_output_is_physical() {
 }
 
 #[test]
-fn larger_system_uses_the_auto_krylov_path_and_matches_direct() {
+fn auto_krylov_refines_a_normwise_candidate_until_componentwise_certified() {
     // 30+ nodes x 9 spectral components puts the system above the 256-unknown
-    // auto threshold; both paths must agree on the converged spectra.
+    // auto threshold. This mixed KCL/KVL ladder deterministically reaches the
+    // global GMRES norm target before its weakest harmonic equation satisfies
+    // the strict componentwise certificate, so successful HB completion is an
+    // end-to-end regression for the bounded row-scaled refinement path.
     let mut deck = String::from("* diode-loaded ladder\nv1 n0 0 sin(0 1.5 2meg)\n");
     for i in 0..30 {
         deck.push_str(&format!("r{i} n{i} n{} 25\n", i + 1));
@@ -105,9 +108,9 @@ fn larger_system_uses_the_auto_krylov_path_and_matches_direct() {
     let netlist = Netlist::parse(&deck).expect("ladder parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    let mut direct_cfg = HbConfig::new(2.0e6).with_harmonics(8);
-    direct_cfg.use_krylov = false; // still >= threshold: auto engages Krylov
-    let auto = engine.run_hb(&netlist, direct_cfg).expect("auto HB runs");
+    let mut auto_cfg = HbConfig::new(2.0e6).with_harmonics(8);
+    auto_cfg.use_krylov = false; // still >= threshold: auto engages Krylov
+    let auto = engine.run_hb(&netlist, auto_cfg).expect("auto HB runs");
     assert!(auto.converged, "auto path must converge");
 
     let out = auto

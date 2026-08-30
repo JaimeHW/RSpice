@@ -15,7 +15,8 @@ mod sparse;
 
 pub use klu::{KluDiagnostics, KluSolver};
 pub use sparse::{
-    ComplexMatrix, CscIndex, CscPatternToken, SparseLuSolver, StaticMatrix, TripletMatrix,
+    ComplexMatrix, ComplexTransposeBackwardErrorReport, CscIndex, CscPatternToken, SparseLuSolver,
+    StaticMatrix, TripletMatrix, analyze_complex_transpose_solution_by_entry_visitor,
     certify_complex_transpose_solution_by_entry_visitor,
 };
 

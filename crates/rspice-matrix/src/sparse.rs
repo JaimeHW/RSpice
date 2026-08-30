@@ -3480,37 +3480,93 @@ fn try_filled_vec<T: Clone>(len: usize, value: T) -> Result<Vec<T>, SolverError>
     Ok(values)
 }
 
-/// Certify a complex transpose solution from caller-owned matrix entries.
+/// Componentwise backward-error evidence for a complex transposed solve.
+///
+/// This report is exposed for bounded matrix-free iterative refinement. A
+/// caller must still reject the candidate unless [`Self::is_accepted`]
+/// returns `true`.
+#[doc(hidden)]
+#[derive(Debug)]
+#[must_use = "backward-error evidence must be checked before accepting a solution"]
+pub struct ComplexTransposeBackwardErrorReport {
+    residual: Vec<Complex64>,
+    denominator: Vec<Value>,
+    row_nnz: Vec<usize>,
+    componentwise_error: Value,
+    acceptance_ratio: Value,
+    accepted: bool,
+}
+
+impl ComplexTransposeBackwardErrorReport {
+    /// Compensated residual `b - A^T*x`, in equation order.
+    pub fn residual(&self) -> &[Complex64] {
+        &self.residual
+    }
+
+    /// Maximum componentwise backward error across all equations.
+    pub fn componentwise_error(&self) -> Value {
+        self.componentwise_error
+    }
+
+    /// Maximum ratio of componentwise error to the per-row acceptance limit.
+    pub fn acceptance_ratio(&self) -> Value {
+        self.acceptance_ratio
+    }
+
+    /// Whether every equation satisfies the shared backward-error policy.
+    pub fn is_accepted(&self) -> bool {
+        self.accepted
+    }
+
+    /// Power-of-two row scale that makes one unit of scaled residual
+    /// comparable to the row's componentwise acceptance threshold.
+    ///
+    /// The scale is clamped to the finite normal binary64 exponent range. A
+    /// structurally zero row has no meaningful denominator and receives an
+    /// identity scale; its nonzero residual will still fail certification.
+    pub fn refinement_row_scale(&self, row: usize) -> Option<Value> {
+        let denominator = *self.denominator.get(row)?;
+        let row_nnz = *self.row_nnz.get(row)?;
+        if denominator == 0.0 {
+            return Some(1.0);
+        }
+        let target_log2 = denominator.log2() + backward_error_tolerance(row_nnz).log2();
+        let exponent = (-target_log2.floor()).clamp(-1022.0, 1023.0) as i32;
+        Some(2.0_f64.powi(exponent))
+    }
+}
+
+/// Analyze a complex transpose solution from caller-owned matrix entries.
 ///
 /// `equations` and `unknowns` describe the native shape of `A`, and every
 /// entry is `(row, column, value)` in that native orientation. This function
 /// certifies `A^T*x=b` without conjugating entries, so the candidate contains
 /// `equations` values and the right-hand side contains `unknowns` values.
 ///
-/// The certificate uses the same strict, floor-free componentwise
+/// The analysis uses the same strict, floor-free componentwise
 /// backward-error tolerance as RSpice's sparse complex solves. Entries with
 /// duplicate coordinates deliberately remain separate physical
 /// contributions: each nonzero contribution participates independently in
 /// `|A|*|x|` and the per-equation rounding budget. Callers requiring the
 /// backward error of a coalesced algebraic matrix must coalesce entries before
-/// invoking this function.
+/// invoking this function. An inaccurate finite candidate is returned as a
+/// report so a bounded refinement caller can use the compensated residual and
+/// exact acceptance scaling.
 ///
 /// # Errors
 ///
 /// Returns [`SolverError::InvalidCircuit`] for dimension or entry-index
 /// mismatches, [`SolverError::Overflow`] for any non-finite input or
-/// intermediate accumulation, [`SolverError::OutOfMemory`] if the linear
-/// certificate workspace cannot be allocated, and
-/// [`SolverError::InaccurateSolution`] when the candidate fails the shared
-/// componentwise criterion.
+/// intermediate accumulation, and [`SolverError::OutOfMemory`] if the linear
+/// analysis workspace cannot be allocated.
 #[doc(hidden)]
-pub fn certify_complex_transpose_solution_by_entry_visitor(
+pub fn analyze_complex_transpose_solution_by_entry_visitor(
     equations: usize,
     unknowns: usize,
     solution: &[Complex64],
     rhs: &[Complex64],
     visit: impl FnOnce(&mut dyn FnMut(usize, usize, Complex64)),
-) -> Result<(), SolverError> {
+) -> Result<ComplexTransposeBackwardErrorReport, SolverError> {
     if solution.len() != equations || rhs.len() != unknowns {
         return Err(SolverError::InvalidCircuit(format!(
             "Complex entry-stream certification dimension mismatch: native matrix is {equations}x{unknowns}, solution has {}, RHS has {}",
@@ -3596,6 +3652,7 @@ pub fn certify_complex_transpose_solution_by_entry_visitor(
     }
 
     let mut componentwise_error: Value = 0.0;
+    let mut acceptance_ratio: Value = 0.0;
     let mut accepted = true;
     for equation in 0..certificate_equations {
         residual[equation] += compensation[equation];
@@ -3617,11 +3674,46 @@ pub fn certify_complex_transpose_solution_by_entry_visitor(
         };
         componentwise_error = componentwise_error.max(row_error);
         accepted &= row_error <= backward_error_tolerance(row_nnz[equation]);
+        acceptance_ratio = acceptance_ratio
+            .max((row_error / backward_error_tolerance(row_nnz[equation])).min(Value::MAX));
     }
-    if accepted {
+    Ok(ComplexTransposeBackwardErrorReport {
+        residual,
+        denominator,
+        row_nnz,
+        componentwise_error,
+        acceptance_ratio,
+        accepted,
+    })
+}
+
+/// Certify a complex transpose solution from caller-owned matrix entries.
+///
+/// This is the strict acceptance wrapper around
+/// [`analyze_complex_transpose_solution_by_entry_visitor`].
+///
+/// # Errors
+///
+/// In addition to the analysis errors, returns
+/// [`SolverError::InaccurateSolution`] when the finite candidate fails the
+/// shared componentwise backward-error criterion.
+#[doc(hidden)]
+pub fn certify_complex_transpose_solution_by_entry_visitor(
+    equations: usize,
+    unknowns: usize,
+    solution: &[Complex64],
+    rhs: &[Complex64],
+    visit: impl FnOnce(&mut dyn FnMut(usize, usize, Complex64)),
+) -> Result<(), SolverError> {
+    let report = analyze_complex_transpose_solution_by_entry_visitor(
+        equations, unknowns, solution, rhs, visit,
+    )?;
+    if report.is_accepted() {
         Ok(())
     } else {
-        Err(SolverError::InaccurateSolution(componentwise_error))
+        Err(SolverError::InaccurateSolution(
+            report.componentwise_error(),
+        ))
     }
 }
 
@@ -7361,6 +7453,25 @@ mod tests {
         };
         assert_eq!(componentwise_error, 1.0);
 
+        let report = analyze_complex_transpose_solution_by_entry_visitor(
+            2,
+            2,
+            &false_solution,
+            &rhs,
+            visit_weak_entries,
+        )
+        .expect("finite false convergence must produce refinement evidence");
+        assert!(!report.is_accepted());
+        assert_eq!(report.componentwise_error(), 1.0);
+        assert_eq!(report.residual()[0], Complex64::new(0.0, 0.0));
+        assert_eq!(report.residual()[1], Complex64::new(-epsilon, 0.0));
+        assert!(report.acceptance_ratio() > 1.0);
+        assert!(
+            report.refinement_row_scale(1).unwrap() > report.refinement_row_scale(0).unwrap(),
+            "the weak equation must receive the larger refinement weight"
+        );
+        assert_eq!(report.refinement_row_scale(2), None);
+
         let denominator = 1.0 - epsilon * epsilon;
         let analytic_solution = [
             Complex64::new(1.0 / denominator, 0.0),
@@ -7456,6 +7567,26 @@ mod tests {
             rounded_to_rhs_result,
             Err(SolverError::InaccurateSolution(error)) if error == Value::MAX
         ));
+    }
+
+    #[test]
+    fn transpose_report_refinement_scales_remain_finite_at_binary64_extremes() {
+        let report = ComplexTransposeBackwardErrorReport {
+            residual: vec![Complex64::new(0.0, 0.0); 4],
+            denominator: vec![0.0, Value::from_bits(1), Value::MAX, 1.0],
+            row_nnz: vec![0, 1, 1, usize::MAX],
+            componentwise_error: 0.0,
+            acceptance_ratio: 0.0,
+            accepted: true,
+        };
+
+        assert_eq!(report.refinement_row_scale(0), Some(1.0));
+        for row in 1..4 {
+            let scale = report.refinement_row_scale(row).unwrap();
+            assert!(scale.is_finite() && scale > 0.0);
+            assert!(scale.recip().is_finite() && scale.recip() > 0.0);
+        }
+        assert_eq!(report.refinement_row_scale(4), None);
     }
 
     #[test]

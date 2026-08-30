@@ -880,13 +880,21 @@ impl ExactHbPreconditioner {
             factors,
         }
     }
-}
 
-impl super::krylov::KrylovPreconditioner for ExactHbPreconditioner {
-    fn apply(&self, r: &[Complex64]) -> Vec<Complex64> {
-        let mut output = vec![Complex64::new(0.0, 0.0); r.len()];
+    fn apply_with_input_scale(
+        &self,
+        residual: &[Complex64],
+        input_scale: Option<&[Value]>,
+    ) -> Vec<Complex64> {
+        debug_assert_eq!(
+            input_scale.map_or(residual.len(), <[Value]>::len),
+            residual.len()
+        );
+        let scaled_value =
+            |index: usize| residual[index] * input_scale.map_or(1.0, |scale| scale[index]);
+        let mut output = vec![Complex64::new(0.0, 0.0); residual.len()];
         let mut dc = (0..self.num_entities)
-            .map(|entity| r[entity * self.real_width])
+            .map(|entity| scaled_value(entity * self.real_width))
             .collect::<Vec<_>>();
         self.factors[0].solve_in_place(&mut dc);
         for (entity, &value) in dc.iter().enumerate() {
@@ -895,8 +903,8 @@ impl super::krylov::KrylovPreconditioner for ExactHbPreconditioner {
         for k in 1..self.num_components {
             let mut block = vec![Complex64::new(0.0, 0.0); 2 * self.num_entities];
             for entity in 0..self.num_entities {
-                block[2 * entity] = r[entity * self.real_width + 2 * k - 1];
-                block[2 * entity + 1] = r[entity * self.real_width + 2 * k];
+                block[2 * entity] = scaled_value(entity * self.real_width + 2 * k - 1);
+                block[2 * entity + 1] = scaled_value(entity * self.real_width + 2 * k);
             }
             self.factors[k].solve_in_place(&mut block);
             for entity in 0..self.num_entities {
@@ -906,6 +914,52 @@ impl super::krylov::KrylovPreconditioner for ExactHbPreconditioner {
         }
         output
     }
+}
+
+impl super::krylov::KrylovPreconditioner for ExactHbPreconditioner {
+    fn apply(&self, residual: &[Complex64]) -> Vec<Complex64> {
+        self.apply_with_input_scale(residual, None)
+    }
+}
+
+struct RowScaledExactHbPreconditioner<'a> {
+    base: &'a ExactHbPreconditioner,
+    inverse_row_scale: &'a [Value],
+}
+
+impl super::krylov::KrylovPreconditioner for RowScaledExactHbPreconditioner<'_> {
+    fn apply(&self, residual: &[Complex64]) -> Vec<Complex64> {
+        debug_assert_eq!(residual.len(), self.inverse_row_scale.len());
+        self.base
+            .apply_with_input_scale(residual, Some(self.inverse_row_scale))
+    }
+}
+
+fn exact_hb_candidate_report(
+    operator: &ExactHbOperator<'_>,
+    solution: &[Complex64],
+    rhs: &[Complex64],
+) -> Result<rspice_matrix::ComplexTransposeBackwardErrorReport, rspice_matrix::SolverError> {
+    let size = rhs.len();
+    rspice_matrix::analyze_complex_transpose_solution_by_entry_visitor(
+        size,
+        size,
+        solution,
+        rhs,
+        |visitor| {
+            // The matrix helper analyzes A^T*x=b. Transposed coordinates
+            // therefore analyze this forward J*x=b.
+            operator.visit_entries(|row, column, value| {
+                visitor(column, row, Complex64::new(value, 0.0));
+            });
+        },
+    )
+}
+
+fn stable_complex_l2_norm(values: &[Complex64]) -> Value {
+    values
+        .iter()
+        .fold(0.0, |norm, value| norm.hypot(value.re).hypot(value.im))
 }
 
 impl HbSolver {
@@ -2084,7 +2138,7 @@ impl HbSolver {
                 .map(|&value| Complex64::new(value, 0.0))
                 .collect::<Vec<_>>();
             let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
-            let outcome = super::krylov::gmres_with_abort(
+            let mut outcome = super::krylov::gmres_with_abort(
                 &|input| operator.apply(input),
                 &preconditioner,
                 &rhs_complex,
@@ -2096,7 +2150,8 @@ impl HbSolver {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
             }
-            let qualification = if outcome.solution.len() != size {
+            let mut report = None;
+            let mut qualification = if outcome.solution.len() != size {
                 Err(rspice_matrix::SolverError::InvalidCircuit(format!(
                     "exact HB GMRES returned {} values for a {size}-unknown system",
                     outcome.solution.len()
@@ -2109,24 +2164,177 @@ impl HbSolver {
             {
                 Err(rspice_matrix::SolverError::Overflow)
             } else if outcome.converged {
-                rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
-                    size,
-                    size,
-                    &outcome.solution,
-                    &rhs_complex,
-                    |visitor| {
-                        // The matrix helper certifies A^T*x=b. Transposed
-                        // coordinates therefore certify this forward J*x=b.
-                        operator.visit_entries(|row, column, value| {
-                            visitor(column, row, Complex64::new(value, 0.0));
-                        });
-                    },
-                )
+                match exact_hb_candidate_report(&operator, &outcome.solution, &rhs_complex) {
+                    Ok(candidate_report) => {
+                        let result = if candidate_report.is_accepted() {
+                            Ok(())
+                        } else {
+                            Err(rspice_matrix::SolverError::InaccurateSolution(
+                                candidate_report.componentwise_error(),
+                            ))
+                        };
+                        report = Some(candidate_report);
+                        result
+                    }
+                    Err(error) => Err(error),
+                }
             } else {
                 Err(rspice_matrix::SolverError::ConvergenceFailed(
                     outcome.iterations,
                 ))
             };
+
+            // A global normwise GMRES tolerance can hide a poor equation in
+            // mixed KCL/KVL systems. Keep the strict componentwise
+            // certificate and refine only an otherwise finite, converged
+            // candidate. Power-of-two row scaling makes GMRES spend its
+            // residual budget in proportion to each equation's exact
+            // acceptance threshold without changing the represented system.
+            if matches!(
+                &qualification,
+                Err(rspice_matrix::SolverError::InaccurateSolution(_))
+            ) && let Some(mut current_report) = report.take()
+            {
+                const MAX_REFINEMENTS: usize = 5;
+                const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
+                let mut row_scale = Vec::new();
+                let mut inverse_row_scale = Vec::new();
+                let mut scaled_rhs = Vec::new();
+                if row_scale.try_reserve_exact(size).is_err()
+                    || inverse_row_scale.try_reserve_exact(size).is_err()
+                    || scaled_rhs.try_reserve_exact(size).is_err()
+                {
+                    qualification = Err(rspice_matrix::SolverError::OutOfMemory);
+                }
+                for _ in 0..MAX_REFINEMENTS {
+                    if matches!(&qualification, Err(rspice_matrix::SolverError::OutOfMemory)) {
+                        break;
+                    }
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+
+                    let previous_acceptance_ratio = current_report.acceptance_ratio();
+                    row_scale.clear();
+                    inverse_row_scale.clear();
+                    scaled_rhs.clear();
+                    for row in 0..size {
+                        let Some(scale) = current_report.refinement_row_scale(row) else {
+                            qualification = Err(rspice_matrix::SolverError::InvalidCircuit(
+                                "exact HB refinement report has inconsistent dimensions"
+                                    .to_string(),
+                            ));
+                            break;
+                        };
+                        row_scale.push(scale);
+                        inverse_row_scale.push(scale.recip());
+                        scaled_rhs.push(current_report.residual()[row] * scale);
+                    }
+                    if row_scale.len() != size {
+                        break;
+                    }
+                    if inverse_row_scale.iter().any(|value| !value.is_finite())
+                        || scaled_rhs
+                            .iter()
+                            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                    {
+                        qualification = Err(rspice_matrix::SolverError::Overflow);
+                        break;
+                    }
+
+                    let scaled_preconditioner = RowScaledExactHbPreconditioner {
+                        base: &preconditioner,
+                        inverse_row_scale: &inverse_row_scale,
+                    };
+                    let correction = super::krylov::gmres_with_abort(
+                        &|input| {
+                            let mut output = operator.apply(input);
+                            for (value, &scale) in output.iter_mut().zip(&row_scale) {
+                                *value *= scale;
+                            }
+                            output
+                        },
+                        &scaled_preconditioner,
+                        &scaled_rhs,
+                        restart,
+                        6,
+                        &|| abort.is_aborted(),
+                    )
+                    .map_err(|_| HbError::Aborted)?;
+                    if abort.is_aborted() {
+                        return Err(HbError::Aborted);
+                    }
+                    outcome.iterations = outcome.iterations.saturating_add(correction.iterations);
+                    if correction.solution.len() != size {
+                        qualification = Err(rspice_matrix::SolverError::InvalidCircuit(format!(
+                            "exact HB refinement returned {} values for a {size}-unknown system",
+                            correction.solution.len()
+                        )));
+                        break;
+                    }
+                    if !correction.converged {
+                        qualification = Err(rspice_matrix::SolverError::ConvergenceFailed(
+                            outcome.iterations,
+                        ));
+                        break;
+                    }
+                    if !correction.relative_residual.is_finite()
+                        || correction
+                            .solution
+                            .iter()
+                            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                    {
+                        qualification = Err(rspice_matrix::SolverError::Overflow);
+                        break;
+                    }
+                    for (value, correction) in outcome.solution.iter_mut().zip(&correction.solution)
+                    {
+                        *value += correction;
+                        if !value.re.is_finite() || !value.im.is_finite() {
+                            qualification = Err(rspice_matrix::SolverError::Overflow);
+                            break;
+                        }
+                    }
+                    if matches!(&qualification, Err(rspice_matrix::SolverError::Overflow)) {
+                        break;
+                    }
+
+                    let refined_report =
+                        match exact_hb_candidate_report(&operator, &outcome.solution, &rhs_complex)
+                        {
+                            Ok(report) => report,
+                            Err(error) => {
+                                qualification = Err(error);
+                                break;
+                            }
+                        };
+                    let rhs_norm = stable_complex_l2_norm(&rhs_complex);
+                    let residual_norm = stable_complex_l2_norm(refined_report.residual());
+                    outcome.relative_residual = if rhs_norm == 0.0 {
+                        residual_norm
+                    } else {
+                        residual_norm / rhs_norm
+                    };
+                    if !outcome.relative_residual.is_finite() {
+                        qualification = Err(rspice_matrix::SolverError::Overflow);
+                        break;
+                    }
+                    if refined_report.is_accepted() {
+                        qualification = Ok(());
+                        break;
+                    }
+
+                    qualification = Err(rspice_matrix::SolverError::InaccurateSolution(
+                        refined_report.componentwise_error(),
+                    ));
+                    let improved = refined_report.acceptance_ratio()
+                        < previous_acceptance_ratio * MIN_IMPROVEMENT_FACTOR;
+                    current_report = refined_report;
+                    if !improved {
+                        break;
+                    }
+                }
+            }
             match qualification {
                 Ok(()) => {
                     if self.config.verbose {
