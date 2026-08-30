@@ -73,7 +73,7 @@ ropey = "1.6.1"
 # Cloud client closure. These pins mirror the RSpice-Cloud workspace pins the
 # vendored crates were tested against (tools/cloud/vendor-manifest.json records
 # the source commit); keep them aligned when re-syncing.
-base64 = "0.22"
+base64 = "0.23"
 # Pure-Rust ed25519 with no default features: the pack trust crate verifies
 # signatures and never needs a random-number source, so the browser image links
 # only the verifying half.

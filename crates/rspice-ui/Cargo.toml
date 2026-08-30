@@ -85,7 +85,7 @@ num-complex = "0.4"
 
 # Image encoding for GPU output
 png = "0.18"
-base64 = "0.22"
+base64 = "0.23"
 
 # Lazy initialization
 once_cell = "1.19"
