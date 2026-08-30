@@ -431,10 +431,24 @@ const BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT: usize = BJT_INTERNAL_STATE_D
     + EXTERNAL_DIM;
 const BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT: usize =
     1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM + 4;
+pub(crate) const BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT: usize =
+    BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
+        + BJT_DYNAMIC_CHARGE_COUNT * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
 pub(crate) const BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT: usize = BJT_ACCEPTED_SCALAR_VALUE_COUNT
     + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
-    + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
-    + BJT_DYNAMIC_CHARGE_COUNT * BJT_CHARGE_BRANCH_CHECKPOINT_VALUE_COUNT;
+    + BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT;
+
+/// Fixed-shape wire image of one accepted legacy-GP transient charge snapshot.
+///
+/// Instance identity and runtime tagging are owned by the enclosing transient
+/// history checkpoint. Keeping this payload numeric-only avoids duplicating
+/// those strings for an optional cache at the same BJT ordinal. VBIC-only
+/// private reduction lanes are excluded: the encoder admits only their
+/// canonical zero state and the decoder reconstructs that state directly.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AcceptedBjtChargeSnapshotCheckpoint {
+    pub(crate) state_values: Vec<Value>,
+}
 
 /// Accepted limiter/evaluation state for one reduced legacy Gummel-Poon BJT.
 ///
@@ -1184,8 +1198,9 @@ impl Bjt {
             g_reduced: Self::checkpoint_take_matrix(values, cursor),
             z_i_static: Self::checkpoint_take_array(values, cursor),
             z_e_static: Self::checkpoint_take_array(values, cursor),
-            // These are VBIC-only inputs. A legacy charge snapshot leaves them
-            // at the default zero state.
+            // The admitted legacy runtime never consumes these VBIC-only
+            // lanes. They are deliberately omitted from the stable wire image
+            // and reconstructed in their one canonical state.
             vbic_transport: TransportChargeState::default(),
             vbic_d_itzf_d_vrth: 0.0,
         }
@@ -1233,6 +1248,114 @@ impl Bjt {
         }
     }
 
+    #[inline]
+    fn legacy_charge_snapshot_private_state_is_canonical(snapshot: &BjtChargeSnapshot) -> bool {
+        Self::legacy_dynamic_reduction_private_state_is_canonical(&snapshot.reduction)
+    }
+
+    #[inline]
+    fn legacy_dynamic_reduction_private_state_is_canonical(
+        reduction: &BjtDynamicReduction,
+    ) -> bool {
+        let transport = reduction.vbic_transport;
+        [
+            transport.q1,
+            transport.qb,
+            transport.ifi,
+            transport.iri,
+            transport.gfi,
+            transport.gri,
+            transport.dq1_dvbe_eff,
+            transport.dq1_dvbc_eff,
+            transport.itzf,
+            transport.itzr,
+            transport.dqb_dvbe_eff,
+            transport.dqb_dvbc_eff,
+            transport.ditzf_dvbe_eff,
+            transport.ditzf_dvbc_eff,
+            transport.ditzr_dvbe_eff,
+            transport.ditzr_dvbc_eff,
+            reduction.vbic_d_itzf_d_vrth,
+        ]
+        .iter()
+        .all(|value| value.to_bits() == 0.0_f64.to_bits())
+    }
+
+    fn validate_charge_snapshot_checkpoint_values(
+        &self,
+        values: &[Value],
+        reduction_start: usize,
+        require_canonical_topology: bool,
+    ) -> Result<(), String> {
+        let endpoint_start = reduction_start + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT;
+        let mut reduction_cursor = reduction_start;
+        let reduction = Self::checkpoint_take_dynamic_reduction(values, &mut reduction_cursor);
+        debug_assert_eq!(reduction_cursor, endpoint_start);
+        let canonical_charge_branches = if require_canonical_topology {
+            Some(self.legacy_dynamic_charge_branches(&reduction))
+        } else {
+            None
+        };
+
+        let mut cursor = endpoint_start;
+        for branch in 0..BJT_DYNAMIC_CHARGE_COUNT {
+            cursor += 1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM;
+            let endpoints = &values[cursor..cursor + 4];
+            let dimensions = [
+                BJT_INTERNAL_STATE_DIM,
+                BJT_INTERNAL_STATE_DIM,
+                EXTERNAL_DIM,
+                EXTERNAL_DIM,
+            ];
+            for (lane, (&endpoint, &dimension)) in
+                endpoints.iter().zip(dimensions.iter()).enumerate()
+            {
+                let absent = endpoint.to_bits() == (-1.0_f64).to_bits();
+                let present =
+                    endpoint >= 0.0 && endpoint.fract() == 0.0 && endpoint < dimension as Value;
+                if !absent && !present {
+                    return Err(format!(
+                        "BJT '{}' charge branch {branch} endpoint {lane} is outside its runtime topology",
+                        self.name
+                    ));
+                }
+            }
+            if (endpoints[0] >= 0.0 && endpoints[2] >= 0.0)
+                || (endpoints[1] >= 0.0 && endpoints[3] >= 0.0)
+            {
+                return Err(format!(
+                    "BJT '{}' charge branch {branch} checkpoint selects both internal and external endpoints",
+                    self.name
+                ));
+            }
+            if let Some(canonical_charge_branches) = canonical_charge_branches.as_ref() {
+                let canonical = canonical_charge_branches[branch];
+                let canonical_endpoints = [
+                    Self::checkpoint_endpoint_value(canonical.pos_internal),
+                    Self::checkpoint_endpoint_value(canonical.neg_internal),
+                    Self::checkpoint_endpoint_value(canonical.pos_external),
+                    Self::checkpoint_endpoint_value(canonical.neg_external),
+                ];
+                if endpoints
+                    .iter()
+                    .zip(canonical_endpoints)
+                    .any(|(captured, expected)| captured.to_bits() != expected.to_bits())
+                {
+                    return Err(format!(
+                        "BJT '{}' charge branch {branch} endpoint pattern does not match the live legacy-GP topology",
+                        self.name
+                    ));
+                }
+            }
+            cursor += 4;
+        }
+        debug_assert_eq!(
+            cursor,
+            reduction_start + BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+        );
+        Ok(())
+    }
+
     fn accepted_nonlinear_checkpoint_runtime(&self) -> Result<(), String> {
         if self.charge_model == BjtChargeModel::LegacyGummelPoon && !self.vbic_mna_promoted {
             return Ok(());
@@ -1246,6 +1369,83 @@ impl Bjt {
             "BJT '{}': {runtime} accepted nonlinear state is not checkpointable; only the legacy Gummel-Poon runtime has a complete checkpoint contract",
             self.name
         ))
+    }
+
+    /// Encode an engine-owned accepted charge snapshot without retaining a
+    /// cloned device or any static model/topology data.
+    pub(crate) fn encode_accepted_charge_snapshot_checkpoint(
+        &self,
+        snapshot: &BjtChargeSnapshot,
+    ) -> Result<AcceptedBjtChargeSnapshotCheckpoint, String> {
+        self.accepted_nonlinear_checkpoint_runtime()?;
+        if !Self::legacy_charge_snapshot_private_state_is_canonical(snapshot) {
+            return Err(format!(
+                "BJT '{}' legacy charge snapshot contains non-canonical VBIC-only state",
+                self.name
+            ));
+        }
+
+        let mut state_values = Vec::with_capacity(BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT);
+        Self::checkpoint_push_dynamic_reduction(&mut state_values, snapshot.reduction);
+        for branch in snapshot.branches {
+            Self::checkpoint_push_charge_branch(&mut state_values, branch);
+        }
+        debug_assert_eq!(
+            state_values.len(),
+            BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+        );
+        let checkpoint = AcceptedBjtChargeSnapshotCheckpoint { state_values };
+        self.validate_accepted_charge_snapshot_checkpoint(&checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    /// Validate a charge-snapshot image against this elaborated BJT before it
+    /// can become transient runtime state.
+    pub(crate) fn validate_accepted_charge_snapshot_checkpoint(
+        &self,
+        checkpoint: &AcceptedBjtChargeSnapshotCheckpoint,
+    ) -> Result<(), String> {
+        self.accepted_nonlinear_checkpoint_runtime()?;
+        if checkpoint.state_values.len() != BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT {
+            return Err(format!(
+                "BJT '{}' accepted charge snapshot shape mismatch: captured {} values, runtime requires {}",
+                self.name,
+                checkpoint.state_values.len(),
+                BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+            ));
+        }
+        if checkpoint
+            .state_values
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "BJT '{}' accepted charge snapshot contains a non-finite value",
+                self.name
+            ));
+        }
+        self.validate_charge_snapshot_checkpoint_values(&checkpoint.state_values, 0, true)
+    }
+
+    /// Decode a previously validated legacy-GP charge snapshot. This does not
+    /// mutate the device; callers may finish validating an aggregate before
+    /// replacing any engine-owned history/cache.
+    pub(crate) fn decode_accepted_charge_snapshot_checkpoint(
+        &self,
+        checkpoint: &AcceptedBjtChargeSnapshotCheckpoint,
+    ) -> Result<BjtChargeSnapshot, String> {
+        self.validate_accepted_charge_snapshot_checkpoint(checkpoint)?;
+        let mut cursor = 0;
+        let reduction =
+            Self::checkpoint_take_dynamic_reduction(&checkpoint.state_values, &mut cursor);
+        let branches = std::array::from_fn(|_| {
+            Self::checkpoint_take_charge_branch(&checkpoint.state_values, &mut cursor)
+        });
+        debug_assert_eq!(cursor, checkpoint.state_values.len());
+        Ok(BjtChargeSnapshot {
+            reduction,
+            branches,
+        })
     }
 
     /// Capture the future-affecting accepted Newton state of a legacy GP BJT.
@@ -1308,6 +1508,12 @@ impl Bjt {
         Self::checkpoint_push_reduced(&mut values, self.reduced_linearization_cache.get());
         Self::checkpoint_push_reduced(&mut values, self.previous_reduced_linearization);
         let charge_snapshot = self.charge_snapshot_cache.get();
+        if !Self::legacy_charge_snapshot_private_state_is_canonical(&charge_snapshot) {
+            return Err(format!(
+                "BJT '{}' legacy charge snapshot contains non-canonical VBIC-only state",
+                self.name
+            ));
+        }
         Self::checkpoint_push_dynamic_reduction(&mut values, charge_snapshot.reduction);
         for branch in charge_snapshot.branches {
             Self::checkpoint_push_charge_branch(&mut values, branch);
@@ -1365,75 +1571,13 @@ impl Bjt {
             ));
         }
 
-        let endpoint_start = BJT_ACCEPTED_SCALAR_VALUE_COUNT
-            + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
-            + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT;
-        let canonical_charge_branches = if checkpoint.charge_snapshot_valid {
-            let mut reduction_cursor =
-                BJT_ACCEPTED_SCALAR_VALUE_COUNT + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT;
-            let reduction = Self::checkpoint_take_dynamic_reduction(
-                &checkpoint.state_values,
-                &mut reduction_cursor,
-            );
-            debug_assert_eq!(reduction_cursor, endpoint_start);
-            Some(self.legacy_dynamic_charge_branches(&reduction))
-        } else {
-            None
-        };
-        let mut cursor = endpoint_start;
-        for branch in 0..BJT_DYNAMIC_CHARGE_COUNT {
-            cursor += 1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM;
-            let endpoints = &checkpoint.state_values[cursor..cursor + 4];
-            let dimensions = [
-                BJT_INTERNAL_STATE_DIM,
-                BJT_INTERNAL_STATE_DIM,
-                EXTERNAL_DIM,
-                EXTERNAL_DIM,
-            ];
-            for (lane, (&endpoint, &dimension)) in
-                endpoints.iter().zip(dimensions.iter()).enumerate()
-            {
-                let absent = endpoint.to_bits() == (-1.0_f64).to_bits();
-                let present =
-                    endpoint >= 0.0 && endpoint.fract() == 0.0 && endpoint < dimension as Value;
-                if !absent && !present {
-                    return Err(format!(
-                        "BJT '{}' charge branch {branch} endpoint {lane} is outside its runtime topology",
-                        self.name
-                    ));
-                }
-            }
-            if (endpoints[0] >= 0.0 && endpoints[2] >= 0.0)
-                || (endpoints[1] >= 0.0 && endpoints[3] >= 0.0)
-            {
-                return Err(format!(
-                    "BJT '{}' charge branch {branch} checkpoint selects both internal and external endpoints",
-                    self.name
-                ));
-            }
-            if let Some(canonical_charge_branches) = canonical_charge_branches.as_ref() {
-                let canonical = canonical_charge_branches[branch];
-                let canonical_endpoints = [
-                    Self::checkpoint_endpoint_value(canonical.pos_internal),
-                    Self::checkpoint_endpoint_value(canonical.neg_internal),
-                    Self::checkpoint_endpoint_value(canonical.pos_external),
-                    Self::checkpoint_endpoint_value(canonical.neg_external),
-                ];
-                if endpoints
-                    .iter()
-                    .zip(canonical_endpoints)
-                    .any(|(captured, expected)| captured.to_bits() != expected.to_bits())
-                {
-                    return Err(format!(
-                        "BJT '{}' charge branch {branch} endpoint pattern does not match the live legacy-GP topology",
-                        self.name
-                    ));
-                }
-            }
-            cursor += 4;
-        }
-        debug_assert_eq!(cursor, checkpoint.state_values.len());
-        Ok(())
+        let reduction_start =
+            BJT_ACCEPTED_SCALAR_VALUE_COUNT + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT;
+        self.validate_charge_snapshot_checkpoint_values(
+            &checkpoint.state_values,
+            reduction_start,
+            checkpoint.charge_snapshot_valid,
+        )
     }
 
     /// Restore accepted state into the existing elaborated device. Static
@@ -2332,6 +2476,12 @@ impl Bjt {
 mod checkpoint_tests {
     use super::*;
 
+    #[test]
+    fn versioned_bjt_checkpoint_numeric_payload_counts_are_pinned() {
+        assert_eq!(BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT, 879);
+        assert_eq!(BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT, 449);
+    }
+
     fn evaluated_legacy_bjt() -> Bjt {
         let mut bjt = Bjt::new_npn("qcheckpoint".to_string(), 1, 2, 3);
         bjt.set_xyce_compatibility(true);
@@ -2395,6 +2545,17 @@ mod checkpoint_tests {
                 .contains("shape mismatch")
         );
 
+        // The private VBIC-only lanes are absent from the stable legacy wire
+        // contract, so an attempted appended lane is rejected by shape before
+        // decode can construct runtime state.
+        let mut hidden_lane_injection = checkpoint.clone();
+        hidden_lane_injection.state_values.push(1.0);
+        assert!(
+            bjt.validate_accepted_nonlinear_checkpoint(&hidden_lane_injection)
+                .unwrap_err()
+                .contains("shape mismatch")
+        );
+
         let mut wrong_endpoint = checkpoint.clone();
         let first_endpoint = BJT_ACCEPTED_SCALAR_VALUE_COUNT
             + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
@@ -2417,6 +2578,96 @@ mod checkpoint_tests {
         assert!(
             error.contains("does not match the live legacy-GP topology"),
             "unexpected error: {error}"
+        );
+
+        let corrupt_live_bjt = evaluated_legacy_bjt();
+        let mut corrupt_live_snapshot = corrupt_live_bjt.charge_snapshot_cache.get();
+        corrupt_live_snapshot.reduction.vbic_transport.q1 = 1.0;
+        corrupt_live_bjt
+            .charge_snapshot_cache
+            .set(corrupt_live_snapshot);
+        assert!(
+            corrupt_live_bjt
+                .accepted_nonlinear_checkpoint()
+                .unwrap_err()
+                .contains("non-canonical VBIC-only state")
+        );
+    }
+
+    #[test]
+    fn legacy_charge_snapshot_checkpoint_round_trips_exactly() {
+        let bjt = evaluated_legacy_bjt();
+        let snapshot = bjt.charge_snapshot(1.4, 0.76, 0.02, 0.0);
+        let checkpoint = bjt
+            .encode_accepted_charge_snapshot_checkpoint(&snapshot)
+            .expect("legacy charge snapshot encodes");
+        assert_eq!(
+            checkpoint.state_values.len(),
+            BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+        );
+        let decoded = bjt
+            .decode_accepted_charge_snapshot_checkpoint(&checkpoint)
+            .expect("legacy charge snapshot decodes");
+        assert!(Bjt::legacy_charge_snapshot_private_state_is_canonical(
+            &decoded
+        ));
+        assert_eq!(
+            bjt.encode_accepted_charge_snapshot_checkpoint(&decoded)
+                .expect("decoded charge snapshot re-encodes"),
+            checkpoint
+        );
+    }
+
+    #[test]
+    fn legacy_charge_snapshot_checkpoint_rejects_private_and_wire_corruption() {
+        let bjt = evaluated_legacy_bjt();
+        let snapshot = bjt.charge_snapshot(1.4, 0.76, 0.02, 0.0);
+
+        let mut private_corruption = snapshot;
+        private_corruption.reduction.vbic_transport.q1 = 1.0;
+        assert!(
+            bjt.encode_accepted_charge_snapshot_checkpoint(&private_corruption)
+                .unwrap_err()
+                .contains("non-canonical VBIC-only state")
+        );
+
+        let checkpoint = bjt
+            .encode_accepted_charge_snapshot_checkpoint(&snapshot)
+            .expect("legacy charge snapshot encodes");
+        let mut wrong_shape = checkpoint.clone();
+        wrong_shape.state_values.pop();
+        assert!(
+            bjt.validate_accepted_charge_snapshot_checkpoint(&wrong_shape)
+                .unwrap_err()
+                .contains("shape mismatch")
+        );
+
+        let mut non_finite = checkpoint.clone();
+        non_finite.state_values[0] = Value::NAN;
+        assert!(
+            bjt.validate_accepted_charge_snapshot_checkpoint(&non_finite)
+                .unwrap_err()
+                .contains("non-finite")
+        );
+
+        let mut hidden_lane_injection = checkpoint.clone();
+        hidden_lane_injection.state_values.push(1.0);
+        assert!(
+            bjt.validate_accepted_charge_snapshot_checkpoint(&hidden_lane_injection)
+                .unwrap_err()
+                .contains("shape mismatch")
+        );
+
+        let first_endpoint = BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
+            + 1
+            + BJT_INTERNAL_STATE_DIM
+            + EXTERNAL_DIM;
+        let mut wrong_endpoint = checkpoint;
+        wrong_endpoint.state_values[first_endpoint] = 0.0;
+        assert!(
+            bjt.validate_accepted_charge_snapshot_checkpoint(&wrong_endpoint)
+                .unwrap_err()
+                .contains("does not match the live legacy-GP topology")
         );
     }
 
