@@ -8,6 +8,22 @@ use thiserror::Error;
 
 use super::checkpoint::TransientCheckpointEncoding;
 
+/// Absolute time window used by Xyce 7.10 to decide whether restart output is due.
+///
+/// Xyce defines `MachinePrecision()` as `2 * 10^-digits10 = 2e-15`,
+/// deliberately distinct from IEEE epsilon. `Transient::testRestartSaveTime`
+/// treats a scheduled restart as due when `scheduled - current <= 2 *
+/// MachinePrecision()`. Restart output observes accepted points and does not
+/// add a solver breakpoint, so this tolerance is independent of the
+/// integrator's breakpoint tolerance.
+pub const XYCE_RESTART_SCHEDULE_TOLERANCE: Value = 4.0e-15;
+
+/// Whether an accepted solver time satisfies Xyce's restart-output schedule.
+#[inline]
+pub fn xyce_restart_schedule_is_due(accepted_time: Value, scheduled_time: Value) -> bool {
+    scheduled_time - accepted_time <= XYCE_RESTART_SCHEDULE_TOLERANCE
+}
+
 /// Failure to construct an exact, bounded Xyce restart checkpoint plan.
 #[derive(Debug, Clone, PartialEq, Error)]
 #[non_exhaustive]
@@ -226,7 +242,24 @@ fn xyce_restart_time_suffix(time: Value) -> Result<String, XyceRestartPlanError>
 
 #[cfg(test)]
 mod tests {
-    use super::xyce_restart_time_suffix;
+    use super::{xyce_restart_schedule_is_due, xyce_restart_time_suffix};
+    use crate::Value;
+
+    #[test]
+    fn schedule_uses_xyce_absolute_machine_precision_window() {
+        let scheduled: Value = 2.0e-4;
+        let one_ulp_below = Value::from_bits(scheduled.to_bits() - 1);
+
+        assert!(one_ulp_below < scheduled);
+        assert!(xyce_restart_schedule_is_due(one_ulp_below, scheduled));
+        assert!(xyce_restart_schedule_is_due(scheduled, scheduled));
+        assert!(xyce_restart_schedule_is_due(scheduled + 1.0e-9, scheduled));
+        assert!(xyce_restart_schedule_is_due(scheduled - 3.0e-15, scheduled));
+        assert!(!xyce_restart_schedule_is_due(
+            scheduled - 5.0e-15,
+            scheduled
+        ));
+    }
 
     #[test]
     fn suffix_is_byte_exact_at_xyce_defaultfloat_boundaries() {

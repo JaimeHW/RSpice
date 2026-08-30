@@ -113,7 +113,8 @@ pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 pub use transient::{
     DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
-    TransientStartupMode, XyceRestartJobPlan, XyceRestartPlanError, netlist_fingerprint,
+    TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,
+    XyceRestartPlanError, netlist_fingerprint, xyce_restart_schedule_is_due,
 };
 pub use waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
 

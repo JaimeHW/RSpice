@@ -320,7 +320,10 @@ pub use self::{
         DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointEncoding,
         netlist_fingerprint,
     },
-    restart::{XyceRestartJobPlan, XyceRestartPlanError},
+    restart::{
+        XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan, XyceRestartPlanError,
+        xyce_restart_schedule_is_due,
+    },
 };
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
@@ -345,8 +348,9 @@ enum ResumeValidation {
 ///
 /// Xyce evaluates restart saves after accepted steps. `nominal_time` is the
 /// due time used in the filename, while `checkpoint.time` is the first
-/// accepted solver time at or after it; these can differ without changing the
-/// integration trajectory.
+/// accepted solver time for which `nominal_time - checkpoint.time <=
+/// XYCE_RESTART_SCHEDULE_TOLERANCE`. It may precede the nominal time by at
+/// most that tolerance or follow it by an unconstrained accepted-step gap.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScheduledTransientCheckpoint {
     pub nominal_time: Value,
@@ -1901,10 +1905,10 @@ impl Engine {
     ///
     /// The schedule does not add solver breakpoints. After each accepted step,
     /// the first due nominal time emits one checkpoint and all additional
-    /// nominal times already crossed are advanced without another file,
-    /// matching Xyce 7.10. Keeping nominal filename time separate from actual
-    /// accepted state time prevents checkpointing from perturbing the physical
-    /// trajectory.
+    /// nominal times already due under Xyce's restart window are advanced
+    /// without another file, matching Xyce 7.10. Keeping nominal filename time
+    /// separate from actual accepted state time prevents checkpointing from
+    /// perturbing the physical trajectory.
     pub fn run_tran_checkpoint_schedule_with_startup_mode(
         &self,
         netlist: &Netlist,
@@ -2298,10 +2302,7 @@ impl Engine {
         let Some(&requested_time) = scheduled_times.get(*cursor) else {
             return Ok(());
         };
-        if accepted_time < requested_time
-            && requested_time - accepted_time
-                > crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE
-        {
+        if !xyce_restart_schedule_is_due(accepted_time, requested_time) {
             return Ok(());
         }
         let at_integration_endpoint = accepted_time >= integration_stop_time
@@ -2340,12 +2341,10 @@ impl Engine {
         *retained_scheduled_checkpoint_values =
             retained_scheduled_checkpoint_values.saturating_add(retained_checkpoint_values);
         *cursor += 1;
-        while scheduled_times.get(*cursor).is_some_and(|time| {
-            *time <= accepted_time
-                || (*time > accepted_time
-                    && *time - accepted_time
-                        <= crate::numerics::integration::XYCE_BREAKPOINT_TOLERANCE)
-        }) {
+        while scheduled_times
+            .get(*cursor)
+            .is_some_and(|time| xyce_restart_schedule_is_due(accepted_time, *time))
+        {
             *cursor += 1;
         }
         Ok(())

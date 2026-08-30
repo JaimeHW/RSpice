@@ -1,7 +1,7 @@
 use super::*;
 use rspice_core::engine::{
     SimulationConfigOverrides, TransientCheckpointEncoding, XyceRestartJobPlan,
-    resolve_simulation_config,
+    resolve_simulation_config, xyce_restart_schedule_is_due,
 };
 
 const LABEL: &str = "BUG_456 transient-restart wrapper family";
@@ -521,6 +521,14 @@ impl Bug456CaseSpec {
         }
         times
     }
+}
+
+fn bug456_checkpoint_is_in_accepted_step_window(
+    checkpoint_time: Value,
+    seam_time: Value,
+    stop_time: Value,
+) -> bool {
+    xyce_restart_schedule_is_due(checkpoint_time, seam_time) && checkpoint_time < stop_time
 }
 
 #[derive(Debug)]
@@ -1163,7 +1171,8 @@ impl XyceTestRunner {
                 spec.case
             )
         })?;
-        if seam_checkpoint.time < spec.seam || seam_checkpoint.time >= spec.stop {
+        if !bug456_checkpoint_is_in_accepted_step_window(seam_checkpoint.time, spec.seam, spec.stop)
+        {
             return Err(format!(
                 "{LABEL} {:?} seam checkpoint captured outside its accepted-step window at {:.17e}",
                 spec.case, seam_checkpoint.time
@@ -1353,5 +1362,25 @@ mod tests {
         };
         XyceTestRunner::bug456_require_historical_grid(&good, &test, 2.0e-4)
             .expect("the historical simple.cir threshold is intentionally above TSTOP");
+    }
+
+    #[test]
+    fn bug456_checkpoint_window_accepts_xyce_early_schedule_match() {
+        let seam = 2.0e-4;
+        let stop = 4.0e-4;
+
+        assert!(bug456_checkpoint_is_in_accepted_step_window(
+            seam - 3.0e-15,
+            seam,
+            stop
+        ));
+        assert!(!bug456_checkpoint_is_in_accepted_step_window(
+            seam - 5.0e-15,
+            seam,
+            stop
+        ));
+        assert!(!bug456_checkpoint_is_in_accepted_step_window(
+            stop, seam, stop
+        ));
     }
 }
