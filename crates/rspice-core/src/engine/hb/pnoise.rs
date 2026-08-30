@@ -489,37 +489,28 @@ impl Engine {
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 
+        // One exact canonical V/L MNA registry owns both the periodic
+        // operating point and every subsequent adjoint/forward linearization.
+        // Register authored voltage-source spectra first so the canonical
+        // descriptors carry the same large-signal constraints Newton solves.
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_inductors(&circuit, &mut solver);
-        self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        self.hb_stamp_voltage_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
 
         let has_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
         if has_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
+        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
+            SimulationError::Circuit(format!(
+                "pnoise branch metadata construction failed: {error}"
+            ))
+        })?;
 
-        // Construct the exact periodic branch registry before accepting an HB
-        // artifact. Empty branch evidence is a legacy node-only state and is
-        // valid only when the elaborated circuit registry is also empty.
-        let mut periodic_solver = HbSolver::new(hb_config.clone(), num_nodes);
-        periodic_solver.set_node_names(node_names.clone());
-        self.hb_stamp_resistors(&circuit, &mut periodic_solver);
-        self.hb_stamp_capacitors(&circuit, &mut periodic_solver);
-        self.hb_stamp_periodic_mna_branches(&circuit, &mut periodic_solver)?;
-        if has_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut periodic_solver, num_nodes);
-        }
-        let branch_names = periodic_solver
-            .try_periodic_mna_branch_names()
-            .map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "pnoise branch metadata construction failed: {error}"
-                ))
-            })?;
-
-        let state = if let Some(operating_point) = operating_point {
+        let solve_operating_point = operating_point.is_none();
+        let mut state = if let Some(operating_point) = operating_point {
             match operating_point {
                 PnoiseOperatingPoint::Shooting(point) => {
                     self.hb_state_from_pss_operating_point(point, &hb_config, &node_names)?
@@ -529,7 +520,16 @@ impl Engine {
                 }
             }
         } else {
-            let mut state = HbSolverState::new(num_nodes, op_harmonics);
+            HbSolverState::new(num_nodes, op_harmonics)
+        };
+        state
+            .try_prepare_mna_branches(branch_names.len(), hb_config.num_harmonics)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "pnoise operating-point MNA state construction failed: {error}"
+                ))
+            })?;
+        if solve_operating_point {
             if has_nonlinear {
                 solver
                     .solve_newton_with_abort(&mut state, abort)
@@ -547,12 +547,7 @@ impl Engine {
                     SimulationError::Circuit(format!("pnoise operating-point solve failed: {e}"))
                 })?;
             }
-            state
-        };
-
-        // Keep nonlinear operating-point continuation separate from the exact
-        // periodic small-signal MNA network.
-        let mut solver = periodic_solver;
+        }
 
         let out_idx = node_names
             .iter()

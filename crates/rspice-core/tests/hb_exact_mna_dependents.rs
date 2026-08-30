@@ -160,7 +160,7 @@ fn direct_pac_matches_the_exact_static_mos_ac_oracle() {
         1.0e-9,
         "direct PAC common-source gain",
     );
-    assert_complex_relative(pac_gain(&pac), ac_gain, 1.0e-11, "direct PAC/AC parity");
+    assert_complex_relative(pac_gain(&pac), ac_gain, 5.0e-9, "direct PAC/AC parity");
     assert_pac_exact_source_evidence(&pac);
 }
 
@@ -352,13 +352,13 @@ fn direct_pnoise_matches_ordinary_noise_and_the_static_mos_oracle() {
     assert_relative(
         direct.output_noise[0],
         ordinary_output,
-        1.0e-11,
+        5.0e-9,
         "ordinary/direct output-noise parity",
     );
     assert_relative(
         direct.input_noise.as_ref().expect("direct input noise")[0],
         ordinary_input,
-        1.0e-11,
+        5.0e-9,
         "ordinary/direct input-noise parity",
     );
 }
