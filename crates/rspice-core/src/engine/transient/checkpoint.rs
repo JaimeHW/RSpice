@@ -3845,9 +3845,9 @@ fn read_accepted_integration_runtime(
                 .map_err(|_| {
                     "accepted integration Trap/Gear header has invalid lane count".to_string()
                 })?;
-            if lane_count != solution.len() {
+            if lane_count != 0 && lane_count != solution.len() {
                 return Err(format!(
-                    "accepted integration Trap/Gear lane count {lane_count} does not match solution length {}",
+                    "accepted integration Trap/Gear lane count {lane_count} is neither canonical inactive zero nor solution length {}",
                     solution.len()
                 ));
             }

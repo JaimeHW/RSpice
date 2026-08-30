@@ -567,7 +567,17 @@ impl TrapGearController {
             ));
         }
 
-        if lane_count > 0 {
+        if lane_count == 0 {
+            if snapshot.current_method != IntegrationMethod::Trapezoidal
+                || snapshot.smooth_steps != 0
+                || snapshot.at_breakpoint
+            {
+                return Err(
+                    "inactive Trap/Gear controller snapshot is not in its canonical initial phase"
+                        .to_string(),
+                );
+            }
+        } else {
             if accepted_solution.len() != lane_count {
                 return Err(format!(
                     "active Trap/Gear controller snapshot lane count {lane_count} does not match accepted solution length {}",
