@@ -2994,6 +2994,264 @@ pub struct XyceRestartInterval {
     pub interval: Value,
 }
 
+/// One Xyce `.OPTIONS OUTPUT INITIAL_INTERVAL` cadence transition.
+///
+/// `time` is the simulation time at which `interval` becomes the output
+/// cadence. Interval output is a presentation schedule: Xyce interpolates
+/// output rows from accepted transient history rather than forcing solver
+/// breakpoints at every requested row.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct XyceOutputInterval {
+    /// Simulation time at which this output cadence takes effect.
+    pub time: Value,
+    /// Positive output cadence from `time` until the next transition.
+    pub interval: Value,
+}
+
+/// Typed Xyce 7.10 `.OPTIONS OUTPUT INITIAL_INTERVAL` schedule.
+#[derive(Debug, Clone, PartialEq)]
+pub struct XyceOutputIntervalSchedule {
+    /// Positive cadence before the first transition.
+    pub initial_interval: Value,
+    /// Ordered output-cadence transitions.
+    pub intervals: Vec<XyceOutputInterval>,
+}
+
+/// One ordered Xyce interval-output event and the accepted step that supplies
+/// its solution state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct XyceOutputEvent {
+    pub(crate) output_time: Value,
+    pub(crate) accepted_index: usize,
+    pub(crate) interpolation_time: Option<Value>,
+}
+
+impl XyceOutputIntervalSchedule {
+    /// Replay Xyce 7.10's interval-output scheduler over accepted transient
+    /// steps.
+    ///
+    /// Xyce's exact output grid is accepted-step dependent once cadence
+    /// transitions are present: it drains missed targets by repeated addition,
+    /// then recomputes the following target from the accepted step. Keeping the
+    /// accepted grid here preserves those IEEE-754 details. The first accepted
+    /// step at or after `output_start_time` is emitted without interpolation,
+    /// matching Xyce's TSTART handling.
+    pub(crate) fn output_events(
+        &self,
+        accepted_times: &[Value],
+        output_start_time: Value,
+        final_time: Value,
+        max_points: usize,
+    ) -> Result<Vec<XyceOutputEvent>, String> {
+        if !output_start_time.is_finite()
+            || !final_time.is_finite()
+            || output_start_time < 0.0
+            || final_time < output_start_time
+        {
+            return Err(format!(
+                "invalid Xyce interval-output window [{output_start_time}, {final_time}]"
+            ));
+        }
+        let Some(&run_initial_time) = accepted_times.first() else {
+            return Err("Xyce interval output requires accepted transient steps".to_string());
+        };
+        if !run_initial_time.is_finite() || run_initial_time < 0.0 {
+            return Err("Xyce interval output has an invalid run initial time".to_string());
+        }
+        for pair in accepted_times.windows(2) {
+            if !pair[1].is_finite() || pair[1] <= pair[0] {
+                return Err(
+                    "Xyce interval output requires finite, strictly increasing accepted times"
+                        .to_string(),
+                );
+            }
+        }
+        let final_index = accepted_times
+            .binary_search_by(|time| time.total_cmp(&final_time))
+            .map_err(|_| {
+                format!("accepted transient grid does not contain final output time {final_time}")
+            })?;
+        let first_index = accepted_times.partition_point(|time| *time < output_start_time);
+        if first_index > final_index {
+            return Err("Xyce interval output selected no accepted steps".to_string());
+        }
+        if !self.initial_interval.is_finite() || self.initial_interval <= 0.0 {
+            return Err("Xyce output initial interval must be finite and positive".to_string());
+        }
+        let mut previous_transition = None;
+        for (index, transition) in self.intervals.iter().enumerate() {
+            if !transition.time.is_finite()
+                || transition.time < 0.0
+                || previous_transition.is_some_and(|previous| transition.time <= previous)
+            {
+                return Err(format!(
+                    "Xyce output transition {index} time must be finite, nonnegative, and strictly increasing"
+                ));
+            }
+            if !transition.interval.is_finite() || transition.interval <= 0.0 {
+                return Err(format!(
+                    "Xyce output transition {index} interval must be finite and positive"
+                ));
+            }
+            previous_transition = Some(transition.time);
+        }
+
+        let mut events: Vec<XyceOutputEvent> = Vec::new();
+        let push = |events: &mut Vec<XyceOutputEvent>,
+                    time: Value,
+                    accepted_index: usize,
+                    interpolate: bool|
+         -> Result<(), String> {
+            if !time.is_finite()
+                || time < accepted_times[first_index]
+                || time > final_time
+                || events
+                    .last()
+                    .is_some_and(|previous| time < previous.output_time)
+            {
+                return Err(format!(
+                    "Xyce interval output produced a decreasing or out-of-window time {time:.17e}s"
+                ));
+            }
+            crate::resource::ResourceLimitError::ensure(
+                crate::resource::ResourceKind::AnalysisPoints,
+                events.len().saturating_add(1),
+                max_points,
+            )
+            .map_err(|error| error.to_string())?;
+            events.push(XyceOutputEvent {
+                output_time: time,
+                accepted_index,
+                interpolation_time: interpolate.then_some(time),
+            });
+            Ok(())
+        };
+        let tolerance = 2.0 * Value::EPSILON;
+        let first_transition = self.intervals.first().map(|transition| transition.time);
+        let mut next_output_time = run_initial_time;
+        let mut update_additions = 0usize;
+
+        for (accepted_offset, &current_time) in
+            accepted_times[first_index..=final_index].iter().enumerate()
+        {
+            let accepted_index = first_index + accepted_offset;
+            let output_is_due = current_time >= next_output_time
+                || (current_time - next_output_time).abs() < tolerance;
+            if !output_is_due {
+                continue;
+            }
+
+            if accepted_offset == 0 {
+                push(&mut events, current_time, accepted_index, false)?;
+            } else if first_transition.is_none_or(|first| current_time <= first) {
+                let mut interpolation_time = next_output_time;
+                while interpolation_time < current_time
+                    && current_time - interpolation_time > tolerance
+                {
+                    push(&mut events, interpolation_time, accepted_index, true)?;
+                    let next = interpolation_time + self.initial_interval;
+                    if !next.is_finite() || next <= interpolation_time {
+                        return Err(format!(
+                            "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
+                        ));
+                    }
+                    interpolation_time = next;
+                }
+                if interpolation_time - current_time <= tolerance {
+                    push(&mut events, current_time, accepted_index, false)?;
+                }
+                if interpolation_time - final_time > tolerance {
+                    push(&mut events, final_time, accepted_index, false)?;
+                }
+            } else {
+                let mut active_index = self
+                    .intervals
+                    .partition_point(|transition| transition.time <= next_output_time)
+                    .saturating_sub(1);
+                let mut interpolation_time = next_output_time;
+                while interpolation_time <= current_time {
+                    let interpolate = current_time - interpolation_time >= tolerance;
+                    push(&mut events, interpolation_time, accepted_index, interpolate)?;
+                    let next = interpolation_time + self.intervals[active_index].interval;
+                    if !next.is_finite() || next <= interpolation_time {
+                        return Err(format!(
+                            "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
+                        ));
+                    }
+                    interpolation_time = next;
+                    if let Some(next_interval) = self.intervals.get(active_index + 1)
+                        && interpolation_time >= next_interval.time
+                    {
+                        active_index += 1;
+                        interpolation_time = next_interval.time;
+                    }
+                }
+            }
+
+            next_output_time = if self.intervals.is_empty() {
+                while next_output_time < current_time
+                    || (current_time - next_output_time).abs() < tolerance
+                {
+                    crate::resource::ResourceLimitError::ensure(
+                        crate::resource::ResourceKind::AnalysisPoints,
+                        update_additions.saturating_add(1),
+                        max_points,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let next = next_output_time + self.initial_interval;
+                    if !next.is_finite() || next <= next_output_time {
+                        return Err(format!(
+                            "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
+                        ));
+                    }
+                    next_output_time = next;
+                    update_additions = update_additions.saturating_add(1);
+                }
+                next_output_time
+            } else if current_time < self.intervals[0].time {
+                while next_output_time <= current_time {
+                    crate::resource::ResourceLimitError::ensure(
+                        crate::resource::ResourceKind::AnalysisPoints,
+                        update_additions.saturating_add(1),
+                        max_points,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let next = next_output_time + self.initial_interval;
+                    if !next.is_finite() || next <= next_output_time {
+                        return Err(format!(
+                            "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
+                        ));
+                    }
+                    next_output_time = next;
+                    update_additions = update_additions.saturating_add(1);
+                }
+                next_output_time.min(self.intervals[0].time)
+            } else {
+                let active_index = self
+                    .intervals
+                    .partition_point(|transition| transition.time <= current_time)
+                    - 1;
+                let active = self.intervals[active_index];
+                let quotient = (current_time - active.time) / active.interval;
+                if !quotient.is_finite() || quotient < 0.0 || quotient >= f64::from(i32::MAX) {
+                    return Err(
+                        "Xyce output cadence step index exceeds its supported range".to_string()
+                    );
+                }
+                let step = quotient as i32;
+                let candidate = active.time + f64::from(step + 1) * active.interval;
+                self.intervals
+                    .get(active_index + 1)
+                    .map_or(candidate, |next| candidate.min(next.time))
+            };
+            if next_output_time >= final_time {
+                next_output_time = final_time;
+            }
+        }
+        Ok(events)
+    }
+}
+
 /// Typed Xyce 7.10 `.OPTIONS RESTART` configuration.
 ///
 /// Optional scalar fields distinguish an authored value from Xyce's package
@@ -3143,6 +3401,11 @@ pub struct SimulationOptions {
     /// a platform frontend decides how the retained logical file names map to
     /// desktop, browser, or mobile storage.
     pub restart: Option<XyceRestartOptions>,
+    /// Xyce `.OPTIONS OUTPUT INITIAL_INTERVAL=<dt> [<time> <dt> ...]`.
+    ///
+    /// This is distinct from `output_time_points`: interval rows are obtained
+    /// by interpolation and therefore do not become transient breakpoints.
+    pub output_interval_schedule: Option<XyceOutputIntervalSchedule>,
     /// Xyce `.OPTIONS OUTPUT OUTPUTTIMEPOINTS` output schedule.
     ///
     /// These times are also transient solver breakpoints. The accepted-step
@@ -3462,6 +3725,9 @@ impl SimulationOptions {
                 Some(restart) => restart.merge(other_restart),
                 None => self.restart = Some(other_restart.clone()),
             }
+        }
+        if other.output_interval_schedule.is_some() {
+            self.output_interval_schedule = other.output_interval_schedule.clone();
         }
         if !other.output_time_points.is_empty() {
             self.output_time_points = other.output_time_points.clone();

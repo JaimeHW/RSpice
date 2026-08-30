@@ -108,10 +108,6 @@ pub(super) struct ParseState {
     pub(super) options: super::SimulationOptions,
     /// Parser resource ceiling for vector-valued analysis schedules.
     pub(super) max_analysis_points: usize,
-    /// Xyce rejects OUTPUTTIMEPOINTS when an OUTPUT interval schedule was
-    /// authored, regardless of card order. The legacy interval parser does
-    /// not otherwise retain that schedule yet, so keep this parse-only gate.
-    pub(super) output_initial_interval_seen: bool,
     pub(super) diagnostics: Vec<ParseDiagnostic>,
     /// Number of successfully parsed, authored PSpice E/G CHEBYSHEV cards.
     ///
@@ -160,7 +156,6 @@ impl ParseState {
             output_requests: Vec::new(),
             options: super::SimulationOptions::default(),
             max_analysis_points: crate::resource::ResourceLimits::default().max_analysis_points,
-            output_initial_interval_seen: false,
             diagnostics: Vec::new(),
             pspice_chebyshev_source_count: 0,
             allow_unmatched_subckt_ends: false,
@@ -345,7 +340,6 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) max_analysis_points: usize,
-    pub(super) output_initial_interval_seen: &'a mut bool,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) pspice_chebyshev_source_count: &'a mut usize,
     pub(super) spef_includes: &'a mut Vec<String>,
@@ -377,7 +371,6 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) output_requests: &'a mut Vec<OutputRequest>,
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) max_analysis_points: usize,
-    pub(super) output_initial_interval_seen: &'a mut bool,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) origin: &'a NetlistSourceLocation,

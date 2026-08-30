@@ -2405,6 +2405,7 @@ impl XyceTestRunner {
             output_snapshots: _,
             output_print_header: _,
             output_print_footer: _,
+            output_interval_schedule,
             output_time_points,
             timeint_breakpoints,
             reltol,
@@ -2490,6 +2491,7 @@ impl XyceTestRunner {
         } = options;
         reltol.is_none()
             && abstol.is_none()
+            && output_interval_schedule.is_none()
             && output_time_points.is_empty()
             && timeint_breakpoints.is_empty()
             && timeint_reltol.map(Value::to_bits) == reltol_bits

@@ -5235,7 +5235,11 @@ impl XyceTestRunner {
             })
             .collect::<Vec<_>>();
         let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
-        let output_initial_interval = Self::output_initial_interval(source)?;
+        let output_initial_interval = netlist
+            .options
+            .output_interval_schedule
+            .as_ref()
+            .map(|schedule| schedule.initial_interval);
         let tran_time_scale_factor = Self::tran_print_time_scale_factor(source)?;
         Self::validate_transient_result_time_grid(result)?;
         let reference_times = reference

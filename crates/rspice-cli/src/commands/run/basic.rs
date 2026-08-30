@@ -564,7 +564,10 @@ pub(super) fn run_transient(
             }
             Err(e) => Err(e),
         }
-    } else if ctx.compress && ctx.netlist.options.output_time_points.is_empty() {
+    } else if ctx.compress
+        && ctx.netlist.options.output_time_points.is_empty()
+        && ctx.netlist.options.output_interval_schedule.is_none()
+    {
         let compression_tol = ctx.compress_tol;
         let compression = rspice_core::engine::CompressionConfig {
             enabled: true,
@@ -658,11 +661,15 @@ pub(super) fn run_transient(
                     .copied()
                     .map_or(tstart, |first| tstart.max(first));
                 let projection = result
-                    .output_projection(&ctx.netlist.options.output_time_points, output_start, tstop)
+                    .output_projection(
+                        &ctx.netlist.options.output_time_points,
+                        ctx.netlist.options.output_interval_schedule.as_ref(),
+                        output_start,
+                        tstop,
+                        ctx.engine.config().resource_limits.max_analysis_points,
+                    )
                     .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
-                let output_time = projection
-                    .project(&result.time)
-                    .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+                let output_time = projection.times().to_vec();
                 let mut signals = transient_export_signals(
                     ctx.netlist,
                     &result,
@@ -756,6 +763,13 @@ fn run_authored_restart(
                 .resource_limits
                 .max_analysis_points
                 .saturating_sub(ctx.netlist.options.output_time_points.len())
+                .saturating_sub(
+                    ctx.netlist
+                        .options
+                        .output_interval_schedule
+                        .as_ref()
+                        .map_or(0, |schedule| schedule.intervals.len()),
+                )
                 .saturating_sub(ctx.netlist.options.timeint_breakpoints.len())
                 .saturating_sub(restart.intervals.len());
             // Construction validates the complete nominal namespace before

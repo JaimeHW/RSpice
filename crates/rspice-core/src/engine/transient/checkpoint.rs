@@ -679,6 +679,9 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
         }
     }
     normalized.options.restart = None;
+    // Interval output controls only which interpolated rows a writer emits;
+    // they do not add breakpoints or change accepted integration state.
+    normalized.options.output_interval_schedule = None;
     // Xyce's DeviceOptions default is SEPARATELOAD=0. RSpice intentionally
     // models the switch as loader-policy metadata rather than as a physical
     // circuit option, so an explicit FALSE and omission are one effective
@@ -688,7 +691,7 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     }
     Some(semantic_netlist_identity(
         &normalized,
-        b"rspice-transient-restart-compatible-netlist-v3\0",
+        b"rspice-transient-restart-compatible-netlist-v4\0",
     ))
 }
 
@@ -4368,6 +4371,40 @@ mod tests {
             restart_checkpoint_identity(&first),
             restart_checkpoint_identity(&restarted),
             "presentation-only title and restart control metadata cannot invalidate authored restart"
+        );
+    }
+
+    #[test]
+    fn authored_restart_identity_excludes_interval_output_projection_only() {
+        let baseline = Netlist::parse(
+            "output identity baseline\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .OPTIONS RESTART JOB=bench INITIAL_INTERVAL=1n\n\
+             .END\n",
+        )
+        .expect("baseline deck parses");
+        let restarted = Netlist::parse(
+            "output identity restart\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 3n\n\
+             .OPTIONS OUTPUT INITIAL_INTERVAL=.25n\n\
+             .OPTIONS RESTART FILE=bench1e-09\n\
+             .END\n",
+        )
+        .expect("restart deck parses");
+
+        assert_ne!(
+            netlist_checkpoint_identity(&baseline),
+            netlist_checkpoint_identity(&restarted),
+            "ordinary semantic identity retains output serialization policy"
+        );
+        assert_eq!(
+            restart_checkpoint_identity(&baseline),
+            restart_checkpoint_identity(&restarted),
+            "interpolated output cadence is trajectory-neutral"
         );
     }
 

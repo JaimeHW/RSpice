@@ -5029,34 +5029,39 @@ fn transient_comparison_accepts_decimal_boundary_reference_time_neighborhood() {
 
 #[test]
 fn output_initial_interval_parser_accepts_spaced_assignment() {
-    let interval = XyceTestRunner::output_initial_interval(
+    let netlist = Netlist::parse(
         "\
 interval output
 .OPTIONS OUTPUT INITIAL_INTERVAL = 0.5ms
 .END
 ",
     )
-    .expect("output option parses")
-    .expect("initial interval is detected");
+    .expect("output option parses");
+    let interval = netlist
+        .options
+        .output_interval_schedule
+        .expect("initial interval is detected")
+        .initial_interval;
 
     assert!((interval - 5.0e-4).abs() <= 1.0e-15);
 
-    let schedule = XyceTestRunner::output_interval_schedule(
+    let netlist = Netlist::parse(
         "interval output\n.options output initial_interval=1ms 9ms .1ms 10ms 10us\n.end\n",
     )
-    .expect("piecewise output schedule parses")
-    .expect("piecewise output schedule is present");
-    assert!((schedule.0 - 1.0e-3).abs() <= 1.0e-15);
-    assert_eq!(schedule.1.len(), 2);
-    assert!((schedule.1[0].0 - 9.0e-3).abs() <= 1.0e-15);
-    assert!((schedule.1[0].1 - 1.0e-4).abs() <= 1.0e-15);
-    assert!((schedule.1[1].0 - 10.0e-3).abs() <= 1.0e-15);
-    assert!((schedule.1[1].1 - 10.0e-6).abs() <= 1.0e-15);
+    .expect("piecewise output schedule parses");
+    let schedule = netlist
+        .options
+        .output_interval_schedule
+        .expect("piecewise output schedule is present");
+    assert!((schedule.initial_interval - 1.0e-3).abs() <= 1.0e-15);
+    assert_eq!(schedule.intervals.len(), 2);
+    assert!((schedule.intervals[0].time - 9.0e-3).abs() <= 1.0e-15);
+    assert!((schedule.intervals[0].interval - 1.0e-4).abs() <= 1.0e-15);
+    assert!((schedule.intervals[1].time - 10.0e-3).abs() <= 1.0e-15);
+    assert!((schedule.intervals[1].interval - 10.0e-6).abs() <= 1.0e-15);
     assert!(
-        XyceTestRunner::output_interval_schedule(
-            "invalid output schedule\n.options output initial_interval=1ms 9ms\n.end\n"
-        )
-        .is_err(),
+        Netlist::parse("invalid output schedule\n.options output initial_interval=1ms 9ms\n.end\n")
+            .is_err(),
         "an incomplete time/interval pair must fail closed"
     );
 }

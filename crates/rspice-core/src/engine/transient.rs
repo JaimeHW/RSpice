@@ -1954,6 +1954,13 @@ impl Engine {
             .options
             .output_time_points
             .len()
+            .saturating_add(
+                netlist
+                    .options
+                    .output_interval_schedule
+                    .as_ref()
+                    .map_or(0, |schedule| schedule.intervals.len()),
+            )
             .saturating_add(netlist.options.timeint_breakpoints.len())
             .saturating_add(
                 netlist
@@ -8359,9 +8366,17 @@ mod tests {
         }
 
         let output = output_result
-            .output_projection(&output_netlist.options.output_time_points, 0.0, 5.0e-3)
+            .output_projection(
+                &output_netlist.options.output_time_points,
+                output_netlist.options.output_interval_schedule.as_ref(),
+                0.0,
+                5.0e-3,
+                SimulationConfig::default()
+                    .resource_limits
+                    .max_analysis_points,
+            )
             .expect("OUTPUTTIMEPOINTS projection succeeds");
-        assert_eq!(output.indices().len(), 5);
+        assert_eq!(output.times().len(), 5);
         assert_eq!(output_result.time.len(), breakpoint_result.time.len());
     }
 
