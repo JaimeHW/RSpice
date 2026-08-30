@@ -185,3 +185,71 @@ fn nonlinear_hb_matrix_budget_counts_branch_spectrum_unknowns() {
         }))
     ));
 }
+
+#[test]
+fn nonlinear_hb_fails_closed_before_solving_unrepresented_periodic_families() {
+    let cases = [
+        (
+            "\
+* current switch requires its control branch current spectrum
+iin 0 out dc 0
+vctrl ctrl 0 dc 0
+w1 out 0 vctrl csw
+.model csw iswitch (ron=1 roff=1meg ion=1 ioff=0)
+r1 out 0 1k
+.end
+",
+            "current-controlled switches",
+        ),
+        (
+            "\
+* a VCCS requires a periodic controlled-source matrix stamp
+iin 0 in dc 0
+g1 out 0 in 0 2
+rin in 0 1
+rout out 0 1
+.end
+",
+            "controlled-source equations",
+        ),
+        (
+            "\
+* coupled inductors require a mutual branch block
+iin 0 a dc 0
+l1 a 0 1u
+l2 b 0 1u
+r2 b 0 50
+k12 l1 l2 0.9
+.end
+",
+            "coupled-inductor",
+        ),
+        (
+            "\
+* solution-dependent capacitance requires periodic charge linearization
+iin 0 out dc 0
+vctrl ctrl 0 dc 0.5
+c1 out 0 C={1p*(1+V(ctrl))}
+r1 out 0 1k
+.end
+",
+            "solution-dependent capacitor",
+        ),
+    ];
+
+    for (deck, expected_family) in cases {
+        let netlist = Netlist::parse(deck).expect("unsupported HB deck still parses");
+        let error = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(F0).with_harmonics(1))
+            .expect_err("an unrepresented periodic family must fail before exact HB solving");
+        let message = error.to_string();
+        assert!(
+            message.contains("exact HB MNA is unavailable"),
+            "failure must identify the exact-MNA preflight: {message}"
+        );
+        assert!(
+            message.contains(expected_family),
+            "failure must identify unsupported family '{expected_family}': {message}"
+        );
+    }
+}
