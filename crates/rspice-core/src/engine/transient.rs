@@ -326,7 +326,12 @@ pub use self::{
         xyce_restart_schedule_is_due,
     },
 };
-use checkpoint::ProposedIntegrationContinuation;
+use checkpoint::{
+    AcceptedIntegrationRuntime, AcceptedIntegrationRuntimeCapture,
+    AcceptedIntegrationRuntimeCheckpoint, AcceptedIntegrationRuntimeTarget,
+    ProposedIntegrationContinuation, RestartNormalizedIntegrationRuntimeCapture,
+    RestartNormalizedIntegrationRuntimeCheckpoint, ValidatedAcceptedIntegrationRuntime,
+};
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };
@@ -344,6 +349,22 @@ struct DerivedTransientBranchCurrent {
 enum ResumeValidation {
     ExactNetlist,
     AuthoredRestart,
+}
+
+/// Whether the public caller retains the final checkpoint returned by the
+/// shared transient integration body. Plain and scheduled runs discard this
+/// implementation artifact; checkpointed and resumed runs expose it as part
+/// of their result and therefore charge it to the retained-value policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FinalCheckpointRetention {
+    Discarded,
+    Retained,
+}
+
+impl FinalCheckpointRetention {
+    const fn is_retained(self) -> bool {
+        matches!(self, Self::Retained)
+    }
 }
 
 /// One checkpoint emitted by a nominal restart-save schedule.
@@ -1215,10 +1236,11 @@ impl Engine {
         bjt_history: &BjtTransientHistory,
         record_device_op_traces: bool,
         capture: &TransientCapturePlan,
+        trajectory_point_count: usize,
         abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
         let next_point_count = result.time.len().saturating_add(1);
-        self.ensure_analysis_points(next_point_count)?;
+        self.ensure_analysis_points(trajectory_point_count)?;
         self.ensure_result_shape(
             next_point_count,
             capture
@@ -1885,9 +1907,10 @@ impl Engine {
                     abort,
                     None,
                     ResumeValidation::ExactNetlist,
+                    FinalCheckpointRetention::Retained,
                     &[],
                 )
-                .map(|(result, checkpoint, _)| (result, checkpoint)),
+                .and_then(Self::require_retained_final_checkpoint),
             None => engine
                 .run_tran_resolved_with_resume(
                     netlist,
@@ -1898,10 +1921,29 @@ impl Engine {
                     abort,
                     None,
                     ResumeValidation::ExactNetlist,
+                    FinalCheckpointRetention::Retained,
                     &[],
                 )
-                .map(|(result, checkpoint, _)| (result, checkpoint)),
+                .and_then(Self::require_retained_final_checkpoint),
         }
+    }
+
+    fn require_retained_final_checkpoint(
+        (result, checkpoint, _): (
+            TransientResult,
+            Option<TransientCheckpoint>,
+            Vec<ScheduledTransientCheckpoint>,
+        ),
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        checkpoint.map_or_else(
+            || {
+                Err(SimulationError::Circuit(
+                    "internal transient checkpoint retention contract was not fulfilled"
+                        .to_string(),
+                ))
+            },
+            |checkpoint| Ok((result, checkpoint)),
+        )
     }
 
     /// Run one continuous transient and capture checkpoints at exact accepted
@@ -1996,6 +2038,7 @@ impl Engine {
                 abort,
                 None,
                 ResumeValidation::ExactNetlist,
+                FinalCheckpointRetention::Discarded,
                 checkpoint_times,
             ),
             None => engine.run_tran_resolved_with_resume(
@@ -2007,6 +2050,7 @@ impl Engine {
                 abort,
                 None,
                 ResumeValidation::ExactNetlist,
+                FinalCheckpointRetention::Discarded,
                 checkpoint_times,
             ),
         }
@@ -2019,10 +2063,11 @@ impl Engine {
     /// enforced). Continuation restores the captured linear-reactive state
     /// (capacitor/inductor integrator histories) and restarts integration at
     /// order one with absolute-time source evaluation. Higher-order integration
-    /// resumes only after one real post-checkpoint interval has been accepted,
-    /// because nonlinear charge histories and accepted-step timing provenance
-    /// are intentionally not serialized. Ordinary scalar lossless
-    /// transmission-line histories are restored bit-exactly. Distributed
+    /// resumes only after one real post-checkpoint interval has been accepted.
+    /// Version-19 checkpoints restore accepted legacy-BJT/diode charge,
+    /// limiter, terminal-current and engine-owned integration histories before
+    /// that interval. Ordinary scalar lossless transmission-line histories are
+    /// restored bit-exactly. Distributed
     /// LTRA/TXL and coupled-line runtimes fail closed until their complete
     /// convolution state has a versioned checkpoint contract.
     ///
@@ -2132,9 +2177,10 @@ impl Engine {
                     abort,
                     Some(checkpoint),
                     validation,
+                    FinalCheckpointRetention::Retained,
                     &[],
                 )
-                .map(|(result, checkpoint, _)| (result, checkpoint)),
+                .and_then(Self::require_retained_final_checkpoint),
             None => engine
                 .run_tran_resolved_with_resume(
                     netlist,
@@ -2145,9 +2191,10 @@ impl Engine {
                     abort,
                     Some(checkpoint),
                     validation,
+                    FinalCheckpointRetention::Retained,
                     &[],
                 )
-                .map(|(result, checkpoint, _)| (result, checkpoint)),
+                .and_then(Self::require_retained_final_checkpoint),
         }
     }
 
@@ -2273,9 +2320,111 @@ impl Engine {
             abort,
             None,
             ResumeValidation::ExactNetlist,
+            FinalCheckpointRetention::Discarded,
             &[],
         )
         .map(|(result, _, _)| result)
+    }
+
+    /// Engine/circuit state that is accepted-step mutable but not yet part of
+    /// the exact integration-runtime wire contract. A time-zero checkpoint is
+    /// exempt: no accepted interval has advanced these stores, so rebuilding
+    /// the authenticated startup phase reconstructs their canonical state.
+    fn exact_integration_runtime_resume_blockers(
+        circuit: &crate::circuit::CircuitData,
+        accepted_interval_count: usize,
+    ) -> Vec<String> {
+        if accepted_interval_count == 0 {
+            return Vec::new();
+        }
+
+        let mut blockers = Vec::new();
+        let mut block = |present: bool, description: &'static str| {
+            if present {
+                blockers.push(description.to_string());
+            }
+        };
+        block(
+            !circuit.jfets.is_empty(),
+            "JFET accepted transient integration history is not checkpointed",
+        );
+        block(
+            !circuit.mosfets.is_empty(),
+            "classic MOSFET accepted transient integration history is not checkpointed",
+        );
+        block(
+            !circuit.vdmoses.is_empty(),
+            "VDMOS accepted transient integration history is not checkpointed",
+        );
+        block(
+            circuit.has_b3soi_devices(),
+            "B3SOI DD/FD/PD accepted transient integration history is not checkpointed",
+        );
+        block(
+            circuit.has_bsim3v3_devices(),
+            "BSIM3v3 accepted transient integration history is not checkpointed",
+        );
+        block(
+            circuit.has_bsim4v8_devices(),
+            "BSIM4v8 accepted transient integration history is not checkpointed",
+        );
+        block(
+            !circuit.ekv26s.is_empty(),
+            "EKV2.6 accepted transient integration history is not checkpointed",
+        );
+        block(
+            !circuit.ekv3s.is_empty(),
+            "EKV3 accepted limiter and bypass state is not checkpointed",
+        );
+        block(
+            circuit.capacitors.has_solution_dependent_values(),
+            "solution-dependent capacitor accepted expression state is not checkpointed",
+        );
+        block(
+            circuit.resistors.thermal.iter().any(Option::is_some),
+            "thermal resistor accepted temperature state is not checkpointed",
+        );
+        block(
+            !circuit.coupled_inductor_pairs.is_empty(),
+            "coupled-inductor accepted integration state is not checkpointed",
+        );
+        block(
+            !circuit.multi_winding_transformers.is_empty(),
+            "multi-winding transformer accepted integration state is not checkpointed",
+        );
+        block(
+            !circuit.jiles_atherton_inductors.is_empty(),
+            "Jiles-Atherton accepted magnetic state is not checkpointed",
+        );
+        block(
+            !circuit.xyce_core_groups.is_empty(),
+            "Xyce nonlinear-core accepted magnetic state is not checkpointed",
+        );
+        block(
+            circuit
+                .behavioral_sources
+                .voltage_sources
+                .iter()
+                .any(|source| source.program.sdt_count != 0)
+                || circuit
+                    .behavioral_sources
+                    .current_sources
+                    .iter()
+                    .any(|source| source.program.sdt_count != 0),
+            "behavioral-source accepted SDT state is not checkpointed",
+        );
+        block(
+            !circuit.vswitches.is_empty(),
+            "voltage-controlled switch accepted hysteresis state is not checkpointed",
+        );
+        block(
+            !circuit.iswitches.is_empty(),
+            "current-controlled switch accepted hysteresis state is not checkpointed",
+        );
+        blockers.extend(circuit.xspice_checkpoint_resume_blockers());
+        blockers.sort_unstable();
+        blockers.dedup();
+        blockers
     }
 
     fn capture_scheduled_checkpoint_if_due(
@@ -2295,7 +2444,10 @@ impl Engine {
         integration_stop_time: Value,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
-        lte_estimator: &LteEstimator,
+        bjt_history: &BjtTransientHistory,
+        diode_history: &DiodeTransientHistory,
+        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+        accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture<'_>,
         retained_result_values: usize,
         retained_scheduled_checkpoint_values: &mut usize,
         captured: &mut Vec<ScheduledTransientCheckpoint>,
@@ -2317,6 +2469,66 @@ impl Engine {
         } else {
             integration_continuation
         };
+        let accepted_junction_history =
+            Self::capture_accepted_junction_transient_history_checkpoint(
+                circuit,
+                bjt_history,
+                diode_history,
+                vbic_snapshot_cache,
+            );
+        let restart_normalized = at_integration_endpoint
+            || integration_continuation
+                .is_some_and(|continuation| continuation.xyce_breakpoint_restart_pending);
+        let accepted_junction_history = if restart_normalized {
+            if accepted_junction_history.resume_blockers.is_empty() {
+                Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
+                    circuit,
+                    &accepted_junction_history,
+                    0.0,
+                )
+                .map_err(SimulationError::Circuit)?
+            } else {
+                accepted_junction_history
+            }
+        } else {
+            accepted_junction_history
+        };
+        let lte_estimator = accepted_integration_runtime_capture.lte_estimator;
+        let accepted_integration_runtime = if restart_normalized {
+            AcceptedIntegrationRuntime::RestartNormalized(
+                RestartNormalizedIntegrationRuntimeCheckpoint::capture(
+                    accepted_time,
+                    RestartNormalizedIntegrationRuntimeCapture {
+                        lte_warmup_skips: accepted_integration_runtime_capture.lte_warmup_skips,
+                        force_accept_cooldown: accepted_integration_runtime_capture
+                            .force_accept_cooldown,
+                        livelock_streak: accepted_integration_runtime_capture.livelock_streak,
+                        livelock_last_restart_time: accepted_integration_runtime_capture
+                            .livelock_last_restart_time,
+                        accepted_interval_count: accepted_integration_runtime_capture
+                            .accepted_interval_count,
+                        damped_first_solver_call: accepted_integration_runtime_capture
+                            .damped_first_solver_call,
+                        damped_status: accepted_integration_runtime_capture.damped_status,
+                        retry_count: accepted_integration_runtime_capture.retry_count,
+                        xyce_step_failure_count: accepted_integration_runtime_capture
+                            .xyce_step_failure_count,
+                        stale_accept_count: accepted_integration_runtime_capture.stale_accept_count,
+                        resume_blockers: &[],
+                    },
+                )
+                .map_err(SimulationError::Circuit)?,
+            )
+        } else {
+            AcceptedIntegrationRuntime::Exact(
+                AcceptedIntegrationRuntimeCheckpoint::capture(
+                    solution,
+                    accepted_time,
+                    accepted_integration_runtime_capture,
+                )
+                .map_err(SimulationError::Circuit)?,
+            )
+        };
         let checkpoint = TransientCheckpoint::capture_with_restart_identity(
             fingerprint,
             netlist_identity.clone(),
@@ -2330,6 +2542,8 @@ impl Engine {
             integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
+            accepted_junction_history,
+            accepted_integration_runtime,
             Some(lte_estimator),
         )
         .map_err(SimulationError::Circuit)?;
@@ -2358,8 +2572,9 @@ impl Engine {
     /// The transient integration body. `resume` injects a checkpointed
     /// state (time, solution, reactive histories) instead of the fresh
     /// initial solution — numerically a breakpoint restart at the
-    /// checkpoint time. Returns the result together with the end-of-run
-    /// checkpoint for segmented continuation.
+    /// checkpoint time. The final checkpoint is captured only when the public
+    /// caller retains it; scheduled checkpoint APIs retain their scheduled
+    /// snapshots without materializing an otherwise discarded endpoint copy.
     fn run_tran_resolved_with_resume(
         &self,
         netlist: &Netlist,
@@ -2370,11 +2585,12 @@ impl Engine {
         abort: &dyn AbortSignal,
         resume: Option<&TransientCheckpoint>,
         resume_validation: ResumeValidation,
+        final_checkpoint_retention: FinalCheckpointRetention,
         scheduled_checkpoint_times: &[Value],
     ) -> Result<
         (
             TransientResult,
-            TransientCheckpoint,
+            Option<TransientCheckpoint>,
             Vec<ScheduledTransientCheckpoint>,
         ),
         SimulationError,
@@ -2438,44 +2654,93 @@ impl Engine {
                 device_op_traces: Vec::new(),
                 store_traces: Vec::new(),
             };
-            let checkpoint = TransientCheckpoint::capture_with_restart_identity(
-                fingerprint,
-                netlist_identity,
-                restart_identity,
-                simulation_identity,
-                0.0,
-                &[],
-                &circuit,
-                startup_mode,
-                Some(max_step),
-                None,
-                &[],
-                0,
-                None,
-            )
-            .map_err(SimulationError::Circuit)?;
             if scheduled_checkpoint_times.iter().any(|time| *time != 0.0) {
                 return Err(SimulationError::Circuit(
                     "a topology-free transient cannot produce positive-time scheduled checkpoints"
                         .to_string(),
                 ));
             }
-            scheduled_checkpoints.extend(scheduled_checkpoint_times.iter().map(|&nominal_time| {
-                ScheduledTransientCheckpoint {
-                    nominal_time,
-                    checkpoint: checkpoint.clone(),
-                }
-            }));
-            retained_scheduled_checkpoint_values = checkpoint
-                .retained_value_count()
-                .saturating_add(1)
-                .saturating_mul(scheduled_checkpoints.len());
+            let final_checkpoint = if final_checkpoint_retention.is_retained()
+                || !scheduled_checkpoint_times.is_empty()
+            {
+                let checkpoint = TransientCheckpoint::capture_with_restart_identity(
+                    fingerprint,
+                    netlist_identity,
+                    restart_identity,
+                    simulation_identity,
+                    0.0,
+                    &[],
+                    &circuit,
+                    startup_mode,
+                    Some(max_step),
+                    None,
+                    &[],
+                    0,
+                    AcceptedJunctionTransientHistoryCheckpoint {
+                        available: true,
+                        ..AcceptedJunctionTransientHistoryCheckpoint::default()
+                    },
+                    AcceptedIntegrationRuntime::RestartNormalized(
+                        RestartNormalizedIntegrationRuntimeCheckpoint::capture(
+                            0.0,
+                            RestartNormalizedIntegrationRuntimeCapture {
+                                lte_warmup_skips: 0,
+                                force_accept_cooldown: 0,
+                                livelock_streak: 0,
+                                livelock_last_restart_time: None,
+                                accepted_interval_count: 0,
+                                damped_first_solver_call: true,
+                                damped_status: None,
+                                retry_count: 0,
+                                xyce_step_failure_count: 0,
+                                stale_accept_count: 0,
+                                resume_blockers: &[],
+                            },
+                        )
+                        .map_err(SimulationError::Circuit)?,
+                    ),
+                    None,
+                )
+                .map_err(SimulationError::Circuit)?;
+                let scheduled_checkpoint_values =
+                    checkpoint.retained_value_count().saturating_add(1);
+                let final_checkpoint = if final_checkpoint_retention.is_retained() {
+                    scheduled_checkpoints.extend(scheduled_checkpoint_times.iter().map(
+                        |&nominal_time| ScheduledTransientCheckpoint {
+                            nominal_time,
+                            checkpoint: checkpoint.clone(),
+                        },
+                    ));
+                    Some(checkpoint)
+                } else if let Some(&nominal_time) = scheduled_checkpoint_times.first() {
+                    // A topology-free schedule can contain only its t=0
+                    // checkpoint. Transfer the owned value into the returned
+                    // schedule instead of briefly materializing an uncharged
+                    // endpoint duplicate.
+                    scheduled_checkpoints.push(ScheduledTransientCheckpoint {
+                        nominal_time,
+                        checkpoint,
+                    });
+                    None
+                } else {
+                    None
+                };
+                retained_scheduled_checkpoint_values =
+                    scheduled_checkpoint_values.saturating_mul(scheduled_checkpoints.len());
+                final_checkpoint
+            } else {
+                None
+            };
             self.ensure_result_values(
                 Self::transient_result_value_count(&result)
                     .saturating_add(retained_scheduled_checkpoint_values)
-                    .saturating_add(checkpoint.retained_value_count()),
+                    .saturating_add(
+                        final_checkpoint
+                            .as_ref()
+                            .map_or(0, TransientCheckpoint::retained_value_count),
+                    ),
             )?;
-            return Ok((result, checkpoint, scheduled_checkpoints));
+            return Ok((result, final_checkpoint, scheduled_checkpoints));
         }
         Self::ensure_supported_transient_dynamic_charges(&circuit)?;
         let hinted_max_step = circuit
@@ -2975,6 +3240,7 @@ impl Engine {
         let mut livelock_streak = 0_usize;
         let mut livelock_last_restart_t: Option<Value> = None;
         let mut lte_warmup_skips = 0_u8;
+        let mut accepted_interval_count = 0_usize;
         // Xyce's global first-step phase and its first interval after a
         // breakpoint are separate controller states. A resumed result segment
         // always starts with one stored point, so its local length cannot
@@ -3456,6 +3722,21 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(&solution);
         circuit.update_multi_winding_transformer_state(&solution);
 
+        // ngspice keeps `CKTgmin` live in every analysis mode. Establish the
+        // production transient floor after DC startup but before checkpoint
+        // injection and BJT/diode history construction. The setter can
+        // invalidate nonlinear caches when the value changes, so injection
+        // must remain the last writer of restored accepted device state.
+        circuit.set_semiconductor_junction_gmin(
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+        );
+        // The accepted transient boundary is never a DC operating-point
+        // evaluation phase. The first transient stamp would clear these
+        // modes anyway; establish that canonical phase before a possible t=0
+        // checkpoint so resume and uninterrupted execution start identically.
+        circuit.set_b3soi_operating_point_mode(false);
+        circuit.set_xyce_memristor_operating_point_mode(false);
+
         // Seed transient line bookkeeping before checkpoint injection. A
         // supported scalar lossless checkpoint replaces the seed with its
         // complete accepted delay history; unsupported distributed/coupled
@@ -3464,6 +3745,66 @@ impl Engine {
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
         let coupled_tline_refs =
             Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
+
+        // Decode every engine-owned junction history/cache into temporary
+        // runtime pieces before checkpoint injection mutates the circuit. A
+        // legacy checkpoint is admitted here only when the live elaboration
+        // has no BJT or diode topology.
+        let restored_accepted_junction_history = resume
+            .map(|checkpoint| checkpoint.restore_accepted_junction_transient_history(&circuit))
+            .transpose()
+            .map_err(SimulationError::Circuit)?;
+        let exact_runtime_resume_blockers = resume
+            .filter(|checkpoint| {
+                matches!(
+                    checkpoint.accepted_integration_runtime(),
+                    AcceptedIntegrationRuntime::Exact(_)
+                )
+            })
+            .map_or_else(Vec::new, |_| {
+                Self::exact_integration_runtime_resume_blockers(
+                    &circuit,
+                    usize::from(resume_time > 0.0),
+                )
+            });
+        let (uses_xyce_static_residual, has_direct_dae_static_residual) = resume
+            .and_then(
+                |checkpoint| match checkpoint.accepted_integration_runtime() {
+                    AcceptedIntegrationRuntime::Exact(runtime) => Some((
+                        runtime.xyce_static_residual.is_some(),
+                        runtime.direct_dae_static_residual.is_some(),
+                    )),
+                    AcceptedIntegrationRuntime::UnavailableLegacy
+                    | AcceptedIntegrationRuntime::RestartNormalized(_) => None,
+                },
+            )
+            .unwrap_or((false, false));
+        let restored_accepted_integration_runtime = resume
+            .map(|checkpoint| {
+                checkpoint.validated_accepted_integration_runtime(
+                    AcceptedIntegrationRuntimeTarget {
+                        lte_estimator: &lte_estimator,
+                        uses_trapgear: fixed_method.is_none(),
+                        uses_xyce_static_residual,
+                        uses_direct_dae: uses_direct_xyce_dae,
+                        has_direct_dae_static_residual,
+                        uses_damped_newton: uses_xyce_damped_solver,
+                        expected_resume_blockers: &exact_runtime_resume_blockers,
+                    },
+                )
+            })
+            .transpose()
+            .map_err(SimulationError::Circuit)?;
+        let resume_is_restart_normalized = matches!(
+            restored_accepted_integration_runtime,
+            Some(ValidatedAcceptedIntegrationRuntime::RestartNormalized(_))
+        );
+        if resume_is_restart_normalized {
+            xyce_lte_restart_first_step = true;
+            if fixed_method.is_none() {
+                trapgear.restart_from(&solution);
+            }
+        }
 
         // Resume: replace the flat (DC-style) reactive and transmission-line
         // histories written above with the exact checkpointed state.
@@ -3540,40 +3881,10 @@ impl Engine {
                 .initialize_direct_xyce_accepted_q(accepted_q)
                 .map_err(SimulationError::Circuit)?;
         }
-        self.capture_scheduled_checkpoint_if_due(
-            scheduled_checkpoint_times,
-            &mut scheduled_checkpoint_cursor,
-            resume_time,
-            fingerprint,
-            &netlist_identity,
-            &restart_identity,
-            &simulation_identity,
-            &solution,
-            &circuit,
-            startup_mode,
-            max_step,
-            Some(ProposedIntegrationContinuation {
-                next_step: timestep.dt(),
-                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
-                controller_max_step: timestep.max_dt(),
-                analysis_first_step_pending,
-                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
-            }),
-            tstop,
-            &pending_dynamic_tline_breakpoints,
-            dynamic_tline_breakpoints_added,
-            &lte_estimator,
-            retained_result_values,
-            &mut retained_scheduled_checkpoint_values,
-            &mut scheduled_checkpoints,
-        )?;
-
-        // Version-18 checkpoints restore accepted native diode/BJT limiter,
-        // evaluation, and charge-snapshot state before the order-one reactive
-        // histories below are reconstructed. The accepted timestep chain is
-        // deliberately not continued across the seam, so every variable-step
-        // companion fails safe until one real interval has been accepted.
-        // Fresh startup retains ngspice's maxstep seed.
+        // Fresh startup retains ngspice's maxstep seed. A resumed run
+        // replaces these provisional histories below with the exact decoded
+        // checkpoint state, which is already normalized when the checkpoint
+        // represents a breakpoint-style restart.
         let accepted_dt_seed = if resume.is_some() {
             0.0
         } else {
@@ -3601,6 +3912,32 @@ impl Engine {
         let mut diode_history = Self::initialize_diode_history(&circuit, &solution, reactive_seed);
         diode_history.accepted_dt_prev = accepted_dt_seed;
         diode_history.accepted_dt_prev_prev = accepted_dt_seed;
+        if let Some((restored_bjt, restored_diode, restored_snapshot_cache)) =
+            restored_accepted_junction_history
+        {
+            bjt_history = restored_bjt;
+            diode_history = restored_diode;
+            vbic_snapshot_cache = restored_snapshot_cache;
+        }
+
+        if resume.is_some() && record_device_op_traces {
+            // The initial seam report was created before checkpoint injection
+            // and before the accepted terminal-current history was installed.
+            // Recording at the same sample index overwrites it in place with
+            // restored diode/BJT caches and exact accepted BJT lead currents.
+            retained_result_values = retained_result_values.saturating_add(
+                result.record_device_op_sample(
+                    circuit
+                        .transient_device_op_report(
+                            &solution,
+                            &bjt_history.accepted_terminal_currents,
+                        )
+                        .map_err(SimulationError::Circuit)?,
+                ),
+            );
+            self.ensure_transient_result_limits(&result, retained_result_values)?;
+        }
+
         // Companion stamp slots resolved once against the frozen pattern:
         // the per-iteration charge companions then stamp through direct CSC
         // indices instead of a hash lookup per matrix entry.
@@ -3617,7 +3954,6 @@ impl Engine {
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
         b3soi_history.accepted_dt_prev = accepted_dt_seed;
         b3soi_history.accepted_dt_prev_prev = accepted_dt_seed;
-        let b3soi_first_transient_handoff = resume.is_none() && circuit.has_b3soi_devices();
         let mut bsim3_history = Self::initialize_bsim3_history(&circuit, &solution);
         bsim3_history.accepted_dt_prev = accepted_dt_seed;
         bsim3_history.accepted_dt_prev_prev = accepted_dt_seed;
@@ -3628,14 +3964,6 @@ impl Engine {
         ekv26_history.accepted_dt_prev = accepted_dt_seed;
         ekv26_history.accepted_dt_prev_prev = accepted_dt_seed;
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
-
-        // ngspice keeps `CKTgmin` live in every analysis mode: the compact
-        // models' junction parallels need the configured floor during
-        // transient stepping too, independent of whatever continuation
-        // level a preceding DC phase last left behind.
-        circuit.set_semiconductor_junction_gmin(
-            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
-        );
 
         // Xyce OneStep carries the accepted physical static residual into its
         // next order-2 transient step.  The vector is refreshed only after an
@@ -3738,6 +4066,129 @@ impl Engine {
                 self.transient_newton_iteration_budget(false),
             )
         });
+        if let Some(restored_runtime) = restored_accepted_integration_runtime {
+            let (
+                restored_lte_warmup_skips,
+                restored_force_accept_cooldown,
+                restored_livelock_streak,
+                restored_livelock_last_restart_time,
+                restored_accepted_interval_count,
+                restored_damped_first_solver_call,
+                restored_damped_status,
+            ) = match restored_runtime {
+                ValidatedAcceptedIntegrationRuntime::Exact(runtime) => {
+                    lte_estimator
+                        .restore_accepted_boundary_checkpoint(&runtime.lte, &solution)
+                        .map_err(SimulationError::Circuit)?;
+                    trap_order = runtime.next_trap_order;
+                    if let Some(snapshot) = runtime.trapgear.as_ref() {
+                        trapgear
+                            .restore_snapshot(snapshot, &solution)
+                            .map_err(SimulationError::Circuit)?;
+                    }
+                    xyce_static_history.clone_from(&runtime.xyce_static_residual);
+                    xyce_direct_accepted_q.clone_from(&runtime.direct_dae_accepted_q);
+                    xyce_direct_static_history.clone_from(&runtime.direct_dae_static_residual);
+                    (
+                        runtime.lte_warmup_skips,
+                        runtime.force_accept_cooldown,
+                        runtime.livelock_streak,
+                        runtime.livelock_last_restart_time,
+                        runtime.accepted_interval_count,
+                        runtime.damped_first_solver_call,
+                        runtime.damped_status.as_ref(),
+                    )
+                }
+                ValidatedAcceptedIntegrationRuntime::RestartNormalized(runtime) => (
+                    runtime.lte_warmup_skips,
+                    runtime.force_accept_cooldown,
+                    runtime.livelock_streak,
+                    runtime.livelock_last_restart_time,
+                    runtime.accepted_interval_count,
+                    runtime.damped_first_solver_call,
+                    runtime.damped_status.as_ref(),
+                ),
+            };
+            lte_warmup_skips = restored_lte_warmup_skips;
+            force_accept_cooldown = restored_force_accept_cooldown;
+            livelock_streak = restored_livelock_streak;
+            livelock_last_restart_t = restored_livelock_last_restart_time;
+            accepted_interval_count = restored_accepted_interval_count;
+            xyce_damped_first_solver_call = restored_damped_first_solver_call;
+            if let Some(restored_status) = restored_damped_status {
+                xyce_damped_status
+                    .as_mut()
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(
+                            "validated checkpoint DampedNewton state has no live target solver"
+                                .to_string(),
+                        )
+                    })?
+                    .restore_accepted_boundary_checkpoint(restored_status)
+                    .map_err(SimulationError::Circuit)?;
+            }
+        }
+
+        // The t=0/resume-time scheduled capture must observe every accepted
+        // controller, history, and solver-policy owner. Capturing earlier
+        // would authenticate a partially initialized continuation phase.
+        let runtime_resume_blockers =
+            Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count);
+        let damped_status_checkpoint = xyce_damped_status
+            .as_ref()
+            .map(|status| status.capture_accepted_boundary_checkpoint())
+            .transpose()
+            .map_err(SimulationError::Circuit)?;
+        self.capture_scheduled_checkpoint_if_due(
+            scheduled_checkpoint_times,
+            &mut scheduled_checkpoint_cursor,
+            resume_time,
+            fingerprint,
+            &netlist_identity,
+            &restart_identity,
+            &simulation_identity,
+            &solution,
+            &circuit,
+            startup_mode,
+            max_step,
+            Some(ProposedIntegrationContinuation {
+                next_step: timestep.dt(),
+                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                controller_max_step: timestep.max_dt(),
+                analysis_first_step_pending,
+                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+            }),
+            tstop,
+            &pending_dynamic_tline_breakpoints,
+            dynamic_tline_breakpoints_added,
+            &bjt_history,
+            &diode_history,
+            &vbic_snapshot_cache,
+            AcceptedIntegrationRuntimeCapture {
+                lte_estimator: &lte_estimator,
+                next_trap_order: trap_order,
+                trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                xyce_static_residual: xyce_static_history.as_deref(),
+                direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                lte_warmup_skips,
+                force_accept_cooldown,
+                livelock_streak,
+                livelock_last_restart_time: livelock_last_restart_t,
+                accepted_interval_count,
+                damped_first_solver_call: xyce_damped_first_solver_call,
+                damped_status: damped_status_checkpoint,
+                retry_count,
+                xyce_step_failure_count,
+                stale_accept_count,
+                resume_blockers: &runtime_resume_blockers,
+            },
+            retained_result_values,
+            &mut retained_scheduled_checkpoint_values,
+            &mut scheduled_checkpoints,
+        )?;
+        let b3soi_first_transient_handoff =
+            accepted_interval_count == 0 && circuit.has_b3soi_devices();
         // Meyer capacitance halves captured by exact-residual assembly or the
         // device-truncation walk on the candidate solution; valid only for the
         // accept path of the same loop pass (reset every attempt).
@@ -3893,11 +4344,11 @@ impl Engine {
                     );
                     if lte_estimator.uses_accepted_solution_reference() {
                         lte_estimator.restart_history_from(&solution);
-                        xyce_lte_restart_first_step = true;
                     } else {
                         lte_estimator.restart_history();
                         lte_warmup_skips = 2;
                     }
+                    xyce_lte_restart_first_step = true;
                     let restart_dt = Self::ngspice_t0_breakpoint_limited_initial_timestep(
                         Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
                         breakpoints.next_after(t),
@@ -4140,7 +4591,7 @@ impl Engine {
                 trapgear.force_method(method);
             }
             let step_time = canonical_transient_step_time(t, dt, tstop);
-            let analysis_initial_step = resume.is_none() && uic_requested && result.time.len() == 1;
+            let analysis_initial_step = uic_requested && accepted_interval_count == 0;
             let analysis_final_step = step_time == tstop;
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
@@ -4206,7 +4657,7 @@ impl Engine {
             // changing that interval's order. Its integration reinitialize
             // happens only after the landing point is accepted, so the first
             // interval *leaving* the breakpoint is the order-one step.
-            let is_first_resumed_interval = resume.is_some() && result.time.len() == 1;
+            let is_first_resumed_interval = resume_is_restart_normalized && result.time.len() == 1;
             let step_trap_order = if is_first_resumed_interval {
                 native_order_after_restart(current_method)
             } else {
@@ -4346,7 +4797,7 @@ impl Engine {
             let linearized_startup_recovery_points = matches!(
                 initial_solution_mode,
                 startup::InitialSolutionMode::LinearizedSeed
-            ) && result.time.len()
+            ) && accepted_interval_count.saturating_add(1)
                 <= LINEARIZED_STARTUP_RECOVERY_POINTS;
             let startup_recovery = linearized_startup_recovery_points
                 || Self::in_startup_recovery_window(
@@ -4456,7 +4907,7 @@ impl Engine {
             } else {
                 self.transient_newton_update_weights(&new_solution, &solution)
             };
-            if b3soi_first_transient_handoff && result.time.len() == 1 {
+            if b3soi_first_transient_handoff && accepted_interval_count == 0 {
                 Self::reseed_b3soi_first_transient_history(
                     &circuit,
                     &new_solution,
@@ -4542,7 +4993,7 @@ impl Engine {
                     vdmos_companion_slots: &vdmos_companion_slots,
                     b3soi_history: &b3soi_history,
                     b3soi_zero_first_transient_charge_derivative: b3soi_first_transient_handoff
-                        && result.time.len() == 1
+                        && accepted_interval_count == 0
                         && _iter == 0,
                     bsim3_history: &bsim3_history,
                     bsim4_history: &bsim4_history,
@@ -5434,7 +5885,7 @@ impl Engine {
                                         b3soi_history: &b3soi_history,
                                         b3soi_zero_first_transient_charge_derivative:
                                             b3soi_first_transient_handoff
-                                                && result.time.len() == 1
+                                                && accepted_interval_count == 0
                                                 && _iter == 0,
                                         bsim3_history: &bsim3_history,
                                         bsim4_history: &bsim4_history,
@@ -6747,8 +7198,10 @@ impl Engine {
                         ),
                     );
                     lte_estimator.record(&new_solution, dt);
-                    if hit_breakpoint && lte_estimator.uses_accepted_solution_reference() {
-                        lte_estimator.restart_history_from(&new_solution);
+                    if hit_breakpoint {
+                        if lte_estimator.uses_accepted_solution_reference() {
+                            lte_estimator.restart_history_from(&new_solution);
+                        }
                         xyce_lte_restart_first_step = true;
                     }
                     lte_estimator.set_method_order(effective_method_order(
@@ -6899,6 +7352,20 @@ impl Engine {
                                 "direct Xyce static scratch is allocated for the gated path",
                             ));
                     }
+                    retry_count = 0;
+                    xyce_step_failure_count = 0;
+                    accepted_interval_count =
+                        accepted_interval_count.checked_add(1).ok_or_else(|| {
+                            SimulationError::Circuit(
+                                "transient accepted-interval count overflowed".to_string(),
+                            )
+                        })?;
+                    let trajectory_point_count =
+                        accepted_interval_count.checked_add(1).ok_or_else(|| {
+                            SimulationError::Circuit(
+                                "transient trajectory point count overflowed".to_string(),
+                            )
+                        })?;
                     Self::backfill_initial_linear_capacitor_branch_currents(
                         &mut result,
                         &circuit,
@@ -6916,6 +7383,7 @@ impl Engine {
                             &bjt_history,
                             record_device_op_traces,
                             &capture_plan,
+                            trajectory_point_count,
                             abort,
                         )?,
                     );
@@ -6944,7 +7412,6 @@ impl Engine {
                         max_step,
                         force_accept_device_truncation_limit,
                     );
-                    retry_count = 0; // Reset for next timepoint
                     self.record_convergence(|quality| {
                         if quality.force_accepted_points == 0 {
                             log::warn!(
@@ -6966,6 +7433,19 @@ impl Engine {
                         xyce_lte_restart_first_step = false;
                     }
                     livelock_check!(dt);
+                    debug_assert_eq!(retry_count, 0);
+                    debug_assert_eq!(xyce_step_failure_count, 0);
+                    debug_assert_eq!(stale_accept_count, 0);
+                    debug_assert!(!circuit.xyce_core_trial_invalid());
+                    let runtime_resume_blockers = Self::exact_integration_runtime_resume_blockers(
+                        &circuit,
+                        accepted_interval_count,
+                    );
+                    let damped_status_checkpoint = xyce_damped_status
+                        .as_ref()
+                        .map(|status| status.capture_accepted_boundary_checkpoint())
+                        .transpose()
+                        .map_err(SimulationError::Circuit)?;
                     self.capture_scheduled_checkpoint_if_due(
                         scheduled_checkpoint_times,
                         &mut scheduled_checkpoint_cursor,
@@ -6988,7 +7468,28 @@ impl Engine {
                         tstop,
                         &pending_dynamic_tline_breakpoints,
                         dynamic_tline_breakpoints_added,
-                        &lte_estimator,
+                        &bjt_history,
+                        &diode_history,
+                        &vbic_snapshot_cache,
+                        AcceptedIntegrationRuntimeCapture {
+                            lte_estimator: &lte_estimator,
+                            next_trap_order: trap_order,
+                            trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                            xyce_static_residual: xyce_static_history.as_deref(),
+                            direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                            direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                            lte_warmup_skips,
+                            force_accept_cooldown,
+                            livelock_streak,
+                            livelock_last_restart_time: livelock_last_restart_t,
+                            accepted_interval_count,
+                            damped_first_solver_call: xyce_damped_first_solver_call,
+                            damped_status: damped_status_checkpoint,
+                            retry_count,
+                            xyce_step_failure_count,
+                            stale_accept_count,
+                            resume_blockers: &runtime_resume_blockers,
+                        },
                         retained_result_values,
                         &mut retained_scheduled_checkpoint_values,
                         &mut scheduled_checkpoints,
@@ -7267,10 +7768,12 @@ impl Engine {
                 );
                 if hit_breakpoint {
                     lte_estimator.restart_history_from(&new_solution);
-                    xyce_lte_restart_first_step = true;
                 }
                 lte_estimator
                     .set_method_order(effective_method_order(method_after_step, step_trap_order));
+            }
+            if hit_breakpoint {
+                xyce_lte_restart_first_step = true;
             }
             xyce_step_failure_count = 0;
 
@@ -7300,6 +7803,16 @@ impl Engine {
                     );
             }
 
+            accepted_interval_count = accepted_interval_count.checked_add(1).ok_or_else(|| {
+                SimulationError::Circuit("transient accepted-interval count overflowed".to_string())
+            })?;
+            let trajectory_point_count =
+                accepted_interval_count.checked_add(1).ok_or_else(|| {
+                    SimulationError::Circuit(
+                        "transient trajectory point count overflowed".to_string(),
+                    )
+                })?;
+
             // Store results
             Self::backfill_initial_linear_capacitor_branch_currents(
                 &mut result,
@@ -7318,6 +7831,7 @@ impl Engine {
                     &bjt_history,
                     record_device_op_traces,
                     &capture_plan,
+                    trajectory_point_count,
                     abort,
                 )?);
             if record_xspice_event_traces {
@@ -7490,6 +8004,17 @@ impl Engine {
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
             livelock_check!(dt);
+            debug_assert_eq!(retry_count, 0);
+            debug_assert_eq!(xyce_step_failure_count, 0);
+            debug_assert_eq!(stale_accept_count, 0);
+            debug_assert!(!circuit.xyce_core_trial_invalid());
+            let runtime_resume_blockers =
+                Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count);
+            let damped_status_checkpoint = xyce_damped_status
+                .as_ref()
+                .map(|status| status.capture_accepted_boundary_checkpoint())
+                .transpose()
+                .map_err(SimulationError::Circuit)?;
             self.capture_scheduled_checkpoint_if_due(
                 scheduled_checkpoint_times,
                 &mut scheduled_checkpoint_cursor,
@@ -7512,7 +8037,28 @@ impl Engine {
                 tstop,
                 &pending_dynamic_tline_breakpoints,
                 dynamic_tline_breakpoints_added,
-                &lte_estimator,
+                &bjt_history,
+                &diode_history,
+                &vbic_snapshot_cache,
+                AcceptedIntegrationRuntimeCapture {
+                    lte_estimator: &lte_estimator,
+                    next_trap_order: trap_order,
+                    trapgear: fixed_method.is_none().then(|| trapgear.capture_snapshot()),
+                    xyce_static_residual: xyce_static_history.as_deref(),
+                    direct_dae_accepted_q: xyce_direct_accepted_q.as_deref(),
+                    direct_dae_static_residual: xyce_direct_static_history.as_deref(),
+                    lte_warmup_skips,
+                    force_accept_cooldown,
+                    livelock_streak,
+                    livelock_last_restart_time: livelock_last_restart_t,
+                    accepted_interval_count,
+                    damped_first_solver_call: xyce_damped_first_solver_call,
+                    damped_status: damped_status_checkpoint,
+                    retry_count,
+                    xyce_step_failure_count,
+                    stale_accept_count,
+                    resume_blockers: &runtime_resume_blockers,
+                },
                 retained_result_values,
                 &mut retained_scheduled_checkpoint_values,
                 &mut scheduled_checkpoints,
@@ -7608,33 +8154,91 @@ impl Engine {
         let bypassed = circuit.b3soi_bypass_hits();
         self.record_convergence(|quality| quality.bypassed_device_evaluations = bypassed);
 
-        let final_checkpoint = TransientCheckpoint::capture_with_restart_identity(
-            fingerprint,
-            netlist_identity,
-            restart_identity,
-            simulation_identity,
-            t,
-            &solution,
-            &circuit,
-            startup_mode,
-            Some(max_step),
-            None,
-            &pending_dynamic_tline_breakpoints,
-            dynamic_tline_breakpoints_added,
-            Some(&lte_estimator),
-        )
-        .map_err(SimulationError::Circuit)?;
-        self.ensure_result_values(
-            retained_result_values
-                .saturating_add(retained_scheduled_checkpoint_values)
-                .saturating_add(final_checkpoint.retained_value_count()),
-        )?;
+        debug_assert_eq!(retry_count, 0);
+        debug_assert_eq!(xyce_step_failure_count, 0);
+        debug_assert_eq!(stale_accept_count, 0);
+        debug_assert!(!circuit.xyce_core_trial_invalid());
         if scheduled_checkpoint_cursor != scheduled_checkpoint_times.len() {
             return Err(SimulationError::Circuit(format!(
                 "transient ended at {t:.17e}s before scheduled checkpoint {:.17e}s was captured",
                 scheduled_checkpoint_times[scheduled_checkpoint_cursor]
             )));
         }
+        let final_checkpoint = if final_checkpoint_retention.is_retained() {
+            let final_accepted_junction_history =
+                Self::capture_accepted_junction_transient_history_checkpoint(
+                    &circuit,
+                    &bjt_history,
+                    &diode_history,
+                    &vbic_snapshot_cache,
+                );
+            let final_accepted_junction_history =
+                if final_accepted_junction_history.resume_blockers.is_empty() {
+                    Self::normalize_accepted_junction_transient_history_checkpoint_for_order_one(
+                        &circuit,
+                        &final_accepted_junction_history,
+                        0.0,
+                    )
+                    .map_err(SimulationError::Circuit)?
+                } else {
+                    final_accepted_junction_history
+                };
+            let final_damped_status_checkpoint = xyce_damped_status
+                .as_ref()
+                .map(|status| status.capture_accepted_boundary_checkpoint())
+                .transpose()
+                .map_err(SimulationError::Circuit)?;
+            let final_accepted_integration_runtime = AcceptedIntegrationRuntime::RestartNormalized(
+                RestartNormalizedIntegrationRuntimeCheckpoint::capture(
+                    t,
+                    RestartNormalizedIntegrationRuntimeCapture {
+                        lte_warmup_skips,
+                        force_accept_cooldown,
+                        livelock_streak,
+                        livelock_last_restart_time: livelock_last_restart_t,
+                        accepted_interval_count,
+                        damped_first_solver_call: xyce_damped_first_solver_call,
+                        damped_status: final_damped_status_checkpoint,
+                        retry_count,
+                        xyce_step_failure_count,
+                        stale_accept_count,
+                        resume_blockers: &[],
+                    },
+                )
+                .map_err(SimulationError::Circuit)?,
+            );
+            Some(
+                TransientCheckpoint::capture_with_restart_identity(
+                    fingerprint,
+                    netlist_identity,
+                    restart_identity,
+                    simulation_identity,
+                    t,
+                    &solution,
+                    &circuit,
+                    startup_mode,
+                    Some(max_step),
+                    None,
+                    &pending_dynamic_tline_breakpoints,
+                    dynamic_tline_breakpoints_added,
+                    final_accepted_junction_history,
+                    final_accepted_integration_runtime,
+                    Some(&lte_estimator),
+                )
+                .map_err(SimulationError::Circuit)?,
+            )
+        } else {
+            None
+        };
+        self.ensure_result_values(
+            retained_result_values
+                .saturating_add(retained_scheduled_checkpoint_values)
+                .saturating_add(
+                    final_checkpoint
+                        .as_ref()
+                        .map_or(0, TransientCheckpoint::retained_value_count),
+                ),
+        )?;
         Ok((result, final_checkpoint, scheduled_checkpoints))
     }
 
@@ -8035,6 +8639,313 @@ mod tests {
     fn native_bjt_zero_charge_leads_keep_static_t0_and_accepted_values() {
         let result = run_native_bjt_total_leads("7", false, false);
         assert_native_bjt_total_lead_kcl(&result, false);
+    }
+
+    #[test]
+    fn v20_junction_history_lifecycle_preserves_origin_restart_and_seam_reports() {
+        let source = "\
+v20 accepted junction history lifecycle
+VC 0 C 0
+VB 0 B 0
+VD 0 D 0
+Q1 C B 0 QMOD
+D1 D 0 DMOD
+.MODEL QMOD NPN LEVEL=1 IS=3e-14 BF=130 CJE=0 CJC=0 TF=0 TR=0
+.MODEL DMOD D IS=1e-14 CJO=0 TT=0
+.TRAN 1n 2n
+.PRINT TRAN IC(Q1)
+.END
+";
+        let netlist = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("v20 junction lifecycle deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+
+        let (_, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                1.0e-9,
+                1.0e-9,
+                TransientStartupMode::OperatingPoint,
+                &[0.0],
+            )
+            .expect("t=0 scheduled junction checkpoint captures");
+        let origin = scheduled[0]
+            .checkpoint
+            .accepted_junction_transient_history();
+        assert!(origin.available);
+        assert!(origin.resume_blockers.is_empty());
+        assert_eq!(origin.bjt_names, ["Q1"]);
+        assert_eq!(origin.diode_names, ["D1"]);
+        assert_eq!(origin.bjt_history.vbe_prev.len(), 1);
+        assert_eq!(origin.diode_history.vd_prev.len(), 1);
+        assert_eq!(origin.vbic_snapshot_cache.len(), 1);
+        assert!(origin.bjt_history.accepted_dt_prev > 0.0);
+        assert!(origin.diode_history.accepted_dt_prev > 0.0);
+        match scheduled[0].checkpoint.accepted_integration_runtime() {
+            AcceptedIntegrationRuntime::Exact(runtime) => {
+                assert_eq!(runtime.accepted_interval_count, 0);
+                assert!(runtime.resume_blockers.is_empty());
+            }
+            phase => panic!("t=0 scheduled checkpoint has unexpected runtime phase {phase:?}"),
+        }
+
+        let (first, final_checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 1.0e-9, 1.0e-9)
+            .expect("first v20 junction segment solves");
+        let final_history = final_checkpoint.accepted_junction_transient_history();
+        assert_eq!(final_history.bjt_history.accepted_dt_prev.to_bits(), 0);
+        assert_eq!(final_history.diode_history.accepted_dt_prev.to_bits(), 0);
+        assert_eq!(
+            final_history.bjt_history.charge_q_prev_prev,
+            final_history.bjt_history.charge_q_prev
+        );
+        assert_eq!(
+            final_history.diode_history.qd_prev_prev,
+            final_history.diode_history.qd_prev
+        );
+        assert!(
+            final_history
+                .bjt_history
+                .accepted_terminal_currents
+                .iter()
+                .all(Option::is_some)
+        );
+        assert!(
+            final_history
+                .vbic_snapshot_cache
+                .iter()
+                .all(Option::is_none)
+        );
+        match final_checkpoint.accepted_integration_runtime() {
+            AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
+                assert!(runtime.accepted_interval_count > 0);
+                assert!(runtime.resume_blockers.is_empty());
+            }
+            phase => panic!("final endpoint has unexpected runtime phase {phase:?}"),
+        }
+
+        let serialized = TransientCheckpoint::from_text(&final_checkpoint.to_text())
+            .expect("v20 junction checkpoint round-trips");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &serialized, 2.0e-9, 1.0e-9)
+            .expect("v20 junction checkpoint resumes");
+        for (device, parameter) in [("Q1", "IC"), ("Q1", "IB"), ("D1", "ID")] {
+            let uninterrupted = first
+                .try_device_op_waveform_named(device, parameter)
+                .unwrap_or_else(|| panic!("missing first-segment {device}[{parameter}] trace"));
+            let resumed_trace = resumed
+                .try_device_op_waveform_named(device, parameter)
+                .unwrap_or_else(|| panic!("missing resumed {device}[{parameter}] trace"));
+            assert_eq!(
+                resumed_trace[0].to_bits(),
+                uninterrupted
+                    .last()
+                    .expect("first segment has samples")
+                    .to_bits(),
+                "restored seam report changed {device}[{parameter}]"
+            );
+        }
+    }
+
+    #[test]
+    fn v20_non_breakpoint_checkpoint_round_trips_bjt_snapshot_cache_and_exact_suffix() {
+        let source = "\
+v20 non-breakpoint BJT snapshot-cache continuation
+VC C 0 1
+VB B 0 SIN(-0.2 0.02 100MEG)
+VD D 0 SIN(-0.25 0.01 80MEG)
+Q1 C B 0 QMOD
+D1 D 0 DMOD
+.MODEL QMOD NPN LEVEL=1 IS=3e-14 BF=130 CJE=1f CJC=1f TF=0 TR=0
+.MODEL DMOD D IS=1e-14 CJO=1f TT=0
+.TRAN 0.25n 1n
+.PRINT TRAN V(B) IC(Q1) ID(D1)
+.END
+";
+        let netlist = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("v20 raw snapshot-cache deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+
+        let (uninterrupted, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                1.0e-9,
+                0.25e-9,
+                TransientStartupMode::OperatingPoint,
+                &[0.25e-9],
+            )
+            .expect("non-breakpoint v20 checkpoint trajectory solves");
+        assert_eq!(scheduled.len(), 1);
+        let checkpoint = &scheduled[0].checkpoint;
+        assert!(checkpoint.time < 1.0e-9);
+        let history = checkpoint.accepted_junction_transient_history();
+        assert!(history.available);
+        assert!(history.resume_blockers.is_empty());
+        assert!(history.bjt_history.accepted_dt_prev > 0.0);
+        assert!(history.diode_history.accepted_dt_prev > 0.0);
+        assert!(
+            history.vbic_snapshot_cache[0].is_some(),
+            "a regular accepted legacy-BJT point must retain its reusable charge snapshot"
+        );
+        match checkpoint.accepted_integration_runtime() {
+            AcceptedIntegrationRuntime::Exact(runtime) => {
+                assert!(runtime.accepted_interval_count > 0);
+                assert!(runtime.resume_blockers.is_empty());
+                assert!(runtime.trapgear.is_some());
+            }
+            phase => panic!("non-breakpoint checkpoint has unexpected runtime phase {phase:?}"),
+        }
+
+        let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("raw v20 snapshot-cache checkpoint round-trips");
+        let continuation = serialized
+            .validated_integration_continuation()
+            .expect("raw checkpoint continuation validates")
+            .expect("non-breakpoint checkpoint has a proposed continuation");
+        assert!(
+            serialized
+                .accepted_junction_transient_history()
+                .vbic_snapshot_cache[0]
+                .is_some()
+        );
+        let (resumed, resumed_final) = engine
+            .run_tran_resume(&netlist, &serialized, 1.0e-9, 0.25e-9)
+            .expect("raw v20 snapshot-cache checkpoint resumes");
+        match resumed_final.accepted_integration_runtime() {
+            AcceptedIntegrationRuntime::RestartNormalized(runtime) => assert!(
+                runtime.accepted_interval_count
+                    > match checkpoint.accepted_integration_runtime() {
+                        AcceptedIntegrationRuntime::Exact(runtime) => {
+                            runtime.accepted_interval_count
+                        }
+                        _ => unreachable!("phase asserted above"),
+                    }
+            ),
+            phase => panic!("resumed endpoint has unexpected runtime phase {phase:?}"),
+        }
+        let seam_index = uninterrupted
+            .time
+            .iter()
+            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+            .expect("scheduled accepted time is present in uninterrupted output");
+        let expected_time = &uninterrupted.time[seam_index..];
+        let q1_uninterrupted = uninterrupted
+            .try_device_op_waveform_named("Q1", "IC")
+            .expect("uninterrupted Q1[IC] trace exists");
+        let q1_resumed = resumed
+            .try_device_op_waveform_named("Q1", "IC")
+            .expect("resumed Q1[IC] trace exists");
+        let first_q1_difference = q1_resumed
+            .iter()
+            .zip(&q1_uninterrupted[seam_index..])
+            .position(|(resumed, uninterrupted)| resumed.to_bits() != uninterrupted.to_bits());
+        assert_eq!(
+            resumed.time.len(),
+            expected_time.len(),
+            "restored accepted grid changed at checkpoint {:.17e}: continuation={continuation:?}, uninterrupted suffix={expected_time:?}, resumed={:?}, first Q1[IC] difference={first_q1_difference:?}",
+            checkpoint.time,
+            resumed.time,
+        );
+        for (index, (&actual, &expected)) in resumed.time.iter().zip(expected_time).enumerate() {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "restored accepted time changed at suffix row {index}"
+            );
+        }
+        for (device, parameter) in [("Q1", "IC"), ("D1", "ID")] {
+            let uninterrupted_trace = uninterrupted
+                .try_device_op_waveform_named(device, parameter)
+                .unwrap_or_else(|| panic!("missing uninterrupted {device}[{parameter}] trace"));
+            let resumed_trace = resumed
+                .try_device_op_waveform_named(device, parameter)
+                .unwrap_or_else(|| panic!("missing resumed {device}[{parameter}] trace"));
+            assert_eq!(resumed_trace.len(), expected_time.len());
+            for (index, (&actual, &expected)) in resumed_trace
+                .iter()
+                .zip(&uninterrupted_trace[seam_index..])
+                .enumerate()
+            {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "restored suffix changed {device}[{parameter}] at row {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn v21_exact_runtime_blockers_are_target_aware_and_time_zero_is_exempt() {
+        let stateless = Netlist::parse(
+            "stateless behavioral source\nV1 in 0 1\nB1 out 0 V={2*V(in)}\nR1 out 0 1k\n.end",
+        )
+        .expect("stateless behavioral fixture parses");
+        let stateless = Engine::default()
+            .build_circuit(&stateless)
+            .expect("stateless behavioral fixture builds");
+        assert!(Engine::exact_integration_runtime_resume_blockers(&stateless, 1).is_empty());
+
+        let stateful = Netlist::parse(
+            "stateful behavioral source\nV1 in 0 1\nB1 out 0 V={SDT(V(in))}\nR1 out 0 1k\n.end",
+        )
+        .expect("stateful behavioral fixture parses");
+        let stateful = Engine::default()
+            .build_circuit(&stateful)
+            .expect("stateful behavioral fixture builds");
+        let blockers = Engine::exact_integration_runtime_resume_blockers(&stateful, 1);
+        assert_eq!(
+            blockers,
+            ["behavioral-source accepted SDT state is not checkpointed"]
+        );
+        assert!(Engine::exact_integration_runtime_resume_blockers(&stateful, 0).is_empty());
+    }
+
+    #[test]
+    fn v21_uic_time_zero_checkpoint_preserves_authenticated_startup_phase() {
+        let netlist = Netlist::parse(
+            "v21 UIC checkpoint phase\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1p IC=0.2\n.tran 0.1n 0.2n UIC\n.end",
+        )
+        .expect("UIC phase fixture parses");
+        let engine = Engine::default();
+        let (_, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                0.2e-9,
+                0.1e-9,
+                TransientStartupMode::Uic,
+                &[0.0],
+            )
+            .expect("UIC t=0 checkpoint trajectory solves");
+        assert_eq!(scheduled.len(), 1);
+        let checkpoint = &scheduled[0].checkpoint;
+        assert_eq!(checkpoint.startup_mode(), Some(TransientStartupMode::Uic));
+        let continuation = checkpoint
+            .validated_integration_continuation()
+            .expect("UIC t=0 continuation validates")
+            .expect("UIC t=0 capture proposes the first interval");
+        assert!(continuation.analysis_first_step_pending);
+        match checkpoint.accepted_integration_runtime() {
+            AcceptedIntegrationRuntime::Exact(runtime) => {
+                assert_eq!(runtime.accepted_interval_count, 0);
+                assert!(runtime.resume_blockers.is_empty());
+            }
+            phase => panic!("UIC t=0 checkpoint has unexpected runtime phase {phase:?}"),
+        }
     }
 
     #[test]

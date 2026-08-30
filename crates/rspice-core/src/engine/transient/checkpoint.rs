@@ -10,14 +10,22 @@
 //! interval; legacy continuation state fails closed rather than silently
 //! reconstructing different controls.
 //!
-//! Scope, stated precisely: accepted linear-reactive histories, native diode
-//! and legacy Gummel-Poon BJT limiter/evaluation state, ordinary lossless
-//! scalar transmission-line delay histories, generated Verilog-A `ddt`/`idt`
-//! histories and limiter anchors, and XSPICE model-owned checkpoint state are
-//! captured bit-exactly. Continuation deliberately takes one order-one
-//! breakpoint-restart step before higher-order integration resumes. Native
-//! VBIC, distributed LTRA/TXL, and coupled-line convolution runtimes fail
-//! closed until their complete state has a versioned checkpoint contract.
+//! Scope, stated precisely: accepted linear-reactive histories; native diode
+//! and legacy Gummel-Poon BJT limiter/evaluation state; the engine-owned
+//! accepted diode/BJT charge, derivative, predictor, lead-current, timestep,
+//! and optional charge-snapshot histories; ordinary lossless scalar
+//! transmission-line delay histories; generated Verilog-A `ddt`/`idt`
+//! histories and limiter anchors; XSPICE model-owned checkpoint state; and the
+//! accepted LTE, Trap/Gear, static-residual/DAE, nonlinear-solver, cooldown,
+//! livelock, and global trajectory-policy runtime are captured bit-exactly.
+//! An arbitrary accepted proposal continues exactly, while an explicitly
+//! normalized endpoint or breakpoint contract deliberately takes an order-one
+//! restart step. Exact-proposal restore is target-aware and fails closed for
+//! native compact-model, thermal, solution-dependent capacitor, magnetic,
+//! stateful behavioral/switch, runtime Verilog-A, or generated dynamic-charge
+//! histories that do not yet have a complete versioned contract. Native VBIC,
+//! distributed LTRA/TXL, and coupled-line convolution runtimes block restart
+//! more broadly until their complete state is versioned.
 //!
 //! The canonical checkpoint representation is a versioned, line-oriented
 //! text format using Rust's shortest-round-trip float formatting, so every
@@ -27,13 +35,15 @@
 
 use crate::Value;
 use crate::circuit::{AcceptedNativeNonlinearCheckpointStates, CircuitData};
-#[cfg(feature = "veriloga")]
-use crate::device::veriloga::VerilogADeviceCheckpoint;
 use crate::device::semiconductor::{
-    AcceptedBjtNonlinearCheckpoint, AcceptedDiodeNonlinearCheckpoint,
+    AcceptedBjtChargeSnapshotCheckpoint, AcceptedBjtNonlinearCheckpoint,
+    AcceptedDiodeNonlinearCheckpoint, BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT,
     BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
+    BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
     DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
 };
+#[cfg(feature = "veriloga")]
+use crate::device::veriloga::VerilogADeviceCheckpoint;
 use crate::device::veriloga_builtins::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
@@ -46,12 +56,19 @@ use crate::netlist::{
     Element, ElementKind, Netlist, ParamContext, SourceSpec, SubcircuitDef,
     flatten_netlist_with_models,
 };
-use crate::numerics::integration::LteEstimator;
-use crate::numerics::integration::TransientLteReference;
+use crate::numerics::integration::{
+    ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION, AcceptedBoundaryLteEstimatorCheckpoint,
+    IntegrationMethod, LteEstimator, TransientLteReference, TrapGearController,
+    TrapGearControllerSnapshot,
+};
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
 use std::io::Read;
 
-use super::TransientStartupMode;
+use super::damped_status::XyceDampedAcceptedBoundaryCheckpoint;
+use super::{
+    AcceptedJunctionTransientHistoryCheckpoint, BjtTransientHistory, DiodeTransientHistory, Engine,
+    TransientStartupMode, VbicPredictorLinearBranchState,
+};
 
 /// Format version written to and required from checkpoint files.
 ///
@@ -66,10 +83,18 @@ use super::TransientStartupMode;
 /// limiter/evaluation state. Earlier files remain readable, but resume fails
 /// closed when their target circuit contains either device family rather than
 /// reconstructing an accepted nonlinear state from the external solution.
-const FORMAT_VERSION: u32 = 19;
+/// Version 20 adds accepted engine-owned junction transient history. Version 21
+/// adds the accepted LTE, Trap/Gear, DAE residual/history, nonlinear solver,
+/// and persistent trajectory-policy runtime needed to continue the next
+/// proposed interval exactly. Earlier files remain readable, but an arbitrary
+/// proposal fails closed instead of reconstructing missing runtime state; only
+/// an authenticated normalized-restart phase may resume.
+const FORMAT_VERSION: u32 = 21;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
+const ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION: u32 = 20;
+const EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION: u32 = 21;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -125,6 +150,120 @@ pub(super) struct ProposedIntegrationContinuation {
     pub xyce_breakpoint_restart_pending: bool,
 }
 
+const ACCEPTED_INTEGRATION_RUNTIME_VERSION: u32 = 1;
+const MAX_LTE_WARMUP_SKIPS: u8 = 2;
+const MAX_FORCE_ACCEPT_COOLDOWN: usize = 2;
+const LIVELOCK_STREAK_RESTART: usize = 32;
+
+/// Accepted transient runtime contract carried alongside the integration
+/// continuation phase.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum AcceptedIntegrationRuntime {
+    /// An arbitrary in-flight continuation from a legacy file cannot prove
+    /// its controller state and must fail closed.
+    UnavailableLegacy,
+    /// Synthetic origins, deliberate endpoints, and post-breakpoint proposals
+    /// intentionally start from normalized order-one integration state.
+    RestartNormalized(RestartNormalizedIntegrationRuntimeCheckpoint),
+    /// Complete state for continuing an arbitrary accepted interval exactly.
+    Exact(AcceptedIntegrationRuntimeCheckpoint),
+}
+
+/// Complete accepted-boundary state that influences the next integration
+/// attempt or recovery decision.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct AcceptedIntegrationRuntimeCheckpoint {
+    pub version: u32,
+    pub resume_blockers: Vec<String>,
+    pub lte: AcceptedBoundaryLteEstimatorCheckpoint,
+    pub next_trap_order: u8,
+    pub trapgear: Option<TrapGearControllerSnapshot>,
+    pub xyce_static_residual: Option<Vec<Value>>,
+    pub direct_dae_accepted_q: Option<Vec<Value>>,
+    pub direct_dae_static_residual: Option<Vec<Value>>,
+    pub lte_warmup_skips: u8,
+    pub force_accept_cooldown: usize,
+    pub livelock_streak: usize,
+    pub livelock_last_restart_time: Option<Value>,
+    pub accepted_interval_count: usize,
+    pub damped_first_solver_call: bool,
+    pub damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+}
+
+/// Persistent trajectory policy retained even when predictor/device histories
+/// deliberately restart from a normalized boundary.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RestartNormalizedIntegrationRuntimeCheckpoint {
+    pub version: u32,
+    pub resume_blockers: Vec<String>,
+    pub lte_warmup_skips: u8,
+    pub force_accept_cooldown: usize,
+    pub livelock_streak: usize,
+    pub livelock_last_restart_time: Option<Value>,
+    pub accepted_interval_count: usize,
+    pub damped_first_solver_call: bool,
+    pub damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+}
+
+pub(super) struct RestartNormalizedIntegrationRuntimeCapture<'a> {
+    pub lte_warmup_skips: u8,
+    pub force_accept_cooldown: usize,
+    pub livelock_streak: usize,
+    pub livelock_last_restart_time: Option<Value>,
+    pub accepted_interval_count: usize,
+    pub damped_first_solver_call: bool,
+    pub damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+    pub retry_count: usize,
+    pub xyce_step_failure_count: usize,
+    pub stale_accept_count: usize,
+    pub resume_blockers: &'a [String],
+}
+
+/// Borrowed capture inputs. Attempt-local retry counters are included only to
+/// prove that the caller reached a canonical accepted boundary; nonzero
+/// values become deterministic resume blockers rather than persistent state.
+pub(super) struct AcceptedIntegrationRuntimeCapture<'a> {
+    pub lte_estimator: &'a LteEstimator,
+    pub next_trap_order: u8,
+    pub trapgear: Option<TrapGearControllerSnapshot>,
+    pub xyce_static_residual: Option<&'a [Value]>,
+    pub direct_dae_accepted_q: Option<&'a [Value]>,
+    pub direct_dae_static_residual: Option<&'a [Value]>,
+    pub lte_warmup_skips: u8,
+    pub force_accept_cooldown: usize,
+    pub livelock_streak: usize,
+    pub livelock_last_restart_time: Option<Value>,
+    pub accepted_interval_count: usize,
+    pub damped_first_solver_call: bool,
+    pub damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+    pub retry_count: usize,
+    pub xyce_step_failure_count: usize,
+    pub stale_accept_count: usize,
+    pub resume_blockers: &'a [String],
+}
+
+/// Live runtime capabilities used to reject structurally valid state that
+/// belongs to a different integration path.
+pub(super) struct AcceptedIntegrationRuntimeTarget<'a> {
+    pub lte_estimator: &'a LteEstimator,
+    pub uses_trapgear: bool,
+    pub uses_xyce_static_residual: bool,
+    pub uses_direct_dae: bool,
+    pub has_direct_dae_static_residual: bool,
+    pub uses_damped_newton: bool,
+    /// Canonically sorted, duplicate-free blockers derived from the rebuilt
+    /// target circuit and runtime selection.
+    pub expected_resume_blockers: &'a [String],
+}
+
+/// Validated resume phase returned without mutating any live integration
+/// object.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum ValidatedAcceptedIntegrationRuntime<'a> {
+    RestartNormalized(&'a RestartNormalizedIntegrationRuntimeCheckpoint),
+    Exact(&'a AcceptedIntegrationRuntimeCheckpoint),
+}
+
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransientCheckpoint {
@@ -162,6 +301,7 @@ pub struct TransientCheckpoint {
     /// unavailable legacy state. These cases must never alias during format
     /// upgrades because only the first restores the in-flight controller.
     integration_continuation: IntegrationContinuation,
+    accepted_integration_runtime: AcceptedIntegrationRuntime,
     /// Dynamically discovered transmission-line arrivals that had not yet
     /// occurred at `time`. These are distinct from authored/source
     /// breakpoints: they arise from accepted wave changes and cannot always be
@@ -189,6 +329,7 @@ pub struct TransientCheckpoint {
     generic_switch_stores: Vec<[Value; 4]>,
     accepted_nonlinear_state_available: bool,
     accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
+    accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
     tline_state_available: bool,
     tline_resume_blockers: Vec<String>,
     tline_states: Vec<TransmissionLineCheckpoint>,
@@ -1658,6 +1799,833 @@ fn read_accepted_bjt_nonlinear_states(
     Ok(states)
 }
 
+const BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT: usize = 7;
+
+fn allocate_bjt_transient_history(
+    count: usize,
+    budget: &mut CheckpointParseBudget,
+) -> Result<BjtTransientHistory, String> {
+    macro_rules! values {
+        ($name:literal) => {
+            allocate_checkpoint_capacity(count, $name, budget)?
+        };
+    }
+    Ok(BjtTransientHistory {
+        vbe_prev: values!("accepted BJT vbe_prev"),
+        vbe_prev_prev: values!("accepted BJT vbe_prev_prev"),
+        ibe_prev: values!("accepted BJT ibe_prev"),
+        vbc_prev: values!("accepted BJT vbc_prev"),
+        vbc_prev_prev: values!("accepted BJT vbc_prev_prev"),
+        ibc_prev: values!("accepted BJT ibc_prev"),
+        vcs_prev: values!("accepted BJT vcs_prev"),
+        vcs_prev_prev: values!("accepted BJT vcs_prev_prev"),
+        ics_prev: values!("accepted BJT ics_prev"),
+        charge_q_prev: values!("accepted BJT charge_q_prev"),
+        charge_q_prev_prev: values!("accepted BJT charge_q_prev_prev"),
+        charge_q_prev_prev_prev: values!("accepted BJT charge_q_prev_prev_prev"),
+        charge_cq_prev: values!("accepted BJT charge_cq_prev"),
+        accepted_terminal_currents: values!("accepted BJT terminal currents"),
+        dynamic_internal_prev: values!("accepted BJT dynamic_internal_prev"),
+        dynamic_internal_prev_prev: values!("accepted BJT dynamic_internal_prev_prev"),
+        dynamic_linear_prev: values!("accepted BJT dynamic_linear_prev"),
+        dynamic_linear_prev_prev: values!("accepted BJT dynamic_linear_prev_prev"),
+        accepted_dt_prev: 0.0,
+        accepted_dt_prev_prev: 0.0,
+    })
+}
+
+fn allocate_diode_transient_history(
+    count: usize,
+    budget: &mut CheckpointParseBudget,
+) -> Result<DiodeTransientHistory, String> {
+    macro_rules! values {
+        ($name:literal) => {
+            allocate_checkpoint_capacity(count, $name, budget)?
+        };
+    }
+    Ok(DiodeTransientHistory {
+        vd_prev: values!("accepted diode vd_prev"),
+        vd_prev_prev: values!("accepted diode vd_prev_prev"),
+        qd_prev: values!("accepted diode qd_prev"),
+        qd_prev_prev: values!("accepted diode qd_prev_prev"),
+        qd_prev_prev_prev: values!("accepted diode qd_prev_prev_prev"),
+        cqd_prev: values!("accepted diode cqd_prev"),
+        accepted_dt_prev: 0.0,
+        accepted_dt_prev_prev: 0.0,
+    })
+}
+
+fn read_fixed_finite_values<const N: usize>(
+    fields: &mut std::str::SplitWhitespace<'_>,
+    kind: &str,
+    row: usize,
+    field_name: &str,
+) -> Result<[Value; N], String> {
+    let mut values = [0.0; N];
+    for (index, value) in values.iter_mut().enumerate() {
+        let field = fields.next().ok_or_else(|| {
+            format!("accepted {kind} transient history row {row} is missing {field_name}[{index}]")
+        })?;
+        *value = field.parse::<Value>().map_err(|_| {
+            format!(
+                "accepted {kind} transient history row {row} has invalid {field_name}[{index}] '{field}'"
+            )
+        })?;
+        if !value.is_finite() {
+            return Err(format!(
+                "accepted {kind} transient history row {row} has non-finite {field_name}[{index}] '{field}'"
+            ));
+        }
+    }
+    Ok(values)
+}
+
+fn read_finite_history_value(
+    fields: &mut std::str::SplitWhitespace<'_>,
+    kind: &str,
+    row: usize,
+    field_name: &str,
+) -> Result<Value, String> {
+    let field = fields.next().ok_or_else(|| {
+        format!("accepted {kind} transient history row {row} is missing {field_name}")
+    })?;
+    let value = field.parse::<Value>().map_err(|_| {
+        format!("accepted {kind} transient history row {row} has invalid {field_name} '{field}'")
+    })?;
+    if !value.is_finite() {
+        return Err(format!(
+            "accepted {kind} transient history row {row} has non-finite {field_name} '{field}'"
+        ));
+    }
+    Ok(value)
+}
+
+fn read_history_bool(
+    fields: &mut std::str::SplitWhitespace<'_>,
+    kind: &str,
+    row: usize,
+    field_name: &str,
+) -> Result<bool, String> {
+    match fields.next() {
+        Some("0") => Ok(false),
+        Some("1") => Ok(true),
+        Some(field) => Err(format!(
+            "accepted {kind} transient history row {row} {field_name} must be 0 or 1, found '{field}'"
+        )),
+        None => Err(format!(
+            "accepted {kind} transient history row {row} is missing {field_name}"
+        )),
+    }
+}
+
+fn read_accepted_junction_transient_history(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+) -> Result<AcceptedJunctionTransientHistoryCheckpoint, String> {
+    let availability_line = lines
+        .next()
+        .ok_or_else(|| "missing accepted junction history availability line".to_string())?;
+    let mut availability_fields = availability_line.split_whitespace();
+    if availability_fields.next() != Some("accepted_junction_history_available") {
+        return Err(format!(
+            "malformed accepted junction history availability line: '{availability_line}'"
+        ));
+    }
+    let available = availability_fields
+        .next()
+        .ok_or_else(|| {
+            "accepted junction history availability line is missing its boolean".to_string()
+        })
+        .and_then(|field| parse_checkpoint_bool(field, "accepted junction history availability"))?;
+    if let Some(extra) = availability_fields.next() {
+        return Err(format!(
+            "accepted junction history availability line has extra field '{extra}'"
+        ));
+    }
+    let resume_blockers =
+        read_canonical_nonempty_line_vector(lines, "accepted_junction_history_blockers", budget)?;
+
+    let bjt_header = lines
+        .next()
+        .ok_or_else(|| "missing 'accepted_bjt_transient_histories' section".to_string())?;
+    let bjt_count = parse_count_header(bjt_header, "accepted_bjt_transient_histories")?;
+    let minimum_bjt_rows = bjt_count.checked_mul(2).ok_or_else(|| {
+        "accepted BJT transient-history row count overflows allocation limits".to_string()
+    })?;
+    if minimum_bjt_rows > lines.remaining() {
+        return Err(format!(
+            "'accepted_bjt_transient_histories' declares {bjt_count} states but only {} checkpoint rows remain; each state requires two rows",
+            lines.remaining()
+        ));
+    }
+    let mut bjt_names =
+        allocate_checkpoint_capacity(bjt_count, "accepted BJT transient-history names", budget)?;
+    let mut bjt_runtime_tags = allocate_checkpoint_capacity(
+        bjt_count,
+        "accepted BJT transient-history runtime tags",
+        budget,
+    )?;
+    let mut bjt_history = allocate_bjt_transient_history(bjt_count, budget)?;
+    let mut vbic_snapshot_cache =
+        allocate_checkpoint_capacity(bjt_count, "accepted BJT charge-snapshot cache", budget)?;
+
+    for row in 0..bjt_count {
+        let line = lines.next().ok_or_else(|| {
+            format!("'accepted_bjt_transient_histories' truncated at state {row}")
+        })?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("accepted_bjt_transient_history") {
+            return Err(format!(
+                "malformed 'accepted_bjt_transient_history' row: '{line}'"
+            ));
+        }
+        let instance_name = fields.next().ok_or_else(|| {
+            format!("accepted BJT transient history row {row} is missing instance name")
+        })?;
+        let runtime_tag = fields.next().ok_or_else(|| {
+            format!("accepted BJT transient history row {row} is missing runtime tag")
+        })?;
+        bjt_history.vbe_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "vbe_prev",
+        )?);
+        bjt_history.vbe_prev_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "vbe_prev_prev",
+        )?);
+        bjt_history.ibe_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "ibe_prev",
+        )?);
+        bjt_history.vbc_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "vbc_prev",
+        )?);
+        bjt_history.vbc_prev_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "vbc_prev_prev",
+        )?);
+        bjt_history.ibc_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "ibc_prev",
+        )?);
+        bjt_history.vcs_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "vcs_prev",
+        )?);
+        bjt_history.vcs_prev_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "vcs_prev_prev",
+        )?);
+        bjt_history.ics_prev.push(read_finite_history_value(
+            &mut fields,
+            "BJT",
+            row,
+            "ics_prev",
+        )?);
+        bjt_history.charge_q_prev.push(read_fixed_finite_values(
+            &mut fields,
+            "BJT",
+            row,
+            "charge_q_prev",
+        )?);
+        bjt_history
+            .charge_q_prev_prev
+            .push(read_fixed_finite_values(
+                &mut fields,
+                "BJT",
+                row,
+                "charge_q_prev_prev",
+            )?);
+        bjt_history
+            .charge_q_prev_prev_prev
+            .push(read_fixed_finite_values(
+                &mut fields,
+                "BJT",
+                row,
+                "charge_q_prev_prev_prev",
+            )?);
+        bjt_history.charge_cq_prev.push(read_fixed_finite_values(
+            &mut fields,
+            "BJT",
+            row,
+            "charge_cq_prev",
+        )?);
+        let terminal_present =
+            read_history_bool(&mut fields, "BJT", row, "terminal-current presence")?;
+        bjt_history.accepted_terminal_currents.push(
+            terminal_present
+                .then(|| {
+                    read_fixed_finite_values(&mut fields, "BJT", row, "accepted_terminal_currents")
+                })
+                .transpose()?,
+        );
+        bjt_history
+            .dynamic_internal_prev
+            .push(read_fixed_finite_values(
+                &mut fields,
+                "BJT",
+                row,
+                "dynamic_internal_prev",
+            )?);
+        bjt_history
+            .dynamic_internal_prev_prev
+            .push(read_fixed_finite_values(
+                &mut fields,
+                "BJT",
+                row,
+                "dynamic_internal_prev_prev",
+            )?);
+        let linear_prev = read_fixed_finite_values::<BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT>(
+            &mut fields,
+            "BJT",
+            row,
+            "dynamic_linear_prev",
+        )?;
+        bjt_history
+            .dynamic_linear_prev
+            .push(VbicPredictorLinearBranchState {
+                vrcx: linear_prev[0],
+                vrci: linear_prev[1],
+                vrbx: linear_prev[2],
+                vrbi: linear_prev[3],
+                vre: linear_prev[4],
+                vrbp: linear_prev[5],
+                vrs: linear_prev[6],
+            });
+        let linear_prev_prev = read_fixed_finite_values::<BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT>(
+            &mut fields,
+            "BJT",
+            row,
+            "dynamic_linear_prev_prev",
+        )?;
+        bjt_history
+            .dynamic_linear_prev_prev
+            .push(VbicPredictorLinearBranchState {
+                vrcx: linear_prev_prev[0],
+                vrci: linear_prev_prev[1],
+                vrbx: linear_prev_prev[2],
+                vrbi: linear_prev_prev[3],
+                vre: linear_prev_prev[4],
+                vrbp: linear_prev_prev[5],
+                vrs: linear_prev_prev[6],
+            });
+        if let Some(extra) = fields.next() {
+            return Err(format!(
+                "accepted BJT transient history row {row} has extra field '{extra}'"
+            ));
+        }
+        bjt_names.push(copy_checkpoint_string(
+            instance_name,
+            "accepted BJT transient-history instance name",
+            budget,
+        )?);
+        bjt_runtime_tags.push(copy_checkpoint_string(
+            runtime_tag,
+            "accepted BJT transient-history runtime tag",
+            budget,
+        )?);
+
+        let snapshot_line = lines.next().ok_or_else(|| {
+            format!("accepted BJT transient history row {row} is missing its snapshot-cache row")
+        })?;
+        let mut snapshot_fields = snapshot_line.split_whitespace();
+        if snapshot_fields.next() != Some("accepted_bjt_charge_snapshot") {
+            return Err(format!(
+                "malformed 'accepted_bjt_charge_snapshot' row: '{snapshot_line}'"
+            ));
+        }
+        let snapshot_count = snapshot_fields
+            .next()
+            .ok_or_else(|| {
+                format!("accepted BJT charge snapshot row {row} is missing its value count")
+            })?
+            .parse::<usize>()
+            .map_err(|_| {
+                format!("accepted BJT charge snapshot row {row} has an invalid value count")
+            })?;
+        if snapshot_count != 0 && snapshot_count != BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT {
+            return Err(format!(
+                "accepted BJT charge snapshot row {row} has {snapshot_count} values; runtime requires either 0 or {BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT}"
+            ));
+        }
+        let snapshot = if snapshot_count == 0 {
+            None
+        } else {
+            let mut state_values = allocate_checkpoint_capacity(
+                snapshot_count,
+                "accepted BJT charge snapshot values",
+                budget,
+            )?;
+            for value_index in 0..snapshot_count {
+                let field = snapshot_fields.next().ok_or_else(|| {
+                    format!(
+                        "accepted BJT charge snapshot row {row} is missing state_values[{value_index}]"
+                    )
+                })?;
+                let value = field.parse::<Value>().map_err(|_| {
+                    format!(
+                        "accepted BJT charge snapshot row {row} has invalid state_values[{value_index}] '{field}'"
+                    )
+                })?;
+                if !value.is_finite() {
+                    return Err(format!(
+                        "accepted BJT charge snapshot row {row} has non-finite state_values[{value_index}] '{field}'"
+                    ));
+                }
+                state_values.push(value);
+            }
+            Some(AcceptedBjtChargeSnapshotCheckpoint { state_values })
+        };
+        if let Some(extra) = snapshot_fields.next() {
+            return Err(format!(
+                "accepted BJT charge snapshot row {row} has extra field '{extra}'"
+            ));
+        }
+        vbic_snapshot_cache.push(snapshot);
+    }
+
+    let bjt_dt_line = lines
+        .next()
+        .ok_or_else(|| "missing accepted BJT transient timestep history".to_string())?;
+    let mut bjt_dt_fields = bjt_dt_line.split_whitespace();
+    if bjt_dt_fields.next() != Some("accepted_bjt_transient_dt") {
+        return Err(format!(
+            "malformed accepted BJT transient timestep history: '{bjt_dt_line}'"
+        ));
+    }
+    bjt_history.accepted_dt_prev = read_finite_value_field(
+        &mut bjt_dt_fields,
+        "accepted BJT transient timestep history",
+        "accepted_dt_prev",
+    )?;
+    bjt_history.accepted_dt_prev_prev = read_finite_value_field(
+        &mut bjt_dt_fields,
+        "accepted BJT transient timestep history",
+        "accepted_dt_prev_prev",
+    )?;
+    if let Some(extra) = bjt_dt_fields.next() {
+        return Err(format!(
+            "accepted BJT transient timestep history has extra field '{extra}'"
+        ));
+    }
+
+    let diode_header = lines
+        .next()
+        .ok_or_else(|| "missing 'accepted_diode_transient_histories' section".to_string())?;
+    let diode_count = parse_count_header(diode_header, "accepted_diode_transient_histories")?;
+    if diode_count > lines.remaining() {
+        return Err(format!(
+            "'accepted_diode_transient_histories' declares {diode_count} states but only {} checkpoint rows remain",
+            lines.remaining()
+        ));
+    }
+    let mut diode_names = allocate_checkpoint_capacity(
+        diode_count,
+        "accepted diode transient-history names",
+        budget,
+    )?;
+    let mut diode_runtime_tags = allocate_checkpoint_capacity(
+        diode_count,
+        "accepted diode transient-history runtime tags",
+        budget,
+    )?;
+    let mut diode_history = allocate_diode_transient_history(diode_count, budget)?;
+    for row in 0..diode_count {
+        let line = lines.next().ok_or_else(|| {
+            format!("'accepted_diode_transient_histories' truncated at state {row}")
+        })?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("accepted_diode_transient_history") {
+            return Err(format!(
+                "malformed 'accepted_diode_transient_history' row: '{line}'"
+            ));
+        }
+        let instance_name = fields.next().ok_or_else(|| {
+            format!("accepted diode transient history row {row} is missing instance name")
+        })?;
+        let runtime_tag = fields.next().ok_or_else(|| {
+            format!("accepted diode transient history row {row} is missing runtime tag")
+        })?;
+        diode_history.vd_prev.push(read_finite_history_value(
+            &mut fields,
+            "diode",
+            row,
+            "vd_prev",
+        )?);
+        diode_history.vd_prev_prev.push(read_finite_history_value(
+            &mut fields,
+            "diode",
+            row,
+            "vd_prev_prev",
+        )?);
+        diode_history.qd_prev.push(read_finite_history_value(
+            &mut fields,
+            "diode",
+            row,
+            "qd_prev",
+        )?);
+        diode_history.qd_prev_prev.push(read_finite_history_value(
+            &mut fields,
+            "diode",
+            row,
+            "qd_prev_prev",
+        )?);
+        diode_history
+            .qd_prev_prev_prev
+            .push(read_finite_history_value(
+                &mut fields,
+                "diode",
+                row,
+                "qd_prev_prev_prev",
+            )?);
+        diode_history.cqd_prev.push(read_finite_history_value(
+            &mut fields,
+            "diode",
+            row,
+            "cqd_prev",
+        )?);
+        if let Some(extra) = fields.next() {
+            return Err(format!(
+                "accepted diode transient history row {row} has extra field '{extra}'"
+            ));
+        }
+        diode_names.push(copy_checkpoint_string(
+            instance_name,
+            "accepted diode transient-history instance name",
+            budget,
+        )?);
+        diode_runtime_tags.push(copy_checkpoint_string(
+            runtime_tag,
+            "accepted diode transient-history runtime tag",
+            budget,
+        )?);
+    }
+    let diode_dt_line = lines
+        .next()
+        .ok_or_else(|| "missing accepted diode transient timestep history".to_string())?;
+    let mut diode_dt_fields = diode_dt_line.split_whitespace();
+    if diode_dt_fields.next() != Some("accepted_diode_transient_dt") {
+        return Err(format!(
+            "malformed accepted diode transient timestep history: '{diode_dt_line}'"
+        ));
+    }
+    diode_history.accepted_dt_prev = read_finite_value_field(
+        &mut diode_dt_fields,
+        "accepted diode transient timestep history",
+        "accepted_dt_prev",
+    )?;
+    diode_history.accepted_dt_prev_prev = read_finite_value_field(
+        &mut diode_dt_fields,
+        "accepted diode transient timestep history",
+        "accepted_dt_prev_prev",
+    )?;
+    if let Some(extra) = diode_dt_fields.next() {
+        return Err(format!(
+            "accepted diode transient timestep history has extra field '{extra}'"
+        ));
+    }
+
+    Ok(AcceptedJunctionTransientHistoryCheckpoint {
+        available,
+        resume_blockers,
+        bjt_names,
+        bjt_runtime_tags,
+        bjt_history,
+        diode_names,
+        diode_runtime_tags,
+        diode_history,
+        vbic_snapshot_cache,
+    })
+}
+
+fn validate_checkpoint_identity_vector(
+    kind: &str,
+    names: &[String],
+    runtime_tags: &[String],
+    expected_runtime_tag: &str,
+    budget: &mut Option<&mut CheckpointParseBudget>,
+) -> Result<(), String> {
+    if runtime_tags.len() != names.len() {
+        return Err(format!(
+            "accepted {kind} transient-history identity has {} names but {} runtime tags",
+            names.len(),
+            runtime_tags.len()
+        ));
+    }
+    let allocation_name = if kind == "BJT" {
+        "accepted BJT transient-history validation names"
+    } else {
+        "accepted diode transient-history validation names"
+    };
+    let mut sorted_names = match budget.as_deref_mut() {
+        Some(budget) => allocate_checkpoint_capacity(names.len(), allocation_name, budget)?,
+        None => {
+            let mut sorted_names = Vec::new();
+            sorted_names.try_reserve_exact(names.len()).map_err(|_| {
+                format!("accepted {kind} transient-history name count exceeds allocation limits")
+            })?;
+            sorted_names
+        }
+    };
+    for (index, (name, runtime_tag)) in names.iter().zip(runtime_tags).enumerate() {
+        if name.is_empty() || name.chars().any(char::is_whitespace) {
+            return Err(format!(
+                "accepted {kind} transient-history identity {index} has an invalid instance name"
+            ));
+        }
+        if runtime_tag != expected_runtime_tag {
+            return Err(format!(
+                "accepted {kind} transient-history identity {index} uses unsupported runtime tag '{runtime_tag}'"
+            ));
+        }
+        sorted_names.push((name.as_str(), index));
+    }
+    sorted_names.sort_unstable_by_key(|(name, _)| *name);
+    if let Some(duplicate) = sorted_names.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+        return Err(format!(
+            "accepted {kind} transient-history identity {} duplicates instance name '{}'",
+            duplicate[1].1, duplicate[1].0
+        ));
+    }
+    Ok(())
+}
+
+fn accepted_junction_history_payload_is_empty(
+    checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
+) -> bool {
+    let bjt = &checkpoint.bjt_history;
+    let diode = &checkpoint.diode_history;
+    checkpoint.bjt_names.is_empty()
+        && checkpoint.bjt_runtime_tags.is_empty()
+        && checkpoint.vbic_snapshot_cache.is_empty()
+        && bjt.vbe_prev.is_empty()
+        && bjt.vbe_prev_prev.is_empty()
+        && bjt.ibe_prev.is_empty()
+        && bjt.vbc_prev.is_empty()
+        && bjt.vbc_prev_prev.is_empty()
+        && bjt.ibc_prev.is_empty()
+        && bjt.vcs_prev.is_empty()
+        && bjt.vcs_prev_prev.is_empty()
+        && bjt.ics_prev.is_empty()
+        && bjt.charge_q_prev.is_empty()
+        && bjt.charge_q_prev_prev.is_empty()
+        && bjt.charge_q_prev_prev_prev.is_empty()
+        && bjt.charge_cq_prev.is_empty()
+        && bjt.accepted_terminal_currents.is_empty()
+        && bjt.dynamic_internal_prev.is_empty()
+        && bjt.dynamic_internal_prev_prev.is_empty()
+        && bjt.dynamic_linear_prev.is_empty()
+        && bjt.dynamic_linear_prev_prev.is_empty()
+        && bjt.accepted_dt_prev.to_bits() == 0.0_f64.to_bits()
+        && bjt.accepted_dt_prev_prev.to_bits() == 0.0_f64.to_bits()
+        && checkpoint.diode_names.is_empty()
+        && checkpoint.diode_runtime_tags.is_empty()
+        && diode.vd_prev.is_empty()
+        && diode.vd_prev_prev.is_empty()
+        && diode.qd_prev.is_empty()
+        && diode.qd_prev_prev.is_empty()
+        && diode.qd_prev_prev_prev.is_empty()
+        && diode.cqd_prev.is_empty()
+        && diode.accepted_dt_prev.to_bits() == 0.0_f64.to_bits()
+        && diode.accepted_dt_prev_prev.to_bits() == 0.0_f64.to_bits()
+}
+
+fn validate_accepted_junction_transient_history_numeric_state(
+    checkpoint: &AcceptedJunctionTransientHistoryCheckpoint,
+    budget: &mut Option<&mut CheckpointParseBudget>,
+) -> Result<(), String> {
+    if checkpoint.resume_blockers.iter().any(|blocker| {
+        blocker.is_empty() || blocker != blocker.trim() || blocker.contains(['\r', '\n'])
+    }) {
+        return Err("accepted BJT/diode transient-history blocker text is malformed".to_string());
+    }
+    if !checkpoint.available {
+        if !accepted_junction_history_payload_is_empty(checkpoint) {
+            return Err(
+                "accepted BJT/diode transient history is present without availability provenance"
+                    .to_string(),
+            );
+        }
+        return Ok(());
+    }
+
+    validate_checkpoint_identity_vector(
+        "BJT",
+        &checkpoint.bjt_names,
+        &checkpoint.bjt_runtime_tags,
+        super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
+        budget,
+    )?;
+    let bjt_count = checkpoint.bjt_names.len();
+    let bjt = &checkpoint.bjt_history;
+    for (field, actual) in [
+        ("vbe_prev", bjt.vbe_prev.len()),
+        ("vbe_prev_prev", bjt.vbe_prev_prev.len()),
+        ("ibe_prev", bjt.ibe_prev.len()),
+        ("vbc_prev", bjt.vbc_prev.len()),
+        ("vbc_prev_prev", bjt.vbc_prev_prev.len()),
+        ("ibc_prev", bjt.ibc_prev.len()),
+        ("vcs_prev", bjt.vcs_prev.len()),
+        ("vcs_prev_prev", bjt.vcs_prev_prev.len()),
+        ("ics_prev", bjt.ics_prev.len()),
+        ("charge_q_prev", bjt.charge_q_prev.len()),
+        ("charge_q_prev_prev", bjt.charge_q_prev_prev.len()),
+        ("charge_q_prev_prev_prev", bjt.charge_q_prev_prev_prev.len()),
+        ("charge_cq_prev", bjt.charge_cq_prev.len()),
+        (
+            "accepted_terminal_currents",
+            bjt.accepted_terminal_currents.len(),
+        ),
+        ("dynamic_internal_prev", bjt.dynamic_internal_prev.len()),
+        (
+            "dynamic_internal_prev_prev",
+            bjt.dynamic_internal_prev_prev.len(),
+        ),
+        ("dynamic_linear_prev", bjt.dynamic_linear_prev.len()),
+        (
+            "dynamic_linear_prev_prev",
+            bjt.dynamic_linear_prev_prev.len(),
+        ),
+        (
+            "charge_snapshot_cache",
+            checkpoint.vbic_snapshot_cache.len(),
+        ),
+    ] {
+        if actual != bjt_count {
+            return Err(format!(
+                "accepted BJT transient-history field '{field}' has {actual} entries; identity requires {bjt_count}"
+            ));
+        }
+    }
+    if bjt
+        .vbe_prev
+        .iter()
+        .chain(&bjt.vbe_prev_prev)
+        .chain(&bjt.ibe_prev)
+        .chain(&bjt.vbc_prev)
+        .chain(&bjt.vbc_prev_prev)
+        .chain(&bjt.ibc_prev)
+        .chain(&bjt.vcs_prev)
+        .chain(&bjt.vcs_prev_prev)
+        .chain(&bjt.ics_prev)
+        .chain(bjt.charge_q_prev.iter().flatten())
+        .chain(bjt.charge_q_prev_prev.iter().flatten())
+        .chain(bjt.charge_q_prev_prev_prev.iter().flatten())
+        .chain(bjt.charge_cq_prev.iter().flatten())
+        .chain(bjt.accepted_terminal_currents.iter().flatten().flatten())
+        .chain(bjt.dynamic_internal_prev.iter().flatten())
+        .chain(bjt.dynamic_internal_prev_prev.iter().flatten())
+        .any(|value| !value.is_finite())
+    {
+        return Err("accepted BJT transient history contains a non-finite value".to_string());
+    }
+    for state in bjt
+        .dynamic_linear_prev
+        .iter()
+        .chain(&bjt.dynamic_linear_prev_prev)
+    {
+        if [
+            state.vrcx, state.vrci, state.vrbx, state.vrbi, state.vre, state.vrbp, state.vrs,
+        ]
+        .iter()
+        .any(|value| !value.is_finite())
+        {
+            return Err(
+                "accepted BJT transient linear-branch history contains a non-finite value"
+                    .to_string(),
+            );
+        }
+    }
+    if !bjt.accepted_dt_prev.is_finite()
+        || bjt.accepted_dt_prev < 0.0
+        || !bjt.accepted_dt_prev_prev.is_finite()
+        || bjt.accepted_dt_prev_prev < 0.0
+    {
+        return Err(
+            "accepted BJT transient timestep history must be finite and nonnegative".to_string(),
+        );
+    }
+    for (index, snapshot) in checkpoint.vbic_snapshot_cache.iter().enumerate() {
+        if let Some(snapshot) = snapshot {
+            if snapshot.state_values.len() != BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT {
+                return Err(format!(
+                    "accepted BJT charge snapshot {index} has {} values; runtime requires {}",
+                    snapshot.state_values.len(),
+                    BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+                ));
+            }
+            if snapshot.state_values.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "accepted BJT charge snapshot {index} contains a non-finite value"
+                ));
+            }
+        }
+    }
+
+    validate_checkpoint_identity_vector(
+        "diode",
+        &checkpoint.diode_names,
+        &checkpoint.diode_runtime_tags,
+        super::DIODE_TRANSIENT_HISTORY_RUNTIME_TAG,
+        budget,
+    )?;
+    let diode_count = checkpoint.diode_names.len();
+    let diode = &checkpoint.diode_history;
+    for (field, actual) in [
+        ("vd_prev", diode.vd_prev.len()),
+        ("vd_prev_prev", diode.vd_prev_prev.len()),
+        ("qd_prev", diode.qd_prev.len()),
+        ("qd_prev_prev", diode.qd_prev_prev.len()),
+        ("qd_prev_prev_prev", diode.qd_prev_prev_prev.len()),
+        ("cqd_prev", diode.cqd_prev.len()),
+    ] {
+        if actual != diode_count {
+            return Err(format!(
+                "accepted diode transient-history field '{field}' has {actual} entries; identity requires {diode_count}"
+            ));
+        }
+    }
+    if diode
+        .vd_prev
+        .iter()
+        .chain(&diode.vd_prev_prev)
+        .chain(&diode.qd_prev)
+        .chain(&diode.qd_prev_prev)
+        .chain(&diode.qd_prev_prev_prev)
+        .chain(&diode.cqd_prev)
+        .any(|value| !value.is_finite())
+    {
+        return Err("accepted diode transient history contains a non-finite value".to_string());
+    }
+    if !diode.accepted_dt_prev.is_finite()
+        || diode.accepted_dt_prev < 0.0
+        || !diode.accepted_dt_prev_prev.is_finite()
+        || diode.accepted_dt_prev_prev < 0.0
+    {
+        return Err(
+            "accepted diode transient timestep history must be finite and nonnegative".to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn read_generated_state_rows(
     lines: &mut CheckpointLines<'_>,
     name: &str,
@@ -1781,12 +2749,13 @@ fn read_generated_veriloga_states(
 #[cfg(feature = "veriloga")]
 fn read_runtime_veriloga_states(
     lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
 ) -> Result<Vec<VerilogADeviceCheckpoint>, String> {
     let header = lines
         .next()
         .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
     let count = parse_count_header(header, "runtime_veriloga_states")?;
-    let mut states = allocate_checkpoint_rows(lines, count, "runtime_veriloga_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "runtime_veriloga_states", budget)?;
     for row in 0..count {
         let line = lines
             .next()
@@ -1821,7 +2790,8 @@ fn read_runtime_veriloga_states(
             .next()
             .ok_or_else(|| format!("runtime state row {row} is missing its payload"))?;
         let word_count = parse_count_header(words_header, "runtime_veriloga_words")?;
-        let mut words = allocate_checkpoint_rows(lines, word_count, "runtime_veriloga_words")?;
+        let mut words =
+            allocate_checkpoint_rows(lines, word_count, "runtime_veriloga_words", budget)?;
         for word_index in 0..word_count {
             let word_line = lines.next().ok_or_else(|| {
                 format!("runtime state row {row} payload truncated at word {word_index}")
@@ -1831,14 +2801,28 @@ fn read_runtime_veriloga_states(
             })?;
             words.push(word);
         }
+        // The decoded VM checkpoint owns nested vectors in addition to this
+        // temporary flat word buffer. Three word-buffer equivalents are a
+        // conservative bound for the decoder's heap-resident representation.
+        let decoded_bytes = word_count
+            .checked_mul(std::mem::size_of::<u64>())
+            .and_then(|bytes| bytes.checked_mul(3))
+            .ok_or_else(|| {
+                "runtime Verilog-A decoded-state allocation size overflow".to_string()
+            })?;
+        budget.charge_bytes(decoded_bytes, "decoded runtime Verilog-A state")?;
+        let instance = copy_checkpoint_string(instance, "runtime Verilog-A instance name", budget)?;
+        let model = copy_checkpoint_string(model, "runtime Verilog-A model name", budget)?;
+        let source = if source == "-" {
+            String::new()
+        } else {
+            copy_checkpoint_string(source, "runtime Verilog-A source digest", budget)?
+        };
+        let shape = copy_checkpoint_string(shape, "runtime Verilog-A shape identity", budget)?;
         let state = VerilogADeviceCheckpoint::from_words(
             instance.into(),
             model.into(),
-            if source == "-" {
-                "".into()
-            } else {
-                source.into()
-            },
+            source.into(),
             shape.into(),
             &words,
         )?;
@@ -1851,6 +2835,1232 @@ fn read_runtime_veriloga_states(
         states.push(state);
     }
     Ok(states)
+}
+
+fn capture_runtime_blockers(
+    blockers: &[String],
+    retry_count: usize,
+    xyce_step_failure_count: usize,
+    stale_accept_count: usize,
+) -> Vec<String> {
+    let mut blockers = blockers.to_vec();
+    for (name, value) in [
+        ("retry_count", retry_count),
+        ("xyce_step_failure_count", xyce_step_failure_count),
+        ("stale_accept_count", stale_accept_count),
+    ] {
+        if value != 0 {
+            blockers.push(format!(
+                "accepted integration runtime captured with nonzero {name}={value}"
+            ));
+        }
+    }
+    blockers.sort_unstable();
+    blockers.dedup();
+    blockers
+}
+
+fn validate_runtime_blockers(blockers: &[String]) -> Result<(), String> {
+    if blockers.iter().any(|blocker| {
+        blocker.is_empty() || blocker != blocker.trim() || blocker.contains(['\r', '\n'])
+    }) || blockers.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(
+            "accepted integration runtime blockers must be nonempty, canonical, sorted, and unique"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_runtime_policy(
+    checkpoint_time: Value,
+    lte_warmup_skips: u8,
+    force_accept_cooldown: usize,
+    livelock_streak: usize,
+    livelock_last_restart_time: Option<Value>,
+    accepted_interval_count: usize,
+    damped_first_solver_call: bool,
+    damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+) -> Result<(), String> {
+    if !checkpoint_time.is_finite() || checkpoint_time < 0.0 {
+        return Err(
+            "accepted integration runtime checkpoint time must be finite and nonnegative"
+                .to_string(),
+        );
+    }
+    if checkpoint_time == 0.0 && checkpoint_time.to_bits() != 0.0_f64.to_bits() {
+        return Err(
+            "accepted integration runtime checkpoint time must use canonical +0".to_string(),
+        );
+    }
+    if lte_warmup_skips > MAX_LTE_WARMUP_SKIPS {
+        return Err(format!(
+            "accepted integration runtime LTE warmup count {lte_warmup_skips} exceeds {MAX_LTE_WARMUP_SKIPS}"
+        ));
+    }
+    if force_accept_cooldown > MAX_FORCE_ACCEPT_COOLDOWN {
+        return Err(format!(
+            "accepted integration runtime force-accept cooldown {force_accept_cooldown} exceeds {MAX_FORCE_ACCEPT_COOLDOWN}"
+        ));
+    }
+    if livelock_streak >= LIVELOCK_STREAK_RESTART {
+        return Err(format!(
+            "accepted integration runtime livelock streak {livelock_streak} reaches restart threshold {LIVELOCK_STREAK_RESTART}"
+        ));
+    }
+    if let Some(last_restart) = livelock_last_restart_time {
+        if !last_restart.is_finite()
+            || last_restart < 0.0
+            || last_restart > checkpoint_time
+            || (last_restart == 0.0 && last_restart.to_bits() != 0.0_f64.to_bits())
+        {
+            return Err(format!(
+                "accepted integration runtime last livelock restart time {last_restart} is outside [0, {checkpoint_time}] or noncanonical"
+            ));
+        }
+    }
+    if (checkpoint_time == 0.0 && accepted_interval_count != 0)
+        || (checkpoint_time > 0.0 && accepted_interval_count == 0)
+    {
+        return Err(format!(
+            "accepted integration runtime interval count {accepted_interval_count} is inconsistent with checkpoint time {checkpoint_time}"
+        ));
+    }
+    if let Some(status) = damped_status {
+        status.validate()?;
+        if damped_first_solver_call != (accepted_interval_count == 0) {
+            return Err(
+                "accepted integration runtime DampedNewton first-call phase is inconsistent with its accepted interval count"
+                    .to_string(),
+            );
+        }
+    } else if !damped_first_solver_call {
+        return Err(
+            "accepted integration runtime without DampedNewton status has a consumed first-solver-call phase"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+impl RestartNormalizedIntegrationRuntimeCheckpoint {
+    pub(super) fn capture(
+        checkpoint_time: Value,
+        input: RestartNormalizedIntegrationRuntimeCapture<'_>,
+    ) -> Result<Self, String> {
+        let checkpoint = Self {
+            version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
+            resume_blockers: capture_runtime_blockers(
+                input.resume_blockers,
+                input.retry_count,
+                input.xyce_step_failure_count,
+                input.stale_accept_count,
+            ),
+            lte_warmup_skips: input.lte_warmup_skips,
+            force_accept_cooldown: input.force_accept_cooldown,
+            livelock_streak: input.livelock_streak,
+            livelock_last_restart_time: input.livelock_last_restart_time,
+            accepted_interval_count: input.accepted_interval_count,
+            damped_first_solver_call: input.damped_first_solver_call,
+            damped_status: input.damped_status,
+        };
+        checkpoint.validate_numeric_state(checkpoint_time)?;
+        Ok(checkpoint)
+    }
+
+    fn validate_numeric_state(&self, checkpoint_time: Value) -> Result<(), String> {
+        if self.version != ACCEPTED_INTEGRATION_RUNTIME_VERSION {
+            return Err(format!(
+                "unsupported restart-normalized integration runtime version {} (runtime requires {})",
+                self.version, ACCEPTED_INTEGRATION_RUNTIME_VERSION
+            ));
+        }
+        validate_runtime_blockers(&self.resume_blockers)?;
+        validate_runtime_policy(
+            checkpoint_time,
+            self.lte_warmup_skips,
+            self.force_accept_cooldown,
+            self.livelock_streak,
+            self.livelock_last_restart_time,
+            self.accepted_interval_count,
+            self.damped_first_solver_call,
+            self.damped_status,
+        )
+    }
+
+    fn validate_for_target(
+        &self,
+        target: &AcceptedIntegrationRuntimeTarget<'_>,
+    ) -> Result<(), String> {
+        if self.resume_blockers != target.expected_resume_blockers {
+            return Err(
+                "restart-normalized integration runtime blocker set does not match the rebuilt target"
+                    .to_string(),
+            );
+        }
+        if !self.resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint cannot restore restart-normalized integration runtime: {}",
+                self.resume_blockers.join("; ")
+            ));
+        }
+        if self.damped_status.is_some() != target.uses_damped_newton {
+            return Err(
+                "restart-normalized integration runtime DampedNewton status presence does not match the rebuilt target"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl AcceptedIntegrationRuntimeCheckpoint {
+    pub(super) fn capture(
+        accepted_solution: &[Value],
+        checkpoint_time: Value,
+        input: AcceptedIntegrationRuntimeCapture<'_>,
+    ) -> Result<Self, String> {
+        let resume_blockers = capture_runtime_blockers(
+            input.resume_blockers,
+            input.retry_count,
+            input.xyce_step_failure_count,
+            input.stale_accept_count,
+        );
+
+        let checkpoint = Self {
+            version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
+            resume_blockers,
+            lte: input
+                .lte_estimator
+                .capture_accepted_boundary_checkpoint(accepted_solution)?,
+            next_trap_order: input.next_trap_order,
+            trapgear: input.trapgear,
+            xyce_static_residual: input.xyce_static_residual.map(<[Value]>::to_vec),
+            direct_dae_accepted_q: input.direct_dae_accepted_q.map(<[Value]>::to_vec),
+            direct_dae_static_residual: input.direct_dae_static_residual.map(<[Value]>::to_vec),
+            lte_warmup_skips: input.lte_warmup_skips,
+            force_accept_cooldown: input.force_accept_cooldown,
+            livelock_streak: input.livelock_streak,
+            livelock_last_restart_time: input.livelock_last_restart_time,
+            accepted_interval_count: input.accepted_interval_count,
+            damped_first_solver_call: input.damped_first_solver_call,
+            damped_status: input.damped_status,
+        };
+        checkpoint.validate_numeric_state(accepted_solution, checkpoint_time)?;
+        Ok(checkpoint)
+    }
+
+    fn validate_numeric_state(
+        &self,
+        accepted_solution: &[Value],
+        checkpoint_time: Value,
+    ) -> Result<(), String> {
+        if self.version != ACCEPTED_INTEGRATION_RUNTIME_VERSION {
+            return Err(format!(
+                "unsupported accepted integration runtime version {} (runtime requires {})",
+                self.version, ACCEPTED_INTEGRATION_RUNTIME_VERSION
+            ));
+        }
+        validate_runtime_blockers(&self.resume_blockers)?;
+        validate_runtime_policy(
+            checkpoint_time,
+            self.lte_warmup_skips,
+            self.force_accept_cooldown,
+            self.livelock_streak,
+            self.livelock_last_restart_time,
+            self.accepted_interval_count,
+            self.damped_first_solver_call,
+            self.damped_status,
+        )?;
+        let validator = LteEstimator::with_tolerances_and_reference(
+            self.lte.reltol,
+            self.lte.abstol,
+            self.lte.reference,
+        );
+        validator.validate_accepted_boundary_checkpoint(&self.lte, accepted_solution)?;
+
+        if !(1..=2).contains(&self.next_trap_order) {
+            return Err(format!(
+                "accepted integration runtime next Trap/Gear order {} is outside 1..=2",
+                self.next_trap_order
+            ));
+        }
+        if let Some(trapgear) = &self.trapgear {
+            TrapGearController::validate_snapshot(trapgear, accepted_solution)?;
+        }
+        for (name, values) in [
+            ("Xyce static residual", self.xyce_static_residual.as_deref()),
+            (
+                "direct-DAE accepted Q",
+                self.direct_dae_accepted_q.as_deref(),
+            ),
+            (
+                "direct-DAE static residual",
+                self.direct_dae_static_residual.as_deref(),
+            ),
+        ] {
+            if let Some(values) = values {
+                if values.len() != accepted_solution.len() {
+                    return Err(format!(
+                        "accepted integration runtime {name} length {} does not match solution length {}",
+                        values.len(),
+                        accepted_solution.len()
+                    ));
+                }
+                if values.iter().any(|value| !value.is_finite()) {
+                    return Err(format!(
+                        "accepted integration runtime {name} contains a non-finite value"
+                    ));
+                }
+            }
+        }
+        if self.direct_dae_static_residual.is_some() && self.direct_dae_accepted_q.is_none() {
+            return Err(
+                "accepted integration runtime direct-DAE static history requires accepted Q history"
+                    .to_string(),
+            );
+        }
+        if self.direct_dae_accepted_q.is_some() && self.xyce_static_residual.is_some() {
+            return Err(
+                "accepted integration runtime cannot mix direct-DAE and matrix-probe static histories"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_for_target(
+        &self,
+        accepted_solution: &[Value],
+        target: &AcceptedIntegrationRuntimeTarget<'_>,
+    ) -> Result<(), String> {
+        if self.resume_blockers != target.expected_resume_blockers {
+            return Err(format!(
+                "accepted integration runtime blocker set does not match the rebuilt target: checkpoint {:?}, target {:?}",
+                self.resume_blockers, target.expected_resume_blockers
+            ));
+        }
+        if !self.resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint cannot restore accepted integration runtime: {}",
+                self.resume_blockers.join("; ")
+            ));
+        }
+        target
+            .lte_estimator
+            .validate_accepted_boundary_checkpoint(&self.lte, accepted_solution)?;
+        if self.trapgear.is_some() != target.uses_trapgear {
+            return Err(
+                "accepted integration runtime Trap/Gear controller presence does not match the rebuilt target"
+                    .to_string(),
+            );
+        }
+        if self.xyce_static_residual.is_some() != target.uses_xyce_static_residual {
+            return Err(
+                "accepted integration runtime Xyce static residual presence does not match the rebuilt target"
+                    .to_string(),
+            );
+        }
+        if self.direct_dae_accepted_q.is_some() != target.uses_direct_dae {
+            return Err(
+                "accepted integration runtime direct-DAE history presence does not match the rebuilt target"
+                    .to_string(),
+            );
+        }
+        if self.direct_dae_static_residual.is_some() != target.has_direct_dae_static_residual {
+            return Err(
+                "accepted integration runtime direct-DAE static residual presence does not match the rebuilt target phase"
+                    .to_string(),
+            );
+        }
+        if self.damped_status.is_some() != target.uses_damped_newton {
+            return Err(
+                "accepted integration runtime DampedNewton status presence does not match the rebuilt target"
+                    .to_string(),
+            );
+        }
+        if !target.uses_damped_newton && !self.damped_first_solver_call {
+            return Err(
+                "accepted integration runtime without DampedNewton has a consumed first-solver-call phase"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+fn integration_method_tag(method: IntegrationMethod) -> &'static str {
+    match method {
+        IntegrationMethod::BackwardEuler => "backward-euler",
+        IntegrationMethod::Trapezoidal => "trapezoidal",
+        IntegrationMethod::Gear2 => "gear2",
+        IntegrationMethod::TrapGear => "trapgear",
+    }
+}
+
+fn parse_integration_method_tag(tag: &str) -> Result<IntegrationMethod, String> {
+    match tag {
+        "backward-euler" => Ok(IntegrationMethod::BackwardEuler),
+        "trapezoidal" => Ok(IntegrationMethod::Trapezoidal),
+        "gear2" => Ok(IntegrationMethod::Gear2),
+        "trapgear" => Ok(IntegrationMethod::TrapGear),
+        _ => Err(format!("unsupported checkpoint integration method '{tag}'")),
+    }
+}
+
+fn lte_reference_tag(reference: TransientLteReference) -> &'static str {
+    match reference {
+        TransientLteReference::PredictorLocal => "predictor-local",
+        TransientLteReference::PointLocal => "point-local",
+        TransientLteReference::PointGlobal => "point-global",
+        TransientLteReference::SignalGlobal => "signal-global",
+        TransientLteReference::SignalLocal => "signal-local",
+    }
+}
+
+fn parse_lte_reference_tag(tag: &str) -> Result<TransientLteReference, String> {
+    match tag {
+        "predictor-local" => Ok(TransientLteReference::PredictorLocal),
+        "point-local" => Ok(TransientLteReference::PointLocal),
+        "point-global" => Ok(TransientLteReference::PointGlobal),
+        "signal-global" => Ok(TransientLteReference::SignalGlobal),
+        "signal-local" => Ok(TransientLteReference::SignalLocal),
+        _ => Err(format!("unsupported checkpoint LTE reference mode '{tag}'")),
+    }
+}
+
+fn write_runtime_blockers(out: &mut String, blockers: &[String]) {
+    out.push_str(&format!(
+        "accepted_integration_runtime_blockers {}\n",
+        blockers.len()
+    ));
+    for blocker in blockers {
+        out.push_str(blocker);
+        out.push('\n');
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_runtime_policy(
+    out: &mut String,
+    lte_warmup_skips: u8,
+    force_accept_cooldown: usize,
+    livelock_streak: usize,
+    livelock_last_restart_time: Option<Value>,
+    accepted_interval_count: usize,
+    damped_first_solver_call: bool,
+    damped_status: Option<XyceDampedAcceptedBoundaryCheckpoint>,
+) {
+    out.push_str(&format!(
+        "accepted_integration_policy {lte_warmup_skips} {force_accept_cooldown} {livelock_streak} {} {accepted_interval_count} {}",
+        livelock_last_restart_time.map_or_else(|| "none".to_string(), |value| value.to_string()),
+        u8::from(damped_first_solver_call),
+    ));
+    match damped_status {
+        Some(status) => out.push_str(&format!(
+            " damped {} {}\n",
+            status.bad_step_count, status.min_convergence_rate
+        )),
+        None => out.push_str(" none\n"),
+    }
+}
+
+fn write_accepted_integration_runtime(out: &mut String, runtime: &AcceptedIntegrationRuntime) {
+    match runtime {
+        AcceptedIntegrationRuntime::UnavailableLegacy => {
+            out.push_str("accepted_integration_runtime unavailable-legacy\n");
+        }
+        AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
+            out.push_str(&format!(
+                "accepted_integration_runtime restart-normalized {}\n",
+                runtime.version
+            ));
+            write_runtime_blockers(out, &runtime.resume_blockers);
+            write_runtime_policy(
+                out,
+                runtime.lte_warmup_skips,
+                runtime.force_accept_cooldown,
+                runtime.livelock_streak,
+                runtime.livelock_last_restart_time,
+                runtime.accepted_interval_count,
+                runtime.damped_first_solver_call,
+                runtime.damped_status,
+            );
+        }
+        AcceptedIntegrationRuntime::Exact(runtime) => {
+            out.push_str(&format!(
+                "accepted_integration_runtime exact {}\n",
+                runtime.version
+            ));
+            write_runtime_blockers(out, &runtime.resume_blockers);
+            write_runtime_policy(
+                out,
+                runtime.lte_warmup_skips,
+                runtime.force_accept_cooldown,
+                runtime.livelock_streak,
+                runtime.livelock_last_restart_time,
+                runtime.accepted_interval_count,
+                runtime.damped_first_solver_call,
+                runtime.damped_status,
+            );
+            let lte = &runtime.lte;
+            out.push_str(&format!(
+                "accepted_integration_lte {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
+                lte.version,
+                lte.solution_dimension,
+                lte.history_count,
+                lte.reltol,
+                lte.abstol,
+                lte_reference_tag(lte.reference),
+                lte.method_order,
+                lte.prev_dt,
+                lte.prev_prev_dt,
+                lte.signal_global_reference,
+                lte.xyce_order_two_difference_dt,
+                lte.xyce_attempt_dt,
+                lte.xyce_attempt_prev_dt,
+                lte.xyce_attempt_prev_prev_dt,
+            ));
+            write_value_vector(out, "accepted_integration_lte_prev", &lte.prev_solution);
+            write_value_vector(
+                out,
+                "accepted_integration_lte_prev_prev",
+                &lte.prev_prev_solution,
+            );
+            write_value_vector(
+                out,
+                "accepted_integration_lte_prev_prev_prev",
+                &lte.prev_prev_prev_solution,
+            );
+            write_value_vector(
+                out,
+                "accepted_integration_lte_accepted_reference",
+                &lte.accepted_reference_solution,
+            );
+            write_value_vector(
+                out,
+                "accepted_integration_lte_signal_local",
+                &lte.signal_local_reference,
+            );
+            write_value_vector(
+                out,
+                "accepted_integration_lte_order_two_difference",
+                &lte.xyce_order_two_difference,
+            );
+            match &runtime.trapgear {
+                None => out.push_str("accepted_integration_trapgear none\n"),
+                Some(trapgear) => {
+                    out.push_str(&format!(
+                        "accepted_integration_trapgear {} {} {} {}\n",
+                        integration_method_tag(trapgear.current_method),
+                        trapgear.prev_values.len(),
+                        trapgear.smooth_steps,
+                        u8::from(trapgear.at_breakpoint),
+                    ));
+                    for index in 0..trapgear.prev_values.len() {
+                        out.push_str(&format!(
+                            "accepted_integration_trapgear_lane {} {} {} {}\n",
+                            trapgear.prev_values[index],
+                            u8::from(trapgear.prev_signs[index]),
+                            u8::from(trapgear.prev_sign_valid[index]),
+                            trapgear.sign_change_count[index],
+                        ));
+                    }
+                }
+            }
+            out.push_str(&format!(
+                "accepted_integration_next_trap_order {}\n",
+                runtime.next_trap_order
+            ));
+            for (name, values) in [
+                (
+                    "accepted_integration_xyce_static",
+                    runtime.xyce_static_residual.as_deref(),
+                ),
+                (
+                    "accepted_integration_direct_q",
+                    runtime.direct_dae_accepted_q.as_deref(),
+                ),
+                (
+                    "accepted_integration_direct_static",
+                    runtime.direct_dae_static_residual.as_deref(),
+                ),
+            ] {
+                out.push_str(&format!(
+                    "{name}_available {}\n",
+                    u8::from(values.is_some())
+                ));
+                write_value_vector(out, name, values.unwrap_or(&[]));
+            }
+        }
+    }
+}
+
+fn read_fixed_runtime_values(
+    lines: &mut CheckpointLines<'_>,
+    name: &str,
+    allowed_counts: &[usize],
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<Value>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| format!("missing '{name}' section"))?;
+    let count = parse_count_header(header, name)?;
+    if !allowed_counts.contains(&count) {
+        return Err(format!(
+            "'{name}' declares {count} values; expected one of {allowed_counts:?}"
+        ));
+    }
+    let mut values = allocate_checkpoint_rows(lines, count, name, budget)?;
+    for index in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'{name}' truncated at value {index}"))?;
+        let mut fields = line.split_whitespace();
+        let field = fields
+            .next()
+            .ok_or_else(|| format!("'{name}' value {index} is missing"))?;
+        let value = field
+            .parse::<Value>()
+            .map_err(|_| format!("'{name}' value {index} is invalid: '{field}'"))?;
+        if !value.is_finite() {
+            return Err(format!("'{name}' value {index} is non-finite: '{field}'"));
+        }
+        if let Some(extra) = fields.next() {
+            return Err(format!("'{name}' value {index} has extra field '{extra}'"));
+        }
+        values.push(value);
+    }
+    Ok(values)
+}
+
+fn read_runtime_blockers(
+    lines: &mut CheckpointLines<'_>,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Vec<String>, String> {
+    read_canonical_nonempty_line_vector(lines, "accepted_integration_runtime_blockers", budget)
+}
+
+fn parse_runtime_policy(
+    lines: &mut CheckpointLines<'_>,
+) -> Result<
+    (
+        u8,
+        usize,
+        usize,
+        Option<Value>,
+        usize,
+        bool,
+        Option<XyceDampedAcceptedBoundaryCheckpoint>,
+    ),
+    String,
+> {
+    let line = lines
+        .next()
+        .ok_or_else(|| "missing accepted integration policy line".to_string())?;
+    let mut fields = line.split_whitespace();
+    if fields.next() != Some("accepted_integration_policy") {
+        return Err(format!(
+            "malformed accepted integration policy line: '{line}'"
+        ));
+    }
+    let parse_usize = |field: Option<&str>, name: &str| -> Result<usize, String> {
+        field
+            .ok_or_else(|| format!("accepted integration policy is missing {name}"))?
+            .parse::<usize>()
+            .map_err(|_| format!("accepted integration policy has invalid {name}"))
+    };
+    let lte_warmup_skips = u8::try_from(parse_usize(fields.next(), "LTE warmup count")?)
+        .map_err(|_| "accepted integration policy LTE warmup count exceeds u8".to_string())?;
+    let force_accept_cooldown = parse_usize(fields.next(), "force-accept cooldown")?;
+    let livelock_streak = parse_usize(fields.next(), "livelock streak")?;
+    let last_restart_field = fields
+        .next()
+        .ok_or_else(|| "accepted integration policy is missing last restart time".to_string())?;
+    let livelock_last_restart_time =
+        if last_restart_field == "none" {
+            None
+        } else {
+            Some(last_restart_field.parse::<Value>().map_err(|_| {
+                "accepted integration policy has invalid last restart time".to_string()
+            })?)
+        };
+    let accepted_interval_count = parse_usize(fields.next(), "accepted interval count")?;
+    let damped_first_solver_call = fields
+        .next()
+        .ok_or_else(|| {
+            "accepted integration policy is missing DampedNewton first-call flag".to_string()
+        })
+        .and_then(|field| {
+            parse_checkpoint_bool(field, "accepted integration DampedNewton first-call flag")
+        })?;
+    let damped_status = match fields.next() {
+        Some("none") => None,
+        Some("damped") => {
+            let bad_step_count = parse_usize(fields.next(), "DampedNewton bad-step count")?;
+            let rate_field = fields.next().ok_or_else(|| {
+                "accepted integration policy is missing DampedNewton convergence rate".to_string()
+            })?;
+            let min_convergence_rate = rate_field.parse::<Value>().map_err(|_| {
+                "accepted integration policy has invalid DampedNewton convergence rate".to_string()
+            })?;
+            Some(XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count,
+                min_convergence_rate,
+            })
+        }
+        Some(tag) => {
+            return Err(format!(
+                "accepted integration policy has invalid DampedNewton status tag '{tag}'"
+            ));
+        }
+        None => {
+            return Err(
+                "accepted integration policy is missing DampedNewton status tag".to_string(),
+            );
+        }
+    };
+    if let Some(extra) = fields.next() {
+        return Err(format!(
+            "accepted integration policy line has extra field '{extra}'"
+        ));
+    }
+    Ok((
+        lte_warmup_skips,
+        force_accept_cooldown,
+        livelock_streak,
+        livelock_last_restart_time,
+        accepted_interval_count,
+        damped_first_solver_call,
+        damped_status,
+    ))
+}
+
+fn next_runtime_field<'a>(
+    fields: &mut std::str::SplitWhitespace<'a>,
+    name: &str,
+) -> Result<&'a str, String> {
+    fields
+        .next()
+        .ok_or_else(|| format!("accepted integration LTE header is missing {name}"))
+}
+
+fn read_optional_runtime_values(
+    lines: &mut CheckpointLines<'_>,
+    name: &str,
+    expected_count: usize,
+    budget: &mut CheckpointParseBudget,
+) -> Result<Option<Vec<Value>>, String> {
+    let line = lines
+        .next()
+        .ok_or_else(|| format!("missing '{name}_available' line"))?;
+    let mut fields = line.split_whitespace();
+    if fields
+        .next()
+        .and_then(|field| field.strip_suffix("_available"))
+        != Some(name)
+    {
+        return Err(format!("malformed '{name}_available' line: '{line}'"));
+    }
+    let available = fields
+        .next()
+        .ok_or_else(|| format!("'{name}_available' is missing its boolean"))
+        .and_then(|field| parse_checkpoint_bool(field, name))?;
+    if let Some(extra) = fields.next() {
+        return Err(format!("'{name}_available' has extra field '{extra}'"));
+    }
+    let count = if available { expected_count } else { 0 };
+    let values = read_fixed_runtime_values(lines, name, &[count], budget)?;
+    Ok(available.then_some(values))
+}
+
+fn read_accepted_integration_runtime(
+    lines: &mut CheckpointLines<'_>,
+    solution: &[Value],
+    checkpoint_time: Value,
+    budget: &mut CheckpointParseBudget,
+) -> Result<AcceptedIntegrationRuntime, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing accepted integration runtime header".to_string())?;
+    let mut header_fields = header.split_whitespace();
+    if header_fields.next() != Some("accepted_integration_runtime") {
+        return Err(format!(
+            "malformed accepted integration runtime header: '{header}'"
+        ));
+    }
+    let kind = header_fields
+        .next()
+        .ok_or_else(|| "accepted integration runtime header is missing its kind".to_string())?;
+    if kind == "unavailable-legacy" {
+        if header_fields.next().is_some() {
+            return Err(format!(
+                "accepted integration runtime header has extra fields: '{header}'"
+            ));
+        }
+        return Ok(AcceptedIntegrationRuntime::UnavailableLegacy);
+    }
+    let version = header_fields
+        .next()
+        .ok_or_else(|| "accepted integration runtime header is missing its version".to_string())?
+        .parse::<u32>()
+        .map_err(|_| "accepted integration runtime header has invalid version".to_string())?;
+    if header_fields.next().is_some() {
+        return Err(format!(
+            "accepted integration runtime header has extra fields: '{header}'"
+        ));
+    }
+    if version != ACCEPTED_INTEGRATION_RUNTIME_VERSION {
+        return Err(format!(
+            "unsupported accepted integration runtime version {version} (runtime requires {ACCEPTED_INTEGRATION_RUNTIME_VERSION})"
+        ));
+    }
+    let resume_blockers = read_runtime_blockers(lines, budget)?;
+    let (
+        lte_warmup_skips,
+        force_accept_cooldown,
+        livelock_streak,
+        livelock_last_restart_time,
+        accepted_interval_count,
+        damped_first_solver_call,
+        damped_status,
+    ) = parse_runtime_policy(lines)?;
+    if kind == "restart-normalized" {
+        let runtime = RestartNormalizedIntegrationRuntimeCheckpoint {
+            version,
+            resume_blockers,
+            lte_warmup_skips,
+            force_accept_cooldown,
+            livelock_streak,
+            livelock_last_restart_time,
+            accepted_interval_count,
+            damped_first_solver_call,
+            damped_status,
+        };
+        runtime.validate_numeric_state(checkpoint_time)?;
+        return Ok(AcceptedIntegrationRuntime::RestartNormalized(runtime));
+    }
+    if kind != "exact" {
+        return Err(format!(
+            "unknown accepted integration runtime kind '{kind}'"
+        ));
+    }
+
+    let lte_line = lines
+        .next()
+        .ok_or_else(|| "missing accepted integration LTE header".to_string())?;
+    let mut lte_fields = lte_line.split_whitespace();
+    if lte_fields.next() != Some("accepted_integration_lte") {
+        return Err(format!(
+            "malformed accepted integration LTE header: '{lte_line}'"
+        ));
+    }
+    let parse_usize = |field: &str, name: &str| {
+        field
+            .parse::<usize>()
+            .map_err(|_| format!("accepted integration LTE header has invalid {name}"))
+    };
+    let parse_value = |field: &str, name: &str| {
+        field
+            .parse::<Value>()
+            .map_err(|_| format!("accepted integration LTE header has invalid {name}"))
+    };
+    let lte_version = next_runtime_field(&mut lte_fields, "version")?
+        .parse::<u32>()
+        .map_err(|_| "accepted integration LTE header has invalid version".to_string())?;
+    if lte_version != ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION {
+        return Err(format!(
+            "unsupported accepted-boundary LTE checkpoint version {lte_version} (runtime requires {ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION})"
+        ));
+    }
+    let solution_dimension = parse_usize(
+        next_runtime_field(&mut lte_fields, "solution dimension")?,
+        "solution dimension",
+    )?;
+    if solution_dimension != solution.len() {
+        return Err(format!(
+            "accepted integration LTE solution dimension {solution_dimension} does not match checkpoint solution length {}",
+            solution.len()
+        ));
+    }
+    let history_count = parse_usize(
+        next_runtime_field(&mut lte_fields, "history count")?,
+        "history count",
+    )?;
+    if history_count > 3 {
+        return Err(format!(
+            "accepted integration LTE history count {history_count} exceeds 3"
+        ));
+    }
+    let reltol = parse_value(
+        next_runtime_field(&mut lte_fields, "relative tolerance")?,
+        "relative tolerance",
+    )?;
+    let abstol = parse_value(
+        next_runtime_field(&mut lte_fields, "absolute tolerance")?,
+        "absolute tolerance",
+    )?;
+    let reference =
+        parse_lte_reference_tag(next_runtime_field(&mut lte_fields, "reference mode")?)?;
+    let method_order = next_runtime_field(&mut lte_fields, "method order")?
+        .parse::<u32>()
+        .map_err(|_| "accepted integration LTE header has invalid method order".to_string())?;
+    let prev_dt = parse_value(
+        next_runtime_field(&mut lte_fields, "previous timestep")?,
+        "previous timestep",
+    )?;
+    let prev_prev_dt = parse_value(
+        next_runtime_field(&mut lte_fields, "second previous timestep")?,
+        "second previous timestep",
+    )?;
+    let signal_global_reference = parse_value(
+        next_runtime_field(&mut lte_fields, "signal-global reference")?,
+        "signal-global reference",
+    )?;
+    let xyce_order_two_difference_dt = parse_value(
+        next_runtime_field(&mut lte_fields, "order-two difference timestep")?,
+        "order-two difference timestep",
+    )?;
+    let xyce_attempt_dt = parse_value(
+        next_runtime_field(&mut lte_fields, "current psi coefficient")?,
+        "current psi coefficient",
+    )?;
+    let xyce_attempt_prev_dt = parse_value(
+        next_runtime_field(&mut lte_fields, "previous psi coefficient")?,
+        "previous psi coefficient",
+    )?;
+    let xyce_attempt_prev_prev_dt = parse_value(
+        next_runtime_field(&mut lte_fields, "second previous psi coefficient")?,
+        "second previous psi coefficient",
+    )?;
+    if let Some(extra) = lte_fields.next() {
+        return Err(format!(
+            "accepted integration LTE header has extra field '{extra}'"
+        ));
+    }
+    let history_len = |generation: usize| {
+        if history_count >= generation {
+            solution_dimension
+        } else {
+            0
+        }
+    };
+    let prev_solution = read_fixed_runtime_values(
+        lines,
+        "accepted_integration_lte_prev",
+        &[history_len(1)],
+        budget,
+    )?;
+    let prev_prev_solution = read_fixed_runtime_values(
+        lines,
+        "accepted_integration_lte_prev_prev",
+        &[history_len(2)],
+        budget,
+    )?;
+    let prev_prev_prev_solution = read_fixed_runtime_values(
+        lines,
+        "accepted_integration_lte_prev_prev_prev",
+        &[history_len(3)],
+        budget,
+    )?;
+    let accepted_reference_len = if reference == TransientLteReference::PredictorLocal {
+        0
+    } else {
+        solution_dimension
+    };
+    let accepted_reference_solution = read_fixed_runtime_values(
+        lines,
+        "accepted_integration_lte_accepted_reference",
+        &[accepted_reference_len],
+        budget,
+    )?;
+    let signal_local_len = if reference == TransientLteReference::SignalLocal {
+        solution_dimension
+    } else {
+        0
+    };
+    let signal_local_reference = read_fixed_runtime_values(
+        lines,
+        "accepted_integration_lte_signal_local",
+        &[signal_local_len],
+        budget,
+    )?;
+    let xyce_order_two_difference = read_fixed_runtime_values(
+        lines,
+        "accepted_integration_lte_order_two_difference",
+        &[0, solution_dimension],
+        budget,
+    )?;
+    let lte = AcceptedBoundaryLteEstimatorCheckpoint {
+        version: lte_version,
+        solution_dimension,
+        history_count,
+        prev_solution,
+        prev_prev_solution,
+        prev_prev_prev_solution,
+        prev_dt,
+        prev_prev_dt,
+        reltol,
+        abstol,
+        reference,
+        accepted_reference_solution,
+        signal_global_reference,
+        signal_local_reference,
+        method_order,
+        xyce_order_two_difference,
+        xyce_order_two_difference_dt,
+        xyce_attempt_dt,
+        xyce_attempt_prev_dt,
+        xyce_attempt_prev_prev_dt,
+    };
+
+    let trapgear_line = lines
+        .next()
+        .ok_or_else(|| "missing accepted integration Trap/Gear header".to_string())?;
+    let mut trapgear_fields = trapgear_line.split_whitespace();
+    if trapgear_fields.next() != Some("accepted_integration_trapgear") {
+        return Err(format!(
+            "malformed accepted integration Trap/Gear header: '{trapgear_line}'"
+        ));
+    }
+    let trapgear = match trapgear_fields.next() {
+        Some("none") => {
+            if trapgear_fields.next().is_some() {
+                return Err(format!(
+                    "accepted integration Trap/Gear none header has extra fields: '{trapgear_line}'"
+                ));
+            }
+            None
+        }
+        Some(method_tag) => {
+            let current_method = parse_integration_method_tag(method_tag)?;
+            let lane_count = trapgear_fields
+                .next()
+                .ok_or_else(|| {
+                    "accepted integration Trap/Gear header is missing lane count".to_string()
+                })?
+                .parse::<usize>()
+                .map_err(|_| {
+                    "accepted integration Trap/Gear header has invalid lane count".to_string()
+                })?;
+            if lane_count != solution.len() {
+                return Err(format!(
+                    "accepted integration Trap/Gear lane count {lane_count} does not match solution length {}",
+                    solution.len()
+                ));
+            }
+            let smooth_steps = trapgear_fields
+                .next()
+                .ok_or_else(|| {
+                    "accepted integration Trap/Gear header is missing smooth count".to_string()
+                })?
+                .parse::<usize>()
+                .map_err(|_| {
+                    "accepted integration Trap/Gear header has invalid smooth count".to_string()
+                })?;
+            let at_breakpoint = trapgear_fields
+                .next()
+                .ok_or_else(|| {
+                    "accepted integration Trap/Gear header is missing breakpoint flag".to_string()
+                })
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, "accepted integration Trap/Gear breakpoint flag")
+                })?;
+            if let Some(extra) = trapgear_fields.next() {
+                return Err(format!(
+                    "accepted integration Trap/Gear header has extra field '{extra}'"
+                ));
+            }
+            let mut prev_values = allocate_checkpoint_rows(
+                lines,
+                lane_count,
+                "accepted integration Trap/Gear previous values",
+                budget,
+            )?;
+            let mut prev_signs = allocate_checkpoint_rows(
+                lines,
+                lane_count,
+                "accepted integration Trap/Gear signs",
+                budget,
+            )?;
+            let mut prev_sign_valid = allocate_checkpoint_rows(
+                lines,
+                lane_count,
+                "accepted integration Trap/Gear sign validity",
+                budget,
+            )?;
+            let mut sign_change_count = allocate_checkpoint_rows(
+                lines,
+                lane_count,
+                "accepted integration Trap/Gear sign-change counts",
+                budget,
+            )?;
+            for index in 0..lane_count {
+                let line = lines.next().ok_or_else(|| {
+                    format!("accepted integration Trap/Gear lanes truncated at {index}")
+                })?;
+                let mut fields = line.split_whitespace();
+                if fields.next() != Some("accepted_integration_trapgear_lane") {
+                    return Err(format!(
+                        "malformed accepted integration Trap/Gear lane: '{line}'"
+                    ));
+                }
+                let value_field = fields.next().ok_or_else(|| {
+                    format!("accepted integration Trap/Gear lane {index} is missing value")
+                })?;
+                let value = value_field.parse::<Value>().map_err(|_| {
+                    format!("accepted integration Trap/Gear lane {index} has invalid value")
+                })?;
+                if !value.is_finite() {
+                    return Err(format!(
+                        "accepted integration Trap/Gear lane {index} has non-finite value"
+                    ));
+                }
+                prev_values.push(value);
+                prev_signs.push(
+                    fields
+                        .next()
+                        .ok_or_else(|| {
+                            format!("accepted integration Trap/Gear lane {index} is missing sign")
+                        })
+                        .and_then(|field| {
+                            parse_checkpoint_bool(field, "accepted integration Trap/Gear sign")
+                        })?,
+                );
+                prev_sign_valid.push(fields.next().ok_or_else(|| format!("accepted integration Trap/Gear lane {index} is missing sign-valid flag"))
+                    .and_then(|field| parse_checkpoint_bool(field, "accepted integration Trap/Gear sign-valid flag"))?);
+                sign_change_count.push(fields.next().ok_or_else(|| format!("accepted integration Trap/Gear lane {index} is missing sign-change count"))?
+                    .parse::<usize>().map_err(|_| format!("accepted integration Trap/Gear lane {index} has invalid sign-change count"))?);
+                if let Some(extra) = fields.next() {
+                    return Err(format!(
+                        "accepted integration Trap/Gear lane {index} has extra field '{extra}'"
+                    ));
+                }
+            }
+            Some(TrapGearControllerSnapshot {
+                current_method,
+                prev_values,
+                prev_signs,
+                prev_sign_valid,
+                sign_change_count,
+                smooth_steps,
+                at_breakpoint,
+            })
+        }
+        None => {
+            return Err(
+                "accepted integration Trap/Gear header is missing its state tag".to_string(),
+            );
+        }
+    };
+    let order_line = lines
+        .next()
+        .ok_or_else(|| "missing accepted integration next Trap/Gear order".to_string())?;
+    let next_trap_order = order_line
+        .strip_prefix("accepted_integration_next_trap_order ")
+        .ok_or_else(|| {
+            format!("malformed accepted integration next Trap/Gear order: '{order_line}'")
+        })?
+        .parse::<u8>()
+        .map_err(|_| {
+            format!("malformed accepted integration next Trap/Gear order: '{order_line}'")
+        })?;
+    let xyce_static_residual = read_optional_runtime_values(
+        lines,
+        "accepted_integration_xyce_static",
+        solution.len(),
+        budget,
+    )?;
+    let direct_dae_accepted_q = read_optional_runtime_values(
+        lines,
+        "accepted_integration_direct_q",
+        solution.len(),
+        budget,
+    )?;
+    let direct_dae_static_residual = read_optional_runtime_values(
+        lines,
+        "accepted_integration_direct_static",
+        solution.len(),
+        budget,
+    )?;
+    let runtime = AcceptedIntegrationRuntimeCheckpoint {
+        version,
+        resume_blockers,
+        lte,
+        next_trap_order,
+        trapgear,
+        xyce_static_residual,
+        direct_dae_accepted_q,
+        direct_dae_static_residual,
+        lte_warmup_skips,
+        force_accept_cooldown,
+        livelock_streak,
+        livelock_last_restart_time,
+        accepted_interval_count,
+        damped_first_solver_call,
+        damped_status,
+    };
+    runtime.validate_numeric_state(solution, checkpoint_time)?;
+    Ok(AcceptedIntegrationRuntime::Exact(runtime))
+}
+
+fn accepted_integration_runtime_retained_value_count(
+    runtime: &AcceptedIntegrationRuntime,
+) -> usize {
+    let policy_count = |blockers: usize, last_restart: bool, damped_status: bool| -> usize {
+        9_usize
+            .saturating_add(blockers)
+            .saturating_add(usize::from(last_restart))
+            .saturating_add(2_usize.saturating_mul(usize::from(damped_status)))
+    };
+    match runtime {
+        AcceptedIntegrationRuntime::UnavailableLegacy => 1,
+        AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
+            1_usize.saturating_add(policy_count(
+                runtime.resume_blockers.len(),
+                runtime.livelock_last_restart_time.is_some(),
+                runtime.damped_status.is_some(),
+            ))
+        }
+        AcceptedIntegrationRuntime::Exact(runtime) => {
+            let lte = &runtime.lte;
+            let mut count = 1_usize
+                .saturating_add(policy_count(
+                    runtime.resume_blockers.len(),
+                    runtime.livelock_last_restart_time.is_some(),
+                    runtime.damped_status.is_some(),
+                ))
+                .saturating_add(14)
+                .saturating_add(6)
+                .saturating_add(lte.prev_solution.len())
+                .saturating_add(lte.prev_prev_solution.len())
+                .saturating_add(lte.prev_prev_prev_solution.len())
+                .saturating_add(lte.accepted_reference_solution.len())
+                .saturating_add(lte.signal_local_reference.len())
+                .saturating_add(lte.xyce_order_two_difference.len())
+                .saturating_add(1)
+                .saturating_add(1)
+                .saturating_add(6);
+            if let Some(trapgear) = &runtime.trapgear {
+                count = count
+                    // The base Trap/Gear scalar above is the method/presence
+                    // discriminant; a present snapshot adds lane count,
+                    // smooth count, and breakpoint flag.
+                    .saturating_add(3)
+                    .saturating_add(trapgear.prev_values.len().saturating_mul(4));
+            }
+            for values in [
+                runtime.xyce_static_residual.as_deref(),
+                runtime.direct_dae_accepted_q.as_deref(),
+                runtime.direct_dae_static_residual.as_deref(),
+            ] {
+                count = count.saturating_add(values.map_or(0, <[Value]>::len));
+            }
+            count
+        }
+    }
 }
 
 impl TransientCheckpoint {
@@ -1950,6 +4160,59 @@ impl TransientCheckpoint {
         }
         if self.solution.iter().any(|value| !value.is_finite()) {
             return Err("checkpoint solution values must be finite".to_string());
+        }
+        match (
+            &self.integration_continuation,
+            &self.accepted_integration_runtime,
+        ) {
+            (
+                IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: false,
+                    ..
+                },
+                AcceptedIntegrationRuntime::Exact(runtime),
+            ) => runtime.validate_numeric_state(&self.solution, self.time)?,
+            (
+                IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: false,
+                    ..
+                },
+                AcceptedIntegrationRuntime::UnavailableLegacy,
+            ) => {
+                // Legacy v<=19 files remain parseable so the resume boundary
+                // can issue a targeted fail-closed diagnostic.
+            }
+            (
+                IntegrationContinuation::SyntheticOrigin
+                | IntegrationContinuation::BreakpointRestart
+                | IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: true,
+                    ..
+                },
+                AcceptedIntegrationRuntime::RestartNormalized(runtime),
+            ) => runtime.validate_numeric_state(self.time)?,
+            (
+                IntegrationContinuation::SyntheticOrigin
+                | IntegrationContinuation::BreakpointRestart
+                | IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: true,
+                    ..
+                },
+                AcceptedIntegrationRuntime::UnavailableLegacy,
+            ) => {
+                // Legacy normalized phases remain parseable but cannot prove
+                // persistent trajectory policy on resume.
+            }
+            (
+                IntegrationContinuation::Unavailable,
+                AcceptedIntegrationRuntime::UnavailableLegacy,
+            ) => {}
+            _ => {
+                return Err(
+                    "checkpoint integration continuation phase is inconsistent with its accepted integration runtime contract"
+                        .to_string(),
+                );
+            }
         }
 
         let capacitor_len = self.cap_v_prev.len();
@@ -2148,6 +4411,10 @@ impl TransientCheckpoint {
                 duplicate[1].1
             ));
         }
+        validate_accepted_junction_transient_history_numeric_state(
+            &self.accepted_junction_history,
+            &mut budget,
+        )?;
         if !self.lte_signal_global_reference.is_finite()
             || self.lte_signal_global_reference < 0.0
             || self
@@ -2289,6 +4556,16 @@ impl TransientCheckpoint {
         startup_mode: TransientStartupMode,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
+        let accepted_junction_history = if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
+            AcceptedJunctionTransientHistoryCheckpoint {
+                available: true,
+                ..AcceptedJunctionTransientHistoryCheckpoint::default()
+            }
+        } else {
+            AcceptedJunctionTransientHistoryCheckpoint::unavailable(
+                "checkpoint capture caller did not provide accepted BJT/diode transient histories",
+            )
+        };
         Self::capture_with_restart_identity(
             fingerprint,
             netlist_identity,
@@ -2302,6 +4579,20 @@ impl TransientCheckpoint {
             None,
             &[],
             0,
+            accepted_junction_history,
+            AcceptedIntegrationRuntime::RestartNormalized(
+                RestartNormalizedIntegrationRuntimeCheckpoint {
+                    version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
+                    resume_blockers: Vec::new(),
+                    lte_warmup_skips: 0,
+                    force_accept_cooldown: 0,
+                    livelock_streak: 0,
+                    livelock_last_restart_time: None,
+                    accepted_interval_count: usize::from(time > 0.0),
+                    damped_first_solver_call: true,
+                    damped_status: None,
+                },
+            ),
             lte_estimator,
         )
     }
@@ -2320,6 +4611,8 @@ impl TransientCheckpoint {
         integration_continuation: Option<ProposedIntegrationContinuation>,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
+        accepted_junction_history: AcceptedJunctionTransientHistoryCheckpoint,
+        accepted_integration_runtime: AcceptedIntegrationRuntime,
         lte_estimator: Option<&LteEstimator>,
     ) -> Result<Self, String> {
         let mut tline_states = Vec::with_capacity(circuit.tlines.len());
@@ -2370,6 +4663,27 @@ impl TransientCheckpoint {
                 accepted_nonlinear_states.resume_blockers.join("; ")
             );
         }
+        if !accepted_junction_history.resume_blockers.is_empty() {
+            log::warn!(
+                "transient checkpoint at t={time:.6e}: accepted BJT/diode transient history is not fully serialized; this checkpoint will be refused for resume: {}",
+                accepted_junction_history.resume_blockers.join("; ")
+            );
+        }
+        let accepted_integration_resume_blockers = match &accepted_integration_runtime {
+            AcceptedIntegrationRuntime::UnavailableLegacy => None,
+            AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
+                Some(&runtime.resume_blockers)
+            }
+            AcceptedIntegrationRuntime::Exact(runtime) => Some(&runtime.resume_blockers),
+        };
+        if let Some(blockers) = accepted_integration_resume_blockers
+            && !blockers.is_empty()
+        {
+            log::warn!(
+                "transient checkpoint at t={time:.6e}: accepted integration runtime is not fully resumable; this checkpoint will be refused for resume: {}",
+                blockers.join("; ")
+            );
+        }
 
         #[cfg(feature = "veriloga")]
         let runtime_veriloga_instance_states = circuit.runtime_veriloga_checkpoint_states()?;
@@ -2412,6 +4726,7 @@ impl TransientCheckpoint {
                     xyce_breakpoint_restart_pending: continuation.xyce_breakpoint_restart_pending,
                 },
             ),
+            accepted_integration_runtime,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             cap_v_prev: circuit.capacitors.v_prev.clone(),
@@ -2432,6 +4747,7 @@ impl TransientCheckpoint {
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
             accepted_nonlinear_state_available: true,
             accepted_nonlinear_states,
+            accepted_junction_history,
             tline_state_available: true,
             tline_resume_blockers,
             tline_states,
@@ -2448,6 +4764,65 @@ impl TransientCheckpoint {
             #[cfg(feature = "veriloga")]
             runtime_veriloga_instance_states,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) fn accepted_junction_transient_history(
+        &self,
+    ) -> &AcceptedJunctionTransientHistoryCheckpoint {
+        &self.accepted_junction_history
+    }
+
+    fn validate_accepted_junction_history_for_circuit(
+        &self,
+        circuit: &CircuitData,
+    ) -> Result<(), String> {
+        if !self.accepted_junction_history.resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint resume cannot restore unsupported accepted BJT/diode transient history: {}",
+                self.accepted_junction_history.resume_blockers.join("; ")
+            ));
+        }
+        if !self.accepted_junction_history.available {
+            if circuit.bjts.is_empty() && circuit.diodes.is_empty() {
+                return Ok(());
+            }
+            return Err(
+                "legacy transient checkpoint does not contain accepted BJT/diode transient history; re-run the transient from t=0"
+                    .to_string(),
+            );
+        }
+        Engine::validate_accepted_junction_transient_history_checkpoint(
+            circuit,
+            &self.accepted_junction_history,
+        )
+    }
+
+    /// Validate and decode accepted engine-owned junction state without
+    /// mutating the freshly built circuit or any live runtime history.
+    pub(super) fn restore_accepted_junction_transient_history(
+        &self,
+        circuit: &CircuitData,
+    ) -> Result<
+        (
+            BjtTransientHistory,
+            DiodeTransientHistory,
+            Vec<Option<BjtChargeSnapshot>>,
+        ),
+        String,
+    > {
+        self.validate_accepted_junction_history_for_circuit(circuit)?;
+        if !self.accepted_junction_history.available {
+            return Ok((
+                BjtTransientHistory::default(),
+                DiodeTransientHistory::default(),
+                Vec::new(),
+            ));
+        }
+        Engine::restore_accepted_junction_transient_history_checkpoint(
+            circuit,
+            &self.accepted_junction_history,
+        )
     }
 
     /// Inject the captured reactive-state histories into a freshly built
@@ -2480,6 +4855,7 @@ impl TransientCheckpoint {
         circuit.validate_accepted_native_nonlinear_checkpoint_states(
             &self.accepted_nonlinear_states,
         )?;
+        self.validate_accepted_junction_history_for_circuit(circuit)?;
         if !self.tline_resume_blockers.is_empty() {
             return Err(format!(
                 "transient checkpoint resume cannot restore unsupported transmission-line state: {}",
@@ -2741,6 +5117,12 @@ impl TransientCheckpoint {
     }
 
     fn validate_resume_capabilities(&self, netlist: &Netlist) -> Result<(), String> {
+        if !self.accepted_junction_history.resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint resume cannot restore unsupported accepted BJT/diode transient history: {}. Run this transient deck unsegmented.",
+                self.accepted_junction_history.resume_blockers.join("; ")
+            ));
+        }
         if !self.accepted_nonlinear_states.resume_blockers.is_empty() {
             return Err(format!(
                 "transient checkpoint resume cannot restore unsupported accepted native diode/BJT state: {}. Run this transient deck unsegmented.",
@@ -2762,6 +5144,30 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
+        match &self.accepted_integration_runtime {
+            AcceptedIntegrationRuntime::UnavailableLegacy => {
+                return Err(
+                    "legacy transient checkpoint does not record accepted integration runtime state required for exact resume"
+                        .to_string(),
+                );
+            }
+            AcceptedIntegrationRuntime::RestartNormalized(runtime) => {
+                if !runtime.resume_blockers.is_empty() {
+                    return Err(format!(
+                        "transient checkpoint resume cannot restore restart-normalized integration runtime: {}",
+                        runtime.resume_blockers.join("; ")
+                    ));
+                }
+            }
+            AcceptedIntegrationRuntime::Exact(runtime) => {
+                if !runtime.resume_blockers.is_empty() {
+                    return Err(format!(
+                        "transient checkpoint resume cannot restore accepted integration runtime: {}",
+                        runtime.resume_blockers.join("; ")
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2770,6 +5176,10 @@ impl TransientCheckpoint {
         netlist: &Netlist,
         config: &SimulationConfig,
     ) -> Result<(), String> {
+        self.validate_numeric_state()?;
+        if self.simulation_identity.is_none() {
+            return self.validate_resolved_config(config);
+        }
         self.validate_for(netlist)?;
         self.validate_resolved_config(config)
     }
@@ -2779,6 +5189,10 @@ impl TransientCheckpoint {
         netlist: &Netlist,
         config: &SimulationConfig,
     ) -> Result<(), String> {
+        self.validate_numeric_state()?;
+        if self.simulation_identity.is_none() {
+            return self.validate_resolved_config(config);
+        }
         self.validate_for_restart(netlist)?;
         self.validate_resolved_config(config)
     }
@@ -2841,24 +5255,131 @@ impl TransientCheckpoint {
     pub(super) fn validated_integration_continuation(
         &self,
     ) -> Result<Option<ProposedIntegrationContinuation>, String> {
-        match self.integration_continuation {
-            IntegrationContinuation::Proposed {
-                next_step,
-                breakpoint_span_ceiling,
-                controller_max_step,
-                analysis_first_step_pending,
-                xyce_breakpoint_restart_pending,
-            } => Ok(Some(ProposedIntegrationContinuation {
+        match (self.integration_continuation, &self.accepted_integration_runtime) {
+            (
+                IntegrationContinuation::Proposed {
+                    next_step,
+                    breakpoint_span_ceiling,
+                    controller_max_step,
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending,
+                },
+                AcceptedIntegrationRuntime::Exact(_),
+            ) if !xyce_breakpoint_restart_pending => Ok(Some(ProposedIntegrationContinuation {
                 next_step,
                 breakpoint_span_ceiling,
                 controller_max_step,
                 analysis_first_step_pending,
                 xyce_breakpoint_restart_pending,
             })),
-            IntegrationContinuation::SyntheticOrigin
-            | IntegrationContinuation::BreakpointRestart => Ok(None),
-            IntegrationContinuation::Unavailable => Err(
+            (
+                IntegrationContinuation::Proposed {
+                    next_step,
+                    breakpoint_span_ceiling,
+                    controller_max_step,
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending: true,
+                },
+                AcceptedIntegrationRuntime::RestartNormalized(_),
+            ) => Ok(Some(ProposedIntegrationContinuation {
+                next_step,
+                breakpoint_span_ceiling,
+                controller_max_step,
+                analysis_first_step_pending,
+                xyce_breakpoint_restart_pending: true,
+            })),
+            (
+                IntegrationContinuation::SyntheticOrigin
+                | IntegrationContinuation::BreakpointRestart,
+                AcceptedIntegrationRuntime::RestartNormalized(_),
+            ) => Ok(None),
+            (IntegrationContinuation::Unavailable, _) => Err(
                 "legacy transient checkpoint does not record complete integration continuation state"
+                    .to_string(),
+            ),
+            (
+                IntegrationContinuation::Proposed { .. },
+                AcceptedIntegrationRuntime::UnavailableLegacy,
+            ) => Err(
+                "legacy transient checkpoint does not record exact accepted integration runtime for its proposed interval"
+                    .to_string(),
+            ),
+            (_, AcceptedIntegrationRuntime::UnavailableLegacy) => Err(
+                "legacy transient checkpoint does not record persistent restart-normalized integration policy state"
+                    .to_string(),
+            ),
+            _ => Err(
+                "checkpoint integration continuation phase is inconsistent with its accepted integration runtime contract"
+                    .to_string(),
+            ),
+        }
+    }
+
+    pub(super) fn accepted_integration_runtime(&self) -> &AcceptedIntegrationRuntime {
+        &self.accepted_integration_runtime
+    }
+
+    /// Validate the accepted integration runtime against the rebuilt target
+    /// without mutating any estimator, controller, or solver-status object.
+    pub(super) fn validated_accepted_integration_runtime<'a>(
+        &'a self,
+        target: AcceptedIntegrationRuntimeTarget<'_>,
+    ) -> Result<ValidatedAcceptedIntegrationRuntime<'a>, String> {
+        match (&self.integration_continuation, &self.accepted_integration_runtime) {
+            (
+                IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: false,
+                    ..
+                },
+                AcceptedIntegrationRuntime::Exact(runtime),
+            ) => {
+                runtime.validate_numeric_state(&self.solution, self.time)?;
+                runtime.validate_for_target(&self.solution, &target)?;
+                Ok(ValidatedAcceptedIntegrationRuntime::Exact(runtime))
+            }
+            (
+                IntegrationContinuation::SyntheticOrigin
+                | IntegrationContinuation::BreakpointRestart
+                | IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: true,
+                    ..
+                },
+                AcceptedIntegrationRuntime::RestartNormalized(runtime),
+            ) => {
+                runtime.validate_numeric_state(self.time)?;
+                runtime.validate_for_target(&target)?;
+                Ok(ValidatedAcceptedIntegrationRuntime::RestartNormalized(
+                    runtime,
+                ))
+            }
+            (
+                IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: false,
+                    ..
+                },
+                AcceptedIntegrationRuntime::UnavailableLegacy,
+            ) => Err(
+                "legacy transient checkpoint does not record exact accepted integration runtime for an arbitrary proposed interval"
+                    .to_string(),
+            ),
+            (
+                IntegrationContinuation::SyntheticOrigin
+                | IntegrationContinuation::BreakpointRestart
+                | IntegrationContinuation::Proposed {
+                    xyce_breakpoint_restart_pending: true,
+                    ..
+                },
+                AcceptedIntegrationRuntime::UnavailableLegacy,
+            ) => Err(
+                "legacy transient checkpoint does not record persistent restart-normalized integration policy state"
+                    .to_string(),
+            ),
+            (IntegrationContinuation::Unavailable, _) => Err(
+                "legacy transient checkpoint does not record complete integration continuation state"
+                    .to_string(),
+            ),
+            _ => Err(
+                "checkpoint integration continuation phase is inconsistent with its accepted integration runtime contract"
                     .to_string(),
             ),
         }
@@ -2938,6 +5459,9 @@ impl TransientCheckpoint {
                 }
             )))
             .saturating_add(self.solution.len())
+            .saturating_add(accepted_integration_runtime_retained_value_count(
+                &self.accepted_integration_runtime,
+            ))
             .saturating_add(self.cap_v_prev.len())
             .saturating_add(self.cap_v_prev_prev.len())
             .saturating_add(self.cap_v_prev_prev_prev.len())
@@ -2963,8 +5487,98 @@ impl TransientCheckpoint {
                     .map(|state| state.state_values.len().saturating_add(4))
                     .fold(0_usize, usize::saturating_add),
             )
+            .saturating_add(1)
+            .saturating_add(self.accepted_junction_history.resume_blockers.len())
+            .saturating_add(self.accepted_junction_history.bjt_names.len())
+            .saturating_add(self.accepted_junction_history.bjt_runtime_tags.len())
+            .saturating_add(self.accepted_junction_history.diode_names.len())
+            .saturating_add(self.accepted_junction_history.diode_runtime_tags.len())
             .saturating_add(self.pending_tline_arrivals.len())
             .saturating_add(self.lte_signal_local_reference.len());
+
+        let junction = &self.accepted_junction_history;
+        let bjt = &junction.bjt_history;
+        count = count
+            .saturating_add(bjt.vbe_prev.len())
+            .saturating_add(bjt.vbe_prev_prev.len())
+            .saturating_add(bjt.ibe_prev.len())
+            .saturating_add(bjt.vbc_prev.len())
+            .saturating_add(bjt.vbc_prev_prev.len())
+            .saturating_add(bjt.ibc_prev.len())
+            .saturating_add(bjt.vcs_prev.len())
+            .saturating_add(bjt.vcs_prev_prev.len())
+            .saturating_add(bjt.ics_prev.len())
+            .saturating_add(
+                bjt.charge_q_prev
+                    .len()
+                    .saturating_mul(BJT_DYNAMIC_CHARGE_COUNT),
+            )
+            .saturating_add(
+                bjt.charge_q_prev_prev
+                    .len()
+                    .saturating_mul(BJT_DYNAMIC_CHARGE_COUNT),
+            )
+            .saturating_add(
+                bjt.charge_q_prev_prev_prev
+                    .len()
+                    .saturating_mul(BJT_DYNAMIC_CHARGE_COUNT),
+            )
+            .saturating_add(
+                bjt.charge_cq_prev
+                    .len()
+                    .saturating_mul(BJT_DYNAMIC_CHARGE_COUNT),
+            )
+            .saturating_add(
+                bjt.accepted_terminal_currents
+                    .iter()
+                    .map(|currents| {
+                        usize::from(currents.is_some()).saturating_mul(BJT_EXTERNAL_STATE_DIM)
+                    })
+                    .fold(0_usize, usize::saturating_add),
+            )
+            .saturating_add(bjt.accepted_terminal_currents.len())
+            .saturating_add(
+                bjt.dynamic_internal_prev
+                    .len()
+                    .saturating_mul(BJT_INTERNAL_STATE_DIM),
+            )
+            .saturating_add(
+                bjt.dynamic_internal_prev_prev
+                    .len()
+                    .saturating_mul(BJT_INTERNAL_STATE_DIM),
+            )
+            .saturating_add(
+                bjt.dynamic_linear_prev
+                    .len()
+                    .saturating_mul(BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT),
+            )
+            .saturating_add(
+                bjt.dynamic_linear_prev_prev
+                    .len()
+                    .saturating_mul(BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT),
+            )
+            .saturating_add(2)
+            .saturating_add(junction.vbic_snapshot_cache.len())
+            .saturating_add(
+                junction
+                    .vbic_snapshot_cache
+                    .iter()
+                    .map(|snapshot| {
+                        snapshot
+                            .as_ref()
+                            .map_or(0, |snapshot| snapshot.state_values.len())
+                    })
+                    .fold(0_usize, usize::saturating_add),
+            );
+        let diode = &junction.diode_history;
+        count = count
+            .saturating_add(diode.vd_prev.len())
+            .saturating_add(diode.vd_prev_prev.len())
+            .saturating_add(diode.qd_prev.len())
+            .saturating_add(diode.qd_prev_prev.len())
+            .saturating_add(diode.qd_prev_prev_prev.len())
+            .saturating_add(diode.cqd_prev.len())
+            .saturating_add(2);
 
         for state in &self.tline_states {
             count = count
@@ -3107,6 +5721,7 @@ impl TransientCheckpoint {
             "lte_signal_local",
             &self.lte_signal_local_reference,
         );
+        write_accepted_integration_runtime(&mut out, &self.accepted_integration_runtime);
         section(
             &mut out,
             "capacitors",
@@ -3211,6 +5826,133 @@ impl TransientCheckpoint {
                 &checkpoint.state_values,
             );
         }
+        let junction = &self.accepted_junction_history;
+        out.push_str(&format!(
+            "accepted_junction_history_available {}\n",
+            u8::from(junction.available)
+        ));
+        out.push_str(&format!(
+            "accepted_junction_history_blockers {}\n",
+            junction.resume_blockers.len()
+        ));
+        for blocker in &junction.resume_blockers {
+            out.push_str(blocker);
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "accepted_bjt_transient_histories {}\n",
+            junction.bjt_names.len()
+        ));
+        let push_values = |out: &mut String, values: &[Value]| {
+            for value in values {
+                out.push(' ');
+                out.push_str(&value.to_string());
+            }
+        };
+        for index in 0..junction.bjt_names.len() {
+            let history = &junction.bjt_history;
+            out.push_str("accepted_bjt_transient_history ");
+            out.push_str(&junction.bjt_names[index]);
+            out.push(' ');
+            out.push_str(&junction.bjt_runtime_tags[index]);
+            push_values(
+                &mut out,
+                &[
+                    history.vbe_prev[index],
+                    history.vbe_prev_prev[index],
+                    history.ibe_prev[index],
+                    history.vbc_prev[index],
+                    history.vbc_prev_prev[index],
+                    history.ibc_prev[index],
+                    history.vcs_prev[index],
+                    history.vcs_prev_prev[index],
+                    history.ics_prev[index],
+                ],
+            );
+            push_values(&mut out, &history.charge_q_prev[index]);
+            push_values(&mut out, &history.charge_q_prev_prev[index]);
+            push_values(&mut out, &history.charge_q_prev_prev_prev[index]);
+            push_values(&mut out, &history.charge_cq_prev[index]);
+            match history.accepted_terminal_currents[index] {
+                Some(currents) => {
+                    out.push_str(" 1");
+                    push_values(&mut out, &currents);
+                }
+                None => out.push_str(" 0"),
+            }
+            push_values(&mut out, &history.dynamic_internal_prev[index]);
+            push_values(&mut out, &history.dynamic_internal_prev_prev[index]);
+            let linear = history.dynamic_linear_prev[index];
+            push_values(
+                &mut out,
+                &[
+                    linear.vrcx,
+                    linear.vrci,
+                    linear.vrbx,
+                    linear.vrbi,
+                    linear.vre,
+                    linear.vrbp,
+                    linear.vrs,
+                ],
+            );
+            let linear = history.dynamic_linear_prev_prev[index];
+            push_values(
+                &mut out,
+                &[
+                    linear.vrcx,
+                    linear.vrci,
+                    linear.vrbx,
+                    linear.vrbi,
+                    linear.vre,
+                    linear.vrbp,
+                    linear.vrs,
+                ],
+            );
+            out.push('\n');
+
+            match &junction.vbic_snapshot_cache[index] {
+                Some(snapshot) => {
+                    out.push_str(&format!(
+                        "accepted_bjt_charge_snapshot {}",
+                        snapshot.state_values.len()
+                    ));
+                    push_values(&mut out, &snapshot.state_values);
+                    out.push('\n');
+                }
+                None => out.push_str("accepted_bjt_charge_snapshot 0\n"),
+            }
+        }
+        out.push_str(&format!(
+            "accepted_bjt_transient_dt {} {}\n",
+            junction.bjt_history.accepted_dt_prev, junction.bjt_history.accepted_dt_prev_prev
+        ));
+        out.push_str(&format!(
+            "accepted_diode_transient_histories {}\n",
+            junction.diode_names.len()
+        ));
+        for index in 0..junction.diode_names.len() {
+            let history = &junction.diode_history;
+            out.push_str("accepted_diode_transient_history ");
+            out.push_str(&junction.diode_names[index]);
+            out.push(' ');
+            out.push_str(&junction.diode_runtime_tags[index]);
+            push_values(
+                &mut out,
+                &[
+                    history.vd_prev[index],
+                    history.vd_prev_prev[index],
+                    history.qd_prev[index],
+                    history.qd_prev_prev[index],
+                    history.qd_prev_prev_prev[index],
+                    history.cqd_prev[index],
+                ],
+            );
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "accepted_diode_transient_dt {} {}\n",
+            junction.diode_history.accepted_dt_prev, junction.diode_history.accepted_dt_prev_prev
+        ));
         out.push_str(&format!(
             "tline_state_available {}\n",
             u8::from(self.tline_state_available)
@@ -3591,7 +6333,7 @@ impl TransientCheckpoint {
                     return Err(format!("malformed integration continuation line: '{line}'"));
                 }
             }
-        } else if version == 16 {
+        } else if (16..CONTROLLER_PHASE_FORMAT_VERSION).contains(&version) {
             let line = lines
                 .next()
                 .ok_or_else(|| "missing integration continuation line".to_string())?;
@@ -3757,6 +6499,27 @@ impl TransientCheckpoint {
             } else {
                 (None, 0.0, Vec::new())
             };
+        let accepted_integration_runtime = if version >= EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION {
+            read_accepted_integration_runtime(&mut lines, &solution_cols[0], time, budget)?
+        } else if integration_continuation == IntegrationContinuation::SyntheticOrigin
+            && time.to_bits() == 0.0_f64.to_bits()
+        {
+            AcceptedIntegrationRuntime::RestartNormalized(
+                RestartNormalizedIntegrationRuntimeCheckpoint {
+                    version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
+                    resume_blockers: Vec::new(),
+                    lte_warmup_skips: 0,
+                    force_accept_cooldown: 0,
+                    livelock_streak: 0,
+                    livelock_last_restart_time: None,
+                    accepted_interval_count: 0,
+                    damped_first_solver_call: true,
+                    damped_status: None,
+                },
+            )
+        } else {
+            AcceptedIntegrationRuntime::UnavailableLegacy
+        };
         let cap_cols = read_value_section(&mut lines, "capacitors", 5, budget)?;
         let inductor_flux_history_available = if version >= 13 {
             let availability_line = lines
@@ -3827,8 +6590,9 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
-        let (accepted_nonlinear_state_available, accepted_nonlinear_states) =
-            if version >= NATIVE_NONLINEAR_FORMAT_VERSION {
+        let (accepted_nonlinear_state_available, accepted_nonlinear_states) = if version
+            >= NATIVE_NONLINEAR_FORMAT_VERSION
+        {
             let availability_line = lines
                 .next()
                 .ok_or_else(|| "missing accepted nonlinear state availability line".to_string())?;
@@ -3865,6 +6629,11 @@ impl TransientCheckpoint {
             )
         } else {
             (false, AcceptedNativeNonlinearCheckpointStates::default())
+        };
+        let accepted_junction_history = if version >= ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION {
+            read_accepted_junction_transient_history(&mut lines, budget)?
+        } else {
+            AcceptedJunctionTransientHistoryCheckpoint::default()
         };
         let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
             let availability_line = lines
@@ -3987,7 +6756,7 @@ impl TransientCheckpoint {
         };
         #[cfg(feature = "veriloga")]
         let runtime_veriloga_instance_states = if version >= RUNTIME_VERILOGA_FORMAT_VERSION {
-            read_runtime_veriloga_states(&mut lines)?
+            read_runtime_veriloga_states(&mut lines, budget)?
         } else {
             Vec::new()
         };
@@ -4019,6 +6788,7 @@ impl TransientCheckpoint {
             startup_mode,
             integration_max_step,
             integration_continuation,
+            accepted_integration_runtime,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             cap_v_prev: cap_iter.next().unwrap(),
@@ -4035,6 +6805,7 @@ impl TransientCheckpoint {
             generic_switch_stores,
             accepted_nonlinear_state_available,
             accepted_nonlinear_states,
+            accepted_junction_history,
             tline_state_available,
             tline_resume_blockers,
             tline_states,
@@ -4533,6 +7304,92 @@ mod tests {
     use super::*;
     use crate::engine::Engine;
 
+    fn sample_restart_normalized_runtime(
+        checkpoint_time: Value,
+        accepted_interval_count: usize,
+    ) -> AcceptedIntegrationRuntime {
+        AcceptedIntegrationRuntime::RestartNormalized(
+            RestartNormalizedIntegrationRuntimeCheckpoint::capture(
+                checkpoint_time,
+                RestartNormalizedIntegrationRuntimeCapture {
+                    lte_warmup_skips: 0,
+                    force_accept_cooldown: 0,
+                    livelock_streak: 0,
+                    livelock_last_restart_time: None,
+                    accepted_interval_count,
+                    damped_first_solver_call: true,
+                    damped_status: None,
+                    retry_count: 0,
+                    xyce_step_failure_count: 0,
+                    stale_accept_count: 0,
+                    resume_blockers: &[],
+                },
+            )
+            .expect("canonical normalized runtime fixture"),
+        )
+    }
+
+    fn sample_junction_history() -> AcceptedJunctionTransientHistoryCheckpoint {
+        let linear = |offset: Value| VbicPredictorLinearBranchState {
+            vrcx: offset + 0.01,
+            vrci: offset + 0.02,
+            vrbx: offset + 0.03,
+            vrbi: offset + 0.04,
+            vre: offset + 0.05,
+            vrbp: offset + 0.06,
+            vrs: offset + 0.07,
+        };
+        AcceptedJunctionTransientHistoryCheckpoint {
+            available: true,
+            resume_blockers: Vec::new(),
+            bjt_names: vec!["qcheck".to_string()],
+            bjt_runtime_tags: vec![super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
+            bjt_history: BjtTransientHistory {
+                vbe_prev: vec![0.61],
+                vbe_prev_prev: vec![0.60],
+                ibe_prev: vec![-1.0e-9],
+                vbc_prev: vec![-0.12],
+                vbc_prev_prev: vec![-0.11],
+                ibc_prev: vec![2.0e-10],
+                vcs_prev: vec![-0.0],
+                vcs_prev_prev: vec![f64::MIN_POSITIVE],
+                ics_prev: vec![-3.0e-12],
+                charge_q_prev: vec![std::array::from_fn(|index| index as Value * 0.01)],
+                charge_q_prev_prev: vec![std::array::from_fn(|index| index as Value * 0.01 - 0.1)],
+                charge_q_prev_prev_prev: vec![std::array::from_fn(|index| {
+                    index as Value * 0.01 - 0.2
+                })],
+                charge_cq_prev: vec![std::array::from_fn(|index| index as Value * -0.005)],
+                accepted_terminal_currents: vec![Some([0.1, -0.2, 0.3, -0.4])],
+                dynamic_internal_prev: vec![std::array::from_fn(|index| index as Value * 0.125)],
+                dynamic_internal_prev_prev: vec![std::array::from_fn(|index| {
+                    index as Value * -0.25
+                })],
+                dynamic_linear_prev: vec![linear(0.5)],
+                dynamic_linear_prev_prev: vec![linear(-0.5)],
+                accepted_dt_prev: 1.25e-9,
+                accepted_dt_prev_prev: 2.5e-9,
+            },
+            diode_names: vec!["dcheck".to_string()],
+            diode_runtime_tags: vec![super::super::DIODE_TRANSIENT_HISTORY_RUNTIME_TAG.to_string()],
+            diode_history: DiodeTransientHistory {
+                vd_prev: vec![0.7],
+                vd_prev_prev: vec![0.69],
+                qd_prev: vec![1.0e-12],
+                qd_prev_prev: vec![0.9e-12],
+                qd_prev_prev_prev: vec![0.8e-12],
+                cqd_prev: vec![-2.0e-6],
+                accepted_dt_prev: 1.25e-9,
+                accepted_dt_prev_prev: 2.5e-9,
+            },
+            vbic_snapshot_cache: vec![Some(AcceptedBjtChargeSnapshotCheckpoint {
+                state_values: (0..BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT)
+                    .map(|index| index as Value * 0.03125 - 4.0)
+                    .collect(),
+            })],
+        }
+    }
+
     fn sample() -> TransientCheckpoint {
         TransientCheckpoint {
             time: 1.2345678901234567e-6,
@@ -4548,8 +7405,65 @@ mod tests {
                 breakpoint_span_ceiling: Some(6.25e-10),
                 controller_max_step: 6.25e-9,
                 analysis_first_step_pending: false,
-                xyce_breakpoint_restart_pending: true,
+                xyce_breakpoint_restart_pending: false,
             },
+            accepted_integration_runtime: AcceptedIntegrationRuntime::Exact(
+                AcceptedIntegrationRuntimeCheckpoint {
+                    version: ACCEPTED_INTEGRATION_RUNTIME_VERSION,
+                    resume_blockers: Vec::new(),
+                    lte: AcceptedBoundaryLteEstimatorCheckpoint {
+                        version: 1,
+                        solution_dimension: 5,
+                        history_count: 3,
+                        prev_solution: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
+                        prev_prev_solution: vec![0.4, -3.0, 0.0, 0.0, -0.0],
+                        prev_prev_prev_solution: vec![0.3, -2.75, 0.0, 0.0, -0.0],
+                        prev_dt: 1.0e-9,
+                        prev_prev_dt: 7.5e-10,
+                        reltol: 1.0e-3,
+                        abstol: 1.0e-6,
+                        reference: TransientLteReference::SignalGlobal,
+                        accepted_reference_solution: vec![
+                            0.5,
+                            -3.25,
+                            1.0e-15,
+                            f64::MIN_POSITIVE,
+                            -0.0,
+                        ],
+                        signal_global_reference: 4.0,
+                        signal_local_reference: Vec::new(),
+                        method_order: 2,
+                        xyce_order_two_difference: Vec::new(),
+                        xyce_order_two_difference_dt: 0.0,
+                        xyce_attempt_dt: 1.0e-9,
+                        xyce_attempt_prev_dt: 7.5e-10,
+                        xyce_attempt_prev_prev_dt: 0.0,
+                    },
+                    next_trap_order: 2,
+                    trapgear: Some(TrapGearControllerSnapshot {
+                        current_method: IntegrationMethod::Trapezoidal,
+                        prev_values: vec![0.5, -3.25, 1.0e-15, f64::MIN_POSITIVE, -0.0],
+                        prev_signs: vec![true, false, true, true, false],
+                        prev_sign_valid: vec![true; 5],
+                        sign_change_count: vec![0, 1, 0, 1, 0],
+                        smooth_steps: 2,
+                        at_breakpoint: false,
+                    }),
+                    xyce_static_residual: Some(vec![0.1, -0.2, 0.0, 0.0, -0.0]),
+                    direct_dae_accepted_q: None,
+                    direct_dae_static_residual: None,
+                    lte_warmup_skips: 1,
+                    force_accept_cooldown: 2,
+                    livelock_streak: 3,
+                    livelock_last_restart_time: Some(1.0e-6),
+                    accepted_interval_count: 17,
+                    damped_first_solver_call: false,
+                    damped_status: Some(XyceDampedAcceptedBoundaryCheckpoint {
+                        bad_step_count: 1,
+                        min_convergence_rate: 0.9995,
+                    }),
+                },
+            ),
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
             cap_v_prev: vec![0.1, -0.2],
@@ -4597,6 +7511,7 @@ mod tests {
                         .collect(),
                 }],
             },
+            accepted_junction_history: sample_junction_history(),
             tline_state_available: true,
             tline_resume_blockers: Vec::new(),
             tline_states: Vec::new(),
@@ -4638,6 +7553,69 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < EXACT_INTEGRATION_RUNTIME_FORMAT_VERSION
+                && line.starts_with("accepted_integration_runtime ")
+            {
+                if line.contains(" unavailable-legacy") {
+                    continue;
+                }
+                let blocker_header = lines.next().expect("integration runtime blockers");
+                let blocker_count = blocker_header
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("integration runtime blocker count")
+                    .parse::<usize>()
+                    .expect("numeric integration runtime blocker count");
+                for _ in 0..blocker_count {
+                    lines.next().expect("integration runtime blocker row");
+                }
+                lines.next().expect("integration runtime policy");
+                if line.contains(" restart-normalized ") {
+                    continue;
+                }
+                lines.next().expect("integration runtime LTE header");
+                for _ in 0..6 {
+                    let header = lines.next().expect("integration runtime LTE vector header");
+                    let count = header
+                        .split_whitespace()
+                        .nth(1)
+                        .expect("integration runtime LTE vector count")
+                        .parse::<usize>()
+                        .expect("numeric integration runtime LTE vector count");
+                    for _ in 0..count {
+                        lines.next().expect("integration runtime LTE vector row");
+                    }
+                }
+                let trapgear = lines.next().expect("integration runtime Trap/Gear header");
+                if !trapgear.ends_with(" none") {
+                    let count = trapgear
+                        .split_whitespace()
+                        .nth(2)
+                        .expect("integration runtime Trap/Gear lane count")
+                        .parse::<usize>()
+                        .expect("numeric integration runtime Trap/Gear lane count");
+                    for _ in 0..count {
+                        lines.next().expect("integration runtime Trap/Gear lane");
+                    }
+                }
+                lines.next().expect("integration runtime next order");
+                for _ in 0..3 {
+                    lines
+                        .next()
+                        .expect("integration runtime vector availability");
+                    let header = lines.next().expect("integration runtime vector header");
+                    let count = header
+                        .split_whitespace()
+                        .nth(1)
+                        .expect("integration runtime vector count")
+                        .parse::<usize>()
+                        .expect("numeric integration runtime vector count");
+                    for _ in 0..count {
+                        lines.next().expect("integration runtime vector row");
+                    }
+                }
+                continue;
+            }
             if version < 13 && line.starts_with("inductor_flux_history_available ") {
                 continue;
             }
@@ -4676,7 +7654,9 @@ mod tests {
             if version < 15 && line.starts_with("integration_continuation ") {
                 continue;
             }
-            if version == 16 && line.starts_with("integration_continuation proposed ") {
+            if (16..CONTROLLER_PHASE_FORMAT_VERSION).contains(&version)
+                && line.starts_with("integration_continuation proposed ")
+            {
                 let fields = line.split_whitespace().collect::<Vec<_>>();
                 assert_eq!(
                     fields.len(),
@@ -4797,6 +7777,72 @@ mod tests {
                 }
                 continue;
             }
+            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_junction_history_available ")
+            {
+                continue;
+            }
+            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_junction_history_blockers ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("accepted junction-history blocker count")
+                    .parse::<usize>()
+                    .expect("numeric accepted junction-history blocker count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete accepted junction-history blocker rows");
+                }
+                continue;
+            }
+            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transient_histories ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("accepted BJT transient-history count")
+                    .parse::<usize>()
+                    .expect("numeric accepted BJT transient-history count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete accepted BJT transient-history row");
+                    lines
+                        .next()
+                        .expect("complete accepted BJT charge-snapshot row");
+                }
+                continue;
+            }
+            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_transient_dt ")
+            {
+                continue;
+            }
+            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_diode_transient_histories ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("accepted diode transient-history count")
+                    .parse::<usize>()
+                    .expect("numeric accepted diode transient-history count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete accepted diode transient-history row");
+                }
+                continue;
+            }
+            if version < ACCEPTED_JUNCTION_HISTORY_FORMAT_VERSION
+                && line.starts_with("accepted_diode_transient_dt ")
+            {
+                continue;
+            }
             if version < 14 && line.starts_with("tline_state_available ") {
                 continue;
             }
@@ -4864,6 +7910,7 @@ mod tests {
         synthetic.time = 0.0;
         synthetic.integration_max_step = None;
         synthetic.integration_continuation = IntegrationContinuation::SyntheticOrigin;
+        synthetic.accepted_integration_runtime = sample_restart_normalized_runtime(0.0, 0);
         let requested = 7.5e-10;
 
         let bound = synthetic
@@ -4939,7 +7986,7 @@ mod tests {
             6.25e-9_f64.to_bits()
         );
         assert!(!continuation.analysis_first_step_pending);
-        assert!(continuation.xyce_breakpoint_restart_pending);
+        assert!(!continuation.xyce_breakpoint_restart_pending);
 
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("current continuation round-trips");
@@ -5044,6 +8091,295 @@ mod tests {
         );
     }
 
+    fn sample_exact_runtime_target<'a>(
+        lte_estimator: &'a LteEstimator,
+        expected_resume_blockers: &'a [String],
+    ) -> AcceptedIntegrationRuntimeTarget<'a> {
+        AcceptedIntegrationRuntimeTarget {
+            lte_estimator,
+            uses_trapgear: true,
+            uses_xyce_static_residual: true,
+            uses_direct_dae: false,
+            has_direct_dae_static_residual: false,
+            uses_damped_newton: true,
+            expected_resume_blockers,
+        }
+    }
+
+    #[test]
+    fn accepted_integration_runtime_exact_and_normalized_contracts_round_trip() {
+        let exact = sample();
+        let lte_estimator = LteEstimator::with_tolerances_and_reference(
+            1.0e-3,
+            1.0e-6,
+            TransientLteReference::SignalGlobal,
+        );
+        assert!(matches!(
+            exact
+                .validated_accepted_integration_runtime(sample_exact_runtime_target(
+                    &lte_estimator,
+                    &[],
+                ))
+                .expect("exact accepted runtime validates against matching live owners"),
+            ValidatedAcceptedIntegrationRuntime::Exact(_)
+        ));
+        let exact_text = exact.to_text();
+        assert!(
+            exact_text.contains("accepted_integration_runtime exact 1\n")
+                && exact_text.contains("accepted_integration_lte_prev 5\n")
+                && exact_text.contains("accepted_integration_trapgear trapezoidal 5 2 0\n")
+        );
+        assert_eq!(
+            TransientCheckpoint::from_text(&exact_text).expect("exact v21 runtime parses"),
+            exact
+        );
+        assert_eq!(
+            TransientCheckpoint::from_bytes(
+                &exact
+                    .to_bytes(TransientCheckpointEncoding::Packed)
+                    .expect("exact v21 runtime packs")
+            )
+            .expect("packed exact v21 runtime parses"),
+            exact
+        );
+
+        let mut normalized = sample();
+        normalized.integration_continuation = IntegrationContinuation::BreakpointRestart;
+        normalized.accepted_integration_runtime =
+            sample_restart_normalized_runtime(normalized.time, 17);
+        let normalized_text = normalized.to_text();
+        let restored = TransientCheckpoint::from_text(&normalized_text)
+            .expect("restart-normalized v21 runtime parses");
+        assert_eq!(restored, normalized);
+        assert!(matches!(
+            restored
+                .validated_accepted_integration_runtime(AcceptedIntegrationRuntimeTarget {
+                    lte_estimator: &lte_estimator,
+                    uses_trapgear: false,
+                    uses_xyce_static_residual: false,
+                    uses_direct_dae: false,
+                    has_direct_dae_static_residual: false,
+                    uses_damped_newton: false,
+                    expected_resume_blockers: &[],
+                })
+                .expect("normalized runtime validates without reconstructing integration history"),
+            ValidatedAcceptedIntegrationRuntime::RestartNormalized(runtime)
+                if runtime.accepted_interval_count == 17
+        ));
+    }
+
+    #[test]
+    fn accepted_integration_runtime_corruption_and_target_mismatch_fail_closed() {
+        let checkpoint = sample();
+        let text = checkpoint.to_text();
+
+        let wrong_runtime_version = text.replacen(
+            "accepted_integration_runtime exact 1\n",
+            "accepted_integration_runtime exact 2\n",
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&wrong_runtime_version)
+            .expect_err("unsupported runtime versions must fail before nested allocations");
+        assert!(
+            error.contains("unsupported accepted integration runtime version 2"),
+            "unexpected error: {error}"
+        );
+
+        let wrong_lte_version = text.replacen(
+            "accepted_integration_lte 1 ",
+            "accepted_integration_lte 2 ",
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&wrong_lte_version)
+            .expect_err("unsupported LTE versions must fail before history allocations");
+        assert!(
+            error.contains("unsupported accepted-boundary LTE checkpoint version 2"),
+            "unexpected error: {error}"
+        );
+
+        let wrong_history_shape = text.replacen(
+            "accepted_integration_lte_prev 5\n",
+            "accepted_integration_lte_prev 4\n",
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&wrong_history_shape)
+            .expect_err("fixed LTE history shape must reject before allocation");
+        assert!(
+            error.contains("accepted_integration_lte_prev") && error.contains("expected one of"),
+            "unexpected error: {error}"
+        );
+
+        let non_finite = text.replacen(
+            "accepted_integration_xyce_static 5\n0.1\n",
+            "accepted_integration_xyce_static 5\nNaN\n",
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&non_finite)
+            .expect_err("non-finite accepted static residual must fail while parsing");
+        assert!(
+            error.contains("accepted_integration_xyce_static") && error.contains("non-finite"),
+            "unexpected error: {error}"
+        );
+
+        let bad_policy = text.replacen(
+            "accepted_integration_policy 1 2 3 ",
+            "accepted_integration_policy 1 3 3 ",
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&bad_policy)
+            .expect_err("out-of-range persistent policy state must fail closed");
+        assert!(
+            error.contains("force-accept cooldown") && error.contains("exceeds"),
+            "unexpected error: {error}"
+        );
+
+        let mut wrong_order = checkpoint.clone();
+        let AcceptedIntegrationRuntime::Exact(runtime) =
+            &mut wrong_order.accepted_integration_runtime
+        else {
+            unreachable!("sample exact runtime")
+        };
+        runtime.next_trap_order = 3;
+        let error = wrong_order
+            .to_bytes(TransientCheckpointEncoding::Unpacked)
+            .expect_err("unsupported next integration order must fail before serialization");
+        assert!(error.contains("outside 1..=2"), "unexpected error: {error}");
+
+        let mut mixed_direct = checkpoint.clone();
+        let AcceptedIntegrationRuntime::Exact(runtime) =
+            &mut mixed_direct.accepted_integration_runtime
+        else {
+            unreachable!("sample exact runtime")
+        };
+        runtime.direct_dae_static_residual = Some(vec![0.0; mixed_direct.solution.len()]);
+        let error = mixed_direct
+            .to_bytes(TransientCheckpointEncoding::Unpacked)
+            .expect_err("direct static history without accepted Q must fail closed");
+        assert!(
+            error.contains("requires accepted Q history"),
+            "unexpected error: {error}"
+        );
+
+        let mut wrong_phase = checkpoint.clone();
+        wrong_phase.integration_continuation = IntegrationContinuation::BreakpointRestart;
+        let error = wrong_phase
+            .to_bytes(TransientCheckpointEncoding::Unpacked)
+            .expect_err("exact history cannot masquerade as a normalized restart");
+        assert!(
+            error.contains("phase is inconsistent"),
+            "unexpected error: {error}"
+        );
+
+        let wrong_reference = LteEstimator::with_tolerances_and_reference(
+            1.0e-3,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        let error = checkpoint
+            .validated_accepted_integration_runtime(sample_exact_runtime_target(
+                &wrong_reference,
+                &[],
+            ))
+            .expect_err("live LTE reference-mode mismatch must fail before restore");
+        assert!(
+            error.contains("reference mode mismatch"),
+            "unexpected error: {error}"
+        );
+
+        let mut blocked = checkpoint;
+        let AcceptedIntegrationRuntime::Exact(runtime) = &mut blocked.accepted_integration_runtime
+        else {
+            unreachable!("sample exact runtime")
+        };
+        runtime.resume_blockers =
+            vec!["QVBIC: direct-DAE accepted runtime cannot be restored exactly".to_string()];
+        let blocked = TransientCheckpoint::from_text(&blocked.to_text())
+            .expect("canonical accepted-runtime blocker round-trips");
+        let error = blocked
+            .validate_resume_capabilities(&Netlist::default())
+            .expect_err("explicit runtime blockers must fail before circuit construction");
+        assert!(
+            error.contains("accepted integration runtime") && error.contains("QVBIC"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn v20_arbitrary_proposal_lacks_exact_integration_runtime_and_fails_closed() {
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&sample(), 20))
+            .expect("version-20 checkpoint remains readable for diagnostics");
+        assert!(matches!(
+            legacy.accepted_integration_runtime,
+            AcceptedIntegrationRuntime::UnavailableLegacy
+        ));
+        let error = legacy
+            .validated_integration_continuation()
+            .expect_err("v20 arbitrary proposal must not synthesize exact runtime state");
+        assert!(
+            error.contains("does not record exact accepted integration runtime"),
+            "unexpected error: {error}"
+        );
+        let error = legacy
+            .validate_resume_capabilities(&Netlist::default())
+            .expect_err("v20 resume capability validation must fail before construction");
+        assert!(
+            error.contains("does not record accepted integration runtime state"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn retained_value_count_includes_accepted_integration_controls_and_payloads() {
+        let without_direct_q = sample();
+        assert_eq!(
+            accepted_integration_runtime_retained_value_count(
+                &without_direct_q.accepted_integration_runtime
+            ),
+            89,
+            "exact runtime accounting includes every version, discriminant, presence/count control, policy scalar, and payload lane"
+        );
+        assert_eq!(
+            accepted_integration_runtime_retained_value_count(&sample_restart_normalized_runtime(
+                without_direct_q.time,
+                17,
+            )),
+            10,
+            "normalized runtime retains its discriminant, version, blocker count, and seven policy controls"
+        );
+        assert_eq!(
+            accepted_integration_runtime_retained_value_count(
+                &AcceptedIntegrationRuntime::UnavailableLegacy
+            ),
+            1
+        );
+        let mut with_direct_q = without_direct_q.clone();
+        let AcceptedIntegrationRuntime::Exact(runtime) =
+            &mut with_direct_q.accepted_integration_runtime
+        else {
+            unreachable!("sample exact runtime")
+        };
+        runtime.xyce_static_residual = None;
+        runtime.direct_dae_accepted_q = Some(with_direct_q.solution.clone());
+        // Optional-vector availability and count controls are retained in both
+        // forms, so exchanging one same-sized payload is count-neutral.
+        assert_eq!(
+            with_direct_q.retained_value_count(),
+            without_direct_q.retained_value_count()
+        );
+
+        let mut with_direct_static = with_direct_q.clone();
+        let AcceptedIntegrationRuntime::Exact(runtime) =
+            &mut with_direct_static.accepted_integration_runtime
+        else {
+            unreachable!("sample exact runtime")
+        };
+        runtime.direct_dae_static_residual = Some(with_direct_static.solution.clone());
+        assert_eq!(
+            with_direct_static.retained_value_count(),
+            with_direct_q.retained_value_count() + with_direct_static.solution.len()
+        );
+    }
+
     #[test]
     fn text_round_trip_is_bit_exact() {
         let original = sample();
@@ -5051,9 +8387,9 @@ mod tests {
         assert_eq!(original, restored);
         let packed = original
             .to_bytes(TransientCheckpointEncoding::Packed)
-            .expect("v18 checkpoint packs");
+            .expect("v21 checkpoint packs");
         let restored_packed =
-            TransientCheckpoint::from_bytes(&packed).expect("v18 packed checkpoint parses");
+            TransientCheckpoint::from_bytes(&packed).expect("v21 packed checkpoint parses");
         assert_eq!(original, restored_packed);
         // Bit-level check on the touchy values (subnormals, negative zero).
         for (a, b) in original.solution.iter().zip(&restored.solution) {
@@ -5103,6 +8439,166 @@ mod tests {
         {
             assert_eq!(a.to_bits(), b.to_bits());
         }
+        assert_eq!(
+            original.accepted_junction_history.bjt_history.vcs_prev[0].to_bits(),
+            restored.accepted_junction_history.bjt_history.vcs_prev[0].to_bits()
+        );
+        for (original, restored) in original.accepted_junction_history.vbic_snapshot_cache[0]
+            .as_ref()
+            .expect("sample has a BJT charge snapshot")
+            .state_values
+            .iter()
+            .zip(
+                &restored.accepted_junction_history.vbic_snapshot_cache[0]
+                    .as_ref()
+                    .expect("restored sample has a BJT charge snapshot")
+                    .state_values,
+            )
+        {
+            assert_eq!(original.to_bits(), restored.to_bits());
+        }
+    }
+
+    #[test]
+    fn malformed_accepted_junction_history_fails_during_parse_or_validation() {
+        let mut duplicate = sample();
+        duplicate
+            .accepted_junction_history
+            .diode_names
+            .push("dcheck".to_string());
+        duplicate
+            .accepted_junction_history
+            .diode_runtime_tags
+            .push(super::super::DIODE_TRANSIENT_HISTORY_RUNTIME_TAG.to_string());
+        duplicate
+            .accepted_junction_history
+            .diode_history
+            .vd_prev
+            .push(0.0);
+        duplicate
+            .accepted_junction_history
+            .diode_history
+            .vd_prev_prev
+            .push(0.0);
+        duplicate
+            .accepted_junction_history
+            .diode_history
+            .qd_prev
+            .push(0.0);
+        duplicate
+            .accepted_junction_history
+            .diode_history
+            .qd_prev_prev
+            .push(0.0);
+        duplicate
+            .accepted_junction_history
+            .diode_history
+            .qd_prev_prev_prev
+            .push(0.0);
+        duplicate
+            .accepted_junction_history
+            .diode_history
+            .cqd_prev
+            .push(0.0);
+        let error = duplicate
+            .validate_numeric_state()
+            .expect_err("duplicate accepted diode history identity must fail closed");
+        assert!(
+            error.contains("duplicates instance name"),
+            "unexpected error: {error}"
+        );
+
+        let mut bad_tag = sample();
+        bad_tag.accepted_junction_history.bjt_runtime_tags[0] =
+            "future-bjt-history-v99".to_string();
+        let error = TransientCheckpoint::from_text(&bad_tag.to_text())
+            .expect_err("unknown BJT history runtime tags must fail while parsing");
+        assert!(
+            error.contains("unsupported runtime tag"),
+            "unexpected error: {error}"
+        );
+
+        let text = sample().to_text();
+        let snapshot_header = format!(
+            "accepted_bjt_charge_snapshot {} ",
+            BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+        );
+        let bad_count = text.replacen(&snapshot_header, "accepted_bjt_charge_snapshot 1 ", 1);
+        let error = TransientCheckpoint::from_text(&bad_count)
+            .expect_err("wrong fixed charge-snapshot counts must fail before allocation");
+        assert!(
+            error.contains("runtime requires either 0"),
+            "unexpected error: {error}"
+        );
+
+        let diode_prefix = format!(
+            "accepted_diode_transient_history dcheck {} 0.7",
+            super::super::DIODE_TRANSIENT_HISTORY_RUNTIME_TAG
+        );
+        let non_finite = text.replacen(&diode_prefix, &diode_prefix.replace("0.7", "NaN"), 1);
+        let error = TransientCheckpoint::from_text(&non_finite)
+            .expect_err("non-finite diode history must fail while parsing");
+        assert!(error.contains("non-finite"), "unexpected error: {error}");
+
+        let dt_line = format!("accepted_bjt_transient_dt {} {}", 1.25e-9, 2.5e-9);
+        let negative_dt = text.replacen(
+            &dt_line,
+            &format!("accepted_bjt_transient_dt -1 {}", 2.5e-9),
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&negative_dt)
+            .expect_err("negative accepted timestep history must fail closed");
+        assert!(
+            error.contains("finite and nonnegative"),
+            "unexpected error: {error}"
+        );
+
+        let mut whitespace_blocker = sample();
+        whitespace_blocker.accepted_junction_history.resume_blockers =
+            vec![" padded history blocker ".to_string()];
+        let error = whitespace_blocker
+            .validate_numeric_state()
+            .expect_err("noncanonical junction blocker whitespace must fail");
+        assert!(error.contains("blocker text"), "unexpected error: {error}");
+
+        let mut unavailable_with_payload = sample();
+        unavailable_with_payload.accepted_junction_history.available = false;
+        let error = unavailable_with_payload
+            .validate_numeric_state()
+            .expect_err("unavailable history must not carry an unproven payload");
+        assert!(
+            error.contains("without availability provenance"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn retained_value_count_includes_junction_history_controls_and_payloads() {
+        let populated = sample();
+        let mut empty = populated.clone();
+        empty.accepted_junction_history = AcceptedJunctionTransientHistoryCheckpoint {
+            available: true,
+            ..AcceptedJunctionTransientHistoryCheckpoint::default()
+        };
+        let mandatory_bjt_values = 9
+            + 4 * BJT_DYNAMIC_CHARGE_COUNT
+            + 2 * BJT_INTERNAL_STATE_DIM
+            + 2 * BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT;
+        // Both checkpoints retain the mandatory availability scalar and the
+        // two accepted-dt pairs; the populated-minus-empty delta covers every
+        // per-device control and payload.
+        let expected_delta = 2 // BJT name and runtime tag
+            + mandatory_bjt_values
+            + 1 // terminal-current presence
+            + BJT_EXTERNAL_STATE_DIM
+            + 1 // snapshot presence/count
+            + BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+            + 2 // diode name and runtime tag
+            + 6; // diode per-instance history
+        assert_eq!(
+            populated.retained_value_count(),
+            empty.retained_value_count() + expected_delta
+        );
     }
 
     #[test]
@@ -5176,7 +8672,7 @@ mod tests {
             1,
         );
         let error = TransientCheckpoint::from_text(&padded_text)
-            .expect_err("the v18 parser must reject noncanonical blocker whitespace");
+            .expect_err("the current parser must reject noncanonical blocker whitespace");
         assert!(
             error.contains("surrounding whitespace"),
             "unexpected error: {error}"
@@ -5202,7 +8698,7 @@ mod tests {
         solution[1] = 5.0;
         solution[2] = 0.72;
         circuit.update_nonlinear(&solution);
-        let checkpoint = TransientCheckpoint::capture(
+        let mut checkpoint = TransientCheckpoint::capture(
             netlist_fingerprint(&netlist),
             netlist_checkpoint_identity(&netlist),
             simulation_checkpoint_identity(engine.config()),
@@ -5211,7 +8707,25 @@ mod tests {
             &circuit,
             TransientStartupMode::OperatingPoint,
             None,
+        )
+        .expect("native diode/BJT checkpoint captures");
+        let bjt_history = Engine::initialize_bjt_history(
+            &circuit,
+            &solution,
+            super::super::ReactiveHistorySeed::SolvedBias,
         );
+        let diode_history = Engine::initialize_diode_history(
+            &circuit,
+            &solution,
+            super::super::ReactiveHistorySeed::SolvedBias,
+        );
+        checkpoint.accepted_junction_history =
+            Engine::capture_accepted_junction_transient_history_checkpoint(
+                &circuit,
+                &bjt_history,
+                &diode_history,
+                &[None],
+            );
         (engine, netlist, checkpoint)
     }
 
@@ -5229,7 +8743,7 @@ mod tests {
         assert_eq!(checkpoint.accepted_nonlinear_states.bjts.len(), 1);
 
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
-            .expect("v18 native nonlinear checkpoint parses");
+            .expect("current native nonlinear checkpoint parses");
         assert_eq!(checkpoint, restored);
 
         let mut target = engine
@@ -5249,7 +8763,7 @@ mod tests {
 
         restored
             .inject(&mut target)
-            .expect("v18 native nonlinear state injects");
+            .expect("current native nonlinear state injects");
         assert_eq!(
             target.capture_accepted_native_nonlinear_checkpoint_states(),
             expected
@@ -5274,6 +8788,131 @@ mod tests {
         assert!(
             error.contains("legacy transient checkpoint") && error.contains("diode/BJT"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn v19_junction_history_is_target_aware_and_fails_closed_for_junction_devices() {
+        let (engine, netlist, checkpoint) = native_junction_checkpoint_fixture();
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 19))
+            .expect("version-19 checkpoint remains parseable for diagnostics");
+        assert!(!legacy.accepted_junction_history.available);
+        assert!(legacy.accepted_junction_history.resume_blockers.is_empty());
+        assert!(accepted_junction_history_payload_is_empty(
+            &legacy.accepted_junction_history
+        ));
+
+        let target = engine
+            .build_circuit(&netlist)
+            .expect("v19 junction-history target builds");
+        let error = legacy
+            .restore_accepted_junction_transient_history(&target)
+            .expect_err("v19 cannot reconstruct accepted BJT/diode histories");
+        assert!(
+            error.contains("legacy transient checkpoint")
+                && error.contains("BJT/diode transient history"),
+            "unexpected error: {error}"
+        );
+
+        let empty = engine
+            .build_circuit(&Netlist::default())
+            .expect("empty target circuit builds");
+        let (bjt, diode, cache) = legacy
+            .restore_accepted_junction_transient_history(&empty)
+            .expect("v19 missing junction history is irrelevant to a junction-free target");
+        assert_eq!(bjt, BjtTransientHistory::default());
+        assert_eq!(diode, DiodeTransientHistory::default());
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn accepted_junction_blockers_round_trip_and_fail_before_circuit_construction() {
+        let mut checkpoint = sample();
+        checkpoint.accepted_junction_history.resume_blockers =
+            vec!["QVBIC: promoted runtime has no accepted transient-history contract".to_string()];
+        let retained_before = sample().retained_value_count();
+        let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("accepted junction-history blocker parses");
+        assert_eq!(restored, checkpoint);
+        assert_eq!(restored.retained_value_count(), retained_before + 1);
+        let error = restored
+            .validate_resume_capabilities(&Netlist::default())
+            .expect_err("named junction-history blocker must fail pre-build validation");
+        assert!(error.contains("QVBIC"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn junction_history_validation_precedes_every_injection_mutation() {
+        let (engine, netlist, mut checkpoint) = native_junction_checkpoint_fixture();
+        let mut target = engine
+            .build_circuit(&netlist)
+            .expect("junction-history validation target builds");
+        let before = target.capture_accepted_native_nonlinear_checkpoint_states();
+        checkpoint.accepted_junction_history.diode_names[0] = "wrong-name".to_string();
+
+        let error = checkpoint
+            .inject(&mut target)
+            .expect_err("junction-history identity mismatch must reject before injection");
+        assert!(
+            error.contains("instance mismatch"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            target.capture_accepted_native_nonlinear_checkpoint_states(),
+            before,
+            "junction-history rejection must occur before circuit-owned device mutation"
+        );
+    }
+
+    #[test]
+    fn capture_without_runtime_histories_is_available_only_for_junction_free_circuits() {
+        let engine = Engine::default();
+        let empty_netlist = Netlist::default();
+        let empty = engine
+            .build_circuit(&empty_netlist)
+            .expect("empty capture target builds");
+        let empty_checkpoint = TransientCheckpoint::capture(
+            netlist_fingerprint(&empty_netlist),
+            netlist_checkpoint_identity(&empty_netlist),
+            simulation_checkpoint_identity(engine.config()),
+            0.0,
+            &[],
+            &empty,
+            TransientStartupMode::OperatingPoint,
+            None,
+        )
+        .expect("junction-free checkpoint captures");
+        assert!(empty_checkpoint.accepted_junction_history.available);
+        assert!(accepted_junction_history_payload_is_empty(
+            &empty_checkpoint.accepted_junction_history
+        ));
+        let (bjt, diode, cache) = empty_checkpoint
+            .restore_accepted_junction_transient_history(&empty)
+            .expect("available-empty v20 history validates exact zero topology");
+        assert_eq!(bjt, BjtTransientHistory::default());
+        assert_eq!(diode, DiodeTransientHistory::default());
+        assert!(cache.is_empty());
+
+        let diode_netlist = Netlist::parse("junction capture policy\nD1 1 0 D\n.MODEL D D\n.END\n")
+            .expect("diode policy deck parses");
+        let diode = engine
+            .build_circuit(&diode_netlist)
+            .expect("diode policy circuit builds");
+        let diode_checkpoint = TransientCheckpoint::capture(
+            netlist_fingerprint(&diode_netlist),
+            netlist_checkpoint_identity(&diode_netlist),
+            simulation_checkpoint_identity(engine.config()),
+            0.0,
+            &vec![0.0; diode.matrix_size()],
+            &diode,
+            TransientStartupMode::OperatingPoint,
+            None,
+        )
+        .expect("diode checkpoint captures with an explicit history blocker");
+        assert!(!diode_checkpoint.accepted_junction_history.available);
+        assert!(
+            diode_checkpoint.accepted_junction_history.resume_blockers[0]
+                .contains("did not provide")
         );
     }
 
@@ -5406,6 +9045,26 @@ mod tests {
     }
 
     #[test]
+    fn v17_runtime_veriloga_tail_parses_without_reinterpreting_controller_phase() {
+        let checkpoint = sample();
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 17))
+            .expect("version-17 runtime Verilog-A checkpoint remains parseable");
+
+        assert!(
+            legacy.runtime_veriloga_state_available,
+            "v17 introduced runtime Verilog-A state provenance"
+        );
+        assert!(matches!(
+            legacy.integration_continuation,
+            IntegrationContinuation::Unavailable
+        ));
+        assert!(matches!(
+            legacy.accepted_integration_runtime,
+            AcceptedIntegrationRuntime::UnavailableLegacy
+        ));
+    }
+
+    #[test]
     fn rshunt_participates_in_resolved_simulation_checkpoint_identity() {
         let base = SimulationConfig::default();
         let with_rshunt = SimulationConfig {
@@ -5475,6 +9134,11 @@ mod tests {
             None,
             &[],
             0,
+            AcceptedJunctionTransientHistoryCheckpoint {
+                available: true,
+                ..AcceptedJunctionTransientHistoryCheckpoint::default()
+            },
+            sample_restart_normalized_runtime(0.0, 0),
             None,
         )
         .expect("accepted checkpoint captures");
@@ -6823,6 +10487,98 @@ mod tests {
     }
 
     #[test]
+    fn dense_accepted_integration_history_obeys_cumulative_parsed_memory_limit() {
+        const DIMENSION: usize = 4096;
+        let mut checkpoint = sample();
+        checkpoint.solution = vec![0.0; DIMENSION];
+        checkpoint.cap_v_prev.clear();
+        checkpoint.cap_v_prev_prev.clear();
+        checkpoint.cap_v_prev_prev_prev.clear();
+        checkpoint.cap_i_prev.clear();
+        checkpoint.cap_i_eq.clear();
+        checkpoint.ind_i_prev.clear();
+        checkpoint.ind_i_prev_prev.clear();
+        checkpoint.ind_i_prev_prev_prev.clear();
+        checkpoint.ind_v_prev.clear();
+        checkpoint.generic_switch_stores.clear();
+        checkpoint.accepted_nonlinear_states = AcceptedNativeNonlinearCheckpointStates::default();
+        checkpoint.accepted_junction_history = AcceptedJunctionTransientHistoryCheckpoint {
+            available: true,
+            ..AcceptedJunctionTransientHistoryCheckpoint::default()
+        };
+        checkpoint.generated_veriloga_instance_states.clear();
+        let AcceptedIntegrationRuntime::Exact(runtime) =
+            &mut checkpoint.accepted_integration_runtime
+        else {
+            unreachable!("sample exact runtime")
+        };
+        runtime.lte.solution_dimension = DIMENSION;
+        runtime.lte.prev_solution = checkpoint.solution.clone();
+        runtime.lte.prev_prev_solution = checkpoint.solution.clone();
+        runtime.lte.prev_prev_prev_solution = checkpoint.solution.clone();
+        runtime.lte.accepted_reference_solution = checkpoint.solution.clone();
+        runtime.lte.signal_global_reference = 0.0;
+        runtime.trapgear = None;
+        runtime.xyce_static_residual = None;
+
+        let text = checkpoint.to_text();
+        let limit = text.len();
+        assert!(
+            4 * DIMENSION * std::mem::size_of::<Value>() > limit,
+            "the nested LTE histories must exceed their compact canonical text"
+        );
+        let error = TransientCheckpoint::from_text_with_limit(&text, limit)
+            .expect_err("nested LTE histories must share the cumulative parsed-memory budget");
+        assert!(
+            error.contains("parsed-memory limit") && error.contains("accepted_integration_lte_"),
+            "unexpected dense-runtime diagnostic: {error}"
+        );
+    }
+
+    #[test]
+    fn dense_bjt_snapshot_obeys_cumulative_parsed_memory_limit() {
+        let mut text = format!(
+            "accepted_junction_history_available 1\n\
+             accepted_junction_history_blockers 0\n\
+             accepted_bjt_transient_histories 1\n\
+             accepted_bjt_transient_history Q1 {}",
+            super::super::BJT_TRANSIENT_HISTORY_RUNTIME_TAG,
+        );
+        for _ in 0..(9 + 4 * BJT_DYNAMIC_CHARGE_COUNT) {
+            text.push_str(" 0");
+        }
+        text.push_str(" 0"); // accepted-terminal-current presence
+        for _ in 0..(2 * BJT_INTERNAL_STATE_DIM + 2 * BJT_TRANSIENT_LINEAR_BRANCH_VALUE_COUNT) {
+            text.push_str(" 0");
+        }
+        text.push_str("\naccepted_bjt_charge_snapshot ");
+        text.push_str(&BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT.to_string());
+        for _ in 0..BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT {
+            text.push_str(" 0");
+        }
+        text.push_str(
+            "\naccepted_bjt_transient_dt 0 0\n\
+             accepted_diode_transient_histories 0\n\
+             accepted_diode_transient_dt 0 0\n",
+        );
+
+        let limit = text.len();
+        assert!(
+            BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT * std::mem::size_of::<Value>() > limit,
+            "the nested snapshot allocation alone must exceed the canonical fragment"
+        );
+        let mut lines = CheckpointLines::new(&text);
+        let mut budget = CheckpointParseBudget::new(limit);
+        let error = read_accepted_junction_transient_history(&mut lines, &mut budget)
+            .expect_err("dense snapshots must not amplify beyond the cumulative parse budget");
+        assert!(
+            error.contains("parsed-memory limit")
+                && error.contains("accepted BJT charge snapshot values"),
+            "unexpected dense-snapshot diagnostic: {error}"
+        );
+    }
+
+    #[test]
     fn custom_text_limit_preserves_normal_and_legacy_parsing() {
         let current = sample().to_text();
         let byte_error = TransientCheckpoint::from_text_with_limit(&current, current.len() - 1)
@@ -6887,6 +10643,33 @@ mod tests {
             .expect_err("outer accepted BJT counts must be bounded by fixed nested row shape");
         assert!(
             err.contains("each state requires"),
+            "unexpected error: {err}"
+        );
+
+        let text = format!(
+            "accepted_junction_history_available 1\naccepted_junction_history_blockers 0\naccepted_bjt_transient_histories {count}\n"
+        );
+        let mut lines = CheckpointLines::new(&text);
+        let err = read_accepted_junction_transient_history(&mut lines, &mut budget)
+            .expect_err("outer accepted BJT history counts must be bounded before allocation");
+        assert!(
+            err.contains("row count overflows") || err.contains("each state requires two rows"),
+            "unexpected error: {err}"
+        );
+
+        let snapshot_header = format!(
+            "accepted_bjt_charge_snapshot {} ",
+            BJT_ACCEPTED_CHARGE_SNAPSHOT_STATE_VALUE_COUNT
+        );
+        let wrong_snapshot_count = sample().to_text().replacen(
+            &snapshot_header,
+            &format!("accepted_bjt_charge_snapshot {} ", usize::MAX),
+            1,
+        );
+        let err = TransientCheckpoint::from_text(&wrong_snapshot_count)
+            .expect_err("wrong fixed snapshot counts must fail before allocation");
+        assert!(
+            err.contains("runtime requires either 0"),
             "unexpected error: {err}"
         );
     }
