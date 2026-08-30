@@ -569,6 +569,14 @@ impl BuiltinVerilogADevices {
 
     #[inline]
     pub(crate) fn advance_state(&mut self) -> Result<(), String> {
+        self.validate_state_acceptance()?;
+        self.apply_validated_state_acceptance();
+        Ok(())
+    }
+
+    /// Validate every generated instance before an accepted analysis point is
+    /// allowed to mutate any runtime or generated Verilog-A state.
+    pub(crate) fn validate_state_acceptance(&self) -> Result<(), String> {
         for device in &self.devices {
             device.validate_advance_state().map_err(|source| {
                 format!(
@@ -577,10 +585,15 @@ impl BuiltinVerilogADevices {
                 )
             })?;
         }
+        Ok(())
+    }
+
+    /// Apply a state acceptance only after every runtime and generated
+    /// instance in the circuit has passed validation.
+    pub(crate) fn apply_validated_state_acceptance(&mut self) {
         for device in &mut self.devices {
             device.apply_validated_advance_state();
         }
-        Ok(())
     }
 
     pub(crate) fn stamp_ac_real_all(

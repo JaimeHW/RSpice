@@ -476,11 +476,16 @@ impl Engine {
         to_value: Value,
         seed: &[Value],
         min_subdivisions: usize,
+        target_initial_step: bool,
+        target_final_step: bool,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, usize), SimulationError> {
         let span = to_value - from_value;
         if !span.is_finite() || span == 0.0 {
             sweep_source.set_value(circuit, to_value);
+            circuit
+                .prepare_veriloga_dc_analysis_point(target_initial_step, target_final_step)
+                .map_err(SimulationError::Circuit)?;
             return self
                 .solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(seed), abort)
                 .map(|solution| (solution, 1));
@@ -506,6 +511,13 @@ impl Engine {
                 }
                 let alpha = step_idx as Value / subdivisions as Value;
                 sweep_source.set_value(circuit, from_value + alpha * span);
+                let public_target = step_idx == subdivisions;
+                circuit
+                    .prepare_veriloga_dc_analysis_point(
+                        public_target && target_initial_step,
+                        public_target && target_final_step,
+                    )
+                    .map_err(SimulationError::Circuit)?;
                 match self.solve_nonlinear_with_guess_and_abort(
                     circuit,
                     matrix,
@@ -532,6 +544,9 @@ impl Engine {
 
         circuit.restore_nonlinear_state(start_state);
         sweep_source.set_value(circuit, from_value);
+        circuit
+            .prepare_veriloga_dc_analysis_point(target_initial_step, target_final_step)
+            .map_err(SimulationError::Circuit)?;
         Err(last_error.unwrap_or(SimulationError::ConvergenceFailed(
             self.config.max_iterations,
         )))
@@ -643,6 +658,13 @@ impl Engine {
             return Ok((result, report));
         }
 
+        circuit
+            .begin_veriloga_dc_analysis()
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .prepare_veriloga_dc_analysis_point(true, true)
+            .map_err(SimulationError::Circuit)?;
+
         // Build matrix structure (done once)
         let matrix = engine.build_matrix(&circuit)?;
 
@@ -700,6 +722,9 @@ impl Engine {
         Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
         let device_op_report = circuit.device_op_report();
         engine.ensure_result_values(dc_result_value_count(&result, &device_op_report))?;
+        circuit
+            .accept_veriloga_analysis_point()
+            .map_err(SimulationError::Circuit)?;
 
         Ok((result, device_op_report))
     }
@@ -1013,6 +1038,10 @@ impl Engine {
                 .collect());
         }
 
+        circuit
+            .begin_veriloga_dc_analysis()
+            .map_err(SimulationError::Circuit)?;
+
         // Find source index (case-insensitive comparison - SPICE standard)
         let source_name_upper = source_name.to_uppercase();
         let sweep_source = if let Some(index) = circuit
@@ -1066,10 +1095,15 @@ impl Engine {
             let mut prev_sweep_value: Option<Value> = None;
             let mut dc_sweep_subdivisions = 2;
 
-            for &sweep_value in &sweep_points {
+            for (point_index, &sweep_value) in sweep_points.iter().enumerate() {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
+                let analysis_initial_step = point_index == 0;
+                let analysis_final_step = point_index + 1 == sweep_points.len();
+                circuit
+                    .prepare_veriloga_dc_analysis_point(analysis_initial_step, analysis_final_step)
+                    .map_err(SimulationError::Circuit)?;
                 // Update source value.
                 sweep_source.set_value(&mut circuit, sweep_value);
                 engine.ensure_dc_paths_to_ground(&circuit)?;
@@ -1102,6 +1136,8 @@ impl Engine {
                                         sweep_value,
                                         seed,
                                         dc_sweep_subdivisions,
+                                        analysis_initial_step,
+                                        analysis_final_step,
                                         abort,
                                     ) {
                                         Ok((solution, subdivisions)) => {
@@ -1197,6 +1233,12 @@ impl Engine {
                 retained_values =
                     retained_values.saturating_add(dc_sweep_point_value_count(&point));
                 engine.ensure_result_values(retained_values)?;
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                circuit
+                    .accept_veriloga_analysis_point()
+                    .map_err(SimulationError::Circuit)?;
                 results.push(point);
                 prev_solution = Some(solution);
                 prev_sweep_value = Some(sweep_value);

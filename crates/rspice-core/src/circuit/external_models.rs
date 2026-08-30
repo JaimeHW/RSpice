@@ -1957,6 +1957,73 @@ impl CircuitData {
         Ok(())
     }
 
+    /// Begin a fresh DC analysis for every runtime-compiled Verilog-A
+    /// instance. Generated instances are newly constructed with the circuit;
+    /// their DC analysis kind is supplied by the ordinary DC stamp path.
+    pub(crate) fn begin_veriloga_dc_analysis(&mut self) -> Result<(), String> {
+        #[cfg(feature = "veriloga")]
+        self.begin_veriloga_analysis(0)?;
+        Ok(())
+    }
+
+    /// Prepare one public DC operating point. DC sweeps keep time fixed at
+    /// zero, use inactive integration, and expose lifecycle flags only on
+    /// public points (never on solver-owned continuation points).
+    pub(crate) fn prepare_veriloga_dc_analysis_point(
+        &mut self,
+        initial_step: bool,
+        final_step: bool,
+    ) -> Result<(), String> {
+        #[cfg(feature = "veriloga")]
+        for device in self.veriloga_devices.iter_mut() {
+            let instance = device.name.clone();
+            device.try_set_analysis_type(0).map_err(|error| {
+                format!("Verilog-A device '{instance}' DC analysis setup failed: {error}")
+            })?;
+            device.try_set_time(0.0).map_err(|error| {
+                format!("Verilog-A device '{instance}' DC time setup failed: {error}")
+            })?;
+            device.try_set_timestep(0.0).map_err(|error| {
+                format!("Verilog-A device '{instance}' DC timestep setup failed: {error}")
+            })?;
+            device
+                .try_set_analysis_step(initial_step, final_step)
+                .map_err(|error| {
+                    format!("Verilog-A device '{instance}' DC analysis-step setup failed: {error}")
+                })?;
+        }
+
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            self.generated_veriloga_devices.set_timepoint(
+                0.0,
+                0.0,
+                crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
+            );
+            self.generated_veriloga_devices
+                .set_analysis_step(initial_step, final_step);
+        }
+        Ok(())
+    }
+
+    /// Atomically accept the exact public analysis point across both
+    /// runtime-compiled and build-time generated Verilog-A instances.
+    /// Validation completes for every instance before the first mutation.
+    pub(crate) fn accept_veriloga_analysis_point(&mut self) -> Result<(), String> {
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices.validate_timestep_acceptance()?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .validate_state_acceptance()?;
+
+        #[cfg(feature = "veriloga")]
+        self.veriloga_devices.apply_validated_timestep_acceptance();
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .apply_validated_state_acceptance();
+        Ok(())
+    }
+
     /// Evaluate every runtime-compiled Verilog-A device against one final
     /// solver solution without adding another matrix/RHS contribution. This
     /// refreshes ordered assignments and speculative state immediately before
