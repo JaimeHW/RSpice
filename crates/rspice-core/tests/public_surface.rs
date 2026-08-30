@@ -106,7 +106,13 @@ use std::path::{Path, PathBuf};
 ///
 /// The latest +1 is `NetlistDiagnostic::xyce_legacy_warning_lines`, which the
 /// CLI calls to render the byte-stable two-line Xyce compatibility warning.
-const MAX_PUBLIC_ITEMS: usize = 4270;
+///
+/// The current reduction removes 36 unused public statements from the legacy
+/// HB-only diode/BJT/MOS wrapper module and its re-export. Production HB uses
+/// the exact `solver::NonlinearDeviceInstance` path; retaining a second,
+/// simplified public device vocabulary made the supported numerical contract
+/// ambiguous.
+const MAX_PUBLIC_ITEMS: usize = 4257;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

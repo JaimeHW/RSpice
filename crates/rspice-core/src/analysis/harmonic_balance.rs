@@ -36,14 +36,12 @@
 mod config;
 mod fft;
 mod multi_tone;
-pub mod nonlinear;
 mod result;
 mod solver;
 
 pub use config::{HbConfig, HbConfigError, HbTone};
 pub use fft::HbFft;
 pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};
-pub use nonlinear::{HbBjt, HbBjtType, HbDevice, HbDeviceCollection, HbDiode, HbMosType, HbMosfet};
 pub use result::{
     HarmonicData, HbContinuationLimitation, HbPhaseProjectionError, HbPhaseState, HbReactiveKind,
     HbReactivePhaseState, HbReactiveSpectrum, HbResult, SpectralBranchCurrent, SpectralVoltage,
