@@ -1016,6 +1016,146 @@ impl Default for GeneratedDdtCoefficients {
     }
 }
 
+/// Accepted history consumed by one generated `idt` candidate evaluation.
+///
+/// The history is immutable: evaluating a Newton candidate must not publish it
+/// as accepted state. An uninitialized operator starts from its initial
+/// condition and uses the current input as its synthetic previous input.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedIdtAcceptedHistory {
+    pub initialized: bool,
+    pub integral_previous: Value,
+    pub integral_older: Value,
+    pub input_previous: Value,
+}
+
+/// Pure result of applying the selected companion rule to one `idt` slot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedIdtCandidate {
+    pub value: Value,
+    /// Exact partial derivative of the candidate integral with respect to its
+    /// current input. This is zero outside active transient integration.
+    pub jacobian_scale: Value,
+}
+
+/// Malformed numeric input to [`evaluate_generated_idt_candidate`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedIdtCandidateError {
+    NonFiniteInput { field: &'static str },
+    ZeroDerivativeScale,
+    NonFiniteResult { field: &'static str },
+}
+
+impl std::fmt::Display for GeneratedIdtCandidateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFiniteInput { field } => {
+                write!(f, "generated idt {field} must be finite")
+            }
+            Self::ZeroDerivativeScale => {
+                f.write_str("generated idt active derivative scale must be nonzero")
+            }
+            Self::NonFiniteResult { field } => {
+                write!(f, "generated idt produced a non-finite {field}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for GeneratedIdtCandidateError {}
+
+/// Evaluate one generalized `idt` candidate without mutating accepted state.
+///
+/// For an active companion rule, this algebraically inverts the same
+/// derivative formula used by generated `ddt`:
+///
+/// `integral = (input + pv*previous + ov*older + pd*previous_input) / scale`.
+///
+/// Inactive integration returns the initial condition with a zero Jacobian.
+/// Every numeric operand is validated even when the history is uninitialized,
+/// so corrupted accepted lanes cannot remain latent until a later step.
+#[inline]
+pub fn evaluate_generated_idt_candidate(
+    coefficients: GeneratedDdtCoefficients,
+    input: Value,
+    initial_condition: Value,
+    history: GeneratedIdtAcceptedHistory,
+) -> Result<GeneratedIdtCandidate, GeneratedIdtCandidateError> {
+    let finite_inputs = [
+        ("input", input),
+        ("initial condition", initial_condition),
+        ("accepted previous integral", history.integral_previous),
+        ("accepted older integral", history.integral_older),
+        ("accepted previous input", history.input_previous),
+        ("derivative scale", coefficients.derivative_scale),
+        ("previous-value scale", coefficients.previous_value_scale),
+        ("older-value scale", coefficients.older_value_scale),
+        (
+            "previous-derivative scale",
+            coefficients.previous_derivative_scale,
+        ),
+    ];
+    if let Some((field, _)) = finite_inputs
+        .into_iter()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(GeneratedIdtCandidateError::NonFiniteInput { field });
+    }
+
+    if !coefficients.active {
+        return Ok(GeneratedIdtCandidate {
+            value: initial_condition,
+            jacobian_scale: 0.0,
+        });
+    }
+    if coefficients.derivative_scale == 0.0 {
+        return Err(GeneratedIdtCandidateError::ZeroDerivativeScale);
+    }
+
+    let previous = if history.initialized {
+        history.integral_previous
+    } else {
+        initial_condition
+    };
+    let older = if history.initialized {
+        history.integral_older
+    } else {
+        previous
+    };
+    let previous_input = if history.initialized {
+        history.input_previous
+    } else {
+        input
+    };
+    let numerator = input
+        + coefficients.previous_value_scale * previous
+        + coefficients.older_value_scale * older
+        + coefficients.previous_derivative_scale * previous_input;
+    if !numerator.is_finite() {
+        return Err(GeneratedIdtCandidateError::NonFiniteResult {
+            field: "companion numerator",
+        });
+    }
+
+    let value = numerator / coefficients.derivative_scale;
+    if !value.is_finite() {
+        return Err(GeneratedIdtCandidateError::NonFiniteResult {
+            field: "candidate value",
+        });
+    }
+    let jacobian_scale = coefficients.derivative_scale.recip();
+    if !jacobian_scale.is_finite() {
+        return Err(GeneratedIdtCandidateError::NonFiniteResult {
+            field: "Jacobian scale",
+        });
+    }
+
+    Ok(GeneratedIdtCandidate {
+        value,
+        jacobian_scale,
+    })
+}
+
 /// Accepted dynamic history needed to resume a generated Verilog-A instance.
 ///
 /// Parameters, topology, static caches, and scratch buffers are deliberately
@@ -6539,6 +6679,195 @@ mod fixed_lane_tests {
         let canonical =
             GeneratedDdtCoefficients::from_companion_values(2.0, 2.0, 0.0, false, true, 0.25);
         assert_eq!(canonical.previous_derivative_scale, 1.0);
+    }
+
+    #[test]
+    fn generalized_idt_candidate_matches_backward_euler() {
+        let candidate = evaluate_generated_idt_candidate(
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 2.0,
+                previous_value_scale: 2.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+            4.0,
+            0.25,
+            GeneratedIdtAcceptedHistory {
+                initialized: true,
+                integral_previous: 10.0,
+                integral_older: 8.0,
+                input_previous: 3.0,
+            },
+        )
+        .expect("backward-Euler candidate");
+
+        assert_eq!(candidate.value, 12.0);
+        assert_eq!(candidate.jacobian_scale, 0.5);
+    }
+
+    #[test]
+    fn generalized_idt_candidate_matches_trapezoidal_and_gear() {
+        let trapezoidal = evaluate_generated_idt_candidate(
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 4.0,
+                previous_value_scale: 4.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 1.0,
+            },
+            1.0,
+            0.0,
+            GeneratedIdtAcceptedHistory {
+                initialized: true,
+                integral_previous: 0.0,
+                integral_older: 0.0,
+                input_previous: 0.0,
+            },
+        )
+        .expect("trapezoidal candidate");
+        assert_eq!(trapezoidal.value, 0.25);
+        assert_eq!(trapezoidal.jacobian_scale, 0.25);
+
+        let gear = evaluate_generated_idt_candidate(
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 3.0,
+                previous_value_scale: 4.0,
+                older_value_scale: -1.0,
+                previous_derivative_scale: 0.0,
+            },
+            2.0,
+            0.0,
+            GeneratedIdtAcceptedHistory {
+                initialized: true,
+                integral_previous: trapezoidal.value,
+                integral_older: 0.0,
+                input_previous: 1.0,
+            },
+        )
+        .expect("Gear-2 candidate");
+        assert_eq!(gear.value, 1.0);
+        assert_eq!(gear.jacobian_scale, 1.0 / 3.0);
+    }
+
+    #[test]
+    fn generalized_idt_candidate_handles_inactive_and_uninitialized_state() {
+        let inactive = evaluate_generated_idt_candidate(
+            GeneratedDdtCoefficients::inactive(),
+            7.0,
+            1.25,
+            GeneratedIdtAcceptedHistory {
+                initialized: false,
+                integral_previous: 0.0,
+                integral_older: 0.0,
+                input_previous: 0.0,
+            },
+        )
+        .expect("inactive candidate");
+        assert_eq!(inactive.value, 1.25);
+        assert_eq!(inactive.jacobian_scale, 0.0);
+
+        let first_backward_euler = evaluate_generated_idt_candidate(
+            GeneratedDdtCoefficients {
+                active: true,
+                derivative_scale: 2.0,
+                previous_value_scale: 2.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+            4.0,
+            10.0,
+            GeneratedIdtAcceptedHistory {
+                initialized: false,
+                integral_previous: 0.0,
+                integral_older: 0.0,
+                input_previous: 0.0,
+            },
+        )
+        .expect("first backward-Euler candidate");
+        assert_eq!(first_backward_euler.value, 12.0);
+        assert_eq!(first_backward_euler.jacobian_scale, 0.5);
+    }
+
+    #[test]
+    fn generalized_idt_candidate_rejects_malformed_numeric_state() {
+        let coefficients = GeneratedDdtCoefficients {
+            active: true,
+            derivative_scale: 2.0,
+            previous_value_scale: 2.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        };
+        let history = GeneratedIdtAcceptedHistory {
+            initialized: true,
+            integral_previous: 1.0,
+            integral_older: 0.5,
+            input_previous: 2.0,
+        };
+
+        assert!(matches!(
+            evaluate_generated_idt_candidate(coefficients, f64::NAN, 0.0, history),
+            Err(GeneratedIdtCandidateError::NonFiniteInput { field: "input" })
+        ));
+        assert!(matches!(
+            evaluate_generated_idt_candidate(
+                coefficients,
+                1.0,
+                0.0,
+                GeneratedIdtAcceptedHistory {
+                    initialized: false,
+                    integral_previous: f64::INFINITY,
+                    ..history
+                },
+            ),
+            Err(GeneratedIdtCandidateError::NonFiniteInput {
+                field: "accepted previous integral"
+            })
+        ));
+
+        let mut malformed_coefficients = coefficients;
+        malformed_coefficients.previous_value_scale = f64::NAN;
+        assert!(matches!(
+            evaluate_generated_idt_candidate(malformed_coefficients, 1.0, 0.0, history),
+            Err(GeneratedIdtCandidateError::NonFiniteInput {
+                field: "previous-value scale"
+            })
+        ));
+
+        let mut zero_scale = coefficients;
+        zero_scale.derivative_scale = -0.0;
+        assert_eq!(
+            evaluate_generated_idt_candidate(zero_scale, 1.0, 0.0, history),
+            Err(GeneratedIdtCandidateError::ZeroDerivativeScale)
+        );
+
+        let mut reciprocal_overflow = coefficients;
+        reciprocal_overflow.derivative_scale = f64::from_bits(1);
+        reciprocal_overflow.previous_value_scale = 0.0;
+        assert!(matches!(
+            evaluate_generated_idt_candidate(reciprocal_overflow, 0.0, 0.0, history),
+            Err(GeneratedIdtCandidateError::NonFiniteResult {
+                field: "Jacobian scale"
+            })
+        ));
+
+        let mut numerator_overflow = coefficients;
+        numerator_overflow.previous_value_scale = f64::MAX;
+        assert!(matches!(
+            evaluate_generated_idt_candidate(
+                numerator_overflow,
+                1.0,
+                0.0,
+                GeneratedIdtAcceptedHistory {
+                    integral_previous: 2.0,
+                    ..history
+                },
+            ),
+            Err(GeneratedIdtCandidateError::NonFiniteResult {
+                field: "companion numerator"
+            })
+        ));
     }
 
     #[test]
