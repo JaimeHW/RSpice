@@ -304,7 +304,7 @@ impl Engine {
         time: Value,
         gmin: Value,
         linear_system: TransientOperatingPointLinearSystem,
-    ) {
+    ) -> Result<(), SimulationError> {
         match linear_system {
             TransientOperatingPointLinearSystem::IdealInductorShorts => {
                 Self::stamp_transient_operating_point_linear(
@@ -320,11 +320,14 @@ impl Engine {
             && !circuit.behavioral_sources.has_solution_dependent_sources()
         {
             let zero_solution = vec![0.0; rhs.len()];
-            circuit.stamp_behavioral_sources(matrix, rhs, &zero_solution, time);
+            circuit
+                .stamp_behavioral_sources(matrix, rhs, &zero_solution, time)
+                .map_err(SimulationError::Circuit)?;
         }
         if circuit.has_xspice_devices() {
             let zero_solution = vec![0.0; rhs.len()];
             circuit.stamp_xspice_transient_trial(matrix, rhs, time, 0.0, &zero_solution);
         }
+        Ok(())
     }
 }

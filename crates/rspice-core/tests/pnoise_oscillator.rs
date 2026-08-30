@@ -20,7 +20,7 @@ use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 const K_B: f64 = 1.380649e-23;
-const T_REF: f64 = 300.15;
+const T_REF: f64 = 400.15;
 
 #[test]
 fn rlc_oscillator_phase_noise_matches_the_demir_constant() {
@@ -31,9 +31,9 @@ fn rlc_oscillator_phase_noise_matches_the_demir_constant() {
 * noisy negative-resistance lc oscillator
 l1 osc 0 1u
 c1 osc 0 1u
-r1 osc 0 1k
 b1 osc 0 i=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)
 i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
+.options rshunt=1k temp=127
 .end
 ";
     let netlist = Netlist::parse(deck).expect("deck parses");

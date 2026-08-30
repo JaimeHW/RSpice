@@ -57,7 +57,8 @@ impl Mosfet {
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn classic_meyer_effective_length(&self) -> Value {
         match self.level {
-            1 | 6 => self.level6_effective_length(),
+            1 => self.l - 2.0 * self.ld,
+            6 => self.level6_effective_length(),
             2 => self.level2_effective_length(),
             3 | 9 => self.mos3_effective_length(),
             _ => self.l,
@@ -190,7 +191,11 @@ impl Mosfet {
         let vbsvbd = if mode > 0.0 { vbs_m } else { vbd_m };
         let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
 
-        let phi = self.phi.max(1e-12);
+        let phi = if self.level == 1 {
+            self.phi
+        } else {
+            self.phi.max(1e-12)
+        };
         let sqrt_phi = phi.sqrt();
         let sarg1 = if vbsvbd <= 0.0 {
             (phi - vbsvbd).max(0.0).sqrt()
@@ -217,7 +222,11 @@ impl Mosfet {
         vbs: Value,
     ) -> (Value, Value, Value) {
         let oxide_cap = self.oxide_capacitance_total();
-        let phi = self.phi.max(1e-12);
+        let phi = if self.level == 1 {
+            self.phi
+        } else {
+            self.phi.max(1e-12)
+        };
         let p = self.polarity();
         let vgs_m = p * vgs;
         let vds_m = p * vds;
@@ -283,7 +292,7 @@ impl Mosfet {
             return self.transient_capacitance_halves_at(vgs, vds, vbs);
         }
 
-        let phi = self.phi.max(1e-12);
+        let phi = self.phi;
         let p = self.polarity();
         let vgs_m = p * vgs;
         let vds_m = p * vds;

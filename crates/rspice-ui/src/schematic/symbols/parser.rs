@@ -37,6 +37,17 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
         &mut max_y,
     );
 
+    if paths.is_empty() {
+        return Err(SymbolError::ParseError(
+            "SVG contains no drawable symbol paths".to_owned(),
+        ));
+    }
+    if ![min_x, min_y, max_x, max_y].into_iter().all(f32::is_finite) {
+        return Err(SymbolError::ParseError(format!(
+            "SVG contains invalid symbol bounds ({min_x}, {min_y}, {max_x}, {max_y})"
+        )));
+    }
+
     // Log number of paths found (before normalization)
     log::debug!(
         "Parsed SVG: {} paths, raw bounds=({:.1},{:.1},{:.1},{:.1})",
@@ -58,8 +69,7 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
     // to the viewBox would stretch the drawing and drift the pins off
     // the terminal grid.
     let tolerance = 0.5;
-    let authored_in_view_box = min_x != f32::MAX
-        && min_x >= -tolerance
+    let authored_in_view_box = min_x >= -tolerance
         && min_y >= -tolerance
         && max_x <= vb.2 + tolerance
         && max_y <= vb.3 + tolerance;
@@ -77,8 +87,8 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
     // Legacy path (Inkscape exports with device-space transforms):
     // normalize coordinates so bounds start at (0,0), then re-fit the art
     // bounds onto the viewBox.
-    let offset_x = if min_x != f32::MAX { min_x } else { 0.0 };
-    let offset_y = if min_y != f32::MAX { min_y } else { 0.0 };
+    let offset_x = min_x;
+    let offset_y = min_y;
 
     for path in &mut paths {
         for cmd in &mut path.commands {
@@ -105,11 +115,7 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
     }
 
     // Update bounds to reflect normalization
-    let (norm_width, norm_height) = if min_x != f32::MAX {
-        (max_x - offset_x, max_y - offset_y)
-    } else {
-        (40.0, 40.0) // Default fallback
-    };
+    let (norm_width, norm_height) = (max_x - offset_x, max_y - offset_y);
 
     // Scale paths to match viewBox coordinate space
     // usvg may extract paths at different DPI than viewBox dimensions
@@ -279,4 +285,17 @@ fn update_bounds(
     *min_y = min_y.min(y);
     *max_x = max_x.max(x);
     *max_y = max_y.max(y);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_svg_is_an_explicit_parse_error() {
+        let error =
+            parse_svg(r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"/>"#)
+                .expect_err("an empty canonical asset is not renderable");
+        assert!(error.to_string().contains("no drawable symbol paths"));
+    }
 }

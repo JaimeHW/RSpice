@@ -10,11 +10,51 @@
 
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::harmonic_balance::HbConfig;
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 const K_B: f64 = 1.380649e-23;
 const T_REF: f64 = 300.15;
+
+#[test]
+fn direct_pnoise_resolves_deck_temperature() {
+    let resistance = 2.0e3;
+    let temperature = 400.0;
+    let netlist = Netlist::parse(
+        "deck-temperature pnoise\n\
+         r1 out 0 2k\n\
+         .options temp=126.85\n\
+         .end\n",
+    )
+    .expect("temperature deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("direct pnoise resolves deck temperature");
+    let expected = 4.0 * K_B * temperature * resistance;
+    assert!(
+        (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
+        "deck TEMP must set periodic thermal noise: got {:.6e}, want {expected:.6e}",
+        result.output_noise[0]
+    );
+}
+
+#[test]
+fn direct_pnoise_applies_hb_local_options_and_rejects_invalid_modes() {
+    let base = "HB-local pnoise gate\nr1 out 0 1k\n.end\n";
+    let mut zero_budget = Netlist::parse(base).expect("base deck parses");
+    zero_budget.options.nonlin_hb_maxstep = Some(0);
+    let error = Engine::new(SimulationConfig::default())
+        .run_pnoise(&zero_budget, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect_err("a zero NONLIN-HB MAXSTEP must fail at the pnoise boundary");
+    assert!(error.to_string().contains("MAXSTEP must be at least 1"));
+
+    let unsupported_tahb = Netlist::parse(&base.replace(".end", ".options hbint tahb=2\n.end"))
+        .expect("typed TAHB deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_pnoise(&unsupported_tahb, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect_err("an unsupported TAHB mode must fail at the pnoise boundary");
+    assert!(error.to_string().contains("TAHB=2"));
+}
 
 #[test]
 fn pnoise_preserves_dc_and_rejects_negative_or_nonfinite_offsets() {
@@ -57,6 +97,132 @@ r1 out 0 1e12
         (result.output_noise[0] - expected).abs() <= 1.0e-12 * expected,
         "resistor output noise must be 4kTR: got {:.6e}, want {expected:.6e}",
         result.output_noise[0]
+    );
+}
+
+#[test]
+fn pnoise_rshunt_is_one_physical_source_per_electrical_node_and_uses_dialect_constants() {
+    let resistance = 1.0e3;
+    let netlist = Netlist::parse(
+        "physical RSHUNT pnoise\n\
+         i1 out 0 dc 0\n\
+         .options rshunt=1k\n\
+         .end\n",
+    )
+    .expect("RSHUNT deck parses");
+    for (dialect, boltzmann) in [
+        (SpiceDialect::Ngspice, rspice_core::constants::K_BOLTZMANN),
+        (SpiceDialect::Xyce, rspice_core::constants::XYCE_K_BOLTZMANN),
+    ] {
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_pnoise(&netlist, 1.0e6, &[0.0], "out", None, None, 0)
+            .expect("RSHUNT pnoise completes");
+        let expected = 4.0 * boltzmann * T_REF * resistance;
+        assert_eq!(
+            result.contributors.len(),
+            1,
+            "one electrical node has one shunt"
+        );
+        assert_eq!(
+            result.contributors[0].0.to_ascii_lowercase(),
+            "rshunt:out thermal"
+        );
+        assert!(
+            (result.output_noise[0] - expected).abs() <= 2.0e-12 * expected,
+            "{dialect:?} RSHUNT output noise: got {:.6e}, want {expected:.6e}",
+            result.output_noise[0]
+        );
+        assert!(
+            result
+                .contributors
+                .iter()
+                .all(|(name, _)| !name.to_ascii_uppercase().contains("GMIN")),
+            "numerical GMIN must never enter the physical source catalog"
+        );
+    }
+}
+
+#[test]
+fn pnoise_rejects_active_device_colored_controls_but_accepts_exact_zero() {
+    let cases = [
+        (
+            "resistor",
+            "r1 out 0 rm 1k\n.model rm R (KF=1e-18 AF=1 EF=1)",
+            "r1 out 0 rm 1k\n.model rm R (KF=0 AF=1 EF=1)",
+            "out",
+            "r1",
+        ),
+        (
+            "diode",
+            "v1 in 0 1\nr1 in out 1k\nd1 out 0 dm\n.model dm D (IS=1e-12 KF=1e-18 AF=1)",
+            "v1 in 0 1\nr1 in out 1k\nd1 out 0 dm\n.model dm D (IS=1e-12 KF=0 AF=1)",
+            "out",
+            "d1",
+        ),
+        (
+            "MOSFET",
+            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 mm w=20u l=2u\n.model mm NMOS (LEVEL=1 VTO=1 KP=60u KF=1e-24 AF=1)",
+            "vdd vdd 0 5\nvg g 0 1.5\nrd vdd d 10k\nm1 d g 0 0 mm w=20u l=2u\n.model mm NMOS (LEVEL=1 VTO=1 KP=60u KF=0 AF=1)",
+            "d",
+            "m1",
+        ),
+        (
+            "JFET",
+            "vdd vdd 0 5\nvg g 0 -0.5\nrd vdd d 10k\nj1 d g 0 jm\n.model jm NJF (VTO=-2 BETA=1m KF=1e-18 AF=1)",
+            "vdd vdd 0 5\nvg g 0 -0.5\nrd vdd d 10k\nj1 d g 0 jm\n.model jm NJF (VTO=-2 BETA=1m KF=0 AF=1)",
+            "d",
+            "j1",
+        ),
+    ];
+    let engine = Engine::new(SimulationConfig::default());
+    for (mechanism, active_body, zero_body, output, instance) in cases {
+        let active = Netlist::parse(&format!(
+            "active colored {mechanism}\n{active_body}\n.end\n"
+        ))
+        .expect("active colored deck parses");
+        let error = engine
+            .run_pnoise(&active, 1.0e6, &[1.0e4], output, None, None, 0)
+            .expect_err("periodically bias-dependent colored noise must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains("cyclostationary colored-noise")
+                && message.to_ascii_lowercase().contains(instance),
+            "{mechanism} rejection must identify the exact instance and mechanism: {message}"
+        );
+
+        let zero = Netlist::parse(&format!("zero colored {mechanism}\n{zero_body}\n.end\n"))
+            .expect("exact-zero colored deck parses");
+        engine
+            .run_pnoise(&zero, 1.0e6, &[1.0e4], output, None, None, 0)
+            .unwrap_or_else(|error| {
+                panic!("exact-zero {mechanism} control must remain accepted: {error}")
+            });
+    }
+}
+
+#[test]
+fn pnoise_names_and_models_finite_branch_form_resistor_noise() {
+    let netlist = Netlist::parse(
+        "near-zero branch resistor pnoise\n\
+         v1 in 0 1\n\
+         Rtiny in out 0.6 TEMP=50 DTEMP=10 NOISY=1\n\
+         rload out 0 1k\n\
+         .options device zeroresistancetol=1\n\
+         .end\n",
+    )
+    .expect("near-zero branch-resistor deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 0)
+        .expect("finite branch-form resistor noise is represented exactly");
+    assert!(
+        result
+            .contributors
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("Rtiny thermal")
+                && values[0].is_finite()
+                && values[0] >= 0.0),
+        "branch-form thermal contributor must preserve its authored identity: {:?}",
+        result.contributors
     );
 }
 
@@ -136,7 +302,7 @@ r1 out 0 10k rm temp=27 dtemp=-1000
 }
 
 #[test]
-fn pnoise_mos_and_jfet_dtemp_match_equivalent_ambient_temperature() {
+fn pnoise_mos_dtemp_matches_ambient_while_inexact_jfet_scaling_fails_closed() {
     let run_contributors = |deck: &str, temperature: f64| {
         let netlist = Netlist::parse(deck).expect("device deck parses");
         let config = SimulationConfig {
@@ -179,8 +345,8 @@ m1 d g 0 0 nm w=20u l=2u
     );
     let mos_hot_contributors = run_contributors(mos_ambient, T_REF + 150.0);
     let mos_offset_contributors = run_contributors(&mos_dtemp, T_REF);
-    let mos_hot = contribution(&mos_hot_contributors, "Nmos#0 channel thermal");
-    let mos_offset = contribution(&mos_offset_contributors, "Nmos#0 channel thermal");
+    let mos_hot = contribution(&mos_hot_contributors, "m1 channel thermal");
+    let mos_offset = contribution(&mos_offset_contributors, "m1 channel thermal");
     assert!(
         (mos_offset - mos_hot).abs() <= 1.0e-10 * mos_hot,
         "MOS DTEMP channel noise must equal the same absolute ambient temperature: {mos_offset:.6e} vs {mos_hot:.6e}"
@@ -192,9 +358,9 @@ m1 d g 0 0 nm w=20u l=2u
     let mos_absolute_contributors = run_contributors(mos_ambient, 423.15);
     let mos_priority_contributors = run_contributors(&mos_temp_priority, T_REF);
     let mos_extreme_contributors = run_contributors(&mos_temp_priority, 1.0e20);
-    let mos_absolute = contribution(&mos_absolute_contributors, "Nmos#0 channel thermal");
-    let mos_priority = contribution(&mos_priority_contributors, "Nmos#0 channel thermal");
-    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "Nmos#0 channel thermal");
+    let mos_absolute = contribution(&mos_absolute_contributors, "m1 channel thermal");
+    let mos_priority = contribution(&mos_priority_contributors, "m1 channel thermal");
+    let mos_extreme_ambient = contribution(&mos_extreme_contributors, "m1 channel thermal");
     assert!(
         (mos_priority - mos_absolute).abs() <= 1.0e-10 * mos_absolute,
         "MOS TEMP must set the absolute channel-noise temperature and outrank DTEMP: {mos_priority:.6e} vs {mos_absolute:.6e}"
@@ -224,38 +390,22 @@ j1 d g 0 jn
 .end
 ";
     let jfet_dtemp = jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn dtemp=150");
-    let jfet_hot_contributors = run_contributors(jfet_ambient, T_REF + 150.0);
-    let jfet_offset_contributors = run_contributors(&jfet_dtemp, T_REF);
-    let jfet_hot = contribution(&jfet_hot_contributors, "Njfet#0 channel thermal");
-    let jfet_offset = contribution(&jfet_offset_contributors, "Njfet#0 channel thermal");
-    assert!(
-        (jfet_offset - jfet_hot).abs() <= 1.0e-10 * jfet_hot,
-        "JFET DTEMP channel noise must equal the same absolute ambient temperature: {jfet_offset:.6e} vs {jfet_hot:.6e}"
-    );
-    let jfet_temp_priority =
-        jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn temp=150 dtemp=-1000");
-    let jfet_absolute_contributors = run_contributors(jfet_ambient, 423.15);
-    let jfet_priority_contributors = run_contributors(&jfet_temp_priority, T_REF);
-    let jfet_extreme_contributors = run_contributors(&jfet_temp_priority, 1.0e20);
-    let jfet_absolute = contribution(&jfet_absolute_contributors, "Njfet#0 channel thermal");
-    let jfet_priority = contribution(&jfet_priority_contributors, "Njfet#0 channel thermal");
-    let jfet_extreme_ambient = contribution(&jfet_extreme_contributors, "Njfet#0 channel thermal");
-    assert!(
-        (jfet_priority - jfet_absolute).abs() <= 1.0e-10 * jfet_absolute,
-        "JFET TEMP must set the absolute channel-noise temperature and outrank DTEMP: {jfet_priority:.6e} vs {jfet_absolute:.6e}"
-    );
-    assert_eq!(
-        jfet_extreme_ambient.to_bits(),
-        jfet_priority.to_bits(),
-        "JFET TEMP must not be reconstructed through a lossy ambient-relative offset"
-    );
-    for label in ["j1.__rd thermal", "j1.__rs thermal"] {
-        let ordinary = contribution(&jfet_priority_contributors, label);
-        let extreme = contribution(&jfet_extreme_contributors, label);
-        assert_eq!(
-            extreme.to_bits(),
-            ordinary.to_bits(),
-            "JFET {label} must retain the parent device's absolute TEMP"
+    let jfet_temp = jfet_ambient.replace("j1 d g 0 jn", "j1 d g 0 jn temp=150 dtemp=-1000");
+    for (deck, temperature) in [
+        (jfet_ambient, T_REF + 150.0),
+        (jfet_dtemp.as_str(), T_REF),
+        (jfet_temp.as_str(), T_REF),
+    ] {
+        let netlist = Netlist::parse(deck).expect("temperature-scaled JFET deck parses");
+        let error = Engine::new(SimulationConfig {
+            temperature,
+            ..SimulationConfig::default()
+        })
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "d", None, None, 0)
+        .expect_err("PNoise must not publish a JFET state with incomplete temperature scaling");
+        assert!(
+            error.to_string().contains("temperature-scaled"),
+            "JFET temperature capability failure must be explicit: {error}"
         );
     }
 }
@@ -309,17 +459,16 @@ fn pnoise_without_large_signal_drive_matches_stationary_noise() {
     // Forward-biased diode divider: thermal (R1) plus shot (D1) noise with
     // frequency shaping from the 1 nF capacitor.
     let deck = "\
-* stationary parity network (thermal + shot + diode flicker)
+* stationary parity network (thermal + shot)
 v1 in 0 dc 2
 r1 in mid 10k
 d1 mid 0 dmod
 c1 mid 0 1n
-.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0 KF=1e-15 AF=1
+.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0 KF=0 AF=1
 .end
 ";
     let netlist = Netlist::parse(deck).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    // 100 Hz sits in the flicker-dominated region, 10 MHz in pure white.
     let offsets = [1.0e2, 1.0e3, 1.0e5, 1.0e7];
 
     let pnoise = engine

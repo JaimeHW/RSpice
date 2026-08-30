@@ -4,7 +4,7 @@
 //! Solves the frequency-domain circuit equations: G*X + jω*C*X + F_NL(X) = I_S
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
-use super::config::HbConfig;
+use super::config::{HbConfig, HbConfigError};
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralBranchCurrent, SpectralVoltage};
 use crate::Value;
@@ -64,6 +64,8 @@ pub enum HbError {
     SingularMatrix,
     /// Invalid circuit configuration
     InvalidCircuit(String),
+    /// Invalid numerical solver configuration.
+    InvalidConfig(HbConfigError),
     /// FFT operation failed
     FftError(String),
 }
@@ -84,12 +86,19 @@ impl std::fmt::Display for HbError {
             }
             Self::SingularMatrix => write!(f, "Singular Jacobian matrix"),
             Self::InvalidCircuit(msg) => write!(f, "Invalid circuit: {}", msg),
+            Self::InvalidConfig(error) => write!(f, "Invalid HB config: {error}"),
             Self::FftError(msg) => write!(f, "FFT error: {}", msg),
         }
     }
 }
 
 impl std::error::Error for HbError {}
+
+impl From<HbConfigError> for HbError {
+    fn from(error: HbConfigError) -> Self {
+        Self::InvalidConfig(error)
+    }
+}
 
 /// Harmonic Balance solver state
 #[derive(Debug)]
@@ -123,9 +132,14 @@ pub struct HbSolverState {
     pub converged: bool,
 
     /// Spectra for branch-current unknowns retained by an actual MNA solve.
-    /// Nonlinear HB currently uses node-only Newton state, so this remains
-    /// empty for that path rather than synthesizing non-existent unknowns.
+    /// Rows are in the solver's canonical exact-MNA branch order.
     pub mna_branch_currents: Vec<Vec<Complex64>>,
+
+    /// KVL residual spectra aligned with `mna_branch_currents`.
+    pub(crate) mna_branch_residual: Vec<Vec<Complex64>>,
+
+    /// Per-row voltage scale for the KVL convergence certificate.
+    pub(crate) mna_branch_residual_scale: Vec<Vec<Value>>,
 }
 
 impl HbSolverState {
@@ -140,52 +154,501 @@ impl HbSolverState {
             total_iterations: 0,
             converged: false,
             mna_branch_currents: Vec::new(),
+            mna_branch_residual: Vec::new(),
+            mna_branch_residual_scale: Vec::new(),
         }
+    }
+
+    /// Fallibly allocate or validate the exact-MNA branch portion of this
+    /// state without changing its public node-only construction contract.
+    ///
+    /// Existing branch currents are preserved so an authenticated operating
+    /// point can enter a dependent solve. Empty residual workspaces are
+    /// allocated transactionally; any nonempty incompatible shape fails
+    /// closed instead of truncating or silently reordering state.
+    pub(crate) fn try_prepare_mna_branches(
+        &mut self,
+        num_branches: usize,
+        num_harmonics: usize,
+    ) -> Result<(), HbError> {
+        let width = num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "HB branch-state harmonic width exceeds this platform".to_string(),
+            )
+        })?;
+        let validate_complex_rows =
+            |label: &str, rows: &[Vec<Complex64>], allow_empty: bool| -> Result<(), HbError> {
+                if allow_empty && rows.is_empty() {
+                    return Ok(());
+                }
+                if rows.len() != num_branches {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB {label} has {} branch rows; expected {num_branches}",
+                        rows.len()
+                    )));
+                }
+                for (branch, row) in rows.iter().enumerate() {
+                    if row.len() != width {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB {label} branch {branch} has {} harmonics; expected {width}",
+                            row.len()
+                        )));
+                    }
+                    if row
+                        .iter()
+                        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                    {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB {label} branch {branch} contains a non-finite value"
+                        )));
+                    }
+                    if row.first().is_some_and(|value| value.im != 0.0) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB {label} branch {branch} has a nonzero imaginary DC component"
+                        )));
+                    }
+                }
+                Ok(())
+            };
+        validate_complex_rows("MNA current state", &self.mna_branch_currents, true)?;
+        validate_complex_rows("MNA residual state", &self.mna_branch_residual, true)?;
+        if !self.mna_branch_residual_scale.is_empty() {
+            if self.mna_branch_residual_scale.len() != num_branches {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB MNA residual scale has {} branch rows; expected {num_branches}",
+                    self.mna_branch_residual_scale.len()
+                )));
+            }
+            for (branch, row) in self.mna_branch_residual_scale.iter().enumerate() {
+                if row.len() != width {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB MNA residual scale branch {branch} has {} harmonics; expected {width}",
+                        row.len()
+                    )));
+                }
+                if row.iter().any(|value| !value.is_finite() || *value < 0.0) {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB MNA residual scale branch {branch} contains an invalid value"
+                    )));
+                }
+            }
+        }
+
+        let allocate_complex_rows = || -> Result<Vec<Vec<Complex64>>, HbError> {
+            let mut rows = Vec::new();
+            rows.try_reserve_exact(num_branches).map_err(|error| {
+                HbError::InvalidCircuit(format!("HB MNA branch-row allocation failed: {error}"))
+            })?;
+            for _ in 0..num_branches {
+                let mut row = Vec::new();
+                row.try_reserve_exact(width).map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "HB MNA branch-spectrum allocation failed: {error}"
+                    ))
+                })?;
+                row.resize(width, Complex64::new(0.0, 0.0));
+                rows.push(row);
+            }
+            Ok(rows)
+        };
+        let allocate_scale_rows = || -> Result<Vec<Vec<Value>>, HbError> {
+            let mut rows = Vec::new();
+            rows.try_reserve_exact(num_branches).map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "HB MNA branch-scale row allocation failed: {error}"
+                ))
+            })?;
+            for _ in 0..num_branches {
+                let mut row = Vec::new();
+                row.try_reserve_exact(width).map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "HB MNA branch-scale allocation failed: {error}"
+                    ))
+                })?;
+                row.resize(width, 0.0);
+                rows.push(row);
+            }
+            Ok(rows)
+        };
+
+        let currents = self
+            .mna_branch_currents
+            .is_empty()
+            .then(allocate_complex_rows)
+            .transpose()?;
+        let residual = self
+            .mna_branch_residual
+            .is_empty()
+            .then(allocate_complex_rows)
+            .transpose()?;
+        let residual_scale = self
+            .mna_branch_residual_scale
+            .is_empty()
+            .then(allocate_scale_rows)
+            .transpose()?;
+        if let Some(rows) = currents {
+            self.mna_branch_currents = rows;
+        }
+        if let Some(rows) = residual {
+            self.mna_branch_residual = rows;
+        }
+        if let Some(rows) = residual_scale {
+            self.mna_branch_residual_scale = rows;
+        }
+        Ok(())
     }
 
     /// Compute residual norm (L2 over all nodes and harmonics)
     pub fn compute_residual_norm(&mut self) {
-        let sum: Value = self
+        // Accumulating squared magnitudes can overflow even when every
+        // residual component is finite (for example, two values near
+        // sqrt(f64::MAX)). `hypot` performs a scale-safe L2 accumulation and
+        // still propagates non-finite input to a non-finite diagnostic norm.
+        self.residual_norm = self
             .residual
             .iter()
+            .chain(self.mna_branch_residual.iter())
             .flat_map(|node| node.iter())
-            .map(|c| c.norm_sqr())
-            .sum();
-        self.residual_norm = sum.sqrt();
+            .fold(0.0, |norm, value| norm.hypot(value.re).hypot(value.im));
     }
 
     /// SPICE-style per-row KCL convergence: every residual entry must
     /// satisfy |res| <= abstol + reltol * (sum of |contribution| into the
     /// row), using the scale accumulated during residual assembly.
     pub fn rows_converged(&self, reltol: Value, abstol: Value) -> bool {
-        self.residual
-            .iter()
-            .zip(self.residual_scale.iter())
-            .all(|(res_row, scale_row)| {
-                res_row
-                    .iter()
-                    .zip(scale_row.iter())
-                    .all(|(r, s)| r.norm() <= abstol + reltol * s)
-            })
+        self.rows_converged_with_branch_tolerances(reltol, abstol, abstol)
+    }
+
+    pub(crate) fn rows_converged_with_branch_tolerances(
+        &self,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+    ) -> bool {
+        if !reltol.is_finite()
+            || reltol < 0.0
+            || !current_abstol.is_finite()
+            || current_abstol < 0.0
+            || !voltage_abstol.is_finite()
+            || voltage_abstol < 0.0
+        {
+            return false;
+        }
+        let current_rows_converged = residual_rows_converged(
+            &self.x,
+            &self.residual,
+            &self.residual_scale,
+            reltol,
+            current_abstol,
+            false,
+        );
+        current_rows_converged
+            && residual_rows_converged(
+                &self.mna_branch_currents,
+                &self.mna_branch_residual,
+                &self.mna_branch_residual_scale,
+                reltol,
+                voltage_abstol,
+                false,
+            )
     }
 
     /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
     /// the DC operating-point pre-solve which only assembles harmonic 0.
     pub fn dc_rows_converged(&self, reltol: Value, abstol: Value) -> bool {
-        self.residual
-            .iter()
-            .zip(self.residual_scale.iter())
-            .all(
-                |(res_row, scale_row)| match (res_row.first(), scale_row.first()) {
-                    (Some(r), Some(s)) => r.norm() <= abstol + reltol * s,
-                    _ => true,
-                },
+        self.dc_rows_converged_with_branch_tolerances(reltol, abstol, abstol)
+    }
+
+    /// DC convergence certificate with dimensionally distinct KCL-current and
+    /// KVL-voltage absolute tolerances.
+    pub(crate) fn dc_rows_converged_with_branch_tolerances(
+        &self,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+    ) -> bool {
+        if !reltol.is_finite() || reltol < 0.0 {
+            return false;
+        }
+        if !current_abstol.is_finite()
+            || current_abstol < 0.0
+            || !voltage_abstol.is_finite()
+            || voltage_abstol < 0.0
+        {
+            return false;
+        }
+        let current_rows_converged = residual_rows_converged(
+            &self.x,
+            &self.residual,
+            &self.residual_scale,
+            reltol,
+            current_abstol,
+            true,
+        );
+        current_rows_converged
+            && residual_rows_converged(
+                &self.mna_branch_currents,
+                &self.mna_branch_residual,
+                &self.mna_branch_residual_scale,
+                reltol,
+                voltage_abstol,
+                true,
             )
     }
 
-    /// Total number of unknowns
+    /// Dimensionless worst-row residual certificate shared by DC and
+    /// full-spectrum Newton line searches. KCL and KVL rows use independent
+    /// absolute tolerances, so amperes and volts are never added or dotted.
+    pub(crate) fn certificate_merit(
+        &self,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+        dc_only: bool,
+    ) -> Result<Value, HbError> {
+        if !reltol.is_finite()
+            || reltol < 0.0
+            || !current_abstol.is_finite()
+            || current_abstol <= 0.0
+            || !voltage_abstol.is_finite()
+            || voltage_abstol <= 0.0
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB residual-certificate tolerances must be finite and positive".to_string(),
+            ));
+        }
+        let current_merit = residual_rows_merit(
+            "KCL-current",
+            &self.x,
+            &self.residual,
+            &self.residual_scale,
+            reltol,
+            current_abstol,
+            dc_only,
+        )?;
+        let voltage_merit = residual_rows_merit(
+            "KVL-voltage",
+            &self.mna_branch_currents,
+            &self.mna_branch_residual,
+            &self.mna_branch_residual_scale,
+            reltol,
+            voltage_abstol,
+            dc_only,
+        )?;
+        Ok(current_merit.max(voltage_merit))
+    }
+
+    /// Total number of spectral coordinates, or `usize::MAX` when publicly
+    /// mutable state is malformed or cannot be represented. Resource and
+    /// transport authorization must use the fallible internal qualifier.
     pub fn total_unknowns(&self) -> usize {
-        self.x.len() * self.x.first().map(|v| v.len()).unwrap_or(0)
+        self.try_total_unknowns().unwrap_or(usize::MAX)
+    }
+
+    /// Fallible coordinate count for resource authorization and transport
+    /// validation. Unlike `total_unknowns`, this never treats a saturated
+    /// value as evidence that a state fits a caller's resource budget.
+    pub(crate) fn try_total_unknowns(&self) -> Result<usize, HbError> {
+        if self.x.is_empty() && self.mna_branch_currents.is_empty() {
+            return Ok(0);
+        }
+        let width = self.x.first().map(|row| row.len()).unwrap_or(0);
+        if width == 0
+            || self.x.iter().any(|row| row.len() != width)
+            || self
+                .mna_branch_currents
+                .iter()
+                .any(|row| row.len() != width)
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB solver state is not a nonempty rectangular spectral grid".to_string(),
+            ));
+        }
+        self.x
+            .len()
+            .checked_add(self.mna_branch_currents.len())
+            .and_then(|rows| rows.checked_mul(width))
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "HB solver-state coordinate count exceeds this platform".to_string(),
+                )
+            })
+    }
+}
+
+#[inline]
+fn residual_entry_converged(
+    residual: Complex64,
+    scale: Value,
+    reltol: Value,
+    abstol: Value,
+) -> bool {
+    if !residual.re.is_finite() || !residual.im.is_finite() || !scale.is_finite() || scale < 0.0 {
+        return false;
+    }
+    let tolerance = abstol + reltol * scale;
+    tolerance.is_finite() && residual.norm() <= tolerance
+}
+
+fn residual_rows_converged(
+    solution: &[Vec<Complex64>],
+    residual: &[Vec<Complex64>],
+    scale: &[Vec<Value>],
+    reltol: Value,
+    abstol: Value,
+    dc_only: bool,
+) -> bool {
+    if solution.len() != residual.len() || residual.len() != scale.len() {
+        return false;
+    }
+    solution
+        .iter()
+        .zip(residual)
+        .zip(scale)
+        .all(|((solution_row, residual_row), scale_row)| {
+            if solution_row.is_empty()
+                || solution_row.len() != residual_row.len()
+                || residual_row.len() != scale_row.len()
+            {
+                return false;
+            }
+            if dc_only {
+                residual_entry_converged(residual_row[0], scale_row[0], reltol, abstol)
+            } else {
+                residual_row
+                    .iter()
+                    .zip(scale_row)
+                    .all(|(&entry, &entry_scale)| {
+                        residual_entry_converged(entry, entry_scale, reltol, abstol)
+                    })
+            }
+        })
+}
+
+fn residual_rows_merit(
+    label: &str,
+    solution: &[Vec<Complex64>],
+    residual: &[Vec<Complex64>],
+    scale: &[Vec<Value>],
+    reltol: Value,
+    abstol: Value,
+    dc_only: bool,
+) -> Result<Value, HbError> {
+    if solution.len() != residual.len() || residual.len() != scale.len() {
+        return Err(HbError::InvalidCircuit(format!(
+            "HB {label} certificate row cardinality is inconsistent"
+        )));
+    }
+    let mut merit: Value = 0.0;
+    for (row, ((solution_row, residual_row), scale_row)) in
+        solution.iter().zip(residual).zip(scale).enumerate()
+    {
+        if solution_row.is_empty()
+            || solution_row.len() != residual_row.len()
+            || residual_row.len() != scale_row.len()
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB {label} certificate row {row} has an inconsistent harmonic width"
+            )));
+        }
+        let width = if dc_only { 1 } else { residual_row.len() };
+        for harmonic in 0..width {
+            let residual = residual_row[harmonic];
+            let scale = scale_row[harmonic];
+            if !residual.re.is_finite()
+                || !residual.im.is_finite()
+                || !scale.is_finite()
+                || scale < 0.0
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB {label} certificate row {row}, harmonic {harmonic} is non-finite"
+                )));
+            }
+            if harmonic == 0 && residual.im != 0.0 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB {label} certificate row {row} has a nonzero imaginary DC residual"
+                )));
+            }
+            let tolerance = abstol + reltol * scale;
+            if !tolerance.is_finite() || tolerance <= 0.0 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB {label} certificate row {row}, harmonic {harmonic} has an invalid tolerance"
+                )));
+            }
+            let ratio = residual.norm() / tolerance;
+            merit = merit.max(if ratio.is_finite() { ratio } else { Value::MAX });
+        }
+    }
+    Ok(merit)
+}
+
+#[cfg(test)]
+mod solver_state_qualification_tests {
+    use super::*;
+
+    #[test]
+    fn residual_norm_remains_finite_for_finite_large_components() {
+        let mut state = HbSolverState::new(1, 1);
+        state.residual[0][0] = Complex64::new(1.0e308, 0.0);
+        state.residual[0][1] = Complex64::new(0.0, 1.0e308);
+
+        state.compute_residual_norm();
+
+        assert!(state.residual_norm.is_finite());
+        assert!((state.residual_norm / 1.0e308 - 2.0_f64.sqrt()).abs() <= 4.0e-15);
+    }
+
+    #[test]
+    fn row_certificate_rejects_nonfinite_residuals_scales_and_tolerances() {
+        let mut state = HbSolverState::new(1, 0);
+        state.residual[0][0] = Complex64::new(1.0, 0.0);
+        state.residual_scale[0][0] = Value::INFINITY;
+        assert!(!state.rows_converged(1.0, Value::INFINITY));
+        assert!(!state.dc_rows_converged(1.0, Value::INFINITY));
+
+        state.residual[0][0] = Complex64::new(Value::INFINITY, 0.0);
+        state.residual_scale[0][0] = 1.0;
+        assert!(!state.rows_converged(1.0, 0.0));
+        assert!(!state.dc_rows_converged(1.0, 0.0));
+
+        state.residual[0][0] = Complex64::new(0.0, 0.0);
+        assert!(!state.rows_converged(Value::NAN, 0.0));
+        assert!(!state.dc_rows_converged(-1.0, 0.0));
+    }
+
+    #[test]
+    fn branch_state_preparation_and_certificates_are_shape_strict() {
+        let mut state = HbSolverState::new(1, 1);
+        state
+            .try_prepare_mna_branches(1, 1)
+            .expect("one exact branch row is allocated");
+        assert_eq!(state.try_total_unknowns().unwrap(), 4);
+        assert_eq!(
+            state
+                .certificate_merit(1.0e-3, 1.0e-12, 1.0e-6, false)
+                .unwrap(),
+            0.0
+        );
+        assert!(state.rows_converged_with_branch_tolerances(1.0e-3, 1.0e-12, 1.0e-6));
+
+        state.mna_branch_residual_scale[0].pop();
+        assert!(!state.rows_converged_with_branch_tolerances(1.0e-3, 1.0e-12, 1.0e-6));
+        assert!(
+            state
+                .certificate_merit(1.0e-3, 1.0e-12, 1.0e-6, false)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn branch_preparation_rejects_nonreal_dc_current_evidence() {
+        let mut state = HbSolverState::new(1, 1);
+        state.mna_branch_currents =
+            vec![vec![Complex64::new(0.0, 1.0e-30), Complex64::new(0.0, 0.0)]];
+        let error = state
+            .try_prepare_mna_branches(1, 1)
+            .expect_err("harmonic zero must be exactly real");
+        assert!(error.to_string().contains("imaginary DC"), "{error}");
     }
 }
 
@@ -193,7 +656,7 @@ impl HbSolverState {
 ///
 /// In Modified Nodal Analysis, voltage sources require branch current
 /// variables to properly enforce voltage constraints.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VoltageSourceBranch {
     /// Positive terminal node (1-indexed, 0 = ground)
     pub node_pos: usize,
@@ -209,20 +672,22 @@ pub struct VoltageSourceBranch {
     pub ac_harmonics: Vec<(usize, Complex64)>,
 }
 
-/// One exact MNA branch retained by the periodic small-signal operator.
+/// One canonical exact MNA branch shared by linear HB and the periodic
+/// small-signal operators.
 ///
-/// Large-signal nonlinear HB still uses its node-only continuation system,
-/// but PAC and PNoise must not replace ideal voltage constraints or the DC
-/// inductor equation with an arbitrary large conductance.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum PeriodicMnaBranch {
-    /// Zero-valued small-signal voltage constraint. `source_index` preserves
-    /// the authored independent-source ordering for PAC excitation lookup.
+/// A large-signal registration retains the authored voltage-source spectrum
+/// directly. A PAC/PNoise-only registration has `source == None`, because its
+/// independent voltage-source row is a zero-valued small-signal constraint.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ExactMnaBranch {
+    /// Ideal voltage constraint. `source_index` preserves authored
+    /// independent-source ordering for PAC excitation lookup.
     VoltageSource {
         branch_ordinal: usize,
         node_pos: usize,
         node_neg: usize,
         source_index: usize,
+        source: Option<VoltageSourceBranch>,
     },
     /// Exact `Vpos - Vneg - j*omega*L*I = 0` branch equation.
     Inductor {
@@ -230,6 +695,17 @@ enum PeriodicMnaBranch {
         node_pos: usize,
         node_neg: usize,
         inductance: Value,
+    },
+    /// Exact `Vpos - Vneg - R*I = 0` resistor branch equation. This avoids a
+    /// reciprocal conductance and therefore remains representable for every
+    /// finite resistance that the circuit builder routes to branch form,
+    /// including the exact-zero ideal constraint.
+    Resistor {
+        branch_ordinal: usize,
+        node_pos: usize,
+        node_neg: usize,
+        resistance: Value,
+        small_signal_resistance: Value,
     },
 }
 
@@ -278,6 +754,11 @@ pub struct HbSolver {
     /// Configuration
     config: HbConfig,
 
+    /// Authentication failure retained by the backwards-compatible
+    /// infallible constructor. Numerical entry points return this as a typed
+    /// error before touching the placeholder FFT or storage.
+    configuration_error: Option<HbConfigError>,
+
     /// FFT processor
     fft: HbFft,
 
@@ -287,12 +768,18 @@ pub struct HbSolver {
     /// Number of harmonics (including DC)
     num_harmonics: usize,
 
-    /// Number of branch currents (for MNA voltage sources)
+    /// Number of branch currents in the canonical exact-MNA registry.
     num_branches: usize,
 
     /// Conductance matrix for each node combination
     /// Stored as sparse: (row, col) -> G
     g_matrix: Vec<(usize, usize, Value)>,
+
+    /// Static conductance operator for PAC/PNoise linearization. Ordinary
+    /// conductances are inserted identically into both matrices; resistors
+    /// with an authored `AC=` override retain their DC conductance above and
+    /// their small-signal conductance here.
+    periodic_g_matrix: Vec<(usize, usize, Value)>,
 
     /// Capacitance matrix for each node combination
     /// Stored as sparse: (row, col) -> C
@@ -311,7 +798,7 @@ pub struct HbSolver {
     voltage_source_branch_names: Vec<String>,
 
     /// Exact branch equations used by PAC and PNoise conversion systems.
-    periodic_mna_branches: Vec<PeriodicMnaBranch>,
+    periodic_mna_branches: Vec<ExactMnaBranch>,
 
     /// Authored names aligned with `periodic_mna_branches` in the circuit's
     /// canonical one-based MNA branch order.
@@ -325,6 +812,10 @@ pub struct HbSolver {
 
     /// Registered nonlinear devices for Newton iteration
     nonlinear_devices: Vec<NonlinearDeviceInstance>,
+    /// Stable contributor owners aligned exactly with `nonlinear_devices`.
+    /// Engine clients retain authored instance names; direct solver clients
+    /// receive deterministic type-and-registration-index fallbacks.
+    nonlinear_device_names: Vec<String>,
     /// Per-device thermal-noise temperature provenance, aligned with
     /// `nonlinear_devices`. Absolute TEMP values are retained directly so an
     /// extreme analysis temperature cannot destroy them through subtraction.
@@ -413,10 +904,6 @@ pub struct NonlinearDeviceInstance {
 pub enum NonlinearDeviceType {
     /// Two-terminal diode (anode, cathode)
     Diode,
-    /// Three-terminal NPN BJT (collector, base, emitter)
-    NpnBjt,
-    /// Three-terminal PNP BJT (collector, base, emitter)
-    PnpBjt,
     /// Four-terminal NMOS (drain, gate, source, bulk)
     Nmos,
     /// Four-terminal PMOS (drain, gate, source, bulk)
@@ -427,9 +914,6 @@ pub enum NonlinearDeviceType {
     Pjfet,
     /// Four-terminal voltage-controlled switch (p, n, cp, cn)
     VoltageSwitch,
-    /// Four-terminal current-controlled switch with sensed control voltage
-    /// converted to current (p, n, cp, cn)
-    CurrentSwitch,
 }
 
 /// Depletion-capacitance parameter set for one junction.
@@ -459,14 +943,13 @@ impl DepletionCap {
         }
     }
 
-    /// Junction parameters with SPICE-standard clamping.
+    /// Construct a junction parameter set without mutating authored values.
+    ///
+    /// Production engine paths validate these values before constructing the
+    /// HB solver. Direct solver clients are likewise responsible for passing
+    /// finite `cj0 >= 0`, `vj > 0`, `0 <= m <= 1`, and `0 <= fc < 1`.
     pub fn new(cj0: Value, vj: Value, m: Value, fc: Value) -> Self {
-        Self {
-            cj0: cj0.max(0.0),
-            vj: vj.max(0.01),
-            m: m.clamp(0.01, 0.95),
-            fc: fc.clamp(0.0, 0.99),
-        }
+        Self { cj0, vj, m, fc }
     }
 }
 
@@ -479,32 +962,25 @@ impl Default for DepletionCap {
 /// Device parameters for nonlinear devices
 #[derive(Debug, Clone)]
 pub struct NonlinearDeviceParams {
-    /// Saturation current (Is for diode/BJT)
+    /// Saturation current (diode or gate-junction Is)
     pub is: Value,
     /// Ideality factor (n for diode)
     pub n: Value,
-    /// Forward emission coefficient (BJT B-E junction)
-    pub nf: Value,
-    /// Reverse emission coefficient (BJT B-C junction)
-    pub nr: Value,
     /// Thermal voltage
     pub vt: Value,
-    /// Forward beta (BJT)
-    pub bf: Value,
-    /// Reverse beta (BJT)
-    pub br: Value,
     /// Threshold voltage (MOSFET)
     pub vth: Value,
     /// Transconductance parameter K = μCox W/L (MOSFET)
     pub kp: Value,
     /// Channel length modulation (MOSFET)
     pub lambda: Value,
+    /// Channel thermal-noise coefficient gamma. The white drain-source
+    /// density is `4*k*T*gamma*|gm|`; Level-1 MOS and JFET defaults use 2/3.
+    pub channel_noise_gamma: Value,
     /// Body-effect coefficient gamma (MOSFET, V^0.5)
     pub gamma: Value,
     /// Surface potential phi (MOSFET, V)
     pub phi: Value,
-    /// Early voltage (BJT)
-    pub vaf: Value,
     /// Switch ON resistance
     pub ron: Value,
     /// Switch OFF resistance
@@ -513,12 +989,9 @@ pub struct NonlinearDeviceParams {
     pub vh: Value,
     /// Switch transition smoothness
     pub smooth: Value,
-    /// Control conversion gain (e.g. sense conductance A/V)
-    pub control_gain: Value,
-    /// Primary junction depletion capacitance (diode junction, BJT B-E,
-    /// JFET G-S)
+    /// Primary junction depletion capacitance (diode junction or JFET G-S)
     pub cap_a: DepletionCap,
-    /// Secondary junction depletion capacitance (BJT B-C, JFET G-D)
+    /// Secondary junction depletion capacitance (JFET G-D)
     pub cap_b: DepletionCap,
     /// Secondary-junction saturation current (MOS drain-bulk diode; the
     /// source-bulk diode rides on `is`)
@@ -526,10 +999,8 @@ pub struct NonlinearDeviceParams {
     /// Total intrinsic oxide capacitance Cox' * W * Leff (MOS channel
     /// charge model; zero disables it)
     pub cox_wl: Value,
-    /// Forward transit time: diode TT / BJT TF (diffusion charge tau_f * i_f)
+    /// Diode transit time (diffusion charge `TT * Id`)
     pub tt_f: Value,
-    /// Reverse transit time: BJT TR (diffusion charge tau_r * i_r)
-    pub tt_r: Value,
 }
 
 impl Default for NonlinearDeviceParams {
@@ -537,28 +1008,22 @@ impl Default for NonlinearDeviceParams {
         Self {
             is: 1e-14,
             n: 1.0,
-            nf: 1.0,
-            nr: 1.0,
             vt: 0.02585,
-            bf: 100.0,
-            br: 1.0,
             vth: 0.7,
             kp: 2e-5,
             lambda: 0.0,
+            channel_noise_gamma: 2.0 / 3.0,
             gamma: 0.0,
             phi: 0.6,
-            vaf: f64::INFINITY,
             ron: 1.0,
             roff: 1e6,
             vh: 0.0,
             smooth: 0.1,
-            control_gain: 1.0,
             cap_a: DepletionCap::none(),
             cap_b: DepletionCap::none(),
             is2: 1e-14,
             cox_wl: 0.0,
             tt_f: 0.0,
-            tt_r: 0.0,
         }
     }
 }

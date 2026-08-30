@@ -421,8 +421,8 @@ C1 out 0 100p
 
 # A diode mixer, not the RC, is what makes the periodic state worth carrying:
 # it spreads energy across harmonics, couples the PAC sidebands so the
-# conversion matrix is not merely diagonal, and makes HB record a Norton
-# continuation limitation. On the RC every one of those is empty or zero and
+# conversion matrix is not merely diagonal, and exercises retained exact MNA
+# branch state. On the RC every nonlinear coupling term is empty or zero and
 # an equality assertion would hold vacuously.
 MIXER_DECK = """* Diode mixer
 V1 lo 0 SIN(0 0.8 1meg)

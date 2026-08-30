@@ -1192,7 +1192,12 @@ impl CodeGenerator {
                     .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
 
-                let filter = StateSpaceFilter::from_poles_zeros(&p_complex, &z_complex, *gain);
+                let filter = StateSpaceFilter::from_poles_zeros(&p_complex, &z_complex, *gain)
+                    .map_err(|error| {
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "laplace_zp: {error}"
+                        )))
+                    })?;
                 let filter_id = self.laplace_filters.borrow().len();
                 self.laplace_filters.borrow_mut().push(filter);
 
@@ -1214,7 +1219,12 @@ impl CodeGenerator {
                 let mut den_desc = denominator.clone();
                 den_desc.reverse();
 
-                let filter = StateSpaceFilter::from_transfer_function(&num_desc, &den_desc);
+                let filter = StateSpaceFilter::from_transfer_function(&num_desc, &den_desc)
+                    .map_err(|error| {
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "laplace coefficient form: {error}"
+                        )))
+                    })?;
                 let filter_id = self.laplace_filters.borrow().len();
                 self.laplace_filters.borrow_mut().push(filter);
 

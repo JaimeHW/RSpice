@@ -132,7 +132,8 @@ impl Engine {
         circuit.commit_accepted_nonlinear_state();
         circuit
             .behavioral_sources
-            .accept_transient_step(accepted_solution, accepted_time);
+            .accept_transient_step(accepted_solution, accepted_time)
+            .map_err(|error| SimulationError::Circuit(error.to_string()))?;
 
         // Update transmission-line delayed-wave history from the accepted state.
         for (idx, tl) in circuit.tlines.iter_mut().enumerate() {

@@ -9292,10 +9292,10 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
 
-        let mut filters = [StateSpaceFilter::from_transfer_function(
-            &[1.0],
-            &[1.0, 1.0],
-        )];
+        let mut filters = [
+            StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
+                .expect("valid first-order Laplace filter"),
+        ];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.laplace_filters = filters.as_mut_ptr();
         ctx.laplace_filters_len = filters.len();

@@ -158,6 +158,15 @@ impl CircuitData {
             .flatten()
     }
 
+    /// Number of explicitly materialized absolute resistor-noise temperature
+    /// slots. Trailing omissions are the canonical compact representation of
+    /// authored ambient temperature; a count beyond the resistor array is an
+    /// invalid metadata state.
+    #[inline]
+    pub(crate) fn resistor_absolute_noise_temperature_count(&self) -> usize {
+        self.resistor_absolute_noise_temperatures.len()
+    }
+
     /// Resolve a resistor's physical noise temperature without a lossy
     /// subtract-then-add round trip through an extreme analysis temperature.
     #[inline]

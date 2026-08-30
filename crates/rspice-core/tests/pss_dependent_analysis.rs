@@ -3,64 +3,22 @@
 //! the producer's optional saved harmonic count; the retained time orbit's
 //! Nyquist capacity is the governing numerical limit.
 
-use num_complex::Complex64;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
-use rspice_core::analysis::pss::{PeriodicWaveform, PssConfig, PssResult};
-use rspice_core::analysis::{
-    FloquetOrbitKind, FloquetSpectrumCertificate, FloquetSpectrumEvidence,
-};
-use rspice_core::engine::{Engine, PssAnalysisResult, PssOperatingPoint, SimulationConfig};
+use rspice_core::analysis::pss::PssConfig;
+use rspice_core::engine::{Engine, PssOperatingPoint, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 const F0: f64 = 1.0e6;
 
-fn retained_linear_operating_point() -> PssOperatingPoint {
+fn retained_linear_operating_point(engine: &Engine, netlist: &Netlist) -> PssOperatingPoint {
     let config = PssConfig::new(F0)
         .with_harmonics(20)
-        .with_points_per_period(256);
-    let period = 1.0 / F0;
-    let time = (0..=256)
-        .map(|index| period * index as f64 / 256.0)
-        .collect::<Vec<_>>();
-    let zeros = vec![0.0; time.len()];
-    let certificate = FloquetSpectrumCertificate::new(
-        1,
-        0.0,
-        FloquetSpectrumCertificate::canonical_qualification_tolerance(1),
-    )
-    .unwrap();
-    let result = PssResult {
-        period,
-        frequency: F0,
-        iterations: 1,
-        residual_norm: 0.0,
-        time,
-        waveforms: vec![
-            PeriodicWaveform::from_values(zeros.clone()),
-            PeriodicWaveform::from_values(zeros),
-        ],
-        node_names: vec!["in".to_owned(), "out".to_owned()],
-        period_detected: false,
-        floquet_multipliers: vec![Complex64::new(0.5, 0.0)],
-        floquet_evidence: FloquetSpectrumEvidence::qualified(certificate).unwrap(),
-        floquet_orbit_kind: FloquetOrbitKind::Driven,
-        trivial_floquet_multiplier_index: None,
-    };
-    PssOperatingPoint::try_from_parts(
-        config,
-        PssAnalysisResult {
-            result,
-            iterations: 1,
-            final_residual: 0.0,
-            period,
-            monodromy: vec![vec![0.5]],
-            floquet_multipliers: vec![Complex64::new(0.5, 0.0)],
-            is_stable: true,
-        },
-        vec![0.0],
-    )
-    .expect("synthetic retained PSS state is structurally complete")
+        .with_points_per_period(256)
+        .with_tstab_periods(0);
+    engine
+        .run_pss_operating_point_with_abort(netlist, config, &NoAbort)
+        .expect("linear producer yields an authenticated retained PSS state")
 }
 
 fn linear_deck() -> Netlist {
@@ -77,12 +35,11 @@ fn linear_deck() -> Netlist {
 
 #[test]
 fn mockup_sideband_span_uses_orbit_nyquist_capacity_not_saved_harmonic_count() {
-    let operating_point = retained_linear_operating_point();
-    assert_eq!(operating_point.config().num_harmonics, 20);
-    assert_eq!(operating_point.spectral_harmonic_capacity(), 128);
-
     let engine = Engine::new(SimulationConfig::default());
     let netlist = linear_deck();
+    let operating_point = retained_linear_operating_point(&engine, &netlist);
+    assert_eq!(operating_point.config().num_harmonics, 20);
+    assert_eq!(operating_point.spectral_harmonic_capacity(), 128);
     let pac = PacConfig::new()
         .with_fundamental(F0)
         .with_sweep(1.0e3, 1.0e3, 1)

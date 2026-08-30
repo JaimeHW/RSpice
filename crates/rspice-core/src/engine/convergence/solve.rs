@@ -164,7 +164,9 @@ impl Engine {
             && !circuit.behavioral_sources.has_solution_dependent_sources()
         {
             let zero_solution = vec![0.0; size];
-            circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0);
+            circuit
+                .stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0)
+                .map_err(SimulationError::Circuit)?;
         }
 
         let direct_result = matrix.solve(&rhs);
@@ -1520,7 +1522,7 @@ impl Engine {
             time,
             nodal_gmin,
             TransientOperatingPointLinearSystem::IdealInductorShorts,
-        );
+        )?;
         Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
         match matrix.solve(&rhs) {
             Ok(mut values) if values.iter().all(|value| value.is_finite()) => {
@@ -1546,7 +1548,7 @@ impl Engine {
                     time,
                     nodal_gmin,
                     TransientOperatingPointLinearSystem::CurrentSeededInductors,
-                );
+                )?;
                 Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_constraints)?;
                 match matrix.solve(&rhs) {
                     Ok(mut values) if values.iter().all(|value| value.is_finite()) => {

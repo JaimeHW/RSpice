@@ -108,6 +108,52 @@ fn periodic_result() -> SimulationResult {
     }
 }
 
+fn authenticated_periodic_result() -> SimulationResult {
+    let netlist = rspice_core::netlist::Netlist::parse(
+        "* authenticated artifact PSS fixture\n\
+         V1 in 0 DC 1\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         C1 out 0 1p\n\
+         .end\n",
+    )
+    .unwrap();
+    let config = rspice_core::analysis::PssConfig::new(1.0)
+        .with_harmonics(8)
+        .with_tolerance(1.0e-6)
+        .with_max_iterations(100)
+        .with_tstab_periods(10)
+        .with_points_per_period(16);
+    let operating_point = rspice_core::engine::Engine::default()
+        .run_pss_operating_point_with_abort(&netlist, config, &rspice_core::abort_signal::NoAbort)
+        .unwrap();
+    assert!(operating_point.producer_identity().is_some());
+    let result = &operating_point.analysis().result;
+    let waveforms = result
+        .node_names
+        .iter()
+        .zip(&result.waveforms)
+        .map(|(node_name, waveform)| {
+            (
+                format!("V({node_name})"),
+                WaveformData::new_time_domain(
+                    format!("V({node_name})"),
+                    result.time.clone(),
+                    waveform.values.clone(),
+                ),
+            )
+        })
+        .collect();
+    SimulationResult::Transient {
+        time: result.time.clone(),
+        waveforms,
+        measurements: Vec::new(),
+        periodic_state: Some(Arc::new(operating_point)),
+        convergence: Default::default(),
+        events: Default::default(),
+    }
+}
+
 fn hb_spec() -> AnalysisSpec {
     AnalysisSpec::HarmonicBalance {
         tones: vec![crate::simulation::multi_run::HbToneSpec {
@@ -176,12 +222,31 @@ fn hb_result() -> SimulationResult {
     )
     .unwrap();
     let coefficients = (0..=config.num_harmonics)
-        .map(|harmonic| num_complex::Complex64::new(harmonic as f64 * 0.1, -0.25))
+        .map(|harmonic| {
+            num_complex::Complex64::new(
+                harmonic as f64 * 0.1,
+                if harmonic == 0 { 0.0 } else { -0.25 },
+            )
+        })
         .collect::<Vec<_>>();
-    let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+    let branch_coefficients = (0..=config.num_harmonics)
+        .map(|harmonic| {
+            num_complex::Complex64::new(
+                -1.0e-3 / (harmonic + 1) as f64,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    harmonic as f64 * 1.0e-5
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
         config,
         vec!["out".to_owned()],
         vec![coefficients.clone()],
+        vec!["V1".to_owned()],
+        vec![branch_coefficients],
         4,
         1.0e-10,
     )
@@ -267,17 +332,52 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         resolved.hb_state().unwrap().operating_point().iterations(),
         4
     );
+    assert_eq!(
+        resolved
+            .hb_state()
+            .unwrap()
+            .operating_point()
+            .mna_branch_names(),
+        &["V1"]
+    );
 
     let (metadata, buffers) = resolved.encode_transfer().unwrap();
-    assert_eq!(buffers.len(), 2, "one real and one imaginary HB row");
+    assert_eq!(
+        buffers.len(),
+        4,
+        "node and MNA branch rows each carry real and imaginary buffers"
+    );
     assert_eq!(
         ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap(),
         resolved
     );
-    let mut tampered = buffers;
-    tampered[0][3] += 1.0;
+    let mut tampered = buffers.clone();
+    tampered[2][3] += 1.0;
     assert!(matches!(
         ResolvedExecutionDependencies::decode_transfer(&metadata, tampered),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
+
+    let mut identity: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    let branch_name =
+        identity["artifacts"][0]["payload"]["HbState"]["mna_branch_spectra"][0]["branch_name"]
+            .as_str()
+            .unwrap();
+    assert_eq!(branch_name, "V1");
+    identity["artifacts"][0]["payload"]["HbState"]["mna_branch_spectra"][0]["branch_name"] =
+        serde_json::Value::String("VDRIFT".to_owned());
+    let identity = serde_json::to_string(&identity).unwrap();
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&identity, buffers),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
+
+    let mut config: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    config["artifacts"][0]["payload"]["HbState"]["config"]["tolerance"] = serde_json::json!(1.0e-4);
+    let config = serde_json::to_string(&config).unwrap();
+    let (_, buffers) = resolved.encode_transfer().unwrap();
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&config, buffers),
         Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
     ));
 }
@@ -725,6 +825,100 @@ fn periodic_state_transfer_round_trips_and_rejects_tamper_or_config_drift() {
         ResolvedExecutionDependencies::decode_transfer(&metadata, tampered),
         Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
     ));
+}
+
+#[test]
+fn authenticated_periodic_state_transfer_preserves_identity_and_rejects_tamper() {
+    let producer = AnalysisInstanceId::new();
+    let revision = ObjectRevision::new(10).unwrap();
+    let snapshot = digest(24);
+    let config_digest = digest(25);
+    let binding = PreparedDependencyBinding::periodic_state(producer, revision, config_digest);
+    let artifact = ExecutionArtifactEnvelope::from_periodic_result(
+        snapshot,
+        producer,
+        revision,
+        config_digest,
+        &pss_spec(PssMethod::Shooting),
+        &authenticated_periodic_result(),
+    )
+    .unwrap()
+    .unwrap();
+    let resolved = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding],
+        &HashMap::from([(producer, artifact)]),
+    )
+    .unwrap();
+    let original_identity = resolved
+        .periodic_state()
+        .unwrap()
+        .operating_point()
+        .producer_identity()
+        .cloned()
+        .unwrap();
+
+    let (metadata, buffers) = resolved.encode_transfer().unwrap();
+    let restored = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone())
+        .expect("authenticated PSS state reconstructs through artifact transport");
+    assert_eq!(
+        restored
+            .periodic_state()
+            .unwrap()
+            .operating_point()
+            .producer_identity(),
+        Some(&original_identity)
+    );
+    assert_eq!(
+        restored
+            .periodic_state()
+            .unwrap()
+            .operating_point()
+            .shooting_state_basis(),
+        ["C:C1"]
+    );
+
+    let mut state_tamper = buffers.clone();
+    state_tamper.last_mut().unwrap()[0] += 0.5;
+    let error = ResolvedExecutionDependencies::decode_transfer(&metadata, state_tamper)
+        .expect_err("transported shooting-state tamper must fail core authentication");
+    assert!(
+        matches!(error, ExecutionArtifactError::InvalidPayload(_))
+            && error
+                .to_string()
+                .contains("numerical payload does not match"),
+        "{error}"
+    );
+
+    fn tamper_retained_identity(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                if let Some(serde_json::Value::Object(identity)) =
+                    object.get_mut("producer_identity")
+                {
+                    identity.insert(
+                        "retained_state_identity".to_owned(),
+                        serde_json::Value::String("0".repeat(64)),
+                    );
+                    return true;
+                }
+                object.values_mut().any(tamper_retained_identity)
+            }
+            serde_json::Value::Array(values) => values.iter_mut().any(tamper_retained_identity),
+            _ => false,
+        }
+    }
+
+    let mut identity_tamper: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    assert!(tamper_retained_identity(&mut identity_tamper));
+    let identity_tamper = serde_json::to_string(&identity_tamper).unwrap();
+    let error = ResolvedExecutionDependencies::decode_transfer(&identity_tamper, buffers)
+        .expect_err("transported producer identity tamper must fail closed");
+    assert!(
+        matches!(error, ExecutionArtifactError::InvalidPayload(_))
+            || matches!(error, ExecutionArtifactError::Transport(_)),
+        "{error}"
+    );
 }
 
 #[test]

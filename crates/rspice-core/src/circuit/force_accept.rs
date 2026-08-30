@@ -714,7 +714,9 @@ mod tests {
         )
         .expect("behavioral-source test matrix builds");
         let mut rhs = vec![0.0; 2];
-        source.stamp(&mut matrix, &mut rhs, &[predictor, 0.0], 1, time);
+        source
+            .stamp(&mut matrix, &mut rhs, &[predictor, 0.0], 1, time)
+            .expect("finite behavioral source stamp");
 
         let target = source
             .cached_exact_constraint_at(time)

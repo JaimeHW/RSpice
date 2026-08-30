@@ -830,10 +830,20 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
 
     let filters =
         unsafe { std::slice::from_raw_parts_mut(ctx.laplace_filters, ctx.laplace_filters_len) };
-    if ctx.analysis_type == 2 {
+    let result = if ctx.analysis_type == 2 {
         filters[filter_id].step(input, ctx.timestep)
     } else {
         filters[filter_id].dc_output(input)
+    };
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            set_native_context_error(
+                ctx,
+                format!("native Laplace filter {filter_id} evaluation failed: {error}"),
+            );
+            0.0
+        }
     }
 }
 

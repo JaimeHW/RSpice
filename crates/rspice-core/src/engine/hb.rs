@@ -23,6 +23,7 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::harmonic_balance::{HbDcSeedPolicy, HbFft};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
+use crate::engine::transient::netlist_checkpoint_identity;
 use crate::netlist::{SourceSpec, XyceHbTimeDomainMode};
 use crate::{Netlist, Value};
 use num_complex::Complex64;
@@ -31,12 +32,389 @@ use std::collections::BTreeSet;
 mod drive;
 mod pac;
 mod pnoise;
+#[cfg(test)]
+mod retained_auth_tests;
 mod stamping;
 mod state;
 
 pub use pac::PacAnalysisResult;
 pub use pnoise::PnoiseAnalysisResult;
 pub use state::{HbEnvelopeContinuationState, HbEnvelopeStateGuarantee};
+
+const HB_OPERATING_POINT_IDENTITY_VERSION: u32 = 1;
+
+fn hb_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
+    hasher.update(&(name.len() as u64).to_le_bytes());
+    hasher.update(name.as_bytes());
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn hb_config_identity(config: &HbConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-hb-source-transform-config-v1\0");
+    hb_identity_field(
+        &mut hasher,
+        "fundamental_freq",
+        &config.fundamental_freq.to_bits().to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "num_harmonics",
+        &(config.num_harmonics as u64).to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "tone_count",
+        &(config.tones.len() as u64).to_le_bytes(),
+    );
+    for (index, tone) in config.tones.iter().enumerate() {
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].frequency"),
+            &tone.frequency.to_bits().to_le_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].num_harmonics"),
+            &(tone.num_harmonics as u64).to_le_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].name"),
+            tone.name.as_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("tone[{index}].source_name"),
+            tone.source_name.as_deref().unwrap_or("<none>").as_bytes(),
+        );
+    }
+    for (name, value) in [
+        ("tolerance", config.tolerance),
+        ("abstol", config.abstol),
+        ("damping", config.damping),
+        ("min_damping", config.min_damping),
+    ] {
+        hb_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    for (name, value) in [
+        ("max_iterations", config.max_iterations),
+        ("oversample_factor", config.oversample_factor),
+        ("max_mixing_order", config.max_mixing_order),
+        ("gmres_restart", config.gmres_restart),
+    ] {
+        hb_identity_field(&mut hasher, name, &(value as u64).to_le_bytes());
+    }
+    hb_identity_field(
+        &mut hasher,
+        "collocation_points",
+        &(config
+            .collocation_points
+            .map(|value| value as u64)
+            .unwrap_or(u64::MAX))
+        .to_le_bytes(),
+    );
+    for (name, value) in [
+        ("use_krylov", config.use_krylov),
+        ("source_stepping", config.source_stepping),
+        ("use_exact_jacobian", config.use_exact_jacobian),
+        ("verbose", config.verbose),
+    ] {
+        hb_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hb_retained_state_identity(
+    config: &HbConfig,
+    node_names: &[String],
+    spectral_state: &[Vec<Complex64>],
+    mna_branch_names: &[String],
+    mna_branch_spectral_state: &[Vec<Complex64>],
+    iterations: usize,
+    residual_norm: Value,
+) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-hb-retained-state-v1\0");
+    hb_identity_field(
+        &mut hasher,
+        "hb_config_identity",
+        hb_config_identity(config).as_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "iterations",
+        &(iterations as u64).to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "residual_norm",
+        &residual_norm.to_bits().to_le_bytes(),
+    );
+    hb_identity_field(
+        &mut hasher,
+        "node_count",
+        &(node_names.len() as u64).to_le_bytes(),
+    );
+    for (index, (node, spectrum)) in node_names.iter().zip(spectral_state).enumerate() {
+        hb_identity_field(&mut hasher, &format!("node[{index}].name"), node.as_bytes());
+        hb_identity_field(
+            &mut hasher,
+            &format!("node[{index}].coefficient_count"),
+            &(spectrum.len() as u64).to_le_bytes(),
+        );
+        for (harmonic, value) in spectrum.iter().enumerate() {
+            hb_identity_field(
+                &mut hasher,
+                &format!("node[{index}].coefficient[{harmonic}].real"),
+                &value.re.to_bits().to_le_bytes(),
+            );
+            hb_identity_field(
+                &mut hasher,
+                &format!("node[{index}].coefficient[{harmonic}].imaginary"),
+                &value.im.to_bits().to_le_bytes(),
+            );
+        }
+    }
+    hb_identity_field(
+        &mut hasher,
+        "mna_branch_count",
+        &(mna_branch_names.len() as u64).to_le_bytes(),
+    );
+    for (index, (branch, spectrum)) in mna_branch_names
+        .iter()
+        .zip(mna_branch_spectral_state)
+        .enumerate()
+    {
+        hb_identity_field(
+            &mut hasher,
+            &format!("mna_branch[{index}].name"),
+            branch.as_bytes(),
+        );
+        hb_identity_field(
+            &mut hasher,
+            &format!("mna_branch[{index}].coefficient_count"),
+            &(spectrum.len() as u64).to_le_bytes(),
+        );
+        for (harmonic, value) in spectrum.iter().enumerate() {
+            hb_identity_field(
+                &mut hasher,
+                &format!("mna_branch[{index}].coefficient[{harmonic}].real"),
+                &value.re.to_bits().to_le_bytes(),
+            );
+            hb_identity_field(
+                &mut hasher,
+                &format!("mna_branch[{index}].coefficient[{harmonic}].imaginary"),
+                &value.im.to_bits().to_le_bytes(),
+            );
+        }
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn hb_resolved_simulation_identity(config: &super::SimulationConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-hb-resolved-simulation-config-v1\0");
+    for (name, value) in [
+        ("tolerance", config.tolerance),
+        ("temperature", config.temperature),
+        ("matrix_pivot_tolerance", config.matrix_pivot_tolerance),
+        (
+            "matrix_absolute_pivot_tolerance",
+            config.matrix_absolute_pivot_tolerance,
+        ),
+    ] {
+        hb_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    hb_identity_field(
+        &mut hasher,
+        "max_iterations",
+        &(config.max_iterations as u64).to_le_bytes(),
+    );
+    for (name, value) in [
+        ("b3soi_gmin_scaling", config.b3soi_gmin_scaling),
+        ("device_voltage_limiting", config.device_voltage_limiting),
+        ("bypass.enabled", config.bypass_config.enabled),
+    ] {
+        hb_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    for (name, value) in [("rshunt", config.rshunt), ("cshunt", config.cshunt)] {
+        hb_identity_field(
+            &mut hasher,
+            name,
+            &value.map(Value::to_bits).unwrap_or(u64::MAX).to_le_bytes(),
+        );
+    }
+    for (name, value) in [
+        ("bypass.reltol", config.bypass_config.reltol),
+        ("bypass.abstol", config.bypass_config.abstol),
+        ("gmin_initial", config.convergence_config.gmin_initial),
+        ("gmin_target", config.convergence_config.gmin_target),
+        (
+            "junction_gmin_target",
+            config.convergence_config.junction_gmin_target,
+        ),
+        ("voltage_reltol", config.convergence_config.voltage_reltol),
+        ("voltage_abstol", config.convergence_config.voltage_abstol),
+        ("current_abstol", config.convergence_config.current_abstol),
+        ("charge_abstol", config.convergence_config.charge_abstol),
+        ("residual_reltol", config.convergence_config.residual_reltol),
+    ] {
+        hb_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    for (name, value) in [
+        ("gmin_stepping", config.convergence_config.gmin_stepping),
+        ("source_stepping", config.convergence_config.source_stepping),
+        (
+            "pseudo_transient",
+            config.convergence_config.pseudo_transient,
+        ),
+        ("arc_length", config.convergence_config.arc_length),
+    ] {
+        hb_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    for (name, value) in [
+        ("spice_dialect", format!("{:?}", config.spice_dialect)),
+        (
+            "jfet_level2_model",
+            format!("{:?}", config.resolved_jfet_level2_model()),
+        ),
+        ("matrix_solver", format!("{:?}", config.matrix_solver)),
+        (
+            "nonlinear_continuation",
+            format!("{:?}", config.convergence_config.nonlinear_continuation),
+        ),
+        (
+            "damping_strategy",
+            format!("{:?}", config.convergence_config.damping_strategy),
+        ),
+    ] {
+        hb_identity_field(&mut hasher, name, value.as_bytes());
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn is_canonical_blake3_identity(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Versioned semantic producer identity for a retained HB operating point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct HbOperatingPointIdentity {
+    version: u32,
+    semantic_netlist_identity: String,
+    resolved_simulation_identity: String,
+    hb_source_transform_identity: String,
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    retained_state_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HbOperatingPointProducerInputs {
+    semantic_netlist_identity: String,
+    resolved_simulation_identity: String,
+    hb_source_transform_identity: String,
+}
+
+impl HbOperatingPointIdentity {
+    /// Identity schema version.
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Fully elaborated semantic netlist identity.
+    pub fn semantic_netlist_identity(&self) -> &str {
+        &self.semantic_netlist_identity
+    }
+
+    /// Resolved HB-relevant simulation configuration identity.
+    pub fn resolved_simulation_identity(&self) -> &str {
+        &self.resolved_simulation_identity
+    }
+
+    /// Exact HB basis and source-transform configuration identity.
+    pub fn hb_source_transform_identity(&self) -> &str {
+        &self.hb_source_transform_identity
+    }
+
+    /// Canonical identity of the exact retained numerical payload.
+    pub fn retained_state_identity(&self) -> &str {
+        &self.retained_state_identity
+    }
+
+    fn capture(
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        hb_config: &HbConfig,
+    ) -> Result<HbOperatingPointProducerInputs, SimulationError> {
+        let semantic_netlist_identity = netlist_checkpoint_identity(netlist).ok_or_else(|| {
+            SimulationError::Circuit(
+                "HB producer netlist has no canonical semantic identity".to_owned(),
+            )
+        })?;
+        Ok(HbOperatingPointProducerInputs {
+            semantic_netlist_identity,
+            resolved_simulation_identity: hb_resolved_simulation_identity(simulation_config),
+            hb_source_transform_identity: hb_config_identity(hb_config),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind(
+        producer: HbOperatingPointProducerInputs,
+        config: &HbConfig,
+        node_names: &[String],
+        spectral_state: &[Vec<Complex64>],
+        mna_branch_names: &[String],
+        mna_branch_spectral_state: &[Vec<Complex64>],
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Self {
+        Self {
+            version: HB_OPERATING_POINT_IDENTITY_VERSION,
+            semantic_netlist_identity: producer.semantic_netlist_identity,
+            resolved_simulation_identity: producer.resolved_simulation_identity,
+            hb_source_transform_identity: producer.hb_source_transform_identity,
+            retained_state_identity: hb_retained_state_identity(
+                config,
+                node_names,
+                spectral_state,
+                mna_branch_names,
+                mna_branch_spectral_state,
+                iterations,
+                residual_norm,
+            ),
+        }
+    }
+
+    fn validate(&self) -> Result<(), SimulationError> {
+        if self.version != HB_OPERATING_POINT_IDENTITY_VERSION {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB producer identity version {} is unsupported; expected {}",
+                self.version, HB_OPERATING_POINT_IDENTITY_VERSION
+            )));
+        }
+        for (name, value) in [
+            ("semantic netlist", &self.semantic_netlist_identity),
+            ("resolved simulation", &self.resolved_simulation_identity),
+            ("HB source-transform", &self.hb_source_transform_identity),
+            ("retained state", &self.retained_state_identity),
+        ] {
+            if !is_canonical_blake3_identity(value) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB {name} identity is not a canonical BLAKE3 digest"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Exact converged harmonic-balance numerical state retained for dependent
 /// periodic small-signal analyses.
@@ -51,6 +429,17 @@ pub struct HbOperatingPoint {
     config: HbConfig,
     node_names: Vec<String>,
     spectral_state: Vec<Vec<Complex64>>,
+    /// Canonical circuit-MNA branch order authenticated alongside
+    /// `mna_branch_spectral_state`. An empty pair is the legacy node-only
+    /// representation and is never accepted for a circuit that has branches.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    mna_branch_names: Vec<String>,
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    mna_branch_spectral_state: Vec<Vec<Complex64>>,
+    /// Versioned semantic producer authentication. `None` is a parseable
+    /// legacy artifact that must never enter a dependent numerical solve.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    producer_identity: Option<HbOperatingPointIdentity>,
     iterations: usize,
     residual_norm: Value,
 }
@@ -69,6 +458,30 @@ impl HbOperatingPoint {
     /// Solver Fourier coefficients indexed `[node][harmonic]`.
     pub fn spectral_state(&self) -> &[Vec<Complex64>] {
         &self.spectral_state
+    }
+
+    /// Canonical MNA branch order for the retained current spectra.
+    ///
+    /// An empty slice denotes a legacy node-only artifact, not evidence that
+    /// an elaborated circuit has no branch unknowns. The consuming engine
+    /// makes that distinction against the circuit's canonical MNA registry.
+    pub fn mna_branch_names(&self) -> &[String] {
+        &self.mna_branch_names
+    }
+
+    /// Solver Fourier coefficients indexed `[branch][harmonic]`, with current
+    /// oriented from the authored positive terminal to the negative terminal.
+    pub fn mna_branch_spectral_state(&self) -> &[Vec<Complex64>] {
+        &self.mna_branch_spectral_state
+    }
+
+    /// Authenticated semantic identity minted by the producing HB engine.
+    ///
+    /// `None` identifies a legacy or caller-assembled artifact. Such an
+    /// artifact remains inspectable for compatibility, but PAC and PNoise
+    /// reject it before numerical reuse.
+    pub fn producer_identity(&self) -> Option<&HbOperatingPointIdentity> {
+        self.producer_identity.as_ref()
     }
 
     /// Number of nonlinear iterations used by the producer solve.
@@ -96,15 +509,93 @@ impl HbOperatingPoint {
         iterations: usize,
         residual_norm: Value,
     ) -> Result<Self, SimulationError> {
-        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
-            return Err(SimulationError::Circuit(
-                "retained HB state has an invalid fundamental frequency".to_owned(),
-            ));
-        }
-        if config.num_harmonics == 0 {
-            return Err(SimulationError::Circuit(
-                "retained HB state has no harmonic basis".to_owned(),
-            ));
+        Self::try_from_parts_with_mna_branches(
+            config,
+            node_names,
+            spectral_state,
+            Vec::new(),
+            Vec::new(),
+            iterations,
+            residual_norm,
+        )
+    }
+
+    /// Reconstruct an HB operating point with authenticated circuit-MNA
+    /// branch-current spectra.
+    ///
+    /// `mna_branch_names` and `mna_branch_spectral_state` must be in the exact
+    /// canonical branch order of the elaborated circuit. The consumer repeats
+    /// that circuit-specific identity check before numerical reuse.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_from_parts_with_mna_branches(
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_internal(
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            iterations,
+            residual_norm,
+            None,
+        )
+    }
+
+    /// Reconstruct a transported HB operating point together with the exact
+    /// semantic producer identity that was minted by the HB engine.
+    ///
+    /// This validates the identity's schema and digests but does not trust a
+    /// caller assertion by itself. A dependent PAC or PNoise run always
+    /// compares the identity with the currently elaborated deck and resolved
+    /// engine configuration immediately before numerical reuse.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_from_authenticated_parts_with_mna_branches(
+        producer_identity: HbOperatingPointIdentity,
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+    ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_internal(
+            config,
+            node_names,
+            spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            iterations,
+            residual_norm,
+            Some(producer_identity),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_from_parts_internal(
+        config: HbConfig,
+        node_names: Vec<String>,
+        spectral_state: Vec<Vec<Complex64>>,
+        mna_branch_names: Vec<String>,
+        mna_branch_spectral_state: Vec<Vec<Complex64>>,
+        iterations: usize,
+        residual_norm: Value,
+        producer_identity: Option<HbOperatingPointIdentity>,
+    ) -> Result<Self, SimulationError> {
+        config.validate().map_err(|error| {
+            SimulationError::Circuit(format!(
+                "retained HB state has an invalid configuration: {error}"
+            ))
+        })?;
+        if let Some(identity) = producer_identity.as_ref() {
+            identity.validate()?;
         }
         if !residual_norm.is_finite() || residual_norm < 0.0 {
             return Err(SimulationError::Circuit(
@@ -118,7 +609,9 @@ impl HbOperatingPoint {
                 node_names.len()
             )));
         }
-        let expected_harmonics = config.num_harmonics.saturating_add(1);
+        let expected_harmonics = config.num_harmonics.checked_add(1).ok_or_else(|| {
+            SimulationError::Circuit("retained HB harmonic basis exceeds this platform".to_owned())
+        })?;
         let mut seen = std::collections::HashSet::with_capacity(node_names.len());
         for (node, spectrum) in node_names.iter().zip(&spectral_state) {
             if node.is_empty() || node.trim() != node {
@@ -145,19 +638,136 @@ impl HbOperatingPoint {
                     "retained HB node '{node}' contains a non-finite coefficient"
                 )));
             }
+            if spectrum.first().is_some_and(|value| value.im != 0.0) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB node '{node}' has a nonzero imaginary DC coefficient"
+                )));
+            }
         }
-        Ok(Self {
+        if mna_branch_spectral_state.len() != mna_branch_names.len() {
+            return Err(SimulationError::Circuit(format!(
+                "retained HB state contains {} MNA branch spectral row(s) for {} branch name(s)",
+                mna_branch_spectral_state.len(),
+                mna_branch_names.len()
+            )));
+        }
+        let mut seen_branches = std::collections::HashSet::with_capacity(mna_branch_names.len());
+        for (branch, spectrum) in mna_branch_names.iter().zip(&mna_branch_spectral_state) {
+            if branch.is_empty() || branch.trim() != branch {
+                return Err(SimulationError::Circuit(
+                    "retained HB state contains a non-canonical MNA branch name".to_owned(),
+                ));
+            }
+            if !seen_branches.insert(branch.to_ascii_uppercase()) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB state contains duplicate MNA branch name '{branch}'"
+                )));
+            }
+            if spectrum.len() != expected_harmonics {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB MNA branch '{branch}' contains {} coefficients; the frozen basis requires {expected_harmonics}",
+                    spectrum.len()
+                )));
+            }
+            if spectrum
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB MNA branch '{branch}' contains a non-finite coefficient"
+                )));
+            }
+            if spectrum.first().is_some_and(|value| value.im != 0.0) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained HB MNA branch '{branch}' has a nonzero imaginary DC coefficient"
+                )));
+            }
+        }
+        let point = Self {
             config,
             node_names,
             spectral_state,
+            mna_branch_names,
+            mna_branch_spectral_state,
+            producer_identity,
             iterations,
             residual_norm,
-        })
+        };
+        if let Some(identity) = point.producer_identity.as_ref()
+            && identity.retained_state_identity
+                != hb_retained_state_identity(
+                    &point.config,
+                    &point.node_names,
+                    &point.spectral_state,
+                    &point.mna_branch_names,
+                    &point.mna_branch_spectral_state,
+                    point.iterations,
+                    point.residual_norm,
+                )
+        {
+            return Err(SimulationError::Circuit(
+                "retained HB numerical payload does not match its authenticated producer identity"
+                    .to_owned(),
+            ));
+        }
+        Ok(point)
+    }
+
+    fn authenticate_for_reuse(
+        &self,
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        hb_config: &HbConfig,
+    ) -> Result<(), SimulationError> {
+        let retained = self.producer_identity.as_ref().ok_or_else(|| {
+            SimulationError::Circuit(
+                "retained HB operating point is a legacy identityless artifact and is not trusted for dependent numerical reuse"
+                    .to_owned(),
+            )
+        })?;
+        retained.validate()?;
+        if retained.retained_state_identity
+            != hb_retained_state_identity(
+                &self.config,
+                &self.node_names,
+                &self.spectral_state,
+                &self.mna_branch_names,
+                &self.mna_branch_spectral_state,
+                self.iterations,
+                self.residual_norm,
+            )
+        {
+            return Err(SimulationError::Circuit(
+                "retained HB numerical payload does not match its authenticated producer identity"
+                    .to_owned(),
+            ));
+        }
+        let current = HbOperatingPointIdentity::capture(netlist, simulation_config, hb_config)?;
+        if retained.semantic_netlist_identity != current.semantic_netlist_identity {
+            return Err(SimulationError::Circuit(
+                "retained HB semantic circuit identity does not match the currently elaborated netlist"
+                    .to_owned(),
+            ));
+        }
+        if retained.resolved_simulation_identity != current.resolved_simulation_identity {
+            return Err(SimulationError::Circuit(
+                "retained HB resolved simulation configuration does not match the current engine configuration"
+                    .to_owned(),
+            ));
+        }
+        if retained.hb_source_transform_identity != current.hb_source_transform_identity {
+            return Err(SimulationError::Circuit(
+                "retained HB source-transform configuration does not match the current HB configuration"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     fn to_solver_state(
         &self,
         expected_node_names: &[String],
+        expected_mna_branch_names: &[String],
     ) -> Result<HbSolverState, SimulationError> {
         if self.node_names != expected_node_names {
             return Err(SimulationError::Circuit(format!(
@@ -165,8 +775,22 @@ impl HbOperatingPoint {
                 expected_node_names, self.node_names
             )));
         }
+        if self.mna_branch_names != expected_mna_branch_names {
+            let detail = if self.mna_branch_names.is_empty() {
+                "the retained artifact is node-only"
+            } else {
+                "the retained branch basis differs"
+            };
+            return Err(SimulationError::Circuit(format!(
+                "retained HB MNA branch basis does not match the elaborated circuit ({detail}): expected {:?}, received {:?}",
+                expected_mna_branch_names, self.mna_branch_names
+            )));
+        }
         let mut state = HbSolverState::new(self.node_names.len(), self.config.num_harmonics);
         state.x.clone_from(&self.spectral_state);
+        state
+            .mna_branch_currents
+            .clone_from(&self.mna_branch_spectral_state);
         state.iteration = self.iterations;
         state.total_iterations = self.iterations;
         state.residual_norm = self.residual_norm;
@@ -241,16 +865,6 @@ pub struct HbAnalysisResult {
     pub operating_point: HbOperatingPoint,
 }
 
-const HB_NORTON_G: Value = 1e6; // Rs = 1 uOhm for stiff source conversion in nonlinear HB.
-const HB_ZERO_SENSE_TOL: Value = 1e-12;
-
-#[derive(Debug, Clone, Copy)]
-struct HbCurrentSwitchControl {
-    ctrl_pos: usize,
-    ctrl_neg: usize,
-    control_current_bias: Value,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct HbDriveTone {
     harmonic: usize,
@@ -293,6 +907,9 @@ impl Engine {
         config: &HbConfig,
         node_names: &[String],
     ) -> Result<HbSolverState, SimulationError> {
+        config.validate().map_err(|error| {
+            SimulationError::Circuit(format!("dependent HB configuration is invalid: {error}"))
+        })?;
         let analysis = operating_point.analysis();
         let result = &analysis.result;
         if !result.frequency.is_finite() || result.frequency <= 0.0 {
@@ -316,7 +933,12 @@ impl Engine {
             )));
         }
 
-        let mut fft = HbFft::with_size(config.num_harmonics, config.fft_size());
+        let fft_size = config.checked_fft_size().map_err(|error| {
+            SimulationError::Circuit(format!("dependent HB collocation grid is invalid: {error}"))
+        })?;
+        let mut fft = HbFft::try_with_size(config.num_harmonics, fft_size).map_err(|error| {
+            SimulationError::Circuit(format!("dependent HB FFT construction failed: {error}"))
+        })?;
         let sample_count = fft.size();
         let mut state = HbSolverState::new(node_names.len(), config.num_harmonics);
         for (target_index, target_name) in node_names.iter().enumerate() {
@@ -389,10 +1011,25 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         let config = engine.hb_config_for_netlist(netlist, config)?;
         engine.hb_validate_config(&config)?;
+        let producer_identity =
+            HbOperatingPointIdentity::capture(netlist, &engine.config, &config)?;
 
         // Build circuit using SoA architecture
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        engine.run_hb_with_prebuilt_circuit_abort(netlist, circuit, config, abort)
+        if producer_identity != HbOperatingPointIdentity::capture(netlist, &engine.config, &config)?
+        {
+            return Err(SimulationError::Circuit(
+                "HB semantic producer inputs changed while the circuit was being elaborated"
+                    .to_owned(),
+            ));
+        }
+        engine.run_hb_with_prebuilt_circuit_abort(
+            netlist,
+            circuit,
+            config,
+            Some(producer_identity),
+            abort,
+        )
     }
 
     /// Apply analysis-local options authored for Xyce's HB packages.
@@ -431,36 +1068,17 @@ impl Engine {
     }
 
     fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {
-        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
-            return Err(HbError::InvalidConfig(
-                "Fundamental frequency must be finite and positive".to_string(),
-            )
-            .into());
-        }
-        if config.num_harmonics == 0 {
-            return Err(
-                HbError::InvalidConfig("Must have at least one harmonic".to_string()).into(),
-            );
-        }
-
-        let minimum_points = config.minimum_collocation_points().ok_or_else(|| {
-            HbError::InvalidConfig(format!(
-                "harmonic count {} exceeds the addressable collocation grid",
-                config.num_harmonics
-            ))
+        config
+            .validate()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let fft_size = config
+            .checked_fft_size()
+            .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
+        let spectral_components = config.num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidConfig("num_harmonics exceeds the addressable spectrum".to_owned())
         })?;
-        if let Some(points) = config.collocation_points
-            && (points % 2 == 0 || points < minimum_points)
-        {
-            return Err(HbError::InvalidConfig(format!(
-                "collocation grid must be odd and contain at least {} points for {} harmonics; found {points}",
-                minimum_points,
-                config.num_harmonics
-            ))
-            .into());
-        }
-        self.ensure_analysis_points(config.fft_size())?;
-        self.ensure_analysis_points(config.num_harmonics.saturating_add(1))?;
+        self.ensure_analysis_points(fft_size)?;
+        self.ensure_analysis_points(spectral_components)?;
         Ok(())
     }
 
@@ -473,6 +1091,7 @@ impl Engine {
         netlist: &Netlist,
         circuit: CircuitData,
         config: HbConfig,
+        producer_inputs: Option<HbOperatingPointProducerInputs>,
         abort: &dyn AbortSignal,
     ) -> Result<HbAnalysisResult, SimulationError> {
         // Get node count (excluding ground)
@@ -480,10 +1099,6 @@ impl Engine {
         if num_nodes == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        self.ensure_result_shape(
-            config.num_harmonics.saturating_add(1),
-            num_nodes.saturating_mul(2),
-        )?;
 
         // No reactive-element gate: junction devices carry their own charge
         // storage, and HB on a resistive nonlinear circuit is legitimate
@@ -492,12 +1107,58 @@ impl Engine {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
         let has_supported_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
+        if let Some(summary) = Self::hb_periodic_mna_unsupported_summary(&circuit) {
+            return Err(SimulationError::Circuit(format!(
+                "exact HB MNA is unavailable because the circuit contains {summary}"
+            )));
+        }
+        let mna_unknowns = num_nodes
+            .checked_add(circuit.num_branches())
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB node and canonical branch count overflows this platform".to_string(),
+                )
+            })?;
+        let one_sided_scalar_coordinates = config
+            .num_harmonics
+            .checked_mul(2)
+            .and_then(|count| count.checked_add(1))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB realified spectral coordinate count overflows this platform".to_string(),
+                )
+            })?;
+        let matrix_unknowns = mna_unknowns
+            .checked_mul(one_sided_scalar_coordinates)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB realified MNA dimension overflows this platform".to_string(),
+                )
+            })?;
+        self.ensure_matrix_unknowns(matrix_unknowns)?;
+        let retained_complex_values = config
+            .num_harmonics
+            .checked_add(1)
+            .and_then(|harmonics| harmonics.checked_mul(mna_unknowns))
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB retained complex-value count overflows this platform".to_string(),
+                )
+            })?;
+        let retained_scalar_values = retained_complex_values.checked_mul(2).ok_or_else(|| {
+            SimulationError::Circuit(
+                "HB retained scalar-value count overflows this platform".to_string(),
+            )
+        })?;
+        self.ensure_result_values(retained_scalar_values)?;
         let dc_seed_policy = Self::hb_dc_seed_policy(netlist)?;
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
         // Create solver
-        let mut solver = HbSolver::new(config.clone(), num_nodes);
+        let mut solver = HbSolver::try_new(config.clone(), num_nodes).map_err(|error| {
+            SimulationError::Circuit(format!("HB solver construction failed: {error}"))
+        })?;
 
         // Set node names from circuit's node map
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
@@ -506,12 +1167,8 @@ impl Engine {
         // Stamp linear circuit elements into HB solver
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_inductors(&circuit, &mut solver);
-        if has_supported_nonlinear {
-            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &config, &drive_tones)?;
-        } else {
-            self.hb_stamp_voltage_sources(&circuit, &mut solver, &config, &drive_tones)?;
-        }
+        self.hb_stamp_voltage_sources(&circuit, &mut solver, &config, &drive_tones)?;
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
@@ -519,6 +1176,28 @@ impl Engine {
 
         // Create solver state
         let mut state = HbSolverState::new(num_nodes, config.num_harmonics);
+        state
+            .try_prepare_mna_branches(solver.exact_mna_branches().len(), config.num_harmonics)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "HB canonical MNA state allocation failed: {error}"
+                ))
+            })?;
+        let retained_state_values = state.try_total_unknowns().map_err(|error| {
+            SimulationError::Circuit(format!("HB state qualification failed: {error}"))
+        })?;
+        let expected_retained_state_values = mna_unknowns
+            .checked_mul(config.num_harmonics + 1)
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "HB retained state dimension exceeds this platform".to_string(),
+                )
+            })?;
+        if retained_state_values != expected_retained_state_values {
+            return Err(SimulationError::Circuit(format!(
+                "HB retained state contains {retained_state_values} complex coordinates; resource qualification authorized {expected_retained_state_values}"
+            )));
+        }
 
         // Seed harmonic 0 with the DC operating point: Newton starts on the
         // bias trajectory instead of from zero, which is the difference
@@ -590,16 +1269,57 @@ impl Engine {
         }
 
         // Build result
-        let mut result = solver.build_result(&state);
-        self.hb_attach_periodic_state(&circuit, &mut result, has_supported_nonlinear);
+        let mut result = solver.build_result(&state).map_err(|error| {
+            SimulationError::Circuit(format!("HB result construction failed: {error}"))
+        })?;
+        self.hb_attach_periodic_state(&circuit, &mut result)?;
 
-        let operating_point = HbOperatingPoint::try_from_parts(
-            config.clone(),
-            result.node_names.clone(),
-            state.x.clone(),
-            state.total_iterations.max(state.iteration),
-            state.residual_norm,
-        )?;
+        let mna_branch_names = if solver.exact_mna_branches().is_empty() {
+            Vec::new()
+        } else {
+            solver.try_periodic_mna_branch_names().map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "HB operating-point branch metadata construction failed: {error}"
+                ))
+            })?
+        };
+        let operating_point = if let Some(producer) = producer_inputs {
+            if producer != HbOperatingPointIdentity::capture(netlist, &self.config, &config)? {
+                return Err(SimulationError::Circuit(
+                    "HB semantic producer inputs changed during the periodic solve".to_owned(),
+                ));
+            }
+            let identity = HbOperatingPointIdentity::bind(
+                producer,
+                &config,
+                &result.node_names,
+                &state.x,
+                &mna_branch_names,
+                &state.mna_branch_currents,
+                state.total_iterations.max(state.iteration),
+                state.residual_norm,
+            );
+            HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
+                identity,
+                config.clone(),
+                result.node_names.clone(),
+                state.x.clone(),
+                mna_branch_names,
+                state.mna_branch_currents.clone(),
+                state.total_iterations.max(state.iteration),
+                state.residual_norm,
+            )?
+        } else {
+            HbOperatingPoint::try_from_parts_with_mna_branches(
+                config.clone(),
+                result.node_names.clone(),
+                state.x.clone(),
+                mna_branch_names,
+                state.mna_branch_currents.clone(),
+                state.total_iterations.max(state.iteration),
+                state.residual_norm,
+            )?
+        };
         Ok(HbAnalysisResult {
             result,
             fundamental_freq: config.fundamental_freq,
@@ -706,9 +1426,55 @@ mod tests {
             .expect("driven input spectrum is retained");
         assert!(
             input.coefficients[1].norm() > 4.0e-3,
-            "direct nonlinear HB lost its Norton-stamped periodic drive: {:?}",
+            "direct nonlinear HB lost its exact periodic source constraint: {:?}",
             input.coefficients
         );
+    }
+
+    #[test]
+    fn retained_inductor_state_requires_a_complete_exact_mna_spectrum() {
+        let netlist = Netlist::parse(
+            "retained exact inductor state\n\
+             V1 in 0 DC 1\n\
+             R1 in out 1k\n\
+             LSTATE out 0 1m\n\
+             .end\n",
+        )
+        .expect("exact inductor deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let exact = engine
+            .run_hb(&netlist, HbConfig::new(1.0e3).with_harmonics(2))
+            .expect("exact branch-aware HB converges")
+            .result;
+
+        let mut missing = exact.clone();
+        missing.reactive_spectra.clear();
+        missing
+            .mna_branch_currents
+            .retain(|branch| !branch.device_name.eq_ignore_ascii_case("LSTATE"));
+        let error = engine
+            .hb_attach_periodic_state(&circuit, &mut missing)
+            .expect_err("missing exact inductor branch state must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("lost exact MNA current spectrum")
+        );
+
+        let mut malformed = exact;
+        malformed.reactive_spectra.clear();
+        malformed
+            .mna_branch_currents
+            .iter_mut()
+            .find(|branch| branch.device_name.eq_ignore_ascii_case("LSTATE"))
+            .expect("exact inductor branch is retained")
+            .coefficients
+            .pop();
+        let error = engine
+            .hb_attach_periodic_state(&circuit, &mut malformed)
+            .expect_err("truncated exact inductor branch state must fail closed");
+        assert!(error.to_string().contains("is malformed"));
     }
 
     #[test]
@@ -747,14 +1513,15 @@ mod tests {
     }
 
     #[test]
-    fn pulse_source_uses_the_exact_configured_collocation_grid() {
-        let config = HbConfig::new(10.0e3)
+    fn pulse_source_coefficients_are_analytic_and_grid_invariant() {
+        let minimal_grid = HbConfig::new(10.0e3)
             .with_harmonics(50)
             .with_collocation_points(101);
+        let oversized_grid = minimal_grid.clone().with_collocation_points(401);
         let pulse = SourceSpec::Pulse {
             v1: 1.0,
             v2: 2.0,
-            delay: 0.0,
+            delay: 1.234_567e-6,
             rise: 10.0e-6,
             fall: 10.0e-6,
             width: 40.0e-6,
@@ -762,27 +1529,33 @@ mod tests {
             pulse_count: 0.0,
             width_defaults_to_zero: false,
         };
-        let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &config, &[1])
+        let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &minimal_grid, &[1])
             .expect("periodic pulse spectrum");
+        let oversized =
+            Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &oversized_grid, &[1])
+                .expect("same pulse on an oversized collocation grid");
 
-        assert!((spectrum.dc - 1.499_950_985_197_529_7).abs() < 1.0e-14);
+        assert_eq!(spectrum.dc, oversized.dc);
+        assert_eq!(spectrum.harmonics, oversized.harmonics);
+        assert!((spectrum.dc - 1.5).abs() < 1.0e-15);
         let (_, h1_amplitude, h1_phase) = spectrum.harmonics[0];
         let h1 = Complex64::from_polar(h1_amplitude, h1_phase);
+        let envelope = (2.0 / std::f64::consts::PI) * (std::f64::consts::PI / 10.0).sin()
+            / (std::f64::consts::PI / 10.0);
+        let center = 30.0e-6 + 1.234_567e-6;
+        let expected_h1 =
+            Complex64::from_polar(envelope, -std::f64::consts::TAU * center / 100.0e-6);
         assert!(
-            (h1.re - -1.935_850_060_379_601_7e-1).abs() < 1.0e-12,
-            "h1={h1:?}"
+            (h1 - expected_h1).norm() < 1.0e-14,
+            "h1={h1:?}, expected={expected_h1:?}"
         );
-        assert!(
-            (h1.im - -5.955_525_013_998_652e-1).abs() < 1.0e-12,
-            "h1={h1:?}"
-        );
-        let h2 = spectrum
+        let h2_norm = spectrum
             .harmonics
             .iter()
             .find(|(harmonic, _, _)| *harmonic == 2)
             .map(|(_, amplitude, phase)| Complex64::from_polar(*amplitude, *phase))
-            .expect("minimal odd grid aliases the continuous even harmonic onto the grid");
-        assert!(h2.norm() > 1.0e-4);
+            .map_or(0.0, |phasor| phasor.norm());
+        assert!(h2_norm < 1.0e-14, "symmetric trapezoid h2={h2_norm}");
     }
 
     #[test]

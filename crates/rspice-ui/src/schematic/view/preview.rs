@@ -6,9 +6,9 @@
 use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::state::{
-    Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortDirection,
-    SchematicArrayKind, SchematicArrayPlacement, SnapResult, SnapTarget, SnapTargetType,
-    SymbolResolver, Tool, geometry_from_points,
+    Bus, BusTap, Component, ComponentType, DesignNote, NetLabel, Point, PortSpec,
+    ResolvedSymbolSource, SchematicArrayKind, SchematicArrayPlacement, SnapResult, SnapTarget,
+    SnapTargetType, SymbolResolver, Tool, geometry_from_points,
 };
 use crate::workbench::app_state::AppState;
 
@@ -24,20 +24,15 @@ use super::documentation_shapes::{
 };
 use super::drawing::{
     compatible_builtin_xspice_asset, draw_artwork_lead_extensions, draw_bus, draw_bus_tap,
-    draw_cell_instance_symbol, draw_component, draw_junction, draw_port_symbol, draw_wire,
-    nearest_wire_screen_hit,
+    draw_component, draw_junction, draw_port_direction_overlay, draw_symbol_resolution_error,
+    draw_wire, nearest_wire_screen_hit, port_symbol_stroke,
 };
 use super::net_labels::draw_net_label;
-use super::resolved_symbol_render::draw_resolved_symbol;
+use super::resolved_symbol_render::{draw_resolved_symbol, resolved_symbol_world_bounds};
 use super::sheet_visibility::{
     active_junction_at, object_is_on_active_sheet, objects_on_active_sheet,
 };
 use super::snap_resolution::{resolve_grid_pointer, resolve_target_pointer};
-use super::symbol_primitives::{
-    draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
-    draw_isource_symbol, draw_nmos_symbol, draw_npn_symbol, draw_pmos_symbol, draw_pnp_symbol,
-    draw_resistor_symbol, draw_vsource_symbol, rotation_to_index,
-};
 use super::viewport::Viewport;
 
 const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
@@ -1037,7 +1032,6 @@ fn draw_component_preview(
 
     let preview_tool = state.schematic.tool;
     let preview_rotation_degrees = state.schematic.preview_rotation.degrees();
-    let preview_rotation_index = rotation_to_index(state.schematic.preview_rotation);
     let preview_mirror_h = state.schematic.preview_mirror_h;
 
     if let Tool::Place(component_type) = preview_tool
@@ -1083,7 +1077,10 @@ fn draw_component_preview(
                     &preview_component,
                     preview_stroke,
                 );
-            } else if let Some(symbol) = symbol_context.pending_library_symbol() {
+            } else if let Some(symbol) = symbol_context.pending_library_symbol()
+                && symbol.source() == ResolvedSymbolSource::Authored
+                && resolved_symbol_world_bounds(&preview_component, symbol).is_some()
+            {
                 draw_resolved_symbol(
                     painter,
                     preview_pos,
@@ -1093,66 +1090,72 @@ fn draw_component_preview(
                     preview_stroke,
                 );
             } else {
-                draw_cell_instance_symbol(
+                draw_symbol_resolution_error(
                     painter,
                     preview_pos,
                     viewport.zoom,
-                    &preview_component,
-                    preview_stroke,
+                    component_type,
+                    "unresolved cell",
                 );
             }
             return;
         }
 
-        if component_type == ComponentType::Port {
-            let direction = state
+        if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
+            library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
+        }) {
+            let pending_port_spec = state
                 .schematic
                 .pending_port
                 .as_ref()
-                .map(|pending| pending.contract.direction)
-                .unwrap_or_default();
-            draw_port_symbol(
+                .map(|pending| PortSpec {
+                    name: pending.name.clone(),
+                    direction: pending.contract.direction,
+                });
+            let symbol_stroke = if component_type == ComponentType::Port {
+                port_symbol_stroke(
+                    preview_stroke,
+                    viewport.zoom,
+                    false,
+                    pending_port_spec.as_ref(),
+                )
+            } else {
+                preview_stroke
+            };
+            draw_symbol(
                 painter,
+                symbol,
                 preview_pos,
                 viewport.zoom,
-                preview_rotation_index,
-                (preview_mirror_h, false),
-                direction,
-                preview_stroke,
+                adjusted_rotation,
+                preview_mirror_h,
+                false,
+                symbol_stroke,
             );
-            return;
-        }
-
-        let svg_rendered = if let Some(library) = symbol_library {
-            if let Some((symbol, adjusted_rotation)) =
-                library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
-            {
-                draw_symbol(
+            if component_type == ComponentType::Port {
+                draw_port_direction_overlay(
                     painter,
-                    symbol,
                     preview_pos,
                     viewport.zoom,
                     adjusted_rotation,
                     preview_mirror_h,
                     false,
-                    preview_stroke,
+                    state
+                        .schematic
+                        .pending_port
+                        .as_ref()
+                        .map(|pending| pending.contract.direction)
+                        .unwrap_or_default(),
+                    symbol_stroke,
                 );
-                true
-            } else {
-                false
             }
         } else {
-            false
-        };
-
-        if !svg_rendered {
-            draw_procedural_component_preview(
+            draw_symbol_resolution_error(
                 painter,
-                component_type,
                 preview_pos,
                 viewport.zoom,
-                preview_rotation_index,
-                preview_stroke,
+                component_type,
+                "missing canonical SVG",
             );
         }
     }
@@ -1177,7 +1180,6 @@ pub(super) fn draw_shelf_drag_preview(
     let preview_pos = viewport.schematic_to_screen(grid_pos);
     let rotation = state.schematic.preview_rotation;
     let rotation_degrees = rotation.degrees();
-    let rotation_index = rotation_to_index(rotation);
     let mirror_h = state.schematic.preview_mirror_h;
     let preview_stroke = Stroke::new(
         viewport.zoom,
@@ -1219,6 +1221,8 @@ pub(super) fn draw_shelf_drag_preview(
         } else if let Some(symbol) =
             SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers)
                 .resolve_binding(binding)
+            && symbol.source() == ResolvedSymbolSource::Authored
+            && resolved_symbol_world_bounds(&component, &symbol).is_some()
         {
             draw_resolved_symbol(
                 painter,
@@ -1229,100 +1233,39 @@ pub(super) fn draw_shelf_drag_preview(
                 preview_stroke,
             );
         } else {
-            draw_cell_instance_symbol(
+            draw_symbol_resolution_error(
                 painter,
                 preview_pos,
                 viewport.zoom,
-                &component,
-                preview_stroke,
+                ComponentType::CellInstance,
+                "unresolved cell",
             );
         }
         return;
     }
 
     let component_type = payload.component_type();
-    let svg_rendered = symbol_library.is_some_and(|library| {
-        library
-            .get_with_rotation_variant(component_type, rotation_degrees, None)
-            .is_some_and(|(symbol, adjusted_rotation)| {
-                draw_symbol(
-                    painter,
-                    symbol,
-                    preview_pos,
-                    viewport.zoom,
-                    adjusted_rotation,
-                    mirror_h,
-                    false,
-                    preview_stroke,
-                );
-                true
-            })
-    });
-    if !svg_rendered {
-        draw_procedural_component_preview(
+    if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
+        library.get_with_rotation_variant(component_type, rotation_degrees, None)
+    }) {
+        draw_symbol(
             painter,
-            component_type,
+            symbol,
             preview_pos,
             viewport.zoom,
-            rotation_index,
+            adjusted_rotation,
+            mirror_h,
+            false,
             preview_stroke,
         );
-    }
-}
-
-pub(super) fn draw_procedural_component_preview(
-    painter: &Painter,
-    component_type: ComponentType,
-    preview_pos: egui::Pos2,
-    zoom: f32,
-    rotation_index: i32,
-    preview_stroke: Stroke,
-) {
-    match component_type {
-        ComponentType::Resistor => {
-            draw_resistor_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::Capacitor => {
-            draw_capacitor_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::Inductor => {
-            draw_inductor_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::VoltageSource => {
-            draw_vsource_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::CurrentSource => {
-            draw_isource_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::Ground => draw_ground_symbol(painter, preview_pos, zoom, preview_stroke),
-        ComponentType::Port => draw_port_symbol(
+    } else {
+        draw_symbol_resolution_error(
             painter,
             preview_pos,
-            zoom,
-            rotation_index,
-            (false, false),
-            PortDirection::default(),
-            preview_stroke,
-        ),
-        ComponentType::Diode => {
-            draw_diode_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::Nmos => {
-            draw_nmos_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::Pmos => {
-            draw_pmos_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::NpnBjt => {
-            draw_npn_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        ComponentType::PnpBjt => {
-            draw_pnp_symbol(painter, preview_pos, zoom, rotation_index, preview_stroke)
-        }
-        _ => {
-            let rect = Rect::from_center_size(preview_pos, Vec2::splat(30.0 * zoom));
-            painter.rect_stroke(rect, 2.0, preview_stroke, egui::StrokeKind::Inside);
-        }
+            viewport.zoom,
+            component_type,
+            "missing canonical SVG",
+        );
     }
 }
 

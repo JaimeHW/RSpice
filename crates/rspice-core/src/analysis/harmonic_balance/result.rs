@@ -5,6 +5,7 @@
 
 use crate::Value;
 use num_complex::Complex64;
+use std::collections::BTreeSet;
 
 /// One HB branch-current spectrum retained from an actual MNA branch unknown.
 ///
@@ -38,19 +39,22 @@ pub struct HbReactiveSpectrum {
     pub voltage_coefficients: Vec<Complex64>,
     /// Positive-to-negative branch-current phasors.
     pub current_coefficients: Vec<Complex64>,
-    /// Whether harmonic zero is a physically exact branch current. Capacitor
-    /// DC current is exact; the current HB inductor stamp uses a finite DC
-    /// short surrogate and therefore reports `false` for inductors.
+    /// Whether harmonic zero is a physically exact branch current. The
+    /// production HB engine reports `true` for capacitor constitutive current
+    /// and exact inductor MNA branch current. `false` is retained only for
+    /// compatibility with legacy or manually constructed results.
     pub dc_current_is_exact: bool,
 }
 
 /// A known reason an HB phase projection is not a complete physical state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HbContinuationLimitation {
-    /// Nonlinear HB replaces ideal voltage-source MNA branches with a stiff
-    /// Norton equivalent, so exact source branch-current spectra do not exist.
+    /// Legacy compatibility marker for HB states produced with a stiff Norton
+    /// voltage-source equivalent. The production engine no longer emits it.
     NonlinearVoltageSourcesUseNortonEquivalent,
-    /// The HB inductor DC stamp is a finite-conductance short surrogate.
+    /// Legacy compatibility marker for an inductor DC current reconstructed
+    /// from a finite-conductance short. The production engine no longer emits
+    /// it.
     InductorDcCurrentUsesShortSurrogate,
     /// A Verilog-A device may own dynamic state that node-voltage spectra do
     /// not describe. Consumers must not assume that state can be restored.
@@ -85,12 +89,14 @@ pub struct HbPhaseState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HbPhaseProjectionError {
     NonFinitePhase,
+    InvalidResult,
 }
 
 impl std::fmt::Display for HbPhaseProjectionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NonFinitePhase => write!(formatter, "HB projection phase must be finite"),
+            Self::InvalidResult => write!(formatter, "HB result is not a valid periodic state"),
         }
     }
 }
@@ -289,12 +295,14 @@ pub struct HbResult {
     /// Multi-tone info (if applicable)
     pub tones: Vec<String>,
 
-    /// Current spectra retained from actual MNA branch unknowns. Nonlinear HB
-    /// currently has no such unknowns because it uses Norton source stamping.
+    /// Current spectra retained from the canonical ideal voltage-source,
+    /// inductor, and branch-form resistor MNA unknowns solved by linear or
+    /// nonlinear HB.
     pub mna_branch_currents: Vec<SpectralBranchCurrent>,
 
-    /// Named linear capacitor and inductor spectra derived from the converged
-    /// node-voltage solution using their HB constitutive relations.
+    /// Named linear reactive spectra. Capacitor current is evaluated from its
+    /// constitutive relation; inductor current is retained from its exact MNA
+    /// branch unknown.
     pub reactive_spectra: Vec<HbReactiveSpectrum>,
 
     /// Reasons a projected state must not be treated as a complete physical
@@ -333,6 +341,9 @@ impl HbResult {
     ) -> Result<HbPhaseState, HbPhaseProjectionError> {
         if !phase_radians.is_finite() {
             return Err(HbPhaseProjectionError::NonFinitePhase);
+        }
+        if !self.is_valid() {
+            return Err(HbPhaseProjectionError::InvalidResult);
         }
         let node_voltages = self
             .spectral_voltages
@@ -389,27 +400,104 @@ impl HbResult {
             .collect()
     }
 
-    /// Check if solution is valid (converged with reasonable values)
+    /// Check whether this is a complete, structurally consistent, finite HB
+    /// solution that is safe to consume as a periodic state.
     pub fn is_valid(&self) -> bool {
-        self.converged
-            && self.residual_norm.is_finite()
-            && self.spectral_voltages.iter().all(|sv| {
-                sv.coefficients
-                    .iter()
-                    .all(|c| c.re.is_finite() && c.im.is_finite())
+        let Some(harmonic_count) = self.num_harmonics.checked_add(1) else {
+            return false;
+        };
+        if !self.converged
+            || self.num_harmonics == 0
+            || !self.residual_norm.is_finite()
+            || self.residual_norm < 0.0
+            || !self.fundamental_freq.is_finite()
+            || self.fundamental_freq <= 0.0
+            || !self.solve_time_seconds.is_finite()
+            || self.solve_time_seconds < 0.0
+            || self.harmonic_frequencies.len() != harmonic_count
+            || self.node_names.is_empty()
+            || self.spectral_voltages.len() != self.node_names.len()
+        {
+            return false;
+        }
+        if !self
+            .harmonic_frequencies
+            .iter()
+            .enumerate()
+            .all(|(harmonic, &frequency)| {
+                frequency.is_finite() && frequency == harmonic as Value * self.fundamental_freq
             })
-            && self.mna_branch_currents.iter().all(|branch| {
-                branch
+        {
+            return false;
+        }
+
+        let mut unique_nodes = BTreeSet::new();
+        if !self
+            .spectral_voltages
+            .iter()
+            .enumerate()
+            .all(|(node, spectrum)| {
+                let Some(name) = self.node_names.get(node) else {
+                    return false;
+                };
+                !name.is_empty()
+                    && name.trim() == name
+                    && name == &spectrum.node_name
+                    && unique_nodes.insert(name.to_ascii_lowercase())
+                    && spectrum.coefficients.len() == harmonic_count
+                    && spectrum.frequencies == self.harmonic_frequencies
+                    && spectrum
+                        .coefficients
+                        .iter()
+                        .all(|coefficient| coefficient.re.is_finite() && coefficient.im.is_finite())
+                    && spectrum
+                        .coefficients
+                        .first()
+                        .is_some_and(|coefficient| coefficient.im == 0.0)
+            })
+        {
+            return false;
+        }
+
+        let mut unique_branches = BTreeSet::new();
+        if !self.mna_branch_currents.iter().all(|branch| {
+            !branch.device_name.is_empty()
+                && branch.device_name.trim() == branch.device_name
+                && unique_branches.insert(branch.device_name.to_ascii_lowercase())
+                && branch.coefficients.len() == harmonic_count
+                && branch.frequencies == self.harmonic_frequencies
+                && branch
                     .coefficients
                     .iter()
-                    .all(|c| c.re.is_finite() && c.im.is_finite())
-            })
-            && self.reactive_spectra.iter().all(|reactive| {
-                reactive
+                    .all(|coefficient| coefficient.re.is_finite() && coefficient.im.is_finite())
+                && branch
+                    .coefficients
+                    .first()
+                    .is_some_and(|coefficient| coefficient.im == 0.0)
+        }) {
+            return false;
+        }
+
+        let mut unique_reactive = BTreeSet::new();
+        self.reactive_spectra.iter().all(|reactive| {
+            !reactive.device_name.is_empty()
+                && reactive.device_name.trim() == reactive.device_name
+                && unique_reactive.insert(reactive.device_name.to_ascii_lowercase())
+                && reactive.voltage_coefficients.len() == harmonic_count
+                && reactive.current_coefficients.len() == harmonic_count
+                && reactive
                     .voltage_coefficients
                     .iter()
                     .chain(reactive.current_coefficients.iter())
-                    .all(|c| c.re.is_finite() && c.im.is_finite())
-            })
+                    .all(|coefficient| coefficient.re.is_finite() && coefficient.im.is_finite())
+                && reactive
+                    .voltage_coefficients
+                    .first()
+                    .is_some_and(|coefficient| coefficient.im == 0.0)
+                && reactive
+                    .current_coefficients
+                    .first()
+                    .is_some_and(|coefficient| coefficient.im == 0.0)
+        })
     }
 }

@@ -167,15 +167,6 @@ fn trapezoid(x: &[f64], y: &[f64], f: impl Fn(f64) -> f64) -> f64 {
     area
 }
 
-/// As [`trapezoid`], for an integrand that also reads the domain.
-fn trapezoid_xy(x: &[f64], y: &[f64], f: impl Fn(f64, f64) -> f64) -> f64 {
-    let mut area = 0.0;
-    for i in 1..x.len() {
-        area += (f(x[i], y[i]) + f(x[i - 1], y[i - 1])) * 0.5 * (x[i] - x[i - 1]);
-    }
-    area
-}
-
 /// Mean of `f(y)` over the x-window: `∫f(y)dx ÷ (x_last − x_first)`.
 ///
 /// A degenerate window — every sample at the same x, or a single sample —
@@ -873,6 +864,24 @@ fn delay(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 /// How many harmonics `thd` weighs when the caller does not say.
 const DEFAULT_THD_HARMONICS: usize = 10;
 
+/// The auto detector needs enough cycles to separate a fundamental from its
+/// neighbours under its Hann discovery window. Calls with an explicit `f0`
+/// need only one complete cycle and do not pass through the detector.
+const MIN_AUTO_THD_CYCLES: f64 = 3.0;
+const THD_SEARCH_START_CYCLES: f64 = MIN_AUTO_THD_CYCLES - 0.5;
+
+/// Eight trial frequencies per `1 / record_length` resolution interval keeps
+/// the parabolic peak refinement comfortably inside its three-point bracket.
+const THD_SEARCH_OVERSAMPLING: f64 = 8.0;
+
+/// A Hann-windowed sinusoid's first sidelobe is about 2.7 % in amplitude. A
+/// one-percent floor therefore needs the main-lobe exclusion below before it
+/// can be treated as independent evidence of another periodicity.
+const THD_AMBIGUITY_FLOOR: f64 = 0.01;
+const THD_STRONG_PEAK_FLOOR: f64 = 0.05;
+const THD_HANN_MAIN_LOBE_BINS: f64 = 3.0;
+const THD_HARMONIC_ALIGNMENT_BINS: f64 = 0.35;
+
 /// The samples inside `[from, to]`, with the two endpoints interpolated onto
 /// the boundary so the window is exactly the interval asked for.
 fn window(x: &[f64], y: &[f64], from: f64, to: f64) -> (Vec<f64>, Vec<f64>) {
@@ -889,79 +898,538 @@ fn window(x: &[f64], y: &[f64], from: f64, to: f64) -> (Vec<f64>, Vec<f64>) {
     (window_x, window_y)
 }
 
-/// `thd(w)` — total harmonic distortion in percent; `thd(w, n)` weighs `n`
-/// harmonics instead of [`DEFAULT_THD_HARMONICS`].
-///
-/// The window is a whole number of periods, bounded by the first and last
-/// rising crossings of the mean level, and the harmonic amplitudes come from
-/// integrating `w` against a quadrature pair at each multiple of the
-/// fundamental. Integrating rather than transforming is what makes this
-/// correct on a non-uniform grid: an FFT would first have to resample, and
-/// the resampling — not the signal — would set the noise floor.
-///
-/// **The fundamental is counted, not fitted**, so this assumes a single
-/// dominant one: the rate comes from how many times `w` rises through its
-/// mean level, and a heavily distorted signal that rises through that level
-/// more than once per cycle is read as a higher fundamental than it has,
-/// which puts every harmonic on the wrong bin. Naming the fundamental
-/// explicitly — `thd(w, n, f0)` — is the fix, and is not implemented yet.
-fn thd(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
-    check_arg_range("thd", &args, 1, 2)?;
-    let (x, y) = series_arg("thd", &args[0])?;
-    forward_domain("thd", x)?;
-    let harmonics = match args.get(1) {
-        Some(value) => {
-            let count = scalar_arg("thd", "harmonic count", value)?;
-            // NaN is rejected explicitly rather than left to the negation: it
-            // would cast to `0usize` and ask for a THD over no harmonics.
-            if count.is_nan() || count < 2.0 || count.fract() != 0.0 {
-                return Err(EvaluationError::MathError(
-                    "thd harmonic count must be a whole number of 2 or more".to_owned(),
-                ));
-            }
-            count as usize
+#[derive(Clone, Copy)]
+struct SpectralPeak {
+    /// Frequency multiplied by the complete input-record duration. Expressing
+    /// it in resolution bins avoids repeatedly multiplying and dividing by a
+    /// possibly very large or very small physical time unit.
+    cycles: f64,
+    amplitude: f64,
+}
+
+/// Add one value with Neumaier compensation. The projections below can span
+/// thousands of panels whose positive and negative contributions nearly
+/// cancel, exactly the case a plain left-to-right sum handles least well.
+fn compensated_add(sum: &mut f64, correction: &mut f64, value: f64) {
+    let next = *sum + value;
+    if sum.abs() >= value.abs() {
+        *correction += (*sum - next) + value;
+    } else {
+        *correction += (value - next) + *sum;
+    }
+    *sum = next;
+}
+
+/// The two basis integrals needed to integrate a line segment against a
+/// complex exponential. Series expansions avoid cancellation when a solver
+/// has placed two timepoints very close together.
+fn linear_basis_integrals(phase_span: f64) -> (f64, f64) {
+    let z2 = phase_span * phase_span;
+    if phase_span.abs() < 1.0e-3 {
+        let z4 = z2 * z2;
+        (
+            1.0 - z2 / 24.0 + z4 / 1_920.0,
+            phase_span / 12.0 - phase_span * z2 / 480.0 + phase_span * z4 / 53_760.0,
+        )
+    } else {
+        let half = phase_span * 0.5;
+        (
+            half.sin() / half,
+            (2.0 * half.sin() - phase_span * half.cos()) / z2,
+        )
+    }
+}
+
+/// Exact Fourier projection of the piecewise-linear waveform represented by
+/// `values` on the normalized `[0, 1]` domain. The result is the integral,
+/// not an amplitude; callers apply the factor of two where appropriate.
+fn pwl_projection(unit_x: &[f64], values: &[f64], cycles: f64) -> (f64, f64) {
+    let angular_cycles = 2.0 * PI * cycles;
+    let mut real = 0.0;
+    let mut real_correction = 0.0;
+    let mut imag = 0.0;
+    let mut imag_correction = 0.0;
+    for index in 1..unit_x.len() {
+        let from = unit_x[index - 1];
+        let to = unit_x[index];
+        let width = to - from;
+        let phase_span = angular_cycles * width;
+        let (constant_basis, slope_basis) = linear_basis_integrals(phase_span);
+        let average = (values[index - 1] + values[index]) * 0.5;
+        let difference = values[index] - values[index - 1];
+        let constant = average * constant_basis;
+        let slope = difference * slope_basis;
+        let phase = angular_cycles * (from + to) * 0.5;
+        let (sine, cosine) = phase.sin_cos();
+        compensated_add(
+            &mut real,
+            &mut real_correction,
+            width * (constant * cosine - slope * sine),
+        );
+        compensated_add(
+            &mut imag,
+            &mut imag_correction,
+            width * (constant * sine + slope * cosine),
+        );
+    }
+    (real + real_correction, imag + imag_correction)
+}
+
+/// Normalize time and signal magnitude before spectral arithmetic. THD is
+/// scale invariant, so this prevents a representable input near `f64::MAX`
+/// from overflowing a projection and preserves tiny harmonics beside it.
+fn normalized_thd_signal(x: &[f64], y: &[f64]) -> Result<(Vec<f64>, Vec<f64>), EvaluationError> {
+    let span = x[x.len() - 1] - x[0];
+    if !span.is_finite() || span <= 0.0 {
+        return Err(EvaluationError::MathError(
+            "thd needs a positive, representable observation interval".to_owned(),
+        ));
+    }
+    let scale = y
+        .iter()
+        .fold(0.0_f64, |largest, value| largest.max(value.abs()));
+    if scale == 0.0 {
+        return Err(EvaluationError::MathError(
+            "thd found no AC signal to measure".to_owned(),
+        ));
+    }
+    let unit_x: Vec<f64> = x.iter().map(|time| (*time - x[0]) / span).collect();
+    let mut normalized: Vec<f64> = y.iter().map(|value| *value / scale).collect();
+    let mut mean = 0.0;
+    let mut correction = 0.0;
+    for index in 1..unit_x.len() {
+        compensated_add(
+            &mut mean,
+            &mut correction,
+            (normalized[index - 1] + normalized[index]) * 0.5 * (unit_x[index] - unit_x[index - 1]),
+        );
+    }
+    let mean = mean + correction;
+    normalized.iter_mut().for_each(|value| *value -= mean);
+    Ok((unit_x, normalized))
+}
+
+/// Validate the sampling contract and return the record span and the most
+/// conservative Nyquist bound for a non-uniform grid. The largest gap is the
+/// interval over which the retained PWL signal carries the least information.
+fn thd_sampling_limits(x: &[f64], y: &[f64]) -> Result<(f64, f64), EvaluationError> {
+    if x.len() < 3 {
+        return Err(EvaluationError::MathError(
+            "thd needs at least three time samples".to_owned(),
+        ));
+    }
+    if let Some(index) = x.iter().position(|value| !value.is_finite()) {
+        return Err(EvaluationError::MathError(format!(
+            "thd time sample {index} is not finite"
+        )));
+    }
+    if let Some(index) = y.iter().position(|value| !value.is_finite()) {
+        return Err(EvaluationError::MathError(format!(
+            "thd waveform sample {index} is not finite"
+        )));
+    }
+    let mut largest_step = 0.0_f64;
+    for index in 1..x.len() {
+        let step = x[index] - x[index - 1];
+        if !step.is_finite() || step <= 0.0 {
+            return Err(EvaluationError::MathError(format!(
+                "thd needs strictly increasing finite time samples; samples {} and {index} are {} and {}",
+                index - 1,
+                x[index - 1],
+                x[index]
+            )));
         }
-        None => DEFAULT_THD_HARMONICS,
+        largest_step = largest_step.max(step);
+    }
+    let span = x[x.len() - 1] - x[0];
+    if !span.is_finite() || span <= 0.0 {
+        return Err(EvaluationError::MathError(
+            "thd needs a positive, representable observation interval".to_owned(),
+        ));
+    }
+    let nyquist = 0.5 / largest_step;
+    if !nyquist.is_finite() || nyquist <= 0.0 {
+        return Err(EvaluationError::MathError(
+            "thd could not represent the sampling-grid Nyquist frequency".to_owned(),
+        ));
+    }
+    Ok((span, nyquist))
+}
+
+fn parse_thd_harmonics(value: Option<&CalcValue>) -> Result<usize, EvaluationError> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_THD_HARMONICS);
     };
-    let mean = window_mean("thd", x, y, |v| v)?;
-    let rising: Vec<f64> = crossings(x, y, mean)
-        .into_iter()
-        .filter(|crossing| crossing.rising)
-        .map(|crossing| crossing.x)
+    let count = scalar_arg("thd", "harmonic count", value)?;
+    if !count.is_finite() || count < 2.0 || count.fract() != 0.0 || count >= usize::MAX as f64 {
+        return Err(EvaluationError::MathError(
+            "thd harmonic count must be a finite whole number of 2 or more".to_owned(),
+        ));
+    }
+    Ok(count as usize)
+}
+
+fn spectral_amplitude(unit_x: &[f64], windowed: &[f64], cycles: f64) -> f64 {
+    let (real, imag) = pwl_projection(unit_x, windowed, cycles);
+    real.hypot(imag)
+}
+
+/// Refine a bracketed local maximum. The coarse grid exists to find the right
+/// lobe; repeated ternary subdivision then avoids biasing the integer-cycle
+/// measurement window with a resolution-bin-rounded `f0`.
+fn refine_spectral_peak(unit_x: &[f64], windowed: &[f64], centre_cycles: f64) -> SpectralPeak {
+    let half_step = 1.0 / THD_SEARCH_OVERSAMPLING;
+    let mut low = centre_cycles - half_step;
+    let mut high = centre_cycles + half_step;
+    for _ in 0..32 {
+        let third = (high - low) / 3.0;
+        let left = low + third;
+        let right = high - third;
+        if spectral_amplitude(unit_x, windowed, left) < spectral_amplitude(unit_x, windowed, right)
+        {
+            low = left;
+        } else {
+            high = right;
+        }
+    }
+    let cycles = (low + high) * 0.5;
+    SpectralPeak {
+        cycles,
+        amplitude: spectral_amplitude(unit_x, windowed, cycles),
+    }
+}
+
+fn harmonically_aligned(base: f64, candidate: f64) -> bool {
+    let order = (candidate / base).round().max(1.0);
+    (candidate - order * base).abs() <= THD_HARMONIC_ALIGNMENT_BINS
+}
+
+fn normalized_value_at(unit_x: &[f64], values: &[f64], at: f64) -> f64 {
+    let upper = unit_x.partition_point(|position| *position <= at);
+    if upper == 0 {
+        return values[0];
+    }
+    if upper == unit_x.len() {
+        return values[values.len() - 1];
+    }
+    let lower = upper - 1;
+    let fraction = (at - unit_x[lower]) / (unit_x[upper] - unit_x[lower]);
+    values[lower] + (values[upper] - values[lower]) * fraction
+}
+
+/// Integral of `(w(t + period) - w(t))²` across their common domain. The
+/// integration grid is the union of both PWL knot sets, so this is exact for
+/// the retained waveform rather than a sample-count autocorrelation.
+fn periodic_mismatch(unit_x: &[f64], values: &[f64], cycles: f64) -> f64 {
+    let period = cycles.recip();
+    let end = 1.0 - period;
+    let mut left_knot = 1usize;
+    let mut shifted_knot = unit_x.partition_point(|position| *position <= period);
+    let mut at = 0.0;
+    let mut area = 0.0;
+    let mut correction = 0.0;
+    while at < end {
+        while left_knot < unit_x.len() && unit_x[left_knot] <= at {
+            left_knot += 1;
+        }
+        while shifted_knot < unit_x.len() && unit_x[shifted_knot] - period <= at {
+            shifted_knot += 1;
+        }
+        let left_boundary = unit_x.get(left_knot).copied().unwrap_or(end);
+        let shifted_boundary = unit_x
+            .get(shifted_knot)
+            .map(|position| *position - period)
+            .unwrap_or(end);
+        let next = end.min(left_boundary).min(shifted_boundary);
+        if next <= at {
+            // The strict input grid makes this reachable only through a
+            // rounded shifted knot coinciding with `at`; advance its owner.
+            if left_knot < unit_x.len() && left_boundary <= at {
+                left_knot += 1;
+            }
+            if shifted_knot < unit_x.len() && shifted_boundary <= at {
+                shifted_knot += 1;
+            }
+            continue;
+        }
+        let difference_at = normalized_value_at(unit_x, values, at + period)
+            - normalized_value_at(unit_x, values, at);
+        let difference_next = normalized_value_at(unit_x, values, next + period)
+            - normalized_value_at(unit_x, values, next);
+        let panel = (next - at)
+            * (difference_at * difference_at
+                + difference_at * difference_next
+                + difference_next * difference_next)
+            / 3.0;
+        compensated_add(&mut area, &mut correction, panel);
+        at = next;
+    }
+    area + correction
+}
+
+/// The Hann spectrum identifies the correct lobe and harmonic family. A
+/// shift-consistency fit then removes the small finite-record frequency bias
+/// of any one-sided spectral peak (including its negative-frequency image).
+fn refine_periodicity(unit_x: &[f64], values: &[f64], centre_cycles: f64) -> f64 {
+    let mut low = centre_cycles - 2.0 / THD_SEARCH_OVERSAMPLING;
+    let mut high = centre_cycles + 2.0 / THD_SEARCH_OVERSAMPLING;
+    for _ in 0..36 {
+        let third = (high - low) / 3.0;
+        let left = low + third;
+        let right = high - third;
+        if periodic_mismatch(unit_x, values, left) < periodic_mismatch(unit_x, values, right) {
+            high = right;
+        } else {
+            low = left;
+        }
+    }
+    (low + high) * 0.5
+}
+
+/// Estimate a fundamental from a Hann-windowed, DC-removed spectrum. The
+/// detector accepts only a single harmonic family. Independent subharmonic,
+/// intermodulation, or incommensurate peaks are an ambiguity error; callers
+/// can resolve that intentionally with `thd(w, n, f0)`.
+fn estimate_thd_fundamental(
+    x: &[f64],
+    y: &[f64],
+    span: f64,
+    nyquist: f64,
+    harmonics: usize,
+) -> Result<f64, EvaluationError> {
+    let (unit_x, normalized) = normalized_thd_signal(x, y)?;
+    let windowed: Vec<f64> = unit_x
+        .iter()
+        .zip(normalized.iter().copied())
+        .map(|(position, value)| value * (PI * position).sin().powi(2))
         .collect();
-    if rising.len() < 2 {
+    let maximum_cycles = nyquist * span / harmonics as f64;
+    if !maximum_cycles.is_finite() || maximum_cycles <= MIN_AUTO_THD_CYCLES {
+        return Err(EvaluationError::MathError(format!(
+            "thd cannot auto-estimate a fundamental with {harmonics} harmonics: the record and sampling grid provide insufficient frequency resolution"
+        )));
+    }
+    let scan_intervals =
+        ((maximum_cycles - THD_SEARCH_START_CYCLES) * THD_SEARCH_OVERSAMPLING).floor();
+    if !scan_intervals.is_finite() || scan_intervals < 2.0 || scan_intervals >= usize::MAX as f64 {
         return Err(EvaluationError::MathError(
-            "thd needs at least one whole period of a periodic signal".to_owned(),
+            "thd automatic frequency search is not representable".to_owned(),
         ));
     }
-    let (from, to) = (rising[0], rising[rising.len() - 1]);
-    let length = to - from;
-    if length <= 0.0 {
+    let sample_count = scan_intervals as usize + 1;
+    let mut spectrum = Vec::new();
+    spectrum.try_reserve_exact(sample_count).map_err(|_| {
+        EvaluationError::MathError("thd could not allocate its frequency search".to_owned())
+    })?;
+    for index in 0..sample_count {
+        let cycles = THD_SEARCH_START_CYCLES + index as f64 / THD_SEARCH_OVERSAMPLING;
+        let amplitude = spectral_amplitude(&unit_x, &windowed, cycles);
+        if !amplitude.is_finite() {
+            return Err(EvaluationError::MathError(
+                "thd automatic frequency search produced a non-finite spectrum".to_owned(),
+            ));
+        }
+        spectrum.push(amplitude);
+    }
+    let maximum = spectrum.iter().copied().fold(0.0_f64, f64::max);
+    if maximum == 0.0 {
         return Err(EvaluationError::MathError(
-            "thd found no elapsed time between periods".to_owned(),
+            "thd found no resolvable periodic component".to_owned(),
         ));
     }
-    let base = (rising.len() - 1) as f64 / length;
+    let mut peaks = Vec::new();
+    peaks.try_reserve_exact(spectrum.len() / 2).map_err(|_| {
+        EvaluationError::MathError("thd could not allocate its spectral peaks".to_owned())
+    })?;
+    for index in 1..spectrum.len() - 1 {
+        if spectrum[index] >= spectrum[index - 1]
+            && spectrum[index] > spectrum[index + 1]
+            && spectrum[index] >= maximum * THD_AMBIGUITY_FLOOR
+        {
+            peaks.push(refine_spectral_peak(
+                &unit_x,
+                &windowed,
+                THD_SEARCH_START_CYCLES + index as f64 / THD_SEARCH_OVERSAMPLING,
+            ));
+        }
+    }
+    let strong: Vec<SpectralPeak> = peaks
+        .iter()
+        .copied()
+        .filter(|peak| peak.amplitude >= maximum * THD_STRONG_PEAK_FLOOR)
+        .collect();
+    let Some(base) = strong.iter().min_by(|a, b| a.cycles.total_cmp(&b.cycles)) else {
+        return Err(EvaluationError::MathError(
+            "thd could not resolve an interior fundamental peak; provide f0 explicitly".to_owned(),
+        ));
+    };
+    if base.cycles < MIN_AUTO_THD_CYCLES {
+        return Err(EvaluationError::MathError(
+            "thd automatic fundamental needs at least three observed cycles; provide f0 explicitly"
+                .to_owned(),
+        ));
+    }
+    if strong
+        .iter()
+        .any(|peak| !harmonically_aligned(base.cycles, peak.cycles))
+    {
+        return Err(EvaluationError::MathError(
+            "thd automatic fundamental is ambiguous: significant peaks do not form one harmonic family; provide f0 explicitly"
+                .to_owned(),
+        ));
+    }
+    // Reject an independent weaker peak too. Peaks inside a strong peak's
+    // three-bin Hann main lobe are spectral leakage, not a second periodicity.
+    if peaks.iter().any(|peak| {
+        let belongs_to_main_lobe = strong
+            .iter()
+            .any(|strong_peak| (peak.cycles - strong_peak.cycles).abs() <= THD_HANN_MAIN_LOBE_BINS);
+        !belongs_to_main_lobe && !harmonically_aligned(base.cycles, peak.cycles)
+    }) {
+        return Err(EvaluationError::MathError(
+            "thd automatic fundamental is ambiguous: a subharmonic or unrelated spectral peak is present; provide f0 explicitly"
+                .to_owned(),
+        ));
+    }
+    let frequency = refine_periodicity(&unit_x, &normalized, base.cycles) / span;
+    if !frequency.is_finite() || frequency <= 0.0 {
+        return Err(EvaluationError::MathError(
+            "thd automatic fundamental is not representable; provide f0 explicitly".to_owned(),
+        ));
+    }
+    Ok(frequency)
+}
+
+fn measure_thd(
+    x: &[f64],
+    y: &[f64],
+    harmonics: usize,
+    fundamental: f64,
+    span: f64,
+    nyquist: f64,
+) -> Result<f64, EvaluationError> {
+    if !fundamental.is_finite() || fundamental <= 0.0 {
+        return Err(EvaluationError::MathError(
+            "thd fundamental frequency f0 must be finite and positive".to_owned(),
+        ));
+    }
+    let observed_cycles = fundamental * span;
+    if !observed_cycles.is_finite() || observed_cycles < 1.0 {
+        return Err(EvaluationError::MathError(format!(
+            "thd needs at least one complete cycle at f0 = {fundamental} within the observation interval"
+        )));
+    }
+    let highest_harmonic = fundamental * harmonics as f64;
+    if !highest_harmonic.is_finite() || highest_harmonic >= nyquist {
+        return Err(EvaluationError::MathError(format!(
+            "thd harmonic {harmonics} at {highest_harmonic} is not below the conservative sampling-grid Nyquist frequency {nyquist}"
+        )));
+    }
+    let complete_cycles = observed_cycles.floor();
+    let mut length = complete_cycles / fundamental;
+    let span_tolerance = 4.0 * f64::EPSILON * span;
+    if length > span && length - span <= span_tolerance {
+        length = span;
+    }
+    if !length.is_finite() || length <= 0.0 || length > span {
+        return Err(EvaluationError::MathError(
+            "thd complete-cycle measurement window is not representable".to_owned(),
+        ));
+    }
+    let from = x[0];
+    let mut to = from + length;
+    let axis_scale = from.abs().max(x[x.len() - 1].abs()).max(span);
+    let endpoint_tolerance = 4.0 * f64::EPSILON * axis_scale;
+    if to > x[x.len() - 1] && to - x[x.len() - 1] <= endpoint_tolerance {
+        to = x[x.len() - 1];
+    }
+    if !to.is_finite() || to <= from || to > x[x.len() - 1] {
+        return Err(EvaluationError::MathError(
+            "thd complete-cycle measurement window cannot be represented on this time axis"
+                .to_owned(),
+        ));
+    }
     let (window_x, window_y) = window(x, y, from, to);
-    let amplitudes: Vec<f64> = (1..=harmonics)
-        .map(|order| {
-            let omega = 2.0 * PI * order as f64 * base;
-            let cosine =
-                2.0 / length * trapezoid_xy(&window_x, &window_y, |t, v| v * (omega * t).cos());
-            let sine =
-                2.0 / length * trapezoid_xy(&window_x, &window_y, |t, v| v * (omega * t).sin());
-            cosine.hypot(sine)
-        })
-        .collect();
-    if amplitudes[0] == 0.0 {
+    let (unit_x, normalized) = normalized_thd_signal(&window_x, &window_y)?;
+    let mut harmonic_rss = 0.0_f64;
+    let mut fundamental_amplitude = 0.0;
+    for order in 1..=harmonics {
+        let cycles = complete_cycles * order as f64;
+        if !cycles.is_finite() {
+            return Err(EvaluationError::MathError(
+                "thd harmonic phase is not representable".to_owned(),
+            ));
+        }
+        let (cosine, sine) = pwl_projection(&unit_x, &normalized, cycles);
+        let amplitude = 2.0 * cosine.hypot(sine);
+        if !amplitude.is_finite() {
+            return Err(EvaluationError::MathError(format!(
+                "thd harmonic {order} amplitude is not representable"
+            )));
+        }
+        if order == 1 {
+            fundamental_amplitude = amplitude;
+        } else {
+            harmonic_rss = harmonic_rss.hypot(amplitude);
+        }
+    }
+    if fundamental_amplitude == 0.0 {
         return Err(EvaluationError::MathError(
             "thd found no fundamental to compare the harmonics against".to_owned(),
         ));
     }
-    let harmonic_power: f64 = amplitudes[1..].iter().map(|a| a * a).sum();
-    Ok(CalcValue::Scalar(
-        100.0 * harmonic_power.sqrt() / amplitudes[0],
-    ))
+    let percent = if harmonic_rss < fundamental_amplitude {
+        // Multiplication first preserves a subnormal ratio whose percentage
+        // is representable. Normalized amplitudes are at most order unity,
+        // so multiplying the smaller operand by 100 cannot overflow.
+        (harmonic_rss * 100.0) / fundamental_amplitude
+    } else {
+        // Division first avoids overflowing the numerator when distortion is
+        // large; a non-representable final percentage is rejected below.
+        (harmonic_rss / fundamental_amplitude) * 100.0
+    };
+    if !percent.is_finite() {
+        return Err(EvaluationError::MathError(
+            "thd percentage is not representable".to_owned(),
+        ));
+    }
+    Ok(percent)
+}
+
+/// `thd(w)` — total harmonic distortion in percent; `thd(w, n)` weighs `n`
+/// harmonics instead of [`DEFAULT_THD_HARMONICS`], and `thd(w, n, f0)` uses
+/// the caller's explicit fundamental frequency.
+///
+/// All forms require finite waveform values on a finite, strictly increasing
+/// (but not necessarily uniform) time grid. The requested top harmonic must
+/// be below the conservative Nyquist limit implied by the grid's largest
+/// sample gap, and the record must hold at least one complete `f0` cycle.
+///
+/// The one- and two-argument forms estimate `f0` from a DC-removed Hann
+/// spectrum and refuse records with an unresolved, subharmonic, or unrelated
+/// competing peak. The Hann window is used only to identify `f0`. The final
+/// amplitudes use exact piecewise-linear integration over a rectangular,
+/// integer-cycle window beginning at the first sample. Its time-weighted DC
+/// mean is removed before projection, so DC offset does not leak into the
+/// reported harmonics. Supply `f0` when the record is intentionally multitone
+/// or when its fundamental is known more accurately than the record permits.
+fn thd(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
+    check_arg_range("thd", &args, 1, 3)?;
+    let (x, y) = series_arg("thd", &args[0])?;
+    let harmonics = parse_thd_harmonics(args.get(1))?;
+    let (span, nyquist) = thd_sampling_limits(x, y)?;
+    let fundamental = match args.get(2) {
+        Some(value) => scalar_arg("thd", "fundamental frequency f0", value)?,
+        None => estimate_thd_fundamental(x, y, span, nyquist, harmonics)?,
+    };
+    Ok(CalcValue::Scalar(measure_thd(
+        x,
+        y,
+        harmonics,
+        fundamental,
+        span,
+        nyquist,
+    )?))
 }
 
 // =============================================================================
@@ -1486,7 +1954,10 @@ mod tests {
             ("freq", vec![train.clone()]),
             ("period", vec![train.clone()]),
             ("duty", vec![train.clone()]),
-            ("thd", vec![train]),
+            // This fixture's largest retained gap cannot resolve the default
+            // ten harmonics below Nyquist; two are enough for this test's
+            // forward-versus-reversed domain assertion.
+            ("thd", vec![train, CalcValue::Scalar(2.0)]),
             ("rise", vec![rising_ramp.clone()]),
             ("fall", vec![falling_ramp]),
             ("overshoot", vec![step.clone()]),
@@ -1709,6 +2180,150 @@ mod tests {
             0.02,
             "total harmonic distortion",
         );
+    }
+
+    #[test]
+    fn thd_explicit_fundamental_handles_dc_scale_and_a_strong_second_harmonic() {
+        // The non-uniform grid, huge signal scale, and DC offset exercise the
+        // documented normalization and leakage policy. The AC signal is
+        // sin(2πt) + 0.8 cos(4πt), so THD relative to f0 = 1 Hz is 80 %.
+        let x = nonuniform(6001, 0.0, 4.0);
+        let y: Vec<f64> = x
+            .iter()
+            .map(|time| 1.0e300 * (0.25 + (2.0 * PI * time).sin() + 0.8 * (4.0 * PI * time).cos()))
+            .collect();
+        assert_close(
+            scalar_of(
+                "thd",
+                vec![wave(x, y), CalcValue::Scalar(5.0), CalcValue::Scalar(1.0)],
+            ),
+            80.0,
+            1.0e-3,
+            "explicit-f0 THD with DC offset and a large signal scale",
+        );
+    }
+
+    #[test]
+    fn thd_auto_estimator_keeps_a_strong_second_harmonic_out_of_the_fundamental() {
+        // Mean-level crossing counts see extra crossings once the second
+        // harmonic dominates. The spectral estimator must still select the
+        // lowest member of the one coherent harmonic family.
+        let x = nonuniform(6001, 0.0, 6.0);
+        let y: Vec<f64> = x
+            .iter()
+            .map(|time| (2.0 * PI * time).sin() + 1.5 * (4.0 * PI * time).sin())
+            .collect();
+        assert_close(
+            scalar_of("thd", vec![wave(x, y), CalcValue::Scalar(4.0)]),
+            150.0,
+            0.02,
+            "auto-estimated THD with a dominant second harmonic",
+        );
+    }
+
+    #[test]
+    fn thd_auto_estimator_refuses_an_ambiguous_missing_subharmonic() {
+        // Peaks at 1 Hz and 1.5 Hz could be the second and third harmonics of
+        // an absent 0.5 Hz component, or two intentional tones. Choosing 1 Hz
+        // would print a plausible but unjustified answer, so auto mode must
+        // ask for the explicit-f0 form instead.
+        let x = nonuniform(8001, 0.0, 8.0);
+        let y: Vec<f64> = x
+            .iter()
+            .map(|time| (2.0 * PI * time).sin() + 0.7 * (2.0 * PI * 1.5 * time).sin())
+            .collect();
+        let error = call("thd", vec![wave(x, y), CalcValue::Scalar(4.0)])
+            .expect_err("an absent subharmonic makes automatic f0 ambiguous")
+            .to_string();
+        assert!(
+            error.contains("ambiguous") && error.contains("provide f0 explicitly"),
+            "unexpected ambiguity diagnostic: {error}"
+        );
+    }
+
+    #[test]
+    fn thd_accepts_irregular_sampling_but_rejects_invalid_samples() {
+        let x = nonuniform(2001, 0.0, 4.0);
+        let y: Vec<f64> = x
+            .iter()
+            .map(|time| (2.0 * PI * time).sin() + 0.2 * (4.0 * PI * time).sin())
+            .collect();
+        assert_close(
+            scalar_of(
+                "thd",
+                vec![
+                    wave(x.clone(), y.clone()),
+                    CalcValue::Scalar(3.0),
+                    CalcValue::Scalar(1.0),
+                ],
+            ),
+            20.0,
+            2.0e-3,
+            "explicit-f0 THD on an irregular grid",
+        );
+
+        let mut duplicate_x = x.clone();
+        duplicate_x[100] = duplicate_x[99];
+        let duplicate_error = call(
+            "thd",
+            vec![
+                wave(duplicate_x, y.clone()),
+                CalcValue::Scalar(3.0),
+                CalcValue::Scalar(1.0),
+            ],
+        )
+        .expect_err("THD cannot assign a Nyquist limit to duplicate timepoints")
+        .to_string();
+        assert!(
+            duplicate_error.contains("strictly increasing"),
+            "unexpected duplicate-time diagnostic: {duplicate_error}"
+        );
+
+        let mut undefined_y = y;
+        undefined_y[200] = f64::NAN;
+        let undefined_error = call(
+            "thd",
+            vec![
+                wave(x, undefined_y),
+                CalcValue::Scalar(3.0),
+                CalcValue::Scalar(1.0),
+            ],
+        )
+        .expect_err("THD cannot integrate through a waveform hole")
+        .to_string();
+        assert!(
+            undefined_error.contains("waveform sample 200 is not finite"),
+            "unexpected non-finite-sample diagnostic: {undefined_error}"
+        );
+    }
+
+    #[test]
+    fn thd_enforces_fundamental_resolution_and_nyquist_bounds() {
+        let x: Vec<f64> = (0..=400).map(|index| index as f64 * 0.01).collect();
+        let y: Vec<f64> = x.iter().map(|time| (2.0 * PI * time).sin()).collect();
+        for (fundamental, harmonics, expected) in [
+            (0.2, 2.0, "at least one complete cycle"),
+            (0.0, 2.0, "finite and positive"),
+            (f64::NAN, 2.0, "finite and positive"),
+            // Largest gap is 0.01 s, so the conservative Nyquist limit is
+            // 50 Hz and the fifth harmonic of 10 Hz lies on, not below, it.
+            (10.0, 5.0, "not below"),
+        ] {
+            let error = call(
+                "thd",
+                vec![
+                    wave(x.clone(), y.clone()),
+                    CalcValue::Scalar(harmonics),
+                    CalcValue::Scalar(fundamental),
+                ],
+            )
+            .expect_err("invalid explicit-f0 measurement must fail closed")
+            .to_string();
+            assert!(
+                error.contains(expected),
+                "f0={fundamental:?}, n={harmonics}: expected {expected:?} in {error:?}"
+            );
+        }
     }
 
     /// A NaN parameter is refused by the guard that owns it, not absorbed.

@@ -313,8 +313,16 @@ impl Mosfet {
     /// intentionally match the canonical helpers exactly so cached and
     /// fallback evaluation remain bit-identical.
     pub(crate) fn classic_transient_constants(&self) -> ClassicMosTransientConstants {
-        let phi = self.phi.max(1.0e-12);
-        let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
+        let phi = if self.level == 1 {
+            self.phi
+        } else {
+            self.phi.max(1.0e-12)
+        };
+        let effective_length = if self.level == 1 {
+            self.l - 2.0 * self.ld
+        } else {
+            (self.l - 2.0 * self.ld).max(1.0e-12)
+        };
         let meyer_width = self.classic_meyer_effective_width();
         let meyer_length = self.classic_meyer_effective_length();
         let source_body_isat = self.effective_body_junction_saturation_current(self.source_area);
@@ -715,7 +723,7 @@ impl Mosfet {
         let kp_explicit = params
             .get("KP")
             .copied()
-            .filter(|v| v.is_finite() && *v > 0.0);
+            .filter(|v| v.is_finite() && *v >= 0.0);
         let kc_explicit = params
             .get("KC")
             .copied()
@@ -1305,6 +1313,117 @@ impl Mosfet {
                 }
             }
         }
+    }
+
+    /// Validate the physical scalar contract consumed by the native Level-1
+    /// equations. Circuit construction calls this after geometry and
+    /// temperature resolution; exact HB calls it again defensively for
+    /// programmatically assembled circuits.
+    pub(crate) fn level1_physical_parameter_error(&self) -> Option<&'static str> {
+        if self.level != 1 {
+            return None;
+        }
+        if !self.l.is_finite() || self.l <= 0.0 {
+            return Some("L must be finite and positive");
+        }
+        if !self.w.is_finite() || self.w <= 0.0 {
+            return Some("W must be finite and positive");
+        }
+        if !self.ld.is_finite() || self.ld < 0.0 {
+            return Some("LD must be finite and nonnegative");
+        }
+        let effective_length = self.l - 2.0 * self.ld;
+        if !effective_length.is_finite() || effective_length <= 0.0 {
+            return Some("effective channel length L-2*LD must be finite and positive");
+        }
+        if !self.kp.is_finite() || self.kp < 0.0 {
+            return Some("KP must be finite and nonnegative");
+        }
+        if !self.vto.is_finite() {
+            return Some("VTO must be finite");
+        }
+        if !self.lambda.is_finite() || self.lambda < 0.0 {
+            return Some("LAMBDA must be finite and nonnegative");
+        }
+        if !self.gamma.is_finite() || self.gamma < 0.0 {
+            return Some("GAMMA must be finite and nonnegative");
+        }
+        if !self.phi.is_finite() || self.phi <= 0.0 {
+            return Some("PHI must be finite and positive");
+        }
+        if !(1.0 / self.phi).is_finite() {
+            return Some("1/PHI must be finite for the Level-1 charge law");
+        }
+        if !self.vt.is_finite() || self.vt <= 0.0 {
+            return Some("thermal voltage must be finite and positive");
+        }
+        if !self.is_bulk.is_finite() || self.is_bulk < 0.0 {
+            return Some("IS must be finite and nonnegative");
+        }
+        if !self.js_bulk.is_finite() || self.js_bulk < 0.0 {
+            return Some("JS must be finite and nonnegative");
+        }
+        if !self.cox.is_finite() || self.cox < 0.0 {
+            return Some("oxide capacitance density must be finite and nonnegative");
+        }
+        for capacitance in [self.cj, self.cjsw, self.cgso, self.cgdo, self.cgbo] {
+            if !capacitance.is_finite() || capacitance < 0.0 {
+                return Some("junction and overlap capacitances must be finite and nonnegative");
+            }
+        }
+        if !self.pb.is_finite() || self.pb <= 0.0 {
+            return Some("PB must be finite and positive");
+        }
+        if !self.mj.is_finite() || !(0.0..=1.0).contains(&self.mj) {
+            return Some("MJ must be finite and satisfy 0 <= MJ <= 1");
+        }
+        if !self.mjsw.is_finite() || !(0.0..=1.0).contains(&self.mjsw) {
+            return Some("MJSW must be finite and satisfy 0 <= MJSW <= 1");
+        }
+        if !self.fc.is_finite() || !(0.0..1.0).contains(&self.fc) {
+            return Some("FC must be finite and satisfy 0 <= FC < 1");
+        }
+        for geometry in [
+            self.drain_area,
+            self.source_area,
+            self.drain_perimeter,
+            self.source_perimeter,
+        ] {
+            if !geometry.is_finite() || geometry < 0.0 {
+                return Some("junction areas and perimeters must be finite and nonnegative");
+            }
+        }
+        for capacitance in [
+            self.drain_bulk_cap_zero_bias,
+            self.source_bulk_cap_zero_bias,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !capacitance.is_finite() || capacitance < 0.0 {
+                return Some("CBD and CBS must be finite and nonnegative");
+            }
+        }
+
+        let beta = self.kp * self.w / effective_length;
+        if !beta.is_finite() || beta < 0.0 {
+            return Some("KP*W/(L-2*LD) must be finite and nonnegative");
+        }
+        for capacitance in [
+            self.cox * self.w * effective_length,
+            self.cgso * self.w,
+            self.cgdo * self.w,
+            self.cgbo * effective_length,
+            self.cj * self.source_area,
+            self.cj * self.drain_area,
+            self.cjsw * self.source_perimeter,
+            self.cjsw * self.drain_perimeter,
+        ] {
+            if !capacitance.is_finite() || capacitance < 0.0 {
+                return Some("resolved Level-1 capacitance must be finite and nonnegative");
+            }
+        }
+        None
     }
 
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {

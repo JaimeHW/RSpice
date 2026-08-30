@@ -511,7 +511,7 @@ struct PeriodicConversionOperator<'a> {
     g_matrix: &'a [(usize, usize, Value)],
     c_matrix: &'a [(usize, usize, Value)],
     l_matrix: &'a [(usize, usize, Value)],
-    mna_branches: &'a [PeriodicMnaBranch],
+    mna_branches: &'a [ExactMnaBranch],
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
 }
@@ -567,7 +567,7 @@ impl PeriodicConversionOperator<'_> {
             && self
                 .mna_branches
                 .iter()
-                .any(|branch| matches!(branch, PeriodicMnaBranch::Inductor { .. }))
+                .any(|branch| matches!(branch, ExactMnaBranch::Inductor { .. }))
         {
             return Err(HbError::InvalidCircuit(format!(
                 "{context} mixes nodal inductor admittances with exact inductor MNA branches"
@@ -644,19 +644,25 @@ impl PeriodicConversionOperator<'_> {
                     "{context} MNA branch ordinal exceeds this platform"
                 ))
             })?;
-            let (branch_ordinal, node_pos, node_neg, inductance) = match *branch {
-                PeriodicMnaBranch::VoltageSource {
+            let (branch_ordinal, node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
                     branch_ordinal,
                     node_pos,
                     node_neg,
                     ..
-                } => (branch_ordinal, node_pos, node_neg, None),
-                PeriodicMnaBranch::Inductor {
+                } => (*branch_ordinal, *node_pos, *node_neg),
+                ExactMnaBranch::Inductor {
                     branch_ordinal,
                     node_pos,
                     node_neg,
-                    inductance,
-                } => (branch_ordinal, node_pos, node_neg, Some(inductance)),
+                    ..
+                } => (*branch_ordinal, *node_pos, *node_neg),
+                ExactMnaBranch::Resistor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    ..
+                } => (*branch_ordinal, *node_pos, *node_neg),
             };
             if branch_ordinal != expected_ordinal {
                 return Err(HbError::InvalidCircuit(format!(
@@ -674,21 +680,31 @@ impl PeriodicConversionOperator<'_> {
                     "{context} MNA branch #{branch_index} has identical terminals"
                 )));
             }
-            if let Some(inductance) = inductance {
-                if !inductance.is_finite() || inductance == 0.0 {
+            if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                if !inductance.is_finite() || *inductance == 0.0 {
                     return Err(HbError::InvalidCircuit(format!(
                         "{context} inductor branch #{branch_index} must have finite nonzero inductance"
                     )));
                 }
                 for sideband_index in 0..self.num_sidebands {
                     let omega = self.omega(sideband_index);
-                    if !finite_product_is_representable(omega, inductance) {
+                    if !finite_product_is_representable(omega, *inductance) {
                         return Err(HbError::InvalidCircuit(format!(
                             "{context} inductor branch #{branch_index} has a non-representable impedance at sideband {}",
                             i64::from(self.sideband_min) + sideband_index as i64
                         )));
                     }
                 }
+            }
+            if let ExactMnaBranch::Resistor {
+                small_signal_resistance,
+                ..
+            } = branch
+                && !small_signal_resistance.is_finite()
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "{context} resistor branch #{branch_index} has non-finite small-signal resistance"
+                )));
             }
         }
         for (kind, spectra) in [
@@ -782,13 +798,16 @@ impl PeriodicConversionOperator<'_> {
 
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
             let branch_unknown = n + branch_index;
-            let (node_pos, node_neg) = match *branch {
-                PeriodicMnaBranch::VoltageSource {
+            let (node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
                     node_pos, node_neg, ..
                 }
-                | PeriodicMnaBranch::Inductor {
+                | ExactMnaBranch::Inductor {
                     node_pos, node_neg, ..
-                } => (node_pos, node_neg),
+                }
+                | ExactMnaBranch::Resistor {
+                    node_pos, node_neg, ..
+                } => (*node_pos, *node_neg),
             };
             for k_idx in 0..s {
                 let branch_coordinate = branch_unknown * s + k_idx;
@@ -810,11 +829,22 @@ impl PeriodicConversionOperator<'_> {
                         Complex64::new(-1.0, 0.0),
                     );
                 }
-                if let PeriodicMnaBranch::Inductor { inductance, .. } = *branch {
+                if let ExactMnaBranch::Inductor { inductance, .. } = branch {
                     visitor(
                         branch_coordinate,
                         branch_coordinate,
-                        Complex64::new(0.0, -self.omega(k_idx) * inductance),
+                        Complex64::new(0.0, -self.omega(k_idx) * *inductance),
+                    );
+                }
+                if let ExactMnaBranch::Resistor {
+                    small_signal_resistance,
+                    ..
+                } = branch
+                {
+                    visitor(
+                        branch_coordinate,
+                        branch_coordinate,
+                        Complex64::new(-*small_signal_resistance, 0.0),
                     );
                 }
             }
@@ -951,13 +981,16 @@ impl PeriodicConversionOperator<'_> {
         }
         for (branch_index, branch) in self.mna_branches.iter().enumerate() {
             let row = node_count + branch_index;
-            let (node_pos, node_neg) = match *branch {
-                PeriodicMnaBranch::VoltageSource {
+            let (node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
                     node_pos, node_neg, ..
                 }
-                | PeriodicMnaBranch::Inductor {
+                | ExactMnaBranch::Inductor {
                     node_pos, node_neg, ..
-                } => (node_pos, node_neg),
+                }
+                | ExactMnaBranch::Resistor {
+                    node_pos, node_neg, ..
+                } => (*node_pos, *node_neg),
             };
             if node_pos > 0 {
                 let node = node_pos - 1;
@@ -969,8 +1002,15 @@ impl PeriodicConversionOperator<'_> {
                 block[node * n + row] -= Complex64::new(1.0, 0.0);
                 block[row * n + node] -= Complex64::new(1.0, 0.0);
             }
-            if let PeriodicMnaBranch::Inductor { inductance, .. } = *branch {
-                block[row * n + row] -= jw * inductance;
+            if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                block[row * n + row] -= jw * *inductance;
+            }
+            if let ExactMnaBranch::Resistor {
+                small_signal_resistance,
+                ..
+            } = branch
+            {
+                block[row * n + row] -= *small_signal_resistance;
             }
         }
         if transpose {
@@ -1177,6 +1217,7 @@ impl HbSolver {
         state: &HbSolverState,
         context: &str,
     ) -> Result<Vec<Vec<Value>>, HbError> {
+        self.validate_nonlinear_device_parameters()?;
         validate_periodic_state(state, self.num_nodes, context)?;
         let mut waveforms = Vec::with_capacity(self.num_nodes);
         for (node, spectrum) in state.x.iter().enumerate() {
@@ -1661,7 +1702,7 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.g_matrix,
+            g_matrix: &self.periodic_g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
@@ -1813,7 +1854,7 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.g_matrix,
+            g_matrix: &self.periodic_g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
@@ -1830,14 +1871,30 @@ impl HbSolver {
     /// Each entry is a current-noise source between two nodes whose
     /// time-varying intensity s(t) >= 0 (A^2/Hz) is returned as Fourier
     /// coefficients on the HB grid: shot noise `2q|I(t)|` for junction
-    /// currents and channel thermal noise `(8/3)kT|gm(t)|` for FETs.
+    /// currents and channel thermal noise `4kT*gamma*|gm(t)|` for FETs.
     pub(crate) fn device_noise_sources(
         &mut self,
         state: &HbSolverState,
         temperature: Value,
+        physical_constants: crate::analysis::noise::NoisePhysicalConstants,
     ) -> Result<Vec<PeriodicNoiseSource>, HbError> {
-        use crate::constants::K_BOLTZMANN as K_B;
-        use crate::constants::Q_ELECTRON as Q_E;
+        let k_b = physical_constants.boltzmann;
+        let q_e = physical_constants.electron_charge;
+        if !k_b.is_finite() || k_b <= 0.0 || !q_e.is_finite() || q_e <= 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "periodic noise physical constants must be finite and positive, got k={k_b}, q={q_e}"
+            )));
+        }
+        if self.nonlinear_device_names.len() != self.nonlinear_devices.len()
+            || self.nonlinear_noise_temperatures.len() != self.nonlinear_devices.len()
+        {
+            return Err(HbError::InvalidCircuit(format!(
+                "nonlinear periodic-noise metadata is misaligned: {} devices, {} names, {} temperatures",
+                self.nonlinear_devices.len(),
+                self.nonlinear_device_names.len(),
+                self.nonlinear_noise_temperatures.len()
+            )));
+        }
 
         let n = self.num_nodes;
         let n_time = self.fft.size();
@@ -1854,6 +1911,16 @@ impl HbSolver {
         let mut node_voltages = vec![0.0; n];
 
         for (d_idx, device) in self.nonlinear_devices.iter().enumerate() {
+            let device_name = self.nonlinear_device_names.get(d_idx).ok_or_else(|| {
+                HbError::InvalidCircuit(format!(
+                    "nonlinear device {d_idx} has no aligned contributor name"
+                ))
+            })?;
+            if device_name.trim().is_empty() {
+                return Err(HbError::InvalidCircuit(format!(
+                    "nonlinear device {d_idx} has an empty periodic-noise contributor name"
+                )));
+            }
             let temperature_metadata = self
                 .nonlinear_noise_temperatures
                 .get(d_idx)
@@ -1871,14 +1938,12 @@ impl HbSolver {
                     | NonlinearDeviceType::Njfet
                     | NonlinearDeviceType::Pjfet
                     | NonlinearDeviceType::VoltageSwitch
-                    | NonlinearDeviceType::CurrentSwitch
             );
             if temperature_dependent
                 && (!source_temperature.is_finite() || source_temperature <= 0.0)
             {
                 return Err(HbError::InvalidCircuit(format!(
-                    "periodic noise source {:?}#{d_idx} absolute temperature must be finite and positive, got {source_temperature} K",
-                    device.device_type
+                    "periodic noise source '{device_name}' absolute temperature must be finite and positive, got {source_temperature} K"
                 )));
             }
             let branches = device.noise_branches();
@@ -1887,11 +1952,7 @@ impl HbSolver {
             }
             let base = intensities.len();
             for (b, &(p, q)) in branches.iter().enumerate() {
-                let label = format!(
-                    "{:?}#{d_idx} {}",
-                    device.device_type,
-                    device.noise_branch_label(b)
-                );
+                let label = format!("{device_name} {}", device.noise_branch_label(b));
                 intensities.push((
                     (p, q),
                     label,
@@ -1903,17 +1964,15 @@ impl HbSolver {
                     node_voltages[node] = v_time[node][t];
                 }
                 let values = device
-                    .noise_intensities(&node_voltages, source_temperature, Q_E, K_B)
+                    .noise_intensities(&node_voltages, source_temperature, q_e, k_b)
                     .map_err(|reason| {
                         HbError::InvalidCircuit(format!(
-                            "periodic noise source {:?}#{d_idx} is invalid at time sample {t}: {reason}",
-                            device.device_type
+                            "periodic noise source '{device_name}' is invalid at time sample {t}: {reason}"
                         ))
                     })?;
                 if values.len() != branches.len() {
                     return Err(HbError::InvalidCircuit(format!(
-                        "periodic noise source {:?}#{d_idx} produced {} intensities for {} branches",
-                        device.device_type,
+                        "periodic noise source '{device_name}' produced {} intensities for {} branches",
                         values.len(),
                         branches.len()
                     )));
@@ -1926,6 +1985,12 @@ impl HbSolver {
 
         let mut sources = Vec::with_capacity(intensities.len());
         for ((p, q), name, waveform) in intensities {
+            if waveform
+                .iter()
+                .all(|sample| *sample == super::devices::ScaledNonnegative::ZERO)
+            {
+                continue;
+            }
             let (normalized, binary_scale_exponent) = normalize_scaled_noise_waveform(&waveform)
                 .map_err(|reason| {
                     HbError::InvalidCircuit(format!(
@@ -2207,7 +2272,7 @@ impl HbSolver {
             sideband_min,
             offset_hz,
             fundamental_hz: self.config.fundamental_freq,
-            g_matrix: &self.g_matrix,
+            g_matrix: &self.periodic_g_matrix,
             c_matrix: &self.c_matrix,
             l_matrix: &self.l_matrix,
             mna_branches: &self.periodic_mna_branches,
@@ -2419,11 +2484,13 @@ pub struct PeriodicNoiseSource {
     /// coefficient. This preserves physically representable folded results
     /// when an elementary source density lies outside the direct `f64` range.
     pub binary_scale_exponent: i32,
-    /// Stationary flicker term `(coefficient, frequency exponent)`: adds
+    /// Explicitly stationary colored term `(coefficient, frequency exponent)`:
+    /// adds
     /// `coefficient / |f|^exponent` evaluated at each sideband's absolute
-    /// frequency. The coefficient already folds the bias dependence
-    /// (KF * |I_dc|^AF); bias modulation of 1/f noise is approximated by the
-    /// periodic average, the standard folding treatment.
+    /// frequency with no inter-sideband source correlation. This is exact for
+    /// a caller-authenticated stationary source. Periodically bias-dependent
+    /// device KF controls require a different cyclostationary colored-source
+    /// contract and are rejected by the engine rather than mapped here.
     pub flicker: Option<(Value, Value)>,
 }
 
@@ -2565,7 +2632,8 @@ mod matrix_free_tests {
         let config = HbConfig::new(1.0e6).with_harmonics(1);
         let mut offset_solver = HbSolver::new(config.clone(), 4);
         offset_solver.add_diode(2, 3, 1.0e-14, 1.0);
-        offset_solver.add_nonlinear_device_with_noise_temperature_offset(
+        offset_solver.add_named_nonlinear_device_with_noise_temperature_offset(
+            "Moffset",
             NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
             150.0,
         );
@@ -2581,11 +2649,22 @@ mod matrix_free_tests {
         let channel_source = |sources: Vec<PeriodicNoiseSource>| {
             sources
                 .into_iter()
-                .find(|source| source.name.contains("Nmos#1 channel thermal"))
+                .find(|source| source.name.contains("channel thermal"))
                 .expect("the MOS source stays aligned after an earlier diode")
         };
-        let offset = channel_source(offset_solver.device_noise_sources(&state, 300.15).unwrap());
-        let ambient = channel_source(ambient_solver.device_noise_sources(&state, 450.15).unwrap());
+        let constants = crate::analysis::noise::NoisePhysicalConstants::MODERN;
+        let offset = channel_source(
+            offset_solver
+                .device_noise_sources(&state, 300.15, constants)
+                .unwrap(),
+        );
+        assert_eq!(offset.name, "Moffset channel thermal");
+        let ambient = channel_source(
+            ambient_solver
+                .device_noise_sources(&state, 450.15, constants)
+                .unwrap(),
+        );
+        assert_eq!(ambient.name, "Nmos#1 channel thermal");
         assert!(
             offset.psd[0].re.is_finite() && offset.psd[0].re > 0.0,
             "offset-temperature MOS source must exercise a nonzero PSD"
@@ -2599,7 +2678,8 @@ mod matrix_free_tests {
 
         let mut absolute_solver = HbSolver::new(config.clone(), 4);
         absolute_solver.add_diode(2, 3, 1.0e-14, 1.0);
-        absolute_solver.add_nonlinear_device_with_absolute_noise_temperature(
+        absolute_solver.add_named_nonlinear_device_with_absolute_noise_temperature(
+            "Mabsolute",
             NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
             300.15,
         );
@@ -2609,12 +2689,12 @@ mod matrix_free_tests {
             .add_nonlinear_device(NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04));
         let absolute = channel_source(
             absolute_solver
-                .device_noise_sources(&state, 1.0e20)
+                .device_noise_sources(&state, 1.0e20, constants)
                 .expect("absolute TEMP survives an extreme ambient temperature"),
         );
         let reference = channel_source(
             reference_solver
-                .device_noise_sources(&state, 300.15)
+                .device_noise_sources(&state, 300.15, constants)
                 .unwrap(),
         );
         assert_eq!(
@@ -2624,27 +2704,151 @@ mod matrix_free_tests {
         assert_eq!(absolute.psd, reference.psd);
 
         let mut invalid_solver = HbSolver::new(config.clone(), 4);
-        invalid_solver.add_nonlinear_device_with_noise_temperature_offset(
+        invalid_solver.add_named_nonlinear_device_with_noise_temperature_offset(
+            "Minvalid",
             NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
             -300.15,
         );
         let error = invalid_solver
-            .device_noise_sources(&state, 300.15)
+            .device_noise_sources(&state, 300.15, constants)
             .expect_err("zero absolute channel-noise temperature must fail");
         let message = error.to_string();
-        assert!(message.contains("Nmos#0") && message.contains("finite and positive"));
+        assert!(message.contains("Minvalid") && message.contains("finite and positive"));
 
         for invalid_offset in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
             let mut invalid_solver = HbSolver::new(config.clone(), 4);
-            invalid_solver.add_nonlinear_device_with_noise_temperature_offset(
+            invalid_solver.add_named_nonlinear_device_with_noise_temperature_offset(
+                "Mnonfinite",
                 NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2.0e-5, 0.04),
                 invalid_offset,
             );
             let error = invalid_solver
-                .device_noise_sources(&state, 300.15)
+                .device_noise_sources(&state, 300.15, constants)
                 .expect_err("non-finite channel-noise temperature must fail");
             assert!(error.to_string().contains("finite and positive"));
         }
+    }
+
+    fn physical_density(source: &PeriodicNoiseSource) -> Value {
+        libm::scalbn(source.psd[0].re, source.binary_scale_exponent)
+    }
+
+    #[test]
+    fn nonlinear_noise_catalog_retains_authored_junction_sources_and_omits_exact_zero() {
+        let constants = crate::analysis::noise::NoisePhysicalConstants::MODERN;
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config.clone(), 4);
+        let vt = 0.02585;
+        let source_is = 1.0e-14;
+        let drain_is = 2.0e-14;
+        solver.add_named_nonlinear_device(
+            "Mauthored",
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 1.0, 0.0, 0.0)
+                .with_thermal_voltage(vt)
+                .with_bulk_junctions(
+                    DepletionCap::none(),
+                    DepletionCap::none(),
+                    source_is,
+                    drain_is,
+                ),
+        );
+        let mut state = HbSolverState::new(4, 1);
+        state.x[3][0] = Complex64::new(0.1, 0.0);
+        let sources = solver
+            .device_noise_sources(&state, 300.15, constants)
+            .expect("MOS junction source catalog builds");
+        assert_eq!(sources.len(), 2, "the exact-zero channel source is omitted");
+        let expected_current_factor = (0.1 / vt).exp() - 1.0;
+        for (label, saturation_current) in [
+            ("Mauthored source-bulk shot", source_is),
+            ("Mauthored drain-bulk shot", drain_is),
+        ] {
+            let source = sources
+                .iter()
+                .find(|source| source.name == label)
+                .unwrap_or_else(|| panic!("missing authored source {label}: {sources:?}"));
+            let expected =
+                2.0 * constants.electron_charge * saturation_current * expected_current_factor;
+            let actual = physical_density(source);
+            assert!((actual - expected).abs() <= 16.0 * Value::EPSILON * expected);
+        }
+        let xyce_sources = solver
+            .device_noise_sources(
+                &state,
+                300.15,
+                crate::analysis::noise::NoisePhysicalConstants::XYCE_7_10,
+            )
+            .expect("the dialect-specific charge constant remains accepted");
+        let xyce_source = xyce_sources
+            .iter()
+            .find(|source| source.name == "Mauthored source-bulk shot")
+            .expect("the Xyce source-bulk contributor remains present");
+        let xyce_expected = 2.0
+            * crate::analysis::noise::NoisePhysicalConstants::XYCE_7_10.electron_charge
+            * source_is
+            * expected_current_factor;
+        let xyce_actual = physical_density(xyce_source);
+        assert!(
+            (xyce_actual - xyce_expected).abs() <= 16.0 * Value::EPSILON * xyce_expected,
+            "junction shot noise must use the configured dialect's q"
+        );
+
+        let mut jfet_solver = HbSolver::new(config.clone(), 3);
+        let gate_is = 3.0e-14;
+        jfet_solver.add_named_nonlinear_device(
+            "Jauthored",
+            NonlinearDeviceInstance::njfet(0, 1, 2, 1.0, 0.0, 0.0, gate_is)
+                .with_thermal_voltage(vt),
+        );
+        let mut jfet_state = HbSolverState::new(3, 1);
+        jfet_state.x[1][0] = Complex64::new(0.1, 0.0);
+        let sources = jfet_solver
+            .device_noise_sources(&jfet_state, 300.15, constants)
+            .expect("JFET junction source catalog builds");
+        assert_eq!(sources.len(), 2, "the exact-zero channel source is omitted");
+        let expected = 2.0 * constants.electron_charge * gate_is * expected_current_factor;
+        for label in ["Jauthored gate-source shot", "Jauthored gate-drain shot"] {
+            let source = sources
+                .iter()
+                .find(|source| source.name == label)
+                .unwrap_or_else(|| panic!("missing authored source {label}: {sources:?}"));
+            let actual = physical_density(source);
+            assert!((actual - expected).abs() <= 16.0 * Value::EPSILON * expected);
+        }
+
+        let mut zero_solver = HbSolver::new(config, 4);
+        zero_solver.add_named_nonlinear_device(
+            "Mzero",
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 1.0, 0.0, 0.0).with_bulk_junctions(
+                DepletionCap::none(),
+                DepletionCap::none(),
+                0.0,
+                0.0,
+            ),
+        );
+        assert!(
+            zero_solver
+                .device_noise_sources(&HbSolverState::new(4, 1), 300.15, constants)
+                .expect("exact-zero mechanisms are valid")
+                .is_empty(),
+            "disabled channel and junction mechanisms must not publish zero contributors"
+        );
+    }
+
+    #[test]
+    fn nonlinear_noise_catalog_rejects_misaligned_names() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 2);
+        solver.add_diode(0, 1, 1.0e-14, 1.0);
+        solver.nonlinear_device_names.clear();
+        let error = solver
+            .device_noise_sources(
+                &HbSolverState::new(2, 1),
+                300.15,
+                crate::analysis::noise::NoisePhysicalConstants::MODERN,
+            )
+            .expect_err("misaligned contributor identity must fail before sampling");
+        assert!(error.to_string().contains("metadata is misaligned"));
     }
 
     #[test]
@@ -2861,13 +3065,14 @@ mod matrix_free_tests {
             ],
         )];
         let branches = [
-            PeriodicMnaBranch::VoltageSource {
+            ExactMnaBranch::VoltageSource {
                 branch_ordinal: 1,
                 node_pos: 1,
                 node_neg: 0,
                 source_index: 0,
+                source: None,
             },
-            PeriodicMnaBranch::Inductor {
+            ExactMnaBranch::Inductor {
                 branch_ordinal: 2,
                 node_pos: 2,
                 node_neg: 0,
@@ -3361,6 +3566,30 @@ mod matrix_free_tests {
                 .solve_periodic_ac(&state, 1.0e3, 0, 0, &[excitation])
                 .expect_err("invalid PAC excitation evidence must fail closed");
             assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
+    #[test]
+    fn periodic_operators_reject_invalid_direct_solver_devices_before_sampling() {
+        let config = HbConfig::new(1.0e6).with_harmonics(1);
+        let mut solver = HbSolver::new(config, 1);
+        let mut diode = NonlinearDeviceInstance::diode(0, 0, 1.0e-14, 1.0);
+        diode.params.cap_a = DepletionCap::new(1.0e-12, 0.7, 1.01, 0.5);
+        solver.add_nonlinear_device(diode);
+        let state = HbSolverState::new(1, 1);
+
+        for error in [
+            solver
+                .conductance_spectra(&state, 1)
+                .expect_err("PAC conductance sampling must validate direct solver devices"),
+            solver
+                .capacitance_spectra(&state, 1)
+                .expect_err("PAC/PNoise charge sampling must validate direct solver devices"),
+        ] {
+            assert!(
+                error.to_string().contains("grading coefficient"),
+                "wrong periodic-device validation diagnostic: {error}"
+            );
         }
     }
 

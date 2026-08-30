@@ -247,6 +247,9 @@ pub(super) struct GmresOutcome {
     pub converged: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GmresAborted;
+
 #[inline]
 fn dot(u: &[Complex64], v: &[Complex64]) -> Complex64 {
     u.iter().zip(v).map(|(a, b)| a.conj() * b).sum()
@@ -277,8 +280,8 @@ fn givens(a: Complex64, b: Complex64) -> (f64, Complex64) {
 ///
 /// `matvec` applies A to a flattened vector. `x` starts at zero (the HB
 /// Newton step has no better initial guess). Stagnation across a restart
-/// cycle terminates early with `converged = false`; the caller is expected
-/// to fall back to the exact dense solve.
+/// cycle terminates early with `converged = false`; the caller must apply its
+/// own certification and bounded-recovery policy.
 pub(super) fn gmres(
     matvec: &dyn Fn(&[Complex64]) -> Vec<Complex64>,
     precond: &dyn KrylovPreconditioner,
@@ -286,15 +289,41 @@ pub(super) fn gmres(
     restart: usize,
     max_outer: usize,
 ) -> GmresOutcome {
+    match gmres_with_abort(matvec, precond, b, restart, max_outer, &|| false) {
+        Ok(outcome) => outcome,
+        Err(GmresAborted) => GmresOutcome {
+            solution: vec![ZERO; b.len()],
+            iterations: 0,
+            relative_residual: f64::INFINITY,
+            converged: false,
+        },
+    }
+}
+
+/// Abort-aware form of [`gmres`]. The callback is polled before each outer
+/// restart, each Arnoldi step, and every expensive operator/preconditioner
+/// application so a desktop or browser cancellation does not wait for the
+/// entire inner linear solve.
+pub(super) fn gmres_with_abort(
+    matvec: &dyn Fn(&[Complex64]) -> Vec<Complex64>,
+    precond: &dyn KrylovPreconditioner,
+    b: &[Complex64],
+    restart: usize,
+    max_outer: usize,
+    is_aborted: &dyn Fn() -> bool,
+) -> Result<GmresOutcome, GmresAborted> {
+    if is_aborted() {
+        return Err(GmresAborted);
+    }
     let size = b.len();
     let b_norm = norm(b);
     if b_norm == 0.0 {
-        return GmresOutcome {
+        return Ok(GmresOutcome {
             solution: vec![ZERO; size],
             iterations: 0,
             relative_residual: 0.0,
             converged: true,
-        };
+        });
     }
 
     let m = bounded_gmres_restart(restart, size);
@@ -304,6 +333,9 @@ pub(super) fn gmres(
     let mut total_iterations = 0usize;
 
     for _outer in 0..max_outer {
+        if is_aborted() {
+            return Err(GmresAborted);
+        }
         // Arnoldi basis (m+1 vectors) and Hessenberg columns.
         let mut basis: Vec<Vec<Complex64>> = Vec::with_capacity(m + 1);
         basis.push(r.iter().map(|c| c / beta).collect());
@@ -318,12 +350,21 @@ pub(super) fn gmres(
         let mut happy_breakdown = false;
 
         for j in 0..m {
+            if is_aborted() {
+                return Err(GmresAborted);
+            }
             total_iterations += 1;
             inner_used = j + 1;
 
             // w = A · M⁻¹ vⱼ
             let z = precond.apply(&basis[j]);
+            if is_aborted() {
+                return Err(GmresAborted);
+            }
             let mut w = matvec(&z);
+            if is_aborted() {
+                return Err(GmresAborted);
+            }
 
             // Modified Gram-Schmidt.
             let mut h_col = vec![ZERO; j + 2];
@@ -385,13 +426,22 @@ pub(super) fn gmres(
                 *u += y_j * v;
             }
         }
+        if is_aborted() {
+            return Err(GmresAborted);
+        }
         let preconditioned = precond.apply(&update);
         for (x_i, p_i) in x.iter_mut().zip(&preconditioned) {
             *x_i += p_i;
         }
 
         // True residual for the restart decision.
+        if is_aborted() {
+            return Err(GmresAborted);
+        }
         let ax = matvec(&x);
+        if is_aborted() {
+            return Err(GmresAborted);
+        }
         for ((r_i, b_i), ax_i) in r.iter_mut().zip(b).zip(&ax) {
             *r_i = b_i - ax_i;
         }
@@ -399,33 +449,33 @@ pub(super) fn gmres(
         let relative = new_beta / b_norm;
 
         if relative < GMRES_REL_TOL {
-            return GmresOutcome {
+            return Ok(GmresOutcome {
                 solution: x,
                 iterations: total_iterations,
                 relative_residual: relative,
                 converged: true,
-            };
+            });
         }
         if happy_breakdown || new_beta > 0.99 * beta {
             // Lucky breakdown without convergence, or stagnation across a
             // full cycle: stop and let the caller take the exact path.
-            return GmresOutcome {
+            return Ok(GmresOutcome {
                 solution: x,
                 iterations: total_iterations,
                 relative_residual: relative,
                 converged: false,
-            };
+            });
         }
         beta = new_beta;
     }
 
     let relative = norm(&r) / b_norm;
-    GmresOutcome {
+    Ok(GmresOutcome {
         solution: x,
         iterations: total_iterations,
         relative_residual: relative,
         converged: false,
-    }
+    })
 }
 
 //=============================================================================
@@ -435,6 +485,7 @@ pub(super) fn gmres(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn gmres_restart_is_bounded_by_one_dimension_and_shared_cap() {
@@ -443,6 +494,32 @@ mod tests {
         assert_eq!(bounded_gmres_restart(30, 20), 20);
         assert_eq!(bounded_gmres_restart(usize::MAX, 1_000), 64);
         assert_eq!(bounded_gmres_restart(usize::MAX, 7), 7);
+    }
+
+    #[test]
+    fn abort_aware_gmres_polls_inside_the_arnoldi_iteration() {
+        struct Identity;
+        impl KrylovPreconditioner for Identity {
+            fn apply(&self, residual: &[Complex64]) -> Vec<Complex64> {
+                residual.to_vec()
+            }
+        }
+
+        let polls = Cell::new(0usize);
+        let result = gmres_with_abort(
+            &|input| input.to_vec(),
+            &Identity,
+            &[Complex64::new(1.0, 0.0); 16],
+            8,
+            4,
+            &|| {
+                let next = polls.get() + 1;
+                polls.set(next);
+                next >= 4
+            },
+        );
+        assert!(matches!(result, Err(GmresAborted)));
+        assert!(polls.get() >= 4);
     }
 
     /// Deterministic pseudo-random stream for reproducible test matrices.

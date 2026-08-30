@@ -27,6 +27,7 @@ use crate::analysis::{
     PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::CircuitData;
+use crate::engine::transient::{netlist_checkpoint_identity, simulation_checkpoint_identity};
 use crate::numerics::integration::CompanionCoefficients;
 use crate::numerics::integration::IntegrationMethod;
 use crate::numerics::integration::{
@@ -77,6 +78,333 @@ impl PssAcceptedStepHistory {
 
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 1;
+
+fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
+    hasher.update(&(name.len() as u64).to_le_bytes());
+    hasher.update(name.as_bytes());
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn pss_config_identity(config: &PssConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-pss-config-v1\0");
+    for (name, value) in [
+        ("fundamental_freq", config.fundamental_freq),
+        ("tstab", config.tstab),
+        ("tolerance", config.tolerance),
+        ("abstol", config.abstol),
+        ("period_guess", config.period_guess),
+        ("damping_factor", config.damping_factor),
+        ("max_period_change", config.max_period_change),
+    ] {
+        pss_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    for (name, value) in [
+        ("num_harmonics", config.num_harmonics),
+        ("max_iterations", config.max_iterations),
+        ("tstab_periods", config.tstab_periods),
+        ("points_per_period", config.points_per_period),
+    ] {
+        pss_identity_field(&mut hasher, name, &(value as u64).to_le_bytes());
+    }
+    pss_identity_field(&mut hasher, "auto_period", &[u8::from(config.auto_period)]);
+    match config.oscillator_node.as_deref() {
+        Some(node) => {
+            pss_identity_field(&mut hasher, "oscillator_node.present", &[1]);
+            pss_identity_field(&mut hasher, "oscillator_node.value", node.as_bytes());
+        }
+        None => pss_identity_field(&mut hasher, "oscillator_node.present", &[0]),
+    }
+    let integration_method = match config.integration_method {
+        None => u8::MAX,
+        Some(IntegrationMethod::BackwardEuler) => 0,
+        Some(IntegrationMethod::Trapezoidal) => 1,
+        Some(IntegrationMethod::Gear2) => 2,
+        Some(IntegrationMethod::TrapGear) => 3,
+    };
+    pss_identity_field(&mut hasher, "integration_method", &[integration_method]);
+    pss_identity_field(&mut hasher, "verbose", &[u8::from(config.verbose)]);
+    hasher.finalize().to_hex().to_string()
+}
+
+fn pss_resolved_simulation_identity(config: &super::SimulationConfig) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-pss-resolved-simulation-config-v1\0");
+    pss_identity_field(
+        &mut hasher,
+        "transient_config_identity",
+        simulation_checkpoint_identity(config).as_bytes(),
+    );
+    for (name, value) in [
+        ("tolerance", config.tolerance),
+        ("min_timestep", config.min_timestep),
+        ("matrix_pivot_tolerance", config.matrix_pivot_tolerance),
+        (
+            "matrix_absolute_pivot_tolerance",
+            config.matrix_absolute_pivot_tolerance,
+        ),
+        ("bypass.reltol", config.bypass_config.reltol),
+        ("bypass.abstol", config.bypass_config.abstol),
+        ("gmin_initial", config.convergence_config.gmin_initial),
+        ("voltage_reltol", config.convergence_config.voltage_reltol),
+        ("voltage_abstol", config.convergence_config.voltage_abstol),
+        ("current_abstol", config.convergence_config.current_abstol),
+        ("charge_abstol", config.convergence_config.charge_abstol),
+        ("residual_reltol", config.convergence_config.residual_reltol),
+    ] {
+        pss_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    pss_identity_field(
+        &mut hasher,
+        "max_iterations",
+        &(config.max_iterations as u64).to_le_bytes(),
+    );
+    pss_identity_field(
+        &mut hasher,
+        "cshunt",
+        &config
+            .cshunt
+            .map(f64::to_bits)
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
+    for (name, value) in [
+        ("bypass.enabled", config.bypass_config.enabled),
+        ("gmin_stepping", config.convergence_config.gmin_stepping),
+        ("source_stepping", config.convergence_config.source_stepping),
+        (
+            "pseudo_transient",
+            config.convergence_config.pseudo_transient,
+        ),
+        ("arc_length", config.convergence_config.arc_length),
+    ] {
+        pss_identity_field(&mut hasher, name, &[u8::from(value)]);
+    }
+    for (name, value) in [
+        ("matrix_solver", format!("{:?}", config.matrix_solver)),
+        (
+            "nonlinear_continuation",
+            format!("{:?}", config.convergence_config.nonlinear_continuation),
+        ),
+        (
+            "damping_strategy",
+            format!("{:?}", config.convergence_config.damping_strategy),
+        ),
+    ] {
+        pss_identity_field(&mut hasher, name, value.as_bytes());
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn pss_encode_floquet_evidence(hasher: &mut blake3::Hasher, evidence: &FloquetSpectrumEvidence) {
+    match evidence {
+        FloquetSpectrumEvidence::NotComputed => {
+            pss_identity_field(hasher, "floquet_evidence.kind", &[0]);
+        }
+        FloquetSpectrumEvidence::NoDynamicModes => {
+            pss_identity_field(hasher, "floquet_evidence.kind", &[1]);
+        }
+        FloquetSpectrumEvidence::Qualified { certificate } => {
+            pss_identity_field(hasher, "floquet_evidence.kind", &[2]);
+            pss_identity_field(
+                hasher,
+                "floquet_evidence.problem_order",
+                &(certificate.problem_order as u64).to_le_bytes(),
+            );
+            pss_identity_field(
+                hasher,
+                "floquet_evidence.max_backward_error",
+                &certificate.max_backward_error.to_bits().to_le_bytes(),
+            );
+            pss_identity_field(
+                hasher,
+                "floquet_evidence.qualification_tolerance",
+                &certificate.qualification_tolerance.to_bits().to_le_bytes(),
+            );
+        }
+        FloquetSpectrumEvidence::LegacyUnknown => {
+            pss_identity_field(hasher, "floquet_evidence.kind", &[3]);
+        }
+    }
+}
+
+fn pss_retained_state_identity(
+    config: &PssConfig,
+    analysis: &PssAnalysisResult,
+    shooting_state_basis: &[String],
+    shooting_state: &[Value],
+) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"rspice-pss-retained-state-v1\0");
+    pss_identity_field(
+        &mut hasher,
+        "pss_config_identity",
+        pss_config_identity(config).as_bytes(),
+    );
+    for (name, value) in [
+        ("analysis.iterations", analysis.iterations),
+        ("result.iterations", analysis.result.iterations),
+    ] {
+        pss_identity_field(&mut hasher, name, &(value as u64).to_le_bytes());
+    }
+    for (name, value) in [
+        ("analysis.final_residual", analysis.final_residual),
+        ("analysis.period", analysis.period),
+        ("result.period", analysis.result.period),
+        ("result.frequency", analysis.result.frequency),
+        ("result.residual_norm", analysis.result.residual_norm),
+    ] {
+        pss_identity_field(&mut hasher, name, &value.to_bits().to_le_bytes());
+    }
+    pss_identity_field(
+        &mut hasher,
+        "result.period_detected",
+        &[u8::from(analysis.result.period_detected)],
+    );
+    pss_identity_field(
+        &mut hasher,
+        "result.time.count",
+        &(analysis.result.time.len() as u64).to_le_bytes(),
+    );
+    for (index, value) in analysis.result.time.iter().enumerate() {
+        pss_identity_field(
+            &mut hasher,
+            &format!("result.time[{index}]"),
+            &value.to_bits().to_le_bytes(),
+        );
+    }
+    pss_identity_field(
+        &mut hasher,
+        "result.waveform.count",
+        &(analysis.result.waveforms.len() as u64).to_le_bytes(),
+    );
+    for (index, (name, waveform)) in analysis
+        .result
+        .node_names
+        .iter()
+        .zip(&analysis.result.waveforms)
+        .enumerate()
+    {
+        pss_identity_field(
+            &mut hasher,
+            &format!("result.waveform[{index}].node"),
+            name.as_bytes(),
+        );
+        pss_identity_field(
+            &mut hasher,
+            &format!("result.waveform[{index}].count"),
+            &(waveform.values.len() as u64).to_le_bytes(),
+        );
+        for (sample, value) in waveform.values.iter().enumerate() {
+            pss_identity_field(
+                &mut hasher,
+                &format!("result.waveform[{index}].value[{sample}]"),
+                &value.to_bits().to_le_bytes(),
+            );
+        }
+    }
+    pss_identity_field(
+        &mut hasher,
+        "result.floquet.count",
+        &(analysis.result.floquet_multipliers.len() as u64).to_le_bytes(),
+    );
+    for (index, value) in analysis.result.floquet_multipliers.iter().enumerate() {
+        pss_identity_field(
+            &mut hasher,
+            &format!("result.floquet[{index}].real"),
+            &value.re.to_bits().to_le_bytes(),
+        );
+        pss_identity_field(
+            &mut hasher,
+            &format!("result.floquet[{index}].imaginary"),
+            &value.im.to_bits().to_le_bytes(),
+        );
+    }
+    pss_encode_floquet_evidence(&mut hasher, &analysis.result.floquet_evidence);
+    let orbit_kind = match analysis.result.floquet_orbit_kind {
+        FloquetOrbitKind::Driven => 0,
+        FloquetOrbitKind::Autonomous => 1,
+    };
+    pss_identity_field(&mut hasher, "result.floquet_orbit_kind", &[orbit_kind]);
+    pss_identity_field(
+        &mut hasher,
+        "result.trivial_floquet_multiplier_index",
+        &(analysis
+            .result
+            .trivial_floquet_multiplier_index
+            .map(|value| value as u64)
+            .unwrap_or(u64::MAX))
+        .to_le_bytes(),
+    );
+    pss_identity_field(
+        &mut hasher,
+        "analysis.monodromy.count",
+        &(analysis.monodromy.len() as u64).to_le_bytes(),
+    );
+    for (row_index, row) in analysis.monodromy.iter().enumerate() {
+        pss_identity_field(
+            &mut hasher,
+            &format!("analysis.monodromy[{row_index}].count"),
+            &(row.len() as u64).to_le_bytes(),
+        );
+        for (column_index, value) in row.iter().enumerate() {
+            pss_identity_field(
+                &mut hasher,
+                &format!("analysis.monodromy[{row_index}][{column_index}]"),
+                &value.to_bits().to_le_bytes(),
+            );
+        }
+    }
+    pss_identity_field(
+        &mut hasher,
+        "analysis.floquet.count",
+        &(analysis.floquet_multipliers.len() as u64).to_le_bytes(),
+    );
+    for (index, value) in analysis.floquet_multipliers.iter().enumerate() {
+        pss_identity_field(
+            &mut hasher,
+            &format!("analysis.floquet[{index}].real"),
+            &value.re.to_bits().to_le_bytes(),
+        );
+        pss_identity_field(
+            &mut hasher,
+            &format!("analysis.floquet[{index}].imaginary"),
+            &value.im.to_bits().to_le_bytes(),
+        );
+    }
+    pss_identity_field(
+        &mut hasher,
+        "analysis.is_stable",
+        &[u8::from(analysis.is_stable)],
+    );
+    pss_identity_field(
+        &mut hasher,
+        "shooting_state.count",
+        &(shooting_state.len() as u64).to_le_bytes(),
+    );
+    for (index, (basis, value)) in shooting_state_basis.iter().zip(shooting_state).enumerate() {
+        pss_identity_field(
+            &mut hasher,
+            &format!("shooting_state[{index}].basis"),
+            basis.as_bytes(),
+        );
+        pss_identity_field(
+            &mut hasher,
+            &format!("shooting_state[{index}].value"),
+            &value.to_bits().to_le_bytes(),
+        );
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
+fn is_canonical_pss_identity(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
 
 /// Dense LU of the most recently formed shooting Jacobian.  Newton-Krylov
 /// uses it only as a right preconditioner; a singular factor disables the
@@ -544,6 +872,100 @@ impl PssDcOperatingPointSeed {
     }
 }
 
+/// Versioned semantic producer identity for a retained shooting-PSS state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "veriloga", derive(serde::Serialize, serde::Deserialize))]
+pub struct PssOperatingPointIdentity {
+    version: u32,
+    semantic_netlist_identity: String,
+    resolved_simulation_identity: String,
+    pss_config_identity: String,
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    retained_state_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PssOperatingPointProducerInputs {
+    semantic_netlist_identity: String,
+    resolved_simulation_identity: String,
+    pss_config_identity: String,
+}
+
+impl PssOperatingPointIdentity {
+    /// Canonical transport components: schema version, semantic netlist,
+    /// resolved simulation configuration, PSS configuration, and retained
+    /// numerical-state identities, in that order.
+    pub fn canonical_parts(&self) -> (u32, &str, &str, &str, &str) {
+        (
+            self.version,
+            &self.semantic_netlist_identity,
+            &self.resolved_simulation_identity,
+            &self.pss_config_identity,
+            &self.retained_state_identity,
+        )
+    }
+
+    fn capture(
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        pss_config: &PssConfig,
+    ) -> Result<PssOperatingPointProducerInputs, SimulationError> {
+        let semantic_netlist_identity = netlist_checkpoint_identity(netlist).ok_or_else(|| {
+            SimulationError::Circuit(
+                "PSS producer netlist has no canonical semantic identity".to_owned(),
+            )
+        })?;
+        Ok(PssOperatingPointProducerInputs {
+            semantic_netlist_identity,
+            resolved_simulation_identity: pss_resolved_simulation_identity(simulation_config),
+            pss_config_identity: pss_config_identity(pss_config),
+        })
+    }
+
+    fn bind(
+        producer: PssOperatingPointProducerInputs,
+        config: &PssConfig,
+        analysis: &PssAnalysisResult,
+        shooting_state_basis: &[String],
+        shooting_state: &[Value],
+    ) -> Self {
+        Self {
+            version: PSS_OPERATING_POINT_IDENTITY_VERSION,
+            semantic_netlist_identity: producer.semantic_netlist_identity,
+            resolved_simulation_identity: producer.resolved_simulation_identity,
+            pss_config_identity: producer.pss_config_identity,
+            retained_state_identity: pss_retained_state_identity(
+                config,
+                analysis,
+                shooting_state_basis,
+                shooting_state,
+            ),
+        }
+    }
+
+    fn validate(&self) -> Result<(), SimulationError> {
+        if self.version != PSS_OPERATING_POINT_IDENTITY_VERSION {
+            return Err(SimulationError::Circuit(format!(
+                "retained PSS producer identity version {} is unsupported; expected {}",
+                self.version, PSS_OPERATING_POINT_IDENTITY_VERSION
+            )));
+        }
+        for (name, value) in [
+            ("semantic netlist", &self.semantic_netlist_identity),
+            ("resolved simulation", &self.resolved_simulation_identity),
+            ("PSS configuration", &self.pss_config_identity),
+            ("retained state", &self.retained_state_identity),
+        ] {
+            if !is_canonical_pss_identity(value) {
+                return Err(SimulationError::Circuit(format!(
+                    "retained PSS {name} identity is not a canonical BLAKE3 digest"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Exact converged shooting-PSS numerical state retained for dependent
 /// analyses. This is deliberately distinct from a display waveform: the
 /// reactive shooting state and monodromy matrix are part of the contract and
@@ -553,7 +975,14 @@ impl PssDcOperatingPointSeed {
 pub struct PssOperatingPoint {
     config: PssConfig,
     analysis: PssAnalysisResult,
+    /// Ordered capacitor-voltage then inductor-current shooting coordinates.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    shooting_state_basis: Vec<String>,
     shooting_state: Vec<Value>,
+    /// `None` denotes a parseable legacy artifact that dependent numerical
+    /// solves must reject.
+    #[cfg_attr(feature = "veriloga", serde(default))]
+    producer_identity: Option<PssOperatingPointIdentity>,
 }
 
 impl PssOperatingPoint {
@@ -570,6 +999,17 @@ impl PssOperatingPoint {
     /// Reactive state at the authenticated phase origin.
     pub fn shooting_state(&self) -> &[Value] {
         &self.shooting_state
+    }
+
+    /// Canonical ordered names for the retained shooting-state coordinates.
+    pub fn shooting_state_basis(&self) -> &[String] {
+        &self.shooting_state_basis
+    }
+
+    /// Authenticated semantic producer identity, or `None` for a legacy
+    /// identityless artifact.
+    pub fn producer_identity(&self) -> Option<&PssOperatingPointIdentity> {
+        self.producer_identity.as_ref()
     }
 
     /// Highest Fourier harmonic that can be projected without exceeding the
@@ -591,13 +1031,88 @@ impl PssOperatingPoint {
         analysis: PssAnalysisResult,
         shooting_state: Vec<Value>,
     ) -> Result<Self, SimulationError> {
-        config.validate().map_err(PssError::InvalidConfig)?;
-        Self::validate_parts(&config, &analysis, &shooting_state)?;
-        Ok(Self {
+        Self::try_from_parts_internal(config, analysis, Vec::new(), shooting_state, None)
+    }
+
+    /// Reconstruct an authenticated transported PSS operating point.
+    ///
+    /// The identity is accepted only when its retained-state digest matches
+    /// every configuration, orbit, monodromy, Floquet, basis, and shooting
+    /// value bit. Consumers additionally compare its semantic producer fields
+    /// with the currently resolved circuit before numerical reuse.
+    pub fn try_from_authenticated_parts(
+        producer_identity: PssOperatingPointIdentity,
+        config: PssConfig,
+        analysis: PssAnalysisResult,
+        shooting_state_basis: Vec<String>,
+        shooting_state: Vec<Value>,
+    ) -> Result<Self, SimulationError> {
+        Self::try_from_parts_internal(
             config,
             analysis,
+            shooting_state_basis,
             shooting_state,
-        })
+            Some(producer_identity),
+        )
+    }
+
+    fn try_from_parts_internal(
+        config: PssConfig,
+        analysis: PssAnalysisResult,
+        shooting_state_basis: Vec<String>,
+        shooting_state: Vec<Value>,
+        producer_identity: Option<PssOperatingPointIdentity>,
+    ) -> Result<Self, SimulationError> {
+        config.validate().map_err(PssError::InvalidConfig)?;
+        Self::validate_parts(&config, &analysis, &shooting_state)?;
+        if let Some(identity) = producer_identity.as_ref() {
+            identity.validate()?;
+            Self::validate_shooting_state_basis(&shooting_state_basis, shooting_state.len())?;
+        }
+        let point = Self {
+            config,
+            analysis,
+            shooting_state_basis,
+            shooting_state,
+            producer_identity,
+        };
+        if let Some(identity) = point.producer_identity.as_ref()
+            && identity.retained_state_identity
+                != pss_retained_state_identity(
+                    &point.config,
+                    &point.analysis,
+                    &point.shooting_state_basis,
+                    &point.shooting_state,
+                )
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS numerical payload does not match its authenticated producer identity"
+                    .to_owned(),
+            ));
+        }
+        Ok(point)
+    }
+
+    fn validate_shooting_state_basis(
+        shooting_state_basis: &[String],
+        expected_len: usize,
+    ) -> Result<(), SimulationError> {
+        if shooting_state_basis.len() != expected_len {
+            return Err(SimulationError::Circuit(format!(
+                "retained PSS shooting-state basis contains {} name(s) for {expected_len} value(s)",
+                shooting_state_basis.len()
+            )));
+        }
+        let mut seen = std::collections::HashSet::with_capacity(shooting_state_basis.len());
+        for name in shooting_state_basis {
+            if name.is_empty() || name.trim() != name || !seen.insert(name.to_ascii_uppercase()) {
+                return Err(SimulationError::Circuit(
+                    "retained PSS shooting-state basis contains an empty, non-canonical, or duplicate name"
+                        .to_owned(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn validate_parts(
@@ -781,6 +1296,69 @@ impl PssOperatingPoint {
         }
         Ok(())
     }
+
+    pub(in crate::engine) fn authenticate_for_reuse(
+        &self,
+        netlist: &Netlist,
+        simulation_config: &super::SimulationConfig,
+        pss_config: &PssConfig,
+    ) -> Result<(), SimulationError> {
+        let retained = self.producer_identity.as_ref().ok_or_else(|| {
+            SimulationError::Circuit(
+                "retained PSS operating point is a legacy identityless artifact and is not trusted for dependent numerical reuse"
+                    .to_owned(),
+            )
+        })?;
+        retained.validate()?;
+        Self::validate_shooting_state_basis(&self.shooting_state_basis, self.shooting_state.len())?;
+        if retained.retained_state_identity
+            != pss_retained_state_identity(
+                &self.config,
+                &self.analysis,
+                &self.shooting_state_basis,
+                &self.shooting_state,
+            )
+        {
+            return Err(SimulationError::Circuit(
+                "retained PSS numerical payload does not match its authenticated producer identity"
+                    .to_owned(),
+            ));
+        }
+        let current = PssOperatingPointIdentity::capture(netlist, simulation_config, pss_config)?;
+        if retained.semantic_netlist_identity != current.semantic_netlist_identity {
+            return Err(SimulationError::Circuit(
+                "retained PSS semantic circuit identity does not match the currently elaborated netlist"
+                    .to_owned(),
+            ));
+        }
+        if retained.resolved_simulation_identity != current.resolved_simulation_identity {
+            return Err(SimulationError::Circuit(
+                "retained PSS resolved simulation configuration does not match the current engine configuration"
+                    .to_owned(),
+            ));
+        }
+        if retained.pss_config_identity != current.pss_config_identity {
+            return Err(SimulationError::Circuit(
+                "retained PSS analysis configuration does not match the current PSS configuration"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(in crate::engine) fn validate_shooting_basis_for_circuit(
+        &self,
+        circuit: &CircuitData,
+    ) -> Result<(), SimulationError> {
+        let expected = Engine::pss_shooting_state_basis(circuit);
+        if self.shooting_state_basis != expected {
+            return Err(SimulationError::Circuit(format!(
+                "retained PSS shooting-state basis does not match the elaborated circuit: expected {expected:?}, received {:?}",
+                self.shooting_state_basis
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Phase-consistent state at the end of one converged PSS period, projected
@@ -817,6 +1395,22 @@ impl PssContinuationState {
 }
 
 impl Engine {
+    fn pss_shooting_state_basis(circuit: &CircuitData) -> Vec<String> {
+        circuit
+            .capacitors
+            .names
+            .iter()
+            .map(|name| format!("C:{name}"))
+            .chain(
+                circuit
+                    .inductors
+                    .names
+                    .iter()
+                    .map(|name| format!("L:{name}")),
+            )
+            .collect()
+    }
+
     /// Run Periodic Steady-State analysis
     ///
     /// This is the main entry point for PSS simulation. It handles both driven
@@ -848,7 +1442,9 @@ impl Engine {
         config: PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_state_abort(netlist, config, abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine
+            .run_pss_with_state_abort(netlist, config, abort)
             .map(|(result, _, _, _)| result)
     }
 
@@ -874,15 +1470,17 @@ impl Engine {
         dc_seed: &PssDcOperatingPointSeed,
         abort: &dyn AbortSignal,
     ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_state_and_frozen_sources_abort(
-            netlist,
-            config,
-            &std::collections::BTreeSet::new(),
-            false,
-            Some(dc_seed),
-            abort,
-        )
-        .map(|(result, _, _, _)| result)
+        let engine = self.resolved_for_netlist(netlist);
+        engine
+            .run_pss_with_state_and_frozen_sources_abort(
+                netlist,
+                config,
+                &std::collections::BTreeSet::new(),
+                false,
+                Some(dc_seed),
+                abort,
+            )
+            .map(|(result, _, _, _)| result)
     }
 
     /// Solve PSS and retain the exact numerical state required by dependent
@@ -893,10 +1491,35 @@ impl Engine {
         config: PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PssOperatingPoint, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        config.validate().map_err(PssError::InvalidConfig)?;
         let retained_config = config.clone();
-        let (analysis, _, _, shooting_state) =
-            self.run_pss_with_state_abort(netlist, config, abort)?;
-        PssOperatingPoint::try_from_parts(retained_config, analysis, shooting_state)
+        let producer =
+            PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
+        let (analysis, circuit, _, shooting_state) =
+            engine.run_pss_with_state_abort(netlist, config, abort)?;
+        if producer
+            != PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?
+        {
+            return Err(SimulationError::Circuit(
+                "PSS semantic producer inputs changed during the periodic solve".to_owned(),
+            ));
+        }
+        let shooting_state_basis = Self::pss_shooting_state_basis(&circuit);
+        let identity = PssOperatingPointIdentity::bind(
+            producer,
+            &retained_config,
+            &analysis,
+            &shooting_state_basis,
+            &shooting_state,
+        );
+        PssOperatingPoint::try_from_authenticated_parts(
+            identity,
+            retained_config,
+            analysis,
+            shooting_state_basis,
+            shooting_state,
+        )
     }
 
     /// Solve PSS from an exact DC seed and retain the converged numerical
@@ -918,16 +1541,42 @@ impl Engine {
         dc_seed: &PssDcOperatingPointSeed,
         abort: &dyn AbortSignal,
     ) -> Result<PssOperatingPoint, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        config.validate().map_err(PssError::InvalidConfig)?;
         let retained_config = config.clone();
-        let (analysis, _, _, shooting_state) = self.run_pss_with_state_and_frozen_sources_abort(
-            netlist,
-            config,
-            &std::collections::BTreeSet::new(),
-            false,
-            Some(dc_seed),
-            abort,
-        )?;
-        PssOperatingPoint::try_from_parts(retained_config, analysis, shooting_state)
+        let producer =
+            PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?;
+        let (analysis, circuit, _, shooting_state) = engine
+            .run_pss_with_state_and_frozen_sources_abort(
+                netlist,
+                config,
+                &std::collections::BTreeSet::new(),
+                false,
+                Some(dc_seed),
+                abort,
+            )?;
+        if producer
+            != PssOperatingPointIdentity::capture(netlist, &engine.config, &retained_config)?
+        {
+            return Err(SimulationError::Circuit(
+                "PSS semantic producer inputs changed during the periodic solve".to_owned(),
+            ));
+        }
+        let shooting_state_basis = Self::pss_shooting_state_basis(&circuit);
+        let identity = PssOperatingPointIdentity::bind(
+            producer,
+            &retained_config,
+            &analysis,
+            &shooting_state_basis,
+            &shooting_state,
+        );
+        PssOperatingPoint::try_from_authenticated_parts(
+            identity,
+            retained_config,
+            analysis,
+            shooting_state_basis,
+            shooting_state,
+        )
     }
 
     /// Run PSS and materialize a phase-consistent transient continuation
@@ -953,7 +1602,8 @@ impl Engine {
         config: PssConfig,
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
-        self.run_pss_with_frozen_source_continuation_state_abort(netlist, config, &[], abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pss_with_frozen_source_continuation_state_resolved(netlist, config, &[], abort)
     }
 
     /// Run PSS with selected independent source waveforms frozen at their
@@ -987,6 +1637,25 @@ impl Engine {
         frozen_source_names: &[String],
         abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pss_with_frozen_source_continuation_state_resolved(
+            netlist,
+            config,
+            frozen_source_names,
+            abort,
+        )
+    }
+
+    /// Resolved implementation shared by both public continuation-state
+    /// boundaries.  Callers must resolve `.OPTIONS` before entering so the
+    /// checkpoint identity and both periodic traversals see one configuration.
+    fn run_pss_with_frozen_source_continuation_state_resolved(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        frozen_source_names: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<(PssAnalysisResult, PssContinuationState), SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -996,10 +1665,9 @@ impl Engine {
         // authenticate the same snapshot after both expensive traversals.
         let authenticated_netlist_identity = Self::pss_continuation_netlist_identity(netlist)?;
         let authenticated_fingerprint = super::transient::netlist_fingerprint(netlist);
-        let engine = self.resolved_for_netlist(netlist);
         let continuation_config = config.clone();
         let frozen_source_set = Self::validate_pss_frozen_source_names(frozen_source_names)?;
-        let (analysis, mut circuit, mut matrix, shooting_state) = engine
+        let (analysis, mut circuit, mut matrix, shooting_state) = self
             .run_pss_with_state_and_frozen_sources_abort(
                 netlist,
                 config,
@@ -1029,10 +1697,10 @@ impl Engine {
 
         let period = analysis.period;
         let max_step = period / continuation_config.points_per_period as Value;
-        engine.pss_set_reactive_state(&mut circuit, &shooting_state);
-        let seed = engine.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
+        self.pss_set_reactive_state(&mut circuit, &shooting_state);
+        let seed = self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
         let mut trace = PssStateTrace::default();
-        engine.pss_run_tran_internal(
+        self.pss_run_tran_internal(
             &mut circuit,
             &mut matrix,
             seed,
@@ -1053,15 +1721,13 @@ impl Engine {
                 "PSS continuation state could not capture the converged orbit endpoint".to_string(),
             )
         })?;
-        let lte_reference = engine.config.transient_lte_reference.unwrap_or_else(|| {
-            engine
-                .config
-                .spice_dialect
-                .default_transient_lte_reference()
-        });
+        let lte_reference = self
+            .config
+            .transient_lte_reference
+            .unwrap_or_else(|| self.config.spice_dialect.default_transient_lte_reference());
         let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
-            engine.transient_lte_reltol(),
-            engine.transient_lte_abstol(),
+            self.transient_lte_reltol(),
+            self.transient_lte_abstol(),
             lte_reference,
         );
         for solution in &trace.solutions {
@@ -1070,7 +1736,7 @@ impl Engine {
         let checkpoint = TransientCheckpoint::capture(
             authenticated_fingerprint,
             Some(authenticated_netlist_identity),
-            super::transient::simulation_checkpoint_identity(&engine.config),
+            super::transient::simulation_checkpoint_identity(&self.config),
             0.0,
             endpoint,
             &circuit,
@@ -2516,16 +3182,20 @@ impl Engine {
             circuit
                 .stamp_nonlinear(matrix, rhs, linearize_at)
                 .map_err(SimulationError::Circuit)?;
-            circuit
-                .stamp_behavioral(
-                    matrix,
-                    rhs,
-                    linearize_at,
-                    t_next,
-                    crate::xspice::AnalysisType::Transient,
-                )
-                .map_err(SimulationError::Circuit)?;
         }
+        // B sources remain part of the physical transient equation even when
+        // they are solution-independent and therefore do not make the circuit
+        // nonlinear. Keep their fallible evaluation on the PSS shooting path
+        // instead of omitting time-only sources from the periodic orbit.
+        circuit
+            .stamp_behavioral(
+                matrix,
+                rhs,
+                linearize_at,
+                t_next,
+                crate::xspice::AnalysisType::Transient,
+            )
+            .map_err(SimulationError::Circuit)?;
         Ok(())
     }
 

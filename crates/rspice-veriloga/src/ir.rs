@@ -2443,6 +2443,39 @@ pub mod autodiff {
         }
     }
 
+    /// Return a finite, representable filter gain or a non-finite sentinel.
+    ///
+    /// Automatic differentiation predates fallible IR construction, so its
+    /// public API cannot carry a `CompileError` without changing every
+    /// derivative consumer. A NaN is deliberately retained in the derivative
+    /// IR for invalid gains: generated Jacobian evaluation then reaches the
+    /// existing typed `InvalidNumericResult` boundary instead of silently
+    /// substituting zero. There is no magnitude cutoff; every representable
+    /// nonzero ratio is preserved.
+    fn checked_filter_dc_gain(numerator: f64, denominator: f64) -> f64 {
+        if !numerator.is_finite() || !denominator.is_finite() || denominator == 0.0 {
+            return f64::NAN;
+        }
+        let gain = numerator / denominator;
+        if !gain.is_finite() || (gain == 0.0 && numerator != 0.0) {
+            f64::NAN
+        } else {
+            gain
+        }
+    }
+
+    fn checked_filter_dc_product(left: f64, right: f64) -> f64 {
+        if !left.is_finite() || !right.is_finite() {
+            return f64::NAN;
+        }
+        let product = left * right;
+        if !product.is_finite() || (product == 0.0 && left != 0.0 && right != 0.0) {
+            f64::NAN
+        } else {
+            product
+        }
+    }
+
     /// Differentiate an expression with respect to a variable
     /// (without assignment-chain shadows; prefer
     /// [`differentiate_with_shadows`] when a chain context exists)
@@ -2927,7 +2960,7 @@ pub mod autodiff {
             } => {
                 let num: f64 = numerator.iter().sum();
                 let den: f64 = denominator.iter().sum();
-                let gain = if den.abs() > 1e-300 { num / den } else { 0.0 };
+                let gain = checked_filter_dc_gain(num, den);
                 IrExpr::Binary(
                     BinaryOp::Mul,
                     Box::new(IrExpr::Const(gain)),
@@ -2944,7 +2977,7 @@ pub mod autodiff {
             } => {
                 let n0 = numerator.first().copied().unwrap_or(0.0);
                 let d0 = denominator.first().copied().unwrap_or(1.0);
-                let gain = if d0.abs() > 1e-300 { n0 / d0 } else { 0.0 };
+                let gain = checked_filter_dc_gain(n0, d0);
                 IrExpr::Binary(
                     BinaryOp::Mul,
                     Box::new(IrExpr::Const(gain)),
@@ -2960,11 +2993,8 @@ pub mod autodiff {
                 // H(0) = gain * prod(-z) / prod(-p) for real DC evaluation
                 let num: f64 = zeros.iter().map(|(re, _)| -re).product();
                 let den: f64 = poles.iter().map(|(re, _)| -re).product();
-                let dc_gain = if den.abs() > 1e-300 {
-                    gain * num / den
-                } else {
-                    0.0
-                };
+                let ratio = checked_filter_dc_gain(num, den);
+                let dc_gain = checked_filter_dc_product(*gain, ratio);
                 IrExpr::Binary(
                     BinaryOp::Mul,
                     Box::new(IrExpr::Const(dc_gain)),

@@ -244,13 +244,21 @@ impl CircuitData {
     /// partials immutably. One-shot per analysis for frequency-invariant
     /// expressions; frequency-dependent sources are selectively refreshed
     /// at each analysis point.
-    pub(crate) fn prepare_behavioral_small_signal(&mut self, dc_solution: &[Value]) {
+    pub(crate) fn prepare_behavioral_small_signal(
+        &mut self,
+        dc_solution: &[Value],
+    ) -> Result<(), String> {
         for source in &mut self.behavioral_sources.voltage_sources {
-            source.linearize_at(dc_solution);
+            source
+                .linearize_at(dc_solution)
+                .map_err(|error| error.to_string())?;
         }
         for source in &mut self.behavioral_sources.current_sources {
-            source.linearize_at(dc_solution);
+            source
+                .linearize_at(dc_solution)
+                .map_err(|error| error.to_string())?;
         }
+        Ok(())
     }
 
     /// Refresh behavioral-source Jacobians for one AC frequency point.
@@ -263,17 +271,22 @@ impl CircuitData {
         &mut self,
         dc_solution: &[Value],
         frequency: Value,
-    ) {
+    ) -> Result<(), String> {
         for source in &mut self.behavioral_sources.voltage_sources {
             if source.is_frequency_dependent() {
-                source.linearize_at_frequency(dc_solution, frequency);
+                source
+                    .linearize_at_frequency(dc_solution, frequency)
+                    .map_err(|error| error.to_string())?;
             }
         }
         for source in &mut self.behavioral_sources.current_sources {
             if source.is_frequency_dependent() {
-                source.linearize_at_frequency(dc_solution, frequency);
+                source
+                    .linearize_at_frequency(dc_solution, frequency)
+                    .map_err(|error| error.to_string())?;
             }
         }
+        Ok(())
     }
 
     /// Linearize every behavioral source at an arbitrary state and active
@@ -284,13 +297,18 @@ impl CircuitData {
         &mut self,
         state: &[Value],
         frequency: Value,
-    ) {
+    ) -> Result<(), String> {
         for source in &mut self.behavioral_sources.voltage_sources {
-            source.linearize_at_state_and_frequency(state, frequency);
+            source
+                .linearize_at_state_and_frequency(state, frequency)
+                .map_err(|error| error.to_string())?;
         }
         for source in &mut self.behavioral_sources.current_sources {
-            source.linearize_at_state_and_frequency(state, frequency);
+            source
+                .linearize_at_state_and_frequency(state, frequency)
+                .map_err(|error| error.to_string())?;
         }
+        Ok(())
     }
 
     /// Build the per-device operating-point report from the device state

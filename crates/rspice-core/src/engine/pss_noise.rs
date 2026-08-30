@@ -81,7 +81,8 @@ impl Engine {
         offsets: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
-        self.run_pnoise_oscillator_impl(netlist, config, offsets, None, abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_oscillator_impl(netlist, config, offsets, None, abort)
     }
 
     /// Compute oscillator phase noise from an exact retained shooting-PSS
@@ -95,7 +96,8 @@ impl Engine {
         operating_point: &super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<OscPnoiseResult, SimulationError> {
-        self.run_pnoise_oscillator_impl(netlist, config, offsets, Some(operating_point), abort)
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pnoise_oscillator_impl(netlist, config, offsets, Some(operating_point), abort)
     }
 
     fn run_pnoise_oscillator_impl(
@@ -129,11 +131,19 @@ impl Engine {
                 "oscillator pnoise requires an autonomous PSS configuration".to_string(),
             ));
         }
+        config
+            .validate()
+            .map_err(|error| SimulationError::Circuit(format!("Invalid PSS config: {error}")))?;
+        if let Some(point) = operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &config)?;
+        }
 
         let (period, mut circuit, mut matrix, x0) = if let Some(operating_point) = operating_point {
             let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);
+            operating_point.authenticate_for_reuse(netlist, &self.config, &config)?;
+            operating_point.validate_shooting_basis_for_circuit(&circuit)?;
             let state_dimension = circuit.capacitors.len() + circuit.inductors.len();
             if operating_point.shooting_state().len() != state_dimension {
                 return Err(SimulationError::Circuit(format!(

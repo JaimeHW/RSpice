@@ -758,14 +758,22 @@ impl<'a> Vm<'a> {
                 let result = if self.context.analysis_type == 2 {
                     // Transient analysis
                     if let Some(filter) = self.context.laplace_filters.get_mut(*filter_id) {
-                        filter.step(input, self.context.timestep)
+                        filter.step(input, self.context.timestep).map_err(|error| {
+                            VmError::InvalidNumericResult(format!(
+                                "Laplace filter {filter_id}: {error}"
+                            ))
+                        })?
                     } else {
                         return Err(VmError::InvalidInstruction("missing laplace filter"));
                     }
                 } else {
                     // DC and others (s=0)
                     if let Some(filter) = self.context.laplace_filters.get(*filter_id) {
-                        filter.dc_output(input)
+                        filter.dc_output(input).map_err(|error| {
+                            VmError::InvalidNumericResult(format!(
+                                "Laplace filter {filter_id}: {error}"
+                            ))
+                        })?
                     } else {
                         return Err(VmError::InvalidInstruction("missing laplace filter"));
                     }
@@ -1044,5 +1052,36 @@ mod tests {
             matches!(err, VmError::InvalidInstruction(_)),
             "expected invalid instruction error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn singular_laplace_evaluations_are_typed_vm_errors() {
+        let mut dc_context = VmContext::default();
+        dc_context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 0.0])
+                .expect("ideal integrator is valid in transient"),
+        );
+        let error = execute_with_context(
+            &mut dc_context,
+            vec![Instruction::PushConst(1.0), Instruction::LaplaceState(0)],
+        )
+        .expect_err("integrator DC equilibrium is singular");
+        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        assert!(error.to_string().contains("DC equilibrium"));
+
+        let mut transient_context = VmContext::default();
+        transient_context.analysis_type = 2;
+        transient_context.timestep = 1.0;
+        transient_context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::new(vec![vec![1.0]], vec![1.0], vec![1.0], 0.0)
+                .expect("well-formed state-space filter"),
+        );
+        let error = execute_with_context(
+            &mut transient_context,
+            vec![Instruction::PushConst(1.0), Instruction::LaplaceState(0)],
+        )
+        .expect_err("singular transient state solve must fail");
+        assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        assert!(error.to_string().contains("transient"));
     }
 }

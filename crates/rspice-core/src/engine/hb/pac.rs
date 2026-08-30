@@ -63,7 +63,11 @@ impl Engine {
         config: PacConfig,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(netlist, config, None, abort)
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pac_impl(netlist, config, None, abort)
     }
 
     /// Run periodic AC from an exact previously converged shooting-PSS
@@ -76,7 +80,11 @@ impl Engine {
         operating_point: &super::super::PssOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pac_impl(
             netlist,
             config,
             Some(PacOperatingPoint::Shooting(operating_point)),
@@ -94,7 +102,11 @@ impl Engine {
         operating_point: &HbOperatingPoint,
         abort: &dyn AbortSignal,
     ) -> Result<PacAnalysisResult, SimulationError> {
-        self.run_pac_impl(
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let engine = self.resolved_for_netlist(netlist);
+        engine.run_pac_impl(
             netlist,
             config,
             Some(PacOperatingPoint::HarmonicBalance(operating_point)),
@@ -172,6 +184,28 @@ impl Engine {
             )));
         }
 
+        let mut hb_config = match &operating_point {
+            Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
+            _ => HbConfig::new(config.fundamental_freq)
+                .with_harmonics(op_harmonics)
+                .with_oversample(4),
+        };
+        // PAC's tolerances govern the nonlinear periodic operating point.
+        // The subsequent sideband systems use deterministic direct solves and
+        // therefore have no iterative tolerance of their own.
+        if !matches!(operating_point, Some(PacOperatingPoint::HarmonicBalance(_))) {
+            hb_config.tolerance = config.reltol;
+            hb_config.abstol = config.abstol;
+        }
+        let hb_config = self.hb_config_for_netlist(netlist, hb_config)?;
+        self.hb_validate_config(&hb_config)?;
+        if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
+        if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+        }
+
         let input_name = config
             .input_source
             .clone()
@@ -185,6 +219,7 @@ impl Engine {
         let periodic_unknowns = num_nodes
             .checked_add(circuit.voltage_sources.len())
             .and_then(|count| count.checked_add(circuit.inductors.len()))
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()))
             .ok_or_else(|| {
                 SimulationError::Circuit(
                     "PAC periodic node and branch count overflows this platform".to_string(),
@@ -235,47 +270,66 @@ impl Engine {
             )));
         }
 
-        let mut hb_config = match &operating_point {
-            Some(PacOperatingPoint::HarmonicBalance(point)) => point.config().clone(),
-            _ => HbConfig::new(config.fundamental_freq)
-                .with_harmonics(op_harmonics)
-                .with_oversample(4),
-        };
-        self.ensure_analysis_points(hb_config.fft_size())?;
-        // PAC's tolerances govern the nonlinear periodic operating point.
-        // The subsequent sideband systems use deterministic direct solves and
-        // therefore have no iterative tolerance of their own.
-        hb_config.tolerance = config.reltol;
-        hb_config.abstol = config.abstol;
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
-        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
+        let mut solver = HbSolver::try_new(hb_config.clone(), num_nodes).map_err(|error| {
+            SimulationError::Circuit(format!("PAC solver construction failed: {error}"))
+        })?;
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 
+        // Use one canonical exact-MNA solver for both the large-signal
+        // operating point and its periodic small-signal linearization. The
+        // authored source spectra must be registered before the canonical
+        // V/L/R branch map so its voltage-source descriptors retain the same
+        // large-signal constraints Newton solves. Keeping one registry also
+        // makes branch identity drift between the producer and consumer
+        // structurally impossible.
         self.hb_stamp_resistors(&circuit, &mut solver);
         self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_inductors(&circuit, &mut solver);
-        // Always Norton form: the small-signal system must short the
-        // large-signal voltage sources, and the input excitation needs a
-        // node-space current injection.
-        self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        self.hb_stamp_voltage_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
         self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
 
         let has_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
         if has_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
+        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
+            SimulationError::Circuit(format!(
+                "PAC branch-result metadata construction failed: {error}"
+            ))
+        })?;
 
-        let state = if let Some(operating_point) = operating_point {
+        if let Some(PacOperatingPoint::HarmonicBalance(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, &hb_config)?;
+        }
+        if let Some(PacOperatingPoint::Shooting(point)) = &operating_point {
+            point.authenticate_for_reuse(netlist, &self.config, point.config())?;
+        }
+
+        let solve_operating_point = operating_point.is_none();
+        let mut state = if let Some(operating_point) = operating_point {
             match operating_point {
                 PacOperatingPoint::Shooting(point) => {
                     self.hb_state_from_pss_operating_point(point, &hb_config, &node_names)?
                 }
-                PacOperatingPoint::HarmonicBalance(point) => point.to_solver_state(&node_names)?,
+                PacOperatingPoint::HarmonicBalance(point) => {
+                    point.to_solver_state(&node_names, &branch_names)?
+                }
             }
         } else {
-            let mut state = HbSolverState::new(num_nodes, op_harmonics);
+            HbSolverState::new(num_nodes, op_harmonics)
+        };
+        let branch_count = branch_names.len();
+        state
+            .try_prepare_mna_branches(branch_count, hb_config.num_harmonics)
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "PAC operating-point MNA state construction failed: {error}"
+                ))
+            })?;
+        if solve_operating_point {
             if has_nonlinear {
                 solver
                     .solve_newton_with_abort(&mut state, abort)
@@ -293,27 +347,7 @@ impl Engine {
                     SimulationError::Circuit(format!("PAC operating-point solve failed: {e}"))
                 })?;
             }
-            state
-        };
-
-        // The operating-point solver may use Norton continuation for its
-        // nonlinear node-only Newton system. Build a distinct periodic solver
-        // whose linear network contains exact voltage-source and inductor MNA
-        // branch equations and no corresponding Norton/admittance surrogate.
-        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
-        solver.set_node_names(node_names.clone());
-        self.hb_stamp_resistors(&circuit, &mut solver);
-        self.hb_stamp_capacitors(&circuit, &mut solver);
-        self.hb_stamp_periodic_mna_branches(&circuit, &mut solver)?;
-        if has_nonlinear {
-            self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
-        let branch_names = solver.try_periodic_mna_branch_names().map_err(|error| {
-            SimulationError::Circuit(format!(
-                "PAC branch-result metadata construction failed: {error}"
-            ))
-        })?;
-        let branch_count = branch_names.len();
         if num_nodes.checked_add(branch_count) != Some(periodic_unknowns) {
             return Err(SimulationError::Circuit(format!(
                 "PAC periodic solver exposes {num_nodes} nodes and {branch_count} branches, but resource qualification used {periodic_unknowns} MNA unknowns"

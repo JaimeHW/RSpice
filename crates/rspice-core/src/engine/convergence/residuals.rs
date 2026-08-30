@@ -113,7 +113,7 @@ impl Engine {
                     time,
                     0.0,
                     contract.linear_system,
-                );
+                )?;
             }
 
             self.conditioning_dependent_kcl_violation_nodes_from_probe(

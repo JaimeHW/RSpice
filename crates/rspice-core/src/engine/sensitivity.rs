@@ -218,7 +218,9 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
-        circuit.prepare_behavioral_small_signal(&dc_solution);
+        circuit
+            .prepare_behavioral_small_signal(&dc_solution)
+            .map_err(SimulationError::Circuit)?;
 
         let mut small_signal =
             Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)?;

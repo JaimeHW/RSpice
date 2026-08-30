@@ -36,19 +36,19 @@
 mod config;
 mod fft;
 mod multi_tone;
-pub mod nonlinear;
 mod result;
 mod solver;
 
-pub use config::{HbConfig, HbTone};
+pub use config::{HbConfig, HbConfigError, HbTone};
 pub use fft::HbFft;
 pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};
-pub use nonlinear::{HbBjt, HbBjtType, HbDevice, HbDeviceCollection, HbDiode, HbMosType, HbMosfet};
 pub use result::{
     HarmonicData, HbContinuationLimitation, HbPhaseProjectionError, HbPhaseState, HbReactiveKind,
     HbReactivePhaseState, HbReactiveSpectrum, HbResult, SpectralBranchCurrent, SpectralVoltage,
 };
-pub(crate) use solver::{DC_SHORT_CONDUCTANCE, HbDcSeedPolicy};
+#[cfg(test)]
+pub(crate) use solver::DC_SHORT_CONDUCTANCE;
+pub(crate) use solver::HbDcSeedPolicy;
 pub use solver::{
     DepletionCap, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance, NonlinearDeviceParams,
     NonlinearDeviceType, PeriodicAcExcitation, PeriodicNoiseSource,

@@ -104,6 +104,8 @@ pub(super) fn validate_worker_response_before_transport(
         let transfer_buffer_count = operating_point
             .spectral_state()
             .len()
+            .checked_add(operating_point.mna_branch_spectral_state().len())
+            .ok_or_else(|| "retained HB response buffer count overflows this platform".to_owned())?
             .checked_mul(2)
             .and_then(|count| count.checked_add(waveform_buffer_count))
             .and_then(|count| count.checked_add(1))
@@ -125,7 +127,16 @@ pub(super) fn validate_worker_response_before_transport(
         }
         for spectrum in operating_point.spectral_state() {
             numeric_values = numeric_values
-                .checked_add(spectrum.len().saturating_mul(2))
+                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
+                    "retained HB response size overflows this platform".to_owned()
+                })?)
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        for spectrum in operating_point.mna_branch_spectral_state() {
+            numeric_values = numeric_values
+                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
+                    "retained HB response size overflows this platform".to_owned()
+                })?)
                 .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
         }
         if numeric_values > MAX_WORKER_F64_VALUES {
@@ -184,12 +195,22 @@ pub(super) fn validate_worker_response_before_transport(
         return Ok(());
     };
     let analysis = operating_point.analysis();
-    rspice_core::engine::PssOperatingPoint::try_from_parts(
-        operating_point.config().clone(),
-        analysis.clone(),
-        operating_point.shooting_state().to_vec(),
-    )
-    .map_err(|error| format!("invalid retained PSS worker response: {error}"))?;
+    let validation = if let Some(identity) = operating_point.producer_identity() {
+        rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+            identity.clone(),
+            operating_point.config().clone(),
+            analysis.clone(),
+            operating_point.shooting_state_basis().to_vec(),
+            operating_point.shooting_state().to_vec(),
+        )
+    } else {
+        rspice_core::engine::PssOperatingPoint::try_from_parts(
+            operating_point.config().clone(),
+            analysis.clone(),
+            operating_point.shooting_state().to_vec(),
+        )
+    };
+    validation.map_err(|error| format!("invalid retained PSS worker response: {error}"))?;
     let transfer_buffer_count = analysis
         .result
         .waveforms
@@ -636,6 +657,8 @@ pub(crate) struct WorkerPeriodicWaveformTransport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerPssOperatingPointTransport {
     config: rspice_core::analysis::PssConfig,
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::PssOperatingPointIdentity>,
     result_period: f64,
     result_frequency: f64,
     result_iterations: usize,
@@ -662,6 +685,8 @@ pub(crate) struct WorkerPssOperatingPointTransport {
     analysis_floquet_verdict: rspice_core::analysis::FloquetStabilityVerdict,
     #[serde(default)]
     analysis_floquet_authenticated: bool,
+    #[serde(default)]
+    shooting_state_basis: Vec<String>,
     shooting_state: WorkerF64Series,
 }
 
@@ -725,6 +750,7 @@ impl WorkerPssOperatingPointTransport {
             .unzip();
         Self {
             config,
+            producer_identity: operating_point.producer_identity().cloned(),
             result_period: result.period,
             result_frequency: result.frequency,
             result_iterations: result.iterations,
@@ -751,6 +777,7 @@ impl WorkerPssOperatingPointTransport {
             analysis_is_stable: analysis.is_stable,
             analysis_floquet_verdict,
             analysis_floquet_authenticated,
+            shooting_state_basis: operating_point.shooting_state_basis().to_vec(),
             shooting_state: WorkerF64Series::from_vec(
                 operating_point.shooting_state().to_vec(),
                 buffers,
@@ -827,12 +854,22 @@ impl WorkerPssOperatingPointTransport {
             floquet_multipliers: analysis_floquet_multipliers,
             is_stable: self.analysis_is_stable,
         };
-        rspice_core::engine::PssOperatingPoint::try_from_parts(
-            self.config,
-            analysis,
-            shooting_state,
-        )
-        .map_err(|error| format!("invalid retained PSS worker payload: {error}"))
+        let operating_point = if let Some(producer_identity) = self.producer_identity {
+            rspice_core::engine::PssOperatingPoint::try_from_authenticated_parts(
+                producer_identity,
+                self.config,
+                analysis,
+                self.shooting_state_basis,
+                shooting_state,
+            )
+        } else {
+            rspice_core::engine::PssOperatingPoint::try_from_parts(
+                self.config,
+                analysis,
+                shooting_state,
+            )
+        };
+        operating_point.map_err(|error| format!("invalid retained PSS worker payload: {error}"))
     }
 }
 
@@ -845,13 +882,26 @@ pub(crate) struct WorkerHbSpectrumTransport {
     imaginary_digest: crate::product::ContentDigest,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbBranchSpectrumTransport {
+    branch_name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: crate::product::ContentDigest,
+    imaginary_digest: crate::product::ContentDigest,
+}
+
 /// Scalar HB basis metadata plus transferable complex spectral rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerHbOperatingPointTransport {
     config: rspice_core::analysis::HbConfig,
+    #[serde(default)]
+    producer_identity: Option<rspice_core::engine::HbOperatingPointIdentity>,
     spectra: Vec<WorkerHbSpectrumTransport>,
+    mna_branch_spectra: Vec<WorkerHbBranchSpectrumTransport>,
     iterations: usize,
     residual_norm: f64,
+    state_digest: crate::product::ContentDigest,
 }
 
 impl WorkerHbOperatingPointTransport {
@@ -884,11 +934,39 @@ impl WorkerHbOperatingPointTransport {
                 }
             })
             .collect();
+        let mna_branch_spectra = operating_point
+            .mna_branch_names()
+            .iter()
+            .cloned()
+            .zip(operating_point.mna_branch_spectral_state())
+            .map(|(branch_name, coefficients)| {
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbBranchSpectrumTransport {
+                    branch_name,
+                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-branch-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
         Self {
             config: operating_point.config().clone(),
+            producer_identity: operating_point.producer_identity().cloned(),
             spectra,
+            mna_branch_spectra,
             iterations: operating_point.iterations(),
             residual_norm: operating_point.residual_norm(),
+            state_digest: crate::simulation::execution::hb_operating_point_digest(&operating_point),
         }
     }
 
@@ -896,7 +974,12 @@ impl WorkerHbOperatingPointTransport {
         self,
         buffers: &[Vec<f64>],
     ) -> Result<rspice_core::engine::HbOperatingPoint, String> {
-        if self.spectra.len() > 65_536 {
+        if self
+            .spectra
+            .len()
+            .checked_add(self.mna_branch_spectra.len())
+            .is_none_or(|rows| rows > 65_536)
+        {
             return Err("retained HB worker metadata exceeds structural limits".to_owned());
         }
         let mut node_names = Vec::with_capacity(self.spectra.len());
@@ -920,14 +1003,64 @@ impl WorkerHbOperatingPointTransport {
             }
             spectral_state.push(worker_join_complex("HB spectral row", real, imaginary)?);
         }
-        rspice_core::engine::HbOperatingPoint::try_from_parts(
-            self.config,
-            node_names,
-            spectral_state,
-            self.iterations,
-            self.residual_norm,
-        )
-        .map_err(|error| format!("invalid retained HB worker payload: {error}"))
+        let mut mna_branch_names = Vec::with_capacity(self.mna_branch_spectra.len());
+        let mut mna_branch_spectral_state = Vec::with_capacity(self.mna_branch_spectra.len());
+        for spectrum in self.mna_branch_spectra {
+            mna_branch_names.push(spectrum.branch_name);
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let actual_real_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-branch-spectrum-real/v1",
+                &real,
+            );
+            let actual_imaginary_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if actual_real_digest != spectrum.real_digest
+                || actual_imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err(
+                    "retained HB worker MNA branch spectral payload digest mismatch".to_owned(),
+                );
+            }
+            mna_branch_spectral_state.push(worker_join_complex(
+                "HB MNA branch spectral row",
+                real,
+                imaginary,
+            )?);
+        }
+        let operating_point = if let Some(producer_identity) = self.producer_identity {
+            rspice_core::engine::HbOperatingPoint::try_from_authenticated_parts_with_mna_branches(
+                producer_identity,
+                self.config,
+                node_names,
+                spectral_state,
+                mna_branch_names,
+                mna_branch_spectral_state,
+                self.iterations,
+                self.residual_norm,
+            )
+        } else {
+            rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
+                self.config,
+                node_names,
+                spectral_state,
+                mna_branch_names,
+                mna_branch_spectral_state,
+                self.iterations,
+                self.residual_norm,
+            )
+        }
+        .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
+        let actual_state_digest =
+            crate::simulation::execution::hb_operating_point_digest(&operating_point);
+        if actual_state_digest != self.state_digest {
+            return Err(
+                "retained HB worker state identity or configuration digest mismatch".to_owned(),
+            );
+        }
+        Ok(operating_point)
     }
 }
 
@@ -1736,6 +1869,67 @@ pub(super) fn worker_waveforms_from_transport(
 }
 
 #[cfg(test)]
+mod hb_state_contract_tests {
+    use super::*;
+
+    fn transport() -> (WorkerHbOperatingPointTransport, Vec<Vec<f64>>) {
+        let mut buffers = Vec::new();
+        let transport = WorkerHbOperatingPointTransport::from_operating_point(
+            super::super::tests::retained_hb_operating_point(),
+            &mut buffers,
+        );
+        (transport, buffers)
+    }
+
+    #[test]
+    fn retained_hb_transport_authenticates_branch_identity_and_configuration() {
+        let (mut identity, buffers) = transport();
+        identity.mna_branch_spectra[0].branch_name = "VDRIFT".to_owned();
+        assert!(
+            identity
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+
+        let (mut config, buffers) = transport();
+        config.config.tolerance *= 10.0;
+        assert!(
+            config
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+    }
+
+    #[test]
+    fn current_zero_branch_state_still_round_trips_without_invented_branches() {
+        let config = rspice_core::analysis::HbConfig::new(1.0).with_harmonics(1);
+        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+            config,
+            vec!["out".to_owned()],
+            vec![vec![
+                num_complex::Complex64::new(0.5, 0.0),
+                num_complex::Complex64::new(0.1, -0.2),
+            ]],
+            2,
+            1.0e-9,
+        )
+        .unwrap();
+        let mut buffers = Vec::new();
+        let transport = WorkerHbOperatingPointTransport::from_operating_point(
+            operating_point.clone(),
+            &mut buffers,
+        );
+        assert!(transport.mna_branch_spectra.is_empty());
+        assert_eq!(
+            transport.into_operating_point(&buffers).unwrap(),
+            operating_point
+        );
+    }
+}
+
+#[cfg(test)]
 mod pss_floquet_contract_tests {
     use super::*;
 
@@ -1746,6 +1940,39 @@ mod pss_floquet_contract_tests {
             &mut buffers,
         );
         (transport, buffers)
+    }
+
+    fn authenticated_transport() -> (
+        rspice_core::engine::PssOperatingPoint,
+        WorkerPssOperatingPointTransport,
+        Vec<Vec<f64>>,
+    ) {
+        let netlist = rspice_core::netlist::Netlist::parse(
+            "* authenticated worker PSS fixture\n\
+             V1 in 0 DC 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             C1 out 0 1p\n\
+             .end\n",
+        )
+        .unwrap();
+        let config = rspice_core::analysis::PssConfig::new(1.0e6)
+            .with_harmonics(4)
+            .with_points_per_period(32)
+            .with_tstab_periods(0);
+        let operating_point = rspice_core::engine::Engine::default()
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                config,
+                &rspice_core::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let mut buffers = Vec::new();
+        let transport = WorkerPssOperatingPointTransport::from_operating_point(
+            operating_point.clone(),
+            &mut buffers,
+        );
+        (operating_point, transport, buffers)
     }
 
     #[test]
@@ -1761,6 +1988,28 @@ mod pss_floquet_contract_tests {
         assert_eq!(
             restored,
             super::super::tests::retained_pss_operating_point()
+        );
+    }
+
+    #[test]
+    fn retained_pss_worker_transport_preserves_identity_and_rejects_numeric_tamper() {
+        let (operating_point, transport, buffers) = authenticated_transport();
+        assert!(transport.producer_identity.is_some());
+        assert_eq!(transport.shooting_state_basis, ["C:C1"]);
+
+        let restored = transport.clone().into_operating_point(&buffers).unwrap();
+        assert_eq!(
+            restored.producer_identity(),
+            operating_point.producer_identity()
+        );
+        assert_eq!(restored.shooting_state_basis(), ["C:C1"]);
+
+        let mut tampered = buffers;
+        tampered.last_mut().unwrap()[0] += 0.25;
+        let error = transport.into_operating_point(&tampered).unwrap_err();
+        assert!(
+            error.contains("numerical payload does not match"),
+            "retained shooting-state tamper should fail core authentication: {error}"
         );
     }
 
@@ -1785,6 +2034,20 @@ mod pss_floquet_contract_tests {
             rspice_core::analysis::FloquetStabilityVerdict::Indeterminate
         );
         assert!(restored.into_operating_point(&buffers).is_err());
+    }
+
+    #[test]
+    fn retained_pss_transport_parses_pre_identity_metadata_as_untrusted_legacy_state() {
+        let (transport, buffers) = transport();
+        let mut encoded = serde_json::to_value(transport).unwrap();
+        let object = encoded.as_object_mut().unwrap();
+        object.remove("producer_identity");
+        object.remove("shooting_state_basis");
+
+        let restored: WorkerPssOperatingPointTransport = serde_json::from_value(encoded).unwrap();
+        let operating_point = restored.into_operating_point(&buffers).unwrap();
+        assert!(operating_point.producer_identity().is_none());
+        assert!(operating_point.shooting_state_basis().is_empty());
     }
 
     #[test]

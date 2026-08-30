@@ -1,6 +1,6 @@
 use num_complex::Complex64;
 use rspice_core::AtomicAbort;
-use rspice_core::analysis::harmonic_balance::{HbConfig, HbContinuationLimitation, HbReactiveKind};
+use rspice_core::analysis::harmonic_balance::{HbConfig, HbPhaseProjectionError, HbReactiveKind};
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::{PI, TAU};
@@ -79,7 +79,49 @@ fn linear_hb_retains_named_mna_current_and_exact_capacitor_state() {
 }
 
 #[test]
-fn inductor_projection_is_constitutive_and_fails_closed_on_dc_exactness() {
+fn linear_hb_preserves_interleaved_v_l_v_branch_order_and_current_orientation() {
+    let deck = r#"interleaved exact HB branches
+VLEFT left 0 DC 2
+RLEFT left mid 1k
+LSTORE mid 0 1m
+VRIGHT right 0 DC 1
+RRIGHT right mid 1k
+.end
+"#;
+    let analysis = run(deck, 100.0e3, 3);
+    assert!(analysis.converged);
+    let result = &analysis.result;
+    let branch_names: Vec<_> = result
+        .mna_branch_currents
+        .iter()
+        .map(|branch| branch.device_name.to_ascii_uppercase())
+        .collect();
+    assert_eq!(branch_names, ["VLEFT", "LSTORE", "VRIGHT"]);
+
+    let expected_dc_currents = [-2.0e-3, 3.0e-3, -1.0e-3];
+    for (branch, expected_dc) in result.mna_branch_currents.iter().zip(expected_dc_currents) {
+        assert!((branch.coefficients[0].re - expected_dc).abs() < 1.0e-12);
+        assert_eq!(branch.coefficients[0].im, 0.0);
+        assert!(
+            branch.coefficients[1..]
+                .iter()
+                .all(|coefficient| coefficient.norm() < 1.0e-14)
+        );
+    }
+
+    let inductor = result
+        .reactive_spectra
+        .iter()
+        .find(|spectrum| spectrum.device_name.eq_ignore_ascii_case("LSTORE"))
+        .expect("interleaved inductor state retained");
+    assert!(inductor.dc_current_is_exact);
+    assert!((inductor.current_coefficients[0].re - 3.0e-3).abs() < 1.0e-12);
+    assert_eq!(inductor.current_coefficients[0].im, 0.0);
+    assert!(result.continuation_limitations.is_empty());
+}
+
+#[test]
+fn inductor_projection_retains_exact_mna_current_and_is_complete() {
     let f0 = 100.0e3;
     let inductance = 1.0e-3;
     let deck = format!(
@@ -98,16 +140,19 @@ fn inductor_projection_is_constitutive_and_fails_closed_on_dc_exactness() {
         .find(|branch| branch.device_name.eq_ignore_ascii_case("LSTATE"))
         .expect("inductor state retained");
     assert_eq!(inductor.kind, HbReactiveKind::Inductor);
-    assert!(!inductor.dc_current_is_exact);
+    assert!(inductor.dc_current_is_exact);
+    let branch = result
+        .mna_branch_currents
+        .iter()
+        .find(|branch| branch.device_name.eq_ignore_ascii_case("LSTATE"))
+        .expect("canonical inductor MNA current retained");
+    assert_eq!(inductor.current_coefficients, branch.coefficients);
     let expected_current =
         inductor.voltage_coefficients[1] / Complex64::new(0.0, TAU * f0 * inductance);
     assert!((inductor.current_coefficients[1] - expected_current).norm() < 1.0e-14);
-    assert_eq!(
-        result.continuation_limitations,
-        vec![HbContinuationLimitation::InductorDcCurrentUsesShortSurrogate]
-    );
+    assert!(result.continuation_limitations.is_empty());
     assert!(
-        !result
+        result
             .project_phase(0.0)
             .expect("finite phase projects")
             .is_complete()
@@ -115,7 +160,7 @@ fn inductor_projection_is_constitutive_and_fails_closed_on_dc_exactness() {
 }
 
 #[test]
-fn nonlinear_norton_source_never_claims_an_mna_branch_spectrum() {
+fn nonlinear_exact_source_retains_mna_branch_spectrum() {
     let f0 = 1.0e6;
     let deck = format!(
         "nonlinear HB state\n\
@@ -128,20 +173,76 @@ fn nonlinear_norton_source_never_claims_an_mna_branch_spectrum() {
     );
     let analysis = run(&deck, f0, 3);
     assert!(analysis.converged);
-    assert!(analysis.result.mna_branch_currents.is_empty());
+    assert_eq!(analysis.result.mna_branch_currents.len(), 1);
     assert!(
         analysis
             .result
-            .continuation_limitations
-            .contains(&HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent)
+            .mna_branch_currents
+            .iter()
+            .any(|branch| branch.device_name.eq_ignore_ascii_case("V1"))
     );
+    assert!(analysis.result.continuation_limitations.is_empty());
     assert!(
-        !analysis
+        analysis
             .result
             .project_phase(0.0)
             .expect("finite phase projects")
             .is_complete()
     );
+}
+
+#[test]
+fn malformed_hb_results_are_not_valid_periodic_states() {
+    let exact = run(
+        "HB result validation\n\
+         V1 in 0 SIN(0 1 1meg)\n\
+         R1 in out 1k\n\
+         L1 out 0 1m\n\
+         C1 out 0 1p\n\
+         .end\n",
+        1.0e6,
+        3,
+    )
+    .result;
+    assert!(exact.is_valid());
+
+    let mut truncated_node = exact.clone();
+    truncated_node.spectral_voltages[0].coefficients.pop();
+
+    let mut wrong_frequency_grid = exact.clone();
+    wrong_frequency_grid.harmonic_frequencies[1] += 1.0;
+
+    let mut imaginary_branch_dc = exact.clone();
+    imaginary_branch_dc.mna_branch_currents[0].coefficients[0].im = 1.0e-12;
+
+    let mut truncated_reactive_current = exact.clone();
+    truncated_reactive_current.reactive_spectra[0]
+        .current_coefficients
+        .pop();
+
+    let mut duplicate_node_identity = exact;
+    duplicate_node_identity.node_names[1] = duplicate_node_identity.node_names[0].clone();
+    duplicate_node_identity.spectral_voltages[1].node_name = duplicate_node_identity
+        .spectral_voltages[0]
+        .node_name
+        .clone();
+
+    for (case, malformed) in [
+        ("truncated node spectrum", truncated_node),
+        ("wrong frequency grid", wrong_frequency_grid),
+        ("imaginary branch DC", imaginary_branch_dc),
+        ("truncated reactive current", truncated_reactive_current),
+        ("duplicate node identity", duplicate_node_identity),
+    ] {
+        assert!(!malformed.is_valid(), "{case} passed HB validation");
+        assert!(
+            matches!(
+                malformed.project_phase(0.0),
+                Err(HbPhaseProjectionError::InvalidResult)
+            ),
+            "{case} projected as a periodic state"
+        );
+    }
 }
 
 fn envelope_deck() -> Netlist {

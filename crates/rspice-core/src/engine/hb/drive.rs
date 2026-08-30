@@ -15,12 +15,20 @@ impl Engine {
                 harmonics: drive_harmonics
                     .iter()
                     .copied()
-                    .filter(|_| ac_mag.abs() > HB_ZERO_SENSE_TOL)
+                    .filter(|_| ac_mag != 0.0)
                     .map(|harmonic| (harmonic, ac_mag, ac_phase))
                     .collect(),
             });
         };
         match spec {
+            SourceSpec::Distortion { inner, .. } => Self::hb_source_spectrum(
+                fallback_dc,
+                ac_mag,
+                ac_phase,
+                Some(inner),
+                config,
+                drive_harmonics,
+            ),
             SourceSpec::RfPort { inner, port } => {
                 let Some((amplitude, frequency, phase)) = port.drive_tone() else {
                     return Self::hb_source_spectrum(
@@ -58,7 +66,7 @@ impl Engine {
                     config,
                     drive_harmonics,
                 )?;
-                if amplitude.abs() > HB_ZERO_SENSE_TOL {
+                if amplitude != 0.0 {
                     let harmonic = Self::hb_periodic_source_harmonic(
                         frequency,
                         config.fundamental_freq,
@@ -69,6 +77,7 @@ impl Engine {
                     // drive and its own waveform excites the circuit with the
                     // same total that transient integrates.
                     spectrum.harmonics.push((harmonic, amplitude, phase));
+                    Self::hb_merge_source_harmonics(&mut spectrum.harmonics);
                 }
                 Ok(spectrum)
             }
@@ -93,7 +102,7 @@ impl Engine {
                 harmonics: drive_harmonics
                     .iter()
                     .copied()
-                    .filter(|_| ac_magnitude.abs() > HB_ZERO_SENSE_TOL)
+                    .filter(|_| *ac_magnitude != 0.0)
                     .map(|harmonic| (harmonic, *ac_magnitude, *ac_phase))
                     .collect(),
             }),
@@ -136,7 +145,7 @@ impl Engine {
                         .into());
                     }
                 }
-                if amplitude.abs() <= HB_ZERO_SENSE_TOL || drive_harmonics.is_empty() {
+                if *amplitude == 0.0 || drive_harmonics.is_empty() {
                     return Ok(HbSourceSpectrum {
                         dc: *offset,
                         harmonics: Vec::new(),
@@ -198,11 +207,51 @@ impl Engine {
                 }
                 Ok(spectrum)
             }
-            _ => Ok(HbSourceSpectrum {
-                dc: fallback_dc,
-                harmonics: Vec::new(),
-            }),
+            SourceSpec::Pwl { .. } => Err(HbError::InvalidConfig(
+                "HB does not yet implement exact periodic PWL source coefficients".to_string(),
+            )
+            .into()),
+            SourceSpec::PwlFile { .. } => Err(HbError::InvalidConfig(
+                "HB cannot authenticate or derive exact periodic coefficients from a PWL FILE source"
+                    .to_string(),
+            )
+            .into()),
+            SourceSpec::Pat { .. } => Err(HbError::InvalidConfig(
+                "HB does not yet implement exact periodic PAT source coefficients".to_string(),
+            )
+            .into()),
+            SourceSpec::Exp { .. } => Err(HbError::InvalidConfig(
+                "HB requires periodic sources; EXP is not periodic".to_string(),
+            )
+            .into()),
+            SourceSpec::Sffm { .. } => Err(HbError::InvalidConfig(
+                "HB does not yet implement exact periodic SFFM source coefficients".to_string(),
+            )
+            .into()),
+            SourceSpec::Am { .. } => Err(HbError::InvalidConfig(
+                "HB does not yet implement exact periodic AM source coefficients".to_string(),
+            )
+            .into()),
+            SourceSpec::TrNoise { .. } => Err(HbError::InvalidConfig(
+                "HB requires deterministic periodic sources; TRNOISE is stochastic".to_string(),
+            )
+            .into()),
+            SourceSpec::TrRandom { .. } => Err(HbError::InvalidConfig(
+                "HB requires deterministic periodic sources; TRRANDOM is stochastic".to_string(),
+            )
+            .into()),
         }
+    }
+
+    fn hb_merge_source_harmonics(harmonics: &mut Vec<(usize, Value, Value)>) {
+        let mut merged = std::collections::BTreeMap::<usize, Complex64>::new();
+        for (harmonic, amplitude, phase) in harmonics.drain(..) {
+            *merged.entry(harmonic).or_default() += Complex64::from_polar(amplitude, phase);
+        }
+        harmonics.extend(merged.into_iter().filter_map(|(harmonic, phasor)| {
+            let amplitude = phasor.norm();
+            (amplitude != 0.0).then_some((harmonic, amplitude, phasor.arg()))
+        }));
     }
 
     fn hb_periodic_source_harmonic(
@@ -295,55 +344,57 @@ impl Engine {
         }
 
         let source_frequency = period.recip();
-        let _source_harmonic = Self::hb_periodic_source_harmonic(
+        let source_harmonic = Self::hb_periodic_source_harmonic(
             source_frequency,
             config.fundamental_freq,
             config.num_harmonics,
             "PULSE",
         )?;
-        let area = v1 * period + (v2 - v1) * (width + 0.5 * rise + 0.5 * fall);
-        let dc = area / period;
-        if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL {
+        let delta = v2 - v1;
+        let dc = v1 + delta * (width + 0.5 * rise + 0.5 * fall) / period;
+        if v2 == v1 {
             return Ok(HbSourceSpectrum {
                 dc,
                 harmonics: Vec::new(),
             });
         }
 
-        let shift = delay;
-        let collocation_points = config.fft_size();
-        let hb_period = config.fundamental_freq.recip();
-        let samples: Vec<Value> = (0..collocation_points)
-            .map(|sample| {
-                let time = sample as Value * hb_period / collocation_points as Value;
-                let local_time = (time - shift).rem_euclid(period);
-                if rise > 0.0 && local_time < rise {
-                    v1 + (v2 - v1) * local_time / rise
-                } else if local_time < rise + width {
-                    v2
-                } else if fall > 0.0 && local_time < occupied {
-                    v2 + (v1 - v2) * (local_time - rise - width) / fall
-                } else {
-                    v1
-                }
-            })
-            .collect();
-        let dc = samples.iter().sum::<Value>() / collocation_points as Value;
+        // Integrate the authored continuous, piecewise-linear waveform.  The
+        // Fourier coefficient of a ramp is evaluated through its rectangular
+        // derivative using sinc, which remains well-conditioned as a rise or
+        // fall time approaches zero.  A zero-duration edge is its exact jump.
+        // If the source repeats `source_harmonic` times per HB period, only
+        // integer multiples of that HB harmonic can be non-zero.
+        let delay = delay.rem_euclid(period);
         let mut harmonics = Vec::new();
-        for harmonic in 1..=config.num_harmonics {
-            let coefficient = samples
-                .iter()
-                .enumerate()
-                .map(|(sample, value)| {
-                    let angle = -std::f64::consts::TAU * harmonic as Value * sample as Value
-                        / collocation_points as Value;
-                    Complex64::from_polar(*value, angle)
-                })
-                .sum::<Complex64>()
-                / collocation_points as Value;
-            let amplitude = 2.0 * coefficient.norm();
-            if amplitude > HB_ZERO_SENSE_TOL {
-                harmonics.push((harmonic, amplitude, coefficient.arg()));
+        for harmonic in (source_harmonic..=config.num_harmonics).step_by(source_harmonic) {
+            let source_order = harmonic / source_harmonic;
+            let angular_frequency = std::f64::consts::TAU * source_order as Value / period;
+            let mut derivative_integral = Complex64::new(0.0, 0.0);
+            for (start, duration, change) in [(0.0, rise, 1.0), (rise + width, fall, -1.0)] {
+                if duration == 0.0 {
+                    derivative_integral +=
+                        Complex64::from_polar(change, -angular_frequency * start);
+                } else {
+                    let half_angle = 0.5 * angular_frequency * duration;
+                    let sinc = if half_angle == 0.0 {
+                        1.0
+                    } else {
+                        half_angle.sin() / half_angle
+                    };
+                    derivative_integral += Complex64::from_polar(
+                        change * sinc,
+                        -angular_frequency * (start + 0.5 * duration),
+                    );
+                }
+            }
+            let coefficient = delta * derivative_integral
+                / Complex64::new(0.0, std::f64::consts::TAU * source_order as Value)
+                * Complex64::from_polar(1.0, -angular_frequency * delay);
+            let phasor = 2.0 * coefficient;
+            let amplitude = phasor.norm();
+            if amplitude != 0.0 {
+                harmonics.push((harmonic, amplitude, phasor.arg()));
             }
         }
         Ok(HbSourceSpectrum { dc, harmonics })
@@ -508,38 +559,190 @@ impl Engine {
 
     pub(in crate::engine::hb) fn hb_has_supported_nonlinear_devices(
         circuit: &CircuitData,
-        num_nodes: usize,
+        _num_nodes: usize,
     ) -> bool {
         !circuit.diodes.is_empty()
-            || !circuit.bjts.is_empty()
             || !circuit.mosfets.is_empty()
             || !circuit.jfets.is_empty()
             || !circuit.vswitches.is_empty()
-            || circuit
-                .iswitches
-                .iter()
-                .any(|sw| Self::hb_resolve_iswitch_control(circuit, sw, num_nodes).is_ok())
-            || {
-                #[cfg(feature = "veriloga")]
-                {
-                    circuit.has_veriloga_devices()
-                }
-                #[cfg(not(feature = "veriloga"))]
-                {
-                    false
-                }
-            }
     }
 
     pub(in crate::engine::hb) fn hb_unsupported_nonlinear_device_summary(
         circuit: &CircuitData,
-        num_nodes: usize,
+        _num_nodes: usize,
     ) -> Option<String> {
         let mut kinds: Vec<String> = Vec::new();
         let describe = |name: &str, count: usize| -> String {
             let noun = if count == 1 { "device" } else { "devices" };
             format!("{name} ({count} {noun})")
         };
+
+        let reduced_diodes = circuit
+            .diodes
+            .devices
+            .iter()
+            .filter(|diode| {
+                diode.level != crate::device::DiodeLevel::Legacy
+                    || diode.bv.is_some()
+                    || diode.forward_knee_current > 0.0
+                    || diode.reverse_knee_current > 0.0
+                    || diode.recombination_saturation_current != 0.0
+                    || diode.sidewall_saturation_current != 0.0
+                    || diode.sidewall_cj0 != 0.0
+                    || diode.tunneling.bottom_given
+                    || diode.tunneling.sidewall_given
+                    || diode.tunneling.bottom != 0.0
+                    || diode.tunneling.sidewall != 0.0
+                    || diode.overlap_capacitance != 0.0
+            })
+            .count();
+        if reduced_diodes > 0 {
+            kinds.push(describe(
+                "diodes requiring breakdown, high-injection, recombination, sidewall, tunneling, overlap, or non-LEVEL=1 equations not represented by exact HB",
+                reduced_diodes,
+            ));
+        }
+        let invalid_diodes = circuit
+            .diodes
+            .devices
+            .iter()
+            .filter(|diode| {
+                !diode.is.is_finite()
+                    || diode.is < 0.0
+                    || !diode.n.is_finite()
+                    || diode.n <= 0.0
+                    || !diode.vt.is_finite()
+                    || diode.vt <= 0.0
+                    || !(diode.n * diode.vt).is_finite()
+                    || !diode.cj0.is_finite()
+                    || diode.cj0 < 0.0
+                    || !diode.vj.is_finite()
+                    || diode.vj <= 0.0
+                    || !diode.m.is_finite()
+                    || !(0.0..=1.0).contains(&diode.m)
+                    || !diode.fc.is_finite()
+                    || !(0.0..1.0).contains(&diode.fc)
+                    || !diode.tt.is_finite()
+                    || diode.tt < 0.0
+            })
+            .count();
+        if invalid_diodes > 0 {
+            kinds.push(describe(
+                "LEVEL=1 diodes with invalid or nonrepresentable exact-HB junction parameters",
+                invalid_diodes,
+            ));
+        }
+        if !circuit.bjts.is_empty() {
+            kinds.push(describe(
+                "native BJT/VBIC models whose complete Gummel-Poon/VBIC equations are not represented by exact HB",
+                circuit.bjts.len(),
+            ));
+        }
+        let invalid_mos = circuit
+            .mosfets
+            .devices
+            .iter()
+            .filter(|mos| mos.level == 1 && mos.level1_physical_parameter_error().is_some())
+            .count();
+        if invalid_mos > 0 {
+            kinds.push(describe(
+                "LEVEL=1 MOS devices with invalid or nonrepresentable physical parameters",
+                invalid_mos,
+            ));
+        }
+        let reduced_mos = circuit
+            .mosfets
+            .devices
+            .iter()
+            .filter(|mos| {
+                mos.level != 1
+                    || mos.body_junction_model
+                        != crate::device::MosBodyJunctionModel::NgspiceReverseClamp
+                    || (mos.cjsw != 0.0
+                        && (mos.source_perimeter != 0.0 || mos.drain_perimeter != 0.0))
+            })
+            .count();
+        if reduced_mos > 0 {
+            kinds.push(describe(
+                "classic MOS devices requiring non-LEVEL=1, non-ngspice bulk-junction, or sidewall-charge equations not represented by exact HB",
+                reduced_mos,
+            ));
+        }
+        let reduced_jfets = circuit
+            .jfets
+            .iter()
+            .filter(|jfet| {
+                jfet.params.channel_model != crate::device::JfetChannelModel::ShichmanHodges
+                    || jfet.m != 1.0
+                    || jfet.area != 1.0
+                    || jfet.params.fc != 0.5
+                    || jfet.params.n != 1.0
+                    || jfet.resolved_instance_temperature() != jfet.params.tnom
+            })
+            .count();
+        if reduced_jfets > 0 {
+            kinds.push(describe(
+                "JFET devices requiring non-Shichman-Hodges, geometry-scaled, temperature-scaled, or non-default junction equations not represented by exact HB",
+                reduced_jfets,
+            ));
+        }
+        let invalid_jfets = circuit
+            .jfets
+            .iter()
+            .filter(|jfet| {
+                let params = &jfet.params;
+                !params.vto.is_finite()
+                    || !params.beta.is_finite()
+                    || params.beta < 0.0
+                    || !params.lambda.is_finite()
+                    || params.lambda < 0.0
+                    || !params.is.is_finite()
+                    || params.is < 0.0
+                    || !params.cgs.is_finite()
+                    || params.cgs < 0.0
+                    || !params.cgd.is_finite()
+                    || params.cgd < 0.0
+                    || !params.pb.is_finite()
+                    || params.pb <= 0.0
+                    || !params.m.is_finite()
+                    || !(0.0..=1.0).contains(&params.m)
+            })
+            .count();
+        if invalid_jfets > 0 {
+            kinds.push(describe(
+                "JFET devices with invalid physical parameters",
+                invalid_jfets,
+            ));
+        }
+        let invalid_vswitches = circuit
+            .vswitches
+            .iter()
+            .filter(|switch| switch.physical_parameter_error().is_some())
+            .count();
+        if invalid_vswitches > 0 {
+            kinds.push(describe(
+                "voltage-controlled switches with invalid or nonrepresentable physical parameters",
+                invalid_vswitches,
+            ));
+        }
+        let unsupported_vswitches = circuit
+            .vswitches
+            .iter()
+            .filter(|switch| switch.vh != 0.0 || switch.uses_xyce_curve_semantics())
+            .count();
+        if unsupported_vswitches > 0 {
+            kinds.push(describe(
+                "voltage-controlled switches requiring hysteresis or Xyce ON/OFF curve semantics not represented by exact HB",
+                unsupported_vswitches,
+            ));
+        }
+        #[cfg(feature = "veriloga")]
+        if circuit.has_veriloga_devices() {
+            kinds.push(describe(
+                "runtime Verilog-A devices without exact HB charge/noise capability metadata",
+                circuit.veriloga_devices().len(),
+            ));
+        }
 
         if !circuit.bsim3v3.is_empty() {
             kinds.push(describe("native BSIM3v3", circuit.bsim3v3.len()));
@@ -563,15 +766,10 @@ impl Engine {
             ));
         }
 
-        let unsupported_iswitch = circuit
-            .iswitches
-            .iter()
-            .filter(|sw| Self::hb_resolve_iswitch_control(circuit, sw, num_nodes).is_err())
-            .count();
-        if unsupported_iswitch > 0 {
-            kinds.push(format!(
-                "{} current switch(es) (HB requires static control-source waveforms for ISwitch control branches)",
-                unsupported_iswitch
+        if !circuit.iswitches.is_empty() {
+            kinds.push(describe(
+                "current-controlled switches requiring exact control-branch current spectra",
+                circuit.iswitches.len(),
             ));
         }
         if !circuit.generic_switches.is_empty() {
@@ -634,7 +832,8 @@ impl Engine {
         let represented_branches = circuit
             .voltage_sources
             .len()
-            .checked_add(circuit.inductors.len());
+            .checked_add(circuit.inductors.len())
+            .and_then(|count| count.checked_add(circuit.resistor_branches.len()));
         if represented_branches != Some(circuit.num_branches()) {
             kinds.push("unrepresented MNA branch families");
         }
@@ -645,115 +844,6 @@ impl Engine {
             kinds.dedup();
             Some(kinds.join(", "))
         }
-    }
-
-    pub(in crate::engine::hb) fn hb_extract_static_source_voltage(
-        spec: Option<&SourceSpec>,
-        fallback_dc: Value,
-    ) -> Option<Value> {
-        match spec {
-            None => Some(fallback_dc),
-            Some(SourceSpec::RfPort { inner, .. }) => {
-                Self::hb_extract_static_source_voltage(Some(inner), fallback_dc)
-            }
-            Some(SourceSpec::Dc(v)) => Some(*v),
-            Some(SourceSpec::DcAc {
-                dc_value,
-                ac_magnitude,
-                ..
-            }) if ac_magnitude.abs() <= HB_ZERO_SENSE_TOL => Some(*dc_value),
-            Some(SourceSpec::DcTransient {
-                dc_value,
-                transient,
-            }) => Self::hb_extract_static_source_voltage(Some(transient), *dc_value),
-            Some(SourceSpec::DcAcTransient {
-                dc_value,
-                ac_magnitude,
-                transient,
-                ..
-            }) if ac_magnitude.abs() <= HB_ZERO_SENSE_TOL => {
-                Self::hb_extract_static_source_voltage(Some(transient), *dc_value)
-            }
-            Some(SourceSpec::Ac { magnitude, .. }) if magnitude.abs() <= HB_ZERO_SENSE_TOL => {
-                Some(0.0)
-            }
-            Some(SourceSpec::Sin {
-                offset, amplitude, ..
-            }) if amplitude.abs() <= HB_ZERO_SENSE_TOL => Some(*offset),
-            Some(SourceSpec::Pulse { v1, v2, .. }) if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL => {
-                Some(*v1)
-            }
-            Some(SourceSpec::Exp { v1, v2, .. }) if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL => {
-                Some(*v1)
-            }
-            Some(SourceSpec::Pwl { points, .. }) => {
-                let first = points.first().map(|(_, value)| *value)?;
-                if points
-                    .iter()
-                    .all(|(_, value)| (*value - first).abs() <= HB_ZERO_SENSE_TOL)
-                {
-                    Some(first)
-                } else {
-                    None
-                }
-            }
-            Some(SourceSpec::PwlFile { .. }) => None,
-            _ => None,
-        }
-    }
-
-    pub(in crate::engine::hb) fn hb_resolve_iswitch_control(
-        circuit: &CircuitData,
-        sw: &crate::device::CurrentSwitch,
-        num_nodes: usize,
-    ) -> Result<HbCurrentSwitchControl, ()> {
-        let Some(ctrl_branch_matrix_idx) = sw.ctrl_branch else {
-            return Err(());
-        };
-        if ctrl_branch_matrix_idx <= num_nodes {
-            return Err(());
-        }
-        let ctrl_branch_ordinal = ctrl_branch_matrix_idx - num_nodes;
-        let Some(vsrc_idx) = circuit
-            .voltage_sources
-            .branch_indices
-            .iter()
-            .position(|&ordinal| ordinal == ctrl_branch_ordinal)
-        else {
-            return Err(());
-        };
-
-        let dc = circuit
-            .voltage_sources
-            .dc_values
-            .get(vsrc_idx)
-            .copied()
-            .unwrap_or(0.0);
-        let ac_mag = circuit
-            .voltage_sources
-            .ac_magnitudes
-            .get(vsrc_idx)
-            .copied()
-            .unwrap_or(0.0);
-        let spec = circuit
-            .voltage_sources
-            .source_specs
-            .get(vsrc_idx)
-            .and_then(|s| s.as_ref());
-        if ac_mag.abs() > HB_ZERO_SENSE_TOL {
-            return Err(());
-        }
-        let static_voltage = Self::hb_extract_static_source_voltage(spec, dc).ok_or(())?;
-
-        let ctrl_pos =
-            Self::hb_node_to_solver_index(circuit.voltage_sources.node_pos[vsrc_idx], num_nodes);
-        let ctrl_neg =
-            Self::hb_node_to_solver_index(circuit.voltage_sources.node_neg[vsrc_idx], num_nodes);
-        Ok(HbCurrentSwitchControl {
-            ctrl_pos,
-            ctrl_neg,
-            control_current_bias: static_voltage * HB_NORTON_G,
-        })
     }
 
     #[inline]

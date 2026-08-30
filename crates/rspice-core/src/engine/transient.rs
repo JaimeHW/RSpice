@@ -1010,7 +1010,9 @@ impl Engine {
                     })?
             }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
-                circuit.behavioral_sources.current_sources[branch.index].evaluate(solution, time)
+                circuit.behavioral_sources.current_sources[branch.index]
+                    .evaluate(solution, time)
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?
             }
             DerivedTransientBranchCurrentKind::VoltageSwitch => {
                 let switch = &circuit.vswitches[branch.index];
@@ -3109,7 +3111,8 @@ impl Engine {
         if resume.is_none() {
             circuit
                 .behavioral_sources
-                .accept_transient_step(&solution, resume_time);
+                .accept_transient_step(&solution, resume_time)
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         let mut time = Vec::with_capacity(trace_capacity);
         time.push(resume_time);
@@ -4679,13 +4682,15 @@ impl Engine {
                         && (!enforce_device_convergence
                             || !circuit.has_nonlinear_devices()
                             || circuit.nonlinear_converged(self.device_convergence_criteria()));
-                    let behavioral_converged = circuit.behavioral_linearizations_converged(
-                        &new_solution,
-                        t,
-                        self.voltage_reltol(),
-                        self.voltage_abstol(),
-                        self.current_abstol(),
-                    );
+                    let behavioral_converged = circuit
+                        .behavioral_linearizations_converged(
+                            &new_solution,
+                            t,
+                            self.voltage_reltol(),
+                            self.voltage_abstol(),
+                            self.current_abstol(),
+                        )
+                        .map_err(SimulationError::Circuit)?;
                     let decision = status.evaluate(
                         nox_status::XyceNoxSample {
                             iteration: _iter,
@@ -5055,13 +5060,15 @@ impl Engine {
                                     || !circuit.has_nonlinear_devices()
                                     || circuit
                                         .nonlinear_converged(self.device_convergence_criteria()));
-                            let behavioral_converged = circuit.behavioral_linearizations_converged(
-                                &new_solution,
-                                step_time,
-                                self.voltage_reltol(),
-                                self.voltage_abstol(),
-                                self.current_abstol(),
-                            );
+                            let behavioral_converged = circuit
+                                .behavioral_linearizations_converged(
+                                    &new_solution,
+                                    step_time,
+                                    self.voltage_reltol(),
+                                    self.voltage_abstol(),
+                                    self.current_abstol(),
+                                )
+                                .map_err(SimulationError::Circuit)?;
                             let decision = xyce_damped_status
                                 .as_mut()
                                 .expect("Xyce DampedNewton status is initialized for this path")
@@ -5268,13 +5275,15 @@ impl Engine {
                         // behavioral-expression linearization, not a device
                         // `isConverged` flag controlled by Xyce's
                         // ENFORCEDEVICECONV status test.
-                        let mut behavioral_converged = circuit.behavioral_linearizations_converged(
-                            &new_solution,
-                            step_time,
-                            self.voltage_reltol(),
-                            self.voltage_abstol(),
-                            self.current_abstol(),
-                        );
+                        let mut behavioral_converged = circuit
+                            .behavioral_linearizations_converged(
+                                &new_solution,
+                                step_time,
+                                self.voltage_reltol(),
+                                self.voltage_abstol(),
+                                self.current_abstol(),
+                            )
+                            .map_err(SimulationError::Circuit)?;
                         let mut residual_converged_for_acceptance = false;
                         total_postsolve_convergence_nanos +=
                             postsolve_convergence_start.elapsed().as_nanos();
@@ -5367,13 +5376,15 @@ impl Engine {
                                         || circuit.nonlinear_converged(
                                             self.device_convergence_criteria(),
                                         ));
-                                behavioral_converged = circuit.behavioral_linearizations_converged(
-                                    &new_solution,
-                                    step_time,
-                                    self.voltage_reltol(),
-                                    self.voltage_abstol(),
-                                    self.current_abstol(),
-                                );
+                                behavioral_converged = circuit
+                                    .behavioral_linearizations_converged(
+                                        &new_solution,
+                                        step_time,
+                                        self.voltage_reltol(),
+                                        self.voltage_abstol(),
+                                        self.current_abstol(),
+                                    )
+                                    .map_err(SimulationError::Circuit)?;
                             }
                             if _iter == 0
                                 && globalization_active

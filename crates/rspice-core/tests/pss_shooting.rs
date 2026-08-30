@@ -32,6 +32,40 @@ c1 out 0 {C}
 }
 
 #[test]
+fn public_pss_resolves_deck_rshunt_before_circuit_construction() {
+    let netlist = Netlist::parse(
+        "resolved PSS RSHUNT\n\
+         I1 0 out SIN(0 1m 1meg)\n\
+         C1 out 0 159.154943091895p\n\
+         .OPTIONS RSHUNT=1k\n\
+         .END\n",
+    )
+    .expect("PSS option deck parses");
+    let result = Engine::default()
+        .run_pss(
+            &netlist,
+            PssConfig::new(F0)
+                .with_harmonics(4)
+                .with_points_per_period(32)
+                .with_tstab_periods(0)
+                .with_tolerance(1.0e-7),
+        )
+        .expect("resolved RSHUNT PSS converges");
+    let output = result
+        .result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("output node exists");
+    let fundamental = result.result.harmonics(output + 1, 1)[1].magnitude;
+    let expected = 1.0 / 2.0_f64.sqrt();
+    assert!(
+        (fundamental / expected - 1.0).abs() < 0.03,
+        "the resolved 1 kOhm shunt and omega*C=1 mS must produce a 1/sqrt(2) V peak; got {fundamental} V"
+    );
+}
+
+#[test]
 fn multi_state_driven_pss_exercises_preconditioned_newton_krylov() {
     let mut deck = format!("* twelve-state driven PSS\nVdrive in 0 SIN(0 1 {F0})\n");
     for index in 1..=12 {

@@ -145,9 +145,9 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value) {
-        let phi = self.phi.max(1.0e-12);
+        let phi = self.phi;
         let sqrt_phi = phi.sqrt();
-        let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
+        let effective_length = self.l - 2.0 * self.ld;
         let beta = self.kp * self.w / effective_length;
         self.level1_operating_point_with_constants(vgs, vds, vbs, sqrt_phi, beta)
     }
@@ -177,7 +177,7 @@ impl Mosfet {
         let vbsvbd = if mode > 0.0 { vbs_m } else { vbd_m };
         let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
 
-        let phi = self.phi.max(1.0e-12);
+        let phi = self.phi;
         let sarg = if vbsvbd == 0.0 {
             sqrt_phi
         } else if vbsvbd < 0.0 {

@@ -1031,7 +1031,10 @@ pub struct NoiseResult {
     /// Input-referred noise spectral density (V²/Hz)
     pub input_referred_density: Value,
     /// Squared small-signal gain used to refer output noise to the input.
-    /// This retains Xyce's `N_MINGAIN` floor at transfer nulls.
+    /// The ngspice and Xyce compatibility dialects retain their shared
+    /// `N_MINGAIN=1e-20` floor. The native best-available dialect reports the
+    /// physical gain and rejects positive output noise at an exact transfer
+    /// null instead of manufacturing a finite input-referred value.
     pub input_gain_squared: Value,
     /// Valid contribution identities exported by the device models.  This
     /// catalog is independent of operating-point activation so a valid zero
@@ -1253,7 +1256,9 @@ impl NoiseResult {
                 mechanism: probe.mechanism.clone().unwrap_or_default(),
             });
         }
-        Ok(self
+        let mut sum = 0.0;
+        let mut compensation = 0.0;
+        for value in self
             .contributions
             .iter()
             .filter(|entry| {
@@ -1271,7 +1276,16 @@ impl NoiseResult {
                 NoiseContributionKind::Output => entry.output_contribution,
                 NoiseContributionKind::Input => entry.input_contribution,
             })
-            .sum())
+        {
+            let updated = sum + value;
+            compensation += if sum.abs() >= value.abs() {
+                (sum - updated) + value
+            } else {
+                (value - updated) + sum
+            };
+            sum = updated;
+        }
+        Ok(sum + compensation)
     }
 
     /// Get total output noise in V/√Hz (RMS voltage noise density)
@@ -1314,6 +1328,181 @@ pub struct IntegratedNoise {
     results: Vec<NoiseResult>,
 }
 
+/// Nonnegative sum with a shared binary exponent. Products are admitted as
+/// separate factors, so a representable integrated RMS is never lost merely
+/// because its mean-square power is smaller than the `f64` subnormal range.
+#[derive(Debug, Clone, Copy, Default)]
+struct ScaledPositiveSum {
+    significand: Value,
+    compensation: Value,
+    exponent: i32,
+    populated: bool,
+}
+
+impl ScaledPositiveSum {
+    fn binary_power(exponent: i32) -> Value {
+        debug_assert!((-1074..=1023).contains(&exponent));
+        if exponent >= -1022 {
+            Value::from_bits(((exponent + 1023) as u64) << 52)
+        } else {
+            Value::from_bits(1_u64 << (exponent + 1074))
+        }
+    }
+
+    fn decompose(value: Value) -> (Value, i32) {
+        debug_assert!(value.is_finite() && value > 0.0);
+        let bits = value.to_bits();
+        let encoded_exponent = ((bits >> 52) & 0x7ff) as i32;
+        let fraction = bits & ((1_u64 << 52) - 1);
+        if encoded_exponent != 0 {
+            (
+                Value::from_bits((1023_u64 << 52) | fraction),
+                encoded_exponent - 1023,
+            )
+        } else {
+            let leading_bit = 63_i32 - fraction.leading_zeros() as i32;
+            (
+                fraction as Value / (1_u64 << leading_bit) as Value,
+                leading_bit - 1074,
+            )
+        }
+    }
+
+    fn normalized(mut significand: Value, mut exponent: i32) -> (Value, i32) {
+        debug_assert!(significand.is_finite() && significand > 0.0);
+        let (_, adjustment) = Self::decompose(significand);
+        significand /= Self::binary_power(adjustment);
+        exponent = exponent
+            .checked_add(adjustment)
+            .expect("scaled integration exponent is bounded by f64 input exponents");
+        (significand, exponent)
+    }
+
+    fn add_scaled(&mut self, mut significand: Value, mut exponent: i32) {
+        (significand, exponent) = Self::normalized(significand, exponent);
+        if !self.populated {
+            self.significand = significand;
+            self.exponent = exponent;
+            self.populated = true;
+            return;
+        }
+        if exponent > self.exponent {
+            let difference = exponent - self.exponent;
+            let scale = if difference > 1074 {
+                0.0
+            } else {
+                Self::binary_power(-difference)
+            };
+            self.significand *= scale;
+            self.compensation *= scale;
+            self.exponent = exponent;
+        } else {
+            let difference = self.exponent - exponent;
+            significand *= if difference > 1074 {
+                0.0
+            } else {
+                Self::binary_power(-difference)
+            };
+        }
+        let updated = self.significand + significand;
+        self.compensation += if self.significand.abs() >= significand.abs() {
+            (self.significand - updated) + significand
+        } else {
+            (significand - updated) + self.significand
+        };
+        self.significand = updated;
+        let (_, adjustment) = Self::decompose(self.significand);
+        if adjustment != 0 {
+            let scale = Self::binary_power(adjustment);
+            self.significand /= scale;
+            self.compensation /= scale;
+            self.exponent = self
+                .exponent
+                .checked_add(adjustment)
+                .expect("scaled integration exponent is bounded by the result count");
+        }
+    }
+
+    fn add_product(&mut self, left: Value, right: Value, multiplier: Value) {
+        debug_assert!(left.is_finite() && left >= 0.0);
+        debug_assert!(right.is_finite() && right >= 0.0);
+        debug_assert!(multiplier.is_finite() && multiplier > 0.0);
+        if left == 0.0 || right == 0.0 {
+            return;
+        }
+        let (left_mantissa, left_exponent) = Self::decompose(left);
+        let (right_mantissa, right_exponent) = Self::decompose(right);
+        let exponent = left_exponent
+            .checked_add(right_exponent)
+            .expect("a product of two f64 exponents fits in i32");
+        self.add_scaled(left_mantissa * right_mantissa * multiplier, exponent);
+    }
+
+    fn parts(self) -> Option<(Value, i32)> {
+        if !self.populated {
+            return None;
+        }
+        Some(Self::normalized(
+            self.significand + self.compensation,
+            self.exponent,
+        ))
+    }
+
+    fn value(self) -> Value {
+        let Some((significand, exponent)) = self.parts() else {
+            return 0.0;
+        };
+        if exponent > 1023 {
+            return Value::INFINITY;
+        }
+        if exponent < -1074 {
+            // The positive integrated power is not representable. Returning
+            // NaN makes that loss explicit rather than fabricating zero.
+            return Value::NAN;
+        }
+        let power_of_two = Self::binary_power(exponent);
+        significand * power_of_two
+    }
+
+    fn square_root(self) -> Value {
+        let Some((significand, exponent)) = self.parts() else {
+            return 0.0;
+        };
+        let odd = exponent.rem_euclid(2);
+        let root_significand = (significand * if odd == 0 { 1.0 } else { 2.0 }).sqrt();
+        let root_exponent = exponent.div_euclid(2);
+        let (root_significand, root_exponent) = Self::normalized(root_significand, root_exponent);
+        if root_exponent > 1023 {
+            return Value::INFINITY;
+        }
+        if root_exponent < -1075 {
+            return Value::NAN;
+        }
+        if root_exponent == -1075 {
+            (root_significand * 0.5) * Value::from_bits(1)
+        } else {
+            root_significand * Self::binary_power(root_exponent)
+        }
+    }
+
+    fn percentage_of(self, total: Self) -> Value {
+        let (Some((numerator, numerator_exponent)), Some((denominator, denominator_exponent))) =
+            (self.parts(), total.parts())
+        else {
+            return 0.0;
+        };
+        let exponent = numerator_exponent - denominator_exponent;
+        let (significand, exponent) = Self::normalized(100.0 * numerator / denominator, exponent);
+        Self {
+            significand,
+            compensation: 0.0,
+            exponent,
+            populated: true,
+        }
+        .value()
+    }
+}
+
 impl IntegratedNoise {
     /// Create from a vector of noise results
     pub fn new(results: Vec<NoiseResult>) -> Self {
@@ -1321,24 +1510,39 @@ impl IntegratedNoise {
     }
 
     /// Calculate total integrated output noise over the frequency band (V RMS)
-    /// Uses trapezoidal integration
+    /// Uses trapezoidal integration. Returns NaN when the supplied result
+    /// series contains non-finite/negative densities, non-finite frequencies,
+    /// or frequencies that are not strictly increasing.
     pub fn total_output_noise(&self) -> Value {
         if self.results.len() < 2 {
             return 0.0;
         }
 
-        let mut total = 0.0;
+        let mut total = ScaledPositiveSum::default();
         for i in 1..self.results.len() {
             let f1 = self.results[i - 1].frequency;
             let f2 = self.results[i].frequency;
             let s1 = self.results[i - 1].output_noise_density;
             let s2 = self.results[i].output_noise_density;
 
-            // Trapezoidal integration
-            total += 0.5 * (s1 + s2) * (f2 - f1);
+            let width = f2 - f1;
+            if !f1.is_finite()
+                || !f2.is_finite()
+                || width <= 0.0
+                || !s1.is_finite()
+                || s1 < 0.0
+                || !s2.is_finite()
+                || s2 < 0.0
+            {
+                return Value::NAN;
+            }
+            // Admit the two trapezoid halves separately: `(s1 + s2)` may
+            // overflow even when multiplication by 0.5 is finite.
+            total.add_product(s1, width, 0.5);
+            total.add_product(s2, width, 0.5);
         }
 
-        total.sqrt() // Return RMS voltage
+        total.square_root()
     }
 
     /// Per-device, per-mechanism output-noise contributions integrated over
@@ -1355,7 +1559,61 @@ impl IntegratedNoise {
                 .as_deref()
                 .unwrap_or_else(|| contribution.noise_type.label())
         }
-        let mut totals: HashMap<(String, String), (NoiseSourceType, Value)> = HashMap::new();
+        let invalid_series = self.results.windows(2).any(|window| {
+            let left = &window[0];
+            let right = &window[1];
+            !left.frequency.is_finite()
+                || !right.frequency.is_finite()
+                || right.frequency <= left.frequency
+                || left.contributions.iter().any(|contribution| {
+                    !contribution.output_contribution.is_finite()
+                        || contribution.output_contribution < 0.0
+                })
+                || right.contributions.iter().any(|contribution| {
+                    !contribution.output_contribution.is_finite()
+                        || contribution.output_contribution < 0.0
+                })
+        });
+        if invalid_series {
+            let mut invalid = HashMap::new();
+            for result in &self.results {
+                for contribution in &result.contributions {
+                    invalid
+                        .entry((
+                            contribution.identity.device.clone(),
+                            contribution_mechanism(contribution).to_string(),
+                        ))
+                        .or_insert(contribution.noise_type);
+                }
+            }
+            let mut invalid = invalid
+                .into_iter()
+                .map(
+                    |((device_name, mechanism), noise_type)| IntegratedContribution {
+                        device_name,
+                        mechanism,
+                        noise_type,
+                        integrated_power: Value::NAN,
+                        percentage: Value::NAN,
+                    },
+                )
+                .collect::<Vec<_>>();
+            invalid.sort_by(|left, right| {
+                left.device_name
+                    .to_ascii_lowercase()
+                    .cmp(&right.device_name.to_ascii_lowercase())
+                    .then_with(|| {
+                        left.mechanism
+                            .to_ascii_lowercase()
+                            .cmp(&right.mechanism.to_ascii_lowercase())
+                    })
+                    .then_with(|| left.device_name.cmp(&right.device_name))
+                    .then_with(|| left.mechanism.cmp(&right.mechanism))
+            });
+            return invalid;
+        }
+        let mut totals: HashMap<(String, String), (NoiseSourceType, ScaledPositiveSum)> =
+            HashMap::new();
 
         for window in self.results.windows(2) {
             let (a, b) = (&window[0], &window[1]);
@@ -1364,54 +1622,41 @@ impl IntegratedNoise {
                 continue;
             }
 
-            // Index the right edge once so each pair match is O(1).
-            let mut right: HashMap<(&str, &str), Value> =
-                HashMap::with_capacity(b.contributions.len());
-            for contribution in &b.contributions {
-                right.insert(
-                    (
-                        contribution.identity.device.as_str(),
-                        contribution_mechanism(contribution),
-                    ),
-                    contribution.output_contribution,
-                );
-            }
-
-            for contribution in &a.contributions {
-                let key = (
-                    contribution.identity.device.as_str(),
-                    contribution_mechanism(contribution),
-                );
-                let s_right = right
-                    .get(&key)
-                    .copied()
-                    .unwrap_or(contribution.output_contribution);
-                let power = 0.5 * (contribution.output_contribution + s_right) * df;
+            // Integrating every endpoint term independently makes an absent
+            // sparse mechanism exactly zero at that edge, preserves right-only
+            // onsets, and avoids materializing a duplicate-identity endpoint
+            // sum that may overflow before multiplication by a narrow band.
+            for contribution in a.contributions.iter().chain(&b.contributions) {
                 let entry = totals
                     .entry((
                         contribution.identity.device.clone(),
                         contribution_mechanism(contribution).to_string(),
                     ))
-                    .or_insert((contribution.noise_type, 0.0));
-                entry.1 += power;
+                    .or_insert((contribution.noise_type, ScaledPositiveSum::default()));
+                entry
+                    .1
+                    .add_product(contribution.output_contribution, df, 0.5);
             }
         }
 
-        let total: Value = totals.values().map(|(_, power)| *power).sum();
+        let mut total_scaled = ScaledPositiveSum::default();
+        for (_, power) in totals.values() {
+            if let Some((significand, exponent)) = power.parts() {
+                total_scaled.add_scaled(significand, exponent);
+            }
+        }
         let mut summary: Vec<IntegratedContribution> = totals
             .into_iter()
             .map(
                 |((device_name, mechanism), (noise_type, integrated_power))| {
+                    let percentage = integrated_power.percentage_of(total_scaled);
+                    let integrated_power = integrated_power.value();
                     IntegratedContribution {
                         device_name,
                         mechanism,
                         noise_type,
                         integrated_power,
-                        percentage: if total > 0.0 {
-                            100.0 * integrated_power / total
-                        } else {
-                            0.0
-                        },
+                        percentage,
                     }
                 },
             )
@@ -1436,22 +1681,37 @@ impl IntegratedNoise {
     }
 
     /// Calculate integrated input-referred noise (V RMS)
+    ///
+    /// Returns NaN under the same invalid-series contract as
+    /// [`Self::total_output_noise`].
     pub fn total_input_referred_noise(&self) -> Value {
         if self.results.len() < 2 {
             return 0.0;
         }
 
-        let mut total = 0.0;
+        let mut total = ScaledPositiveSum::default();
         for i in 1..self.results.len() {
             let f1 = self.results[i - 1].frequency;
             let f2 = self.results[i].frequency;
             let s1 = self.results[i - 1].input_referred_density;
             let s2 = self.results[i].input_referred_density;
 
-            total += 0.5 * (s1 + s2) * (f2 - f1);
+            let width = f2 - f1;
+            if !f1.is_finite()
+                || !f2.is_finite()
+                || width <= 0.0
+                || !s1.is_finite()
+                || s1 < 0.0
+                || !s2.is_finite()
+                || s2 < 0.0
+            {
+                return Value::NAN;
+            }
+            total.add_product(s1, width, 0.5);
+            total.add_product(s2, width, 0.5);
         }
 
-        total.sqrt()
+        total.square_root()
     }
 
     /// Get all results
@@ -1613,6 +1873,30 @@ mod mechanism_tests {
 mod summary_tests {
     use super::*;
 
+    fn custom_result(
+        frequency: Value,
+        output_noise_density: Value,
+        input_referred_density: Value,
+        contributions: Vec<NoiseContribution>,
+    ) -> NoiseResult {
+        NoiseResult {
+            frequency,
+            node_names: Vec::new(),
+            branch_names: Vec::new(),
+            voltages: Vec::new(),
+            currents: Vec::new(),
+            output_noise_density,
+            input_referred_density,
+            input_gain_squared: 1.0,
+            contribution_catalog: contributions
+                .iter()
+                .map(|contribution| contribution.identity.clone())
+                .collect(),
+            mechanisms_unavailable: Vec::new(),
+            contributions,
+        }
+    }
+
     fn result_at(frequency: Value, r1: Value, d1: Value) -> NoiseResult {
         NoiseResult {
             frequency,
@@ -1716,6 +2000,119 @@ mod summary_tests {
         assert_eq!(summary[1].mechanism, "rs");
         assert!((summary[0].percentage - 75.0).abs() < 1.0e-12);
         assert!((summary[1].percentage - 25.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn scaled_trapezoids_preserve_extreme_rms_values() {
+        let maximum = f64::MAX;
+        let wide = IntegratedNoise::new(vec![
+            custom_result(1.0, maximum, maximum, Vec::new()),
+            custom_result(1.5, maximum, maximum, Vec::new()),
+        ]);
+        let expected = (maximum * 0.5).sqrt();
+        assert_eq!(wide.total_output_noise(), expected);
+        assert_eq!(wide.total_input_referred_noise(), expected);
+
+        let minimum = f64::from_bits(1);
+        let narrow = IntegratedNoise::new(vec![
+            custom_result(minimum, minimum, minimum, Vec::new()),
+            custom_result(2.0 * minimum, minimum, minimum, Vec::new()),
+        ]);
+        assert_eq!(
+            narrow.total_output_noise(),
+            minimum,
+            "mean-square power below the f64 range still has a representable RMS"
+        );
+        assert_eq!(narrow.total_input_referred_noise(), minimum);
+    }
+
+    #[test]
+    fn integrated_noise_marks_invalid_series_instead_of_skipping_them() {
+        let descending = IntegratedNoise::new(vec![
+            custom_result(2.0, 1.0, 1.0, Vec::new()),
+            custom_result(1.0, 1.0, 1.0, Vec::new()),
+        ]);
+        assert!(descending.total_output_noise().is_nan());
+        assert!(descending.total_input_referred_noise().is_nan());
+
+        let negative = IntegratedNoise::new(vec![
+            custom_result(1.0, -1.0, -1.0, Vec::new()),
+            custom_result(2.0, 1.0, 1.0, Vec::new()),
+        ]);
+        assert!(negative.total_output_noise().is_nan());
+        assert!(negative.total_input_referred_noise().is_nan());
+    }
+
+    #[test]
+    fn contribution_summary_integrates_sparse_onsets_and_duplicate_identities() {
+        let identity = NoiseSourceIdentity::mechanism("M1", "CORL");
+        let contribution = |density| NoiseContribution {
+            identity: identity.clone(),
+            noise_type: NoiseSourceType::Bsim4CorrelatedThermal,
+            output_contribution: density,
+            input_contribution: density,
+            percentage: 0.0,
+        };
+        let onset = IntegratedNoise::new(vec![
+            custom_result(1.0, 0.0, 0.0, Vec::new()),
+            custom_result(11.0, 2.0, 2.0, vec![contribution(2.0)]),
+        ])
+        .contribution_summary();
+        assert_eq!(onset.len(), 1);
+        assert_eq!(onset[0].integrated_power, 10.0);
+
+        let maximum = f64::MAX;
+        let duplicates = IntegratedNoise::new(vec![
+            custom_result(
+                1.0,
+                maximum,
+                maximum,
+                vec![contribution(maximum), contribution(maximum)],
+            ),
+            custom_result(
+                1.25,
+                maximum,
+                maximum,
+                vec![contribution(maximum), contribution(maximum)],
+            ),
+        ])
+        .contribution_summary();
+        assert_eq!(duplicates.len(), 1);
+        assert!((duplicates[0].integrated_power / (maximum * 0.5) - 1.0).abs() < 2.0e-15);
+        assert_eq!(duplicates[0].percentage, 100.0);
+    }
+
+    #[test]
+    fn contribution_percentages_survive_unrepresentable_total_power() {
+        let contribution = |device: &str| NoiseContribution {
+            identity: NoiseSourceIdentity::device(device),
+            noise_type: NoiseSourceType::White,
+            output_contribution: f64::MAX,
+            input_contribution: f64::MAX,
+            percentage: 0.0,
+        };
+        let integrated = IntegratedNoise::new(vec![
+            custom_result(
+                1.0,
+                f64::MAX,
+                f64::MAX,
+                vec![contribution("A"), contribution("B")],
+            ),
+            custom_result(
+                2.0,
+                f64::MAX,
+                f64::MAX,
+                vec![contribution("A"), contribution("B")],
+            ),
+        ]);
+        let summary = integrated.contribution_summary();
+        assert_eq!(summary.len(), 2);
+        assert!(summary.iter().all(|row| row.integrated_power == f64::MAX));
+        assert!(
+            summary
+                .iter()
+                .all(|row| (row.percentage - 50.0).abs() < 2.0e-14)
+        );
     }
 
     #[test]

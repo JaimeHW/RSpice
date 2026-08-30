@@ -175,8 +175,12 @@ impl XyceSwitchCurve {
             return (1.0 / roff, 0.0);
         }
 
-        let lm = (ron * roff).sqrt().ln();
-        let lr = (ron / roff).ln();
+        // Form log(sqrt(RON*ROFF)) without multiplying the endpoint
+        // resistances.  The product can overflow or underflow even when both
+        // authored resistances and both reciprocal conductances are exactly
+        // representable.
+        let lm = 0.5 * ron.ln() + 0.5 * roff.ln();
+        let lr = ron.ln() - roff.ln();
         let x = 2.0 * state - 1.0;
         let conductance = (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp();
         let dconductance_dstate = conductance * 1.5 * lr * (x * x - 1.0);
@@ -400,13 +404,13 @@ impl VoltageSwitch {
             self.vh = v;
         }
         if let Some(&v) = params.get("RON") {
-            self.ron = v.max(1e-6);
+            self.ron = v;
         }
         if let Some(&v) = params.get("ROFF") {
-            self.roff = v.max(1e-6);
+            self.roff = v;
         }
         if let Some(&v) = params.get("SMOOTH") {
-            self.smooth = v.max(1e-6);
+            self.smooth = v;
         }
         if params.contains_key("VON")
             || params.contains_key("VOFF")
@@ -453,7 +457,7 @@ impl VoltageSwitch {
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
-            SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
+            SwitchState::Transitioning => self.geometric_mean_resistance(),
         };
         self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
@@ -511,12 +515,12 @@ impl VoltageSwitch {
 
     /// Set on/off resistances
     pub fn with_resistances(mut self, ron: Value, roff: Value) -> Self {
-        self.ron = ron.max(1e-6);
-        self.roff = roff.max(1e-6);
+        self.ron = ron;
+        self.roff = roff;
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
-            SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
+            SwitchState::Transitioning => self.geometric_mean_resistance(),
         };
         self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
@@ -539,7 +543,7 @@ impl VoltageSwitch {
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
-            SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
+            SwitchState::Transitioning => self.geometric_mean_resistance(),
         };
         if let Some(curve) = &mut self.xyce_curve {
             curve.set_initial_state(state);
@@ -559,6 +563,87 @@ impl VoltageSwitch {
         self.current_resistance
     }
 
+    /// Whether every scalar needed by the ordinary and exact-HB memoryless
+    /// laws has a physical, directly representable value.
+    ///
+    /// A finite positive resistance is not sufficient by itself: its
+    /// reciprocal is the MNA conductance and must remain finite and nonzero.
+    /// The steepest smooth-transition conductance derivative must also fit in
+    /// a [`Value`], otherwise an otherwise valid endpoint pair can still
+    /// produce an infinite Newton Jacobian near the switching threshold.
+    pub(crate) fn physical_parameter_error(&self) -> Option<&'static str> {
+        if !self.vt.is_finite() {
+            return Some("VT must be finite");
+        }
+        if !self.vh.is_finite() {
+            return Some("VH must be finite");
+        }
+        if !self.smooth.is_finite() || self.smooth <= 0.0 {
+            return Some("SMOOTH must be finite and positive");
+        }
+        for (name, resistance) in [("RON", self.ron), ("ROFF", self.roff)] {
+            if !resistance.is_finite() || resistance <= 0.0 {
+                return Some(match name {
+                    "RON" => "RON must be finite and positive",
+                    _ => "ROFF must be finite and positive",
+                });
+            }
+            let conductance = 1.0 / resistance;
+            if !conductance.is_finite() || conductance <= 0.0 {
+                return Some(match name {
+                    "RON" => "1/RON must be finite and positive",
+                    _ => "1/ROFF must be finite and positive",
+                });
+            }
+        }
+        let log_max_slope = self.max_transition_slope_log();
+        if log_max_slope != Value::NEG_INFINITY {
+            let max_slope = log_max_slope.exp();
+            if !log_max_slope.is_finite()
+                || log_max_slope > Value::MAX.ln()
+                || !max_slope.is_finite()
+                || max_slope <= 0.0
+            {
+                return Some("maximum |dg/dVctrl| must be finite and representable");
+            }
+        }
+        None
+    }
+
+    /// Natural logarithm of the exact supremum of the native log-resistance
+    /// transition's `|dg/dVctrl|` over all finite control voltages.
+    ///
+    /// With `m = (ln(RON) + ln(ROFF))/2` and
+    /// `h = |ln(ROFF) - ln(RON)|/2`, the derivative magnitude is
+    /// `exp(-m + h*y) * h * (1-y^2) / SMOOTH` for `y` in `[-1, 1]`. It reaches
+    /// its maximum at `y = h/(hypot(h, 1) + 1)`. Keeping the calculation in
+    /// log space avoids overflowing while deciding whether the Jacobian is
+    /// representable.
+    fn max_transition_slope_log(&self) -> Value {
+        let log_ron = self.ron.ln();
+        let log_roff = self.roff.ln();
+        let m = 0.5 * log_ron + 0.5 * log_roff;
+        let h = 0.5 * (log_roff - log_ron).abs();
+        if h == 0.0 {
+            return Value::NEG_INFINITY;
+        }
+
+        let z = h / (h.hypot(1.0) + 1.0);
+        -m + h * z + h.ln() - self.smooth.ln() + (-z * z).ln_1p()
+    }
+
+    /// Xyce ON/OFF/ONH/OFFH curves are stateful piecewise laws distinct from
+    /// the native VT/SMOOTH equation. Exact HB must reject them until that
+    /// complete curve is represented in its nonlinear kernel.
+    pub(crate) fn uses_xyce_curve_semantics(&self) -> bool {
+        self.xyce_curve.is_some()
+    }
+
+    #[inline]
+    fn geometric_mean_resistance(&self) -> Value {
+        (0.5 * self.ron.ln() + 0.5 * self.roff.ln()).exp()
+    }
+
     /// Commit hysteresis-side state after an accepted transient timestep.
     pub fn commit_transient_hysteresis(&mut self) {
         if let Some(curve) = &mut self.xyce_curve {
@@ -569,7 +654,7 @@ impl VoltageSwitch {
     /// Calculate resistance based on control voltage using smooth transition
     fn calculate_resistance(&self, vctrl: Value) -> Value {
         let (g, _) = self.control_sensitivity(vctrl);
-        1.0 / g.max(1e-30)
+        1.0 / g
     }
 
     #[inline]
@@ -593,15 +678,15 @@ impl VoltageSwitch {
     ///
     /// Returns `(g, dg/dvctrl)` for the current hysteresis state.
     fn control_sensitivity(&self, vctrl: Value) -> (Value, Value) {
+        if !vctrl.is_finite() || self.physical_parameter_error().is_some() {
+            return (Value::NAN, Value::NAN);
+        }
         if self.xyce_curve.is_some() {
-            return (
-                1.0 / self.current_resistance.max(1.0e-30),
-                self.current_dg_dcontrol,
-            );
+            return (1.0 / self.current_resistance, self.current_dg_dcontrol);
         }
 
         let vt_eff = self.effective_threshold();
-        let smooth = self.smooth.max(1e-6);
+        let smooth = self.smooth;
         let x = (vctrl - vt_eff) / smooth;
         let tanh_x = x.tanh();
         let f = 0.5 * (1.0 - tanh_x);
@@ -615,9 +700,16 @@ impl VoltageSwitch {
 
         // d/dx tanh(x) = sech^2(x) = 1 - tanh^2(x)
         let sech2 = 1.0 - tanh_x * tanh_x;
-        let df_dvctrl = -0.5 * sech2 / smooth;
-        let dlogr_dvctrl = dlog_r * df_dvctrl;
-        let dg_dvctrl = -g * dlogr_dvctrl;
+        let dg_dvctrl = if dlog_r == 0.0 || sech2 == 0.0 {
+            0.0
+        } else {
+            // Form the exact derivative in log space. Validation above proves
+            // its global maximum is representable, while this avoids an
+            // overflowing D/SMOOTH intermediate for low-conductance curves.
+            let log_abs_derivative =
+                -log_r + dlog_r.abs().ln() + sech2.ln() - std::f64::consts::LN_2 - smooth.ln();
+            log_abs_derivative.exp().copysign(dlog_r)
+        };
 
         (g, dg_dvctrl)
     }
@@ -685,7 +777,7 @@ impl VoltageSwitch {
             let evaluation = curve.evaluate(vctrl, self.ron, self.roff);
             self.state = evaluation.state;
             self.in_hysteresis_band = false;
-            self.current_resistance = 1.0 / evaluation.conductance.max(1.0e-30);
+            self.current_resistance = 1.0 / evaluation.conductance;
             self.current_dg_dcontrol = evaluation.dconductance_dcontrol;
         } else {
             self.update_state(vctrl);
@@ -2127,6 +2219,108 @@ mod tests {
 
         switch.update(&[0.0, 0.0]);
         assert_eq!(switch.state(), SwitchState::On);
+    }
+
+    #[test]
+    fn voltage_switch_preserves_extreme_representable_parameters() {
+        let params = std::collections::HashMap::from([
+            ("RON".to_string(), 1.0e-300),
+            ("ROFF".to_string(), 1.0e300),
+            ("SMOOTH".to_string(), 1.0e-8),
+        ]);
+        let switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0).with_params(&params);
+
+        assert_eq!(switch.ron, 1.0e-300);
+        assert_eq!(switch.roff, 1.0e300);
+        assert_eq!(switch.smooth, 1.0e-8);
+        assert_eq!(switch.physical_parameter_error(), None);
+
+        let h = 0.5 * (switch.roff.ln() - switch.ron.ln()).abs();
+        let x_at_maximum = h / (h.hypot(1.0) + 1.0);
+        let x_at_maximum = x_at_maximum.atanh();
+        let (_, maximum_derivative) =
+            switch.control_sensitivity(switch.vt + switch.smooth * x_at_maximum);
+        let expected_maximum_derivative = switch.max_transition_slope_log().exp();
+        assert!(maximum_derivative.is_finite());
+        assert!(
+            (maximum_derivative - expected_maximum_derivative).abs()
+                <= 1.0e-12 * expected_maximum_derivative
+        );
+
+        let (on, on_derivative) = switch.control_sensitivity(1.0);
+        let (off, off_derivative) = switch.control_sensitivity(-1.0);
+        assert!((on - 1.0e300).abs() <= 1.0e-12 * 1.0e300);
+        assert!((off - 1.0e-300).abs() <= 1.0e-12 * 1.0e-300);
+        assert_eq!(on_derivative, 0.0);
+        assert_eq!(off_derivative, 0.0);
+    }
+
+    #[test]
+    fn voltage_switch_rejects_nonrepresentable_reciprocals_without_clamping() {
+        let switch =
+            VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0).with_resistances(1.0e-320, 1.0);
+        assert_eq!(switch.ron, 1.0e-320);
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("1/RON must be finite and positive")
+        );
+        let (conductance, derivative) = switch.control_sensitivity(0.0);
+        assert!(conductance.is_nan());
+        assert!(derivative.is_nan());
+    }
+
+    #[test]
+    fn voltage_switch_rejects_nonrepresentable_transition_slope() {
+        let params = std::collections::HashMap::from([
+            ("RON".to_string(), 1.0e-300),
+            ("ROFF".to_string(), 1.0e300),
+            ("SMOOTH".to_string(), 1.0e-300),
+        ]);
+        let switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0).with_params(&params);
+
+        assert!(switch.max_transition_slope_log() > f64::MAX.ln());
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("maximum |dg/dVctrl| must be finite and representable")
+        );
+        let (conductance, derivative) = switch.control_sensitivity(0.0);
+        assert!(conductance.is_nan());
+        assert!(derivative.is_nan());
+    }
+
+    #[test]
+    fn voltage_switch_rejects_exact_peak_when_endpoint_span_bound_would_pass() {
+        let params = std::collections::HashMap::from([
+            ("RON".to_string(), 1.0e-300),
+            ("ROFF".to_string(), 1.0e300),
+            ("SMOOTH".to_string(), 3.5e-9),
+        ]);
+        let switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0).with_params(&params);
+
+        let old_endpoint_span_bound =
+            0.5 * ((1.0 / switch.ron) - (1.0 / switch.roff)).abs() / switch.smooth;
+        assert!(old_endpoint_span_bound.is_finite());
+        assert!(switch.max_transition_slope_log() > f64::MAX.ln());
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("maximum |dg/dVctrl| must be finite and representable")
+        );
+    }
+
+    #[test]
+    fn voltage_switch_rejects_transition_slope_underflow() {
+        let params = std::collections::HashMap::from([
+            ("RON".to_string(), 1.0),
+            ("ROFF".to_string(), 1.000_000_000_000_000_2),
+            ("SMOOTH".to_string(), 1.0e308),
+        ]);
+        let switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0).with_params(&params);
+
+        assert_eq!(switch.max_transition_slope_log().exp(), 0.0);
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("maximum |dg/dVctrl| must be finite and representable")
+        );
     }
 
     #[test]

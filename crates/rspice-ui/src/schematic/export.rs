@@ -8,48 +8,28 @@
 
 use std::fmt::Write;
 
-use crate::state::{Component, ComponentType, ResolvedCellSymbol, SchematicState, SymbolResolver};
+use crate::state::{
+    Component, ComponentType, ResolvedCellSymbol, ResolvedSymbolSource, SchematicState,
+    SymbolResolver,
+};
 
-mod bjt_diode_symbols;
 mod block_symbols;
 mod config;
-mod controlled_symbols;
 mod geometry;
-mod jfet_symbols;
-mod mos_symbols;
-mod passive_symbols;
-mod source_symbols;
 
 #[cfg(test)]
 pub use self::config::SvgColor;
 pub use self::config::SvgExportConfig;
 
-use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_symbol};
 use self::block_symbols::{
-    write_artwork_lead_extensions, write_catalog_asset_symbol, write_cell_instance_symbol,
-    write_port_symbol, write_xspice_symbol,
-};
-use self::controlled_symbols::{
-    write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol, write_vcvs_symbol,
-    write_vswitch_symbol,
+    catalog_asset_world_bounds, write_artwork_lead_extensions, write_catalog_asset_symbol,
 };
 #[cfg(test)]
 use self::geometry::calculate_bounds;
 use self::geometry::{
-    calculate_bounds_with_context, get_rotation_transform, include_bus_bounds,
-    include_design_note_bounds, include_documentation_shape_bounds, include_junction_bounds,
-    write_bus, write_bus_tap, write_design_note, write_documentation_shape, write_junction,
-    write_wire,
-};
-use self::jfet_symbols::{write_njfet_symbol, write_pjfet_symbol};
-use self::mos_symbols::{write_nmos_symbol, write_pmos_symbol};
-use self::passive_symbols::{
-    write_capacitor_symbol, write_coupled_inductor_symbol, write_inductor_symbol,
-    write_resistor_symbol, write_tline_symbol, write_transformer_symbol,
-};
-use self::source_symbols::{
-    write_behavioral_source_symbol, write_current_source_symbol, write_ground_symbol,
-    write_loop_probe_symbol, write_vsource_symbol,
+    estimated_text_width, include_bus_bounds, include_design_note_bounds,
+    include_documentation_shape_bounds, include_junction_bounds, write_bus, write_bus_tap,
+    write_design_note, write_documentation_shape, write_junction, write_wire,
 };
 use super::view::resolved_symbol_render::{
     resolved_symbol_world_bounds, write_resolved_symbol_svg,
@@ -104,7 +84,9 @@ pub fn export_to_svg_with_symbol_resolver(
         .iter()
         .filter_map(|component| {
             let binding = component.library_cell.as_ref()?;
-            let resolved = resolver.resolve_binding(binding)?;
+            let resolved = resolver
+                .resolve_binding(binding)
+                .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)?;
             Some(ResolvedSymbolExportEntry {
                 component_id: component.id,
                 symbol: resolved,
@@ -125,7 +107,9 @@ pub fn export_to_svg_with_symbol_resolver_and_context(
         .iter()
         .filter_map(|component| {
             let binding = component.library_cell.as_ref()?;
-            let resolved = resolver.resolve_binding(binding)?;
+            let resolved = resolver
+                .resolve_binding(binding)
+                .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)?;
             Some(ResolvedSymbolExportEntry {
                 component_id: component.id,
                 symbol: resolved,
@@ -165,8 +149,13 @@ fn export_to_svg_with_resolved_symbol_entries(
         .ok();
 
     // Calculate bounds
-    let (min_x, min_y, max_x, max_y) =
-        calculate_bounds_with_resolved_symbols(state, config, resolved_symbols, context);
+    let (min_x, min_y, max_x, max_y) = calculate_bounds_with_resolved_symbols(
+        state,
+        config,
+        resolved_symbols,
+        symbol_library.as_ref(),
+        context,
+    );
     let width = max_x - min_x + 2.0 * config.margin;
     let height = max_y - min_y + 2.0 * config.margin;
 
@@ -255,38 +244,25 @@ fn calculate_bounds_with_resolved_symbols(
     state: &SchematicState,
     config: &SvgExportConfig,
     resolved_symbols: &[ResolvedSymbolExportEntry],
+    symbol_library: Option<&crate::schematic::SymbolLibrary>,
     context: SvgDesignContext<'_>,
 ) -> (f64, f64, f64, f64) {
-    if resolved_symbols.is_empty() {
-        return calculate_bounds_with_context(state, config, context.view_path);
-    }
-
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
 
     for component in &state.components {
-        let (comp_min, comp_max) =
-            if let Some(symbol) = find_resolved_symbol(component, resolved_symbols) {
-                resolved_symbol_world_bounds(component, symbol).unwrap_or_else(|| {
-                    let (min_x, min_y, max_x, max_y) = component.bounding_box();
-                    (
-                        crate::state::Point::new(min_x, min_y),
-                        crate::state::Point::new(max_x, max_y),
-                    )
-                })
-            } else {
-                let (min_x, min_y, max_x, max_y) = component.bounding_box();
-                (
-                    crate::state::Point::new(min_x, min_y),
-                    crate::state::Point::new(max_x, max_y),
-                )
-            };
-        min_x = min_x.min(comp_min.x as f64 * config.grid_size);
-        min_y = min_y.min(comp_min.y as f64 * config.grid_size);
-        max_x = max_x.max(comp_max.x as f64 * config.grid_size);
-        max_y = max_y.max(comp_max.y as f64 * config.grid_size);
+        let (comp_min_x, comp_min_y, comp_max_x, comp_max_y) = component_export_world_bounds(
+            component,
+            find_resolved_symbol(component, resolved_symbols),
+            symbol_library,
+            config,
+        );
+        min_x = min_x.min(comp_min_x * config.grid_size);
+        min_y = min_y.min(comp_min_y * config.grid_size);
+        max_x = max_x.max(comp_max_x * config.grid_size);
+        max_y = max_y.max(comp_max_y * config.grid_size);
     }
 
     for wire in &state.wires {
@@ -329,6 +305,141 @@ fn calculate_bounds_with_resolved_symbols(
     }
 }
 
+fn component_export_world_bounds(
+    component: &Component,
+    resolved_symbol: Option<&ResolvedCellSymbol>,
+    symbol_library: Option<&crate::schematic::SymbolLibrary>,
+    config: &SvgExportConfig,
+) -> (f64, f64, f64, f64) {
+    if component.kind == ComponentType::CellInstance {
+        if let Some((symbol, width, height)) =
+            symbol_library.and_then(|library| compatible_builtin_xspice_symbol(component, library))
+        {
+            let mut bounds = catalog_asset_world_bounds(
+                component,
+                symbol,
+                width,
+                height,
+                component.rotation.degrees(),
+            )
+            .unwrap_or_else(|| {
+                symbol_resolution_error_world_bounds(component, config, "unresolved cell")
+            });
+            for (edge, terminal) in component.artwork_lead_extensions() {
+                for point in [edge, terminal] {
+                    let point = component.pos + component.transform_point(point);
+                    bounds.0 = bounds.0.min(f64::from(point.x));
+                    bounds.1 = bounds.1.min(f64::from(point.y));
+                    bounds.2 = bounds.2.max(f64::from(point.x));
+                    bounds.3 = bounds.3.max(f64::from(point.y));
+                }
+            }
+            return bounds;
+        }
+        return resolved_symbol
+            .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)
+            .and_then(|symbol| resolved_symbol_world_bounds(component, symbol))
+            .map(|(min, max)| {
+                (
+                    f64::from(min.x),
+                    f64::from(min.y),
+                    f64::from(max.x),
+                    f64::from(max.y),
+                )
+            })
+            .unwrap_or_else(|| {
+                symbol_resolution_error_world_bounds(component, config, "unresolved cell")
+            });
+    }
+
+    let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
+        library.get_with_rotation_variant(
+            component.kind,
+            component.rotation.degrees(),
+            component.symbol_variant.as_deref(),
+        )
+    }) else {
+        return symbol_resolution_error_world_bounds(component, config, "missing canonical SVG");
+    };
+    let mut bounds = catalog_asset_world_bounds(
+        component,
+        symbol,
+        symbol.target_width,
+        symbol.target_height,
+        adjusted_rotation,
+    )
+    .unwrap_or_else(|| {
+        symbol_resolution_error_world_bounds(component, config, "missing canonical SVG")
+    });
+    if component.kind == ComponentType::Port {
+        let direction = component
+            .port_spec()
+            .map(|port| port.direction)
+            .unwrap_or_default();
+        for segment in crate::schematic::port_overlay::direction_segments(direction) {
+            for point in [segment.start, segment.end] {
+                let point = crate::schematic::port_overlay::transform_point(
+                    point,
+                    adjusted_rotation,
+                    component.mirror_h,
+                    component.mirror_v,
+                );
+                let x = f64::from(component.pos.x) + f64::from(point.x);
+                let y = f64::from(component.pos.y) + f64::from(point.y);
+                bounds.0 = bounds.0.min(x);
+                bounds.1 = bounds.1.min(y);
+                bounds.2 = bounds.2.max(x);
+                bounds.3 = bounds.3.max(y);
+            }
+        }
+    }
+    bounds
+}
+
+fn symbol_resolution_error_world_bounds(
+    component: &Component,
+    config: &SvgExportConfig,
+    reason: &str,
+) -> (f64, f64, f64, f64) {
+    const HALF_SIZE: f64 = 12.0;
+    const TEXT_HORIZONTAL_PADDING: f64 = 2.0;
+    let x = f64::from(component.pos.x);
+    let y = f64::from(component.pos.y);
+    let diagnostic = format!("{}: {reason}", component.kind.display_name());
+    let grid_size = config.grid_size.max(f64::EPSILON);
+    let text_half_width = (estimated_text_width(&diagnostic, config)
+        + 2.0 * TEXT_HORIZONTAL_PADDING)
+        / grid_size
+        / 2.0;
+    let text_descent = config.font_size * 0.35 / grid_size;
+    (
+        x - HALF_SIZE.max(text_half_width),
+        y - HALF_SIZE,
+        x + HALF_SIZE.max(text_half_width),
+        y + HALF_SIZE + config.font_size / grid_size + text_descent,
+    )
+}
+
+fn compatible_builtin_xspice_symbol<'a>(
+    component: &Component,
+    library: &'a crate::schematic::SymbolLibrary,
+) -> Option<(&'a crate::schematic::symbols::Symbol, f32, f32)> {
+    let contract = component.library_cell.as_ref()?.builtin_xspice.as_ref()?;
+    let (width, height) = component.artwork_dimensions();
+    let offsets = component.artwork_pin_offsets();
+    if !library.asset_matches_terminal_offsets(
+        &contract.symbol_asset,
+        width as f32,
+        height as f32,
+        &offsets,
+    ) {
+        return None;
+    }
+    library
+        .get_asset(&contract.symbol_asset)
+        .map(|symbol| (symbol, width as f32, height as f32))
+}
+
 fn write_component(
     svg: &mut String,
     component: &Component,
@@ -338,155 +449,74 @@ fn write_component(
 ) {
     let cx = component.pos.x as f64 * config.grid_size;
     let cy = component.pos.y as f64 * config.grid_size;
-    // Every cell-instance writer places its own rotated geometry, so the
-    // group must not rotate it a second time.
-    let transform = if component.kind == ComponentType::CellInstance {
-        String::new()
-    } else {
-        get_rotation_transform(component.rotation, cx, cy)
-    };
     let mut symbol_wrote_labels = false;
 
-    if transform.is_empty() {
-        svg.push_str("<g>\n");
-    } else {
-        writeln!(svg, "<g transform=\"{}\">", transform).unwrap();
-    }
+    svg.push_str("<g>\n");
 
-    match component.kind {
-        ComponentType::Resistor => write_resistor_symbol(svg, cx, cy, config),
-        ComponentType::Capacitor => write_capacitor_symbol(svg, cx, cy, config),
-        ComponentType::Inductor | ComponentType::SaturableInductor => {
-            write_inductor_symbol(svg, cx, cy, config)
+    if component.kind == ComponentType::CellInstance {
+        // Artwork first, exactly as the canvas resolves it: an exported sheet
+        // must show the same authored symbol the schematic was drawn with.
+        if let Some((symbol, width, height)) =
+            symbol_library.and_then(|library| compatible_builtin_xspice_symbol(component, library))
+        {
+            write_catalog_asset_symbol(
+                svg,
+                component,
+                symbol,
+                width,
+                height,
+                component.rotation.degrees(),
+                None,
+                config,
+            );
+            write_artwork_lead_extensions(svg, component, config);
+        } else if let Some(symbol) = resolved_symbol
+            && symbol.source() == ResolvedSymbolSource::Authored
+            && resolved_symbol_world_bounds(component, symbol).is_some()
+        {
+            write_resolved_symbol_svg(svg, component, symbol, config);
+            symbol_wrote_labels = true;
+        } else {
+            write_symbol_resolution_error(svg, component, config, "unresolved cell");
         }
-        ComponentType::Transformer => write_transformer_symbol(svg, cx, cy, config),
-        ComponentType::CoupledInductor => write_coupled_inductor_symbol(svg, cx, cy, config),
-        // The export renderer draws family art; line-model detail (loss,
-        // coupling) is a property, not a distinct export glyph.
-        ComponentType::TransmissionLine
-        | ComponentType::LossyTransmissionLine
-        | ComponentType::CoupledTransmissionLine => write_tline_symbol(svg, cx, cy, config),
-        ComponentType::Memristor => write_resistor_symbol(svg, cx, cy, config),
-        ComponentType::VoltageSource
-        | ComponentType::VoltageSourceAc
-        | ComponentType::VoltageSourcePulse
-        | ComponentType::VoltageSourceSin
-        | ComponentType::VoltageSourcePwl
-        | ComponentType::VoltageSourcePwlFile
-        | ComponentType::VoltageSourceExp
-        | ComponentType::VoltageSourceSffm
-        | ComponentType::VoltageSourceAm
-        | ComponentType::VoltageSourcePat
-        | ComponentType::VoltageSourceNoise => write_vsource_symbol(svg, cx, cy, config),
-        ComponentType::RfPort => write_vsource_symbol(svg, cx, cy, config),
-        ComponentType::LoopProbe => write_loop_probe_symbol(svg, cx, cy, config),
-        ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
-        ComponentType::Port => write_port_symbol(
-            svg,
-            cx,
-            cy,
+    } else if let Some((symbol, adjusted_rotation)) = symbol_library.and_then(|library| {
+        library.get_with_rotation_variant(
+            component.kind,
+            component.rotation.degrees(),
+            component.symbol_variant.as_deref(),
+        )
+    }) {
+        let port_stroke_width = if component.kind == ComponentType::Port {
             component
                 .port_spec()
-                .map(|port| port.direction)
-                .unwrap_or_default(),
-            component.mirror_h,
-            component.mirror_v,
+                .and_then(|port| port.vector().map(|_| config.wire_stroke_width * 0.6))
+        } else {
+            None
+        };
+        write_catalog_asset_symbol(
+            svg,
+            component,
+            symbol,
+            symbol.target_width,
+            symbol.target_height,
+            adjusted_rotation,
+            port_stroke_width,
             config,
-        ),
-        ComponentType::Nmos | ComponentType::NVdmos | ComponentType::NmosSoi => {
-            write_nmos_symbol(svg, cx, cy, config)
+        );
+        if component.kind == ComponentType::Port {
+            write_port_direction_overlay(
+                svg,
+                component,
+                adjusted_rotation,
+                component
+                    .port_spec()
+                    .map(|port| port.direction)
+                    .unwrap_or_default(),
+                config,
+            );
         }
-        ComponentType::Pmos | ComponentType::PVdmos | ComponentType::PmosSoi => {
-            write_pmos_symbol(svg, cx, cy, config)
-        }
-        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => {
-            write_npn_symbol(svg, cx, cy, config)
-        }
-        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => {
-            write_pnp_symbol(svg, cx, cy, config)
-        }
-        ComponentType::Diode => write_diode_symbol(svg, cx, cy, config),
-        ComponentType::CurrentSource
-        | ComponentType::CurrentSourceAc
-        | ComponentType::CurrentSourcePulse
-        | ComponentType::CurrentSourceSin
-        | ComponentType::CurrentSourcePwl
-        | ComponentType::CurrentSourcePwlFile
-        | ComponentType::CurrentSourceExp
-        | ComponentType::CurrentSourceSffm
-        | ComponentType::CurrentSourceAm
-        | ComponentType::CurrentSourcePat
-        | ComponentType::CurrentSourceNoise => write_current_source_symbol(svg, cx, cy, config),
-        ComponentType::BehavioralSource => write_behavioral_source_symbol(svg, cx, cy, config),
-        // JFET symbols (MESFET exports share the JFET family art)
-        ComponentType::Njfet | ComponentType::Nmesfet => write_njfet_symbol(svg, cx, cy, config),
-        ComponentType::Pjfet | ComponentType::Pmesfet => write_pjfet_symbol(svg, cx, cy, config),
-        // Controlled source symbols
-        ComponentType::OpAmp => write_opamp_symbol(svg, cx, cy, config),
-        ComponentType::Vcvs => write_vcvs_symbol(svg, cx, cy, config),
-        ComponentType::Vccs => write_vccs_symbol(svg, cx, cy, config),
-        ComponentType::Ccvs => write_ccvs_symbol(svg, cx, cy, config),
-        ComponentType::Cccs => write_cccs_symbol(svg, cx, cy, config),
-        ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
-            write_vswitch_symbol(svg, cx, cy, config)
-        }
-        ComponentType::CellInstance => {
-            // Artwork first, exactly as the canvas resolves it: an exported
-            // sheet must show the same symbol the schematic was drawn with.
-            if let Some((symbol, width, height)) = component
-                .library_cell
-                .as_ref()
-                .and_then(|binding| binding.builtin_xspice.as_ref())
-                .and_then(|contract| {
-                    let library = symbol_library?;
-                    let (width, height) = component.artwork_dimensions();
-                    let offsets = component.artwork_pin_offsets();
-                    library
-                        .asset_matches_terminal_offsets(
-                            &contract.symbol_asset,
-                            width as f32,
-                            height as f32,
-                            &offsets,
-                        )
-                        .then(|| {
-                            library
-                                .get_asset(&contract.symbol_asset)
-                                .map(|symbol| (symbol, width as f32, height as f32))
-                        })
-                        .flatten()
-                })
-            {
-                write_catalog_asset_symbol(svg, component, symbol, width, height, config);
-                write_artwork_lead_extensions(svg, component, config);
-            } else if let Some(symbol) = resolved_symbol {
-                write_resolved_symbol_svg(svg, component, symbol, config);
-                symbol_wrote_labels = true;
-            } else {
-                write_cell_instance_symbol(svg, component, config);
-            }
-        }
-        ComponentType::XspiceGain
-        | ComponentType::XspiceSummer
-        | ComponentType::XspiceMultiplier
-        | ComponentType::XspiceDivider
-        | ComponentType::XspiceLimiter
-        | ComponentType::XspiceIntegrator
-        | ComponentType::XspiceDifferentiator
-        | ComponentType::XspiceInverter
-        | ComponentType::XspiceBuffer
-        | ComponentType::XspiceAndGate
-        | ComponentType::XspiceOrGate
-        | ComponentType::XspiceNandGate
-        | ComponentType::XspiceNorGate
-        | ComponentType::XspiceXorGate
-        | ComponentType::XspiceTristate
-        | ComponentType::XspiceDFlipFlop
-        | ComponentType::XspiceJkFlipFlop
-        | ComponentType::XspiceSrLatch
-        | ComponentType::XspiceAdcBridge
-        | ComponentType::XspiceDacBridge => {
-            write_xspice_symbol(svg, cx, cy, component.kind, config)
-        }
+    } else {
+        write_symbol_resolution_error(svg, component, config, "missing canonical SVG");
     }
 
     if !symbol_wrote_labels {
@@ -521,6 +551,94 @@ fn write_component(
         }
     }
 
+    svg.push_str("</g>\n");
+}
+
+fn write_port_direction_overlay(
+    svg: &mut String,
+    component: &Component,
+    rotation_degrees: i32,
+    direction: crate::state::PortDirection,
+    config: &SvgExportConfig,
+) {
+    let cx = f64::from(component.pos.x) * config.grid_size;
+    let cy = f64::from(component.pos.y) * config.grid_size;
+    let point = |point| {
+        let point = crate::schematic::port_overlay::transform_point(
+            point,
+            rotation_degrees,
+            component.mirror_h,
+            component.mirror_v,
+        );
+        (
+            cx + f64::from(point.x) * config.grid_size,
+            cy + f64::from(point.y) * config.grid_size,
+        )
+    };
+    writeln!(
+        svg,
+        "<g class=\"port-direction-overlay\" data-direction=\"{}\">",
+        direction.keyword()
+    )
+    .unwrap();
+    let style = component
+        .port_spec()
+        .and_then(|port| port.vector())
+        .map_or_else(String::new, |_| {
+            format!(" style=\"stroke-width:{}\"", config.wire_stroke_width * 0.6)
+        });
+    for segment in crate::schematic::port_overlay::direction_segments(direction) {
+        let start = point(segment.start);
+        let end = point(segment.end);
+        writeln!(
+            svg,
+            "<line class=\"component\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{style}/>",
+            start.0, start.1, end.0, end.1
+        )
+        .unwrap();
+    }
+    svg.push_str("</g>\n");
+}
+
+fn write_symbol_resolution_error(
+    svg: &mut String,
+    component: &Component,
+    config: &SvgExportConfig,
+    reason: &str,
+) {
+    let cx = f64::from(component.pos.x) * config.grid_size;
+    let cy = f64::from(component.pos.y) * config.grid_size;
+    let half = 12.0 * config.grid_size;
+    let x = cx - half;
+    let y = cy - half;
+    let size = half * 2.0;
+    let kind = escape_xml(component.kind.display_name());
+    let reason = escape_xml(reason);
+    writeln!(
+        svg,
+        "<g class=\"symbol-resolution-error\" data-component-kind=\"{kind}\" data-error=\"{reason}\">"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<rect x=\"{x}\" y=\"{y}\" width=\"{size}\" height=\"{size}\" fill=\"none\" stroke=\"#DC4646\"/>"
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<path d=\"M {x} {y} L {} {} M {} {y} L {x} {}\" stroke=\"#DC4646\" fill=\"none\"/>",
+        x + size,
+        y + size,
+        x + size,
+        y + size
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        "<text class=\"text\" x=\"{cx}\" y=\"{}\" text-anchor=\"middle\" fill=\"#DC4646\">{kind}: {reason}</text>",
+        y + size + config.font_size
+    )
+    .unwrap();
     svg.push_str("</g>\n");
 }
 
@@ -603,45 +721,240 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn svg_port_symbol_preserves_direction_and_filled_terminal_tip() {
-        let config = SvgExportConfig::default();
-        let mut input = String::new();
-        write_port_symbol(
-            &mut input,
-            100.0,
-            80.0,
-            PortDirection::In,
-            false,
-            false,
-            &config,
-        );
-        assert!(input.contains(r##"fill="#FFFFFF" cx="90" cy="80" r="1.6""##));
-        assert!(input.contains("M -1.5 0 L 5 0 M 5 0 L 2 -2.5"));
+    fn svg_export_uses_canonical_assets_for_every_standard_component() {
+        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let mut schematic = SchematicState::default();
+        let mut expected_paths = 0;
+        for (index, kind) in ComponentType::ALL.into_iter().enumerate() {
+            if kind == ComponentType::CellInstance {
+                continue;
+            }
+            let symbol = library
+                .get_with_rotation_variant(kind, 0, None)
+                .unwrap_or_else(|| panic!("{kind:?} has no canonical symbol"))
+                .0;
+            expected_paths += symbol.paths.len();
+            schematic.components.push(Component::new(
+                index as u64 + 1,
+                kind,
+                Point::new(index as i32 * 100, 0),
+            ));
+        }
 
-        let mut output = String::new();
-        write_port_symbol(
-            &mut output,
-            100.0,
-            80.0,
-            PortDirection::Out,
-            false,
-            false,
-            &config,
-        );
-        assert!(output.contains("M 5 0 L -1.5 0 M -1.5 0 L 1.5 -2.5"));
+        let svg = export_to_svg(&schematic, &SvgExportConfig::default());
 
-        let mut bidirectional = String::new();
-        write_port_symbol(
-            &mut bidirectional,
-            100.0,
-            80.0,
-            PortDirection::InOut,
-            false,
-            false,
-            &config,
+        assert!(!svg.contains("symbol-resolution-error"));
+        assert_eq!(
+            svg.matches(r#"<path class="component""#).count(),
+            expected_paths
         );
-        assert!(bidirectional.contains("M -1.5 0 L 5 0"));
-        assert!(bidirectional.contains("M -1.5 0 L 1.5 -2.5"));
+    }
+
+    #[test]
+    fn missing_or_unknown_export_resolution_is_an_explicit_error() {
+        let component = Component::new(1, ComponentType::Resistor, Point::origin());
+        let mut missing_library = String::new();
+        write_component(
+            &mut missing_library,
+            &component,
+            &SvgExportConfig::default(),
+            None,
+            None,
+        );
+        assert!(missing_library.contains("symbol-resolution-error"));
+        assert!(missing_library.contains("missing canonical SVG"));
+        assert!(!missing_library.contains(r#"<path class="component""#));
+
+        let mut unknown_variant = SchematicState::default();
+        let mut diode = Component::new(2, ComponentType::Diode, Point::origin());
+        diode.symbol_variant = Some("missing-variant".to_owned());
+        unknown_variant.components.push(diode);
+        let svg = export_to_svg(&unknown_variant, &SvgExportConfig::default());
+        assert!(svg.contains("symbol-resolution-error"));
+    }
+
+    #[test]
+    fn export_bounds_follow_rotated_mirrored_canonical_variant_target() {
+        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(140, -35))
+            .with_rotation(crate::state::Rotation::R90)
+            .with_mirror_h(true);
+        component.symbol_variant = Some("battery_multi_cell".to_owned());
+        let (symbol, adjusted_rotation) = library
+            .get_with_rotation_variant(
+                component.kind,
+                component.rotation.degrees(),
+                component.symbol_variant.as_deref(),
+            )
+            .expect("authored variant resolves");
+        assert_eq!(adjusted_rotation, 90);
+
+        let mut schematic = SchematicState::default();
+        schematic.components.push(component);
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            margin: 0.0,
+            ..SvgExportConfig::default()
+        };
+        let bounds = calculate_bounds_with_resolved_symbols(
+            &schematic,
+            &config,
+            &[],
+            Some(&library),
+            SvgDesignContext::default(),
+        );
+        let half_width = f64::from(symbol.target_height) / 2.0;
+        let half_height = f64::from(symbol.target_width) / 2.0;
+
+        let expected = (
+            140.0 - half_width,
+            -35.0 - half_height,
+            140.0 + half_width,
+            -35.0 + half_height,
+        );
+        for (actual, expected) in [
+            (bounds.0, expected.0),
+            (bounds.1, expected.1),
+            (bounds.2, expected.2),
+            (bounds.3, expected.3),
+        ] {
+            assert!((actual - expected).abs() < 1.0e-9);
+        }
+    }
+
+    #[test]
+    fn export_bounds_use_the_explicit_unresolved_cell_marker_and_diagnostic() {
+        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let mut schematic = SchematicState::default();
+        schematic.components.push(Component::new(
+            1,
+            ComponentType::CellInstance,
+            Point::origin(),
+        ));
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            margin: 0.0,
+            ..SvgExportConfig::default()
+        };
+
+        let component = schematic.components.first().expect("unresolved cell");
+        let expected = symbol_resolution_error_world_bounds(component, &config, "unresolved cell");
+        let bounds = calculate_bounds_with_resolved_symbols(
+            &schematic,
+            &config,
+            &[],
+            Some(&library),
+            SvgDesignContext::default(),
+        );
+
+        assert_eq!(bounds, expected);
+        assert!(bounds.0 < -12.0 && bounds.2 > 12.0);
+        assert!(bounds.3 > 12.0 + config.font_size);
+    }
+
+    #[test]
+    fn export_viewbox_contains_a_long_resolution_diagnostic_at_sheet_edge() {
+        let mut component =
+            Component::new(1, ComponentType::BehavioralSource, Point::new(-400, -300));
+        component.symbol_variant = Some("missing-authored-variant".to_owned());
+        let mut schematic = SchematicState::default();
+        schematic.components.push(component);
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            margin: 0.0,
+            ..SvgExportConfig::default()
+        };
+        let expected = symbol_resolution_error_world_bounds(
+            schematic.components.first().expect("component"),
+            &config,
+            "missing canonical SVG",
+        );
+        let diagnostic = "Behavioral Source: missing canonical SVG";
+        let svg = export_to_svg(&schematic, &config);
+        let width = expected.2 - expected.0;
+        let height = expected.3 - expected.1;
+
+        assert!(width >= estimated_text_width(diagnostic, &config));
+        assert!(expected.3 > -300.0 + 12.0 + config.font_size);
+        assert!(svg.contains(&format!(
+            "viewBox=\"{} {} {width} {height}\"",
+            expected.0, expected.1
+        )));
+        assert!(svg.contains(diagnostic));
+    }
+
+    #[test]
+    fn interface_only_cell_cannot_export_a_generated_substitute_body() {
+        let mut binding = LibraryCellInstance::new("missing", "amp", "schematic");
+        binding.bind_interface(&[
+            PortSpec {
+                name: "IN".to_owned(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "OUT".to_owned(),
+                direction: PortDirection::Out,
+            },
+        ]);
+        let mut schematic = SchematicState::default();
+        schematic.add_library_cell_component(Point::origin(), binding);
+        let libraries = LibraryManager::new();
+        let buffers = HashMap::new();
+        let resolver = SymbolResolver::new(&libraries, &buffers);
+
+        let svg =
+            export_to_svg_with_symbol_resolver(&schematic, &SvgExportConfig::default(), &resolver);
+
+        assert!(svg.contains("symbol-resolution-error"));
+        assert!(svg.contains("unresolved cell"));
+        assert!(!svg.contains("symbol-pin-label"));
+    }
+
+    #[test]
+    fn svg_port_uses_canonical_body_and_transformed_direction_overlay() {
+        let config = SvgExportConfig {
+            grid_size: 1.0,
+            ..SvgExportConfig::default()
+        };
+        let component = Component::new(1, ComponentType::Port, Point::new(100, 80))
+            .with_rotation(crate::state::Rotation::R90)
+            .with_mirror_h(true);
+
+        for (direction, segment_count) in [
+            (PortDirection::In, 3),
+            (PortDirection::Out, 3),
+            (PortDirection::InOut, 5),
+            (PortDirection::Supply, 2),
+        ] {
+            let mut overlay = String::new();
+            write_port_direction_overlay(&mut overlay, &component, 90, direction, &config);
+            assert!(overlay.contains(&format!("data-direction=\"{}\"", direction.keyword())));
+            assert_eq!(
+                overlay.matches(r#"<line class="component""#).count(),
+                segment_count
+            );
+        }
+
+        let library = crate::schematic::SymbolLibrary::load_embedded().expect("canonical symbols");
+        let body = library
+            .get_with_rotation_variant(ComponentType::Port, 90, None)
+            .expect("canonical port body")
+            .0;
+        assert_eq!(body.paths.len(), 1);
+        assert!(!body.paths[0].filled);
+        assert!(!body.paths[0].commands.is_empty());
+
+        let mut scalar_schematic = SchematicState::default();
+        scalar_schematic.components.push(component.clone());
+        let scalar_svg = export_to_svg(&scalar_schematic, &config);
+        assert!(!scalar_svg.contains(r#"style="stroke-width:1.2""#));
+
+        let mut vector = component;
+        vector.value = "DATA[7:0]".to_owned();
+        let mut schematic = SchematicState::default();
+        schematic.components.push(vector);
+        let svg = export_to_svg(&schematic, &config);
+        assert!(svg.contains(r#"style="stroke-width:1.2""#));
     }
 
     #[test]
@@ -795,7 +1108,7 @@ mod tests {
     }
 
     #[test]
-    fn svg_export_escapes_fallback_component_labels() {
+    fn svg_export_escapes_canonical_component_labels() {
         let mut schematic = SchematicState::default();
         let id = schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
         let component = schematic

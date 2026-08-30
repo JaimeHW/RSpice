@@ -1449,6 +1449,7 @@ impl WorkerSimulationResult {
                     operating_point
                         .spectral_state()
                         .iter()
+                        .chain(operating_point.mna_branch_spectral_state())
                         .map(Vec::len)
                         .sum::<usize>()
                         .saturating_mul(2),
@@ -1567,7 +1568,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 11;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 12;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

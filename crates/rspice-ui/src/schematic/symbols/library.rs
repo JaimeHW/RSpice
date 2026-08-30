@@ -135,11 +135,17 @@ impl SymbolLibrary {
         library.embedded_assets = Self::load_all_embedded_assets()?;
 
         // Default bindings come from the authoritative device descriptors.
-        // A missing file is fatal here, so catalog drift cannot degrade into a
-        // procedural fallback or an empty palette entry.
+        // A missing or electrically mismatched file is fatal here, so catalog
+        // drift cannot degrade into substitute artwork or an empty entry.
         for component_type in ComponentType::ALL {
             let Some(filename) = component_type.descriptor().default_symbol_asset else {
-                continue;
+                if component_type == ComponentType::CellInstance {
+                    continue;
+                }
+                return Err(SymbolError::IoError {
+                    path: component_type.descriptor().stable_id.to_owned(),
+                    message: "standard component has no canonical symbol asset".to_owned(),
+                });
             };
             let symbol = library.prepare_symbol(
                 component_type,
@@ -147,6 +153,22 @@ impl SymbolLibrary {
                 component_type.display_name(),
                 false,
             )?;
+            let terminal_offsets: Vec<_> = component_type
+                .terminal_offsets()
+                .iter()
+                .map(|(_, offset)| *offset)
+                .collect();
+            if !symbol_reaches_terminal_offsets(
+                &symbol,
+                symbol.target_width,
+                symbol.target_height,
+                &terminal_offsets,
+            ) {
+                return Err(SymbolError::ParseError(format!(
+                    "canonical asset '{filename}' does not reach every terminal for {}",
+                    component_type.descriptor().stable_id
+                )));
+            }
             library.symbols.insert(component_type, symbol);
         }
 
@@ -225,6 +247,22 @@ impl SymbolLibrary {
 
         for (component_type, variant_id, filename, name) in variant_mappings {
             let symbol = library.prepare_symbol(*component_type, filename, name, false)?;
+            let terminal_offsets: Vec<_> = component_type
+                .terminal_offsets()
+                .iter()
+                .map(|(_, offset)| *offset)
+                .collect();
+            if !symbol_reaches_terminal_offsets(
+                &symbol,
+                symbol.target_width,
+                symbol.target_height,
+                &terminal_offsets,
+            ) {
+                return Err(SymbolError::ParseError(format!(
+                    "canonical variant '{variant_id}' ({filename}) does not reach every terminal for {}",
+                    component_type.descriptor().stable_id
+                )));
+            }
             library
                 .variant_symbols
                 .entry(*component_type)
@@ -248,6 +286,22 @@ impl SymbolLibrary {
 
         for (component_type, filename, name) in horizontal_mappings {
             let symbol = library.prepare_symbol(*component_type, filename, name, true)?;
+            let rotated_terminal_offsets: Vec<_> = component_type
+                .terminal_offsets()
+                .iter()
+                .map(|(_, offset)| crate::state::Point::new(-offset.y, offset.x))
+                .collect();
+            if !symbol_reaches_terminal_offsets(
+                &symbol,
+                symbol.target_width,
+                symbol.target_height,
+                &rotated_terminal_offsets,
+            ) {
+                return Err(SymbolError::ParseError(format!(
+                    "canonical horizontal asset '{filename}' does not reach every terminal for {}",
+                    component_type.descriptor().stable_id
+                )));
+            }
             library.horizontal_symbols.insert(*component_type, symbol);
         }
 
@@ -267,6 +321,7 @@ impl SymbolLibrary {
             symbol.name = filename.to_string();
             symbol.target_width = (symbol.bounds.2 - symbol.bounds.0).max(1.0);
             symbol.target_height = (symbol.bounds.3 - symbol.bounds.1).max(1.0);
+            validate_symbol(filename, &symbol)?;
             assets.insert(filename.to_string(), symbol);
         }
 
@@ -299,6 +354,8 @@ impl SymbolLibrary {
             symbol.target_width = target_w as f32;
             symbol.target_height = target_h as f32;
         }
+
+        validate_symbol(filename, &symbol)?;
 
         Ok(symbol)
     }
@@ -338,14 +395,12 @@ impl SymbolLibrary {
             return false;
         };
         let anchors = symbol.boundary_anchors(target_width, target_height);
-        if anchors.len() != terminal_offsets.len() {
-            return false;
-        }
-        terminal_offsets.iter().all(|terminal| {
-            anchors.iter().any(|(x, y)| {
-                (*x - terminal.x as f32).abs() <= 0.25 && (*y - terminal.y as f32).abs() <= 0.25
+        anchors.len() == terminal_offsets.len()
+            && terminal_offsets.iter().all(|terminal| {
+                anchors.iter().any(|(x, y)| {
+                    (*x - terminal.x as f32).abs() <= 0.25 && (*y - terminal.y as f32).abs() <= 0.25
+                })
             })
-        })
     }
 
     /// Return all parsed embedded asset filenames.
@@ -380,7 +435,8 @@ impl SymbolLibrary {
             return Some((symbol, adjusted));
         }
 
-        // Fall back to default symbol with original rotation
+        // Otherwise use the component's canonical default asset with the
+        // original rotation.
         self.symbols
             .get(&component_type)
             .map(|s| (s, rotation_degrees))
@@ -413,6 +469,11 @@ impl SymbolLibrary {
             {
                 return Some((symbol, rotation_degrees));
             }
+
+            // A requested authored skin is part of the saved instance
+            // semantics. Silently replacing an unknown id with the default
+            // glyph would make the canvas and export lie about that instance.
+            return None;
         }
 
         self.get_with_rotation(component_type, rotation_degrees)
@@ -429,13 +490,86 @@ impl SymbolLibrary {
     }
 }
 
+fn symbol_reaches_terminal_offsets(
+    symbol: &Symbol,
+    target_width: f32,
+    target_height: f32,
+    terminal_offsets: &[crate::state::Point],
+) -> bool {
+    let anchors = symbol.boundary_anchors(target_width, target_height);
+    terminal_offsets.iter().all(|terminal| {
+        anchors.iter().any(|(x, y)| {
+            (*x - terminal.x as f32).abs() <= 0.25 && (*y - terminal.y as f32).abs() <= 0.25
+        })
+    })
+}
+
+fn validate_symbol(filename: &str, symbol: &Symbol) -> Result<(), SymbolError> {
+    let (min_x, min_y, max_x, max_y) = symbol.bounds;
+    let finite_bounds = [min_x, min_y, max_x, max_y].into_iter().all(f32::is_finite);
+    if !finite_bounds || max_x <= min_x || max_y <= min_y {
+        return Err(SymbolError::ParseError(format!(
+            "canonical asset '{filename}' has invalid bounds {:?}",
+            symbol.bounds
+        )));
+    }
+    if !symbol.target_width.is_finite()
+        || !symbol.target_height.is_finite()
+        || symbol.target_width <= 0.0
+        || symbol.target_height <= 0.0
+    {
+        return Err(SymbolError::ParseError(format!(
+            "canonical asset '{filename}' has invalid target dimensions {}x{}",
+            symbol.target_width, symbol.target_height
+        )));
+    }
+    if symbol.paths.is_empty() {
+        return Err(SymbolError::ParseError(format!(
+            "canonical asset '{filename}' has no drawable paths"
+        )));
+    }
+
+    let mut drawable = false;
+    for path in &symbol.paths {
+        for command in &path.commands {
+            let finite = match command {
+                super::types::PathCommand::MoveTo(x, y)
+                | super::types::PathCommand::LineTo(x, y) => x.is_finite() && y.is_finite(),
+                super::types::PathCommand::CurveTo { ctrl1, ctrl2, end } => {
+                    [ctrl1.0, ctrl1.1, ctrl2.0, ctrl2.1, end.0, end.1]
+                        .into_iter()
+                        .all(f32::is_finite)
+                }
+                super::types::PathCommand::Close => true,
+            };
+            if !finite {
+                return Err(SymbolError::ParseError(format!(
+                    "canonical asset '{filename}' contains non-finite geometry"
+                )));
+            }
+            drawable |= matches!(
+                command,
+                super::types::PathCommand::LineTo(..)
+                    | super::types::PathCommand::CurveTo { .. }
+                    | super::types::PathCommand::Close
+            );
+        }
+    }
+    if !drawable {
+        return Err(SymbolError::ParseError(format!(
+            "canonical asset '{filename}' has no renderable segments"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every embedded asset must parse and every mapped component type must
-    /// resolve to a symbol — a bad asset would otherwise silently drop the
-    /// whole library back to procedural fallbacks at startup.
+    /// Every standard component must resolve to authored geometry. Cell
+    /// instances are the sole exception because their symbol is resolved from
+    /// the referenced library cell rather than a `ComponentType` asset.
     #[test]
     fn embedded_library_loads_and_covers_mapped_types() {
         let library = SymbolLibrary::load_embedded().expect("embedded symbol assets must parse");
@@ -474,6 +608,78 @@ mod tests {
             library.get_asset("switch_expression.svg").is_some(),
             "the generic expression-controlled switch asset is missing"
         );
+    }
+
+    #[test]
+    fn every_standard_component_resolves_canonical_geometry_at_every_rotation() {
+        let library = SymbolLibrary::load_embedded().expect("canonical library loads");
+
+        for kind in ComponentType::ALL {
+            if kind == ComponentType::CellInstance {
+                continue;
+            }
+            for rotation in [0, 90, 180, 270] {
+                let (symbol, adjusted_rotation) = library
+                    .get_with_rotation_variant(kind, rotation, None)
+                    .unwrap_or_else(|| panic!("{kind:?} missing at {rotation} degrees"));
+                validate_symbol(kind.descriptor().stable_id, symbol)
+                    .unwrap_or_else(|error| panic!("{kind:?} at {rotation}: {error}"));
+                assert!(matches!(
+                    adjusted_rotation.rem_euclid(360),
+                    0 | 90 | 180 | 270
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_resolution_never_substitutes_default_art() {
+        let empty = SymbolLibrary::new();
+        assert!(
+            empty
+                .get_with_rotation_variant(ComponentType::Resistor, 0, None)
+                .is_none()
+        );
+
+        let library = SymbolLibrary::load_embedded().expect("canonical library loads");
+        assert!(
+            library
+                .get_with_rotation_variant(ComponentType::Diode, 0, Some("not-a-real-variant"))
+                .is_none()
+        );
+
+        let invalid = Symbol {
+            name: "invalid".to_owned(),
+            paths: vec![super::super::types::SymbolPath {
+                commands: vec![super::super::types::PathCommand::LineTo(f32::NAN, 0.0)],
+                filled: false,
+            }],
+            bounds: (0.0, 0.0, 40.0, 20.0),
+            target_width: 40.0,
+            target_height: 20.0,
+        };
+        assert!(validate_symbol("invalid.svg", &invalid).is_err());
+    }
+
+    #[test]
+    fn led_variant_reaches_the_exact_diode_terminal_contract() {
+        let library = SymbolLibrary::load_embedded().expect("canonical library loads");
+        let symbol = library
+            .get_with_rotation_variant(ComponentType::Diode, 0, Some("led"))
+            .expect("canonical LED variant")
+            .0;
+        let terminals: Vec<_> = ComponentType::Diode
+            .terminal_offsets()
+            .iter()
+            .map(|(_, offset)| *offset)
+            .collect();
+
+        assert!(symbol_reaches_terminal_offsets(
+            symbol,
+            symbol.target_width,
+            symbol.target_height,
+            &terminals,
+        ));
     }
 
     /// The loop probe is authored in viewBox coordinates like the resistor,

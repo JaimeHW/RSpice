@@ -1,11 +1,11 @@
-//! Nonlinear-HB source-stamping orientation pinned against basic circuit
-//! physics.
+//! Exact nonlinear-HB source-constraint orientation pinned against basic
+//! circuit physics.
 //!
-//! The nonlinear Newton path converts ideal voltage sources into stiff Norton
-//! equivalents. The injected current must reproduce the source polarity: a
-//! +2 V rail has to come out at +2 V, and an AC drive at phase 0 must appear
-//! in-phase at the driven node. A mirrored injection produces an inverted
-//! bias that a symmetric-drive rectifier test can never catch.
+//! The nonlinear Newton path retains ideal voltage sources as MNA branch
+//! constraints. Their incidence and authored spectrum must reproduce source
+//! polarity: a +2 V rail has to come out at +2 V, and an AC drive at phase 0
+//! must appear in-phase at the driven node. A mirrored constraint produces an
+//! inverted bias that a symmetric-drive rectifier test can never catch.
 
 use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
@@ -29,7 +29,7 @@ fn coefficient(result: &HbAnalysisResult, node: &str, k: usize) -> num_complex::
 }
 
 #[test]
-fn dc_rail_keeps_its_polarity_through_norton_conversion() {
+fn dc_rail_keeps_its_polarity_through_exact_mna_constraint() {
     // Forward-biased diode behind a +2 V rail: V(vin) must sit at +2 V and the
     // diode node at one forward drop, ~0.72 V for Is=1e-14 at ~13 mA.
     let deck = "\
@@ -161,6 +161,78 @@ r1 out 0 1e18
         (fundamental.norm() - 1.0e18).abs() <= 1.0e3,
         "1 A through 1 EOhm must produce a 1e18 V amplitude, got {fundamental}"
     );
+}
+
+#[test]
+fn subpicovolt_hb_drive_is_not_reclassified_as_zero() {
+    let deck = "\
+* exact source topology must be invariant under physical scaling
+v1 in 0 sin(0 1e-15 1meg)
+r1 in out 1k
+r2 out 0 1k
+.end
+";
+    let result = run_hb(deck, 1.0e6, 2);
+    let input = coefficient(&result, "in", 1);
+    let output = coefficient(&result, "out", 1);
+
+    assert!(input.norm() > 0.0, "the authored 1 fV drive was erased");
+    assert!(
+        (output / input - num_complex::Complex64::new(0.5, 0.0)).norm() < 1.0e-12,
+        "scaled divider transfer changed: input={input}, output={output}"
+    );
+}
+
+#[test]
+fn distortion_metadata_preserves_the_wrapped_hb_waveform() {
+    let bare = run_hb(
+        "wrapped-source reference\n\
+         v1 out 0 sin(0.25 0.1 1meg)\n\
+         r1 out 0 1k\n\
+         .end\n",
+        1.0e6,
+        2,
+    );
+    let wrapped = run_hb(
+        "wrapped distortion source\n\
+         v1 out 0 sin(0.25 0.1 1meg) distof1 2m 30\n\
+         r1 out 0 1k\n\
+         .end\n",
+        1.0e6,
+        2,
+    );
+
+    for harmonic in 0..=2 {
+        assert_eq!(
+            coefficient(&wrapped, "out", harmonic),
+            coefficient(&bare, "out", harmonic),
+            "DISTOF metadata changed HB harmonic {harmonic}"
+        );
+    }
+}
+
+#[test]
+fn unsupported_time_waveforms_fail_instead_of_becoming_dc() {
+    for (source, waveform, expected) in [
+        ("v1", "exp(0 1 1n 1n 2n 1n)", "EXP is not periodic"),
+        ("v1", "pwl(0 0 1u 1 2u 0) r=0", "periodic PWL"),
+        ("v1", "trnoise(1m 1n 0 0)", "TRNOISE is stochastic"),
+        ("i1", "trrandom(2 1u 2u 3 4)", "TRRANDOM is stochastic"),
+    ] {
+        let deck =
+            format!("unsupported HB waveform\n{source} out 0 {waveform}\nr1 out 0 1k\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("unsupported waveform deck parses");
+        let error = match Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(2))
+        {
+            Ok(_) => panic!("unsupported HB waveform {waveform} must not silently become DC"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains(expected),
+            "unexpected waveform error for {waveform}: {error}"
+        );
+    }
 }
 
 #[test]

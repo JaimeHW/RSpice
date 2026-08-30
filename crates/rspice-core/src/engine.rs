@@ -99,11 +99,12 @@ pub use error::{
 };
 pub use hb::{
     HbAnalysisResult, HbEnvelopeContinuationState, HbEnvelopeStateGuarantee, HbOperatingPoint,
-    PacAnalysisResult, PnoiseAnalysisResult,
+    HbOperatingPointIdentity, PacAnalysisResult, PnoiseAnalysisResult,
 };
 pub use health::EngineHealthReport;
 pub use pss::{
     PssAnalysisResult, PssContinuationState, PssDcOperatingPointSeed, PssError, PssOperatingPoint,
+    PssOperatingPointIdentity,
 };
 pub use pss_noise::OscPnoiseResult;
 pub use result::{

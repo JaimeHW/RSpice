@@ -4,6 +4,12 @@ use super::*;
 use crate::solver::convergence::SourceStepper;
 use crate::solver::{SolverError, StaticMatrix};
 
+#[derive(Debug, Clone)]
+struct HbDcCheckpoint {
+    node_voltages: Vec<Value>,
+    branch_currents: Vec<Value>,
+}
+
 impl HbSolver {
     /// Solve DC operating point before full HB iteration
     ///
@@ -29,9 +35,13 @@ impl HbSolver {
         state: &mut HbSolverState,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, HbError> {
+        self.validate_configuration()?;
         if abort.is_aborted() {
             return Err(HbError::Aborted);
         }
+        let branch_count = self.validate_dc_exact_mna_registry()?;
+        state.try_prepare_mna_branches(branch_count, self.num_harmonics)?;
+        self.validate_dc_state(state)?;
         // The DC seed is part of the same authenticated HB solve. Respect the
         // caller's tolerances instead of silently weakening them.
         let dc_reltol = self.config.tolerance;
@@ -72,6 +82,7 @@ impl HbSolver {
             dc_max_iter,
             dc_reltol,
             dc_abstol,
+            1.0,
             abort,
         )? {
             return Ok(self.extract_dc_solution(state));
@@ -86,11 +97,12 @@ impl HbSolver {
                 dc_max_iter,
                 dc_reltol * 10.0, // Relaxed tolerance during stepping
                 dc_abstol * 10.0,
+                1.0,
                 abort,
             )? {
                 // Converged at this GMIN level - refine to target
                 let mut current_gmin = gmin_level;
-                let mut last_good_x = self.extract_dc_solution(state);
+                let mut last_good_state = self.capture_dc_checkpoint(state)?;
                 let mut last_good_gmin = current_gmin;
                 let mut refine_failures = 0;
 
@@ -102,19 +114,16 @@ impl HbSolver {
                         dc_max_iter,
                         dc_reltol,
                         dc_abstol,
+                        1.0,
                         abort,
                     )? {
-                        last_good_x = self.extract_dc_solution(state);
+                        last_good_state = self.capture_dc_checkpoint(state)?;
                         last_good_gmin = current_gmin;
                         refine_failures = 0; // Reset failure count on success
                     } else {
                         refine_failures += 1;
                         // Restore last good state and keep trying with smaller steps
-                        for (node, &v) in last_good_x.iter().enumerate() {
-                            if node < state.x.len() && !state.x[node].is_empty() {
-                                state.x[node][0] = Complex64::new(v, 0.0);
-                            }
-                        }
+                        self.restore_dc_checkpoint(state, &last_good_state)?;
                         // After too many consecutive failures, try slower reduction
                         if refine_failures > 3 {
                             break;
@@ -132,6 +141,7 @@ impl HbSolver {
                     dc_max_iter,
                     dc_reltol,
                     dc_abstol,
+                    1.0,
                     abort,
                 )? {
                     return Ok(self.extract_dc_solution(state));
@@ -139,14 +149,15 @@ impl HbSolver {
             }
         }
 
-        // Step 3: Source stepping - ramp DC sources from 0 to full
-        let original_sources = self.source_spectra.clone();
-
-        // Reset DC to zero
+        // Step 3: Source stepping - ramp every independent DC source, including
+        // exact ideal-voltage KVL rows, from zero to full strength.
         for node in 0..self.num_nodes {
             if node < state.x.len() && !state.x[node].is_empty() {
                 state.x[node][0] = Complex64::new(0.0, 0.0);
             }
+        }
+        for spectrum in &mut state.mna_branch_currents {
+            spectrum[0] = Complex64::new(0.0, 0.0);
         }
 
         // Use SourceStepper for DC sources
@@ -157,18 +168,7 @@ impl HbSolver {
         while !source_stepper.is_complete() && step_count < max_steps {
             let factor = source_stepper.factor();
             step_count += 1;
-
-            // Scale DC sources only (harmonic 0)
-            for node in 0..self.num_nodes.min(self.source_spectra.len()) {
-                if !self.source_spectra[node].is_empty() {
-                    self.source_spectra[node][0] = original_sources
-                        .get(node)
-                        .and_then(|s| s.first())
-                        .copied()
-                        .unwrap_or(Complex64::ZERO)
-                        * factor;
-                }
-            }
+            let checkpoint = self.capture_dc_checkpoint(state)?;
 
             if self.dc_newton_inner_loop(
                 state,
@@ -176,16 +176,17 @@ impl HbSolver {
                 dc_max_iter / 2,
                 dc_reltol * 10.0,
                 dc_abstol * 10.0,
+                factor,
                 abort,
             )? {
                 source_stepper.advance_on_success();
-            } else if !source_stepper.reduce_on_failure() {
-                break;
+            } else {
+                self.restore_dc_checkpoint(state, &checkpoint)?;
+                if !source_stepper.reduce_on_failure() {
+                    break;
+                }
             }
         }
-
-        // Restore original sources
-        self.source_spectra = original_sources;
 
         // Final DC solve with full sources
         if source_stepper.is_complete()
@@ -195,6 +196,7 @@ impl HbSolver {
                 dc_max_iter,
                 dc_reltol,
                 dc_abstol,
+                1.0,
                 abort,
             )?
         {
@@ -210,45 +212,62 @@ impl HbSolver {
 
     /// Solve DC for linear circuit (no nonlinear devices)
     fn solve_dc_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
-        // Build DC conductance matrix (G plus inductor DC shorts)
         let n = self.num_nodes;
-        let mut g_dc = vec![vec![0.0; n]; n];
+        let branches = self.exact_mna_branches();
+        let total_unknowns = n.checked_add(branches.len()).ok_or_else(|| {
+            HbError::InvalidCircuit("HB DC MNA dimension exceeds this platform".to_string())
+        })?;
+        let mut g_dc = vec![vec![0.0; total_unknowns]; total_unknowns];
 
-        // Add conductances
         for &(row, col, g) in &self.g_matrix {
             if row < n && col < n {
                 g_dc[row][col] += g;
             }
         }
 
-        // Inductors are DC shorts, with the same conductance the
-        // full-spectrum residual uses; leaving them open would seed Newton
-        // with the operating point of a different circuit.
-        for &(row, col, l) in &self.l_matrix {
-            if row < n && col < n && l.abs() > 1e-30 {
-                g_dc[row][col] += inductor_dc_short_admittance(l);
+        if branches.is_empty() {
+            // Compatibility for direct node-only solver clients. Production
+            // exact-MNA HB registers every inductor branch and never reaches
+            // this surrogate path.
+            for &(row, col, l) in &self.l_matrix {
+                if row < n && col < n && l.abs() > 1e-30 {
+                    g_dc[row][col] += inductor_dc_short_admittance(l);
+                }
             }
         }
 
-        // Build DC RHS (source currents at DC)
-        let rhs: Vec<Value> = (0..n)
-            .map(|node| {
-                self.source_spectra
-                    .get(node)
-                    .and_then(|s| s.first())
-                    .map(|c| c.re)
-                    .unwrap_or(0.0)
-            })
-            .collect();
+        let mut rhs = vec![0.0; total_unknowns];
+        for (node, slot) in rhs.iter_mut().take(n).enumerate() {
+            *slot = self.dc_nodal_source(node, 1.0)?;
+        }
+        for (branch_index, branch) in branches.iter().enumerate() {
+            let row = n + branch_index;
+            let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
+            if node_pos > 0 {
+                g_dc[node_pos - 1][row] += 1.0;
+                g_dc[row][node_pos - 1] += 1.0;
+            }
+            if node_neg > 0 {
+                g_dc[node_neg - 1][row] -= 1.0;
+                g_dc[row][node_neg - 1] -= 1.0;
+            }
+            if let ExactMnaBranch::Resistor { resistance, .. } = branch {
+                g_dc[row][row] -= *resistance;
+            }
+            rhs[row] = self.dc_branch_source(branch, 1.0)?;
+        }
 
-        // Solve G * V = I
         let solution = self.solve_real_linear_system(&g_dc, &rhs)?;
 
-        // Store DC solution
-        for (node, &v) in solution.iter().enumerate() {
-            if node < state.x.len() && !state.x[node].is_empty() {
-                state.x[node][0] = Complex64::new(v, 0.0);
-            }
+        for (node, &voltage) in solution.iter().take(n).enumerate() {
+            state.x[node][0] = Complex64::new(voltage, 0.0);
+        }
+        for (branch, &current) in state
+            .mna_branch_currents
+            .iter_mut()
+            .zip(solution.iter().skip(n))
+        {
+            branch[0] = Complex64::new(current, 0.0);
         }
 
         Ok(())
@@ -264,8 +283,14 @@ impl HbSolver {
         max_iterations: usize,
         tol: Value,
         abstol: Value,
+        source_scale: Value,
         abort: &dyn AbortSignal,
     ) -> Result<bool, HbError> {
+        if !source_scale.is_finite() || !(0.0..=1.0).contains(&source_scale) {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC source scale must be finite and within [0, 1], got {source_scale:e}"
+            )));
+        }
         for iteration in 0..max_iterations {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
@@ -273,14 +298,15 @@ impl HbSolver {
             state.iteration = iteration;
 
             // Compute DC residual
-            self.compute_dc_residual(state, gmin)?;
+            self.compute_dc_residual(state, gmin, source_scale)?;
 
             // Check convergence per KCL row: |res| <= abstol + reltol*scale
             // with the scale built from that row's own current contributions.
             // Any circuit-wide reference (a norm, the max source current)
             // lets a microamp imbalance at a high-impedance node hide under
-            // the amp scale of stiff Norton source rows.
-            if state.residual_norm < abstol || state.dc_rows_converged(tol, abstol) {
+            // an unrelated large-row scale.
+            if state.dc_rows_converged_with_branch_tolerances(tol, abstol, crate::constants::VNTOL)
+            {
                 return Ok(true);
             }
 
@@ -290,16 +316,16 @@ impl HbSolver {
             // Solve for delta_x: J * delta = -residual (standard Newton-Raphson)
             // We need -R because: R(x) = 0, Taylor: R(x+delta) ≈ R(x) + J*delta = 0
             // So J*delta = -R
-            let neg_residual: Vec<Value> = (0..self.num_nodes)
-                .map(|node| {
-                    -state
-                        .residual
-                        .get(node)
-                        .and_then(|r| r.first())
-                        .map(|c| c.re)
-                        .unwrap_or(0.0)
-                })
-                .collect();
+            let mut neg_residual = Vec::new();
+            neg_residual
+                .try_reserve_exact(self.num_nodes + state.mna_branch_residual.len())
+                .map_err(|error| {
+                    HbError::InvalidCircuit(format!(
+                        "HB DC residual-vector allocation failed: {error}"
+                    ))
+                })?;
+            neg_residual.extend(state.residual.iter().map(|row| -row[0].re));
+            neg_residual.extend(state.mna_branch_residual.iter().map(|row| -row[0].re));
 
             let delta_x = match self.solve_real_linear_system(&jacobian, &neg_residual) {
                 Ok(d) => d,
@@ -307,7 +333,15 @@ impl HbSolver {
             };
 
             // Line search with DC voltage limiting
-            self.apply_dc_line_search(state, &delta_x, gmin, tol)?;
+            self.apply_dc_line_search(
+                state,
+                &delta_x,
+                gmin,
+                tol,
+                abstol,
+                crate::constants::VNTOL,
+                source_scale,
+            )?;
         }
 
         Ok(false)
@@ -318,6 +352,7 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
         gmin: Value,
+        source_scale: Value,
     ) -> Result<(), HbError> {
         let n = self.num_nodes;
 
@@ -325,12 +360,7 @@ impl HbSolver {
         // |contribution| alongside every term for the KCL convergence test.
         for node in 0..n {
             if node < state.residual.len() && !state.residual[node].is_empty() {
-                let source = self
-                    .source_spectra
-                    .get(node)
-                    .and_then(|s| s.first())
-                    .map(|c| c.re)
-                    .unwrap_or(0.0);
+                let source = self.dc_nodal_source(node, source_scale)?;
                 state.residual[node][0] = Complex64::new(source, 0.0);
                 if !state.residual_scale[node].is_empty() {
                     state.residual_scale[node][0] = source.abs();
@@ -359,12 +389,29 @@ impl HbSolver {
             }
         }
 
-        // Inductor DC shorts, consistent with the full-spectrum residual.
-        for &(row, col, l) in &self.l_matrix {
-            if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
-                let y_l = inductor_dc_short_admittance(l);
-                state.residual[row][0] -= Complex64::new(y_l * v_dc[col], 0.0);
-                state.residual_scale[row][0] += y_l.abs() * v_dc[col].abs();
+        if self.exact_mna_branches().is_empty() {
+            // Compatibility for direct node-only solver users.
+            for &(row, col, l) in &self.l_matrix {
+                if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
+                    let y_l = inductor_dc_short_admittance(l);
+                    state.residual[row][0] -= Complex64::new(y_l * v_dc[col], 0.0);
+                    state.residual_scale[row][0] += y_l.abs() * v_dc[col].abs();
+                }
+            }
+        }
+
+        // Exact branch currents enter only the terminal KCL rows. GMIN and
+        // nonlinear voltage limiting remain node-only homotopies.
+        for (branch_index, branch) in self.exact_mna_branches().iter().enumerate() {
+            let current = state.mna_branch_currents[branch_index][0].re;
+            let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
+            if node_pos > 0 {
+                state.residual[node_pos - 1][0] -= Complex64::new(current, 0.0);
+                state.residual_scale[node_pos - 1][0] += current.abs();
+            }
+            if node_neg > 0 {
+                state.residual[node_neg - 1][0] += Complex64::new(current, 0.0);
+                state.residual_scale[node_neg - 1][0] += current.abs();
             }
         }
 
@@ -410,18 +457,38 @@ impl HbSolver {
             }
         }
 
-        // Compute residual norm (DC only)
-        let norm_sq: Value = (0..n)
-            .map(|node| {
-                state
-                    .residual
-                    .get(node)
-                    .and_then(|r| r.first())
-                    .map(|c| c.re * c.re)
-                    .unwrap_or(0.0)
-            })
-            .sum();
-        state.residual_norm = norm_sq.sqrt();
+        // Exact DC KVL: ideal sources retain their authored DC voltage while
+        // inductors enforce a literal zero voltage drop, never a conductance
+        // surrogate. These are voltage rows with their own convergence scale.
+        for (branch_index, branch) in self.exact_mna_branches().iter().enumerate() {
+            let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
+            let voltage =
+                Self::dc_node_voltage(&v_dc, node_pos) - Self::dc_node_voltage(&v_dc, node_neg);
+            let constitutive_voltage = match branch {
+                ExactMnaBranch::Resistor { resistance, .. } => {
+                    state.mna_branch_currents[branch_index][0].re * *resistance
+                }
+                _ => self.dc_branch_source(branch, source_scale)?,
+            };
+            state.mna_branch_residual[branch_index][0] =
+                Complex64::new(constitutive_voltage - voltage, 0.0);
+            state.mna_branch_residual_scale[branch_index][0] = constitutive_voltage
+                .abs()
+                .max(Self::dc_node_voltage(&v_dc, node_pos).abs())
+                .max(Self::dc_node_voltage(&v_dc, node_neg).abs());
+        }
+
+        self.validate_dc_residual_state(state)?;
+        let diagnostic_norm: Value = state
+            .residual
+            .iter()
+            .chain(state.mna_branch_residual.iter())
+            .fold(0.0, |norm, row| norm.hypot(row[0].re));
+        state.residual_norm = if diagnostic_norm.is_finite() {
+            diagnostic_norm
+        } else {
+            Value::MAX
+        };
         Ok(())
     }
 
@@ -432,7 +499,14 @@ impl HbSolver {
         gmin: Value,
     ) -> Result<Vec<Vec<Value>>, HbError> {
         let n = self.num_nodes;
-        let mut jacobian = vec![vec![0.0; n]; n];
+        let total_unknowns = n
+            .checked_add(self.exact_mna_branches().len())
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "HB DC Jacobian dimension exceeds this platform".to_string(),
+                )
+            })?;
+        let mut jacobian = vec![vec![0.0; total_unknowns]; total_unknowns];
 
         // Linear contribution: -G
         for &(row, col, g) in &self.g_matrix {
@@ -441,10 +515,11 @@ impl HbSolver {
             }
         }
 
-        // Inductor DC shorts, matching compute_dc_residual.
-        for &(row, col, l) in &self.l_matrix {
-            if row < n && col < n && l.abs() > 1e-30 {
-                jacobian[row][col] -= inductor_dc_short_admittance(l);
+        if self.exact_mna_branches().is_empty() {
+            for &(row, col, l) in &self.l_matrix {
+                if row < n && col < n && l.abs() > 1e-30 {
+                    jacobian[row][col] -= inductor_dc_short_admittance(l);
+                }
             }
         }
 
@@ -502,6 +577,22 @@ impl HbSolver {
             }
         }
 
+        for (branch_index, branch) in self.exact_mna_branches().iter().enumerate() {
+            let branch_coordinate = n + branch_index;
+            let (node_pos, node_neg) = Self::dc_branch_terminals(branch);
+            if node_pos > 0 {
+                jacobian[node_pos - 1][branch_coordinate] -= 1.0;
+                jacobian[branch_coordinate][node_pos - 1] -= 1.0;
+            }
+            if node_neg > 0 {
+                jacobian[node_neg - 1][branch_coordinate] += 1.0;
+                jacobian[branch_coordinate][node_neg - 1] += 1.0;
+            }
+            if let ExactMnaBranch::Resistor { resistance, .. } = branch {
+                jacobian[branch_coordinate][branch_coordinate] += *resistance;
+            }
+        }
+
         Ok(jacobian)
     }
 
@@ -511,89 +602,424 @@ impl HbSolver {
         state: &mut HbSolverState,
         delta_x: &[Value],
         gmin: Value,
-        _tol: Value,
+        reltol: Value,
+        current_abstol: Value,
+        voltage_abstol: Value,
+        source_scale: Value,
     ) -> Result<(), HbError> {
         let n = self.num_nodes;
+        let expected_unknowns =
+            n.checked_add(state.mna_branch_currents.len())
+                .ok_or_else(|| {
+                    HbError::InvalidCircuit(
+                        "HB DC line-search dimension exceeds this platform".to_string(),
+                    )
+                })?;
+        if delta_x.len() != expected_unknowns || delta_x.iter().any(|value| !value.is_finite()) {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC line-search update has {} finite-qualified coordinates; expected {expected_unknowns}",
+                delta_x.len()
+            )));
+        }
         let mut alpha = 1.0;
         let min_alpha = 0.001;
         let armijo_c = 1e-4;
 
-        // Save original DC voltages and residual
-        let orig_x: Vec<Value> = (0..n)
-            .map(|node| {
-                state
-                    .x
-                    .get(node)
-                    .and_then(|x| x.first())
-                    .map(|c| c.re)
-                    .unwrap_or(0.0)
-            })
-            .collect();
-        let orig_residual = state.residual_norm;
-
-        // Compute expected improvement
-        let grad_dot_delta: Value = (0..n)
-            .map(|i| {
-                let r = state
-                    .residual
-                    .get(i)
-                    .and_then(|r| r.first())
-                    .map(|c| c.re)
-                    .unwrap_or(0.0);
-                r * delta_x.get(i).copied().unwrap_or(0.0)
-            })
-            .sum();
+        let checkpoint = self.capture_dc_checkpoint(state)?;
+        let original_merit =
+            state.certificate_merit(reltol, current_abstol, voltage_abstol, true)?;
 
         let mut best_alpha = alpha;
-        let mut best_residual = f64::INFINITY;
+        let mut best_merit = f64::INFINITY;
 
         while alpha >= min_alpha {
-            // Apply update with voltage limiting
-            for node in 0..n {
-                if node < state.x.len() && !state.x[node].is_empty() && node < delta_x.len() {
-                    let mut new_v = orig_x[node] + alpha * delta_x[node];
-
-                    // PN junction voltage limiting
-                    // Limit voltage changes at PN junctions to prevent overflow
-                    let max_delta_v = 0.5; // Maximum voltage change per iteration
-                    if (new_v - orig_x[node]).abs() > max_delta_v {
-                        new_v = orig_x[node] + max_delta_v * (new_v - orig_x[node]).signum();
-                    }
-
-                    // Clamp to reasonable range
-                    new_v = new_v.clamp(-1000.0, 1000.0);
-
-                    state.x[node][0] = Complex64::new(new_v, 0.0);
-                }
+            if !Self::apply_dc_trial_update(state, &checkpoint, delta_x, alpha) {
+                alpha *= 0.5;
+                continue;
             }
 
             // Compute new residual
-            self.compute_dc_residual(state, gmin)?;
+            self.compute_dc_residual(state, gmin, source_scale)?;
+            let trial_merit =
+                state.certificate_merit(reltol, current_abstol, voltage_abstol, true)?;
 
             // Track best result
-            if state.residual_norm < best_residual {
-                best_residual = state.residual_norm;
+            if trial_merit < best_merit {
+                best_merit = trial_merit;
                 best_alpha = alpha;
             }
 
-            // Armijo condition
-            if state.residual_norm <= orig_residual + armijo_c * alpha * grad_dot_delta {
+            // Dimensionless sufficient decrease across separately normalized
+            // KCL-current and KVL-voltage row certificates.
+            let sufficient_decrease = original_merit * (1.0 - armijo_c * alpha);
+            if trial_merit <= sufficient_decrease {
                 return Ok(()); // Accepted step
             }
 
             alpha *= 0.5;
         }
 
-        // Use best alpha found
-        for node in 0..n {
-            if node < state.x.len() && !state.x[node].is_empty() && node < delta_x.len() {
-                let mut new_v = orig_x[node] + best_alpha * delta_x[node];
-                new_v = new_v.clamp(-1000.0, 1000.0);
-                state.x[node][0] = Complex64::new(new_v, 0.0);
+        if !best_merit.is_finite()
+            || !Self::apply_dc_trial_update(state, &checkpoint, delta_x, best_alpha)
+        {
+            self.restore_dc_checkpoint(state, &checkpoint)?;
+            return Err(HbError::InvalidCircuit(
+                "HB DC line search found no finite branch-inclusive trial state".to_string(),
+            ));
+        }
+        self.compute_dc_residual(state, gmin, source_scale)?;
+        Ok(())
+    }
+
+    fn validate_dc_exact_mna_registry(&self) -> Result<usize, HbError> {
+        let branches = self.exact_mna_branches();
+        let names = self.exact_mna_branch_names();
+        if names.len() != branches.len() {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC exact-MNA registry has {} descriptors and {} names",
+                branches.len(),
+                names.len()
+            )));
+        }
+        if self.voltage_source_branches.len() != self.num_branches {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC voltage-source storage has {} descriptors for {} registered branch unknowns",
+                self.voltage_source_branches.len(),
+                self.num_branches
+            )));
+        }
+        if branches.is_empty() && !self.voltage_source_branches.is_empty() {
+            return Err(HbError::InvalidCircuit(
+                "HB DC has ideal-voltage branch descriptors but no canonical exact-MNA registry"
+                    .to_string(),
+            ));
+        }
+        if !branches.is_empty()
+            && !self.l_matrix.is_empty()
+            && branches
+                .iter()
+                .any(|branch| matches!(branch, ExactMnaBranch::Inductor { .. }))
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB DC exact inductor branches cannot coexist with nodal inductor admittance stamps"
+                    .to_string(),
+            ));
+        }
+
+        let mut seen_names = std::collections::HashSet::new();
+        seen_names.try_reserve(names.len()).map_err(|error| {
+            HbError::InvalidCircuit(format!(
+                "HB DC exact-MNA identity allocation failed: {error}"
+            ))
+        })?;
+        let mut seen_voltage_sources = std::collections::HashSet::new();
+        seen_voltage_sources
+            .try_reserve(self.voltage_source_branches.len())
+            .map_err(|error| {
+                HbError::InvalidCircuit(format!(
+                    "HB DC voltage-source identity allocation failed: {error}"
+                ))
+            })?;
+        for (index, (branch, name)) in branches.iter().zip(names).enumerate() {
+            if name.is_empty() || name.trim() != name || !seen_names.insert(name.to_uppercase()) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB DC exact-MNA branch name '{name}' is empty, non-canonical, or duplicated"
+                )));
+            }
+            let expected_ordinal = index + 1;
+            let (branch_ordinal, node_pos, node_neg) = match branch {
+                ExactMnaBranch::VoltageSource {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    source_index,
+                    source,
+                } => {
+                    if !seen_voltage_sources.insert(*source_index) {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB DC ideal-voltage source index {source_index} is registered more than once"
+                        )));
+                    }
+                    let source = source.as_ref().ok_or_else(|| {
+                        HbError::InvalidCircuit(format!(
+                            "HB DC ideal-voltage branch '{name}' has no large-signal source evidence"
+                        ))
+                    })?;
+                    if self.voltage_source_branches.get(*source_index) != Some(source)
+                        || source.node_pos != *node_pos
+                        || source.node_neg != *node_neg
+                        || !source.dc_voltage.is_finite()
+                        || source
+                            .ac_harmonics
+                            .iter()
+                            .any(|(_, value)| !value.re.is_finite() || !value.im.is_finite())
+                    {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB DC ideal-voltage branch '{name}' has inconsistent source evidence"
+                        )));
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg)
+                }
+                ExactMnaBranch::Inductor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    inductance,
+                } => {
+                    if !inductance.is_finite() || *inductance == 0.0 {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB DC inductor branch '{name}' has invalid inductance {inductance:e}"
+                        )));
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg)
+                }
+                ExactMnaBranch::Resistor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    resistance,
+                    small_signal_resistance,
+                } => {
+                    if !resistance.is_finite() || !small_signal_resistance.is_finite() {
+                        return Err(HbError::InvalidCircuit(format!(
+                            "HB DC resistor branch '{name}' has non-finite DC or small-signal resistance"
+                        )));
+                    }
+                    (*branch_ordinal, *node_pos, *node_neg)
+                }
+            };
+            if branch_ordinal != expected_ordinal
+                || node_pos > self.num_nodes
+                || node_neg > self.num_nodes
+                || node_pos == node_neg
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB DC exact-MNA branch '{name}' has ordinal {branch_ordinal} and terminals ({node_pos}, {node_neg}); expected ordinal {expected_ordinal} within {} nodes",
+                    self.num_nodes
+                )));
             }
         }
-        self.compute_dc_residual(state, gmin)?;
+        if seen_voltage_sources.len() != self.voltage_source_branches.len() {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC exact-MNA registry covers {} of {} ideal-voltage source descriptors",
+                seen_voltage_sources.len(),
+                self.voltage_source_branches.len()
+            )));
+        }
+        Ok(branches.len())
+    }
+
+    fn validate_dc_state(&self, state: &HbSolverState) -> Result<(), HbError> {
+        let width = self.num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit("HB DC harmonic width exceeds this platform".to_string())
+        })?;
+        if state.x.len() != self.num_nodes
+            || state.residual.len() != self.num_nodes
+            || state.residual_scale.len() != self.num_nodes
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB DC node-state cardinality does not match the solver".to_string(),
+            ));
+        }
+        for node in 0..self.num_nodes {
+            if state.x[node].len() != width
+                || state.residual[node].len() != width
+                || state.residual_scale[node].len() != width
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB DC node {node} has an inconsistent harmonic-state width"
+                )));
+            }
+            if state.x[node]
+                .iter()
+                .chain(&state.residual[node])
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                || state.residual_scale[node]
+                    .iter()
+                    .any(|value| !value.is_finite() || *value < 0.0)
+                || state.x[node][0].im != 0.0
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB DC node {node} contains non-finite state or a nonzero imaginary DC component"
+                )));
+            }
+        }
         Ok(())
+    }
+
+    fn validate_dc_residual_state(&self, state: &HbSolverState) -> Result<(), HbError> {
+        for (node, (residual, scale)) in
+            state.residual.iter().zip(&state.residual_scale).enumerate()
+        {
+            if !residual[0].re.is_finite()
+                || residual[0].im != 0.0
+                || !scale[0].is_finite()
+                || scale[0] < 0.0
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB DC KCL row {node} produced a non-finite residual certificate"
+                )));
+            }
+        }
+        for (branch, (residual, scale)) in state
+            .mna_branch_residual
+            .iter()
+            .zip(&state.mna_branch_residual_scale)
+            .enumerate()
+        {
+            if !residual[0].re.is_finite()
+                || residual[0].im != 0.0
+                || !scale[0].is_finite()
+                || scale[0] < 0.0
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "HB DC KVL row {branch} produced a non-finite residual certificate"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn dc_nodal_source(&self, node: usize, source_scale: Value) -> Result<Value, HbError> {
+        let source = self
+            .source_spectra
+            .get(node)
+            .and_then(|spectrum| spectrum.first())
+            .copied()
+            .unwrap_or(Complex64::ZERO);
+        if !source.re.is_finite() || !source.im.is_finite() || source.im != 0.0 {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC nodal source row {node} has an invalid harmonic-zero coefficient"
+            )));
+        }
+        let scaled = source.re * source_scale;
+        if !scaled.is_finite() {
+            return Err(HbError::InvalidCircuit(format!(
+                "HB DC nodal source row {node} overflows at source scale {source_scale:e}"
+            )));
+        }
+        Ok(scaled)
+    }
+
+    fn dc_branch_source(
+        &self,
+        branch: &ExactMnaBranch,
+        source_scale: Value,
+    ) -> Result<Value, HbError> {
+        let source = match branch {
+            ExactMnaBranch::VoltageSource {
+                source: Some(source),
+                ..
+            } => source.dc_voltage * source_scale,
+            ExactMnaBranch::VoltageSource { source: None, .. } => {
+                return Err(HbError::InvalidCircuit(
+                    "HB DC ideal-voltage branch lacks large-signal source evidence".to_string(),
+                ));
+            }
+            ExactMnaBranch::Inductor { .. } => 0.0,
+            ExactMnaBranch::Resistor { .. } => 0.0,
+        };
+        if !source.is_finite() {
+            return Err(HbError::InvalidCircuit(
+                "HB DC exact-MNA branch source is non-finite".to_string(),
+            ));
+        }
+        Ok(source)
+    }
+
+    fn dc_branch_terminals(branch: &ExactMnaBranch) -> (usize, usize) {
+        match branch {
+            ExactMnaBranch::VoltageSource {
+                node_pos, node_neg, ..
+            }
+            | ExactMnaBranch::Inductor {
+                node_pos, node_neg, ..
+            }
+            | ExactMnaBranch::Resistor {
+                node_pos, node_neg, ..
+            } => (*node_pos, *node_neg),
+        }
+    }
+
+    fn dc_node_voltage(voltages: &[Value], node: usize) -> Value {
+        if node == 0 { 0.0 } else { voltages[node - 1] }
+    }
+
+    fn capture_dc_checkpoint(&self, state: &HbSolverState) -> Result<HbDcCheckpoint, HbError> {
+        self.validate_dc_state(state)?;
+        Ok(HbDcCheckpoint {
+            node_voltages: state.x.iter().map(|spectrum| spectrum[0].re).collect(),
+            branch_currents: state
+                .mna_branch_currents
+                .iter()
+                .map(|spectrum| spectrum[0].re)
+                .collect(),
+        })
+    }
+
+    fn restore_dc_checkpoint(
+        &self,
+        state: &mut HbSolverState,
+        checkpoint: &HbDcCheckpoint,
+    ) -> Result<(), HbError> {
+        if checkpoint.node_voltages.len() != state.x.len()
+            || checkpoint.branch_currents.len() != state.mna_branch_currents.len()
+            || checkpoint
+                .node_voltages
+                .iter()
+                .chain(&checkpoint.branch_currents)
+                .any(|value| !value.is_finite())
+        {
+            return Err(HbError::InvalidCircuit(
+                "HB DC checkpoint does not match the branch-inclusive state".to_string(),
+            ));
+        }
+        for (spectrum, &voltage) in state.x.iter_mut().zip(&checkpoint.node_voltages) {
+            spectrum[0] = Complex64::new(voltage, 0.0);
+        }
+        for (spectrum, &current) in state
+            .mna_branch_currents
+            .iter_mut()
+            .zip(&checkpoint.branch_currents)
+        {
+            spectrum[0] = Complex64::new(current, 0.0);
+        }
+        Ok(())
+    }
+
+    fn apply_dc_trial_update(
+        state: &mut HbSolverState,
+        checkpoint: &HbDcCheckpoint,
+        delta: &[Value],
+        alpha: Value,
+    ) -> bool {
+        let node_count = checkpoint.node_voltages.len();
+        for (node, (&original, &update)) in checkpoint
+            .node_voltages
+            .iter()
+            .zip(delta.iter().take(node_count))
+            .enumerate()
+        {
+            let limited_step = (alpha * update).clamp(-0.5, 0.5);
+            let voltage = (original + limited_step).clamp(-1000.0, 1000.0);
+            if !voltage.is_finite() {
+                return false;
+            }
+            state.x[node][0] = Complex64::new(voltage, 0.0);
+        }
+        for (branch, (&original, &update)) in checkpoint
+            .branch_currents
+            .iter()
+            .zip(delta.iter().skip(node_count))
+            .enumerate()
+        {
+            let current = original + alpha * update;
+            if !current.is_finite() {
+                return false;
+            }
+            state.mna_branch_currents[branch][0] = Complex64::new(current, 0.0);
+        }
+        true
     }
 
     /// Solve and certify a real linear system with scale-aware sparse LU.
@@ -705,37 +1131,15 @@ impl HbSolver {
 
         // Build diode adjacency: for each node, track connected diodes with polarity
         // (neighbor, is_this_node_anode) - True if current node is anode of diode to neighbor
-        // Also include BJT B-E junctions as they behave like diodes
         let mut node_diodes: Vec<Vec<(usize, bool)>> = vec![vec![]; n];
         for device in &self.nonlinear_devices {
-            match device.device_type {
-                NonlinearDeviceType::Diode => {
-                    let anode = device.terminals[0];
-                    let cathode = device.terminals[1];
-                    if anode < n && cathode < n {
-                        node_diodes[anode].push((cathode, true)); // anode connects to cathode
-                        node_diodes[cathode].push((anode, false)); // cathode connects to anode
-                    }
+            if device.device_type == NonlinearDeviceType::Diode {
+                let anode = device.terminals[0];
+                let cathode = device.terminals[1];
+                if anode < n && cathode < n {
+                    node_diodes[anode].push((cathode, true)); // anode connects to cathode
+                    node_diodes[cathode].push((anode, false)); // cathode connects to anode
                 }
-                NonlinearDeviceType::NpnBjt => {
-                    // NPN: B-E junction is like diode with base as anode, emitter as cathode
-                    let base = device.terminals[1];
-                    let emitter = device.terminals[2];
-                    if base < n && emitter < n {
-                        node_diodes[base].push((emitter, true));
-                        node_diodes[emitter].push((base, false));
-                    }
-                }
-                NonlinearDeviceType::PnpBjt => {
-                    // PNP: E-B junction is like diode with emitter as anode, base as cathode
-                    let base = device.terminals[1];
-                    let emitter = device.terminals[2];
-                    if base < n && emitter < n {
-                        node_diodes[emitter].push((base, true));
-                        node_diodes[base].push((emitter, false));
-                    }
-                }
-                _ => {} // MOSFETs don't have junction diodes for DC init
             }
         }
 
@@ -918,8 +1322,82 @@ mod linear_solve_tests {
 
         assert!(matches!(
             solver.solve_dc_operating_point(&mut state),
-            Err(HbError::InvalidCircuit(_))
+            Err(HbError::InvalidConfig(_))
         ));
+    }
+
+    #[test]
+    fn exact_mna_dc_seed_solves_voltage_source_and_inductor_branch_unknowns() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e3).with_harmonics(1), 2);
+        solver.add_resistor(1, 2, 1.0e3);
+        // A negligible nonlinear branch forces the production DC Newton path
+        // without materially changing the simple one-milliamp oracle.
+        solver.add_diode(1, 2, 1.0e-30, 1.0);
+        let source_index = solver
+            .try_add_named_voltage_source_branch_harmonics(1, 0, 1.0, &[], "V1")
+            .expect("exact source descriptor");
+        solver
+            .try_add_periodic_voltage_source_branch(1, 0, source_index, 1, "V1")
+            .expect("canonical source branch");
+        solver
+            .try_add_periodic_inductor_branch(1, 2, 1.0e-3, 2, "L1")
+            .expect("canonical inductor branch");
+        let mut state = HbSolverState::new(2, solver.num_harmonics());
+
+        let voltages = solver
+            .solve_dc_operating_point(&mut state)
+            .expect("branch-aware nonlinear DC seed converges");
+
+        assert!((voltages[0] - 1.0).abs() <= 1.0e-10);
+        assert!((voltages[1] - 1.0).abs() <= 1.0e-10);
+        assert_eq!(state.mna_branch_currents.len(), 2);
+        let source_current = state.mna_branch_currents[0][0];
+        let inductor_current = state.mna_branch_currents[1][0];
+        assert_eq!(source_current.im, 0.0);
+        assert_eq!(inductor_current.im, 0.0);
+        assert!((source_current.re + inductor_current.re).abs() <= 1.0e-10);
+        assert!((inductor_current.re - 1.0e-3).abs() <= 1.0e-9);
+        assert!(state.dc_rows_converged_with_branch_tolerances(
+            solver.config.tolerance,
+            solver.config.abstol,
+            crate::constants::VNTOL,
+        ));
+    }
+
+    #[test]
+    fn dc_source_homotopy_scales_exact_voltage_kvl_without_scaling_branch_current() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e3).with_harmonics(1), 1);
+        let source_index = solver
+            .try_add_named_voltage_source_branch_harmonics(1, 0, 2.0, &[], "V1")
+            .expect("exact source descriptor");
+        solver
+            .try_add_periodic_voltage_source_branch(1, 0, source_index, 1, "V1")
+            .expect("canonical source branch");
+        let mut state = HbSolverState::new(1, solver.num_harmonics());
+        state
+            .try_prepare_mna_branches(1, solver.num_harmonics())
+            .expect("branch workspaces");
+
+        solver
+            .compute_dc_residual(&mut state, 0.0, 0.25)
+            .expect("quarter-strength exact DC residual");
+
+        assert_eq!(state.mna_branch_residual[0][0], Complex64::new(0.5, 0.0));
+        assert_eq!(state.mna_branch_currents[0][0], Complex64::ZERO);
+        assert_eq!(state.residual[0][0], Complex64::ZERO);
+    }
+
+    #[test]
+    fn dc_seed_rejects_uncanonicalized_public_voltage_source_branches() {
+        let mut solver = HbSolver::new(HbConfig::new(1.0e3).with_harmonics(1), 1);
+        solver.add_voltage_source_branch(1, 0, 1.0);
+        solver.add_diode(0, 1, 1.0e-30, 1.0);
+        let mut state = HbSolverState::new(1, solver.num_harmonics());
+
+        let error = solver
+            .solve_dc_operating_point(&mut state)
+            .expect_err("a partial legacy branch registry must fail closed");
+        assert!(error.to_string().contains("canonical exact-MNA"), "{error}");
     }
 
     #[test]
