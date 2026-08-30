@@ -10,6 +10,18 @@
 //! the answer depend on iteration count. Each type therefore computes from the
 //! last accepted state and exposes a separate commit.
 
+/// A stateful operator's speculative primal result and its exact local
+/// coefficient with respect to the current input argument.
+///
+/// The coefficient follows the same branch decisions as `output`. It does not
+/// include derivatives through accepted history, time, delay, or rate
+/// arguments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct StatefulEvaluation {
+    pub output: f64,
+    pub input_coefficient: f64,
+}
+
 /// Circular buffer for absdelay transport delay implementation.
 ///
 /// Stores a history of (time, value) pairs to enable looking up
@@ -143,11 +155,35 @@ impl DelayBuffer {
 
     /// Evaluate a delayed value without mutating accepted history.
     pub fn eval(&mut self, time: f64, value: f64, delay: f64) -> f64 {
+        self.eval_with_input_coefficient(time, value, delay).output
+    }
+
+    /// Evaluate a transport-delay candidate and expose its exact local input
+    /// coefficient without changing accepted history.
+    pub(crate) fn eval_with_input_coefficient(
+        &mut self,
+        time: f64,
+        value: f64,
+        delay: f64,
+    ) -> StatefulEvaluation {
+        let evaluation = self.candidate_evaluation(time, value, delay);
         self.candidate = Some((time, value));
+        evaluation
+    }
+
+    fn candidate_evaluation(&self, time: f64, value: f64, delay: f64) -> StatefulEvaluation {
         if delay <= 0.0 {
-            value
+            StatefulEvaluation {
+                output: value,
+                input_coefficient: 1.0,
+            }
         } else {
-            self.get_delayed_with_candidate(time, delay)
+            let (output, input_coefficient) =
+                self.lookup_delayed_affine(time, delay, Some((time, value, 1.0)));
+            StatefulEvaluation {
+                output,
+                input_coefficient,
+            }
         }
     }
 
@@ -206,21 +242,31 @@ impl DelayBuffer {
         self.lookup_delayed(current_time, delay, None)
     }
 
-    fn get_delayed_with_candidate(&self, current_time: f64, delay: f64) -> f64 {
-        self.lookup_delayed(current_time, delay, self.candidate)
+    fn lookup_delayed(&self, current_time: f64, delay: f64, candidate: Option<(f64, f64)>) -> f64 {
+        self.lookup_delayed_affine(
+            current_time,
+            delay,
+            candidate.map(|(time, value)| (time, value, 0.0)),
+        )
+        .0
     }
 
-    fn lookup_delayed(&self, current_time: f64, delay: f64, candidate: Option<(f64, f64)>) -> f64 {
+    fn lookup_delayed_affine(
+        &self,
+        current_time: f64,
+        delay: f64,
+        candidate: Option<(f64, f64, f64)>,
+    ) -> (f64, f64) {
         if self.count == 0 && candidate.is_none() {
-            return 0.0;
+            return (0.0, 0.0);
         }
 
         let target_time = current_time - delay;
 
         // Find the two samples bracketing target_time.
         // Samples are stored in circular order, so we need to search.
-        let mut before: Option<(f64, f64)> = None;
-        let mut after: Option<(f64, f64)> = None;
+        let mut before: Option<(f64, f64, f64)> = None;
+        let mut after: Option<(f64, f64, f64)> = None;
 
         for i in 0..self.count {
             let idx = if self.count == self.capacity {
@@ -231,31 +277,35 @@ impl DelayBuffer {
             let (t, v) = self.samples[idx];
 
             if t <= target_time {
-                before = Some((t, v));
+                before = Some((t, v, 0.0));
             }
             if t >= target_time && after.is_none() {
-                after = Some((t, v));
+                after = Some((t, v, 0.0));
             }
         }
 
-        if let Some((t, v)) = candidate {
+        if let Some((t, v, coefficient)) = candidate {
             if t <= target_time {
-                before = Some((t, v));
+                before = Some((t, v, coefficient));
             }
-            if t >= target_time && after.map(|(after_time, _)| t < after_time).unwrap_or(true) {
-                after = Some((t, v));
+            if t >= target_time
+                && after
+                    .map(|(after_time, _, _)| t < after_time)
+                    .unwrap_or(true)
+            {
+                after = Some((t, v, coefficient));
             }
         }
 
         match (before, after) {
-            (Some((t0, v0)), Some((t1, v1))) if t0 != t1 => {
+            (Some((t0, v0, c0)), Some((t1, v1, c1))) if t0 != t1 => {
                 // Linear interpolation.
                 let alpha = (target_time - t0) / (t1 - t0);
-                v0 + alpha * (v1 - v0)
+                (v0 + alpha * (v1 - v0), c0 + alpha * (c1 - c0))
             }
-            (Some((_, v)), _) => v,
-            (_, Some((_, v))) => v,
-            _ => 0.0,
+            (Some((_, value, coefficient)), _) => (value, coefficient),
+            (_, Some((_, value, coefficient))) => (value, coefficient),
+            _ => (0.0, 0.0),
         }
     }
 
@@ -376,6 +426,108 @@ mod tests {
     }
 
     #[test]
+    fn delay_candidate_reports_exact_input_interpolation_coefficient() {
+        let mut empty = DelayBuffer::new(2);
+        let evaluation = empty.eval_with_input_coefficient(2.0, 7.0, 0.5);
+        assert_eq!(evaluation.output, 7.0);
+        assert_eq!(evaluation.input_coefficient, 1.0);
+
+        let mut interpolating = DelayBuffer::new(2);
+        interpolating.record(0.0, 0.0);
+        let accepted_before = interpolating.checkpoint();
+        let evaluation = interpolating.eval_with_input_coefficient(2.0, 2.0, 0.5);
+        assert_eq!(evaluation.output, 1.5);
+        assert_eq!(evaluation.input_coefficient, 0.75);
+        assert_eq!(interpolating.checkpoint(), accepted_before);
+
+        let epsilon = 1.0e-6;
+        let upper = interpolating.eval(2.0, 2.0 + epsilon, 0.5);
+        let lower = interpolating.eval(2.0, 2.0 - epsilon, 0.5);
+        let finite_difference = (upper - lower) / (2.0 * epsilon);
+        assert!((finite_difference - evaluation.input_coefficient).abs() <= 1.0e-9);
+    }
+
+    #[test]
+    fn delay_candidate_coefficient_covers_history_only_and_zero_delay() {
+        let mut buffer = DelayBuffer::new(2);
+        buffer.record(0.0, 0.0);
+        buffer.record(1.0, 1.0);
+
+        let history_only = buffer.eval_with_input_coefficient(2.0, 3.0, 1.5);
+        assert_eq!(history_only.output, 0.5);
+        assert_eq!(history_only.input_coefficient, 0.0);
+
+        let direct = buffer.eval_with_input_coefficient(2.0, 3.0, 0.0);
+        assert_eq!(direct.output, 3.0);
+        assert_eq!(direct.input_coefficient, 1.0);
+    }
+
+    #[test]
+    fn transition_candidate_reports_branch_exact_input_coefficient() {
+        let mut transition = TransitionFilter::default();
+        let accepted_before = transition.checkpoint();
+
+        let before_start = transition.eval_with_input_coefficient(1.0, 1.0, 1.0, 2.0, 2.0);
+        assert_eq!(before_start.output, 0.0);
+        assert_eq!(before_start.input_coefficient, 0.0);
+        assert_eq!(transition.checkpoint(), accepted_before);
+
+        let ramp = transition.eval_with_input_coefficient(1.0, 1.0, -1.0, 2.0, 2.0);
+        assert_eq!(ramp.output, 0.5);
+        assert_eq!(ramp.input_coefficient, 0.5);
+
+        let epsilon = 1.0e-6;
+        let upper = transition.eval(1.0 + epsilon, 1.0, -1.0, 2.0, 2.0);
+        let lower = transition.eval(1.0 - epsilon, 1.0, -1.0, 2.0, 2.0);
+        let finite_difference = (upper - lower) / (2.0 * epsilon);
+        assert!((finite_difference - ramp.input_coefficient).abs() <= 1.0e-9);
+
+        let instantaneous = transition.eval_with_input_coefficient(1.0, 1.0, 0.0, 0.0, 0.0);
+        assert_eq!(instantaneous.output, 1.0);
+        assert_eq!(instantaneous.input_coefficient, 1.0);
+    }
+
+    #[test]
+    fn unchanged_transition_target_has_no_current_input_coefficient() {
+        let mut transition = TransitionFilter::default();
+        transition.eval(1.0, 1.0, 0.0, 0.0, 0.0);
+        transition.commit();
+
+        let evaluation = transition.eval_with_input_coefficient(1.0, 2.0, 0.0, 1.0, 1.0);
+        assert_eq!(evaluation.output, 1.0);
+        assert_eq!(evaluation.input_coefficient, 0.0);
+    }
+
+    #[test]
+    fn slew_candidate_reports_branch_exact_input_coefficient() {
+        let mut slew = SlewFilter::default();
+        let accepted_before = slew.checkpoint();
+
+        let saturated = slew.eval_with_input_coefficient(1.0, 1.0, 0.5, 0.5);
+        assert_eq!(saturated.output, 0.5);
+        assert_eq!(saturated.input_coefficient, 0.0);
+        assert_eq!(slew.checkpoint(), accepted_before);
+
+        let unsaturated = slew.eval_with_input_coefficient(0.25, 1.0, 0.5, 0.5);
+        assert_eq!(unsaturated.output, 0.25);
+        assert_eq!(unsaturated.input_coefficient, 1.0);
+
+        let boundary = slew.eval_with_input_coefficient(0.5, 1.0, 0.5, 0.5);
+        assert_eq!(boundary.output, 0.5);
+        assert_eq!(boundary.input_coefficient, 1.0);
+
+        let no_time_advance = slew.eval_with_input_coefficient(1.0, 0.0, 0.5, 0.5);
+        assert_eq!(no_time_advance.output, 0.0);
+        assert_eq!(no_time_advance.input_coefficient, 0.0);
+
+        let epsilon = 1.0e-6;
+        let upper = slew.eval(0.25 + epsilon, 1.0, 0.5, 0.5);
+        let lower = slew.eval(0.25 - epsilon, 1.0, 0.5, 0.5);
+        let finite_difference = (upper - lower) / (2.0 * epsilon);
+        assert!((finite_difference - unsaturated.input_coefficient).abs() <= 1.0e-9);
+    }
+
+    #[test]
     fn stateful_filter_candidates_do_not_mutate_committed_state() {
         let mut transition = TransitionFilter::default();
         assert_eq!(transition.eval(1.0, 1.0, 0.0, 2.0, 2.0), 0.0);
@@ -475,9 +627,40 @@ impl TransitionFilter {
         rise_time: f64,
         fall_time: f64,
     ) -> f64 {
+        self.eval_with_input_coefficient(input, time, delay, rise_time, fall_time)
+            .output
+    }
+
+    /// Evaluate a transition candidate and expose its exact local input
+    /// coefficient without changing accepted history.
+    pub(crate) fn eval_with_input_coefficient(
+        &mut self,
+        input: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+    ) -> StatefulEvaluation {
+        let (state, evaluation) =
+            self.candidate_evaluation(input, time, delay, rise_time, fall_time);
+        self.candidate = state;
+        self.candidate_time = time;
+        self.candidate_valid = true;
+        evaluation
+    }
+
+    fn candidate_evaluation(
+        &self,
+        input: f64,
+        time: f64,
+        delay: f64,
+        rise_time: f64,
+        fall_time: f64,
+    ) -> (TransitionState, StatefulEvaluation) {
         let mut state = self.committed;
         // Check if input target changed.
-        if (input - state.target).abs() > 1e-15 {
+        let target_changed = (input - state.target).abs() > 1e-15;
+        if target_changed {
             // New transition started.
             let trans_time = if input > state.output {
                 rise_time
@@ -491,23 +674,26 @@ impl TransitionFilter {
         }
 
         // Compute output based on current transition state.
-        let output = if time < state.start_time {
+        let (output, input_coefficient) = if time < state.start_time {
             // Before transition starts.
-            state.output
+            (state.output, 0.0)
         } else if time >= state.end_time || (state.end_time - state.start_time).abs() < 1e-15 {
             // Transition complete or instantaneous.
             state.output = state.target;
-            state.target
+            (state.target, if target_changed { 1.0 } else { 0.0 })
         } else {
             // In transition - linear interpolation.
             let t = (time - state.start_time) / (state.end_time - state.start_time);
             state.output = state.start_value + t * (state.target - state.start_value);
-            state.output
+            (state.output, if target_changed { t } else { 0.0 })
         };
-        self.candidate = state;
-        self.candidate_time = time;
-        self.candidate_valid = true;
-        output
+        (
+            state,
+            StatefulEvaluation {
+                output,
+                input_coefficient,
+            },
+        )
     }
 
     pub fn commit(&mut self) {
@@ -623,31 +809,66 @@ impl SlewFilter {
 
     /// Update the filter with new input, limiting slew rate.
     pub fn eval(&mut self, input: f64, time: f64, max_pos_slew: f64, max_neg_slew: f64) -> f64 {
+        self.eval_with_input_coefficient(input, time, max_pos_slew, max_neg_slew)
+            .output
+    }
+
+    /// Evaluate a slew candidate and expose its exact local input coefficient
+    /// without changing accepted history.
+    pub(crate) fn eval_with_input_coefficient(
+        &mut self,
+        input: f64,
+        time: f64,
+        max_pos_slew: f64,
+        max_neg_slew: f64,
+    ) -> StatefulEvaluation {
+        let (state, evaluation) =
+            self.candidate_evaluation(input, time, max_pos_slew, max_neg_slew);
+        self.candidate = state;
+        self.candidate_valid = true;
+        evaluation
+    }
+
+    fn candidate_evaluation(
+        &self,
+        input: f64,
+        time: f64,
+        max_pos_slew: f64,
+        max_neg_slew: f64,
+    ) -> (SlewState, StatefulEvaluation) {
         let mut state = self.committed;
         let dt = time - state.prev_time;
         if dt <= 0.0 {
-            self.candidate = state;
-            self.candidate_valid = true;
-            return state.output;
+            return (
+                state,
+                StatefulEvaluation {
+                    output: state.output,
+                    input_coefficient: 0.0,
+                },
+            );
         }
 
         let delta = input - state.output;
         let rate = delta / dt;
 
         // Apply slew rate limiting.
-        let limited_rate = if rate > max_pos_slew {
-            max_pos_slew
+        let (limited_rate, input_coefficient) = if rate > max_pos_slew {
+            (max_pos_slew, 0.0)
         } else if rate < -max_neg_slew {
-            -max_neg_slew
+            (-max_neg_slew, 0.0)
         } else {
-            rate
+            (rate, 1.0)
         };
 
         state.output += limited_rate * dt;
         state.prev_time = time;
-        self.candidate = state;
-        self.candidate_valid = true;
-        state.output
+        (
+            state,
+            StatefulEvaluation {
+                output: state.output,
+                input_coefficient,
+            },
+        )
     }
 
     pub fn commit(&mut self) {

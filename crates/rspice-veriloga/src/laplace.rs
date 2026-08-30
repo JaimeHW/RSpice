@@ -456,6 +456,46 @@ impl StateSpaceFilter {
         Ok(output)
     }
 
+    /// Return the exact coefficient of the current input in a Backward Euler
+    /// transient evaluation at `timestep`.
+    ///
+    /// For the realization evaluated by [`Self::step`], the coefficient is
+    ///
+    /// ```text
+    /// D + h*C*(I - h*A)^(-1)*B
+    /// ```
+    ///
+    /// This is intentionally distinct from the DC gain. It is a read-only
+    /// calculation: neither accepted state nor an in-flight candidate is
+    /// changed, so callers can use it during Newton linearization without
+    /// affecting transactionality.
+    pub fn backward_euler_input_gain(&self, timestep: f64) -> Result<f64, LaplaceError> {
+        self.validate_structure()?;
+        if self.order == 0 {
+            return checked_product(self.d, 1.0, "static transient input gain");
+        }
+        if !timestep.is_finite() || timestep <= 0.0 {
+            return Err(LaplaceError::InvalidEvaluation(format!(
+                "transient timestep must be finite and positive, got {timestep}"
+            )));
+        }
+
+        let matrix = self.backward_euler_matrix(timestep)?;
+        let rhs = self
+            .b
+            .iter()
+            .map(|coefficient| timestep * coefficient)
+            .collect::<Vec<_>>();
+        if rhs.iter().any(|value| !value.is_finite()) {
+            return Err(LaplaceError::InvalidEvaluation(
+                "transient input-gain right-hand side overflowed".into(),
+            ));
+        }
+
+        let state_gain = solve_real_system(matrix, rhs, "transient")?;
+        checked_state_output(&self.c, &state_gain, self.d, 1.0)
+    }
+
     /// Evaluate and publish a DC-equilibrium candidate for transient startup.
     ///
     /// The equilibrium is solved into temporary storage and becomes eligible
@@ -541,19 +581,7 @@ impl StateSpaceFilter {
     }
 
     fn step_checked(&mut self, input: f64, h: f64) -> Result<f64, LaplaceError> {
-        let n = self.order;
-        let mut mat = vec![vec![0.0; n]; n];
-        for (i, row) in mat.iter_mut().enumerate().take(n) {
-            for (j, cell) in row.iter_mut().enumerate().take(n) {
-                *cell = if i == j { 1.0 } else { 0.0 };
-                *cell -= h * self.a[i][j];
-                if !cell.is_finite() {
-                    return Err(LaplaceError::InvalidEvaluation(
-                        "transient state matrix overflowed".into(),
-                    ));
-                }
-            }
-        }
+        let matrix = self.backward_euler_matrix(h)?;
 
         let rhs = self
             .state_prev
@@ -567,10 +595,26 @@ impl StateSpaceFilter {
             ));
         }
 
-        let candidate = solve_real_system(mat, rhs, "transient")?;
+        let candidate = solve_real_system(matrix, rhs, "transient")?;
         let output = checked_state_output(&self.c, &candidate, self.d, input)?;
         self.state.copy_from_slice(&candidate);
         Ok(output)
+    }
+
+    fn backward_euler_matrix(&self, h: f64) -> Result<Vec<Vec<f64>>, LaplaceError> {
+        let mut matrix = vec![vec![0.0; self.order]; self.order];
+        for (i, row) in matrix.iter_mut().enumerate() {
+            for (j, cell) in row.iter_mut().enumerate() {
+                *cell = if i == j { 1.0 } else { 0.0 };
+                *cell -= h * self.a[i][j];
+                if !cell.is_finite() {
+                    return Err(LaplaceError::InvalidEvaluation(
+                        "transient state matrix overflowed".into(),
+                    ));
+                }
+            }
+        }
+        Ok(matrix)
     }
 
     /// Get DC output (s=0) for a given input
@@ -1213,6 +1257,71 @@ endmodule
         let solution = solve_complex_system(&[vec![-1.0e-300]], &[1.0e-300], 0.0)
             .expect("a tiny, well-scaled system is nonsingular");
         assert!((solution[0].re - 1.0).abs() <= 8.0 * f64::EPSILON);
+    }
+
+    #[test]
+    fn transient_input_gain_matches_backward_euler_finite_difference() {
+        let mut filter = StateSpaceFilter::integrator(1.0).expect("first-order filter");
+        filter
+            .set_initial_state(&[0.25])
+            .expect("matching initial state");
+
+        let timestep = 0.5;
+        let gain = filter
+            .backward_euler_input_gain(timestep)
+            .expect("finite Backward Euler input gain");
+        assert!((gain - 1.0 / 3.0).abs() <= 8.0 * f64::EPSILON);
+        assert_ne!(gain, filter.dc_output(1.0).expect("finite DC gain"));
+
+        let epsilon = 1.0e-6;
+        let upper = filter
+            .step(0.75 + epsilon, timestep)
+            .expect("upper candidate");
+        let lower = filter
+            .step(0.75 - epsilon, timestep)
+            .expect("lower candidate");
+        let finite_difference = (upper - lower) / (2.0 * epsilon);
+        assert!((finite_difference - gain).abs() <= 1.0e-9);
+    }
+
+    #[test]
+    fn transient_input_gain_is_read_only_and_includes_feedthrough() {
+        let mut filter = StateSpaceFilter::differentiator(1.0).expect("first-order filter");
+        filter
+            .set_initial_state(&[0.25])
+            .expect("matching initial state");
+        filter.step(0.75, 0.5).expect("in-flight candidate");
+
+        let state_before = filter.state.clone();
+        let accepted_before = filter.state_prev.clone();
+        let candidate_valid_before = filter.candidate_valid;
+        let gain = filter
+            .backward_euler_input_gain(0.5)
+            .expect("finite Backward Euler input gain");
+
+        assert!((gain - 2.0 / 3.0).abs() <= 8.0 * f64::EPSILON);
+        assert_eq!(filter.state, state_before);
+        assert_eq!(filter.state_prev, accepted_before);
+        assert_eq!(filter.candidate_valid, candidate_valid_before);
+    }
+
+    #[test]
+    fn transient_input_gain_uses_step_timestep_validation() {
+        let dynamic = StateSpaceFilter::integrator(1.0).expect("first-order filter");
+        for timestep in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert!(matches!(
+                dynamic.backward_euler_input_gain(timestep),
+                Err(LaplaceError::InvalidEvaluation(_))
+            ));
+        }
+
+        let static_filter = StateSpaceFilter::unity_gain();
+        assert_eq!(
+            static_filter
+                .backward_euler_input_gain(f64::NAN)
+                .expect("order-zero step ignores timestep"),
+            1.0
+        );
     }
 
     #[test]
