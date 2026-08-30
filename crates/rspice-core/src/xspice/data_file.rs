@@ -4,7 +4,6 @@ use crate::Value;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::UNIX_EPOCH;
 
@@ -24,11 +23,33 @@ struct VirtualDataFile {
 
 #[derive(Debug, Default)]
 struct VirtualDataFileRegistry {
+    epoch: u64,
     retained_bytes: usize,
     files: HashMap<String, VirtualDataFile>,
 }
 
-static VIRTUAL_DATA_FILE_EPOCH: AtomicU64 = AtomicU64::new(0);
+/// Borrowed, coherent view of the virtual data-file registry.
+///
+/// The registry lock remains held for the snapshot's lifetime so a cache can
+/// validate a stamp and publish its parsed entry as one atomic lifecycle step.
+pub(crate) struct VirtualDataFileSnapshot<'a> {
+    epoch: u64,
+    files: &'a HashMap<String, VirtualDataFile>,
+}
+
+impl VirtualDataFileSnapshot<'_> {
+    pub(crate) fn sync_epoch(&self, epoch: &mut u64) -> bool {
+        if *epoch == self.epoch {
+            return false;
+        }
+        *epoch = self.epoch;
+        true
+    }
+
+    pub(crate) fn contains(&self, path: &str, stamp: DataFileStamp) -> bool {
+        self.files.get(path).is_some_and(|file| file.stamp == stamp)
+    }
+}
 
 fn virtual_files() -> &'static Mutex<VirtualDataFileRegistry> {
     static FILES: OnceLock<Mutex<VirtualDataFileRegistry>> = OnceLock::new();
@@ -41,21 +62,31 @@ fn lock_virtual_files() -> MutexGuard<'static, VirtualDataFileRegistry> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn bump_virtual_data_file_epoch() {
-    VIRTUAL_DATA_FILE_EPOCH.fetch_add(1, Ordering::AcqRel);
+fn bump_virtual_data_file_epoch(files: &mut VirtualDataFileRegistry) -> Result<u64, String> {
+    let epoch = files
+        .epoch
+        .checked_add(1)
+        .ok_or_else(|| "virtual data-file generation exhausted".to_string())?;
+    files.epoch = epoch;
+    Ok(epoch)
 }
 
 pub(crate) fn virtual_data_file_epoch() -> u64 {
-    VIRTUAL_DATA_FILE_EPOCH.load(Ordering::Acquire)
+    lock_virtual_files().epoch
 }
 
-pub(crate) fn sync_virtual_data_file_epoch(epoch: &mut u64) -> bool {
-    let current = virtual_data_file_epoch();
-    if *epoch == current {
-        return false;
-    }
-    *epoch = current;
-    true
+/// Runs `operation` while the virtual data-file registry is locked.
+///
+/// Callers that also own a model-cache lock must acquire that lock first. The
+/// operation must not call a registry mutation API recursively.
+pub(crate) fn with_virtual_data_file_snapshot<R>(
+    operation: impl FnOnce(&VirtualDataFileSnapshot<'_>) -> R,
+) -> R {
+    let files = lock_virtual_files();
+    operation(&VirtualDataFileSnapshot {
+        epoch: files.epoch,
+        files: &files.files,
+    })
 }
 
 fn content_hash<T: Hash + ?Sized>(contents: &T) -> u64 {
@@ -310,7 +341,7 @@ pub fn register_data_file_with_limits(
     )
     .map_err(|error| error.to_string())?;
     let stamp = virtual_stamp(&contents);
-    let file = VirtualDataFile {
+    let mut file = VirtualDataFile {
         stamp,
         contents: Arc::<str>::from(contents),
     };
@@ -331,46 +362,39 @@ pub fn register_data_file_with_limits(
         )
         .map_err(|error| error.to_string())?;
         if let Some(existing) = files.files.get(&path)
-            && existing.stamp == file.stamp
             && existing.contents == file.contents
         {
             return Ok(());
         }
+        let epoch = bump_virtual_data_file_epoch(&mut files)?;
+        file.stamp.modified_nanos = u128::from(epoch);
         files.files.insert(path, file);
         files.retained_bytes = retained_bytes;
     }
-    bump_virtual_data_file_epoch();
     Ok(())
 }
 
 /// Remove a virtual XSPICE data file.
 pub fn unregister_data_file(path: &str) -> Result<(), String> {
-    let removed = {
-        let mut files = lock_virtual_files();
-        let Some(removed) = files.files.remove(path) else {
-            return Ok(());
-        };
-        files.retained_bytes = files.retained_bytes.saturating_sub(removed.contents.len());
-        true
+    let mut files = lock_virtual_files();
+    let Some(removed_bytes) = files.files.get(path).map(|file| file.contents.len()) else {
+        return Ok(());
     };
-    if removed {
-        bump_virtual_data_file_epoch();
-    }
+    bump_virtual_data_file_epoch(&mut files)?;
+    files.files.remove(path);
+    files.retained_bytes = files.retained_bytes.saturating_sub(removed_bytes);
     Ok(())
 }
 
 /// Clear all virtual XSPICE data files.
 pub fn clear_registered_data_files() -> Result<(), String> {
-    let cleared = {
-        let mut files = lock_virtual_files();
-        let cleared = !files.files.is_empty();
-        files.files.clear();
-        files.retained_bytes = 0;
-        cleared
-    };
-    if cleared {
-        bump_virtual_data_file_epoch();
+    let mut files = lock_virtual_files();
+    if files.files.is_empty() {
+        return Ok(());
     }
+    bump_virtual_data_file_epoch(&mut files)?;
+    files.files.clear();
+    files.retained_bytes = 0;
     Ok(())
 }
 

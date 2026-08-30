@@ -303,6 +303,17 @@ struct TableCacheKey {
     virtual_file: bool,
 }
 
+impl TableCacheKey {
+    fn stamp(&self) -> data_file::DataFileStamp {
+        data_file::DataFileStamp {
+            len: self.len,
+            modified_nanos: self.modified_nanos,
+            content_hash: self.content_hash,
+            virtual_file: self.virtual_file,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Table2DResource {
     file: String,
@@ -378,10 +389,23 @@ impl<T> Default for TableDataCache<T> {
 }
 
 impl<T> TableDataCache<T> {
-    fn sync_virtual_epoch(&mut self) {
-        if data_file::sync_virtual_data_file_epoch(&mut self.virtual_epoch) {
-            self.entries.retain(|key, _| !key.virtual_file);
-        }
+    fn with_entries<R>(
+        &mut self,
+        operation: impl FnOnce(
+            &mut crate::resource::BoundedCache<TableCacheKey, Arc<T>>,
+            &data_file::VirtualDataFileSnapshot<'_>,
+        ) -> R,
+    ) -> R {
+        let virtual_epoch = &mut self.virtual_epoch;
+        let entries = &mut self.entries;
+        data_file::with_virtual_data_file_snapshot(|snapshot| {
+            if snapshot.sync_epoch(virtual_epoch) {
+                entries.retain(|key, _| {
+                    !key.virtual_file || snapshot.contains(&key.file, key.stamp())
+                });
+            }
+            operation(entries, snapshot)
+        })
     }
 
     #[cfg(test)]
@@ -941,11 +965,13 @@ fn load_table2d_limited(
     let key = table_cache_key(file, stamp);
     {
         let mut guard = lock_table2d_cache();
-        guard.sync_virtual_epoch();
-        guard
-            .entries
-            .enforce_limit(resource_limits.max_shared_cache_bytes);
-        if let Some(table) = guard.entries.get_cloned(&key) {
+        let cached = guard.with_entries(|entries, snapshot| {
+            entries.enforce_limit(resource_limits.max_shared_cache_bytes);
+            (!key.virtual_file || snapshot.contains(&key.file, key.stamp()))
+                .then(|| entries.get_cloned(&key))
+                .flatten()
+        });
+        if let Some(table) = cached {
             let retained_values = table
                 .x
                 .len()
@@ -967,14 +993,19 @@ fn load_table2d_limited(
         resource_limits.max_external_data_values,
     )?);
     let mut guard = lock_table2d_cache();
-    guard.sync_virtual_epoch();
     let retained_bytes = table_cache_entry_bytes::<Table2DData>(&key, table.retained_bytes());
-    let table = guard.entries.insert_or_get(
-        key,
-        table,
-        retained_bytes,
-        resource_limits.max_shared_cache_bytes,
-    );
+    let table = guard.with_entries(|entries, snapshot| {
+        if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+            table
+        } else {
+            entries.insert_or_get(
+                key,
+                table,
+                retained_bytes,
+                resource_limits.max_shared_cache_bytes,
+            )
+        }
+    });
     Ok((table, virtual_stamp))
 }
 
@@ -994,11 +1025,13 @@ fn load_table3d_limited(
     let key = table_cache_key(file, stamp);
     {
         let mut guard = lock_table3d_cache();
-        guard.sync_virtual_epoch();
-        guard
-            .entries
-            .enforce_limit(resource_limits.max_shared_cache_bytes);
-        if let Some(table) = guard.entries.get_cloned(&key) {
+        let cached = guard.with_entries(|entries, snapshot| {
+            entries.enforce_limit(resource_limits.max_shared_cache_bytes);
+            (!key.virtual_file || snapshot.contains(&key.file, key.stamp()))
+                .then(|| entries.get_cloned(&key))
+                .flatten()
+        });
+        if let Some(table) = cached {
             let retained_values = table
                 .x
                 .len()
@@ -1021,14 +1054,19 @@ fn load_table3d_limited(
         resource_limits.max_external_data_values,
     )?);
     let mut guard = lock_table3d_cache();
-    guard.sync_virtual_epoch();
     let retained_bytes = table_cache_entry_bytes::<Table3DData>(&key, table.retained_bytes());
-    let table = guard.entries.insert_or_get(
-        key,
-        table,
-        retained_bytes,
-        resource_limits.max_shared_cache_bytes,
-    );
+    let table = guard.with_entries(|entries, snapshot| {
+        if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+            table
+        } else {
+            entries.insert_or_get(
+                key,
+                table,
+                retained_bytes,
+                resource_limits.max_shared_cache_bytes,
+            )
+        }
+    });
     Ok((table, virtual_stamp))
 }
 
@@ -2638,6 +2676,46 @@ mod tests {
         assert!(cache.entries.keys().all(|key| key.file != file));
 
         let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn table_cache_retains_current_entry_across_unrelated_virtual_file_changes() {
+        let _guard = data_file_test_guard();
+        let retained_file = "virtual://table2d/retained-across-unrelated-change";
+        let unrelated_file = "virtual://table2d/unrelated-change";
+        let _ = data_file::unregister_data_file(retained_file);
+        let _ = data_file::unregister_data_file(unrelated_file);
+        lock_table2d_cache().clear();
+
+        let contents = "\
+2
+2
+0 1
+0 1
+1 1
+1 1
+";
+        data_file::register_data_file(retained_file, contents)
+            .expect("register retained virtual table2d data");
+        load_table2d(retained_file).expect("cache retained virtual table2d data");
+
+        data_file::register_data_file(unrelated_file, contents)
+            .expect("register unrelated virtual table2d data");
+        load_table2d(unrelated_file).expect("cache unrelated virtual table2d data");
+
+        let cache = lock_table2d_cache();
+        assert_eq!(
+            cache
+                .entries
+                .keys()
+                .filter(|key| key.file == retained_file)
+                .count(),
+            1
+        );
+        drop(cache);
+
+        let _ = data_file::unregister_data_file(retained_file);
+        let _ = data_file::unregister_data_file(unrelated_file);
     }
 
     #[test]

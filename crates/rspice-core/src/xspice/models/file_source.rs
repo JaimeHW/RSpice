@@ -96,6 +96,17 @@ struct FileSourceCacheKey {
     virtual_file: bool,
 }
 
+impl FileSourceCacheKey {
+    fn stamp(&self) -> data_file::DataFileStamp {
+        data_file::DataFileStamp {
+            len: self.len,
+            modified_nanos: self.modified_nanos,
+            content_hash: self.content_hash,
+            virtual_file: self.virtual_file,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FileSourceRowsResource {
     file: String,
@@ -129,10 +140,23 @@ struct FileSourceCache {
 }
 
 impl FileSourceCache {
-    fn sync_virtual_epoch(&mut self) {
-        if data_file::sync_virtual_data_file_epoch(&mut self.virtual_epoch) {
-            self.entries.retain(|key, _| !key.virtual_file);
-        }
+    fn with_entries<R>(
+        &mut self,
+        operation: impl FnOnce(
+            &mut crate::resource::BoundedCache<FileSourceCacheKey, Arc<Vec<RawFileSourceField>>>,
+            &data_file::VirtualDataFileSnapshot<'_>,
+        ) -> R,
+    ) -> R {
+        let virtual_epoch = &mut self.virtual_epoch;
+        let entries = &mut self.entries;
+        data_file::with_virtual_data_file_snapshot(|snapshot| {
+            if snapshot.sync_epoch(virtual_epoch) {
+                entries.retain(|key, _| {
+                    !key.virtual_file || snapshot.contains(&key.file, key.stamp())
+                });
+            }
+            operation(entries, snapshot)
+        })
     }
 
     #[cfg(test)]
@@ -438,11 +462,15 @@ fn load_filesource_limited(
     let key = cache_key(file, width, stamp);
     {
         let mut guard = lock_filesource_cache();
-        guard.sync_virtual_epoch();
-        guard
-            .entries
-            .enforce_limit(resource_limits.max_shared_cache_bytes);
-        if let Some(fields) = guard.entries.get_cloned(&key) {
+        let cached = guard.with_entries(|entries, snapshot| {
+            entries.enforce_limit(resource_limits.max_shared_cache_bytes);
+            if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+                None
+            } else {
+                entries.get_cloned(&key)
+            }
+        });
+        if let Some(fields) = cached {
             crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
                 fields.len(),
@@ -460,14 +488,19 @@ fn load_filesource_limited(
         resource_limits.max_external_data_values,
     )?);
     let mut guard = lock_filesource_cache();
-    guard.sync_virtual_epoch();
     let retained_bytes = filesource_cache_entry_bytes(&key, &fields);
-    let fields = guard.entries.insert_or_get(
-        key,
-        fields,
-        retained_bytes,
-        resource_limits.max_shared_cache_bytes,
-    );
+    let fields = guard.with_entries(|entries, snapshot| {
+        if key.virtual_file && !snapshot.contains(&key.file, key.stamp()) {
+            fields
+        } else {
+            entries.insert_or_get(
+                key,
+                fields,
+                retained_bytes,
+                resource_limits.max_shared_cache_bytes,
+            )
+        }
+    });
     Ok((fields, virtual_stamp))
 }
 
@@ -1100,6 +1133,38 @@ mod tests {
         assert!(cache.entries.keys().all(|key| key.file != file));
 
         data_file::unregister_data_file(file).expect("unregister filesource data");
+    }
+
+    #[test]
+    fn filesource_cache_retains_current_entry_across_unrelated_virtual_file_changes() {
+        let _guard = data_file_test_guard();
+        let retained_file = "virtual://filesource/retained-across-unrelated-change";
+        let unrelated_file = "virtual://filesource/unrelated-change";
+        let _ = data_file::unregister_data_file(retained_file);
+        let _ = data_file::unregister_data_file(unrelated_file);
+        lock_filesource_cache().clear();
+
+        data_file::register_data_file(retained_file, "0 1\n1e-9 2\n")
+            .expect("register retained virtual filesource data");
+        load_filesource(retained_file, 1).expect("cache retained virtual filesource data");
+
+        data_file::register_data_file(unrelated_file, "0 3\n1e-9 4\n")
+            .expect("register unrelated virtual filesource data");
+        load_filesource(unrelated_file, 1).expect("cache unrelated virtual filesource data");
+
+        let cache = lock_filesource_cache();
+        assert_eq!(
+            cache
+                .entries
+                .keys()
+                .filter(|key| key.file == retained_file)
+                .count(),
+            1
+        );
+        drop(cache);
+
+        let _ = data_file::unregister_data_file(retained_file);
+        let _ = data_file::unregister_data_file(unrelated_file);
     }
 
     #[test]

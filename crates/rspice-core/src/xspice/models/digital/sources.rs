@@ -70,6 +70,17 @@ struct DSourceCacheKey {
     virtual_file: bool,
 }
 
+impl DSourceCacheKey {
+    fn stamp(&self) -> data_file::DataFileStamp {
+        data_file::DataFileStamp {
+            len: self.len,
+            modified_nanos: self.modified_nanos,
+            content_hash: self.content_hash,
+            virtual_file: self.virtual_file,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DSourceRowsResource {
     input_file: String,
@@ -85,10 +96,23 @@ struct DSourceCache {
 }
 
 impl DSourceCache {
-    fn sync_virtual_epoch(&mut self) {
-        if data_file::sync_virtual_data_file_epoch(&mut self.virtual_epoch) {
-            self.entries.retain(|key, _| !key.virtual_file);
-        }
+    fn with_entries<R>(
+        &mut self,
+        operation: impl FnOnce(
+            &mut crate::resource::BoundedCache<DSourceCacheKey, Arc<DSourceRows>>,
+            &data_file::VirtualDataFileSnapshot<'_>,
+        ) -> R,
+    ) -> R {
+        let virtual_epoch = &mut self.virtual_epoch;
+        let entries = &mut self.entries;
+        data_file::with_virtual_data_file_snapshot(|snapshot| {
+            if snapshot.sync_epoch(virtual_epoch) {
+                entries.retain(|key, _| {
+                    !key.virtual_file || snapshot.contains(&key.input_file, key.stamp())
+                });
+            }
+            operation(entries, snapshot)
+        })
     }
 
     #[cfg(test)]
@@ -496,11 +520,15 @@ fn load_d_source_rows_limited(
 
     {
         let mut guard = lock_d_source_cache();
-        guard.sync_virtual_epoch();
-        guard
-            .entries
-            .enforce_limit(resource_limits.max_shared_cache_bytes);
-        if let Some(rows) = guard.entries.get_cloned(&key) {
+        let cached = guard.with_entries(|entries, snapshot| {
+            entries.enforce_limit(resource_limits.max_shared_cache_bytes);
+            if key.virtual_file && !snapshot.contains(&key.input_file, key.stamp()) {
+                None
+            } else {
+                entries.get_cloned(&key)
+            }
+        });
+        if let Some(rows) = cached {
             let retained_values = rows.rows.len().saturating_add(rows.values.len());
             if let Err(error) = crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
@@ -535,14 +563,19 @@ fn load_d_source_rows_limited(
         }
     };
     let mut guard = lock_d_source_cache();
-    guard.sync_virtual_epoch();
     let retained_bytes = d_source_cache_entry_bytes(&key, &rows);
-    let rows = guard.entries.insert_or_get(
-        key,
-        rows,
-        retained_bytes,
-        resource_limits.max_shared_cache_bytes,
-    );
+    let rows = guard.with_entries(|entries, snapshot| {
+        if key.virtual_file && !snapshot.contains(&key.input_file, key.stamp()) {
+            rows
+        } else {
+            entries.insert_or_get(
+                key,
+                rows,
+                retained_bytes,
+                resource_limits.max_shared_cache_bytes,
+            )
+        }
+    });
     (virtual_stamp, Ok(Some(rows)))
 }
 
@@ -752,6 +785,17 @@ struct DStateCacheKey {
     virtual_file: bool,
 }
 
+impl DStateCacheKey {
+    fn stamp(&self) -> data_file::DataFileStamp {
+        data_file::DataFileStamp {
+            len: self.len,
+            modified_nanos: self.modified_nanos,
+            content_hash: self.content_hash,
+            virtual_file: self.virtual_file,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DStateTableResource {
     state_file: String,
@@ -923,10 +967,23 @@ struct DStateCache {
 }
 
 impl DStateCache {
-    fn sync_virtual_epoch(&mut self) {
-        if data_file::sync_virtual_data_file_epoch(&mut self.virtual_epoch) {
-            self.entries.retain(|key, _| !key.virtual_file);
-        }
+    fn with_entries<R>(
+        &mut self,
+        operation: impl FnOnce(
+            &mut crate::resource::BoundedCache<DStateCacheKey, Arc<DStateTable>>,
+            &data_file::VirtualDataFileSnapshot<'_>,
+        ) -> R,
+    ) -> R {
+        let virtual_epoch = &mut self.virtual_epoch;
+        let entries = &mut self.entries;
+        data_file::with_virtual_data_file_snapshot(|snapshot| {
+            if snapshot.sync_epoch(virtual_epoch) {
+                entries.retain(|key, _| {
+                    !key.virtual_file || snapshot.contains(&key.state_file, key.stamp())
+                });
+            }
+            operation(entries, snapshot)
+        })
     }
 
     #[cfg(test)]
@@ -1604,11 +1661,15 @@ fn load_d_state_table_limited(
 
     {
         let mut guard = lock_d_state_cache();
-        guard.sync_virtual_epoch();
-        guard
-            .entries
-            .enforce_limit(resource_limits.max_shared_cache_bytes);
-        if let Some(table) = guard.entries.get_cloned(&key) {
+        let cached = guard.with_entries(|entries, snapshot| {
+            entries.enforce_limit(resource_limits.max_shared_cache_bytes);
+            if key.virtual_file && !snapshot.contains(&key.state_file, key.stamp()) {
+                None
+            } else {
+                entries.get_cloned(&key)
+            }
+        });
+        if let Some(table) = cached {
             let retained_values = table.retained_value_count();
             if let Err(error) = crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::ExternalDataValues,
@@ -1635,14 +1696,19 @@ fn load_d_state_table_limited(
         Err(err) => return (virtual_stamp, Err(err)),
     };
     let mut guard = lock_d_state_cache();
-    guard.sync_virtual_epoch();
     let retained_bytes = d_state_cache_entry_bytes(&key, &table);
-    let table = guard.entries.insert_or_get(
-        key,
-        table,
-        retained_bytes,
-        resource_limits.max_shared_cache_bytes,
-    );
+    let table = guard.with_entries(|entries, snapshot| {
+        if key.virtual_file && !snapshot.contains(&key.state_file, key.stamp()) {
+            table
+        } else {
+            entries.insert_or_get(
+                key,
+                table,
+                retained_bytes,
+                resource_limits.max_shared_cache_bytes,
+            )
+        }
+    });
     (virtual_stamp, Ok(Some(table)))
 }
 
@@ -2205,6 +2271,77 @@ mod tests {
 
         unregister_test_data_file(input_file);
         unregister_test_data_file(state_file);
+    }
+
+    #[test]
+    fn digital_caches_retain_current_entries_across_unrelated_virtual_file_changes() {
+        let _guard = data_file_test_guard();
+        let retained_input = "virtual://d_source/retained-across-unrelated-change";
+        let unrelated_input = "virtual://d_source/unrelated-change";
+        let retained_state = "virtual://d_state/retained-across-unrelated-change";
+        let unrelated_state = "virtual://d_state/unrelated-change";
+        for file in [
+            retained_input,
+            unrelated_input,
+            retained_state,
+            unrelated_state,
+        ] {
+            unregister_test_data_file(file);
+        }
+        lock_d_source_cache().clear();
+        lock_d_state_cache().clear();
+
+        data_file::register_data_file(retained_input, "0 0s\n1n 1s\n")
+            .expect("register retained d_source data");
+        load_d_source_rows(retained_input, 1)
+            .1
+            .expect("load retained d_source data")
+            .expect("retained d_source data parses");
+        data_file::register_data_file(unrelated_input, "0 1s\n1n 0s\n")
+            .expect("register unrelated d_source data");
+        load_d_source_rows(unrelated_input, 1)
+            .1
+            .expect("load unrelated d_source data")
+            .expect("unrelated d_source data parses");
+
+        data_file::register_data_file(retained_state, "0 0s 0 -> 0\n")
+            .expect("register retained d_state data");
+        load_d_state_table(retained_state, 1, 1)
+            .1
+            .expect("load retained d_state data")
+            .expect("retained d_state data parses");
+        data_file::register_data_file(unrelated_state, "0 1s 0 -> 0\n")
+            .expect("register unrelated d_state data");
+        load_d_state_table(unrelated_state, 1, 1)
+            .1
+            .expect("load unrelated d_state data")
+            .expect("unrelated d_state data parses");
+
+        assert_eq!(
+            lock_d_source_cache()
+                .entries
+                .keys()
+                .filter(|key| key.input_file == retained_input)
+                .count(),
+            1
+        );
+        assert_eq!(
+            lock_d_state_cache()
+                .entries
+                .keys()
+                .filter(|key| key.state_file == retained_state)
+                .count(),
+            1
+        );
+
+        for file in [
+            retained_input,
+            unrelated_input,
+            retained_state,
+            unrelated_state,
+        ] {
+            unregister_test_data_file(file);
+        }
     }
 
     #[test]
