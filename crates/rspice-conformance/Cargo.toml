@@ -29,6 +29,7 @@ default = ["circuit-suites"]
 # shared noise runtime. The remaining compact-model catalog stays outside the
 # default build so compile cost remains bounded.
 circuit-suites = [
+    "veriloga-model-diode-cmc",
     "veriloga-model-bsimsoi-va",
     "veriloga-model-juncap200",
     "veriloga-builtins-noise",
@@ -48,6 +49,13 @@ veriloga-builtins-base = ["rspice-core/veriloga-builtins-base"]
 veriloga-builtins-noise = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-builtins-noise",
+]
+# Forward the canonical CMC diode artifact independently so the Xyce suite can
+# exercise AC, DC, noise, and transient compact-diode behavior without
+# compiling the complete compact-model catalog.
+veriloga-model-diode-cmc = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-diode-cmc",
 ]
 # Forward the canonical BSIM-SOI 4.6.1 artifact independently so the Xyce
 # suite can exercise LEVEL=70 without compiling the complete compact-model
@@ -78,6 +86,7 @@ veriloga-model-vbic13-4t = [
 veriloga-builtins-models = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-builtins-models",
+    "veriloga-model-diode-cmc",
     "veriloga-model-bsimsoi-va",
     "veriloga-model-juncap200",
     "veriloga-model-vbic13",
