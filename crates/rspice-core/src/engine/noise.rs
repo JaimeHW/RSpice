@@ -27,7 +27,306 @@ pub(in crate::engine) struct CollectedNoiseSources {
     pub(in crate::engine) correlated: Vec<CorrelatedNoisePair>,
 }
 
+/// Complex amplitude represented as `value * 2^exponent`.  Keeping the power
+/// of two separate lets ordinary noise combine very large transfer functions
+/// with very small PSDs (and vice versa) without overflowing an intermediate
+/// that cancels in the physical result.
+#[derive(Clone, Copy)]
+struct BinaryScaledComplex {
+    value: Complex64,
+    exponent: i32,
+}
+
 impl Engine {
+    fn binary_power(exponent: i32) -> Value {
+        debug_assert!((-1074..=1023).contains(&exponent));
+        if exponent >= -1022 {
+            Value::from_bits(((exponent + 1023) as u64) << 52)
+        } else {
+            Value::from_bits(1_u64 << (exponent + 1074))
+        }
+    }
+
+    fn decompose_positive(value: Value) -> (Value, i32) {
+        debug_assert!(value.is_finite() && value > 0.0);
+        let bits = value.to_bits();
+        let encoded_exponent = ((bits >> 52) & 0x7ff) as i32;
+        let fraction = bits & ((1_u64 << 52) - 1);
+        if encoded_exponent != 0 {
+            let mantissa_bits = (1023_u64 << 52) | fraction;
+            (Value::from_bits(mantissa_bits), encoded_exponent - 1023)
+        } else {
+            let leading_bit = 63_i32 - fraction.leading_zeros() as i32;
+            let scale = (1_u64 << leading_bit) as Value;
+            (fraction as Value / scale, leading_bit - 1074)
+        }
+    }
+
+    fn compose_positive(
+        label: &str,
+        mantissa: Value,
+        exponent: i32,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        debug_assert!(mantissa.is_finite() && (1.0..2.0).contains(&mantissa));
+        if exponent > 1023 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' output density overflowed at {frequency} Hz"
+            )));
+        }
+        if exponent < -1075 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' output density underflowed at {frequency} Hz"
+            )));
+        }
+        let result = if exponent == -1075 {
+            (mantissa * 0.5) * Value::from_bits(1)
+        } else {
+            mantissa * Self::binary_power(exponent)
+        };
+        if !result.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' output density overflowed at {frequency} Hz"
+            )));
+        }
+        if result == 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' output density underflowed at {frequency} Hz"
+            )));
+        }
+        Ok(result)
+    }
+
+    fn normalize_scaled_complex(mut scaled: BinaryScaledComplex) -> BinaryScaledComplex {
+        let maximum = scaled.value.re.abs().max(scaled.value.im.abs());
+        debug_assert!(maximum.is_finite() && maximum > 0.0);
+        let (_, exponent) = Self::decompose_positive(maximum);
+        scaled.value /= Self::binary_power(exponent);
+        scaled.exponent += exponent;
+        scaled
+    }
+
+    fn scaled_noise_amplitude(
+        gain: Complex64,
+        psd: Value,
+        phase_rad: Value,
+    ) -> Option<BinaryScaledComplex> {
+        if psd == 0.0 || gain == Complex64::new(0.0, 0.0) {
+            return None;
+        }
+        let maximum = gain.re.abs().max(gain.im.abs());
+        let (gain_mantissa, gain_exponent) = Self::decompose_positive(maximum);
+        let root_psd = psd.sqrt();
+        let (psd_mantissa, psd_exponent) = Self::decompose_positive(root_psd);
+        let normalized_gain = gain / maximum;
+        let (sin_phase, cos_phase) = phase_rad.sin_cos();
+        let rotated = Complex64::new(
+            normalized_gain
+                .re
+                .mul_add(cos_phase, -(normalized_gain.im * sin_phase)),
+            normalized_gain
+                .re
+                .mul_add(sin_phase, normalized_gain.im * cos_phase),
+        );
+        Some(Self::normalize_scaled_complex(BinaryScaledComplex {
+            value: rotated * (gain_mantissa * psd_mantissa),
+            exponent: gain_exponent + psd_exponent,
+        }))
+    }
+
+    fn add_scaled_noise_amplitudes(
+        left: Option<BinaryScaledComplex>,
+        right: Option<BinaryScaledComplex>,
+    ) -> Option<BinaryScaledComplex> {
+        let (mut larger, smaller) = match (left, right) {
+            (None, None) => return None,
+            (Some(value), None) | (None, Some(value)) => return Some(value),
+            (Some(left), Some(right)) if left.exponent >= right.exponent => (left, right),
+            (Some(left), Some(right)) => (right, left),
+        };
+        let difference = larger.exponent - smaller.exponent;
+        if difference <= 1074 {
+            larger.value += smaller.value * Self::binary_power(-difference);
+        }
+        if larger.value == Complex64::new(0.0, 0.0) {
+            None
+        } else {
+            Some(Self::normalize_scaled_complex(larger))
+        }
+    }
+
+    fn scaled_amplitude_density(
+        label: &str,
+        amplitude: Option<BinaryScaledComplex>,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        let Some(amplitude) = amplitude else {
+            return Ok(0.0);
+        };
+        let magnitude = amplitude.value.norm();
+        let coefficient = magnitude * magnitude;
+        let (mantissa, coefficient_exponent) = Self::decompose_positive(coefficient);
+        let amplitude_exponent = amplitude.exponent.checked_mul(2).ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "Noise source '{label}' output-density exponent overflowed at {frequency} Hz"
+            ))
+        })?;
+        let output_exponent = coefficient_exponent
+            .checked_add(amplitude_exponent)
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Noise source '{label}' output-density exponent overflowed at {frequency} Hz"
+                ))
+            })?;
+        Self::compose_positive(label, mantissa, output_exponent, frequency)
+    }
+
+    fn transferred_noise_density(
+        label: &str,
+        psd: Value,
+        transfer: Complex64,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        if !psd.is_finite() || psd < 0.0 || !transfer.re.is_finite() || !transfer.im.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Noise source '{label}' has invalid transfer arithmetic at {frequency} Hz"
+            )));
+        }
+        Self::scaled_amplitude_density(
+            label,
+            Self::scaled_noise_amplitude(transfer, psd, 0.0),
+            frequency,
+        )
+    }
+
+    fn correlated_transferred_noise_density(
+        label: &str,
+        first_gain: Complex64,
+        second_gain: Complex64,
+        densities: crate::analysis::noise::CorrelatedNoiseDensities,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        if !first_gain.re.is_finite()
+            || !first_gain.im.is_finite()
+            || !second_gain.re.is_finite()
+            || !second_gain.im.is_finite()
+            || !densities.first_psd.is_finite()
+            || densities.first_psd < 0.0
+            || !densities.second_psd.is_finite()
+            || densities.second_psd < 0.0
+            || !densities.phase_rad.is_finite()
+        {
+            return Err(SimulationError::Circuit(format!(
+                "Correlated noise source '{label}' has invalid transfer arithmetic at {frequency} Hz"
+            )));
+        }
+        let first = Self::scaled_noise_amplitude(first_gain, densities.first_psd, 0.0);
+        let second =
+            Self::scaled_noise_amplitude(second_gain, densities.second_psd, densities.phase_rad);
+        Self::scaled_amplitude_density(
+            label,
+            Self::add_scaled_noise_amplitudes(first, second),
+            frequency,
+        )
+    }
+
+    fn effective_noise_gain_squared(
+        dialect: crate::engine::SpiceDialect,
+        gain: Complex64,
+        source_name: &str,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        if !gain.re.is_finite() || !gain.im.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Input-referred noise gain is non-finite for source '{source_name}' at {frequency} Hz"
+            )));
+        }
+        let magnitude = gain.norm();
+        let compatibility_floor = matches!(
+            dialect,
+            crate::engine::SpiceDialect::Ngspice | crate::engine::SpiceDialect::Xyce
+        );
+        if compatibility_floor && magnitude < 1.0e-10 {
+            // ngspice 46 noisedef.h/noisean.c and Xyce 7.10 N_ANP_NOISE.C
+            // both define N_MINGAIN as a squared-gain floor of 1e-20.
+            return Ok(1.0e-20);
+        }
+        if magnitude == 0.0 {
+            return Ok(0.0);
+        }
+        let squared = magnitude * magnitude;
+        if !squared.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Input-referred noise gain squared overflowed for source '{source_name}' at {frequency} Hz"
+            )));
+        }
+        if squared == 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Input-referred noise gain squared underflowed for source '{source_name}' at {frequency} Hz"
+            )));
+        }
+        Ok(if compatibility_floor {
+            squared.max(1.0e-20)
+        } else {
+            squared
+        })
+    }
+
+    fn referred_noise_density(
+        label: &str,
+        output_density: Value,
+        gain_squared: Value,
+        frequency: Value,
+    ) -> Result<Value, SimulationError> {
+        if output_density == 0.0 {
+            return Ok(0.0);
+        }
+        if gain_squared == 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Input-referred noise is undefined for '{label}' at {frequency} Hz because the physical input-to-output transfer is zero while output noise is positive"
+            )));
+        }
+        let referred = output_density / gain_squared;
+        if !referred.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Input-referred noise for '{label}' overflowed at {frequency} Hz"
+            )));
+        }
+        if referred == 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Input-referred noise for '{label}' underflowed at {frequency} Hz"
+            )));
+        }
+        Ok(referred)
+    }
+
+    fn add_noise_density(
+        sum: &mut Value,
+        compensation: &mut Value,
+        term: Value,
+        frequency: Value,
+    ) -> Result<(), SimulationError> {
+        debug_assert!(term.is_finite() && term >= 0.0);
+        let updated = *sum + term;
+        if !updated.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Total output-noise density overflowed at {frequency} Hz"
+            )));
+        }
+        let correction = if sum.abs() >= term.abs() {
+            (*sum - updated) + term
+        } else {
+            (term - updated) + *sum
+        };
+        *compensation += correction;
+        if !compensation.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Total output-noise compensation overflowed at {frequency} Hz"
+            )));
+        }
+        *sum = updated;
+        Ok(())
+    }
     pub(in crate::engine) fn configure_noise_physical_constants(
         sources: &mut [NoiseSource],
         correlated_sources: &mut [CorrelatedNoisePair],
@@ -260,16 +559,6 @@ impl Engine {
             _ => Complex64::new(0.0, 0.0),
         };
         v_pos - v_neg
-    }
-
-    #[inline]
-    pub(in crate::engine) fn differential_noise_output(
-        solution: &[Complex64],
-        output_pos: usize,
-        output_neg: Option<usize>,
-        num_nodes: usize,
-    ) -> Value {
-        Self::differential_noise_output_complex(solution, output_pos, output_neg, num_nodes).norm()
     }
 
     #[inline]
@@ -2824,6 +3113,7 @@ impl Engine {
         // output phasor for input-referred gain. This is the full deck AC
         // excitation: all independent sources, magnitudes, and phases.
         let ac_excitation_rhs = Self::build_ac_excitation_rhs(&circuit);
+        let noise_dialect = engine.config.spice_dialect;
 
         // Solve one frequency using caller-owned workspaces. Keeping every
         // mutable cache/work vector explicit lets the sequential path reuse a
@@ -2865,24 +3155,24 @@ impl Engine {
                 Err(error) => return Err(SimulationError::Solver(error)),
             }
             let input_gain_sq = if has_input_source {
-                let gain =
-                    Self::differential_noise_output(ac_solution, output_pos, output_neg, num_nodes);
-                let gain_sq = gain * gain;
-                if !gain_sq.is_finite() {
-                    return Err(SimulationError::Circuit(format!(
-                        "Input-referred noise gain is non-finite for source '{}' at {} Hz",
-                        input_source.unwrap_or("<unknown>"),
-                        freq
-                    )));
-                }
-                // Xyce N_ANP_NOISE.C uses N_MINGAIN=1e-20 to retain a
-                // finite input-referred spectrum at transfer nulls.
-                gain_sq.max(1.0e-20)
+                let gain = Self::differential_noise_output_complex(
+                    ac_solution,
+                    output_pos,
+                    output_neg,
+                    num_nodes,
+                );
+                Self::effective_noise_gain_squared(
+                    noise_dialect,
+                    gain,
+                    input_source.unwrap_or("<unknown>"),
+                    freq,
+                )?
             } else {
                 1.0
             };
 
             let mut total_noise_v2_hz = 0.0;
+            let mut total_noise_compensation = 0.0;
             let mut contributions = Vec::new();
             // Adjoint noise analysis reduces one linear solve per noise
             // source to one transpose solve per output/frequency:
@@ -2927,29 +3217,28 @@ impl Engine {
                         source.node_pos,
                         source.node_neg,
                     );
-                    si * transfer.norm_sqr()
+                    Self::transferred_noise_density(
+                        &Self::noise_source_label(&source.identity),
+                        si,
+                        transfer,
+                        freq,
+                    )?
                 } else {
                     0.0
                 };
-                if !output_v2.is_finite() {
-                    return Err(SimulationError::Circuit(format!(
-                        "Noise source '{}' produced non-finite output density at {freq} Hz",
-                        Self::noise_source_label(&source.identity)
-                    )));
-                }
                 if output_v2 > 0.0 {
-                    total_noise_v2_hz += output_v2;
-                    if !total_noise_v2_hz.is_finite() {
-                        return Err(SimulationError::Circuit(format!(
-                            "Total output-noise density overflowed at {freq} Hz"
-                        )));
-                    }
+                    Self::add_noise_density(
+                        &mut total_noise_v2_hz,
+                        &mut total_noise_compensation,
+                        output_v2,
+                        freq,
+                    )?;
                 }
                 contributions.push(NoiseContribution {
                     identity: source.identity.clone(),
                     noise_type: source.noise_type,
                     output_contribution: output_v2,
-                    input_contribution: output_v2 / input_gain_sq,
+                    input_contribution: 0.0,
                     percentage: 0.0,
                 });
             }
@@ -2975,40 +3264,71 @@ impl Engine {
                     source.second.node_neg,
                 );
 
-                let first_amp = first_gain * densities.first_psd.sqrt();
-                let second_amp = second_gain
-                    * Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
-                let output_v2 = (first_amp + second_amp).norm_sqr();
-                if !output_v2.is_finite() {
-                    return Err(SimulationError::Circuit(format!(
-                        "Correlated noise source '{}' produced non-finite output density at {freq} Hz",
-                        Self::noise_source_label(&source.identity)
-                    )));
-                }
+                let output_v2 = Self::correlated_transferred_noise_density(
+                    &Self::noise_source_label(&source.identity),
+                    first_gain,
+                    second_gain,
+                    densities,
+                    freq,
+                )?;
                 if output_v2 > 0.0 {
-                    total_noise_v2_hz += output_v2;
-                    if !total_noise_v2_hz.is_finite() {
-                        return Err(SimulationError::Circuit(format!(
-                            "Total output-noise density overflowed at {freq} Hz"
-                        )));
-                    }
+                    Self::add_noise_density(
+                        &mut total_noise_v2_hz,
+                        &mut total_noise_compensation,
+                        output_v2,
+                        freq,
+                    )?;
                     contributions.push(NoiseContribution {
                         identity: source.identity.clone(),
                         noise_type: source.noise_type,
                         output_contribution: output_v2,
-                        input_contribution: output_v2 / input_gain_sq,
+                        input_contribution: 0.0,
                         percentage: 0.0,
                     });
                 }
             }
 
+            let compensated_total = total_noise_v2_hz + total_noise_compensation;
+            if !compensated_total.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "Total output-noise density overflowed while applying compensated accumulation at {freq} Hz"
+                )));
+            }
+            if compensated_total < 0.0 || (compensated_total == 0.0 && total_noise_v2_hz > 0.0) {
+                return Err(SimulationError::Circuit(format!(
+                    "Total output-noise density became nonpositive while applying compensated accumulation at {freq} Hz"
+                )));
+            }
+            total_noise_v2_hz = compensated_total;
+
             for contrib in &mut contributions {
                 contrib.percentage = if total_noise_v2_hz > 0.0 {
-                    100.0 * contrib.output_contribution / total_noise_v2_hz
+                    100.0 * (contrib.output_contribution / total_noise_v2_hz)
                 } else {
                     0.0
                 };
+                contrib.input_contribution = if has_input_source {
+                    Self::referred_noise_density(
+                        &Self::noise_source_label(&contrib.identity),
+                        contrib.output_contribution,
+                        input_gain_sq,
+                        freq,
+                    )?
+                } else {
+                    contrib.output_contribution
+                };
             }
+
+            let input_referred_density = if has_input_source {
+                Self::referred_noise_density(
+                    input_source.unwrap_or("<unknown>"),
+                    total_noise_v2_hz,
+                    input_gain_sq,
+                    freq,
+                )?
+            } else {
+                total_noise_v2_hz
+            };
 
             let mut branch_currents = ac_solution[num_nodes..].to_vec();
             circuit.capacitors.project_complex_ic_branch_currents(
@@ -3024,11 +3344,7 @@ impl Engine {
                 voltages: ac_solution[..num_nodes].to_vec(),
                 currents: branch_currents,
                 output_noise_density: total_noise_v2_hz,
-                input_referred_density: if has_input_source {
-                    total_noise_v2_hz / input_gain_sq
-                } else {
-                    total_noise_v2_hz
-                },
+                input_referred_density,
                 input_gain_squared: input_gain_sq,
                 contribution_catalog: unique_catalog.clone(),
                 mechanisms_unavailable: mechanisms_unavailable.clone(),
@@ -3448,6 +3764,157 @@ mod tests {
             error.to_string().contains("underflowed to zero"),
             "underflow must be explicit and diagnosable: {error}"
         );
+    }
+
+    #[test]
+    fn transfer_density_scaling_preserves_representable_extremes() {
+        let large_transfer = Engine::transferred_noise_density(
+            "large-transfer",
+            1.0e-300,
+            crate::Complex64::new(1.0e200, 0.0),
+            1.0e3,
+        )
+        .expect("small PSD times large transfer remains representable");
+        assert!((large_transfer / 1.0e100 - 1.0).abs() < 2.0e-15);
+
+        let large_psd = Engine::transferred_noise_density(
+            "large-psd",
+            1.0e300,
+            crate::Complex64::new(1.0e-200, 0.0),
+            1.0e3,
+        )
+        .expect("large PSD times small transfer remains representable");
+        assert!((large_psd / 1.0e-100 - 1.0).abs() < 2.0e-15);
+
+        let underflow = Engine::transferred_noise_density(
+            "underflow",
+            f64::from_bits(1),
+            crate::Complex64::new(f64::from_bits(1), 0.0),
+            1.0e3,
+        )
+        .expect_err("a nonrepresentable positive output PSD must fail closed");
+        assert!(underflow.to_string().contains("underflowed"));
+
+        let overflow = Engine::transferred_noise_density(
+            "overflow",
+            f64::MAX,
+            crate::Complex64::new(f64::MAX, 0.0),
+            1.0e3,
+        )
+        .expect_err("a nonrepresentable output PSD must fail closed");
+        assert!(overflow.to_string().contains("overflowed"));
+    }
+
+    #[test]
+    fn correlated_transfer_scaling_preserves_exact_extreme_cancellation() {
+        let density = Engine::correlated_transferred_noise_density(
+            "cancel",
+            crate::Complex64::new(f64::MAX, 0.0),
+            crate::Complex64::new(-f64::MAX, 0.0),
+            crate::analysis::noise::CorrelatedNoiseDensities {
+                first_psd: f64::MAX,
+                second_psd: f64::MAX,
+                phase_rad: 0.0,
+            },
+            1.0e3,
+        )
+        .expect("opposed fully correlated amplitudes cancel before materialization");
+        assert_eq!(density, 0.0);
+    }
+
+    #[test]
+    fn gain_floor_is_dialect_specific_and_extremes_fail_closed() {
+        let zero = crate::Complex64::new(0.0, 0.0);
+        for dialect in [
+            crate::engine::SpiceDialect::Ngspice,
+            crate::engine::SpiceDialect::Xyce,
+        ] {
+            assert_eq!(
+                Engine::effective_noise_gain_squared(dialect, zero, "VIN", 1.0e3)
+                    .expect("compatibility gain floor applies"),
+                1.0e-20
+            );
+        }
+        assert_eq!(
+            Engine::effective_noise_gain_squared(
+                crate::engine::SpiceDialect::BestAvailable,
+                zero,
+                "VIN",
+                1.0e3,
+            )
+            .expect("native exact transfer null is retained"),
+            0.0
+        );
+        assert!(
+            Engine::effective_noise_gain_squared(
+                crate::engine::SpiceDialect::BestAvailable,
+                crate::Complex64::new(1.0e-200, 0.0),
+                "VIN",
+                1.0e3,
+            )
+            .expect_err("nonrepresentable native squared gain must fail")
+            .to_string()
+            .contains("underflowed")
+        );
+        assert!(
+            Engine::effective_noise_gain_squared(
+                crate::engine::SpiceDialect::BestAvailable,
+                crate::Complex64::new(1.0e200, 0.0),
+                "VIN",
+                1.0e3,
+            )
+            .expect_err("nonrepresentable native squared gain must fail")
+            .to_string()
+            .contains("overflowed")
+        );
+    }
+
+    #[test]
+    fn native_transfer_null_is_undefined_only_for_positive_output_noise() {
+        let noisy = Netlist::parse(
+            "Native transfer-null referral\n\
+             VIN in 0 0 AC 1\n\
+             RIN in 0 1k NOISY=0\n\
+             ROUT out 0 1k\n\
+             .END\n",
+        )
+        .expect("transfer-null deck parses");
+        let error = Engine::default()
+            .run_noise_named_with_input_source(&noisy, "out", None, "VIN", &[1.0e3], 300.15)
+            .expect_err("native input referral at a noisy transfer null is undefined");
+        assert!(
+            error
+                .to_string()
+                .contains("physical input-to-output transfer is zero")
+        );
+
+        for dialect in [
+            crate::engine::SpiceDialect::Ngspice,
+            crate::engine::SpiceDialect::Xyce,
+        ] {
+            let result =
+                Engine::new(crate::engine::SimulationConfig::default().with_spice_dialect(dialect))
+                    .run_noise_named_with_input_source(&noisy, "out", None, "VIN", &[1.0e3], 300.15)
+                    .expect("compatibility dialect retains N_MINGAIN");
+            assert_eq!(result[0].input_gain_squared, 1.0e-20);
+            assert!(result[0].input_referred_density.is_finite());
+            assert!(result[0].input_referred_density > 0.0);
+        }
+
+        let quiet = Netlist::parse(
+            "Quiet native transfer null\n\
+             VIN in 0 0 AC 1\n\
+             RIN in 0 1k NOISY=0\n\
+             ROUT out 0 1k NOISY=0\n\
+             .END\n",
+        )
+        .expect("quiet transfer-null deck parses");
+        let result = Engine::default()
+            .run_noise_named_with_input_source(&quiet, "out", None, "VIN", &[1.0e3], 300.15)
+            .expect("zero output noise at a transfer null is exactly zero");
+        assert_eq!(result[0].input_gain_squared, 0.0);
+        assert_eq!(result[0].output_noise_density, 0.0);
+        assert_eq!(result[0].input_referred_density, 0.0);
     }
 
     #[test]
