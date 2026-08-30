@@ -760,14 +760,62 @@ pub struct ArrayAccessExpr {
     pub span: Span,
 }
 
-/// Array/concatenation literal expression: {a, b, c}
+/// One item inside a concatenation or assignment pattern.
+///
+/// Replication remains recursive in the syntax tree.  The parser must never
+/// expand the repeat count because it is an expression and because even a
+/// constant count can exceed every practical compiler work budget.
+#[derive(Debug, Clone)]
+pub enum ArrayLiteralElement {
+    /// An ordinary expression item.
+    Value(Expression),
+    /// A Verilog replication item such as `4{value}`.
+    Replication(ReplicationExpr),
+}
+
+impl ArrayLiteralElement {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Value(expression) => expression.span(),
+            Self::Replication(replication) => replication.span,
+        }
+    }
+
+    /// Return the first retained replication at or below this item.
+    pub fn first_replication(&self) -> Option<&ReplicationExpr> {
+        match self {
+            Self::Value(Expression::ArrayLiteral(array)) => array.first_replication(),
+            Self::Value(_) => None,
+            Self::Replication(replication) => Some(replication),
+        }
+    }
+}
+
+/// Recursive replication item: `count{element, ...}`.
+#[derive(Debug, Clone)]
+pub struct ReplicationExpr {
+    pub count: Box<Expression>,
+    pub elements: Vec<ArrayLiteralElement>,
+    pub span: Span,
+}
+
+/// Array/concatenation literal expression: `{a, b, c}` or `'{a, b, c}`.
 #[derive(Debug, Clone)]
 pub struct ArrayLiteralExpr {
-    pub elements: Vec<Expression>,
+    pub elements: Vec<ArrayLiteralElement>,
     /// True for the Verilog-AMS assignment-pattern opener `'{`; false for an
     /// ordinary concatenation `{`. These constructs are not interchangeable.
     pub assignment_pattern: bool,
     pub span: Span,
+}
+
+impl ArrayLiteralExpr {
+    /// Return the first recursive replication without expanding it.
+    pub fn first_replication(&self) -> Option<&ReplicationExpr> {
+        self.elements
+            .iter()
+            .find_map(ArrayLiteralElement::first_replication)
+    }
 }
 
 /// Analog operator

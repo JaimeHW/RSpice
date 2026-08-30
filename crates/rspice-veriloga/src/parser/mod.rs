@@ -2125,18 +2125,8 @@ impl<'a> Parser<'a> {
             }
             TokenKind::LBrace | TokenKind::AssignmentPatternStart => {
                 let assignment_pattern = self.check(TokenKind::AssignmentPatternStart);
-                // Concatenation or assignment pattern: {expr, ...} / '{expr, ...}
                 self.advance();
-                let mut elements = Vec::new();
-                if !self.check(TokenKind::RBrace) {
-                    loop {
-                        elements.push(self.parse_expression()?);
-                        if !self.match_token(TokenKind::Comma) {
-                            break;
-                        }
-                    }
-                }
-                self.expect(TokenKind::RBrace)?;
+                let elements = self.parse_array_literal_elements()?;
                 Ok(Expression::ArrayLiteral(ArrayLiteralExpr {
                     elements,
                     assignment_pattern,
@@ -2169,6 +2159,49 @@ impl<'a> Parser<'a> {
             }
             _ => Err(self.error(ParseErrorKind::InvalidExpression)),
         }
+    }
+
+    /// Parse the non-empty contents of a concatenation, assignment pattern, or
+    /// replication body.  Replication is retained recursively and is never
+    /// expanded here.
+    fn parse_array_literal_elements(&mut self) -> Result<Vec<ArrayLiteralElement>, ParseError> {
+        if self.check(TokenKind::RBrace) {
+            return Err(ParseError::expected(
+                "one or more brace elements",
+                "RBrace",
+                self.current_span(),
+            ));
+        }
+
+        let mut elements = Vec::new();
+        loop {
+            let start = self.current_span();
+            let expression = self.parse_expression()?;
+            let element = if self.match_token(TokenKind::LBrace) {
+                let repeated = self.parse_array_literal_elements()?;
+                ArrayLiteralElement::Replication(ReplicationExpr {
+                    count: Box::new(expression),
+                    elements: repeated,
+                    span: start.extend(self.previous_span()),
+                })
+            } else {
+                ArrayLiteralElement::Value(expression)
+            };
+            elements.push(element);
+
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+            if self.check(TokenKind::RBrace) {
+                return Err(ParseError::expected(
+                    "brace element after comma",
+                    "RBrace",
+                    self.current_span(),
+                ));
+            }
+        }
+        self.expect(TokenKind::RBrace)?;
+        Ok(elements)
     }
 
     /// Parse argument list
@@ -2519,6 +2552,13 @@ mod tests {
         panic!("no module in source");
     }
 
+    fn parse_error(source: &str) -> ParseError {
+        let tokens = Lexer::new(source, SourceId::new(0))
+            .collect_tokens()
+            .expect("lex failed");
+        Parser::new(&tokens).parse().expect_err("parse succeeded")
+    }
+
     #[test]
     fn attributes_do_not_swallow_declarations() {
         let m = parse_module(
@@ -2622,6 +2662,136 @@ mod tests {
             m.parameters[1].default,
             Some(Expression::ArrayLiteral(ref literal)) if !literal.assignment_pattern
         ));
+    }
+
+    #[test]
+    fn concatenation_replication_is_retained_without_expansion() {
+        let m = parse_module(
+            r#"module a(p);
+                inout p;
+                electrical p;
+                parameter real w = 1.0;
+                parameter real repeated[0:3] = {4{w}};
+            endmodule"#,
+        );
+
+        let Some(Expression::ArrayLiteral(literal)) = &m.parameters[1].default else {
+            panic!("expected concatenation");
+        };
+        assert!(!literal.assignment_pattern);
+        assert_eq!(literal.elements.len(), 1);
+        let ArrayLiteralElement::Replication(replication) = &literal.elements[0] else {
+            panic!("expected replication item");
+        };
+        assert!(matches!(
+            replication.count.as_ref(),
+            Expression::Number(number) if number.raw == "4"
+        ));
+        assert_eq!(replication.elements.len(), 1);
+        assert!(matches!(
+            &replication.elements[0],
+            ArrayLiteralElement::Value(Expression::Identifier(identifier))
+                if identifier.name == "w"
+        ));
+    }
+
+    #[test]
+    fn nested_replication_is_retained_recursively() {
+        let m = parse_module(
+            r#"module a(p);
+                inout p;
+                electrical p;
+                parameter real w = 1.0;
+                parameter real repeated[0:5] = {2{3{w}}};
+            endmodule"#,
+        );
+
+        let Some(Expression::ArrayLiteral(literal)) = &m.parameters[1].default else {
+            panic!("expected concatenation");
+        };
+        let ArrayLiteralElement::Replication(outer) = &literal.elements[0] else {
+            panic!("expected outer replication");
+        };
+        assert!(matches!(
+            outer.count.as_ref(),
+            Expression::Number(number) if number.raw == "2"
+        ));
+        let ArrayLiteralElement::Replication(inner) = &outer.elements[0] else {
+            panic!("expected nested replication");
+        };
+        assert!(matches!(
+            inner.count.as_ref(),
+            Expression::Number(number) if number.raw == "3"
+        ));
+        assert!(matches!(
+            &inner.elements[0],
+            ArrayLiteralElement::Value(Expression::Identifier(identifier))
+                if identifier.name == "w"
+        ));
+    }
+
+    #[test]
+    fn assignment_pattern_replication_preserves_pattern_identity() {
+        let m = parse_module(
+            r#"module a(p);
+                inout p;
+                electrical p;
+                parameter real repeated[0:4] = '{5{0.0}};
+            endmodule"#,
+        );
+
+        let Some(Expression::ArrayLiteral(literal)) = &m.parameters[0].default else {
+            panic!("expected assignment pattern");
+        };
+        assert!(literal.assignment_pattern);
+        let ArrayLiteralElement::Replication(replication) = &literal.elements[0] else {
+            panic!("expected replication item");
+        };
+        assert!(matches!(
+            replication.count.as_ref(),
+            Expression::Number(number) if number.raw == "5"
+        ));
+        assert!(matches!(
+            &replication.elements[0],
+            ArrayLiteralElement::Value(Expression::Number(number))
+                if number.raw == "0.0"
+        ));
+    }
+
+    #[test]
+    fn empty_brace_forms_are_rejected() {
+        for initializer in ["{}", "'{}", "{4{}}", "'{4{}}"] {
+            let source = format!(
+                "module a(p); inout p; electrical p; parameter real x[0:0] = {initializer}; endmodule"
+            );
+            let error = parse_error(&source);
+            assert!(
+                matches!(
+                    error.kind,
+                    ParseErrorKind::Expected { ref expected, .. }
+                        if expected == "one or more brace elements"
+                ),
+                "unexpected error for {initializer}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn trailing_brace_commas_are_rejected() {
+        for initializer in ["{1,}", "'{1,}", "{2{1,}}", "'{2{1,}}"] {
+            let source = format!(
+                "module a(p); inout p; electrical p; parameter real x[0:0] = {initializer}; endmodule"
+            );
+            let error = parse_error(&source);
+            assert!(
+                matches!(
+                    error.kind,
+                    ParseErrorKind::Expected { ref expected, .. }
+                        if expected == "brace element after comma"
+                ),
+                "unexpected error for {initializer}: {error}"
+            );
+        }
     }
 
     #[test]

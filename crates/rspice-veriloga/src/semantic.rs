@@ -1044,7 +1044,20 @@ impl SemanticAnalyzer {
                         );
                         continue;
                     }
+                    if let Some(replication) = lit.first_replication() {
+                        self.record_error_at(
+                            SemanticErrorKind::UnsupportedFeature(
+                                "replication in executable array initializers is parsed but not yet supported; write the elements explicitly"
+                                    .into(),
+                            ),
+                            replication.span,
+                        );
+                        continue;
+                    }
                     for (offset, element) in lit.elements.iter().enumerate() {
+                        let ArrayLiteralElement::Value(element) = element else {
+                            unreachable!("replication was rejected before array lowering");
+                        };
                         let var_index = layout.base + offset;
                         let expression = self.lower_expression_with_side_effects(
                             element,
@@ -1591,13 +1604,31 @@ impl SemanticAnalyzer {
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
-                .any(|element| Self::expr_contains_identifier(element, expected)),
+                .any(|element| Self::array_element_contains_identifier(element, expected)),
             Expression::Number(_)
             | Expression::StringLit(_)
             | Expression::NullArgument(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn array_element_contains_identifier(
+        element: &ArrayLiteralElement,
+        expected: &SmolStr,
+    ) -> bool {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::expr_contains_identifier(expression, expected)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::expr_contains_identifier(&replication.count, expected)
+                    || replication
+                        .elements
+                        .iter()
+                        .any(|element| Self::array_element_contains_identifier(element, expected))
+            }
         }
     }
 
@@ -1628,7 +1659,7 @@ impl SemanticAnalyzer {
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
-                .any(|element| Self::expr_contains_call(element, expected)),
+                .any(|element| Self::array_element_contains_call(element, expected)),
             Expression::Number(_)
             | Expression::StringLit(_)
             | Expression::NullArgument(_)
@@ -1636,6 +1667,21 @@ impl SemanticAnalyzer {
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn array_element_contains_call(element: &ArrayLiteralElement, expected: &str) -> bool {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::expr_contains_call(expression, expected)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::expr_contains_call(&replication.count, expected)
+                    || replication
+                        .elements
+                        .iter()
+                        .any(|element| Self::array_element_contains_call(element, expected))
+            }
         }
     }
 
@@ -1669,13 +1715,28 @@ impl SemanticAnalyzer {
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
-                .any(|element| Self::expr_contains_number_close(element, expected)),
+                .any(|element| Self::array_element_contains_number_close(element, expected)),
             Expression::StringLit(_)
             | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn array_element_contains_number_close(element: &ArrayLiteralElement, expected: f64) -> bool {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::expr_contains_number_close(expression, expected)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::expr_contains_number_close(&replication.count, expected)
+                    || replication
+                        .elements
+                        .iter()
+                        .any(|element| Self::array_element_contains_number_close(element, expected))
+            }
         }
     }
 
@@ -2929,7 +2990,7 @@ impl SemanticAnalyzer {
             }
             Expression::ArrayLiteral(array) => {
                 for element in &array.elements {
-                    self.validate_direct_zi_contribution(element, span)?;
+                    self.validate_direct_zi_array_element(element, span)?;
                 }
             }
             Expression::Number(_)
@@ -2955,6 +3016,25 @@ impl SemanticAnalyzer {
             },
         }
         Ok(())
+    }
+
+    fn validate_direct_zi_array_element(
+        &self,
+        element: &ArrayLiteralElement,
+        span: Span,
+    ) -> CompileResult<()> {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                self.validate_direct_zi_contribution(expression, span)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                self.validate_direct_zi_contribution(&replication.count, span)?;
+                for element in &replication.elements {
+                    self.validate_direct_zi_array_element(element, span)?;
+                }
+                Ok(())
+            }
+        }
     }
 
     fn validate_direct_zi_analog_children(
@@ -4043,11 +4123,28 @@ impl SemanticAnalyzer {
                 span: access.span,
             }),
             Expression::ArrayLiteral(array) => Expression::ArrayLiteral(ArrayLiteralExpr {
-                elements: array
-                    .elements
-                    .iter()
-                    .map(|element| self.materialize_output_function_calls(element, module, sink))
-                    .collect::<CompileResult<Vec<_>>>()?,
+                elements: {
+                    if let Some(replication) = array.first_replication() {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(
+                                "replication in executable expressions is parsed but not yet supported; write the elements explicitly"
+                                    .into(),
+                            ),
+                            replication.span,
+                        )));
+                    }
+                    array
+                        .elements
+                        .iter()
+                        .map(|element| {
+                            let ArrayLiteralElement::Value(expression) = element else {
+                                unreachable!("replication was rejected before expression lowering");
+                            };
+                            self.materialize_output_function_calls(expression, module, sink)
+                                .map(ArrayLiteralElement::Value)
+                        })
+                        .collect::<CompileResult<Vec<_>>>()?
+                },
                 assignment_pattern: array.assignment_pattern,
                 span: array.span,
             }),
@@ -4379,7 +4476,7 @@ impl SemanticAnalyzer {
             Expression::ArrayLiteral(array) => array
                 .elements
                 .iter()
-                .any(|element| self.expression_contains_output_function_call(element)),
+                .any(|element| self.array_element_contains_output_function_call(element)),
             Expression::AnalogOperator(op) => {
                 self.analog_operator_contains_output_function_call(op)
             }
@@ -4391,6 +4488,21 @@ impl SemanticAnalyzer {
             | Expression::NullArgument(_)
             | Expression::Identifier(_)
             | Expression::BranchAccess(_) => false,
+        }
+    }
+
+    fn array_element_contains_output_function_call(&self, element: &ArrayLiteralElement) -> bool {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                self.expression_contains_output_function_call(expression)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                self.expression_contains_output_function_call(&replication.count)
+                    || replication
+                        .elements
+                        .iter()
+                        .any(|element| self.array_element_contains_output_function_call(element))
+            }
         }
     }
 
@@ -4790,10 +4902,25 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::ArrayLiteral(a) => {
+                if let Some(replication) = a.first_replication() {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "replication in executable expressions is parsed but not yet supported; write the elements explicitly"
+                                .into(),
+                        ),
+                        replication.span,
+                    )));
+                }
                 let elements = a
                     .elements
                     .iter()
-                    .map(|e| self.lower_expression(e))
+                    .map(|element| {
+                        let ArrayLiteralElement::Value(expression) = element else {
+                            unreachable!("replication was rejected before expression lowering");
+                        };
+                        self.lower_expression(expression)
+                            .map(ArrayLiteralElement::Value)
+                    })
                     .collect::<CompileResult<Vec<_>>>()?;
                 Expression::ArrayLiteral(ArrayLiteralExpr {
                     elements,
@@ -4949,7 +5076,7 @@ impl SemanticAnalyzer {
             }
             Expression::ArrayLiteral(array) => {
                 for element in &array.elements {
-                    Self::validate_zi_freeze_expression(element, operator, argument_index)?;
+                    Self::validate_zi_freeze_array_element(element, operator, argument_index)?;
                 }
                 Ok(())
             }
@@ -5023,6 +5150,25 @@ impl SemanticAnalyzer {
                 "a noise source is nondeterministic in this context".into(),
                 noise.span(),
             ),
+        }
+    }
+
+    fn validate_zi_freeze_array_element(
+        element: &ArrayLiteralElement,
+        operator: &str,
+        argument_index: usize,
+    ) -> CompileResult<()> {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::validate_zi_freeze_expression(expression, operator, argument_index)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::validate_zi_freeze_expression(&replication.count, operator, argument_index)?;
+                for element in &replication.elements {
+                    Self::validate_zi_freeze_array_element(element, operator, argument_index)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -6323,32 +6469,48 @@ impl SemanticAnalyzer {
 
         let constant_shape = self.resolve_parameter_array_default_shape(parameter);
         if let Some(initializer) = initializer {
-            if parameter.param_type != ParamType::String {
+            let replication = initializer.first_replication();
+            if let Some(replication) = replication {
                 let owner = format!("default of parameter array '{}'", parameter.name);
-                for element in &initializer.elements {
-                    self.validate_parameter_array_initializer_elements(
-                        element,
-                        parameter,
-                        &owner,
-                        parameter_index,
-                        parameters,
-                        parameter_indices,
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "{owner} uses replication; array-valued parameter replication is retained by the parser but is not yet supported by canonical execution"
+                    )),
+                    replication.span,
+                );
+            } else {
+                if parameter.param_type != ParamType::String {
+                    let owner = format!("default of parameter array '{}'", parameter.name);
+                    for element in &initializer.elements {
+                        let ArrayLiteralElement::Value(expression) = element else {
+                            unreachable!("replication was rejected before initializer validation");
+                        };
+                        self.validate_parameter_array_initializer_elements(
+                            expression,
+                            parameter,
+                            &owner,
+                            parameter_index,
+                            parameters,
+                            parameter_indices,
+                        );
+                    }
+                }
+
+                if let Some(shape) = constant_shape
+                    && let Err(detail) =
+                        Self::validate_parameter_array_initializer_shape(initializer, &shape, 0)
+                {
+                    self.record_error_at(
+                        SemanticErrorKind::TypeMismatch {
+                            expected: format!(
+                                "rectangular assignment pattern with shape {shape:?}"
+                            ),
+                            found: detail,
+                            context: format!("default of parameter array '{}'", parameter.name),
+                        },
+                        initializer.span,
                     );
                 }
-            }
-
-            if let Some(shape) = constant_shape
-                && let Err(detail) =
-                    Self::validate_parameter_array_initializer_shape(initializer, &shape, 0)
-            {
-                self.record_error_at(
-                    SemanticErrorKind::TypeMismatch {
-                        expected: format!("rectangular assignment pattern with shape {shape:?}"),
-                        found: detail,
-                        context: format!("default of parameter array '{}'", parameter.name),
-                    },
-                    initializer.span,
-                );
             }
         }
     }
@@ -6414,14 +6576,28 @@ impl SemanticAnalyzer {
     ) -> bool {
         if let Expression::ArrayLiteral(array) = expression {
             return array.elements.iter().fold(true, |valid, element| {
-                self.validate_parameter_array_initializer_elements(
-                    element,
-                    parameter,
-                    owner,
-                    parameter_index,
-                    parameters,
-                    parameter_indices,
-                ) && valid
+                let element_valid = match element {
+                    ArrayLiteralElement::Value(expression) => {
+                        self.validate_parameter_array_initializer_elements(
+                            expression,
+                            parameter,
+                            owner,
+                            parameter_index,
+                            parameters,
+                            parameter_indices,
+                        )
+                    }
+                    ArrayLiteralElement::Replication(replication) => {
+                        self.record_error_at(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "{owner} uses replication; array-valued parameter replication is retained by the parser but is not yet supported by canonical execution"
+                            )),
+                            replication.span,
+                        );
+                        false
+                    }
+                };
+                element_valid && valid
             });
         }
 
@@ -6492,13 +6668,19 @@ impl SemanticAnalyzer {
         let is_leaf = dimension + 1 == shape.len();
         for element in &initializer.elements {
             match (is_leaf, element) {
-                (true, Expression::ArrayLiteral(_)) => {
+                (_, ArrayLiteralElement::Replication(_)) => {
+                    return Err(format!(
+                        "dimension {} contains unsupported replication",
+                        dimension + 1
+                    ));
+                }
+                (true, ArrayLiteralElement::Value(Expression::ArrayLiteral(_))) => {
                     return Err(format!(
                         "dimension {} contains an unexpected nested pattern",
                         dimension + 1
                     ));
                 }
-                (false, Expression::ArrayLiteral(nested)) => {
+                (false, ArrayLiteralElement::Value(Expression::ArrayLiteral(nested))) => {
                     if !nested.assignment_pattern {
                         return Err(format!(
                             "dimension {} contains a concatenation instead of an assignment pattern",
@@ -6507,13 +6689,13 @@ impl SemanticAnalyzer {
                     }
                     Self::validate_parameter_array_initializer_shape(nested, shape, dimension + 1)?;
                 }
-                (false, _) => {
+                (false, ArrayLiteralElement::Value(_)) => {
                     return Err(format!(
                         "dimension {} contains a scalar before the final dimension",
                         dimension + 1
                     ));
                 }
-                (true, _) => {}
+                (true, ArrayLiteralElement::Value(_)) => {}
             }
         }
         Ok(())
@@ -6916,7 +7098,7 @@ impl SemanticAnalyzer {
             }
             Expression::ArrayLiteral(array) => {
                 for element in &array.elements {
-                    Self::collect_parameter_identifier_references(
+                    Self::collect_array_element_parameter_identifier_references(
                         element,
                         parameter_indices,
                         param_given_indices,
@@ -6930,6 +7112,40 @@ impl SemanticAnalyzer {
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => {}
+        }
+    }
+
+    fn collect_array_element_parameter_identifier_references<'a>(
+        element: &'a ArrayLiteralElement,
+        parameter_indices: &HashMap<SmolStr, usize>,
+        param_given_indices: &HashMap<String, (usize, SmolStr)>,
+        references: &mut Vec<(usize, SmolStr, Span)>,
+    ) {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::collect_parameter_identifier_references(
+                    expression,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::collect_parameter_identifier_references(
+                    &replication.count,
+                    parameter_indices,
+                    param_given_indices,
+                    references,
+                );
+                for element in &replication.elements {
+                    Self::collect_array_element_parameter_identifier_references(
+                        element,
+                        parameter_indices,
+                        param_given_indices,
+                        references,
+                    );
+                }
+            }
         }
     }
 
@@ -6965,10 +7181,28 @@ impl SemanticAnalyzer {
             Expression::ArrayLiteral(a) => a
                 .elements
                 .iter()
-                .any(|e| Self::references_identifiers(e, names)),
+                .any(|element| Self::array_element_references_identifiers(element, names)),
             Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn array_element_references_identifiers(
+        element: &ArrayLiteralElement,
+        names: &std::collections::HashSet<SmolStr>,
+    ) -> bool {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::references_identifiers(expression, names)
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::references_identifiers(&replication.count, names)
+                    || replication
+                        .elements
+                        .iter()
+                        .any(|element| Self::array_element_references_identifiers(element, names))
+            }
         }
     }
 
@@ -7052,7 +7286,7 @@ impl SemanticAnalyzer {
                     )
             }
             Expression::ArrayLiteral(array) => array.elements.iter().any(|element| {
-                Self::references_parameter_without_model_storage(
+                Self::array_element_references_parameter_without_model_storage(
                     element,
                     canonical_storage,
                     external_storage,
@@ -7064,6 +7298,35 @@ impl SemanticAnalyzer {
             | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
+        }
+    }
+
+    fn array_element_references_parameter_without_model_storage(
+        element: &ArrayLiteralElement,
+        canonical_storage: &std::collections::HashMap<SmolStr, bool>,
+        external_storage: &std::collections::HashMap<String, bool>,
+    ) -> bool {
+        match element {
+            ArrayLiteralElement::Value(expression) => {
+                Self::references_parameter_without_model_storage(
+                    expression,
+                    canonical_storage,
+                    external_storage,
+                )
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                Self::references_parameter_without_model_storage(
+                    &replication.count,
+                    canonical_storage,
+                    external_storage,
+                ) || replication.elements.iter().any(|element| {
+                    Self::array_element_references_parameter_without_model_storage(
+                        element,
+                        canonical_storage,
+                        external_storage,
+                    )
+                })
+            }
         }
     }
 

@@ -484,6 +484,24 @@ fn parameter_array_defaults_require_exact_rectangular_shape_when_bounds_resolve(
 }
 
 #[test]
+fn parameter_array_replication_fails_closed_without_expansion() {
+    let error = analyze(&module_src(
+        r#"
+            parameter real taps[0:0] = '{5{0.0}};
+            analog I(p, n) <+ V(p, n);
+            "#,
+    ))
+    .expect_err("unsupported parameter-array replication must fail")
+    .to_string();
+
+    assert!(
+        error.contains("array-valued parameter replication")
+            || error.contains("contains unsupported replication"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
 fn parameter_array_shape_uses_transitive_declared_defaults() {
     let error = analyze(&module_src(
         r#"

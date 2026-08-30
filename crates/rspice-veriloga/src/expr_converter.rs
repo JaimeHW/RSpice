@@ -8,8 +8,8 @@
 //! - Analog operator translation (ddt, idt, limexp)
 
 use crate::ast::{
-    AnalogOperator, BinaryOp, BranchAccess, CallExpr, Expression, Identifier, NumberLit,
-    SystemFunction,
+    AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, CallExpr, Expression, Identifier,
+    NumberLit, SystemFunction,
 };
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
 use crate::ir::{BranchRef, IrExpr, IrFunction};
@@ -1431,7 +1431,21 @@ impl<'a> ExprConverter<'a> {
     /// Evaluate an array-literal argument to constant reals
     fn const_real_array(&self, expr: &Expression) -> CompileResult<Vec<f64>> {
         let elements: Vec<&Expression> = match expr {
-            Expression::ArrayLiteral(arr) => arr.elements.iter().collect(),
+            Expression::ArrayLiteral(arr) => arr
+                .elements
+                .iter()
+                .map(|element| match element {
+                    ArrayLiteralElement::Value(expression) => Ok(expression),
+                    ArrayLiteralElement::Replication(replication) => Err(CodeGenError::with_span(
+                        CodeGenErrorKind::UnsupportedFeature(
+                            "replication in analog filter coefficient lists is not yet supported; write coefficients explicitly within the operand limit"
+                                .into(),
+                        ),
+                        replication.span,
+                    )
+                    .into()),
+                })
+                .collect::<CompileResult<Vec<_>>>()?,
             other => vec![other],
         };
 
@@ -1509,7 +1523,21 @@ impl<'a> ExprConverter<'a> {
             .into());
         }
         let elements: Vec<&Expression> = match expression {
-            Expression::ArrayLiteral(array) => array.elements.iter().collect(),
+            Expression::ArrayLiteral(array) => array
+                .elements
+                .iter()
+                .map(|element| match element {
+                    ArrayLiteralElement::Value(expression) => Ok(expression),
+                    ArrayLiteralElement::Replication(replication) => Err(CodeGenError::with_span(
+                        CodeGenErrorKind::UnsupportedFeature(
+                            "replication in analog filter coefficient lists is not yet supported; write coefficients explicitly within the operand limit"
+                                .into(),
+                        ),
+                        replication.span,
+                    )
+                    .into()),
+                })
+                .collect::<CompileResult<Vec<_>>>()?,
             other => vec![other],
         };
         elements

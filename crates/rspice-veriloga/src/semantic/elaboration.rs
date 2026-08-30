@@ -13,9 +13,9 @@ use super::{
     SemanticAnalyzer,
 };
 use crate::ast::{
-    AnalogOperator, ArrayAccessExpr, ArrayLiteralExpr, BinaryExpr, BranchAccess, CallExpr,
-    ConditionalExpr, Connection, Expression, Identifier, Item, LaplaceKind, Module, ModuleInstance,
-    NoiseSource, NumberLit, SystemFunction, UnaryExpr, ZiKind,
+    AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
+    BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item, LaplaceKind,
+    Module, ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, ZiKind,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -1142,11 +1142,31 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
             index: Box::new(rewrite_expression(&access.index, scope)?),
             span: access.span,
         }),
-        Expression::ArrayLiteral(array) => Expression::ArrayLiteral(ArrayLiteralExpr {
-            elements: rewrite_expressions(&array.elements, scope)?,
-            assignment_pattern: array.assignment_pattern,
-            span: array.span,
-        }),
+        Expression::ArrayLiteral(array) => {
+            if let Some(replication) = array.first_replication() {
+                return Err(semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(
+                        "replication is retained by the parser but hierarchical elaboration does not yet support it; write the elements explicitly"
+                            .into(),
+                    ),
+                    replication.span,
+                ));
+            }
+            Expression::ArrayLiteral(ArrayLiteralExpr {
+                elements: array
+                    .elements
+                    .iter()
+                    .map(|element| {
+                        let ArrayLiteralElement::Value(expression) = element else {
+                            unreachable!("replication was rejected before elaboration");
+                        };
+                        rewrite_expression(expression, scope).map(ArrayLiteralElement::Value)
+                    })
+                    .collect::<CompileResult<Vec<_>>>()?,
+                assignment_pattern: array.assignment_pattern,
+                span: array.span,
+            })
+        }
         Expression::AnalogOperator(operator) => {
             Expression::AnalogOperator(rewrite_analog_operator(operator, scope)?)
         }

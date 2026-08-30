@@ -17,8 +17,8 @@ use smol_str::SmolStr;
 use std::collections::HashSet;
 
 use crate::ast::{
-    AnalogOperator, BranchAccess, CrossDirection, Expression, LaplaceKind, LimiterArgument,
-    NoiseSource, PortDirection, ZiKind,
+    AnalogOperator, ArrayLiteralElement, BranchAccess, CrossDirection, Expression, LaplaceKind,
+    LimiterArgument, NoiseSource, PortDirection, ZiKind,
 };
 use crate::semantic::{AnalyzedModule, AnalyzedRegion, AnalyzedStatement, ParameterScope};
 use crate::types::{ParameterRange, ValueType};
@@ -2052,7 +2052,17 @@ impl HirLowerer {
                 index: self.lower_expr(&array.index).id,
             },
             Expression::ArrayLiteral(array) => HirExprKind::ArrayLiteral {
-                elements: self.lower_expr_ids(&array.elements),
+                elements: array
+                    .elements
+                    .iter()
+                    .map(|element| match element {
+                        ArrayLiteralElement::Value(expression) => self.lower_expr(expression).id,
+                        ArrayLiteralElement::Replication(replication) => panic!(
+                            "semantic invariant violated: unsupported replication at source offset {} reached canonical HIR lowering",
+                            replication.span.start
+                        ),
+                    })
+                    .collect(),
                 assignment_pattern: array.assignment_pattern,
             },
             Expression::AnalogOperator(operator) => self.lower_analog_operator(operator),
