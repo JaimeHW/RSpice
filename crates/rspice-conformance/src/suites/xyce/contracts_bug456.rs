@@ -341,7 +341,9 @@ impl Bug456Role {
         matches!(
             (self.case, self.member),
             (
-                Bug456Case::ConverterUnpacked | Bug456Case::SimpleUnpacked,
+                Bug456Case::ConverterUnpacked
+                    | Bug456Case::ConverterOutput
+                    | Bug456Case::SimpleUnpacked,
                 Bug456Member::Owner
             )
         )
