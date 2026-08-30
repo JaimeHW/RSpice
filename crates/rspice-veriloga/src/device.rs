@@ -197,20 +197,109 @@ impl std::error::Error for ParameterValueError {}
 /// image for artifacts produced by one compiler build, but the pair costs
 /// nothing and keeps the key honest if that ever stops being true.
 #[cfg(feature = "native")]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 enum NativeCompileCacheKey {
     /// Internal bytecode-native contract-test cache lane. Production native
-    /// construction must compile through `CanonicalMir`.
+    /// construction must compile through `CanonicalMir`. Bytecode compilation
+    /// is tied to the lifetime of the bytecode model allocation because that
+    /// lane has no canonical artifact whose digest independently authenticates
+    /// the complete compiler input.
     #[cfg(feature = "native-bytecode-contract-tests")]
     Bytecode {
         source_digest: SmolStr,
         module: SmolStr,
+        owner: std::sync::Weak<CompiledModel>,
     },
     CanonicalMir {
         mir_digest: SmolStr,
         source_digest: SmolStr,
         module: SmolStr,
     },
+}
+
+#[cfg(feature = "native")]
+impl PartialEq for NativeCompileCacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            #[cfg(feature = "native-bytecode-contract-tests")]
+            (
+                Self::Bytecode {
+                    source_digest: left_source,
+                    module: left_module,
+                    ..
+                },
+                Self::Bytecode {
+                    source_digest: right_source,
+                    module: right_module,
+                    ..
+                },
+            ) => left_source == right_source && left_module == right_module,
+            (
+                Self::CanonicalMir {
+                    mir_digest: left_mir,
+                    source_digest: left_source,
+                    module: left_module,
+                },
+                Self::CanonicalMir {
+                    mir_digest: right_mir,
+                    source_digest: right_source,
+                    module: right_module,
+                },
+            ) => {
+                left_mir == right_mir && left_source == right_source && left_module == right_module
+            }
+            #[cfg(feature = "native-bytecode-contract-tests")]
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+impl Eq for NativeCompileCacheKey {}
+
+/// Lifetime contract for a cached native image.
+///
+/// Canonical MIR authenticates every compiler input, so its images are
+/// process-persistent and reusable across separately allocated runtime models.
+/// The internal bytecode lane has no such artifact and is allocation-scoped:
+/// its image and cached failures remain valid only while that exact
+/// `CompiledModel` allocation is alive.
+#[cfg(feature = "native")]
+enum NativeCompileCacheRetention {
+    Persistent,
+    #[cfg(feature = "native-bytecode-contract-tests")]
+    Model(std::sync::Weak<CompiledModel>),
+}
+
+#[cfg(feature = "native")]
+impl NativeCompileCacheRetention {
+    fn for_key(key: &NativeCompileCacheKey) -> Self {
+        match key {
+            #[cfg(feature = "native-bytecode-contract-tests")]
+            NativeCompileCacheKey::Bytecode { owner, .. } => Self::Model(owner.clone()),
+            NativeCompileCacheKey::CanonicalMir { .. } => Self::Persistent,
+        }
+    }
+
+    fn is_dropped(&self) -> bool {
+        match self {
+            Self::Persistent => false,
+            #[cfg(feature = "native-bytecode-contract-tests")]
+            Self::Model(owner) => owner.strong_count() == 0,
+        }
+    }
+
+    fn matches_key(&self, key: &NativeCompileCacheKey) -> bool {
+        match (self, key) {
+            (Self::Persistent, NativeCompileCacheKey::CanonicalMir { .. }) => true,
+            #[cfg(feature = "native-bytecode-contract-tests")]
+            (Self::Model(retained), NativeCompileCacheKey::Bytecode { owner, .. }) => {
+                std::sync::Weak::ptr_eq(retained, owner)
+            }
+            #[cfg(feature = "native-bytecode-contract-tests")]
+            _ => false,
+        }
+    }
 }
 
 /// Content identity of one browser-side compilation, matching
@@ -257,6 +346,7 @@ pub(crate) fn native_compile_count(module: &str) -> usize {
 #[cfg(feature = "native")]
 struct NativeCompileCacheEntry {
     key: NativeCompileCacheKey,
+    retention: NativeCompileCacheRetention,
     compiled: Result<std::sync::Arc<NativeModel>, String>,
     image_bytes: usize,
 }
@@ -283,10 +373,15 @@ impl NativeCompileCache {
         &mut self,
         key: &NativeCompileCacheKey,
     ) -> Option<Result<std::sync::Arc<NativeModel>, String>> {
-        let index = self.entries.iter().position(|entry| entry.key == *key)?;
+        self.prune_dropped_bytecode_owners();
+        let index = self
+            .entries
+            .iter()
+            .position(|entry| entry.key == *key && entry.retention.matches_key(key))?;
         let entry = self.entries.remove(index);
         let compiled = entry.compiled.clone();
         self.entries.insert(0, entry);
+        self.debug_assert_image_bytes();
         Some(compiled)
     }
 
@@ -295,6 +390,8 @@ impl NativeCompileCache {
         key: NativeCompileCacheKey,
         compiled: Result<std::sync::Arc<NativeModel>, String>,
     ) {
+        self.prune_dropped_bytecode_owners();
+        let retention = NativeCompileCacheRetention::for_key(&key);
         let image_bytes = compiled
             .as_ref()
             .map_or(0, |native| native.code_size_bytes());
@@ -302,12 +399,51 @@ impl NativeCompileCache {
             0,
             NativeCompileCacheEntry {
                 key,
+                retention,
                 compiled,
                 image_bytes,
             },
         );
-        self.image_bytes = self.image_bytes.saturating_add(image_bytes);
+        self.image_bytes = self
+            .image_bytes
+            .checked_add(image_bytes)
+            .expect("native compile cache image accounting exceeds addressable memory");
         self.evict_to(Self::max_bytes());
+        self.debug_assert_image_bytes();
+    }
+
+    /// Remove test-lane images after their bytecode model allocation has been
+    /// dropped. Canonical MIR entries deliberately have no owner and remain
+    /// reusable across model allocations and engine rebuilds.
+    fn prune_dropped_bytecode_owners(&mut self) {
+        let mut index = 0;
+        while index < self.entries.len() {
+            if self.entries[index].retention.is_dropped() {
+                let evicted = self.entries.remove(index);
+                self.image_bytes = self
+                    .image_bytes
+                    .checked_sub(evicted.image_bytes)
+                    .expect("native compile cache image accounting underflowed while pruning");
+            } else {
+                index += 1;
+            }
+        }
+        self.debug_assert_image_bytes();
+    }
+
+    fn debug_assert_image_bytes(&self) {
+        #[cfg(debug_assertions)]
+        {
+            let accounted = self.entries.iter().fold(0usize, |total, entry| {
+                total
+                    .checked_add(entry.image_bytes)
+                    .expect("native compile cache entry sizes exceed addressable memory")
+            });
+            debug_assert_eq!(
+                self.image_bytes, accounted,
+                "native compile cache executable-image accounting drifted"
+            );
+        }
     }
 
     /// Drop least-recently-used images until the budget is met, always keeping
@@ -318,7 +454,10 @@ impl NativeCompileCache {
             let Some(evicted) = self.entries.pop() else {
                 break;
             };
-            self.image_bytes = self.image_bytes.saturating_sub(evicted.image_bytes);
+            self.image_bytes = self
+                .image_bytes
+                .checked_sub(evicted.image_bytes)
+                .expect("native compile cache image accounting underflowed while evicting");
         }
     }
 }
@@ -1159,6 +1298,7 @@ impl VerilogADevice {
         let cache_key = NativeCompileCacheKey::Bytecode {
             source_digest: model.source_digest.clone(),
             module: model.name.clone(),
+            owner: std::sync::Arc::downgrade(model),
         };
         Self::try_native_compile_cached(model, cache_key, |model| {
             crate::native::compile_native(model)
