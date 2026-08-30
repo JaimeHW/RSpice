@@ -3549,9 +3549,7 @@ endmodule
         device.set_time(time);
         device.update_voltages(&[voltage]);
         assert_eq!(
-            device
-                .try_evaluate()
-                .expect("zero-delay native evaluation")[0],
+            device.try_evaluate().expect("zero-delay native evaluation")[0],
             voltage
         );
         device.advance_state();
