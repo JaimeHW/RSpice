@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use rspice_core::engine::ConvergenceConfig;
 use rspice_core::engine::{
-    Engine, SimulationConfig, SpiceDialect, TransientCheckpoint, TransientStartupMode,
+    Engine, SimulationConfig, SpiceDialect, TransientCheckpoint, TransientCheckpointEncoding,
+    TransientStartupMode,
 };
 use rspice_core::netlist::Netlist;
 use rspice_core::numerics::integration::{IntegrationMethod, TransientErrorControl};
@@ -493,10 +494,18 @@ fn xyce_scheduled_checkpoint_restores_the_post_breakpoint_step_proposal() {
         .expect("continuation carries its effective controller maximum")
         .parse::<f64>()
         .expect("effective controller maximum is numeric");
+    let analysis_first_step_pending = continuation
+        .next()
+        .expect("continuation carries the global analysis phase");
+    let breakpoint_restart_pending = continuation
+        .next()
+        .expect("continuation carries the breakpoint-restart phase");
     assert!(continuation.next().is_none());
     assert!(proposal.is_finite() && proposal > 0.0);
     assert!(span_ceiling.is_finite() && span_ceiling > 0.0);
     assert!(controller_max_step.is_finite() && controller_max_step > 0.0);
+    assert_eq!(analysis_first_step_pending, "0");
+    assert_eq!(breakpoint_restart_pending, "0");
     assert!(proposal <= controller_max_step);
     assert_ne!(
         proposal.to_bits(),
@@ -518,6 +527,92 @@ fn xyce_scheduled_checkpoint_restores_the_post_breakpoint_step_proposal() {
         (checkpoint.time + proposal).to_bits(),
         "resume must use the post-accept proposal rather than recomputing startup sizing"
     );
+}
+
+#[test]
+fn xyce_source_breakpoint_checkpoint_restores_the_global_controller_phase() {
+    let netlist = Netlist::parse(
+        "source-breakpoint checkpoint preserves Xyce controller phase\n\
+         .tran 0 50u\n\
+         V1 in 0 pulse(0 1 0 1u 1u 5u 10u)\n\
+         R1 in 0 1k\n\
+         .end\n",
+    )
+    .expect("source-breakpoint continuation deck parses");
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: 1200,
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::TrapGear,
+        transient_error_control: TransientErrorControl::LocalTruncation,
+        transient_initial_timestep: Some(1.0e-10),
+        ..Default::default()
+    });
+    let seam = 21.0e-6;
+    let stop = 50.0e-6;
+    let max_step = 5.0e-6;
+    let (full, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            stop,
+            max_step,
+            TransientStartupMode::OperatingPoint,
+            &[seam, stop],
+        )
+        .expect("continuous source-breakpoint run completes");
+    let source_checkpoint = &scheduled
+        .first()
+        .expect("source-breakpoint checkpoint is captured")
+        .checkpoint;
+    let baseline_index = full
+        .time
+        .iter()
+        .position(|time| time.to_bits() == source_checkpoint.time.to_bits())
+        .expect("source checkpoint is an accepted baseline point");
+    let expected = full
+        .time
+        .get(baseline_index..baseline_index + 3)
+        .expect("baseline has two accepted intervals after the source breakpoint");
+    let checkpoint_text = source_checkpoint.to_text();
+    let continuation = checkpoint_text
+        .lines()
+        .find_map(|line| line.strip_prefix("integration_continuation proposed "))
+        .expect("source breakpoint carries an in-flight proposal")
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    assert_eq!(continuation.len(), 5);
+    assert_eq!(continuation[3], "0", "the global first step is complete");
+    assert_eq!(
+        continuation[4], "1",
+        "the first departure from the source breakpoint remains pending"
+    );
+
+    for encoding in [
+        TransientCheckpointEncoding::Unpacked,
+        TransientCheckpointEncoding::Packed,
+    ] {
+        let encoded = source_checkpoint
+            .to_bytes(encoding)
+            .unwrap_or_else(|error| panic!("{encoding:?} checkpoint encodes: {error}"));
+        let checkpoint = TransientCheckpoint::from_bytes(&encoded)
+            .unwrap_or_else(|error| panic!("{encoding:?} checkpoint decodes: {error}"));
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, stop, max_step)
+            .unwrap_or_else(|error| panic!("{encoding:?} checkpoint resumes: {error}"));
+        assert!(
+            resumed.time.len() >= 3,
+            "{encoding:?} resume must accept two intervals after the seam"
+        );
+        for (offset, (&actual, &baseline)) in resumed.time[..3].iter().zip(expected).enumerate() {
+            assert_eq!(
+                actual.to_bits(),
+                baseline.to_bits(),
+                "{encoding:?} accepted grid differs at source-breakpoint suffix row {offset}: baseline={baseline:.17e}, resumed={actual:.17e}"
+            );
+        }
+    }
 }
 
 /// A restart may widen its own maximum step. The captured cap bounded the

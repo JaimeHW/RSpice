@@ -325,6 +325,7 @@ pub use self::{
         xyce_restart_schedule_is_due,
     },
 };
+use checkpoint::ProposedIntegrationContinuation;
 pub(crate) use checkpoint::{
     netlist_checkpoint_identity, restart_checkpoint_identity, simulation_checkpoint_identity,
 };
@@ -2289,7 +2290,7 @@ impl Engine {
         circuit: &crate::circuit::CircuitData,
         startup_mode: TransientStartupMode,
         integration_max_step: Value,
-        integration_continuation: Option<(Value, Option<Value>, Value)>,
+        integration_continuation: Option<ProposedIntegrationContinuation>,
         integration_stop_time: Value,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
@@ -2400,7 +2401,7 @@ impl Engine {
         let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
-        let resume_next_step = if let Some(checkpoint) = resume {
+        let resume_continuation = if let Some(checkpoint) = resume {
             match resume_validation {
                 ResumeValidation::ExactNetlist => {
                     checkpoint.validate_for_with_config(checkpoint_netlist, &self.config)
@@ -2879,8 +2880,8 @@ impl Engine {
                     )
                 })
         };
-        let initial_step = resume_next_step
-            .map(|(next_step, _, _)| next_step)
+        let initial_step = resume_continuation
+            .map(|continuation| continuation.next_step)
             .unwrap_or(fresh_initial_step);
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
@@ -2898,9 +2899,9 @@ impl Engine {
             self.config
                 .effective_transient_min_steps_between_breakpoints(),
         );
-        let startup_span_ceiling = if let Some((_, saved_ceiling, _)) = resume_next_step {
+        let startup_span_ceiling = if let Some(continuation) = resume_continuation {
             xyce_breakpoint_span_ceiling
-                .restore_active_ceiling(saved_ceiling)
+                .restore_active_ceiling(continuation.breakpoint_span_ceiling)
                 .map_err(SimulationError::Circuit)?
         } else {
             xyce_breakpoint_span_ceiling.anchor(
@@ -2923,8 +2924,8 @@ impl Engine {
         // that ordering would instead lower the floor at an arbitrary seam.
         // Applying the current raw cap second also preserves Xyce's contract
         // that an extended restart may select its own per-run maximum step.
-        let startup_controller_max_dt = resume_next_step
-            .map(|(_, _, controller_max_step)| controller_max_step)
+        let startup_controller_max_dt = resume_continuation
+            .map(|continuation| continuation.controller_max_step)
             .unwrap_or(startup_raw_max_dt);
         let mut timestep = TimestepController::new_with_preferred_min(
             initial_step,
@@ -2932,7 +2933,7 @@ impl Engine {
             preferred_min_dt,
             startup_controller_max_dt,
         );
-        if resume_next_step.is_some() {
+        if resume_continuation.is_some() {
             timestep.set_max_dt(startup_raw_max_dt);
         }
         let mut dynamic_tline_breakpoints_added = resume
@@ -2973,7 +2974,22 @@ impl Engine {
         let mut livelock_streak = 0_usize;
         let mut livelock_last_restart_t: Option<Value> = None;
         let mut lte_warmup_skips = 0_u8;
-        let mut xyce_lte_restart_first_step = false;
+        // Xyce's global first-step phase and its first interval after a
+        // breakpoint are separate controller states. A resumed result segment
+        // always starts with one stored point, so its local length cannot
+        // reconstruct either state.
+        let mut analysis_first_step_pending = resume_continuation.map_or_else(
+            || resume.is_none() || resume_time.to_bits() == 0.0_f64.to_bits(),
+            |continuation| continuation.analysis_first_step_pending,
+        );
+        let mut xyce_lte_restart_first_step = resume_continuation.map_or_else(
+            || {
+                resume.is_some()
+                    && resume_time.to_bits() != 0.0_f64.to_bits()
+                    && lte_estimator.uses_accepted_solution_reference()
+            },
+            |continuation| continuation.xyce_breakpoint_restart_pending,
+        );
 
         // Integration method selection:
         // - TrapGear => adaptive trap/gear switching
@@ -3529,11 +3545,13 @@ impl Engine {
             &circuit,
             startup_mode,
             max_step,
-            Some((
-                timestep.dt(),
-                xyce_breakpoint_span_ceiling.ceiling(),
-                timestep.max_dt(),
-            )),
+            Some(ProposedIntegrationContinuation {
+                next_step: timestep.dt(),
+                breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                controller_max_step: timestep.max_dt(),
+                analysis_first_step_pending,
+                xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+            }),
             tstop,
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
@@ -4192,7 +4210,7 @@ impl Engine {
             let suppress_gate_charge = false;
             let classic_mos_truncation_context = if classic_mos_stamp_cache.is_some()
                 && Self::uses_ngspice_charge_truncation(&lte_estimator)
-                && !Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
+                && !analysis_first_step_pending
                 && lte_warmup_skips == 0
                 && !suppress_gate_charge
                 && !truncation::lte_debug_enabled()
@@ -5738,12 +5756,11 @@ impl Engine {
 
             total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
             let truncation_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
-            let first_accepted_transient_step =
-                Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
-                    // Post-livelock-restart warmup: the re-seeded histories
-                    // need two clean accepted points before the truncation
-                    // estimators can difference them meaningfully.
-                    || lte_warmup_skips > 0;
+            let first_accepted_transient_step = analysis_first_step_pending
+                // Post-livelock-restart warmup: the re-seeded histories need
+                // two clean accepted points before the truncation estimators
+                // can difference them meaningfully.
+                || lte_warmup_skips > 0;
             // Xyce OneStep/Gear12 uses ck*WRMS(x_candidate-x_predictor) as
             // its sole compact-device LTE authority.  Its DAE-Q norm is
             // calculated for diagnostics but is not returned by
@@ -6888,6 +6905,10 @@ impl Engine {
                     ) {
                         trap_order = 1;
                     }
+                    analysis_first_step_pending = false;
+                    if xyce_lte_restart_first_step && !hit_breakpoint {
+                        xyce_lte_restart_first_step = false;
+                    }
                     livelock_check!(dt);
                     self.capture_scheduled_checkpoint_if_due(
                         scheduled_checkpoint_times,
@@ -6901,11 +6922,13 @@ impl Engine {
                         &circuit,
                         startup_mode,
                         max_step,
-                        Some((
-                            timestep.dt(),
-                            xyce_breakpoint_span_ceiling.ceiling(),
-                            timestep.max_dt(),
-                        )),
+                        Some(ProposedIntegrationContinuation {
+                            next_step: timestep.dt(),
+                            breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                            controller_max_step: timestep.max_dt(),
+                            analysis_first_step_pending,
+                            xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                        }),
                         tstop,
                         &pending_dynamic_tline_breakpoints,
                         dynamic_tline_breakpoints_added,
@@ -7399,6 +7422,7 @@ impl Engine {
 
             lte_estimator.set_method_order(effective_method_order(current_method, trap_order));
 
+            analysis_first_step_pending = false;
             if xyce_lte_restart_first_step && !hit_breakpoint {
                 xyce_lte_restart_first_step = false;
             }
@@ -7417,11 +7441,13 @@ impl Engine {
                 &circuit,
                 startup_mode,
                 max_step,
-                Some((
-                    timestep.dt(),
-                    xyce_breakpoint_span_ceiling.ceiling(),
-                    timestep.max_dt(),
-                )),
+                Some(ProposedIntegrationContinuation {
+                    next_step: timestep.dt(),
+                    breakpoint_span_ceiling: xyce_breakpoint_span_ceiling.ceiling(),
+                    controller_max_step: timestep.max_dt(),
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending: xyce_lte_restart_first_step,
+                }),
                 tstop,
                 &pending_dynamic_tline_breakpoints,
                 dynamic_tline_breakpoints_added,

@@ -116,15 +116,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn should_skip_post_accept_timestep_control_on_first_step(
-        accepted_point_count_before_push: usize,
-    ) -> bool {
-        // ngspice accepts the first transient point without any post-accept
-        // truncation/LTE check, then retries the same delta on the next step.
-        accepted_point_count_before_push <= 1
-    }
-
-    #[inline]
     pub(super) fn force_accept_recovery_timestep(
         dt: Value,
         preferred_min_dt: Value,

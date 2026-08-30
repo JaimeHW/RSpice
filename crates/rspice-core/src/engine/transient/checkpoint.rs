@@ -5,8 +5,9 @@
 //! histories. Restoring injects that state into a freshly built circuit and
 //! continues integration from the checkpoint time with absolute-time source
 //! evaluation. Current files also retain the post-accept next-step proposal,
-//! its active Xyce breakpoint-span ceiling, and its effective controller
-//! maximum; legacy continuation state fails closed rather than silently
+//! its active Xyce breakpoint-span ceiling, its effective controller maximum,
+//! and the accepted analysis/restart phase controls that govern the next
+//! interval; legacy continuation state fails closed rather than silently
 //! reconstructing different controls.
 //!
 //! Scope, stated precisely: accepted linear-reactive histories, ordinary
@@ -51,11 +52,13 @@ use super::TransientStartupMode;
 /// Version 17 adds accepted runtime-compiled Verilog-A VM/operator state on
 /// top of version 16's active Xyce breakpoint-span ceiling and effective
 /// controller maximum to the accepted integrator's next-step proposal.
-/// Earlier files remain readable, but their incomplete in-flight continuation
-/// or runtime operator state fails closed rather than being reconstructed at
-/// an arbitrary seam.
-const FORMAT_VERSION: u32 = 17;
+/// Version 18 adds Xyce's global first-step and beginning-integration controls
+/// to the accepted integrator's next-step proposal. Earlier files remain
+/// readable, but their incomplete in-flight continuation state fails closed
+/// rather than reconstructing analysis phase from a new output segment.
+const FORMAT_VERSION: u32 = 18;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
+const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -79,7 +82,8 @@ pub enum TransientCheckpointEncoding {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum IntegrationContinuation {
-    /// Versions 1-14 never recorded the post-accept proposal.
+    /// Legacy formats omitted or incompletely recorded the accepted
+    /// controller state, so in-flight resume must fail closed.
     Unavailable,
     /// Authenticated PSS/HB state at exact +0 before a transient controller
     /// has proposed its first interval.
@@ -94,7 +98,19 @@ enum IntegrationContinuation {
         next_step: Value,
         breakpoint_span_ceiling: Option<Value>,
         controller_max_step: Value,
+        analysis_first_step_pending: bool,
+        xyce_breakpoint_restart_pending: bool,
     },
+}
+
+/// Authenticated controls for continuing from an accepted in-flight point.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ProposedIntegrationContinuation {
+    pub next_step: Value,
+    pub breakpoint_span_ceiling: Option<Value>,
+    pub controller_max_step: Value,
+    pub analysis_first_step_pending: bool,
+    pub xyce_breakpoint_restart_pending: bool,
 }
 
 /// Snapshot of transient-integration state at an accepted time point.
@@ -1486,6 +1502,7 @@ impl TransientCheckpoint {
                 next_step,
                 breakpoint_span_ceiling,
                 controller_max_step,
+                ..
             } if next_step.is_finite()
                 && next_step > 0.0
                 && breakpoint_span_ceiling
@@ -1762,7 +1779,7 @@ impl TransientCheckpoint {
     }
 
     /// Capture transient state together with the authored-restart identity.
-    pub(crate) fn capture_with_restart_identity(
+    pub(super) fn capture_with_restart_identity(
         fingerprint: u64,
         netlist_identity: Option<String>,
         restart_identity: Option<String>,
@@ -1772,7 +1789,7 @@ impl TransientCheckpoint {
         circuit: &CircuitData,
         startup_mode: TransientStartupMode,
         integration_max_step: Option<Value>,
-        integration_continuation: Option<(Value, Option<Value>, Value)>,
+        integration_continuation: Option<ProposedIntegrationContinuation>,
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
         lte_estimator: Option<&LteEstimator>,
@@ -1851,12 +1868,12 @@ impl TransientCheckpoint {
                         IntegrationContinuation::BreakpointRestart
                     }
                 },
-                |(next_step, breakpoint_span_ceiling, controller_max_step)| {
-                    IntegrationContinuation::Proposed {
-                        next_step,
-                        breakpoint_span_ceiling,
-                        controller_max_step,
-                    }
+                |continuation| IntegrationContinuation::Proposed {
+                    next_step: continuation.next_step,
+                    breakpoint_span_ceiling: continuation.breakpoint_span_ceiling,
+                    controller_max_step: continuation.controller_max_step,
+                    analysis_first_step_pending: continuation.analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending: continuation.xyce_breakpoint_restart_pending,
                 },
             ),
             pending_tline_arrivals,
@@ -2262,21 +2279,25 @@ impl TransientCheckpoint {
 
     /// Return the authenticated proposal for the first interval after this
     /// accepted point. Synthetic origins and deliberate endpoint breakpoint
-    /// restarts legitimately request fresh startup sizing; legacy state is
-    /// distinguishable and fails closed.
-    pub(crate) fn validated_integration_continuation(
+    /// restarts legitimately request fresh startup sizing; incomplete legacy
+    /// state is distinguishable and fails closed.
+    pub(super) fn validated_integration_continuation(
         &self,
-    ) -> Result<Option<(Value, Option<Value>, Value)>, String> {
+    ) -> Result<Option<ProposedIntegrationContinuation>, String> {
         match self.integration_continuation {
             IntegrationContinuation::Proposed {
                 next_step,
                 breakpoint_span_ceiling,
                 controller_max_step,
-            } => Ok(Some((
+                analysis_first_step_pending,
+                xyce_breakpoint_restart_pending,
+            } => Ok(Some(ProposedIntegrationContinuation {
                 next_step,
                 breakpoint_span_ceiling,
                 controller_max_step,
-            ))),
+                analysis_first_step_pending,
+                xyce_breakpoint_restart_pending,
+            })),
             IntegrationContinuation::SyntheticOrigin
             | IntegrationContinuation::BreakpointRestart => Ok(None),
             IntegrationContinuation::Unavailable => Err(
@@ -2348,7 +2369,7 @@ impl TransientCheckpoint {
     /// valid.
     pub(crate) fn retained_value_count(&self) -> usize {
         let mut count = 7_usize
-            .saturating_add(2_usize.saturating_mul(usize::from(matches!(
+            .saturating_add(4_usize.saturating_mul(usize::from(matches!(
                 self.integration_continuation,
                 IntegrationContinuation::Proposed { .. }
             ))))
@@ -2460,10 +2481,14 @@ impl TransientCheckpoint {
                     next_step,
                     breakpoint_span_ceiling,
                     controller_max_step,
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending,
                 } => format!(
-                    "proposed {next_step} {} {controller_max_step}",
+                    "proposed {next_step} {} {controller_max_step} {} {}",
                     breakpoint_span_ceiling
-                        .map_or_else(|| "none".to_string(), |value| value.to_string())
+                        .map_or_else(|| "none".to_string(), |value| value.to_string()),
+                    u8::from(analysis_first_step_pending),
+                    u8::from(xyce_breakpoint_restart_pending),
                 ),
             }
         ));
@@ -2852,7 +2877,54 @@ impl TransientCheckpoint {
                 None
             };
 
-        let integration_continuation = if version >= 16 {
+        let integration_continuation = if version >= CONTROLLER_PHASE_FORMAT_VERSION {
+            let line = lines
+                .next()
+                .ok_or_else(|| "missing integration continuation line".to_string())?;
+            let field = line
+                .strip_prefix("integration_continuation ")
+                .map(str::trim)
+                .ok_or_else(|| format!("malformed integration continuation line: '{line}'"))?;
+            let fields = field.split_whitespace().collect::<Vec<_>>();
+            match fields.as_slice() {
+                ["unavailable"] => IntegrationContinuation::Unavailable,
+                ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
+                ["breakpoint-restart"] => IntegrationContinuation::BreakpointRestart,
+                [
+                    "proposed",
+                    next_step,
+                    ceiling,
+                    controller_max_step,
+                    analysis_first_step_pending,
+                    xyce_breakpoint_restart_pending,
+                ] => IntegrationContinuation::Proposed {
+                    next_step: next_step.parse::<Value>().map_err(|_| {
+                        format!("malformed integration continuation line: '{line}'")
+                    })?,
+                    breakpoint_span_ceiling: if *ceiling == "none" {
+                        None
+                    } else {
+                        Some(ceiling.parse::<Value>().map_err(|_| {
+                            format!("malformed integration continuation line: '{line}'")
+                        })?)
+                    },
+                    controller_max_step: controller_max_step.parse::<Value>().map_err(|_| {
+                        format!("malformed integration continuation line: '{line}'")
+                    })?,
+                    analysis_first_step_pending: parse_checkpoint_bool(
+                        analysis_first_step_pending,
+                        "integration continuation analysis-first-step field",
+                    )?,
+                    xyce_breakpoint_restart_pending: parse_checkpoint_bool(
+                        xyce_breakpoint_restart_pending,
+                        "integration continuation breakpoint-restart field",
+                    )?,
+                },
+                _ => {
+                    return Err(format!("malformed integration continuation line: '{line}'"));
+                }
+            }
+        } else if version == 16 {
             let line = lines
                 .next()
                 .ok_or_else(|| "missing integration continuation line".to_string())?;
@@ -2866,21 +2938,20 @@ impl TransientCheckpoint {
                 ["synthetic-origin"] => IntegrationContinuation::SyntheticOrigin,
                 ["breakpoint-restart"] => IntegrationContinuation::BreakpointRestart,
                 ["proposed", next_step, ceiling, controller_max_step] => {
-                    IntegrationContinuation::Proposed {
-                        next_step: next_step.parse::<Value>().map_err(|_| {
+                    next_step.parse::<Value>().map_err(|_| {
+                        format!("malformed integration continuation line: '{line}'")
+                    })?;
+                    if *ceiling != "none" {
+                        ceiling.parse::<Value>().map_err(|_| {
                             format!("malformed integration continuation line: '{line}'")
-                        })?,
-                        breakpoint_span_ceiling: if *ceiling == "none" {
-                            None
-                        } else {
-                            Some(ceiling.parse::<Value>().map_err(|_| {
-                                format!("malformed integration continuation line: '{line}'")
-                            })?)
-                        },
-                        controller_max_step: controller_max_step.parse::<Value>().map_err(
-                            |_| format!("malformed integration continuation line: '{line}'"),
-                        )?,
+                        })?;
                     }
+                    controller_max_step.parse::<Value>().map_err(|_| {
+                        format!("malformed integration continuation line: '{line}'")
+                    })?;
+                    // Version 16 omitted Xyce's restored analysis/restart
+                    // phase, so an in-flight continuation is incomplete.
+                    IntegrationContinuation::Unavailable
                 }
                 _ => {
                     return Err(format!("malformed integration continuation line: '{line}'"));
@@ -3726,6 +3797,8 @@ mod tests {
                 next_step: 1.25e-9,
                 breakpoint_span_ceiling: Some(6.25e-10),
                 controller_max_step: 6.25e-9,
+                analysis_first_step_pending: false,
+                xyce_breakpoint_restart_pending: true,
             },
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
@@ -3818,6 +3891,19 @@ mod tests {
                 continue;
             }
             if version < 15 && line.starts_with("integration_continuation ") {
+                continue;
+            }
+            if version == 16 && line.starts_with("integration_continuation proposed ") {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                assert_eq!(
+                    fields.len(),
+                    7,
+                    "current proposed continuation carries six payload fields"
+                );
+                output.push_str(&format!(
+                    "integration_continuation proposed {} {} {}\n",
+                    fields[2], fields[3], fields[4]
+                ));
                 continue;
             }
             if version == 15 && line.starts_with("integration_continuation proposed ") {
@@ -3996,22 +4082,27 @@ mod tests {
     #[test]
     fn integration_continuation_round_trips_and_legacy_state_fails_closed() {
         let checkpoint = sample();
-        let (next_step, span_ceiling, controller_max_step) = checkpoint
+        let continuation = checkpoint
             .validated_integration_continuation()
             .expect("current checkpoint continuation validates")
             .expect("accepted checkpoint carries a proposal");
-        assert_eq!(next_step.to_bits(), 1.25e-9_f64.to_bits());
+        assert_eq!(continuation.next_step.to_bits(), 1.25e-9_f64.to_bits());
         assert_eq!(
-            span_ceiling.map(Value::to_bits),
+            continuation.breakpoint_span_ceiling.map(Value::to_bits),
             Some(6.25e-10_f64.to_bits())
         );
-        assert_eq!(controller_max_step.to_bits(), 6.25e-9_f64.to_bits());
+        assert_eq!(
+            continuation.controller_max_step.to_bits(),
+            6.25e-9_f64.to_bits()
+        );
+        assert!(!continuation.analysis_first_step_pending);
+        assert!(continuation.xyce_breakpoint_restart_pending);
 
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("current continuation round-trips");
         assert_eq!(checkpoint, restored);
 
-        for version in [14, 15] {
+        for version in [14, 15, 16] {
             let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, version))
                 .unwrap_or_else(|error| {
                     panic!("version-{version} checkpoint remains readable: {error}")
@@ -4038,6 +4129,8 @@ mod tests {
                 next_step: invalid,
                 breakpoint_span_ceiling: Some(6.25e-10),
                 controller_max_step: 6.25e-9,
+                analysis_first_step_pending: false,
+                xyce_breakpoint_restart_pending: true,
             };
             let error = malformed
                 .to_bytes(TransientCheckpointEncoding::Unpacked)
@@ -4052,6 +4145,8 @@ mod tests {
                 next_step: 1.25e-9,
                 breakpoint_span_ceiling: Some(invalid),
                 controller_max_step: 6.25e-9,
+                analysis_first_step_pending: false,
+                xyce_breakpoint_restart_pending: true,
             };
             let error = malformed_ceiling
                 .to_bytes(TransientCheckpointEncoding::Unpacked)
@@ -4068,6 +4163,8 @@ mod tests {
                 next_step: 1.25e-9,
                 breakpoint_span_ceiling: Some(6.25e-10),
                 controller_max_step: invalid,
+                analysis_first_step_pending: false,
+                xyce_breakpoint_restart_pending: true,
             };
             let error = malformed_controller_max
                 .to_bytes(TransientCheckpointEncoding::Unpacked)
@@ -4083,6 +4180,8 @@ mod tests {
             next_step: 7.5e-9,
             breakpoint_span_ceiling: Some(6.25e-10),
             controller_max_step: 6.25e-9,
+            analysis_first_step_pending: false,
+            xyce_breakpoint_restart_pending: true,
         };
         assert!(
             oversized_proposal
