@@ -91,9 +91,9 @@ const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
-#[cfg(test)]
+#[cfg(all(test, target_arch = "x86_64"))]
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
 #[cfg(all(test, target_arch = "x86_64"))]
 const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = super::ir::INLINE_DYNAMIC_LOWER_ABS_LIMIT;
