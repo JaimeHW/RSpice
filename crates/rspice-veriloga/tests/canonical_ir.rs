@@ -3371,3 +3371,67 @@ fn hir_validation_rejects_malformed_array_contribution_and_statement_paths() {
         variable_count + 1
     ))));
 }
+
+#[test]
+fn hir_validation_rejects_zero_duplicate_overlapping_and_mixed_array_layouts() {
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+
+    let mut zero = hir.clone();
+    zero.arrays[0].len = 0;
+    assert_validation_message(&zero, "array 'xs' must not have zero length");
+
+    let mut duplicate = hir.clone();
+    let mut duplicate_array = duplicate.arrays[0].clone();
+    duplicate_array.id = rspice_veriloga::canonical_ir::ArrayId::new(1);
+    duplicate.arrays.push(duplicate_array);
+    assert_validation_message(&duplicate, "duplicate array name 'xs'");
+    assert_validation_message(&duplicate, "overlaps array 'xs'");
+
+    let mut overlap = hir.clone();
+    let mut overlapping_array = overlap.arrays[0].clone();
+    overlapping_array.id = rspice_veriloga::canonical_ir::ArrayId::new(1);
+    overlapping_array.name = "ys".into();
+    overlapping_array.base = VariableId::new(1);
+    overlapping_array.len = 3;
+    overlap.arrays.push(overlapping_array);
+    assert_validation_message(
+        &overlap,
+        "array 'ys' storage range [1:4) overlaps array 'xs'",
+    );
+
+    let mut mixed = hir;
+    mixed.variables[1].value_type = CanonicalValueType::Integer;
+    assert_validation_message(&mixed, "array 'xs' mixes element type Real");
+}
+
+#[test]
+fn hir_validation_binds_array_accesses_to_array_symbols() {
+    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let access_index = hir
+        .expressions
+        .iter()
+        .position(|expression| matches!(expression.kind, HirExprKind::ArrayAccess { .. }))
+        .expect("dynamic array expression");
+
+    let mut unknown = hir.clone();
+    let HirExprKind::ArrayAccess { array, .. } = &mut unknown.expressions[access_index].kind else {
+        unreachable!("located array access");
+    };
+    *array = "missing".into();
+    assert_validation_message(&unknown, "unknown array access target 'missing'");
+
+    let mut scalar = hir.clone();
+    let HirExprKind::ArrayAccess { array, .. } = &mut scalar.expressions[access_index].kind else {
+        unreachable!("located array access");
+    };
+    *array = "scale".into();
+    assert_validation_message(&scalar, "scalar symbol 'scale' must not be indexed");
+
+    let mut unindexed = hir;
+    unindexed.expressions[access_index].kind = HirExprKind::Identifier { name: "xs".into() };
+    assert_validation_message(&unindexed, "array identifier 'xs' requires an index");
+}

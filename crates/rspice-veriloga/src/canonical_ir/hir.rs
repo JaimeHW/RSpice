@@ -809,8 +809,9 @@ impl HirModel {
                 self.validate_expression_child(diagnostics, expression, "then_expr", *then_expr);
                 self.validate_expression_child(diagnostics, expression, "else_expr", *else_expr);
             }
-            HirExprKind::ArrayAccess { index, .. } => {
+            HirExprKind::ArrayAccess { array, index } => {
                 self.validate_expression_child(diagnostics, expression, "index", *index);
+                self.validate_array_access_target(diagnostics, expression, array, value_symbols);
             }
             HirExprKind::ArrayLiteral { elements, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "element", elements);
@@ -857,10 +858,83 @@ impl HirModel {
         name: &SmolStr,
         value_symbols: &HashSet<SmolStr>,
     ) {
+        if self.arrays.iter().any(|array| array.name == *name)
+            || self
+                .parameters
+                .iter()
+                .any(|parameter| parameter.name == *name && !parameter.dimensions.is_empty())
+        {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!("HIR array identifier '{}' requires an index", name),
+                expression.span,
+            ));
+            return;
+        }
+
         if !value_symbols.contains(name) {
             diagnostics.push(IrDiagnostic::error(
                 CompilerPhase::HirValidation,
                 format!("HIR unknown identifier '{}'", name),
+                expression.span,
+            ));
+        }
+    }
+
+    fn validate_array_access_target(
+        &self,
+        diagnostics: &mut Vec<IrDiagnostic>,
+        expression: &HirExpression,
+        name: &SmolStr,
+        value_symbols: &HashSet<SmolStr>,
+    ) {
+        let local_array_count = self
+            .arrays
+            .iter()
+            .filter(|array| array.name == *name)
+            .count();
+        let parameter = self
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == *name);
+        let parameter_rank = parameter.map_or(0, |parameter| parameter.dimensions.len());
+
+        if local_array_count > 1 || (local_array_count != 0 && parameter_rank != 0) {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!("HIR array access target '{}' is ambiguous", name),
+                expression.span,
+            ));
+            return;
+        }
+
+        if local_array_count == 1 {
+            return;
+        }
+
+        if parameter_rank == 1 {
+            return;
+        }
+
+        if parameter_rank > 1 {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!(
+                    "HIR parameter array access '{}' supplies one index for declared rank {}",
+                    name, parameter_rank
+                ),
+                expression.span,
+            ));
+        } else if value_symbols.contains(name) {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!("HIR scalar symbol '{}' must not be indexed", name),
+                expression.span,
+            ));
+        } else {
+            diagnostics.push(IrDiagnostic::error(
+                CompilerPhase::HirValidation,
+                format!("HIR unknown array access target '{}'", name),
                 expression.span,
             ));
         }
@@ -1218,10 +1292,36 @@ impl HirModel {
 
     fn validate_arrays(&self, diagnostics: &mut Vec<IrDiagnostic>) {
         let variable_count = self.variables.len();
+        let mut names = HashSet::new();
+        let mut valid_ranges = Vec::<(usize, usize, &SmolStr)>::new();
 
         for array in &self.arrays {
+            if array.name.is_empty() {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    "HIR array name must not be empty",
+                ));
+            } else if !names.insert(array.name.clone()) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!("HIR duplicate array name '{}'", array.name),
+                ));
+            }
+
             let base = usize::from(array.base);
-            let len = usize::try_from(array.len).expect("HIR array len exceeds usize::MAX");
+            let Ok(len) = usize::try_from(array.len) else {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!("HIR array '{}' length cannot fit this target", array.name),
+                ));
+                continue;
+            };
+            if len == 0 {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!("HIR array '{}' must not have zero length", array.name),
+                ));
+            }
             let Some(end) = base.checked_add(len) else {
                 diagnostics.push(IrDiagnostic::global_error(
                     CompilerPhase::HirValidation,
@@ -1241,6 +1341,45 @@ impl HirModel {
                         array.name, array.base, len, variable_count
                     ),
                 ));
+                continue;
+            }
+
+            if len != 0 {
+                let element_type = self.variables[base].value_type;
+                if let Some(variable) = self.variables[base..end]
+                    .iter()
+                    .find(|variable| variable.value_type != element_type)
+                {
+                    diagnostics.push(IrDiagnostic::global_error(
+                        CompilerPhase::HirValidation,
+                        format!(
+                            "HIR array '{}' mixes element type {:?} with variable '{}' type {:?}",
+                            array.name, element_type, variable.name, variable.value_type
+                        ),
+                    ));
+                }
+                valid_ranges.push((base, end, &array.name));
+            }
+        }
+
+        valid_ranges.sort_by(|left, right| {
+            (left.0, left.1, left.2.as_str()).cmp(&(right.0, right.1, right.2.as_str()))
+        });
+        let mut active: Option<(usize, &SmolStr)> = None;
+        for (base, end, name) in valid_ranges {
+            if let Some((active_end, active_name)) = active
+                && base < active_end
+            {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR array '{}' storage range [{base}:{end}) overlaps array '{}' ending at {}",
+                        name, active_name, active_end
+                    ),
+                ));
+            }
+            if active.is_none_or(|(active_end, _)| end > active_end) {
+                active = Some((end, name));
             }
         }
     }
