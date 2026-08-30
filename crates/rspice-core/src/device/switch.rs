@@ -1669,10 +1669,10 @@ impl GenericSwitch {
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
         self.hysteresis_enabled = params.contains_key("ONH") || params.contains_key("OFFH");
         if let Some(&v) = params.get("RON") {
-            self.ron = v.max(1.0e-12);
+            self.ron = v;
         }
         if let Some(&v) = params.get("ROFF") {
-            self.roff = v.max(1.0e-12);
+            self.roff = v;
         }
         if let Some(&v) = params.get("ON") {
             self.on = v;
@@ -1684,6 +1684,110 @@ impl GenericSwitch {
         self.offh = params.get("OFFH").copied().unwrap_or(self.off);
         self.current_conductance = 1.0 / self.roff;
         self
+    }
+
+    /// Whether every scalar required by the Xyce switch law is physical and
+    /// directly representable. Values are validated instead of clamped so a
+    /// model card can never be simulated with silently altered resistances.
+    pub(crate) fn physical_parameter_error(&self) -> Option<&'static str> {
+        for (name, resistance) in [("RON", self.ron), ("ROFF", self.roff)] {
+            if !resistance.is_finite() || resistance <= 0.0 {
+                return Some(match name {
+                    "RON" => "RON must be finite and positive",
+                    _ => "ROFF must be finite and positive",
+                });
+            }
+            let conductance = 1.0 / resistance;
+            if !conductance.is_finite() || conductance <= 0.0 {
+                return Some(match name {
+                    "RON" => "1/RON must be finite and positive",
+                    _ => "1/ROFF must be finite and positive",
+                });
+            }
+        }
+        for (name, threshold) in [
+            ("ON", self.on),
+            ("OFF", self.off),
+            ("ONH", self.onh),
+            ("OFFH", self.offh),
+        ] {
+            if !threshold.is_finite() {
+                return Some(match name {
+                    "ON" => "ON must be finite",
+                    "OFF" => "OFF must be finite",
+                    "ONH" => "ONH must be finite",
+                    _ => "OFFH must be finite",
+                });
+            }
+        }
+        let transition_spans = [
+            ("ON-OFF", self.on - self.off),
+            ("ONH-OFF", self.onh - self.off),
+            ("ON-OFFH", self.on - self.offh),
+        ];
+        let reachable_span_count = if self.hysteresis_enabled { 3 } else { 1 };
+        for (name, span) in transition_spans.into_iter().take(reachable_span_count) {
+            if !span.is_finite() {
+                return Some(match name {
+                    "ON-OFF" => "ON-OFF must be finite",
+                    "ONH-OFF" => "ONH-OFF must be finite",
+                    _ => "ON-OFFH must be finite",
+                });
+            }
+        }
+
+        // Xyce 7.10 evaluates a hysteresis-adjusted interpolation state but
+        // multiplies the expression derivative by the base dInv in every
+        // interpolation branch. Validate the Jacobian it actually stamps.
+        let base_span = transition_spans[0].1;
+        let log_max_state_slope = self.max_transition_state_slope_log();
+        if log_max_state_slope != Value::NEG_INFINITY {
+            let log_max_control_slope =
+                log_max_state_slope - Self::safe_delta(base_span).abs().ln();
+            let max_control_slope = log_max_control_slope.exp();
+            if !log_max_control_slope.is_finite()
+                || log_max_control_slope > Value::MAX.ln()
+                || !max_control_slope.is_finite()
+                || max_control_slope <= 0.0
+            {
+                return Some("maximum |dg/dcontrol| must be finite and representable");
+            }
+        }
+        None
+    }
+
+    /// Natural logarithm of the exact maximum `|dg/dstate|` over the Xyce
+    /// normalized transition interval. The stationary point is unique after
+    /// reflecting it onto `y in [0, 1]` and satisfies
+    /// `y = 3/8 * |ln(RON/ROFF)| * (1-y^2)^2`; bounded bisection avoids a
+    /// fragile quartic closed form and keeps validation deterministic.
+    fn max_transition_state_slope_log(&self) -> Value {
+        let ln_ron = self.ron.ln();
+        let ln_roff = self.roff.ln();
+        let lr = ln_ron - ln_roff;
+        let span = lr.abs();
+        if span == 0.0 {
+            return Value::NEG_INFINITY;
+        }
+
+        let mut lower = 0.0;
+        let mut upper = 1.0;
+        for _ in 0..128 {
+            let y = 0.5 * (lower + upper);
+            let one_minus_y_squared = 1.0 - y * y;
+            let rhs = 0.375 * span * one_minus_y_squared * one_minus_y_squared;
+            if y < rhs {
+                lower = y;
+            } else {
+                upper = y;
+            }
+        }
+        let y = 0.5 * (lower + upper);
+        let x = -lr.signum() * y;
+        let lm = 0.5 * (ln_ron + ln_roff);
+        let log_conductance = -lm - 0.75 * lr * x + 0.25 * lr * x * x * x;
+        let one_minus_x_squared = 1.0 - x * x;
+        log_conductance + (1.5 * span * one_minus_x_squared).ln()
     }
 
     /// Set initial ON/OFF state.
@@ -1896,7 +2000,11 @@ impl GenericSwitch {
     /// Return conductance and derivative with respect to the normalized
     /// control state. The endpoint derivative is exactly zero because Xyce's
     /// normalized law clamps fully-off/fully-on controls.
-    fn interpolated_conductance_with_derivative(&self, normalized_state: Value) -> (Value, Value) {
+    fn interpolated_conductance_with_derivative(
+        &self,
+        normalized_state: Value,
+        control_scale: Value,
+    ) -> (Value, Value) {
         let state = normalized_state.clamp(0.0, 1.0);
         if state >= 1.0 {
             return (1.0 / self.ron, 0.0);
@@ -1905,12 +2013,33 @@ impl GenericSwitch {
             return (1.0 / self.roff, 0.0);
         }
 
-        let lm = (self.ron * self.roff).sqrt().ln();
-        let lr = (self.ron / self.roff).ln();
+        // Xyce defines these as log(sqrt(RON*ROFF)) and log(RON/ROFF).
+        // The algebraically equivalent log-domain form preserves every
+        // representable positive endpoint without overflowing/underflowing
+        // the intermediate product or quotient.
+        let ln_ron = self.ron.ln();
+        let ln_roff = self.roff.ln();
+        let lm = 0.5 * (ln_ron + ln_roff);
+        let lr = ln_ron - ln_roff;
         let x = 2.0 * state - 1.0;
-        let conductance = (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp();
-        let dconductance_dstate = 1.5 * conductance * lr * (x * x - 1.0);
-        (conductance, dconductance_dstate)
+        let log_conductance = -lm - 0.75 * lr * x + 0.25 * lr * x * x * x;
+        let conductance = log_conductance.exp();
+        let one_minus_x_squared = (1.0 - x * x).max(0.0);
+        let derivative_factor = 1.5 * lr * (x * x - 1.0);
+        let dconductance_dcontrol = if derivative_factor == 0.0 || control_scale == 0.0 {
+            0.0
+        } else {
+            let magnitude = (log_conductance
+                + (1.5 * lr.abs() * one_minus_x_squared).ln()
+                + control_scale.abs().ln())
+            .exp();
+            if derivative_factor.is_sign_negative() == control_scale.is_sign_negative() {
+                magnitude
+            } else {
+                -magnitude
+            }
+        };
+        (conductance, dconductance_dcontrol)
     }
 
     #[cfg(test)]
@@ -1928,9 +2057,7 @@ impl GenericSwitch {
 
         if !self.hysteresis_enabled {
             self.trial_state = base_state;
-            let (conductance, derivative) =
-                self.interpolated_conductance_with_derivative(base_state);
-            return (conductance, derivative * d_inv);
+            return self.interpolated_conductance_with_derivative(base_state, d_inv);
         }
 
         let previous_state = self.last_state;
@@ -1962,16 +2089,7 @@ impl GenericSwitch {
         // vector in the interpolation branch, even when the conductance uses
         // a hysteresis-adjusted state for this accepted point.
         self.trial_state = base_state;
-        let (conductance, derivative) =
-            self.interpolated_conductance_with_derivative(interpolation_state);
-        let interpolation_scale = if previous_state <= 0.0 {
-            1.0 / Self::safe_delta(self.onh - self.off)
-        } else if previous_state >= 1.0 {
-            1.0 / Self::safe_delta(self.on - self.offh)
-        } else {
-            d_inv
-        };
-        (conductance, derivative * interpolation_scale)
+        self.interpolated_conductance_with_derivative(interpolation_state, d_inv)
     }
 
     /// Advance Xyce's three-level store-vector history after an accepted
@@ -2147,6 +2265,75 @@ mod tests {
         assert!(
             (actual - expected).abs() < 1.0e-14,
             "{actual} != {expected}"
+        );
+    }
+
+    #[test]
+    fn generic_switch_preserves_extreme_representable_resistances() {
+        let params = std::collections::HashMap::from([
+            ("RON".to_string(), 1.0e-300),
+            ("ROFF".to_string(), 1.0e300),
+        ]);
+        let mut switch = GenericSwitch::new("sw1".to_string(), 1, 0, "1")
+            .expect("valid generic switch expression")
+            .with_params(&params);
+
+        assert_eq!(switch.ron.to_bits(), 1.0e-300_f64.to_bits());
+        assert_eq!(switch.roff.to_bits(), 1.0e300_f64.to_bits());
+        assert_eq!(switch.physical_parameter_error(), None);
+        assert!((switch.conductance_for_control(0.0) / 1.0e-300 - 1.0).abs() < 1.0e-15);
+        assert!((switch.conductance_for_control(1.0) / 1.0e300 - 1.0).abs() < 1.0e-15);
+        assert!(switch.conductance_for_control(0.5).is_finite());
+    }
+
+    #[test]
+    fn generic_switch_rejects_nonrepresentable_reciprocal_without_clamping() {
+        let params = std::collections::HashMap::from([("RON".to_string(), 1.0e-320)]);
+        let switch = GenericSwitch::new("sw1".to_string(), 1, 0, "1")
+            .expect("valid generic switch expression")
+            .with_params(&params);
+
+        assert_eq!(switch.ron.to_bits(), 1.0e-320_f64.to_bits());
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("1/RON must be finite and positive")
+        );
+    }
+
+    #[test]
+    fn generic_switch_rejects_nonrepresentable_control_slope() {
+        let params = std::collections::HashMap::from([
+            ("RON".to_string(), 1.0e-304),
+            ("ROFF".to_string(), 1.0),
+            ("ON".to_string(), 1.0e-3),
+            ("OFF".to_string(), 0.0),
+        ]);
+        let switch = GenericSwitch::new("sw1".to_string(), 1, 0, "1")
+            .expect("valid generic switch expression")
+            .with_params(&params);
+
+        let log_max_state_slope = switch.max_transition_state_slope_log();
+        assert!(log_max_state_slope < f64::MAX.ln());
+        assert!(log_max_state_slope - 1.0e-3_f64.ln() > f64::MAX.ln());
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("maximum |dg/dcontrol| must be finite and representable")
+        );
+    }
+
+    #[test]
+    fn generic_switch_rejects_nonfinite_threshold_span() {
+        let params = std::collections::HashMap::from([
+            ("ON".to_string(), f64::MAX),
+            ("OFF".to_string(), -f64::MAX),
+        ]);
+        let switch = GenericSwitch::new("sw1".to_string(), 1, 0, "1")
+            .expect("valid generic switch expression")
+            .with_params(&params);
+
+        assert_eq!(
+            switch.physical_parameter_error(),
+            Some("ON-OFF must be finite")
         );
     }
 

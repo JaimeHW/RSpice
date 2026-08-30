@@ -1595,6 +1595,154 @@ impl XyceTestRunner {
         })
     }
 
+    pub(super) fn netlist_element_is_native_absolute_transient_xyce_four_node_switch(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        let ElementKind::VSwitch { model, .. } = &element.kind else {
+            return false;
+        };
+        element.nodes.len() == 2
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_xyce_four_node_switch)
+    }
+
+    pub(super) fn model_is_native_xyce_four_node_switch(
+        model: &rspice_core::netlist::ModelDef,
+    ) -> bool {
+        if !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+
+        let model_type = model.model_type.to_ascii_uppercase();
+        let allowed_parameter = |name: &str| match model_type.as_str() {
+            "SWITCH" => matches!(name, "RON" | "ROFF" | "ON" | "OFF" | "ONH" | "OFFH"),
+            "VSWITCH" => matches!(
+                name,
+                "RON" | "ROFF" | "VON" | "VOFF" | "VHON" | "VHOFF" | "ON" | "OFF" | "ONH" | "OFFH"
+            ),
+            "ISWITCH" => matches!(
+                name,
+                "RON" | "ROFF" | "ION" | "IOFF" | "IHON" | "IHOFF" | "ON" | "OFF" | "ONH" | "OFFH"
+            ),
+            _ => false,
+        };
+        let mut names = BTreeSet::new();
+        if !model.params.iter().all(|(name, value)| {
+            let name = name.to_ascii_uppercase();
+            names.insert(name.clone())
+                && allowed_parameter(&name)
+                && value.is_finite()
+                && (!matches!(name.as_str(), "RON" | "ROFF")
+                    || (*value > 0.0 && (1.0 / *value).is_finite()))
+        }) {
+            return false;
+        }
+
+        let parameter = |name: &str| {
+            model
+                .params
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value)
+        };
+        let ron = parameter("RON").unwrap_or(1.0);
+        let roff = parameter("ROFF").unwrap_or(1.0e6);
+        let (on, off, onh, offh, hysteresis_enabled) = match model_type.as_str() {
+            "SWITCH" => {
+                let on = parameter("ON").unwrap_or(1.0);
+                let off = parameter("OFF").unwrap_or(0.0);
+                (
+                    on,
+                    off,
+                    parameter("ONH").unwrap_or(on),
+                    parameter("OFFH").unwrap_or(off),
+                    parameter("ONH").is_some() || parameter("OFFH").is_some(),
+                )
+            }
+            "VSWITCH" => {
+                let on = parameter("ON").or_else(|| parameter("VON")).unwrap_or(1.0);
+                let off = parameter("OFF")
+                    .or_else(|| parameter("VOFF"))
+                    .unwrap_or(0.0);
+                (
+                    on,
+                    off,
+                    parameter("VHON").unwrap_or(on),
+                    parameter("VHOFF").unwrap_or(off),
+                    parameter("ONH").is_some()
+                        || parameter("OFFH").is_some()
+                        || parameter("VHON").is_some()
+                        || parameter("VHOFF").is_some(),
+                )
+            }
+            "ISWITCH" => {
+                let on = parameter("ON")
+                    .or_else(|| parameter("ION"))
+                    .unwrap_or(1.0e-3);
+                // Xyce 7.10 registers IHOFF into IOFF storage while leaving
+                // the IHOFF member at its zero default. Mirror that actual
+                // model projection in strict oracle admission.
+                let registered_ioff = model
+                    .params
+                    .iter()
+                    .rev()
+                    .find(|(name, _)| {
+                        name.eq_ignore_ascii_case("IOFF") || name.eq_ignore_ascii_case("IHOFF")
+                    })
+                    .map(|(_, value)| *value)
+                    .unwrap_or(0.0);
+                let off = parameter("OFF").unwrap_or(registered_ioff);
+                (
+                    on,
+                    off,
+                    parameter("IHON").unwrap_or(on),
+                    if parameter("IHOFF").is_some() {
+                        0.0
+                    } else {
+                        off
+                    },
+                    parameter("ONH").is_some()
+                        || parameter("OFFH").is_some()
+                        || parameter("IHON").is_some()
+                        || parameter("IHOFF").is_some(),
+                )
+            }
+            _ => return false,
+        };
+
+        let spans = [on - off, onh - off, on - offh];
+        let reachable_span_count = if hysteresis_enabled { 3 } else { 1 };
+        if spans
+            .into_iter()
+            .take(reachable_span_count)
+            .any(|span| !span.is_finite())
+        {
+            return false;
+        }
+
+        let resistance_log_span = (ron.ln() - roff.ln()).abs();
+        if resistance_log_span == 0.0 {
+            return true;
+        }
+        // This strict oracle-admission path uses a closed-form upper bound:
+        // conductance never exceeds 1/min(RON, ROFF), and the normalized
+        // cubic derivative factor never exceeds 1.5*|ln(RON/ROFF)|.
+        let log_max_state_slope_bound = (1.5 * resistance_log_span).ln() - ron.ln().min(roff.ln());
+        // Xyce uses the base dInv Jacobian scale even when hysteresis changes
+        // the interpolation state.
+        let safe_span = spans[0].abs().max(1.0e-12);
+        let log_bound = log_max_state_slope_bound - safe_span.ln();
+        let bound = log_bound.exp();
+        log_bound.is_finite() && log_bound <= f64::MAX.ln() && bound.is_finite() && bound > 0.0
+    }
+
     pub(super) fn netlist_uses_ekv3_level301_mosfet(netlist: &Netlist) -> bool {
         if Self::elements_use_ekv3_level301_mosfet(&netlist.elements, &netlist.models, &[]) {
             return true;

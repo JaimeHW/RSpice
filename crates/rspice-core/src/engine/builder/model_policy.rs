@@ -1001,9 +1001,6 @@ pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
     "IT", "IH", "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF", "ONH", "OFFH", "RON", "ROFF", "SMOOTH",
 ];
-pub(super) const GENERIC_SWITCH_MODEL_PARAMS: &[&str] =
-    &["ON", "OFF", "ONH", "OFFH", "RON", "ROFF"];
-
 pub(super) const XYCE_TEAM_MODEL_PARAMS: &[&str] = &[
     "LEVEL",
     "KON",

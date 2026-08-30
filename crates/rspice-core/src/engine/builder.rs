@@ -111,6 +111,217 @@ fn validate_voltage_switch_physical_parameters(
     Ok(())
 }
 
+fn validate_generic_switch_physical_parameters(
+    switch: &crate::device::GenericSwitch,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    if let Some(reason) = switch.physical_parameter_error() {
+        return Err(SimulationError::Circuit(format!(
+            "Generic switch '{}' model '{}' has invalid physical parameters: {reason} (ON={}, OFF={}, ONH={}, OFFH={}, RON={}, ROFF={})",
+            switch.name,
+            model_name,
+            switch.on,
+            switch.off,
+            switch.onh,
+            switch.offh,
+            switch.ron,
+            switch.roff
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GenericSwitchModelFamily {
+    Generic,
+    Voltage,
+    Current,
+}
+
+const XYCE_UNIFIED_SWITCH_MODEL_PARAMS: &[&str] = &[
+    "RON", "ROFF", "VON", "VOFF", "VHON", "VHOFF", "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF",
+    "ONH", "OFFH",
+];
+
+fn validate_switch_model_parameter_names(
+    model_def: &crate::netlist::ModelDef,
+    element_kind: &str,
+    element_name: &str,
+    model_name: &str,
+    supported: &[&str],
+) -> Result<(), SimulationError> {
+    let names = model_def
+        .params
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .chain(model_def.expr_params.iter().map(|(name, _)| name.as_str()))
+        .chain(
+            model_def
+                .string_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .string_vector_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .real_vector_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .real_vector_expr_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        )
+        .chain(
+            model_def
+                .integer_vector_params
+                .iter()
+                .map(|(name, _)| name.as_str()),
+        );
+    for name in names {
+        if !supported
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        {
+            return Err(SimulationError::Circuit(format!(
+                "{element_kind} '{element_name}' model '{model_name}' does not support model parameter '{name}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
+impl GenericSwitchModelFamily {
+    fn from_model_type(model_type: &str) -> Option<Self> {
+        if model_type.eq_ignore_ascii_case("SWITCH") || model_type.eq_ignore_ascii_case("SW") {
+            Some(Self::Generic)
+        } else if model_type.eq_ignore_ascii_case("VSWITCH")
+            || model_type.eq_ignore_ascii_case("VSW")
+        {
+            Some(Self::Voltage)
+        } else if model_type.eq_ignore_ascii_case("ISWITCH")
+            || model_type.eq_ignore_ascii_case("ISW")
+            || model_type.eq_ignore_ascii_case("CSW")
+        {
+            Some(Self::Current)
+        } else {
+            None
+        }
+    }
+
+    fn exact_xyce_model_type(model_type: &str) -> Option<Self> {
+        if model_type.eq_ignore_ascii_case("SWITCH") {
+            Some(Self::Generic)
+        } else if model_type.eq_ignore_ascii_case("VSWITCH") {
+            Some(Self::Voltage)
+        } else if model_type.eq_ignore_ascii_case("ISWITCH") {
+            Some(Self::Current)
+        } else {
+            None
+        }
+    }
+}
+
+/// Apply Xyce's model-family threshold projection after all authored scalar
+/// parameters have been resolved. Generic ON/OFF values override VON/VOFF or
+/// ION/IOFF. Family-specific hysteresis values have the opposite precedence;
+/// when only generic ONH/OFFH is authored, Xyce enables hysteresis but resets
+/// those thresholds to the effective base ON/OFF values.
+///
+/// Xyce 7.10 registers `IHOFF` against its `IOFF` storage member while marking
+/// `IHOFFGiven`. Exact Xyce-dialect compatibility therefore makes authored
+/// `IHOFF` replace `IOFF`, while the later projection reads the untouched
+/// default `IHOFF=0` into `OFFH`. Other dialects retain the coherent declared
+/// `IHOFF -> OFFH` mapping.
+fn finalize_generic_switch_family_params(
+    params: &mut HashMap<String, Value>,
+    family: GenericSwitchModelFamily,
+    model_def: &crate::netlist::ModelDef,
+    xyce_710_compatibility: bool,
+) -> Result<(), SimulationError> {
+    if family == GenericSwitchModelFamily::Current
+        && xyce_710_compatibility
+        && params.contains_key("IHOFF")
+    {
+        let numeric_aliases = model_def
+            .params
+            .iter()
+            .filter(|(name, _)| {
+                name.eq_ignore_ascii_case("IOFF") || name.eq_ignore_ascii_case("IHOFF")
+            })
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        let expression_aliases = model_def
+            .expr_params
+            .iter()
+            .filter(|(name, _)| {
+                name.eq_ignore_ascii_case("IOFF") || name.eq_ignore_ascii_case("IHOFF")
+            })
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        if !numeric_aliases.is_empty() && !expression_aliases.is_empty() {
+            return Err(SimulationError::Circuit(format!(
+                "Xyce 7.10 ISWITCH model '{}' cannot preserve IOFF/IHOFF assignment order when the aliased parameters mix literal and expression values",
+                model_def.name
+            )));
+        }
+        let last_registered_name = numeric_aliases
+            .last()
+            .or_else(|| expression_aliases.last())
+            .expect("resolved IHOFF retains its authored model parameter");
+        let registered_ioff = params
+            .get(&last_registered_name.to_ascii_uppercase())
+            .copied()
+            .expect("resolved switch parameter map contains the authored IOFF/IHOFF value");
+        params.insert("IOFF".to_string(), registered_ioff);
+        params.insert("IHOFF".to_string(), 0.0);
+    }
+    let (family_on, family_off, family_onh, family_offh, default_on, default_off) = match family {
+        GenericSwitchModelFamily::Generic => return Ok(()),
+        GenericSwitchModelFamily::Voltage => ("VON", "VOFF", "VHON", "VHOFF", 1.0, 0.0),
+        GenericSwitchModelFamily::Current => ("ION", "IOFF", "IHON", "IHOFF", 1.0e-3, 0.0),
+    };
+
+    let on = params
+        .get("ON")
+        .copied()
+        .or_else(|| params.get(family_on).copied())
+        .unwrap_or(default_on);
+    let off = params
+        .get("OFF")
+        .copied()
+        .or_else(|| params.get(family_off).copied())
+        .unwrap_or(default_off);
+    params.insert("ON".to_string(), on);
+    params.insert("OFF".to_string(), off);
+
+    let generic_onh_given = params.contains_key("ONH");
+    if let Some(value) = params.get(family_onh).copied() {
+        params.insert("ONH".to_string(), value);
+    } else if generic_onh_given {
+        params.insert("ONH".to_string(), on);
+    } else {
+        params.remove("ONH");
+    }
+
+    let generic_offh_given = params.contains_key("OFFH");
+    if let Some(value) = params.get(family_offh).copied() {
+        params.insert("OFFH".to_string(), value);
+    } else if generic_offh_given {
+        params.insert("OFFH".to_string(), off);
+    } else {
+        params.remove("OFFH");
+    }
+    Ok(())
+}
+
 fn validate_level1_mos_authored_parameters(
     element_name: &str,
     model_name: &str,
@@ -843,19 +1054,6 @@ fn validate_xyce_memristor_generated_namespaces(
     }
 
     Ok(())
-}
-
-fn parse_direct_branch_current_control(expression: &str) -> Option<String> {
-    let normalized: String = expression
-        .chars()
-        .filter(|ch| !ch.is_ascii_whitespace())
-        .flat_map(|ch| ch.to_lowercase())
-        .collect();
-    if !normalized.starts_with("i(") || !normalized.ends_with(')') {
-        return None;
-    }
-    let inner = &normalized[2..normalized.len() - 1];
-    (!inner.is_empty()).then(|| inner.to_string())
 }
 
 fn xtradev_scalar_terminal_node(port: &XspicePort) -> Option<&str> {
@@ -3621,6 +3819,201 @@ mod tests {
             jfet.params.channel_model,
             JfetChannelModel::XyceSydney
         ));
+    }
+
+    #[test]
+    fn xyce_four_node_s_iswitch_uses_implicit_voltage_control_and_current_thresholds() {
+        let deck = "Xyce four-node S with ISWITCH model\n\
+            V1 1 0 5\n\
+            VCTRL 3 0 0\n\
+            S1 1 2 3 0 ISW\n\
+            R1 2 0 1k\n\
+            .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("four-node ISWITCH deck builds through Xyce's unified switch semantics");
+
+        assert!(circuit.vswitches.is_empty());
+        assert!(circuit.iswitches.is_empty());
+        let [switch] = circuit.generic_switches.as_slice() else {
+            panic!("expected one expression-controlled switch");
+        };
+        assert_eq!(switch.ron.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(switch.roff.to_bits(), 3.0e6_f64.to_bits());
+        assert_eq!(switch.on.to_bits(), 10.0e-3_f64.to_bits());
+        assert_eq!(switch.off.to_bits(), 0.5e-3_f64.to_bits());
+        assert_eq!(switch.onh.to_bits(), 11.0e-3_f64.to_bits());
+        assert_eq!(switch.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(switch.hysteresis_enabled);
+        assert!(switch.program.node_map.contains_key("3"));
+        assert_eq!(switch.program.node_map.len(), 2);
+    }
+
+    #[test]
+    fn xyce_explicit_s_iswitch_keeps_general_expression_control() {
+        let deck = "Xyce explicit S with ISWITCH model\n\
+            V1 1 0 5\n\
+            VCTRL 3 0 0\n\
+            S1 1 2 ISW CONTROL={V(3)+TIME}\n\
+            R1 2 0 1k\n\
+            .model ISW ISWITCH (RON=2 ROFF=3MEG ION=10m IOFF=1m IHON=11m IHOFF=.5m)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("explicit ISWITCH deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("explicit ISWITCH accepts Xyce's general scalar CONTROL expression");
+
+        assert!(circuit.vswitches.is_empty());
+        assert!(circuit.iswitches.is_empty());
+        let [switch] = circuit.generic_switches.as_slice() else {
+            panic!("expected one expression-controlled switch");
+        };
+        assert_eq!(switch.ron.to_bits(), 2.0_f64.to_bits());
+        assert_eq!(switch.roff.to_bits(), 3.0e6_f64.to_bits());
+        assert_eq!(switch.on.to_bits(), 10.0e-3_f64.to_bits());
+        assert_eq!(switch.off.to_bits(), 0.5e-3_f64.to_bits());
+        assert_eq!(switch.onh.to_bits(), 11.0e-3_f64.to_bits());
+        assert_eq!(switch.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(switch.hysteresis_enabled);
+        assert!(switch.program.node_map.contains_key("3"));
+        assert_eq!(switch.program.node_map.len(), 1);
+    }
+
+    #[test]
+    fn xyce_switch_family_defaults_and_hysteresis_precedence_are_exact() {
+        let deck = "Xyce switch family projection\n\
+            SDEFAULT 1 2 3 0 IDEFAULT\n\
+            SCOLLIDE 1 4 3 0 ICOLLIDE\n\
+            SREVERSED 1 7 3 0 IREVERSED\n\
+            SGENERIC 1 5 3 0 IGENERIC\n\
+            SVDEFAULT 1 6 3 0 VDEFAULT_MODEL\n\
+            .model IDEFAULT ISWITCH\n\
+            .model ICOLLIDE ISWITCH (ION=10m IOFF=1m ON=20m OFF=2m IHON=30m IHOFF=3m ONH=40m OFFH=4m)\n\
+            .model IREVERSED ISWITCH (ION=10m IHOFF=3m IOFF=1m)\n\
+            .model IGENERIC ISWITCH (ON=20m OFF=2m ONH=40m OFFH=4m)\n\
+            .model VDEFAULT_MODEL VSWITCH\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("switch-family projection deck parses");
+        let mut config = SimulationConfig::default();
+        config.spice_dialect = SpiceDialect::Xyce;
+        let circuit = Engine::new(config)
+            .build_circuit(&netlist)
+            .expect("all Xyce switch families build through the unified implementation");
+
+        assert!(circuit.vswitches.is_empty());
+        assert!(circuit.iswitches.is_empty());
+        assert_eq!(circuit.generic_switches.len(), 5);
+        let find = |name: &str| {
+            circuit
+                .generic_switches
+                .iter()
+                .find(|switch| switch.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("missing switch {name}"))
+        };
+
+        let current_default = find("SDEFAULT");
+        assert_eq!(current_default.on.to_bits(), 1.0e-3_f64.to_bits());
+        assert_eq!(current_default.off.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(current_default.onh.to_bits(), 1.0e-3_f64.to_bits());
+        assert_eq!(current_default.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(!current_default.hysteresis_enabled);
+
+        let collisions = find("SCOLLIDE");
+        assert_eq!(collisions.on.to_bits(), 20.0e-3_f64.to_bits());
+        assert_eq!(collisions.off.to_bits(), 2.0e-3_f64.to_bits());
+        assert_eq!(collisions.onh.to_bits(), 30.0e-3_f64.to_bits());
+        assert_eq!(collisions.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(collisions.hysteresis_enabled);
+
+        let reversed_alias_order = find("SREVERSED");
+        assert_eq!(reversed_alias_order.off.to_bits(), 1.0e-3_f64.to_bits());
+        assert_eq!(reversed_alias_order.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(reversed_alias_order.hysteresis_enabled);
+
+        let generic_hysteresis = find("SGENERIC");
+        assert_eq!(generic_hysteresis.on.to_bits(), 20.0e-3_f64.to_bits());
+        assert_eq!(generic_hysteresis.off.to_bits(), 2.0e-3_f64.to_bits());
+        assert_eq!(generic_hysteresis.onh.to_bits(), 20.0e-3_f64.to_bits());
+        assert_eq!(generic_hysteresis.offh.to_bits(), 2.0e-3_f64.to_bits());
+        assert!(generic_hysteresis.hysteresis_enabled);
+
+        let voltage_default = find("SVDEFAULT");
+        assert_eq!(voltage_default.on.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(voltage_default.off.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(voltage_default.onh.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(voltage_default.offh.to_bits(), 0.0_f64.to_bits());
+        assert!(!voltage_default.hysteresis_enabled);
+    }
+
+    #[test]
+    fn four_node_s_iswitch_normalization_is_xyce_scoped() {
+        let deck = "non-Xyce four-node S with ISWITCH model\n\
+            S1 1 2 3 0 ISW\n\
+            .model ISW ISWITCH (RON=1 ROFF=1MEG ION=10m IOFF=0)\n\
+            .end\n";
+        let netlist = Netlist::parse(deck).expect("four-node ISWITCH deck parses");
+        let error = Engine::new(SimulationConfig::default())
+            .build_circuit(&netlist)
+            .expect_err("Xyce four-node normalization must not leak into other dialects");
+        assert!(error.to_string().contains("ISWITCH"));
+        assert!(error.to_string().contains("Voltage-controlled switch"));
+    }
+
+    #[test]
+    fn xyce_unified_switch_rejects_noncanonical_native_switch_parameters() {
+        for (model_type, parameter) in [("VSWITCH", "VT=0"), ("ISWITCH", "IT=1m")] {
+            let deck = format!(
+                "Xyce unified switch parameter policy\nS1 1 2 3 0 SMOD\n.model SMOD {model_type} ({parameter})\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("switch parameter-policy deck parses");
+            let mut config = SimulationConfig::default();
+            config.spice_dialect = SpiceDialect::Xyce;
+            let error = Engine::new(config)
+                .build_circuit(&netlist)
+                .expect_err("Xyce's unified switch must reject unregistered native parameters");
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not support model parameter")
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains(parameter.split('=').next().unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn xyce_unified_switch_rejects_noncanonical_model_aliases() {
+        for (syntax, model_type) in [
+            ("S1 1 2 3 0 SMOD", "SW"),
+            ("S1 1 2 3 0 SMOD", "VSW"),
+            ("S1 1 2 SMOD CONTROL={V(3)}", "ISW"),
+            ("S1 1 2 SMOD CONTROL={V(3)}", "CSW"),
+        ] {
+            let deck = format!(
+                "Xyce strict switch model names\n{syntax}\n.model SMOD {model_type}\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("switch alias-policy deck parses");
+            let mut config = SimulationConfig::default();
+            config.spice_dialect = SpiceDialect::Xyce;
+            let error = Engine::new(config)
+                .build_circuit(&netlist)
+                .expect_err("Xyce switch syntax must reject unregistered model aliases");
+            assert!(error.to_string().contains(model_type));
+            assert!(
+                error
+                    .to_string()
+                    .contains("expected SWITCH, VSWITCH, ISWITCH")
+            );
+        }
     }
 
     #[test]
@@ -7920,21 +8313,49 @@ impl Engine {
                             element.name, model
                         ))
                     })?;
-                    // Xyce canonicalizes the legacy four-node `S` spelling
-                    // with a `.MODEL ... SWITCH` card into an expression-
-                    // controlled switch whose CONTROL is the voltage across
-                    // the two optional control nodes. Preserve that semantic
-                    // distinction from a true VSWITCH card rather than
-                    // silently accepting the model with the wrong thresholds.
-                    if model_def.model_type.eq_ignore_ascii_case("SWITCH") {
-                        let params_map = resolve_supported_model_params_upper_map(
+                    // Xyce's single `S` implementation evaluates all three
+                    // registered model families through expression-valued
+                    // CONTROL. The legacy four-node spelling supplies
+                    // V(cp)-V(cn) implicitly. Xyce registers only the exact
+                    // SWITCH/VSWITCH/ISWITCH model names; compatibility
+                    // aliases remain scoped to the other dialects.
+                    let xyce_family = if self.config.spice_dialect == SpiceDialect::Xyce {
+                        ensure_model_type(
+                            "Generic switch",
+                            &element.name,
+                            model,
+                            model_def,
+                            &["SWITCH", "VSWITCH", "ISWITCH"],
+                        )?;
+                        Some(
+                            GenericSwitchModelFamily::exact_xyce_model_type(&model_def.model_type)
+                                .expect("ensure_model_type accepted an exact Xyce switch family"),
+                        )
+                    } else {
+                        None
+                    };
+                    if let Some(family) = xyce_family {
+                        validate_switch_model_parameter_names(
+                            model_def,
+                            "Generic switch",
+                            &element.name,
+                            model,
+                            XYCE_UNIFIED_SWITCH_MODEL_PARAMS,
+                        )?;
+                        let mut params_map = resolve_supported_model_params_upper_map(
                             netlist,
                             model_def,
                             "Generic switch",
                             &element.name,
                             model,
-                            GENERIC_SWITCH_MODEL_PARAMS,
+                            XYCE_UNIFIED_SWITCH_MODEL_PARAMS,
                             self.config.temperature,
+                        )?;
+                        finalize_generic_switch_family_params(
+                            &mut params_map,
+                            family,
+                            model_def,
+                            true,
                         )?;
                         let implicit_control = format!("V({})-V({})", control_pos, control_neg);
                         let mut sw = crate::device::GenericSwitch::new(
@@ -7945,6 +8366,7 @@ impl Engine {
                         )
                         .map_err(SimulationError::Circuit)?
                         .with_params(&params_map);
+                        validate_generic_switch_physical_parameters(&sw, model)?;
                         if sw.program.sdt_count != 0 {
                             return Err(SimulationError::Circuit(format!(
                                 "Generic switch '{}' CONTROL does not support stateful SDT expressions",
@@ -8052,81 +8474,49 @@ impl Engine {
                             element.name, model
                         ))
                     })?;
-                    if model_def.model_type.eq_ignore_ascii_case("ISWITCH")
-                        || model_def.model_type.eq_ignore_ascii_case("ISW")
-                        || model_def.model_type.eq_ignore_ascii_case("CSW")
-                    {
-                        let control_element =
-                            parse_direct_branch_current_control(control_expression).ok_or_else(
-                                || {
-                                    SimulationError::Circuit(format!(
-                                        "Generic switch '{}' does not yet support ISWITCH CONTROL expression '{}'; native ISWITCH mapping currently requires a direct branch-current control I(source)",
-                                        element.name, control_expression
-                                    ))
-                                },
-                            )?;
-                        let params_map = resolve_supported_model_params_upper_map(
-                            netlist,
-                            model_def,
-                            "Generic current-controlled switch",
-                            &element.name,
-                            model,
-                            ISWITCH_MODEL_PARAMS,
-                            self.config.temperature,
-                        )?;
-
-                        let mut sw = crate::device::CurrentSwitch::new(
-                            element.name.clone(),
-                            np,
-                            nn,
-                            control_element.clone(),
-                        )
-                        .with_params(&params_map);
-                        if let Some(state) = initial_state {
-                            sw = sw.with_initial_state(map_switch_state(*state));
-                        }
-                        let iswitch_idx = circuit.iswitches.len();
-                        circuit.iswitches.push(sw);
-                        circuit.add_iswitch_pending(iswitch_idx, control_element);
-                        continue;
-                    }
+                    let supported_model_types: &[&str] =
+                        if self.config.spice_dialect == SpiceDialect::Xyce {
+                            &["SWITCH", "VSWITCH", "ISWITCH"]
+                        } else {
+                            &["SW", "SWITCH", "VSWITCH", "VSW", "ISWITCH", "ISW", "CSW"]
+                        };
                     ensure_model_type(
                         "Generic switch",
                         &element.name,
                         model,
                         model_def,
-                        &["SW", "SWITCH", "VSWITCH", "VSW"],
+                        supported_model_types,
                     )?;
-                    let model_is_vswitch = model_def.model_type.eq_ignore_ascii_case("VSWITCH")
-                        || model_def.model_type.eq_ignore_ascii_case("VSW");
-                    let params_map = resolve_supported_model_params_upper_map(
+                    let family = if self.config.spice_dialect == SpiceDialect::Xyce {
+                        GenericSwitchModelFamily::exact_xyce_model_type(&model_def.model_type)
+                            .expect("ensure_model_type accepted an exact Xyce switch family")
+                    } else {
+                        GenericSwitchModelFamily::from_model_type(&model_def.model_type).expect(
+                            "ensure_model_type accepted an exhaustive generic-switch family",
+                        )
+                    };
+                    validate_switch_model_parameter_names(
+                        model_def,
+                        "Generic switch",
+                        &element.name,
+                        model,
+                        XYCE_UNIFIED_SWITCH_MODEL_PARAMS,
+                    )?;
+                    let mut params_map = resolve_supported_model_params_upper_map(
                         netlist,
                         model_def,
                         "Generic switch",
                         &element.name,
                         model,
-                        if model_is_vswitch {
-                            VSWITCH_MODEL_PARAMS
-                        } else {
-                            GENERIC_SWITCH_MODEL_PARAMS
-                        },
+                        XYCE_UNIFIED_SWITCH_MODEL_PARAMS,
                         self.config.temperature,
                     )?;
-                    let mut params_map = params_map;
-                    if model_is_vswitch {
-                        if let Some(&value) = params_map.get("VON") {
-                            params_map.entry("ON".to_string()).or_insert(value);
-                        }
-                        if let Some(&value) = params_map.get("VOFF") {
-                            params_map.entry("OFF".to_string()).or_insert(value);
-                        }
-                        if let Some(&value) = params_map.get("VHON") {
-                            params_map.entry("ONH".to_string()).or_insert(value);
-                        }
-                        if let Some(&value) = params_map.get("VHOFF") {
-                            params_map.entry("OFFH".to_string()).or_insert(value);
-                        }
-                    }
+                    finalize_generic_switch_family_params(
+                        &mut params_map,
+                        family,
+                        model_def,
+                        self.config.spice_dialect == SpiceDialect::Xyce,
+                    )?;
 
                     let mut sw = crate::device::GenericSwitch::new(
                         element.name.clone(),
@@ -8136,6 +8526,7 @@ impl Engine {
                     )
                     .map_err(SimulationError::Circuit)?
                     .with_params(&params_map);
+                    validate_generic_switch_physical_parameters(&sw, model)?;
                     if sw.program.sdt_count != 0 {
                         return Err(SimulationError::Circuit(format!(
                             "Generic switch '{}' CONTROL does not support stateful SDT expressions",

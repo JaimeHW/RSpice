@@ -3692,6 +3692,10 @@ impl XyceTestRunner {
                         && Self::netlist_element_is_native_absolute_transient_level1_gp_npn(
                             netlist, element,
                         ) => {}
+                ElementKind::VSwitch { .. }
+                    if Self::netlist_element_is_native_absolute_transient_xyce_four_node_switch(
+                        netlist, element,
+                    ) => {}
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
@@ -3725,7 +3729,7 @@ impl XyceTestRunner {
                 }
                 _ => {
                     return Err(format!(
-                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, coupled inductors, native legacy diodes, native level-1 NPN BJTs, and generated two-terminal JUNCAP diodes; element '{}' requires a broader self-verifying transient contract",
+                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, coupled inductors, native legacy diodes, native level-1 NPN BJTs, native Xyce four-node switches, and generated two-terminal JUNCAP diodes; element '{}' requires a broader self-verifying transient contract",
                         element.name
                     ));
                 }

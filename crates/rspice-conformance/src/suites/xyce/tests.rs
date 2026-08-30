@@ -6162,6 +6162,8 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
         "Netlists/LEAD_CURRENTS/lead_min2_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_r_c_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_r_c_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_sw_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_sw_trap.cir",
         "Netlists/Verilog_LEAD_CURRENTS/lead_juncap200_gear.cir",
     ] {
         let deck = XyceDeck {
@@ -6250,6 +6252,16 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
             "GEAR",
         ),
         (
+            "native Xyce VSWITCH",
+            "V1 out 0 1\nVCTRL ctl 0 1\nS1 out 0 ctl 0 SWMOD\n.MODEL SWMOD VSWITCH RON=1 ROFF=1MEG VON=1 VOFF=0",
+            "TRAP",
+        ),
+        (
+            "native Xyce four-node S with ISWITCH model",
+            "V1 out 0 1\nVCTRL ctl 0 1\nS1 out 0 ctl 0 SWMOD\n.MODEL SWMOD ISWITCH RON=1 ROFF=1MEG ION=10m IOFF=0",
+            "GEAR",
+        ),
+        (
             "generated two-terminal JUNCAP diode",
             "V1 in 0 PULSE(0 1 0 1u 1u 5u 10u)\nR1 in out 1k\nD1 out 0 DMOD\n.MODEL DMOD D LEVEL=200",
             "GEAR",
@@ -6272,10 +6284,6 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
         (
             "JFET semiconductor",
             "V1 out 0 1\nJ1 out out 0 JMOD\n.MODEL JMOD NJF",
-        ),
-        (
-            "voltage switch",
-            "V1 out 0 1\nVCTRL ctl 0 1\nS1 out 0 ctl 0 SWMOD\n.MODEL SWMOD VSWITCH RON=1 ROFF=1MEG VON=1 VOFF=0",
         ),
         (
             "PNP BJT",
@@ -6318,6 +6326,47 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
         assert!(
             error.contains("supports only exact LEVEL=1 or LEVEL=2"),
             "CORE LEVEL={level} returned the wrong capability diagnostic: {error}"
+        );
+    }
+
+    for (label, model_card) in [
+        (
+            "unsupported four-node switch model family",
+            ".MODEL SWMOD D IS=1e-14",
+        ),
+        (
+            "runtime-valued four-node switch resistance",
+            ".MODEL SWMOD VSWITCH RON={TIME+1} ROFF=1MEG VON=1 VOFF=0",
+        ),
+        (
+            "nonpositive four-node switch resistance",
+            ".MODEL SWMOD ISWITCH RON=0 ROFF=1MEG ION=10m IOFF=0",
+        ),
+        (
+            "nonrepresentable four-node switch conductance",
+            ".MODEL SWMOD VSWITCH RON=1e-320 ROFF=1MEG VON=1 VOFF=0",
+        ),
+        (
+            "nonrepresentable four-node switch control slope",
+            ".MODEL SWMOD ISWITCH RON=1e-304 ROFF=1 ION=1m IOFF=0",
+        ),
+        (
+            "noncanonical Xyce switch model alias",
+            ".MODEL SWMOD VSW RON=1 ROFF=1MEG VON=1 VOFF=0",
+        ),
+    ] {
+        let source = format!(
+            "{label}\nV1 out 0 1\nVCTRL ctl 0 1\nS1 out 0 ctl 0 SWMOD\n{model_card}\n.OPTIONS TIMEINT METHOD=TRAP\n.TRAN 1u 10u\n.MEASURE TRAN MAX_OUT MAX V(out) FAILVALUE=2\n.END\n"
+        );
+        let error = match admission(&source) {
+            Err(error) => error,
+            Ok(admitted) => {
+                panic!("{label} must fail planning rather than execute, but admitted {admitted:?}")
+            }
+        };
+        assert!(
+            error.contains("authored FAILVALUE TRAN oracle"),
+            "{label} returned a non-contract diagnostic: {error}"
         );
     }
 
@@ -6369,8 +6418,6 @@ fn authored_fail_value_hard_failure_decks_are_expected_unsupported() {
         "Netlists/LEAD_CURRENTS/lead_pjfet_tran_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_psoi_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_psoi_trap.cir",
-        "Netlists/LEAD_CURRENTS/lead_sw_gear.cir",
-        "Netlists/LEAD_CURRENTS/lead_sw_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_tra_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_tra_trap.cir",
     ];

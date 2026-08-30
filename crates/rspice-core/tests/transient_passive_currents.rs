@@ -312,3 +312,52 @@ r_is wout 0 100
         }
     }
 }
+
+#[test]
+fn xyce_four_node_iswitch_current_matches_kcl_and_family_threshold() {
+    let deck = "\
+* Xyce four-node S with ISWITCH family thresholds
+v1 xin 0 dc 5
+vctrl xctrl 0 dc 10m
+sx xin xout xctrl 0 swx
+rload xout 0 100
+.model swx iswitch (ion=10m ioff=0 ron=1 roff=100)
+.tran 1u 3u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("Xyce four-node ISWITCH deck parses");
+    let result = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 3.0e-6, 1.0e-6)
+    .expect("Xyce four-node ISWITCH transient solves");
+
+    let xyce_iswitch_current = result
+        .try_branch_current_waveform_named("sx")
+        .expect("SX branch current waveform exists");
+    let xyce_iswitch_voltage = result
+        .try_voltage_waveform_named("xout")
+        .expect("XOUT voltage waveform exists");
+    let expected_current = 5.0 / 101.0;
+    let expected_voltage = 100.0 * expected_current;
+    assert_eq!(xyce_iswitch_current.len(), result.time.len());
+    for (&time, (&current, &voltage)) in result
+        .time
+        .iter()
+        .zip(xyce_iswitch_current.iter().zip(xyce_iswitch_voltage))
+    {
+        assert!(
+            (current - voltage / 100.0).abs() < 1.0e-10,
+            "SX current should match load KCL at {time}, got {current} for load voltage {voltage}"
+        );
+    }
+    assert!(
+        (xyce_iswitch_current[xyce_iswitch_current.len() - 1] - expected_current).abs() < 1.0e-10,
+        "four-node ISWITCH must use ION=10m rather than the generic ON=1 default"
+    );
+    assert!(
+        (xyce_iswitch_voltage[xyce_iswitch_voltage.len() - 1] - expected_voltage).abs() < 1.0e-10,
+        "four-node ISWITCH final load voltage must reflect exact RON=1 conduction"
+    );
+}
