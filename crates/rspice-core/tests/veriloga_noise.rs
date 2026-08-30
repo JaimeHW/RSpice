@@ -462,19 +462,129 @@ endmodule
 }
 
 #[test]
-fn va_noise_ac_linearization_errors_are_simulation_errors_not_panics() {
+fn noise_transfer_matrices_expose_noise_identity_without_changing_ac() {
     let model = write_model(
-        "noise_ac_oob.va",
+        "noise_analysis_identity.va",
         r#"
 `include "disciplines.vams"
 
-module va_noise_ac_oob(p, n);
+module va_noise_analysis_identity(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real g_dc = 1.0e-3;
+    parameter real g_ac = 1.0e-3;
+    parameter real g_noise = 1.0e-3;
+    parameter real c_ac = 0.0;
+    parameter real c_noise = 0.0;
+    real g;
+    real c;
+    analog begin
+        g = analysis("noise") ? g_noise : (analysis("ac") ? g_ac : g_dc);
+        c = analysis("noise") ? c_noise : c_ac;
+        I(p, n) <+ g * V(p, n);
+        I(p, n) <+ ddt(c * V(p, n));
+    end
+endmodule
+"#,
+    );
+    let source_model = write_model(
+        "noise_analysis_identity_source.va",
+        r#"
+`include "disciplines.vams"
+
+module va_noise_analysis_identity_source(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ white_noise(4.0e-18, "source");
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga physical small-signal analysis identity\n\
+         VPORT port 0 DC 0 AC 1\n\
+         XLINK port out va_noise_analysis_identity g_dc=1m g_ac=1m g_noise=1m c_ac=0 c_noise=0\n\
+         XCOND out 0 va_noise_analysis_identity g_dc=1m g_ac=4m g_noise=1m c_ac=0 c_noise=1u\n\
+         XNOISE out 0 va_noise_analysis_identity_source\n\
+         .va \"{model}\" va_noise_analysis_identity\n\
+         .va \"{source_model}\" va_noise_analysis_identity_source\n\
+         .end\n"
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let engine = Engine::new(SimulationConfig::default());
+    let frequencies = [10.0, 1.0e3];
+
+    // AC must retain its own identity: the 1 mS link drives the 4 mS
+    // analysis("ac") shunt, so V(out)/V(port) = 1 / (1 + 4) = 0.2.
+    let ac = engine.run_ac(&netlist, &frequencies).expect("AC runs");
+    let output = ac[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("output node");
+    for point in &ac {
+        let gain = point.voltages[output];
+        assert!(
+            (gain.re - 0.2).abs() <= 1.0e-12 && gain.im.abs() <= 1.0e-12,
+            "AC must expose analysis(\"ac\"), got V(out)={gain:?}"
+        );
+    }
+
+    // Noise must instead use the 1 mS and 1 uF analysis("noise") shunt.
+    // The 4e-18 A²/Hz source sees 2 mS + jw*1 uF in total.
+    let ordinary = engine
+        .run_noise_named_with_input_source(&netlist, "out", None, "VPORT", &frequencies, T_NOM)
+        .expect("ordinary noise runs");
+    for point in &ordinary {
+        let omega_c = 2.0 * std::f64::consts::PI * point.frequency * 1.0e-6;
+        let denominator_norm_squared = (2.0e-3_f64).powi(2) + omega_c.powi(2);
+        let expected = 4.0e-18 / denominator_norm_squared;
+        assert!(
+            (point.output_noise_density - expected).abs() <= 1.0e-9 * expected,
+            "ordinary noise matrix must expose analysis(\"noise\"): actual={:.16e}, expected={expected:.16e}, contributions={:?}",
+            point.output_noise_density,
+            point.contributions
+        );
+    }
+
+    // SP port noise uses the same physical noise identity. With VPORT
+    // shorted, the Norton current is the source current scaled by the 1 mS
+    // link over the same complex total admittance.
+    let port = engine
+        .run_port_noise_correlation(&netlist, &["VPORT".to_owned()], &frequencies, T_NOM)
+        .expect("SP port noise runs");
+    for point in &port {
+        let density = point.current_correlation[0][0];
+        let omega_c = 2.0 * std::f64::consts::PI * point.frequency * 1.0e-6;
+        let denominator_norm_squared = (2.0e-3_f64).powi(2) + omega_c.powi(2);
+        let expected = 4.0e-18 * (1.0e-3_f64).powi(2) / denominator_norm_squared;
+        assert!(
+            (density.re - expected).abs() <= 1.0e-9 * expected && density.im.abs() <= 1.0e-30,
+            "SP port-noise matrix must expose analysis(\"noise\"): actual={density:?}, expected={expected:.16e}"
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+    let _ = std::fs::remove_file(source_model);
+}
+
+#[test]
+fn va_noise_linearization_errors_are_simulation_errors_not_panics() {
+    let model = write_model(
+        "noise_linearization_oob.va",
+        r#"
+`include "disciplines.vams"
+
+module va_noise_linearization_oob(p, n);
     inout p, n;
     electrical p, n;
     real w[1:4];
+    integer armed;
     integer i;
     analog begin
-        i = analysis("ac") ? 5 : 1;
+        i = (analysis("noise") && armed != 0) ? 5 : 1;
+        @(initial_step("noise")) armed = 1;
         w[i] = 1.0e-3;
         I(p, n) <+ w[i] * V(p, n) + white_noise(1.0e-18, "wn");
     end
@@ -483,10 +593,10 @@ endmodule
     );
 
     let deck = format!(
-        "* veriloga noise AC-linearization diagnostic\n\
+        "* veriloga noise-linearization diagnostic\n\
          V1 in 0 DC 1 AC 1\n\
-         XBAD in 0 va_noise_ac_oob\n\
-         .va \"{model}\" va_noise_ac_oob\n\
+         XBAD in 0 va_noise_linearization_oob\n\
+         .va \"{model}\" va_noise_linearization_oob\n\
          .end\n"
     );
 
@@ -504,11 +614,11 @@ endmodule
 
     let _ = std::fs::remove_file(model);
 
-    let result = result.expect("Verilog-A noise AC-linearization errors must not panic");
-    let err = result.expect_err("AC-linearization runtime error must be reported to the caller");
+    let result = result.expect("Verilog-A noise-linearization errors must not panic");
+    let err = result.expect_err("noise-linearization runtime error must be reported to the caller");
     let text = err.to_string();
     assert!(
         text.contains("Verilog-A") && (text.contains("Array index 5") || text.contains("[1:4]")),
-        "diagnostic should identify the Verilog-A AC-linearization array bounds error, got: {text}"
+        "diagnostic should identify the Verilog-A noise-linearization array bounds error, got: {text}"
     );
 }

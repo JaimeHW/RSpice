@@ -2834,11 +2834,12 @@ impl Engine {
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, frequency)
                 .map_err(SimulationError::Circuit)?;
-            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
                 &circuit,
                 &mut ac_matrix,
                 &dc_solution,
                 omega,
+                super::ac::SmallSignalAnalysisKind::Noise,
                 true,
                 true,
             )?;
@@ -3339,11 +3340,12 @@ impl Engine {
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
                 .map_err(SimulationError::Circuit)?;
-            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
                 circuit,
                 ac_matrix,
                 &dc_solution,
                 omega,
+                super::ac::SmallSignalAnalysisKind::Noise,
                 true,
                 true,
             )?;
@@ -4763,11 +4765,12 @@ r1 a 0 rmod
             .solve_dc_operating_point(&netlist, &mut circuit, &mut dc_matrix)
             .expect("physical Chebyshev operating point solves");
         let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&dc_matrix);
-        Engine::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+        Engine::try_fill_small_signal_matrix_with_vbic_delay_mode(
             &circuit,
             &mut ac_matrix,
             &dc_solution,
             2.0 * std::f64::consts::PI * 1.0e-2,
+            crate::engine::ac::SmallSignalAnalysisKind::Noise,
             true,
             true,
         )

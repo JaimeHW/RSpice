@@ -612,16 +612,17 @@ impl BuiltinVerilogADevices {
         }
     }
 
-    pub(crate) fn stamp_ac_real_all(
+    pub(crate) fn stamp_small_signal_real_all(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
         num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
         for device in &mut self.devices {
             device
-                .stamp_ac_real(matrix, voltages, num_nodes, simparams)
+                .stamp_small_signal_real(matrix, voltages, num_nodes, analysis, simparams)
                 .map_err(|source| GeneratedVerilogAEvaluationError {
                     instance_name: device.instance_name.clone(),
                     model_name: device.model_name,
@@ -631,17 +632,20 @@ impl BuiltinVerilogADevices {
         Ok(())
     }
 
-    pub(crate) fn stamp_reactive_all(
+    pub(crate) fn stamp_small_signal_reactive_all(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
         num_nodes: usize,
         omega: Value,
+        analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
         for device in &mut self.devices {
             device
-                .stamp_reactive(matrix, voltages, num_nodes, omega, simparams)
+                .stamp_small_signal_reactive(
+                    matrix, voltages, num_nodes, omega, analysis, simparams,
+                )
                 .map_err(|source| GeneratedVerilogAEvaluationError {
                     instance_name: device.instance_name.clone(),
                     model_name: device.model_name,
@@ -1352,18 +1356,19 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
-    pub(crate) fn stamp_ac_real(
+    pub(crate) fn stamp_small_signal_real(
         &mut self,
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
         num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
         simparams: GeneratedSimulationParameters,
     ) -> Result<(), GeneratedEvaluationError> {
         let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
             num_nodes,
-            GeneratedAnalysisKind::Ac,
+            analysis,
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,
@@ -1401,11 +1406,31 @@ impl BuiltinVerilogAInstance {
         omega: Value,
         simparams: GeneratedSimulationParameters,
     ) -> Result<(), GeneratedEvaluationError> {
+        self.stamp_small_signal_reactive(
+            matrix,
+            voltages,
+            num_nodes,
+            omega,
+            GeneratedAnalysisKind::Ac,
+            simparams,
+        )
+    }
+
+    #[inline]
+    pub(crate) fn stamp_small_signal_reactive(
+        &mut self,
+        matrix: &mut ComplexMatrix,
+        voltages: &[Value],
+        num_nodes: usize,
+        omega: Value,
+        analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
+    ) -> Result<(), GeneratedEvaluationError> {
         let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
             num_nodes,
-            GeneratedAnalysisKind::Ac,
+            analysis,
             self.analysis_initial_step,
             self.analysis_final_step,
             simparams,

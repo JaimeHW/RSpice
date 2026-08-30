@@ -23,6 +23,38 @@ const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 const AC_CONSTRAINT_BACKWARD_ERROR_FACTOR: Value = 64.0;
 
+/// Physical Verilog-A identity of a frequency-domain small-signal operator.
+///
+/// AC and noise share the same complex matrix assembly, but they are distinct
+/// analyses to a model. Keeping that identity explicit prevents the shared
+/// numerical path from making `analysis("ac")` true during noise transfer
+/// calculations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SmallSignalAnalysisKind {
+    Ac,
+    Noise,
+}
+
+impl SmallSignalAnalysisKind {
+    #[cfg(feature = "veriloga")]
+    #[inline]
+    const fn runtime_code(self) -> u8 {
+        match self {
+            Self::Ac => 1,
+            Self::Noise => 3,
+        }
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[inline]
+    const fn generated_kind(self) -> crate::device::veriloga_builtins::GeneratedAnalysisKind {
+        match self {
+            Self::Ac => crate::device::veriloga_builtins::GeneratedAnalysisKind::Ac,
+            Self::Noise => crate::device::veriloga_builtins::GeneratedAnalysisKind::Noise,
+        }
+    }
+}
+
 fn try_stamp_behavioral_ac_coefficient(
     matrix: &mut ComplexMatrix,
     row: usize,
@@ -1633,6 +1665,7 @@ impl Engine {
         circuit: &CircuitData,
         op_voltages: &[Value],
         frequency_hz: Value,
+        physical_analysis: SmallSignalAnalysisKind,
     ) -> Result<(), SimulationError> {
         struct AcRealStamper<'a> {
             matrix: &'a mut ComplexMatrix,
@@ -1719,16 +1752,18 @@ impl Engine {
         {
             let omega = 2.0 * std::f64::consts::PI * frequency_hz;
             for device in circuit.veriloga_devices().iter() {
-                // AC linearization uses Jacobian terms at the DC operating
-                // point. Verilog-A device stamping exposes the Jacobian
-                // through matrix callbacks.
+                // Small-signal linearization uses Jacobian terms at the
+                // operating point. Verilog-A device stamping exposes the
+                // Jacobian through matrix callbacks.
                 let mut cloned = device.clone();
                 let device_name = cloned.name.to_string();
-                cloned.try_set_analysis_type(1).map_err(|err| {
-                    SimulationError::Circuit(format!(
-                        "Verilog-A device '{device_name}' AC analysis setup failed: {err}"
-                    ))
-                })?;
+                cloned
+                    .try_set_analysis_type(physical_analysis.runtime_code())
+                    .map_err(|err| {
+                        SimulationError::Circuit(format!(
+                            "Verilog-A device '{device_name}' small-signal analysis setup failed: {err}"
+                        ))
+                    })?;
                 cloned
                     .try_stamp(
                         op_voltages,
@@ -1737,7 +1772,7 @@ impl Engine {
                     )
                     .map_err(|err| {
                         SimulationError::Circuit(format!(
-                            "Verilog-A device '{device_name}' AC stamping failed: {err}"
+                            "Verilog-A device '{device_name}' small-signal stamping failed: {err}"
                         ))
                     })?;
                 let device_name = cloned.name.to_string();
@@ -1748,7 +1783,7 @@ impl Engine {
                     })
                     .map_err(|err| {
                         SimulationError::Circuit(format!(
-                            "Verilog-A device '{device_name}' AC reactive stamping failed: {err}"
+                            "Verilog-A device '{device_name}' small-signal reactive stamping failed: {err}"
                         ))
                     })?;
             }
@@ -1765,10 +1800,23 @@ impl Engine {
                 crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
             );
             generated
-                .stamp_ac_real_all(matrix, op_voltages, num_nodes, simparams)
+                .stamp_small_signal_real_all(
+                    matrix,
+                    op_voltages,
+                    num_nodes,
+                    physical_analysis.generated_kind(),
+                    simparams,
+                )
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
             generated
-                .stamp_reactive_all(matrix, op_voltages, num_nodes, omega, simparams)
+                .stamp_small_signal_reactive_all(
+                    matrix,
+                    op_voltages,
+                    num_nodes,
+                    omega,
+                    physical_analysis.generated_kind(),
+                    simparams,
+                )
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         Ok(())
@@ -1966,11 +2014,12 @@ impl Engine {
     /// workspace keeps its sparsity pattern and shared symbolic
     /// factorization across calls, so a sweep pays the structure cost once
     /// instead of once per point.
-    pub(super) fn try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+    pub(super) fn try_fill_small_signal_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
         op_voltages: &[Value],
         omega: Value,
+        physical_analysis: SmallSignalAnalysisKind,
         include_vbic_dynamic_stamp: bool,
         include_vbic_delay_branches: bool,
     ) -> Result<(), SimulationError> {
@@ -2028,7 +2077,13 @@ impl Engine {
 
         // Nonlinear device Jacobian (real part) evaluated at DC operating point.
         if has_nonlinear {
-            Self::stamp_nonlinear_small_signal_real(ac_matrix, circuit, op_voltages, frequency_hz)?;
+            Self::stamp_nonlinear_small_signal_real(
+                ac_matrix,
+                circuit,
+                op_voltages,
+                frequency_hz,
+                physical_analysis,
+            )?;
             if include_vbic_dynamic_stamp {
                 for bjt in &circuit.bjts.devices {
                     Self::stamp_bjt_dynamic_ac(
@@ -2519,11 +2574,12 @@ impl Engine {
         // and the official binary fails the pre-xf 2005 AC tables by over
         // 1 dB at 10 GHz on the CEamp deck.
         let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
-        Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+        Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
             circuit,
             &mut ac_matrix,
             op_voltages,
             omega,
+            SmallSignalAnalysisKind::Ac,
             true,
             true,
         )?;
@@ -2558,11 +2614,12 @@ impl Engine {
         // explicitly in `engine/advanced/mod.rs`, so keep the base AC
         // linearization free of frequency-dependent VBIC companion reduction.
         let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
-        Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+        Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
             circuit,
             &mut ac_matrix,
             op_voltages,
             omega,
+            SmallSignalAnalysisKind::Ac,
             false,
             true,
         )?;
@@ -2756,11 +2813,12 @@ impl Engine {
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
                 .map_err(SimulationError::Circuit)?;
-            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
                 circuit,
                 ac_matrix,
                 &dc_solution,
                 omega,
+                SmallSignalAnalysisKind::Ac,
                 true,
                 true,
             )?;

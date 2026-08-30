@@ -185,11 +185,12 @@ impl Engine {
             circuit
                 .prepare_behavioral_small_signal_at_frequency(&dc_solution, freq)
                 .map_err(SimulationError::Circuit)?;
-            Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
+            Self::try_fill_small_signal_matrix_with_vbic_delay_mode(
                 &circuit,
                 &mut ac_matrix,
                 &dc_solution,
                 omega,
+                super::ac::SmallSignalAnalysisKind::Ac,
                 true,
                 true,
             )?;
