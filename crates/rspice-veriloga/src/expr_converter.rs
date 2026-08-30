@@ -1256,6 +1256,7 @@ impl<'a> ExprConverter<'a> {
                 )?;
                 validate_laplace_coefficients("laplace_nd", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
+                    site: crate::ir::LaplaceSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     numerator,
                     denominator,
@@ -1270,6 +1271,7 @@ impl<'a> ExprConverter<'a> {
                     self.const_complex_pairs(require_arg(2)?, "laplace_zp", "poles", false)?;
                 validate_laplace_roots("laplace_zp", &zeros, &poles)?;
                 Ok(IrExpr::LaplaceZP {
+                    site: crate::ir::LaplaceSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     zeros,
                     poles,
@@ -1297,6 +1299,7 @@ impl<'a> ExprConverter<'a> {
                 })?;
                 validate_laplace_coefficients("laplace_zd", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
+                    site: crate::ir::LaplaceSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     numerator,
                     denominator,
@@ -1322,6 +1325,7 @@ impl<'a> ExprConverter<'a> {
                 })?;
                 validate_laplace_coefficients("laplace_np", &numerator, &denominator)?;
                 Ok(IrExpr::LaplaceND {
+                    site: crate::ir::LaplaceSiteId::from_span(call.span),
                     expr: Box::new(expr),
                     numerator,
                     denominator,
@@ -2086,7 +2090,7 @@ impl<'a> ExprConverter<'a> {
                     direction,
                 })
             }
-            AnalogOperator::Laplace { kind, expr, .. } => {
+            AnalogOperator::Laplace { kind, expr, span } => {
                 let expr = Box::new(self.convert(expr)?);
                 match kind {
                     crate::ast::LaplaceKind::ZeroPole { zeros, poles } => {
@@ -2094,6 +2098,7 @@ impl<'a> ExprConverter<'a> {
                         let poles = self.const_complex_expression_pairs(poles)?;
                         validate_laplace_roots("laplace_zp", &zeros, &poles)?;
                         Ok(IrExpr::LaplaceZP {
+                            site: crate::ir::LaplaceSiteId::from_span(*span),
                             expr,
                             zeros,
                             poles,
@@ -2111,6 +2116,7 @@ impl<'a> ExprConverter<'a> {
                         let denominator = self.const_real_expressions(denominator)?;
                         validate_laplace_coefficients("laplace_zd", &numerator, &denominator)?;
                         Ok(IrExpr::LaplaceND {
+                            site: crate::ir::LaplaceSiteId::from_span(*span),
                             expr,
                             numerator,
                             denominator,
@@ -2127,6 +2133,7 @@ impl<'a> ExprConverter<'a> {
                             })?;
                         validate_laplace_coefficients("laplace_np", &numerator, &denominator)?;
                         Ok(IrExpr::LaplaceND {
+                            site: crate::ir::LaplaceSiteId::from_span(*span),
                             expr,
                             numerator,
                             denominator,
@@ -2140,6 +2147,7 @@ impl<'a> ExprConverter<'a> {
                         let denominator = self.const_real_expressions(denominator)?;
                         validate_laplace_coefficients("laplace_nd", &numerator, &denominator)?;
                         Ok(IrExpr::LaplaceND {
+                            site: crate::ir::LaplaceSiteId::from_span(*span),
                             expr,
                             numerator,
                             denominator,

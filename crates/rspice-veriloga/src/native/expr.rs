@@ -1204,7 +1204,10 @@ impl CanonicalStateOperator {
             (Self::Transition, Instruction::TransitionState(slot)) => Some(*slot),
             (Self::Slew, Instruction::SlewState(slot)) => Some(*slot),
             (Self::Absdelay, Instruction::AbsDelayState(slot)) => Some(*slot),
-            (Self::Laplace, Instruction::LaplaceState(slot)) => Some(*slot),
+            (
+                Self::Laplace,
+                Instruction::LaplaceState(slot) | Instruction::LaplaceStateDerivative(slot),
+            ) => Some(*slot),
             (Self::Zi, Instruction::ZiState(layout) | Instruction::ZiStateDerivative(layout)) => {
                 Some(layout.filter_id)
             }
@@ -2070,6 +2073,25 @@ impl NativeProgram {
                         1,
                     )?;
                     ops.push(NativeOp::LaplaceState(*filter_id));
+                }
+                Instruction::LaplaceStateDerivative(filter_id) => {
+                    validate_index(
+                        model.clone(),
+                        "LaplaceStateDerivative filter",
+                        *filter_id,
+                        limits.laplace_filter_count,
+                    )?;
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    return Err(JitError::unsupported_native_coverage(
+                        model.clone(),
+                        "legacy-bytecode Laplace derivative action",
+                    ));
                 }
                 Instruction::ZiState(layout) | Instruction::ZiStateDerivative(layout) => {
                     validate_index(
@@ -9792,6 +9814,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::TimerState(_) => "TimerState",
         Instruction::LaplaceState(_) => "LaplaceState",
         Instruction::IfElse => "IfElse",
+        Instruction::LaplaceStateDerivative(_) => "LaplaceStateDerivative",
     }
 }
 

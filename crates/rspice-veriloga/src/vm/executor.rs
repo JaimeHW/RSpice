@@ -906,6 +906,42 @@ impl<'a> Vm<'a> {
                 };
                 self.stack.push(result);
             }
+            // Read-only Laplace Jacobian action. Active transient integration
+            // uses the coefficient of the current Backward-Euler input;
+            // equilibrium and all other analyses use the filter's DC action.
+            Instruction::LaplaceStateDerivative(filter_id) => {
+                let input_derivative = self.pop()?;
+                let filter = self
+                    .context
+                    .laplace_filters
+                    .get(*filter_id)
+                    .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
+                let result = if self.context.analysis_type == 2 && self.context.integration.active {
+                    let gain = filter
+                        .backward_euler_input_gain(self.context.timestep)
+                        .map_err(|error| {
+                            VmError::InvalidNumericResult(format!(
+                                "Laplace derivative {filter_id}: {error}"
+                            ))
+                        })?;
+                    let result = gain * input_derivative;
+                    if !result.is_finite()
+                        || (result == 0.0 && gain != 0.0 && input_derivative != 0.0)
+                    {
+                        return Err(VmError::InvalidNumericResult(format!(
+                            "Laplace derivative {filter_id}: input action is not representable"
+                        )));
+                    }
+                    result
+                } else {
+                    filter.dc_output(input_derivative).map_err(|error| {
+                        VmError::InvalidNumericResult(format!(
+                            "Laplace derivative {filter_id}: {error}"
+                        ))
+                    })?
+                };
+                self.stack.push(result);
+            }
         }
         Ok(())
     }
@@ -1387,6 +1423,88 @@ mod tests {
         let first_step = execute_with_context(&mut context, program(2.0))
             .expect("first positive transient step");
         assert!((first_step - (14.0 / 3.0)).abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn laplace_derivative_matches_transient_primal_finite_difference_and_is_read_only() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.timestep = 0.5;
+        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        let mut filter = crate::laplace::StateSpaceFilter::integrator(1.0)
+            .expect("first-order low-pass realization");
+        filter
+            .set_initial_state(&[0.25])
+            .expect("matching accepted state");
+        context.laplace_filters.push(filter);
+
+        let derivative = execute_with_context(
+            &mut context,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::LaplaceStateDerivative(0),
+            ],
+        )
+        .expect("read-only transient derivative");
+        assert!((derivative - 1.0 / 3.0).abs() <= 8.0 * f64::EPSILON);
+        assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.25]);
+
+        let base = context.laplace_filters[0].clone();
+        let epsilon = 1.0e-6;
+        let mut primal = |input| {
+            context.laplace_filters[0] = base.clone();
+            execute_with_context(
+                &mut context,
+                vec![Instruction::PushConst(input), Instruction::LaplaceState(0)],
+            )
+            .expect("finite transient primal")
+        };
+        let upper = primal(0.75 + epsilon);
+        let lower = primal(0.75 - epsilon);
+        let finite_difference = (upper - lower) / (2.0 * epsilon);
+        assert!((finite_difference - derivative).abs() <= 1.0e-9);
+
+        context.laplace_filters[0] = base;
+        let primal_candidate = execute_with_context(
+            &mut context,
+            vec![Instruction::PushConst(0.75), Instruction::LaplaceState(0)],
+        )
+        .expect("publish transient primal candidate");
+        assert!((primal_candidate - 5.0 / 12.0).abs() <= 1.0e-12);
+        execute_with_context(
+            &mut context,
+            vec![
+                Instruction::PushConst(1.0),
+                Instruction::LaplaceStateDerivative(0),
+            ],
+        )
+        .expect("derivative must preserve in-flight primal candidate");
+        context
+            .advance_state()
+            .expect("accept the preserved primal candidate");
+        assert!((context.laplace_filters[0].checkpoint().state[0] - 5.0 / 12.0).abs() <= 1.0e-12);
+    }
+
+    #[test]
+    fn laplace_derivative_uses_dc_action_without_active_transient_integration() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.integration = IntegrationCoefficients::inactive();
+        context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::integrator(1.0)
+                .expect("first-order low-pass realization"),
+        );
+
+        let derivative = execute_with_context(
+            &mut context,
+            vec![
+                Instruction::PushConst(2.0),
+                Instruction::LaplaceStateDerivative(0),
+            ],
+        )
+        .expect("transient operating-point derivative uses DC action");
+        assert_eq!(derivative, 2.0);
+        assert_eq!(context.laplace_filters[0].checkpoint().state, vec![0.0]);
     }
 
     #[test]

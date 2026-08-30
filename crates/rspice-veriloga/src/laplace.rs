@@ -1575,11 +1575,13 @@ endmodule
     }
 
     #[test]
-    fn legacy_ir_derivatives_preserve_tiny_gains_and_poison_invalid_ones() {
-        use crate::ir::{DerivativeWrt, IrExpr, autodiff};
+    fn legacy_ir_laplace_nd_derivative_retains_the_primal_site_and_definition() {
+        use crate::ir::{DerivativeWrt, IrExpr, LaplaceSiteId, autodiff};
 
         let derivative = |numerator, denominator| {
+            let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
             let expression = IrExpr::LaplaceND {
+                site,
                 expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
                 numerator,
                 denominator,
@@ -1590,24 +1592,29 @@ endmodule
             ))
         };
 
-        assert!(matches!(
-            derivative(vec![1.0e-310], vec![1.0e-310, 1.0]),
-            IrExpr::Const(value) if value == 1.0
-        ));
-        for invalid in [
-            derivative(vec![1.0], vec![0.0, 1.0]),
-            derivative(vec![f64::from_bits(1)], vec![f64::MAX, 1.0]),
-        ] {
-            assert!(matches!(invalid, IrExpr::Const(value) if value.is_nan()));
-        }
+        let IrExpr::LaplaceNDDerivative {
+            site,
+            expr,
+            numerator,
+            denominator,
+        } = derivative(vec![1.0e-310], vec![1.0e-310, 1.0])
+        else {
+            panic!("Laplace ND derivative must retain an explicit state-site action");
+        };
+        assert_eq!(site, LaplaceSiteId::from_span(crate::source::Span::dummy()));
+        assert!(matches!(expr.as_ref(), IrExpr::Const(1.0)));
+        assert_eq!(numerator, vec![1.0e-310]);
+        assert_eq!(denominator, vec![1.0e-310, 1.0]);
     }
 
     #[test]
-    fn legacy_laplace_zp_derivative_uses_checked_root_dc_gain() {
-        use crate::ir::{DerivativeWrt, IrExpr, autodiff};
+    fn legacy_ir_laplace_zp_derivative_retains_the_primal_site_and_definition() {
+        use crate::ir::{DerivativeWrt, IrExpr, LaplaceSiteId, autodiff};
 
         let derivative = |zeros, poles| {
+            let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
             let expression = IrExpr::LaplaceZP {
+                site,
                 expr: Box::new(IrExpr::Voltage(0, usize::MAX)),
                 zeros,
                 poles,
@@ -1619,19 +1626,23 @@ endmodule
             ))
         };
 
-        for (zeros, poles, expected) in [
-            (vec![(-2.0, 0.0)], vec![(-4.0, 0.0)], 1.0),
-            (
-                vec![(-1.0, 2.0), (-1.0, -2.0)],
-                vec![(-3.0, 4.0), (-3.0, -4.0)],
-                0.4,
-            ),
-        ] {
-            let IrExpr::Const(actual) = derivative(zeros, poles) else {
-                panic!("linear pole-zero derivative must simplify to a constant");
-            };
-            assert!((actual - expected).abs() <= 8.0 * f64::EPSILON);
-        }
+        let zeros = vec![(-1.0, 2.0), (-1.0, -2.0)];
+        let poles = vec![(-3.0, 4.0), (-3.0, -4.0)];
+        let IrExpr::LaplaceZPDerivative {
+            site,
+            expr,
+            zeros: derivative_zeros,
+            poles: derivative_poles,
+            gain,
+        } = derivative(zeros.clone(), poles.clone())
+        else {
+            panic!("Laplace ZP derivative must retain an explicit state-site action");
+        };
+        assert_eq!(site, LaplaceSiteId::from_span(crate::source::Span::dummy()));
+        assert!(matches!(expr.as_ref(), IrExpr::Const(1.0)));
+        assert_eq!(derivative_zeros, zeros);
+        assert_eq!(derivative_poles, poles);
+        assert_eq!(gain, 2.0);
     }
 
     #[cfg(not(feature = "native"))]

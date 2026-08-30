@@ -35,6 +35,32 @@ impl ZiSiteId {
     }
 }
 
+/// Stable identity of one logical Laplace operator in the source tree. The
+/// primal expression and every generated Jacobian action retain this identity
+/// so bytecode lowering assigns them one shared state-space slot regardless of
+/// compilation order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LaplaceSiteId {
+    pub source: u32,
+    pub start: u32,
+    pub end: u32,
+    /// Deterministic preorder ordinal assigned during executable-IR
+    /// construction. This disambiguates independently authored public-AST
+    /// nodes that carry the same (often dummy) span.
+    pub ordinal: u32,
+}
+
+impl LaplaceSiteId {
+    pub fn from_span(span: crate::source::Span) -> Self {
+        Self {
+            source: span.source.raw(),
+            start: span.start,
+            end: span.end,
+            ordinal: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ZiPolynomialDefinition {
     Coefficients(Vec<IrExpr>),
@@ -388,6 +414,7 @@ pub enum IrExpr {
     /// laplace_zp - s-domain filter with poles and zeros
     /// Args: (expr, zeros, poles, k_factor)
     LaplaceZP {
+        site: LaplaceSiteId,
         expr: Box<IrExpr>,
         zeros: Vec<(f64, f64)>, // (real, imag) pairs
         poles: Vec<(f64, f64)>,
@@ -396,9 +423,29 @@ pub enum IrExpr {
     /// laplace_nd - s-domain filter with num/den coefficients
     /// Args: (expr, numerator_coeffs, denominator_coeffs)
     LaplaceND {
+        site: LaplaceSiteId,
         expr: Box<IrExpr>,
         numerator: Vec<f64>, // ascending powers of s
         denominator: Vec<f64>,
+    },
+    /// Exact Jacobian action of a coefficient-form Laplace filter. It shares
+    /// the primal site's state and applies the DC gain outside active
+    /// transient integration or the Backward-Euler input gain during it.
+    LaplaceNDDerivative {
+        site: LaplaceSiteId,
+        expr: Box<IrExpr>,
+        numerator: Vec<f64>,
+        denominator: Vec<f64>,
+    },
+    /// Exact Jacobian action of a pole-zero Laplace filter. It has the same
+    /// analysis-dependent behavior and state identity as
+    /// [`Self::LaplaceNDDerivative`].
+    LaplaceZPDerivative {
+        site: LaplaceSiteId,
+        expr: Box<IrExpr>,
+        zeros: Vec<(f64, f64)>,
+        poles: Vec<(f64, f64)>,
+        gain: f64,
     },
     /// zi_* - z-domain (sampled-data) filter: the input samples every
     /// `period` seconds and the difference equation output holds between
@@ -691,7 +738,9 @@ impl DeviceIR {
         let mut items = Vec::with_capacity(module.statements.len());
         Self::convert_statements(&module.statements, &converter, &mut items)?;
         let mut zi_site_ordinal = 0_u32;
+        let mut laplace_site_ordinal = 0_u32;
         autodiff::assign_zi_site_ordinals_in_items(&mut items, &mut zi_site_ordinal);
+        autodiff::assign_laplace_site_ordinals_in_items(&mut items, &mut laplace_site_ordinal);
         ir.assignments = items;
 
         // Pre-pass over contributions: parse branch refs and register a
@@ -809,6 +858,7 @@ impl DeviceIR {
             // Convert the expression
             let mut expr = converter.convert_contribution(&contrib.expression)?;
             autodiff::assign_zi_site_ordinals(&mut expr, &mut zi_site_ordinal);
+            autodiff::assign_laplace_site_ordinals(&mut expr, &mut laplace_site_ordinal);
             let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
@@ -1137,6 +1187,8 @@ impl DeviceIR {
                 | IrExpr::Slew { expr, .. }
                 | IrExpr::LaplaceZP { expr, .. }
                 | IrExpr::LaplaceND { expr, .. }
+                | IrExpr::LaplaceZPDerivative { expr, .. }
+                | IrExpr::LaplaceNDDerivative { expr, .. }
                 | IrExpr::ZiFilter { expr, .. }
                 | IrExpr::ZiFilterDerivative { expr, .. }
                 | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
@@ -1781,6 +1833,8 @@ pub mod autodiff {
             | IrExpr::Slew { expr, .. }
             | IrExpr::LaplaceZP { expr, .. }
             | IrExpr::LaplaceND { expr, .. }
+            | IrExpr::LaplaceZPDerivative { expr, .. }
+            | IrExpr::LaplaceNDDerivative { expr, .. }
             | IrExpr::ZiFilter { expr, .. }
             | IrExpr::ZiFilterDerivative { expr, .. }
             | IrExpr::Ddx { expr, .. } => recurse(expr),
@@ -2484,6 +2538,54 @@ pub mod autodiff {
                 pos: *pos,
                 neg: *neg,
             },
+            IrExpr::LaplaceND {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => IrExpr::LaplaceND {
+                site: *site,
+                expr: Box::new(map_expr(expr, f)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
+            IrExpr::LaplaceNDDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => IrExpr::LaplaceNDDerivative {
+                site: *site,
+                expr: Box::new(map_expr(expr, f)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
+            IrExpr::LaplaceZP {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => IrExpr::LaplaceZP {
+                site: *site,
+                expr: Box::new(map_expr(expr, f)),
+                zeros: zeros.clone(),
+                poles: poles.clone(),
+                gain: *gain,
+            },
+            IrExpr::LaplaceZPDerivative {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => IrExpr::LaplaceZPDerivative {
+                site: *site,
+                expr: Box::new(map_expr(expr, f)),
+                zeros: zeros.clone(),
+                poles: poles.clone(),
+                gain: *gain,
+            },
             IrExpr::ZiFilter {
                 site,
                 expr,
@@ -2583,24 +2685,64 @@ pub mod autodiff {
         }
     }
 
-    /// Return a finite, representable filter gain or a non-finite sentinel.
-    ///
-    /// Automatic differentiation predates fallible IR construction, so its
-    /// public API cannot carry a `CompileError` without changing every
-    /// derivative consumer. A NaN is deliberately retained in the derivative
-    /// IR for invalid gains: generated Jacobian evaluation then reaches the
-    /// existing typed `InvalidNumericResult` boundary instead of silently
-    /// substituting zero. There is no magnitude cutoff; every representable
-    /// nonzero ratio is preserved.
-    fn checked_filter_dc_gain(numerator: f64, denominator: f64) -> f64 {
-        if !numerator.is_finite() || !denominator.is_finite() || denominator == 0.0 {
-            return f64::NAN;
-        }
-        let gain = numerator / denominator;
-        if !gain.is_finite() || (gain == 0.0 && numerator != 0.0) {
-            f64::NAN
-        } else {
-            gain
+    pub(crate) fn assign_laplace_site_ordinals(expr: &mut IrExpr, next: &mut u32) {
+        *expr = map_expr(expr, &mut |node| match node {
+            IrExpr::LaplaceND {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => {
+                let mut assigned = *site;
+                assigned.ordinal = *next;
+                *next = next.checked_add(1).expect("Laplace site ordinal overflow");
+                let mut inner = expr.as_ref().clone();
+                assign_laplace_site_ordinals(&mut inner, next);
+                Some(IrExpr::LaplaceND {
+                    site: assigned,
+                    expr: Box::new(inner),
+                    numerator: numerator.clone(),
+                    denominator: denominator.clone(),
+                })
+            }
+            IrExpr::LaplaceZP {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => {
+                let mut assigned = *site;
+                assigned.ordinal = *next;
+                *next = next.checked_add(1).expect("Laplace site ordinal overflow");
+                let mut inner = expr.as_ref().clone();
+                assign_laplace_site_ordinals(&mut inner, next);
+                Some(IrExpr::LaplaceZP {
+                    site: assigned,
+                    expr: Box::new(inner),
+                    zeros: zeros.clone(),
+                    poles: poles.clone(),
+                    gain: *gain,
+                })
+            }
+            _ => None,
+        });
+    }
+
+    pub(crate) fn assign_laplace_site_ordinals_in_items(
+        items: &mut [IrAssignmentItem],
+        next: &mut u32,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assignment) => {
+                    assign_laplace_site_ordinals(&mut assignment.expr, next);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    assign_laplace_site_ordinals(condition, next);
+                    assign_laplace_site_ordinals_in_items(body, next);
+                }
+            }
         }
     }
 
@@ -3120,40 +3262,56 @@ pub mod autodiff {
                 direct_assignment: *direct_assignment,
             },
 
-            // Laplace filters: DC small-signal gain times the inner
-            // derivative
+            // Laplace derivatives retain the primal site's state action.
+            // Runtime selects DC gain or the active Backward-Euler input gain.
             IrExpr::LaplaceND {
+                site,
                 expr,
                 numerator,
                 denominator,
-            } => {
-                let n0 = numerator.first().copied().unwrap_or(0.0);
-                let d0 = denominator.first().copied().unwrap_or(1.0);
-                let gain = checked_filter_dc_gain(n0, d0);
-                IrExpr::Binary(
-                    BinaryOp::Mul,
-                    Box::new(IrExpr::Const(gain)),
-                    Box::new(differentiate(expr)),
-                )
-            }
+            } => IrExpr::LaplaceNDDerivative {
+                site: *site,
+                expr: Box::new(differentiate(expr)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
             IrExpr::LaplaceZP {
+                site,
                 expr,
                 zeros,
                 poles,
                 gain,
-            } => {
-                // The fallible root validator is shared with canonical
-                // lowering. Legacy autodiff cannot return a compile error, so
-                // an invalid definition remains a NaN sentinel that reaches
-                // the typed numeric-error boundary during device evaluation.
-                let dc_gain = crate::laplace::checked_pole_zero_dc_gain(*gain, zeros, poles)
-                    .unwrap_or(f64::NAN);
-                IrExpr::Binary(
-                    BinaryOp::Mul,
-                    Box::new(IrExpr::Const(dc_gain)),
-                    Box::new(differentiate(expr)),
-                )
-            }
+            } => IrExpr::LaplaceZPDerivative {
+                site: *site,
+                expr: Box::new(differentiate(expr)),
+                zeros: zeros.clone(),
+                poles: poles.clone(),
+                gain: *gain,
+            },
+            IrExpr::LaplaceNDDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => IrExpr::LaplaceNDDerivative {
+                site: *site,
+                expr: Box::new(differentiate(expr)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+            },
+            IrExpr::LaplaceZPDerivative {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => IrExpr::LaplaceZPDerivative {
+                site: *site,
+                expr: Box::new(differentiate(expr)),
+                zeros: zeros.clone(),
+                poles: poles.clone(),
+                gain: *gain,
+            },
 
             // Unresolved ddx: expand, then differentiate the expansion
             IrExpr::Ddx { .. } => {

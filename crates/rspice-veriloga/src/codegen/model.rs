@@ -14,6 +14,9 @@ use super::*;
 pub struct CodeGenerator {
     /// Collected Laplace filters
     pub(super) laplace_filters: std::cell::RefCell<Vec<StateSpaceFilter>>,
+    /// Stable logical Laplace site to state-space filter slot.
+    pub(super) laplace_sites:
+        std::cell::RefCell<std::collections::HashMap<crate::ir::LaplaceSiteId, usize>>,
     /// Collected lookup tables used by $table_model expressions.
     pub(super) lookup_tables: std::cell::RefCell<Vec<LookupTable>>,
     /// Stateful slot allocator for `$limit`.
@@ -730,4 +733,10 @@ pub enum Instruction {
     LaplaceState(usize),
     /// Conditional: if top is nonzero, use second, else third
     IfElse,
+    /// Read-only exact Jacobian action of a Laplace site.
+    /// Stack: `[input derivative] -> [filtered derivative]`
+    ///
+    /// Appended to preserve the serialized discriminants of all preceding
+    /// bytecode instructions.
+    LaplaceStateDerivative(usize),
 }

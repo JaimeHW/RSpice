@@ -44,6 +44,7 @@ impl CodeGenerator {
     pub fn new() -> Self {
         Self {
             laplace_filters: std::cell::RefCell::new(Vec::new()),
+            laplace_sites: std::cell::RefCell::new(HashMap::new()),
             lookup_tables: std::cell::RefCell::new(Vec::new()),
             limit_state_count: std::cell::Cell::new(0),
             delay_buffer_count: std::cell::Cell::new(0),
@@ -214,6 +215,7 @@ impl CodeGenerator {
         let emit_ctx = EmitContext::from_ir(ir);
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
+        self.laplace_sites.borrow_mut().clear();
         self.zi_filters.borrow_mut().clear();
         self.zi_filter_definitions.borrow_mut().clear();
         self.zi_sites.borrow_mut().clear();
@@ -668,6 +670,22 @@ impl CodeGenerator {
         let id = counter.get();
         counter.set(id + 1);
         id
+    }
+
+    fn laplace_site_slot(
+        &self,
+        site: crate::ir::LaplaceSiteId,
+        construct: impl FnOnce() -> CompileResult<StateSpaceFilter>,
+    ) -> CompileResult<usize> {
+        if let Some(slot) = self.laplace_sites.borrow().get(&site).copied() {
+            return Ok(slot);
+        }
+
+        let filter = construct()?;
+        let slot = self.laplace_filters.borrow().len();
+        self.laplace_filters.borrow_mut().push(filter);
+        self.laplace_sites.borrow_mut().insert(site, slot);
+        Ok(slot)
     }
 
     fn compile_zi_polynomial(
@@ -1338,6 +1356,7 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::TimerState(timer_id));
             }
             IrExpr::LaplaceZP {
+                site,
                 expr,
                 zeros,
                 poles,
@@ -1354,45 +1373,106 @@ impl CodeGenerator {
                     .map(|(re, im)| Complex64::new(*re, *im))
                     .collect();
 
-                let filter = StateSpaceFilter::from_poles_zeros(&p_complex, &z_complex, *gain)
-                    .map_err(|error| {
-                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "laplace_zp: {error}"
-                        )))
-                    })?;
-                let filter_id = self.laplace_filters.borrow().len();
-                self.laplace_filters.borrow_mut().push(filter);
+                let filter_id = self.laplace_site_slot(*site, || {
+                    StateSpaceFilter::from_poles_zeros(&p_complex, &z_complex, *gain).map_err(
+                        |error| {
+                            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                "laplace_zp: {error}"
+                            )))
+                            .into()
+                        },
+                    )
+                })?;
 
                 program
                     .instructions
                     .push(Instruction::LaplaceState(filter_id));
             }
             IrExpr::LaplaceND {
+                site,
                 expr,
                 numerator,
                 denominator,
             } => {
                 self.emit_expr(expr, emit_ctx, program)?;
 
-                // IR has ascending powers: n0 + n1*s + ...
-                // StateSpaceFilter expects descending: n_k*s^k + ... + n0
-                let mut num_desc = numerator.clone();
-                num_desc.reverse();
-                let mut den_desc = denominator.clone();
-                den_desc.reverse();
-
-                let filter = StateSpaceFilter::from_transfer_function(&num_desc, &den_desc)
-                    .map_err(|error| {
-                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "laplace coefficient form: {error}"
-                        )))
-                    })?;
-                let filter_id = self.laplace_filters.borrow().len();
-                self.laplace_filters.borrow_mut().push(filter);
+                let filter_id = self.laplace_site_slot(*site, || {
+                    // IR has ascending powers: n0 + n1*s + ...
+                    // StateSpaceFilter expects descending: n_k*s^k + ... + n0
+                    let mut num_desc = numerator.clone();
+                    num_desc.reverse();
+                    let mut den_desc = denominator.clone();
+                    den_desc.reverse();
+                    StateSpaceFilter::from_transfer_function(&num_desc, &den_desc).map_err(
+                        |error| {
+                            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                "laplace coefficient form: {error}"
+                            )))
+                            .into()
+                        },
+                    )
+                })?;
 
                 program
                     .instructions
                     .push(Instruction::LaplaceState(filter_id));
+            }
+            IrExpr::LaplaceZPDerivative {
+                site,
+                expr,
+                zeros,
+                poles,
+                gain,
+            } => {
+                self.emit_expr(expr, emit_ctx, program)?;
+
+                let p_complex = poles
+                    .iter()
+                    .map(|(re, im)| Complex64::new(*re, *im))
+                    .collect::<Vec<_>>();
+                let z_complex = zeros
+                    .iter()
+                    .map(|(re, im)| Complex64::new(*re, *im))
+                    .collect::<Vec<_>>();
+                let filter_id = self.laplace_site_slot(*site, || {
+                    StateSpaceFilter::from_poles_zeros(&p_complex, &z_complex, *gain).map_err(
+                        |error| {
+                            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                "laplace_zp derivative: {error}"
+                            )))
+                            .into()
+                        },
+                    )
+                })?;
+                program
+                    .instructions
+                    .push(Instruction::LaplaceStateDerivative(filter_id));
+            }
+            IrExpr::LaplaceNDDerivative {
+                site,
+                expr,
+                numerator,
+                denominator,
+            } => {
+                self.emit_expr(expr, emit_ctx, program)?;
+
+                let filter_id = self.laplace_site_slot(*site, || {
+                    let mut num_desc = numerator.clone();
+                    num_desc.reverse();
+                    let mut den_desc = denominator.clone();
+                    den_desc.reverse();
+                    StateSpaceFilter::from_transfer_function(&num_desc, &den_desc).map_err(
+                        |error| {
+                            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                "laplace coefficient derivative: {error}"
+                            )))
+                            .into()
+                        },
+                    )
+                })?;
+                program
+                    .instructions
+                    .push(Instruction::LaplaceStateDerivative(filter_id));
             }
         }
         Ok(())
@@ -1449,4 +1529,87 @@ fn count_assignment_steps_for_timing(items: &[AssignmentStep]) -> usize {
             AssignmentStep::Loop { body, .. } => 1 + count_assignment_steps_for_timing(body),
         })
         .sum()
+}
+
+#[cfg(test)]
+mod laplace_derivative_tests {
+    use super::*;
+    use crate::ir::{IrExpr, LaplaceSiteId};
+
+    fn laplace_nd(site: LaplaceSiteId, derivative: bool) -> IrExpr {
+        let expr = Box::new(IrExpr::Voltage(0, usize::MAX));
+        if derivative {
+            IrExpr::LaplaceNDDerivative {
+                site,
+                expr,
+                numerator: vec![1.0],
+                denominator: vec![1.0, 1.0],
+            }
+        } else {
+            IrExpr::LaplaceND {
+                site,
+                expr,
+                numerator: vec![1.0],
+                denominator: vec![1.0, 1.0],
+            }
+        }
+    }
+
+    #[test]
+    fn laplace_derivative_and_primal_share_a_slot_when_derivative_compiles_first() {
+        let generator = CodeGenerator::new();
+        let emit_context = EmitContext {
+            parameter_indices: HashMap::new(),
+            variable_indices: HashMap::new(),
+        };
+        let site = LaplaceSiteId::from_span(crate::source::Span::dummy());
+
+        let derivative = generator
+            .compile_expr(&laplace_nd(site, true), &emit_context)
+            .expect("compile derivative first");
+        let primal = generator
+            .compile_expr(&laplace_nd(site, false), &emit_context)
+            .expect("compile primal second");
+
+        assert!(matches!(
+            derivative.instructions.last(),
+            Some(Instruction::LaplaceStateDerivative(0))
+        ));
+        assert!(matches!(
+            primal.instructions.last(),
+            Some(Instruction::LaplaceState(0))
+        ));
+        assert_eq!(generator.laplace_filters.borrow().len(), 1);
+        assert_eq!(generator.laplace_sites.borrow().get(&site), Some(&0));
+    }
+
+    #[test]
+    fn source_compiler_emits_explicit_laplace_jacobian_action() {
+        let source = r#"
+`include "disciplines.vams"
+module laplace_jacobian(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
+endmodule
+"#;
+        let model = crate::VerilogACompiler::new(crate::CompilerOptions::default())
+            .compile(source)
+            .expect("compile Laplace contribution");
+
+        assert_eq!(model.laplace_filters.len(), 1);
+        assert!(matches!(
+            model.stamp_programs[0].value_program.instructions.last(),
+            Some(Instruction::LaplaceState(0))
+        ));
+        assert!(
+            model.stamp_programs[0]
+                .jacobian_programs
+                .iter()
+                .any(|entry| matches!(
+                    entry.program.instructions.last(),
+                    Some(Instruction::LaplaceStateDerivative(0))
+                ))
+        );
+    }
 }

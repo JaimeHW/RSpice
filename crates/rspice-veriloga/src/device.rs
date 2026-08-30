@@ -5200,6 +5200,62 @@ mod bytecode_assignment_integrity_tests {
     }
 }
 
+#[cfg(all(
+    test,
+    not(feature = "native"),
+    not(all(feature = "wasm-jit", target_arch = "wasm32"))
+))]
+mod bytecode_laplace_derivative_tests {
+    use super::VerilogADevice;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    const SOURCE: &str = r#"
+`include "disciplines.vams"
+module laplace_derivative_device(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
+endmodule
+"#;
+
+    fn evaluate_at(voltage: f64) -> f64 {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(SOURCE).expect("compile Laplace fixture");
+        let mut device =
+            VerilogADevice::try_new("LAPLACE_FD", model, &[1, 0]).expect("build device");
+        device.try_begin_analysis(2).expect("begin transient");
+        device.set_timestep(0.5);
+        device.update_voltages(&[voltage]);
+        device.try_evaluate().expect("evaluate transient")[0]
+    }
+
+    #[test]
+    fn transient_device_jacobian_matches_primal_finite_difference() {
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(SOURCE).expect("compile Laplace fixture");
+        let mut device =
+            VerilogADevice::try_new("LAPLACE_JAC", model, &[1, 0]).expect("build device");
+        device.try_begin_analysis(2).expect("begin transient");
+        device.set_timestep(0.5);
+        device.update_voltages(&[0.75]);
+
+        let epsilon = 1.0e-6;
+        let finite_difference =
+            (evaluate_at(0.75 + epsilon) - evaluate_at(0.75 - epsilon)) / (2.0 * epsilon);
+        let jacobian = device
+            .try_compute_jacobian()
+            .expect("compute transient Jacobian");
+
+        assert!((finite_difference - 1.0 / 3.0).abs() < 1.0e-9);
+        assert!(
+            jacobian
+                .iter()
+                .any(|entry| (entry.value - finite_difference).abs() < 1.0e-9),
+            "Jacobian {jacobian:?} does not contain finite-difference action {finite_difference}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod analysis_lifecycle_tests {
     use super::VerilogADevice;
@@ -5343,6 +5399,31 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
 
         assert_send_sync::<VerilogADevice>();
+    }
+
+    #[test]
+    fn native_device_construction_accepts_legacy_laplace_derivative_metadata() {
+        let source = r#"
+`include "disciplines.vams"
+module native_laplace_metadata(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0});
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile Laplace model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile Laplace canonical IR");
+
+        VerilogADevice::try_new_with_canonical_ir(
+            "NATIVE_LAPLACE_METADATA",
+            model,
+            &artifact,
+            &[1, 0],
+        )
+        .expect("construct native device with legacy Laplace derivative metadata");
     }
 
     /// A second engine build reuses the first build's image.
