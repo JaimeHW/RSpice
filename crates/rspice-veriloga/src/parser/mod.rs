@@ -1807,10 +1807,10 @@ impl<'a> Parser<'a> {
     /// Parse bitwise and (&)
     fn parse_bit_and(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
-        let mut left = self.parse_comparison()?;
+        let mut left = self.parse_equality()?;
 
         while self.match_token(TokenKind::BitAnd) {
-            let right = self.parse_comparison()?;
+            let right = self.parse_equality()?;
             left = Expression::Binary(BinaryExpr {
                 op: BinaryOp::BitAnd,
                 left: Box::new(left),
@@ -1822,10 +1822,10 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parse comparison
-    fn parse_comparison(&mut self) -> Result<Expression, ParseError> {
+    /// Parse equality (`==`, `!=`) below relational comparisons.
+    fn parse_equality(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
-        let mut left = self.parse_shift()?;
+        let mut left = self.parse_relational()?;
 
         loop {
             let op = match self.current().kind {
@@ -1837,6 +1837,28 @@ impl<'a> Parser<'a> {
                     self.advance();
                     BinaryOp::Ne
                 }
+                _ => break,
+            };
+
+            let right = self.parse_relational()?;
+            left = Expression::Binary(BinaryExpr {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: start.extend(self.previous_span()),
+            });
+        }
+
+        Ok(left)
+    }
+
+    /// Parse relational comparisons (`<`, `<=`, `>`, `>=`) above equality.
+    fn parse_relational(&mut self) -> Result<Expression, ParseError> {
+        let start = self.current_span();
+        let mut left = self.parse_shift()?;
+
+        loop {
+            let op = match self.current().kind {
                 TokenKind::Lt => {
                     self.advance();
                     BinaryOp::Lt
@@ -3190,12 +3212,14 @@ mod tests {
                 inout p, n;
                 electrical p, n;
                 real a, b, c, d;
-                real y1, y2, y3, y4;
+                real y1, y2, y3, y4, y5, y6;
                 analog begin
                     y1 = a << b + c;
                     y2 = a + b << c;
                     y3 = a & b ^ c | d;
                     y4 = a == b & c != d;
+                    y5 = a == b < c;
+                    y6 = a < b == c < d;
                 end
             endmodule"#,
         );
@@ -3232,6 +3256,19 @@ mod tests {
         assert_eq!(y4.op, BinaryOp::BitAnd);
         assert!(matches!(*y4.left, Expression::Binary(ref b) if b.op == BinaryOp::Eq));
         assert!(matches!(*y4.right, Expression::Binary(ref b) if b.op == BinaryOp::Ne));
+
+        let Expression::Binary(y5) = assignment_value(4) else {
+            panic!("expected y5 binary expression");
+        };
+        assert_eq!(y5.op, BinaryOp::Eq);
+        assert!(matches!(*y5.right, Expression::Binary(ref b) if b.op == BinaryOp::Lt));
+
+        let Expression::Binary(y6) = assignment_value(5) else {
+            panic!("expected y6 binary expression");
+        };
+        assert_eq!(y6.op, BinaryOp::Eq);
+        assert!(matches!(*y6.left, Expression::Binary(ref b) if b.op == BinaryOp::Lt));
+        assert!(matches!(*y6.right, Expression::Binary(ref b) if b.op == BinaryOp::Lt));
     }
 
     #[test]
