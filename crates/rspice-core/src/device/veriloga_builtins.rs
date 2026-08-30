@@ -309,6 +309,9 @@ impl std::fmt::Debug for BuiltinVerilogAInstance {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BuiltinVerilogADevices {
     devices: Vec<BuiltinVerilogAInstance>,
+    /// Physical analysis visible to generated models while the numerical DC
+    /// operating-point solver assembles their equilibrium equations.
+    operating_point_analysis_override: Option<GeneratedAnalysisKind>,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
@@ -324,6 +327,7 @@ impl BuiltinVerilogADevices {
     pub(crate) fn new() -> Self {
         Self {
             devices: Vec::new(),
+            operating_point_analysis_override: None,
         }
     }
 
@@ -521,6 +525,7 @@ impl BuiltinVerilogADevices {
         simparams: GeneratedSimulationParameters,
         evaluation_mode: GeneratedEvaluationMode,
     ) -> Result<(), GeneratedVerilogAEvaluationError> {
+        let analysis = self.operating_point_analysis_override.unwrap_or(analysis);
         for device in &mut self.devices {
             device
                 .stamp_with_mode(
@@ -572,6 +577,17 @@ impl BuiltinVerilogADevices {
         self.validate_state_acceptance()?;
         self.apply_validated_state_acceptance();
         Ok(())
+    }
+
+    /// Override the physical analysis queried by generated models during an
+    /// equilibrium operating-point solve. The numerical solver still uses
+    /// DC matrix assembly; only Verilog-A analysis predicates change.
+    #[inline]
+    pub(crate) fn set_operating_point_analysis_override(
+        &mut self,
+        analysis: Option<GeneratedAnalysisKind>,
+    ) {
+        self.operating_point_analysis_override = analysis;
     }
 
     /// Validate every generated instance before an accepted analysis point is
@@ -1020,12 +1036,8 @@ impl BuiltinVerilogAInstance {
             self.temperature,
             num_nodes,
             GeneratedAnalysisKind::Noise,
-            // Noise-source collection begins a new analysis after the DC
-            // operating point. Canonical compact models initialize model and
-            // temperature state under $analysis("initial_step"), so stale DC
-            // step flags must not leak into this evaluation.
-            true,
-            false,
+            self.analysis_initial_step,
+            self.analysis_final_step,
             simparams,
         );
         let descriptors = self.kind.noise_descriptors();

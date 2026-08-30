@@ -2659,6 +2659,12 @@ impl Engine {
             ));
         }
         Self::ensure_supported_ac_dynamic_charges(&circuit)?;
+        circuit
+            .begin_veriloga_equilibrium_analysis(1)
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .prepare_veriloga_equilibrium_analysis_point(1, true, false)
+            .map_err(SimulationError::Circuit)?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
         let ac_voltage_projection = AcVoltageConstraintProjection::new(&circuit)?;
@@ -2673,6 +2679,23 @@ impl Engine {
         } else {
             engine.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
         };
+        if has_nonlinear {
+            engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if let Some(message) = circuit.take_xspice_evaluation_error() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE evaluation failed: {message}"
+            )));
+        }
+        circuit
+            .accept_veriloga_analysis_point()
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .finish_veriloga_equilibrium_operating_point(1)
+            .map_err(SimulationError::Circuit)?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages,

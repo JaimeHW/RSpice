@@ -2738,6 +2738,12 @@ impl Engine {
             ));
         }
 
+        circuit
+            .begin_veriloga_equilibrium_analysis(3)
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .prepare_veriloga_equilibrium_analysis_point(3, true, false)
+            .map_err(SimulationError::Circuit)?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
         let dc_solution = engine.solve_dc_operating_point_with_abort(
@@ -2746,6 +2752,23 @@ impl Engine {
             &mut matrix,
             abort,
         )?;
+        if circuit.has_nonlinear_devices() {
+            engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if let Some(message) = circuit.take_xspice_evaluation_error() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE evaluation failed: {message}"
+            )));
+        }
+        circuit
+            .accept_veriloga_analysis_point()
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .finish_veriloga_equilibrium_operating_point(3)
+            .map_err(SimulationError::Circuit)?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
@@ -3120,6 +3143,12 @@ impl Engine {
             "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
         );
         Self::ensure_supported_dynamic_charges(&circuit, "Noise")?;
+        circuit
+            .begin_veriloga_equilibrium_analysis(3)
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .prepare_veriloga_equilibrium_analysis_point(3, true, false)
+            .map_err(SimulationError::Circuit)?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -3130,6 +3159,23 @@ impl Engine {
             &mut matrix,
             abort,
         )?;
+        if circuit.has_nonlinear_devices() {
+            engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
+        }
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if let Some(message) = circuit.take_xspice_evaluation_error() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE evaluation failed: {message}"
+            )));
+        }
+        circuit
+            .accept_veriloga_analysis_point()
+            .map_err(SimulationError::Circuit)?;
+        circuit
+            .finish_veriloga_equilibrium_operating_point(3)
+            .map_err(SimulationError::Circuit)?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);

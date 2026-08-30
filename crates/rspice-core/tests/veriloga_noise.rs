@@ -72,6 +72,67 @@ endmodule
 "#;
 
 #[test]
+fn noise_initial_step_initializes_the_committed_psd_for_every_frequency() {
+    let model = write_model(
+        "initial_step_noise.va",
+        r#"
+`include "disciplines.vams"
+module va_noise_initial_step(p, n);
+    inout p, n;
+    electrical p, n;
+    real density;
+    analog begin
+        @(initial_step("noise")) density = density + 4.0e-18;
+        I(p, n) <+ white_noise(density, "initialized");
+    end
+endmodule
+"#,
+    );
+    let frequencies = [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1.0e3, 1.0e4, 1.0e5, 1.0e6,
+    ];
+    let observed = output_noise(
+        &format!(
+            "* noise initial-step lifecycle\n\
+             R1 out 0 1k\n\
+             X1 out 0 va_noise_initial_step\n\
+             .va \"{model}\" va_noise_initial_step\n\
+             .end\n"
+        ),
+        "out",
+        &frequencies,
+    );
+    let expected = 4.0e-18 * 1.0e6 + 4.0 * K_BOLTZMANN * T_NOM * 1.0e3;
+    for (frequency, density) in frequencies.into_iter().zip(observed) {
+        assert!(
+            ((density - expected) / expected).abs() < 1.0e-12,
+            "noise initial_step state was not retained at {frequency} Hz: {density:.16e}"
+        );
+    }
+
+    let port_deck = Netlist::parse(&format!(
+        "* port-noise initial-step lifecycle\n\
+         VPORT out 0 0\n\
+         X1 out 0 va_noise_initial_step\n\
+         .va \"{model}\" va_noise_initial_step\n\
+         .end\n"
+    ))
+    .expect("port-noise lifecycle deck parses");
+    let port_results = Engine::default()
+        .run_port_noise_correlation(&port_deck, &["VPORT".to_owned()], &frequencies, T_NOM)
+        .expect("port-noise lifecycle run");
+    for result in port_results {
+        let density = result.current_correlation[0][0];
+        assert_eq!(density.im, 0.0);
+        assert!(
+            ((density.re - 4.0e-18) / 4.0e-18).abs() < 1.0e-12,
+            "port-noise initial_step state was not retained at {} Hz: {density}",
+            result.frequency
+        );
+    }
+}
+
+#[test]
 fn va_white_noise_matches_native_resistor_thermal() {
     let model = write_model("nres.va", NOISY_RES);
     let frequencies = [1.0, 1.0e3, 1.0e6];

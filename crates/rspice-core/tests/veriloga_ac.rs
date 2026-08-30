@@ -22,6 +22,58 @@ fn deck_path(path: &std::path::Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
+#[test]
+fn ac_initial_step_initializes_every_frequency_from_the_committed_operating_point() {
+    let model = write_model(
+        "initial_step",
+        r#"
+`include "disciplines.vams"
+module va_ac_initial_step(p, n);
+    inout p, n;
+    electrical p, n;
+    real conductance;
+    analog begin
+        @(initial_step("ac")) conductance = conductance + 1.0e-3;
+        I(p, n) <+ conductance * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* AC initial-step lifecycle\n\
+         V1 in 0 DC 0 AC 1\n\
+         R1 in out 1k\n\
+         X1 out 0 va_ac_initial_step\n\
+         .va \"{}\" va_ac_initial_step\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse AC lifecycle deck");
+    let frequencies = [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1.0e3, 1.0e4, 1.0e5, 1.0e6,
+    ];
+    let results = Engine::default()
+        .run_ac(&netlist, &frequencies)
+        .expect("AC lifecycle run");
+    assert_eq!(results.len(), frequencies.len());
+    let output = results[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node");
+    for result in &results {
+        let voltage = result.voltages[output];
+        assert!(
+            (voltage.re - 0.5).abs() < 1.0e-12 && voltage.im.abs() < 1.0e-12,
+            "AC initial_step state was not retained at {} Hz: {voltage}",
+            result.frequency
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+}
+
 /// RC lowpass with a Verilog-A capacitor: H(s) = 1/(1 + sRC).
 /// R = 1k, C = 1u -> fc = 1/(2 pi RC) ~= 159.155 Hz.
 #[test]

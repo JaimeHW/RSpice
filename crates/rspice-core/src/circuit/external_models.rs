@@ -1961,8 +1961,34 @@ impl CircuitData {
     /// instance. Generated instances are newly constructed with the circuit;
     /// their DC analysis kind is supplied by the ordinary DC stamp path.
     pub(crate) fn begin_veriloga_dc_analysis(&mut self) -> Result<(), String> {
+        self.begin_veriloga_equilibrium_analysis(0)
+    }
+
+    /// Begin an equilibrium analysis whose equations are solved by the DC
+    /// operating-point machinery but whose physical Verilog-A analysis is
+    /// DC, AC, or noise.
+    pub(crate) fn begin_veriloga_equilibrium_analysis(
+        &mut self,
+        analysis: u8,
+    ) -> Result<(), String> {
+        if !matches!(analysis, 0 | 1 | 3) {
+            return Err(format!(
+                "equilibrium Verilog-A analysis must be 0=dc, 1=ac, or 3=noise, got {analysis}"
+            ));
+        }
         #[cfg(feature = "veriloga")]
-        self.begin_veriloga_analysis(0)?;
+        self.begin_veriloga_analysis(analysis)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        {
+            let generated_analysis = match analysis {
+                0 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Dc,
+                1 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Ac,
+                3 => crate::device::veriloga_builtins::GeneratedAnalysisKind::Noise,
+                _ => unreachable!("validated equilibrium analysis"),
+            };
+            self.generated_veriloga_devices
+                .set_operating_point_analysis_override(Some(generated_analysis));
+        }
         Ok(())
     }
 
@@ -1974,22 +2000,40 @@ impl CircuitData {
         initial_step: bool,
         final_step: bool,
     ) -> Result<(), String> {
+        self.prepare_veriloga_equilibrium_analysis_point(0, initial_step, final_step)
+    }
+
+    /// Prepare one point of a DC-assembled equilibrium solve while preserving
+    /// the physical DC/AC/noise identity visible to Verilog-A predicates.
+    pub(crate) fn prepare_veriloga_equilibrium_analysis_point(
+        &mut self,
+        analysis: u8,
+        initial_step: bool,
+        final_step: bool,
+    ) -> Result<(), String> {
+        if !matches!(analysis, 0 | 1 | 3) {
+            return Err(format!(
+                "equilibrium Verilog-A analysis must be 0=dc, 1=ac, or 3=noise, got {analysis}"
+            ));
+        }
         #[cfg(feature = "veriloga")]
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
-            device.try_set_analysis_type(0).map_err(|error| {
-                format!("Verilog-A device '{instance}' DC analysis setup failed: {error}")
+            device.try_set_analysis_type(analysis).map_err(|error| {
+                format!("Verilog-A device '{instance}' equilibrium analysis setup failed: {error}")
             })?;
             device.try_set_time(0.0).map_err(|error| {
-                format!("Verilog-A device '{instance}' DC time setup failed: {error}")
+                format!("Verilog-A device '{instance}' equilibrium time setup failed: {error}")
             })?;
             device.try_set_timestep(0.0).map_err(|error| {
-                format!("Verilog-A device '{instance}' DC timestep setup failed: {error}")
+                format!("Verilog-A device '{instance}' equilibrium timestep setup failed: {error}")
             })?;
             device
                 .try_set_analysis_step(initial_step, final_step)
                 .map_err(|error| {
-                    format!("Verilog-A device '{instance}' DC analysis-step setup failed: {error}")
+                    format!(
+                        "Verilog-A device '{instance}' equilibrium analysis-step setup failed: {error}"
+                    )
                 })?;
         }
 
@@ -2003,6 +2047,20 @@ impl CircuitData {
             self.generated_veriloga_devices
                 .set_analysis_step(initial_step, final_step);
         }
+        Ok(())
+    }
+
+    /// Finish an AC/noise equilibrium operating point before frequency-domain
+    /// work begins. The accepted state remains committed, while lifecycle
+    /// flags and the generated-model DC-stamp analysis override are cleared.
+    pub(crate) fn finish_veriloga_equilibrium_operating_point(
+        &mut self,
+        analysis: u8,
+    ) -> Result<(), String> {
+        self.prepare_veriloga_equilibrium_analysis_point(analysis, false, false)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        self.generated_veriloga_devices
+            .set_operating_point_analysis_override(None);
         Ok(())
     }
 
