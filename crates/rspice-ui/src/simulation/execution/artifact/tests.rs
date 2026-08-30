@@ -176,12 +176,31 @@ fn hb_result() -> SimulationResult {
     )
     .unwrap();
     let coefficients = (0..=config.num_harmonics)
-        .map(|harmonic| num_complex::Complex64::new(harmonic as f64 * 0.1, -0.25))
+        .map(|harmonic| {
+            num_complex::Complex64::new(
+                harmonic as f64 * 0.1,
+                if harmonic == 0 { 0.0 } else { -0.25 },
+            )
+        })
         .collect::<Vec<_>>();
-    let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+    let branch_coefficients = (0..=config.num_harmonics)
+        .map(|harmonic| {
+            num_complex::Complex64::new(
+                -1.0e-3 / (harmonic + 1) as f64,
+                if harmonic == 0 {
+                    0.0
+                } else {
+                    harmonic as f64 * 1.0e-5
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
         config,
         vec!["out".to_owned()],
         vec![coefficients.clone()],
+        vec!["V1".to_owned()],
+        vec![branch_coefficients],
         4,
         1.0e-10,
     )
@@ -267,17 +286,52 @@ fn hb_state_transfer_round_trips_and_rejects_tamper() {
         resolved.hb_state().unwrap().operating_point().iterations(),
         4
     );
+    assert_eq!(
+        resolved
+            .hb_state()
+            .unwrap()
+            .operating_point()
+            .mna_branch_names(),
+        &["V1"]
+    );
 
     let (metadata, buffers) = resolved.encode_transfer().unwrap();
-    assert_eq!(buffers.len(), 2, "one real and one imaginary HB row");
+    assert_eq!(
+        buffers.len(),
+        4,
+        "node and MNA branch rows each carry real and imaginary buffers"
+    );
     assert_eq!(
         ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap(),
         resolved
     );
-    let mut tampered = buffers;
-    tampered[0][3] += 1.0;
+    let mut tampered = buffers.clone();
+    tampered[2][3] += 1.0;
     assert!(matches!(
         ResolvedExecutionDependencies::decode_transfer(&metadata, tampered),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
+
+    let mut identity: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    let branch_name =
+        identity["artifacts"][0]["payload"]["HbState"]["mna_branch_spectra"][0]["branch_name"]
+            .as_str()
+            .unwrap();
+    assert_eq!(branch_name, "V1");
+    identity["artifacts"][0]["payload"]["HbState"]["mna_branch_spectra"][0]["branch_name"] =
+        serde_json::Value::String("VDRIFT".to_owned());
+    let identity = serde_json::to_string(&identity).unwrap();
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&identity, buffers),
+        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+    ));
+
+    let mut config: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+    config["artifacts"][0]["payload"]["HbState"]["config"]["tolerance"] = serde_json::json!(1.0e-4);
+    let config = serde_json::to_string(&config).unwrap();
+    let (_, buffers) = resolved.encode_transfer().unwrap();
+    assert!(matches!(
+        ResolvedExecutionDependencies::decode_transfer(&config, buffers),
         Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
     ));
 }

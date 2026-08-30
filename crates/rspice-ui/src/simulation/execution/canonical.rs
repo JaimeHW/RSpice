@@ -156,6 +156,71 @@ pub(in crate::simulation) fn f64_sequence_digest(domain: &str, values: &[f64]) -
     writer.finish()
 }
 
+/// Authenticates every numerical and identity field required to reuse an HB
+/// operating point. The zero-branch encoding deliberately matches the legacy
+/// v1 artifact digest; a legacy node-only state can therefore survive an
+/// in-process transport, while the consuming engine still refuses it when the
+/// elaborated circuit has MNA branches.
+pub(in crate::simulation) fn hb_operating_point_digest(
+    point: &rspice_core::engine::HbOperatingPoint,
+) -> ContentDigest {
+    let config = point.config();
+    let mut writer = CanonicalWriter::new("rspice.hb-state-artifact/v1");
+    writer.f64(config.fundamental_freq);
+    writer.usize(config.num_harmonics);
+    writer.sequence(config.tones.len());
+    for tone in &config.tones {
+        writer.f64(tone.frequency);
+        writer.usize(tone.num_harmonics);
+        writer.string(&tone.name);
+        writer.option(tone.source_name.as_deref(), |writer, source| {
+            writer.string(source)
+        });
+    }
+    writer.f64(config.tolerance);
+    writer.f64(config.abstol);
+    writer.usize(config.max_iterations);
+    writer.f64(config.damping);
+    writer.f64(config.min_damping);
+    writer.usize(config.oversample_factor);
+    writer.option(config.collocation_points.as_ref(), |writer, points| {
+        writer.usize(*points)
+    });
+    writer.usize(config.max_mixing_order);
+    writer.bool(config.use_krylov);
+    writer.usize(config.gmres_restart);
+    writer.bool(config.source_stepping);
+    writer.bool(config.use_exact_jacobian);
+    writer.bool(config.verbose);
+    writer.usize(point.iterations());
+    writer.f64(point.residual_norm());
+    writer.sequence(point.node_names().len());
+    for (node, spectrum) in point.node_names().iter().zip(point.spectral_state()) {
+        writer.string(node);
+        writer.sequence(spectrum.len());
+        for value in spectrum {
+            writer.f64(value.re);
+            writer.f64(value.im);
+        }
+    }
+    if !point.mna_branch_names().is_empty() {
+        writer.sequence(point.mna_branch_names().len());
+        for (branch, spectrum) in point
+            .mna_branch_names()
+            .iter()
+            .zip(point.mna_branch_spectral_state())
+        {
+            writer.string(branch);
+            writer.sequence(spectrum.len());
+            for value in spectrum {
+                writer.f64(value.re);
+                writer.f64(value.im);
+            }
+        }
+    }
+    writer.finish()
+}
+
 /// Identity of the exact executable source and voltage mutation consumed by
 /// one OP. Process-corner materialization is already represented in
 /// `source`; supply scaling is authenticated separately because it is applied

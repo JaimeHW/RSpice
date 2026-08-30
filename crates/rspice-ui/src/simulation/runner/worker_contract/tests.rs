@@ -196,9 +196,9 @@ pub(super) fn authenticated_pstb_result() -> SimulationResult {
     }
 }
 
-fn retained_hb_operating_point() -> rspice_core::engine::HbOperatingPoint {
+pub(super) fn retained_hb_operating_point() -> rspice_core::engine::HbOperatingPoint {
     let config = rspice_core::analysis::HbConfig::new(1.0).with_harmonics(4);
-    rspice_core::engine::HbOperatingPoint::try_from_parts(
+    rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
         config,
         vec!["out".to_owned()],
         vec![vec![
@@ -207,6 +207,14 @@ fn retained_hb_operating_point() -> rspice_core::engine::HbOperatingPoint {
             num_complex::Complex64::new(0.05, 0.02),
             num_complex::Complex64::new(0.01, 0.0),
             num_complex::Complex64::new(0.005, -0.001),
+        ]],
+        vec!["V1".to_owned()],
+        vec![vec![
+            num_complex::Complex64::new(-1.0e-3, 0.0),
+            num_complex::Complex64::new(-2.0e-4, 1.0e-4),
+            num_complex::Complex64::new(-5.0e-5, 2.0e-5),
+            num_complex::Complex64::new(-1.0e-5, 0.0),
+            num_complex::Complex64::new(-5.0e-6, -1.0e-6),
         ]],
         3,
         1.0e-10,
@@ -263,7 +271,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 11);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 12);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -1159,16 +1167,16 @@ fn worker_transport_round_trips_hb_display_and_retained_state() {
         })),
     };
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
-    assert_eq!(transport.buffers.len(), 6);
+    assert_eq!(transport.buffers.len(), 8);
     assert_eq!(transport.clone().into_response().unwrap(), response);
 
     let mut tampered = transport;
-    tampered.buffers[5][1] += 1.0;
+    tampered.buffers[7][1] += 1.0;
     assert!(
         tampered
             .into_response()
             .unwrap_err()
-            .contains("spectral payload digest mismatch")
+            .contains("MNA branch spectral payload digest mismatch")
     );
 }
 

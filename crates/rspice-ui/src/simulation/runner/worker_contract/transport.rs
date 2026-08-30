@@ -104,6 +104,8 @@ pub(super) fn validate_worker_response_before_transport(
         let transfer_buffer_count = operating_point
             .spectral_state()
             .len()
+            .checked_add(operating_point.mna_branch_spectral_state().len())
+            .ok_or_else(|| "retained HB response buffer count overflows this platform".to_owned())?
             .checked_mul(2)
             .and_then(|count| count.checked_add(waveform_buffer_count))
             .and_then(|count| count.checked_add(1))
@@ -125,7 +127,16 @@ pub(super) fn validate_worker_response_before_transport(
         }
         for spectrum in operating_point.spectral_state() {
             numeric_values = numeric_values
-                .checked_add(spectrum.len().saturating_mul(2))
+                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
+                    "retained HB response size overflows this platform".to_owned()
+                })?)
+                .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
+        }
+        for spectrum in operating_point.mna_branch_spectral_state() {
+            numeric_values = numeric_values
+                .checked_add(spectrum.len().checked_mul(2).ok_or_else(|| {
+                    "retained HB response size overflows this platform".to_owned()
+                })?)
                 .ok_or_else(|| "retained HB response size overflows this platform".to_owned())?;
         }
         if numeric_values > MAX_WORKER_F64_VALUES {
@@ -845,13 +856,24 @@ pub(crate) struct WorkerHbSpectrumTransport {
     imaginary_digest: crate::product::ContentDigest,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkerHbBranchSpectrumTransport {
+    branch_name: String,
+    real: WorkerF64Series,
+    imaginary: WorkerF64Series,
+    real_digest: crate::product::ContentDigest,
+    imaginary_digest: crate::product::ContentDigest,
+}
+
 /// Scalar HB basis metadata plus transferable complex spectral rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerHbOperatingPointTransport {
     config: rspice_core::analysis::HbConfig,
     spectra: Vec<WorkerHbSpectrumTransport>,
+    mna_branch_spectra: Vec<WorkerHbBranchSpectrumTransport>,
     iterations: usize,
     residual_norm: f64,
+    state_digest: crate::product::ContentDigest,
 }
 
 impl WorkerHbOperatingPointTransport {
@@ -884,11 +906,38 @@ impl WorkerHbOperatingPointTransport {
                 }
             })
             .collect();
+        let mna_branch_spectra = operating_point
+            .mna_branch_names()
+            .iter()
+            .cloned()
+            .zip(operating_point.mna_branch_spectral_state())
+            .map(|(branch_name, coefficients)| {
+                let (real, imaginary): (Vec<_>, Vec<_>) = coefficients
+                    .iter()
+                    .map(|value| (value.re, value.im))
+                    .unzip();
+                WorkerHbBranchSpectrumTransport {
+                    branch_name,
+                    real_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-branch-spectrum-real/v1",
+                        &real,
+                    ),
+                    imaginary_digest: crate::simulation::execution::f64_sequence_digest(
+                        "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                        &imaginary,
+                    ),
+                    real: WorkerF64Series::from_vec(real, buffers),
+                    imaginary: WorkerF64Series::from_vec(imaginary, buffers),
+                }
+            })
+            .collect();
         Self {
             config: operating_point.config().clone(),
             spectra,
+            mna_branch_spectra,
             iterations: operating_point.iterations(),
             residual_norm: operating_point.residual_norm(),
+            state_digest: crate::simulation::execution::hb_operating_point_digest(&operating_point),
         }
     }
 
@@ -896,7 +945,12 @@ impl WorkerHbOperatingPointTransport {
         self,
         buffers: &[Vec<f64>],
     ) -> Result<rspice_core::engine::HbOperatingPoint, String> {
-        if self.spectra.len() > 65_536 {
+        if self
+            .spectra
+            .len()
+            .checked_add(self.mna_branch_spectra.len())
+            .is_none_or(|rows| rows > 65_536)
+        {
             return Err("retained HB worker metadata exceeds structural limits".to_owned());
         }
         let mut node_names = Vec::with_capacity(self.spectra.len());
@@ -920,14 +974,52 @@ impl WorkerHbOperatingPointTransport {
             }
             spectral_state.push(worker_join_complex("HB spectral row", real, imaginary)?);
         }
-        rspice_core::engine::HbOperatingPoint::try_from_parts(
-            self.config,
-            node_names,
-            spectral_state,
-            self.iterations,
-            self.residual_norm,
-        )
-        .map_err(|error| format!("invalid retained HB worker payload: {error}"))
+        let mut mna_branch_names = Vec::with_capacity(self.mna_branch_spectra.len());
+        let mut mna_branch_spectral_state = Vec::with_capacity(self.mna_branch_spectra.len());
+        for spectrum in self.mna_branch_spectra {
+            mna_branch_names.push(spectrum.branch_name);
+            let real = spectrum.real.into_vec(buffers)?;
+            let imaginary = spectrum.imaginary.into_vec(buffers)?;
+            let actual_real_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-branch-spectrum-real/v1",
+                &real,
+            );
+            let actual_imaginary_digest = crate::simulation::execution::f64_sequence_digest(
+                "rspice.worker-hb-branch-spectrum-imaginary/v1",
+                &imaginary,
+            );
+            if actual_real_digest != spectrum.real_digest
+                || actual_imaginary_digest != spectrum.imaginary_digest
+            {
+                return Err(
+                    "retained HB worker MNA branch spectral payload digest mismatch".to_owned(),
+                );
+            }
+            mna_branch_spectral_state.push(worker_join_complex(
+                "HB MNA branch spectral row",
+                real,
+                imaginary,
+            )?);
+        }
+        let operating_point =
+            rspice_core::engine::HbOperatingPoint::try_from_parts_with_mna_branches(
+                self.config,
+                node_names,
+                spectral_state,
+                mna_branch_names,
+                mna_branch_spectral_state,
+                self.iterations,
+                self.residual_norm,
+            )
+            .map_err(|error| format!("invalid retained HB worker payload: {error}"))?;
+        let actual_state_digest =
+            crate::simulation::execution::hb_operating_point_digest(&operating_point);
+        if actual_state_digest != self.state_digest {
+            return Err(
+                "retained HB worker state identity or configuration digest mismatch".to_owned(),
+            );
+        }
+        Ok(operating_point)
     }
 }
 
@@ -1733,6 +1825,67 @@ pub(super) fn worker_waveforms_from_transport(
         .into_iter()
         .map(|waveform| waveform.into_waveform(buffers))
         .collect()
+}
+
+#[cfg(test)]
+mod hb_state_contract_tests {
+    use super::*;
+
+    fn transport() -> (WorkerHbOperatingPointTransport, Vec<Vec<f64>>) {
+        let mut buffers = Vec::new();
+        let transport = WorkerHbOperatingPointTransport::from_operating_point(
+            super::super::tests::retained_hb_operating_point(),
+            &mut buffers,
+        );
+        (transport, buffers)
+    }
+
+    #[test]
+    fn retained_hb_transport_authenticates_branch_identity_and_configuration() {
+        let (mut identity, buffers) = transport();
+        identity.mna_branch_spectra[0].branch_name = "VDRIFT".to_owned();
+        assert!(
+            identity
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+
+        let (mut config, buffers) = transport();
+        config.config.tolerance *= 10.0;
+        assert!(
+            config
+                .into_operating_point(&buffers)
+                .unwrap_err()
+                .contains("identity or configuration digest mismatch")
+        );
+    }
+
+    #[test]
+    fn current_zero_branch_state_still_round_trips_without_invented_branches() {
+        let config = rspice_core::analysis::HbConfig::new(1.0).with_harmonics(1);
+        let operating_point = rspice_core::engine::HbOperatingPoint::try_from_parts(
+            config,
+            vec!["out".to_owned()],
+            vec![vec![
+                num_complex::Complex64::new(0.5, 0.0),
+                num_complex::Complex64::new(0.1, -0.2),
+            ]],
+            2,
+            1.0e-9,
+        )
+        .unwrap();
+        let mut buffers = Vec::new();
+        let transport = WorkerHbOperatingPointTransport::from_operating_point(
+            operating_point.clone(),
+            &mut buffers,
+        );
+        assert!(transport.mna_branch_spectra.is_empty());
+        assert_eq!(
+            transport.into_operating_point(&buffers).unwrap(),
+            operating_point
+        );
+    }
 }
 
 #[cfg(test)]

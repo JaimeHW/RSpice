@@ -18,7 +18,7 @@ pub(in crate::simulation) use artifact::{
 pub(in crate::simulation) use canonical::f64_sequence_digest;
 pub(in crate::simulation) use canonical::{
     analysis_kind_tag, canonical_analysis_kind, content_digest, drc_receipt_digest,
-    manual_deck_analysis_instance_id, manual_source_receipt_digest,
+    hb_operating_point_digest, manual_deck_analysis_instance_id, manual_source_receipt_digest,
     operating_point_effective_source_digest, sealed_dependency_closure_digest,
 };
 pub(in crate::simulation) use permit::{ExecutionPermit, ExecutionPermitIssuer};
