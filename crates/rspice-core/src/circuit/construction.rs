@@ -25,7 +25,7 @@ impl CircuitData {
             num_branches: 0,
             hidden_state_count: 0,
             resistors: Resistors::new(),
-            resistor_absolute_noise_temperatures: Vec::new(),
+            resistor_noise_temperature_provenance: None,
             resistor_branches: ResistorBranches::new(),
             capacitors: Capacitors::new(),
             inductors: Inductors::new(),
@@ -131,9 +131,16 @@ impl CircuitData {
         let Some(index) = self.resistors.len().checked_sub(1) else {
             return;
         };
-        self.resistor_absolute_noise_temperatures
-            .resize(self.resistors.len(), None);
-        self.resistor_absolute_noise_temperatures[index] = None;
+        let clear_provenance = self
+            .resistor_noise_temperature_provenance
+            .as_mut()
+            .is_some_and(|provenance| {
+                provenance.clear(index);
+                provenance.is_empty()
+            });
+        if clear_provenance {
+            self.resistor_noise_temperature_provenance = None;
+        }
     }
 
     /// Retain authored resistor `TEMP` exactly rather than reconstructing it
@@ -143,19 +150,18 @@ impl CircuitData {
         let Some(index) = self.resistors.len().checked_sub(1) else {
             return;
         };
-        self.resistor_absolute_noise_temperatures
-            .resize(self.resistors.len(), None);
-        self.resistor_absolute_noise_temperatures[index] = Some(temperature);
+        self.resistor_noise_temperature_provenance
+            .get_or_insert_default()
+            .set_absolute(index, temperature);
     }
 
     /// Authored absolute resistor-noise temperature, when the instance used
     /// `TEMP` rather than the analysis temperature plus `DTEMP`.
     #[inline]
     pub(crate) fn resistor_absolute_noise_temperature(&self, index: usize) -> Option<Value> {
-        self.resistor_absolute_noise_temperatures
-            .get(index)
-            .copied()
-            .flatten()
+        self.resistor_noise_temperature_provenance
+            .as_ref()
+            .and_then(|provenance| provenance.get(index))
     }
 
     /// Number of explicitly materialized absolute resistor-noise temperature
@@ -164,7 +170,9 @@ impl CircuitData {
     /// invalid metadata state.
     #[inline]
     pub(crate) fn resistor_absolute_noise_temperature_count(&self) -> usize {
-        self.resistor_absolute_noise_temperatures.len()
+        self.resistor_noise_temperature_provenance
+            .as_ref()
+            .map_or(0, ResistorNoiseTemperatureProvenance::materialized_len)
     }
 
     /// Resolve a resistor's physical noise temperature without a lossy
@@ -947,6 +955,46 @@ mod tests {
             300.15_f64.to_bits()
         );
         assert_eq!(circuit.resistors.noise_temperature_offset(0), 0.0);
+    }
+
+    #[test]
+    fn resistor_noise_temperature_provenance_is_lazy_compact_and_value_exact() {
+        let mut circuit = CircuitData::new();
+        assert!(circuit.resistor_noise_temperature_provenance.is_none());
+
+        circuit.resistors.add("R1".to_string(), 1, 0, 1.0);
+        circuit.set_last_resistor_absolute_noise_temperature(Value::NAN);
+        assert_eq!(
+            circuit
+                .resistor_absolute_noise_temperature(0)
+                .expect("authored non-finite value remains available for fail-closed analysis")
+                .to_bits(),
+            Value::NAN.to_bits()
+        );
+
+        circuit.set_last_resistor_noise_temperature_offset(25.0);
+        assert!(circuit.resistor_noise_temperature_provenance.is_none());
+        assert_eq!(circuit.resistor_absolute_noise_temperature_count(), 0);
+
+        circuit.set_last_resistor_absolute_noise_temperature(300.15);
+        circuit.resistors.add("R2".to_string(), 2, 0, 2.0);
+        circuit.set_last_resistor_absolute_noise_temperature(325.15);
+        assert_eq!(circuit.resistor_absolute_noise_temperature_count(), 2);
+
+        circuit.set_last_resistor_noise_temperature_offset(50.0);
+        assert_eq!(
+            circuit.resistor_absolute_noise_temperature_count(),
+            1,
+            "clearing the last absolute temperature removes trailing omissions"
+        );
+        assert_eq!(
+            circuit.resistor_noise_temperature(0, 1.0e20).to_bits(),
+            300.15_f64.to_bits()
+        );
+        assert_eq!(
+            circuit.resistor_noise_temperature(1, 275.15).to_bits(),
+            (275.15_f64 + 50.0).to_bits()
+        );
     }
 
     #[test]

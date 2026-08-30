@@ -397,6 +397,59 @@ pub(crate) struct XyceMemristorBinding {
     pub resistance_store: Value,
 }
 
+/// Sparse authored resistor-noise temperatures that must remain absolute.
+///
+/// Most resistors inherit the analysis temperature, optionally shifted by
+/// `DTEMP`, so allocating a parallel array for every circuit would make the
+/// exceptional `TEMP` provenance look like device storage. This object owns
+/// that exceptional state and keeps its representation canonical: omitted
+/// slots are `None`, and trailing omissions are never retained.
+#[derive(Debug, Clone, Default)]
+struct ResistorNoiseTemperatureProvenance {
+    absolute_by_resistor: Vec<Option<Value>>,
+}
+
+impl ResistorNoiseTemperatureProvenance {
+    fn set_absolute(&mut self, resistor_index: usize, temperature: Value) {
+        let materialized_len = resistor_index
+            .checked_add(1)
+            .expect("a resistor index derived from Vec::len() cannot overflow");
+        self.absolute_by_resistor.resize(materialized_len, None);
+        self.absolute_by_resistor[resistor_index] = Some(temperature);
+    }
+
+    fn clear(&mut self, resistor_index: usize) {
+        if let Some(slot) = self.absolute_by_resistor.get_mut(resistor_index) {
+            *slot = None;
+        }
+        while self
+            .absolute_by_resistor
+            .last()
+            .is_some_and(Option::is_none)
+        {
+            self.absolute_by_resistor.pop();
+        }
+    }
+
+    #[inline]
+    fn get(&self, resistor_index: usize) -> Option<Value> {
+        self.absolute_by_resistor
+            .get(resistor_index)
+            .copied()
+            .flatten()
+    }
+
+    #[inline]
+    fn materialized_len(&self) -> usize {
+        self.absolute_by_resistor.len()
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.absolute_by_resistor.is_empty()
+    }
+}
+
 /// High-performance circuit representation using Struct-of-Arrays
 ///
 /// `Clone` exists so embarrassingly-parallel sweeps (AC frequency points)
@@ -423,10 +476,9 @@ pub struct CircuitData {
 
     // Linear device storage (SoA for cache efficiency)
     pub(crate) resistors: Resistors,
-    /// Authored absolute resistor-noise temperatures indexed like `resistors`.
-    /// Kept outside the public [`Resistors`] storage so absolute `TEMP`
-    /// provenance does not change that exhaustively constructible API.
-    resistor_absolute_noise_temperatures: Vec<Option<Value>>,
+    /// Exceptional authored absolute `TEMP` provenance, allocated lazily and
+    /// kept outside the exhaustively constructible public [`Resistors`] API.
+    resistor_noise_temperature_provenance: Option<ResistorNoiseTemperatureProvenance>,
     pub(crate) resistor_branches: ResistorBranches,
     pub(crate) capacitors: Capacitors,
     pub(crate) inductors: Inductors,
