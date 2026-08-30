@@ -107,9 +107,9 @@ pub struct SemanticAnalyzer {
     /// are not representable and must error)
     runtime_loop_depth: usize,
     /// Nesting depth of control flow whose selector can change during an
-    /// analysis. Stateful analog operators such as `zi_*` must execute on
-    /// every Newton iteration and are therefore illegal beneath such a guard
-    /// (VAMS-2023 section 4.5.15).
+    /// analysis. Stateful analog operators must execute on every Newton
+    /// iteration and are therefore illegal beneath such a guard (VAMS-2023
+    /// section 4.5.15).
     dynamic_analog_operator_guard_depth: usize,
     current_default_transition: f64,
     /// Array variables of the module under analysis (name -> layout)
@@ -4852,20 +4852,8 @@ impl SemanticAnalyzer {
                     self.validate_zi_definition_purity(&call)?;
                 }
 
-                if is_zi_operator_name(&call.name)
-                    && (self.dynamic_analog_operator_guard_depth != 0 || self.inline_depth != 0)
-                {
-                    let context = if self.inline_depth != 0 {
-                        "inside a user-defined analog function"
-                    } else {
-                        "under runtime control flow"
-                    };
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::InvalidAnalogOperator(format!(
-                            "zi_* analog operators must be evaluated on every Newton iteration and cannot appear {context} (VAMS-2023 section 4.5.15)"
-                        )),
-                        call.span,
-                    )));
+                if let Some(operator) = stateful_analog_operator_call_name(&call.name) {
+                    self.validate_stateful_analog_operator_placement(operator, call.span)?;
                 }
 
                 // Nature access functions other than V/I (Pwr, Temp, ...)
@@ -5006,47 +4994,222 @@ impl SemanticAnalyzer {
                     span: a.span,
                 })
             }
-            Expression::AnalogOperator(AnalogOperator::Zi { span, .. })
-                if self.dynamic_analog_operator_guard_depth != 0 || self.inline_depth != 0 =>
+            Expression::AnalogOperator(operator)
+                if stateful_public_analog_operator_name(operator).is_some() =>
             {
-                let context = if self.inline_depth != 0 {
-                    "inside a user-defined analog function"
-                } else {
-                    "under runtime control flow"
-                };
-                return Err(CompileError::Semantic(SemanticError::new(
-                    SemanticErrorKind::InvalidAnalogOperator(format!(
-                        "zi_* analog operators must be evaluated on every Newton iteration and cannot appear {context} (VAMS-2023 section 4.5.15)"
-                    )),
-                    *span,
-                )));
+                let operator_name = stateful_public_analog_operator_name(operator)
+                    .expect("guard requires a classified stateful analog operator");
+                self.validate_stateful_analog_operator_placement(operator_name, operator.span())?;
+                self.lower_stateful_public_analog_operator(operator)?
             }
-            Expression::AnalogOperator(AnalogOperator::Zi {
+            Expression::AnalogOperator(_) | Expression::NoiseSource(_) => expr.clone(),
+        })
+    }
+
+    fn validate_stateful_analog_operator_placement(
+        &self,
+        operator: &str,
+        span: Span,
+    ) -> CompileResult<()> {
+        let context = match (
+            self.inline_depth != 0,
+            self.dynamic_analog_operator_guard_depth != 0,
+        ) {
+            (false, false) => return Ok(()),
+            (true, true) => "inside a user-defined analog function under runtime control flow",
+            (true, false) => "inside a user-defined analog function",
+            (false, true) => "under runtime control flow",
+        };
+        Err(CompileError::Semantic(SemanticError::new(
+            SemanticErrorKind::InvalidAnalogOperator(format!(
+                "'{operator}' analog operator must be evaluated on every Newton iteration and cannot appear {context} (VAMS-2023 section 4.5.15)"
+            )),
+            span,
+        )))
+    }
+
+    /// Lower all operands of the public typed stateful representation. Parsed
+    /// source normally reaches this pass as [`Expression::Call`], but API
+    /// callers may submit these nodes directly; they must receive the same
+    /// substitution, access validation, and nested-placement checks.
+    fn lower_stateful_public_analog_operator(
+        &mut self,
+        operator: &AnalogOperator,
+    ) -> CompileResult<Expression> {
+        let lower_optional = |this: &mut Self, value: &Option<Box<Expression>>| {
+            value
+                .as_ref()
+                .map(|value| this.lower_expression(value).map(Box::new))
+                .transpose()
+        };
+        Ok(Expression::AnalogOperator(match operator {
+            AnalogOperator::Ddt { expr, abstol, span } => AnalogOperator::Ddt {
+                expr: Box::new(self.lower_expression(expr)?),
+                abstol: lower_optional(self, abstol)?,
+                span: *span,
+            },
+            AnalogOperator::Idt {
+                expr,
+                ic,
+                assert_val,
+                abstol,
+                span,
+            } => AnalogOperator::Idt {
+                expr: Box::new(self.lower_expression(expr)?),
+                ic: lower_optional(self, ic)?,
+                assert_val: lower_optional(self, assert_val)?,
+                abstol: lower_optional(self, abstol)?,
+                span: *span,
+            },
+            AnalogOperator::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+                abstol,
+                span,
+            } => AnalogOperator::IdtMod {
+                expr: Box::new(self.lower_expression(expr)?),
+                ic: lower_optional(self, ic)?,
+                modulus: lower_optional(self, modulus)?,
+                offset: lower_optional(self, offset)?,
+                abstol: lower_optional(self, abstol)?,
+                span: *span,
+            },
+            AnalogOperator::Absdelay {
+                expr,
+                delay,
+                max_delay,
+                span,
+            } => AnalogOperator::Absdelay {
+                expr: Box::new(self.lower_expression(expr)?),
+                delay: Box::new(self.lower_expression(delay)?),
+                max_delay: lower_optional(self, max_delay)?,
+                span: *span,
+            },
+            AnalogOperator::Transition {
+                expr,
+                delay,
+                rise,
+                fall,
+                tolerance,
+                span,
+            } => AnalogOperator::Transition {
+                expr: Box::new(self.lower_expression(expr)?),
+                delay: lower_optional(self, delay)?,
+                rise: lower_optional(self, rise)?,
+                fall: lower_optional(self, fall)?,
+                tolerance: lower_optional(self, tolerance)?,
+                span: *span,
+            },
+            AnalogOperator::Slew {
+                expr,
+                max_rise,
+                max_fall,
+                span,
+            } => AnalogOperator::Slew {
+                expr: Box::new(self.lower_expression(expr)?),
+                max_rise: lower_optional(self, max_rise)?,
+                max_fall: lower_optional(self, max_fall)?,
+                span: *span,
+            },
+            AnalogOperator::LastCrossing { expr, edge, span } => AnalogOperator::LastCrossing {
+                expr: Box::new(self.lower_expression(expr)?),
+                edge: *edge,
+                span: *span,
+            },
+            AnalogOperator::Laplace { kind, expr, span } => AnalogOperator::Laplace {
+                kind: self.lower_public_laplace_kind(kind)?,
+                expr: Box::new(self.lower_expression(expr)?),
+                span: *span,
+            },
+            AnalogOperator::Zi {
                 kind,
                 expr,
                 period,
                 transition,
                 first_transition,
                 span,
-            }) => {
+            } => {
                 self.validate_public_zi_operand_budget(kind, *span)?;
-                Expression::AnalogOperator(AnalogOperator::Zi {
-                    kind: kind.clone(),
+                AnalogOperator::Zi {
+                    kind: self.lower_public_zi_kind(kind)?,
                     expr: Box::new(self.lower_expression(expr)?),
                     period: Box::new(self.lower_expression(period)?),
                     transition: Some(Box::new(match transition {
                         Some(transition) => self.lower_expression(transition)?,
                         None => Self::number_expr(self.current_default_transition, *span),
                     })),
-                    first_transition: first_transition
-                        .as_ref()
-                        .map(|value| self.lower_expression(value))
-                        .transpose()?
-                        .map(Box::new),
+                    first_transition: lower_optional(self, first_transition)?,
                     span: *span,
-                })
+                }
             }
-            Expression::AnalogOperator(_) | Expression::NoiseSource(_) => expr.clone(),
+            AnalogOperator::Limit { .. }
+            | AnalogOperator::LimiterArgument { .. }
+            | AnalogOperator::Ddx { .. }
+            | AnalogOperator::Limexp { .. } => {
+                unreachable!("only classified stateful operators enter this lowering path")
+            }
+        }))
+    }
+
+    fn lower_public_laplace_kind(&mut self, kind: &LaplaceKind) -> CompileResult<LaplaceKind> {
+        let lower = |this: &mut Self, values: &[Expression]| {
+            values
+                .iter()
+                .map(|value| this.lower_expression(value))
+                .collect::<CompileResult<Vec<_>>>()
+        };
+        Ok(match kind {
+            LaplaceKind::ZeroPole { zeros, poles } => LaplaceKind::ZeroPole {
+                zeros: lower(self, zeros)?,
+                poles: lower(self, poles)?,
+            },
+            LaplaceKind::ZeroDenominator { zeros, denominator } => LaplaceKind::ZeroDenominator {
+                zeros: lower(self, zeros)?,
+                denominator: lower(self, denominator)?,
+            },
+            LaplaceKind::NumeratorPole { numerator, poles } => LaplaceKind::NumeratorPole {
+                numerator: lower(self, numerator)?,
+                poles: lower(self, poles)?,
+            },
+            LaplaceKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => LaplaceKind::NumeratorDenominator {
+                numerator: lower(self, numerator)?,
+                denominator: lower(self, denominator)?,
+            },
+        })
+    }
+
+    fn lower_public_zi_kind(&mut self, kind: &ZiKind) -> CompileResult<ZiKind> {
+        let lower = |this: &mut Self, values: &[Expression]| {
+            values
+                .iter()
+                .map(|value| this.lower_expression(value))
+                .collect::<CompileResult<Vec<_>>>()
+        };
+        Ok(match kind {
+            ZiKind::ZeroPole { zeros, poles } => ZiKind::ZeroPole {
+                zeros: lower(self, zeros)?,
+                poles: lower(self, poles)?,
+            },
+            ZiKind::ZeroDenominator { zeros, denominator } => ZiKind::ZeroDenominator {
+                zeros: lower(self, zeros)?,
+                denominator: lower(self, denominator)?,
+            },
+            ZiKind::NumeratorPole { numerator, poles } => ZiKind::NumeratorPole {
+                numerator: lower(self, numerator)?,
+                poles: lower(self, poles)?,
+            },
+            ZiKind::NumeratorDenominator {
+                numerator,
+                denominator,
+            } => ZiKind::NumeratorDenominator {
+                numerator: lower(self, numerator)?,
+                denominator: lower(self, denominator)?,
+            },
         })
     }
 
@@ -7992,6 +8155,66 @@ fn is_zi_operator_name(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "zi_zp" | "zi_zd" | "zi_np" | "zi_nd"
     )
+}
+
+/// Canonical name of a source-level analog operator whose state must be
+/// visited on every Newton iteration. Keep this list deliberately narrower
+/// than the built-in-function registry: `ddx`, math, access, nature, and noise
+/// calls are not stateful evaluation sites.
+fn stateful_analog_operator_call_name(name: &str) -> Option<&'static str> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "ddt" => "ddt",
+        "idt" => "idt",
+        "idtmod" => "idtmod",
+        "absdelay" => "absdelay",
+        "transition" => "transition",
+        "slew" => "slew",
+        "cross" => "cross",
+        "above" => "above",
+        "last_crossing" => "last_crossing",
+        "timer" => "timer",
+        "laplace_zp" => "laplace_zp",
+        "laplace_zd" => "laplace_zd",
+        "laplace_np" => "laplace_np",
+        "laplace_nd" => "laplace_nd",
+        "zi_zp" => "zi_zp",
+        "zi_zd" => "zi_zd",
+        "zi_np" => "zi_np",
+        "zi_nd" => "zi_nd",
+        _ => return None,
+    })
+}
+
+/// Canonical name of a public typed analog-operator node with per-evaluation
+/// state. Event-control `cross`, `above`, and `timer` use [`EventExpr`] rather
+/// than this enum and are intentionally validated by their enclosing event
+/// semantics instead of being rejected as conditional calls.
+fn stateful_public_analog_operator_name(operator: &AnalogOperator) -> Option<&'static str> {
+    Some(match operator {
+        AnalogOperator::Ddt { .. } => "ddt",
+        AnalogOperator::Idt { .. } => "idt",
+        AnalogOperator::IdtMod { .. } => "idtmod",
+        AnalogOperator::Absdelay { .. } => "absdelay",
+        AnalogOperator::Transition { .. } => "transition",
+        AnalogOperator::Slew { .. } => "slew",
+        AnalogOperator::LastCrossing { .. } => "last_crossing",
+        AnalogOperator::Laplace { kind, .. } => match kind {
+            LaplaceKind::ZeroPole { .. } => "laplace_zp",
+            LaplaceKind::ZeroDenominator { .. } => "laplace_zd",
+            LaplaceKind::NumeratorPole { .. } => "laplace_np",
+            LaplaceKind::NumeratorDenominator { .. } => "laplace_nd",
+        },
+        AnalogOperator::Zi { kind, .. } => match kind {
+            ZiKind::ZeroPole { .. } => "zi_zp",
+            ZiKind::ZeroDenominator { .. } => "zi_zd",
+            ZiKind::NumeratorPole { .. } => "zi_np",
+            ZiKind::NumeratorDenominator { .. } => "zi_nd",
+        },
+        AnalogOperator::Limit { .. }
+        | AnalogOperator::LimiterArgument { .. }
+        | AnalogOperator::Ddx { .. }
+        | AnalogOperator::Limexp { .. } => return None,
+    })
 }
 
 // ============================================================================

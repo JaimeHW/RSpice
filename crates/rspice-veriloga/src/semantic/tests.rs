@@ -45,6 +45,489 @@ fn flat_assignments(m: &AnalyzedModule) -> Vec<&AnalyzedAssignment> {
 }
 
 #[test]
+fn stateful_analog_operator_guards_are_checked_as_one_complete_family() {
+    let operators = [
+        ("ddt", "ddt(V(p, n))"),
+        ("idt", "idt(V(p, n))"),
+        ("idtmod", "idtmod(V(p, n), 0.0, 1.0)"),
+        ("absdelay", "absdelay(V(p, n), 1.0e-9)"),
+        ("transition", "transition(V(p, n))"),
+        ("slew", "slew(V(p, n))"),
+        ("cross", "cross(V(p, n))"),
+        ("above", "above(V(p, n))"),
+        ("last_crossing", "last_crossing(V(p, n))"),
+        ("timer", "timer(1.0e-9)"),
+        ("laplace_zp", "laplace_zp(V(p, n), '{0.0}, '{1.0})"),
+        ("laplace_zd", "laplace_zd(V(p, n), '{0.0}, '{1.0})"),
+        ("laplace_np", "laplace_np(V(p, n), '{1.0}, '{1.0})"),
+        ("laplace_nd", "laplace_nd(V(p, n), '{1.0}, '{1.0})"),
+        ("zi_zp", "zi_zp(V(p, n), '{0.0}, '{1.0}, 1.0e-6)"),
+        ("zi_zd", "zi_zd(V(p, n), '{0.0}, '{1.0}, 1.0e-6)"),
+        ("zi_np", "zi_np(V(p, n), '{1.0}, '{1.0}, 1.0e-6)"),
+        ("zi_nd", "zi_nd(V(p, n), '{1.0}, '{1.0}, 1.0e-6)"),
+    ];
+
+    for (operator, expression) in operators {
+        let dynamic = module_src(&format!(
+            r#"
+                real y;
+                analog begin
+                    if (V(p, n) > 0.0)
+                        y = {expression};
+                    I(p, n) <+ y;
+                end
+            "#
+        ));
+        let error = match analyze(&dynamic) {
+            Ok(_) => panic!("dynamic {operator} placement unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        let diagnostic = error.to_string();
+        assert!(
+            diagnostic.contains(&format!("'{operator}' analog operator")),
+            "operator-specific diagnostic missing for {operator}: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("every Newton iteration")
+                && diagnostic.contains("4.5.15")
+                && diagnostic.contains("under runtime control flow"),
+            "incomplete placement diagnostic for {operator}: {diagnostic}"
+        );
+
+        let static_guard = module_src(&format!(
+            r#"
+                parameter integer enabled = 1;
+                real y;
+                analog begin
+                    if (enabled)
+                        y = {expression};
+                    I(p, n) <+ y;
+                end
+            "#
+        ));
+        analyze(&static_guard).unwrap_or_else(|error| {
+            panic!("instance-static guard must remain legal for {operator}: {error}")
+        });
+    }
+}
+
+#[test]
+fn pure_operators_noise_and_accesses_are_not_misclassified_as_stateful() {
+    for expression in [
+        "ddx(V(p, n), V(p, n))",
+        "limexp(V(p, n))",
+        "sin(V(p, n))",
+        "white_noise(1.0)",
+        "V(p, n)",
+    ] {
+        analyze(&module_src(&format!(
+            r#"
+                real y;
+                analog begin
+                    if (V(p, n) > 0.0)
+                        y = {expression};
+                    I(p, n) <+ y;
+                end
+            "#
+        )))
+        .unwrap_or_else(|error| {
+            panic!("non-stateful expression '{expression}' was rejected: {error}")
+        });
+    }
+}
+
+#[test]
+fn event_operators_remain_legal_in_event_expressions_but_not_in_event_bodies() {
+    analyze(&module_src(
+        r#"
+            real y;
+            analog begin
+                @(cross(V(p, n), +1)) y = 1.0;
+                @(above(V(p, n))) y = 2.0;
+                @(timer(0.0, 1.0e-9)) y = 3.0;
+                I(p, n) <+ y;
+            end
+        "#,
+    ))
+    .expect("cross/above/timer are mandated event expressions and run every evaluation");
+
+    let error = analyze(&module_src(
+        r#"
+            real y;
+            analog begin
+                @(cross(V(p, n), +1)) y = ddt(V(p, n));
+                I(p, n) <+ y;
+            end
+        "#,
+    ))
+    .expect_err("an event-controlled body must not conditionally execute ddt");
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("'ddt' analog operator"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("under runtime control flow"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn nested_user_functions_cannot_hide_stateful_analog_operators() {
+    let source = module_src(
+        r#"
+            analog function real inner;
+                input x;
+                real x;
+                begin
+                    inner = ddt(x);
+                end
+            endfunction
+            analog function real outer;
+                input x;
+                real x;
+                begin
+                    outer = inner(x);
+                end
+            endfunction
+            real y;
+            analog begin
+                y = outer(V(p, n));
+                I(p, n) <+ y;
+            end
+        "#,
+    );
+    let operator_offset = source.find("ddt(x)").expect("operator source offset") as u32;
+    let error = analyze(&source).expect_err("nested inlining must retain operator restrictions");
+    let CompileError::Semantic(error) = error else {
+        panic!("expected semantic placement error, got {error}");
+    };
+    assert_eq!(error.span.start, operator_offset);
+    let diagnostic = error.kind.to_string();
+    assert!(diagnostic.contains("'ddt' analog operator"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("inside a user-defined analog function"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn public_analog_operator_nodes_share_the_stateful_placement_classifier() {
+    let span = Span::dummy();
+    let number = || {
+        Box::new(Expression::Number(NumberLit {
+            value: 1.0,
+            raw: "1.0".into(),
+            span,
+        }))
+    };
+    let operators = vec![
+        (
+            AnalogOperator::Ddt {
+                expr: number(),
+                abstol: None,
+                span,
+            },
+            "ddt",
+        ),
+        (
+            AnalogOperator::Idt {
+                expr: number(),
+                ic: None,
+                assert_val: None,
+                abstol: None,
+                span,
+            },
+            "idt",
+        ),
+        (
+            AnalogOperator::IdtMod {
+                expr: number(),
+                ic: None,
+                modulus: Some(number()),
+                offset: None,
+                abstol: None,
+                span,
+            },
+            "idtmod",
+        ),
+        (
+            AnalogOperator::Absdelay {
+                expr: number(),
+                delay: number(),
+                max_delay: None,
+                span,
+            },
+            "absdelay",
+        ),
+        (
+            AnalogOperator::Transition {
+                expr: number(),
+                delay: None,
+                rise: None,
+                fall: None,
+                tolerance: None,
+                span,
+            },
+            "transition",
+        ),
+        (
+            AnalogOperator::Slew {
+                expr: number(),
+                max_rise: None,
+                max_fall: None,
+                span,
+            },
+            "slew",
+        ),
+        (
+            AnalogOperator::LastCrossing {
+                expr: number(),
+                edge: None,
+                span,
+            },
+            "last_crossing",
+        ),
+        (
+            AnalogOperator::Laplace {
+                kind: LaplaceKind::ZeroPole {
+                    zeros: vec![],
+                    poles: vec![],
+                },
+                expr: number(),
+                span,
+            },
+            "laplace_zp",
+        ),
+        (
+            AnalogOperator::Laplace {
+                kind: LaplaceKind::ZeroDenominator {
+                    zeros: vec![],
+                    denominator: vec![],
+                },
+                expr: number(),
+                span,
+            },
+            "laplace_zd",
+        ),
+        (
+            AnalogOperator::Laplace {
+                kind: LaplaceKind::NumeratorPole {
+                    numerator: vec![],
+                    poles: vec![],
+                },
+                expr: number(),
+                span,
+            },
+            "laplace_np",
+        ),
+        (
+            AnalogOperator::Laplace {
+                kind: LaplaceKind::NumeratorDenominator {
+                    numerator: vec![],
+                    denominator: vec![],
+                },
+                expr: number(),
+                span,
+            },
+            "laplace_nd",
+        ),
+        (
+            AnalogOperator::Zi {
+                kind: ZiKind::ZeroPole {
+                    zeros: vec![],
+                    poles: vec![],
+                },
+                expr: number(),
+                period: number(),
+                transition: None,
+                first_transition: None,
+                span,
+            },
+            "zi_zp",
+        ),
+        (
+            AnalogOperator::Zi {
+                kind: ZiKind::ZeroDenominator {
+                    zeros: vec![],
+                    denominator: vec![],
+                },
+                expr: number(),
+                period: number(),
+                transition: None,
+                first_transition: None,
+                span,
+            },
+            "zi_zd",
+        ),
+        (
+            AnalogOperator::Zi {
+                kind: ZiKind::NumeratorPole {
+                    numerator: vec![],
+                    poles: vec![],
+                },
+                expr: number(),
+                period: number(),
+                transition: None,
+                first_transition: None,
+                span,
+            },
+            "zi_np",
+        ),
+        (
+            AnalogOperator::Zi {
+                kind: ZiKind::NumeratorDenominator {
+                    numerator: vec![],
+                    denominator: vec![],
+                },
+                expr: number(),
+                period: number(),
+                transition: None,
+                first_transition: None,
+                span,
+            },
+            "zi_nd",
+        ),
+    ];
+    for (operator, expected) in operators {
+        assert_eq!(
+            stateful_public_analog_operator_name(&operator),
+            Some(expected)
+        );
+    }
+
+    let pure = [
+        AnalogOperator::Ddx {
+            expr: number(),
+            probe: BranchAccess::Nodes {
+                access: "V".into(),
+                pos: "p".into(),
+                neg: Some("n".into()),
+                span,
+            },
+            span,
+        },
+        AnalogOperator::Limexp {
+            expr: number(),
+            span,
+        },
+    ];
+    assert!(
+        pure.iter()
+            .all(|operator| stateful_public_analog_operator_name(operator).is_none())
+    );
+}
+
+#[test]
+fn programmatic_stateful_operator_reports_its_own_span_under_a_dynamic_guard() {
+    let source = module_src(
+        r#"
+            real y;
+            analog begin
+                if (V(p, n) > 0.0)
+                    y = 0.0;
+                I(p, n) <+ y;
+            end
+        "#,
+    );
+    let tokens = Lexer::new(&source, SourceId::new(0))
+        .collect_tokens()
+        .expect("lex failed");
+    let mut file = Parser::new(&tokens).parse().expect("parse failed");
+    let Item::Module(module) = &mut file.items[0] else {
+        panic!("expected module");
+    };
+    let AnalogStatement::Conditional(conditional) = &mut module
+        .analog_block
+        .as_mut()
+        .expect("analog block")
+        .statements[0]
+    else {
+        panic!("expected conditional");
+    };
+    let AnalogStatement::Assignment(assignment) = conditional.then_branch.as_mut() else {
+        panic!("expected guarded assignment");
+    };
+    let operator_span = assignment.value.span();
+    assignment.value = Expression::AnalogOperator(AnalogOperator::Ddt {
+        expr: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+            access: "V".into(),
+            pos: "p".into(),
+            neg: Some("n".into()),
+            span: operator_span,
+        })),
+        abstol: None,
+        span: operator_span,
+    });
+
+    let error = SemanticAnalyzer::new()
+        .analyze(&file)
+        .expect_err("public ddt node under a runtime guard must fail");
+    let CompileError::Semantic(error) = error else {
+        panic!("expected semantic placement error, got {error}");
+    };
+    assert_eq!(error.span, operator_span);
+    assert!(error.kind.to_string().contains("'ddt' analog operator"));
+}
+
+#[test]
+fn public_stateful_operator_operands_receive_normal_semantic_lowering() {
+    let source = module_src(
+        r#"
+            real y, local_value;
+            analog begin : scoped
+                real local_value;
+                local_value = V(p, n);
+                y = 0.0;
+                I(p, n) <+ y;
+            end
+        "#,
+    );
+    let tokens = Lexer::new(&source, SourceId::new(0))
+        .collect_tokens()
+        .expect("lex failed");
+    let mut file = Parser::new(&tokens).parse().expect("parse failed");
+    let Item::Module(module) = &mut file.items[0] else {
+        panic!("expected module");
+    };
+    let AnalogStatement::Block(block) = &mut module
+        .analog_block
+        .as_mut()
+        .expect("analog block")
+        .statements[0]
+    else {
+        panic!("expected named analog block");
+    };
+    let AnalogStatement::Assignment(assignment) = &mut block.statements[1] else {
+        panic!("expected y assignment");
+    };
+    let operator_span = assignment.value.span();
+    assignment.value = Expression::AnalogOperator(AnalogOperator::Ddt {
+        expr: Box::new(Expression::Identifier(Identifier {
+            name: "local_value".into(),
+            span: operator_span,
+        })),
+        abstol: None,
+        span: operator_span,
+    });
+
+    let analyzed = SemanticAnalyzer::new()
+        .analyze(&file)
+        .expect("unconditionally evaluated public ddt must be legal");
+    let module = analyzed.modules.get("dut").expect("analyzed module");
+    let assignment = flat_assignments(module)
+        .into_iter()
+        .find(|assignment| assignment.target == "y")
+        .expect("lowered y assignment");
+    let Expression::AnalogOperator(AnalogOperator::Ddt { expr, .. }) = &assignment.expression
+    else {
+        panic!("public ddt was not retained");
+    };
+    let Expression::Identifier(identifier) = expr.as_ref() else {
+        panic!("expected lowered block-local identifier, got {expr:?}");
+    };
+    assert_ne!(identifier.name, "local_value");
+    assert!(identifier.name.starts_with("local_value__blk"));
+}
+
+#[test]
 fn constant_arithmetic_preserves_integer_and_real_literal_types() {
     let module = analyze_one(&module_src(
         r#"
