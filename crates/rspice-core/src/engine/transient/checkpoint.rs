@@ -10,13 +10,14 @@
 //! interval; legacy continuation state fails closed rather than silently
 //! reconstructing different controls.
 //!
-//! Scope, stated precisely: accepted linear-reactive histories, ordinary
-//! lossless scalar transmission-line delay histories, generated Verilog-A
-//! `ddt`/`idt` histories and limiter anchors, and XSPICE model-owned checkpoint
-//! state are captured bit-exactly. Continuation deliberately takes one
-//! order-one breakpoint-restart step before higher-order integration resumes.
-//! Distributed LTRA/TXL and coupled-line convolution runtimes fail closed until
-//! their complete native state has a versioned checkpoint contract.
+//! Scope, stated precisely: accepted linear-reactive histories, native diode
+//! and legacy Gummel-Poon BJT limiter/evaluation state, ordinary lossless
+//! scalar transmission-line delay histories, generated Verilog-A `ddt`/`idt`
+//! histories and limiter anchors, and XSPICE model-owned checkpoint state are
+//! captured bit-exactly. Continuation deliberately takes one order-one
+//! breakpoint-restart step before higher-order integration resumes. Native
+//! VBIC, distributed LTRA/TXL, and coupled-line convolution runtimes fail
+//! closed until their complete state has a versioned checkpoint contract.
 //!
 //! The canonical checkpoint representation is a versioned, line-oriented
 //! text format using Rust's shortest-round-trip float formatting, so every
@@ -25,9 +26,14 @@
 //! envelope with declared lengths and a BLAKE3 integrity seal.
 
 use crate::Value;
-use crate::circuit::CircuitData;
+use crate::circuit::{AcceptedNativeNonlinearCheckpointStates, CircuitData};
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADeviceCheckpoint;
+use crate::device::semiconductor::{
+    AcceptedBjtNonlinearCheckpoint, AcceptedDiodeNonlinearCheckpoint,
+    BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG, BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT,
+    DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG, DiodeNonlinearState,
+};
 use crate::device::veriloga_builtins::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
@@ -56,9 +62,14 @@ use super::TransientStartupMode;
 /// to the accepted integrator's next-step proposal. Earlier files remain
 /// readable, but their incomplete in-flight continuation state fails closed
 /// rather than reconstructing analysis phase from a new output segment.
-const FORMAT_VERSION: u32 = 18;
+/// Version 19 adds the accepted compact native diode and legacy Gummel-Poon BJT
+/// limiter/evaluation state. Earlier files remain readable, but resume fails
+/// closed when their target circuit contains either device family rather than
+/// reconstructing an accepted nonlinear state from the external solution.
+const FORMAT_VERSION: u32 = 19;
 const RUNTIME_VERILOGA_FORMAT_VERSION: u32 = 17;
 const CONTROLLER_PHASE_FORMAT_VERSION: u32 = 18;
+const NATIVE_NONLINEAR_FORMAT_VERSION: u32 = 19;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -175,6 +186,8 @@ pub struct TransientCheckpoint {
     inductor_flux_history_available: bool,
     xyce_memristor_resistance_stores: Vec<Value>,
     generic_switch_stores: Vec<[Value; 4]>,
+    accepted_nonlinear_state_available: bool,
+    accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates,
     tline_state_available: bool,
     tline_resume_blockers: Vec<String>,
     tline_states: Vec<TransmissionLineCheckpoint>,
@@ -1081,6 +1094,29 @@ fn read_nonempty_line_vector(
     Ok(values)
 }
 
+fn read_canonical_nonempty_line_vector(
+    lines: &mut CheckpointLines<'_>,
+    name: &str,
+) -> Result<Vec<String>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| format!("missing '{name}' section"))?;
+    let count = parse_count_header(header, name)?;
+    let mut values = allocate_checkpoint_rows(lines, count, name)?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'{name}' truncated at row {row}"))?;
+        if line.is_empty() || line != line.trim() {
+            return Err(format!(
+                "'{name}' row {row} must be nonempty canonical text without surrounding whitespace"
+            ));
+        }
+        values.push(line.to_string());
+    }
+    Ok(values)
+}
+
 fn read_tline_states(
     lines: &mut CheckpointLines<'_>,
 ) -> Result<Vec<TransmissionLineCheckpoint>, String> {
@@ -1288,6 +1324,212 @@ fn parse_checkpoint_bool(field: &str, context: &str) -> Result<bool, String> {
             "{context}: checkpoint boolean must be 0 or 1, found '{field}'"
         )),
     }
+}
+
+fn read_finite_value_field(
+    fields: &mut std::str::SplitWhitespace<'_>,
+    context: &str,
+    name: &str,
+) -> Result<Value, String> {
+    let field = fields
+        .next()
+        .ok_or_else(|| format!("{context} is missing {name}"))?;
+    let value = field
+        .parse::<Value>()
+        .map_err(|_| format!("{context} has invalid {name} '{field}'"))?;
+    if !value.is_finite() {
+        return Err(format!("{context} has non-finite {name} '{field}'"));
+    }
+    Ok(value)
+}
+
+fn read_accepted_diode_nonlinear_states(
+    lines: &mut CheckpointLines<'_>,
+) -> Result<Vec<AcceptedDiodeNonlinearCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'accepted_diode_nonlinear_states' section".to_string())?;
+    let count = parse_count_header(header, "accepted_diode_nonlinear_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "accepted_diode_nonlinear_states")?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'accepted_diode_nonlinear_states' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("accepted_diode_nonlinear_state") {
+            return Err(format!(
+                "malformed 'accepted_diode_nonlinear_state' row: '{line}'"
+            ));
+        }
+        let instance_name = fields
+            .next()
+            .ok_or_else(|| format!("accepted diode state row {row} is missing instance name"))?;
+        let runtime_tag = fields
+            .next()
+            .ok_or_else(|| format!("accepted diode state row {row} is missing runtime tag"))?;
+        let context = format!("accepted diode state row {row}");
+        let prev_vd = read_finite_value_field(&mut fields, &context, "prev_vd")?;
+        let prev_vd_old = read_finite_value_field(&mut fields, &context, "prev_vd_old")?;
+        let prev_id = read_finite_value_field(&mut fields, &context, "prev_id")?;
+        let prev_gd = read_finite_value_field(&mut fields, &context, "prev_gd")?;
+        let candidate_eval_valid = fields
+            .next()
+            .ok_or_else(|| {
+                format!("accepted diode state row {row} is missing candidate-valid flag")
+            })
+            .and_then(|field| {
+                parse_checkpoint_bool(
+                    field,
+                    &format!("accepted diode state row {row} candidate-valid flag"),
+                )
+            })?;
+        let junction_gmin = read_finite_value_field(&mut fields, &context, "junction_gmin")?;
+        let junction_history_valid = fields
+            .next()
+            .ok_or_else(|| {
+                format!("accepted diode state row {row} is missing junction-history flag")
+            })
+            .and_then(|field| {
+                parse_checkpoint_bool(
+                    field,
+                    &format!("accepted diode state row {row} junction-history flag"),
+                )
+            })?;
+        let last_limited_vd = read_finite_value_field(&mut fields, &context, "last_limited_vd")?;
+        let limited = fields
+            .next()
+            .ok_or_else(|| format!("accepted diode state row {row} is missing limited flag"))
+            .and_then(|field| {
+                parse_checkpoint_bool(
+                    field,
+                    &format!("accepted diode state row {row} limited flag"),
+                )
+            })?;
+        let last_stamp_vd = read_finite_value_field(&mut fields, &context, "last_stamp_vd")?;
+        let last_stamp_id = read_finite_value_field(&mut fields, &context, "last_stamp_id")?;
+        let last_stamp_gd = read_finite_value_field(&mut fields, &context, "last_stamp_gd")?;
+        if let Some(extra) = fields.next() {
+            return Err(format!(
+                "accepted diode state row {row} has extra field '{extra}'"
+            ));
+        }
+        states.push(AcceptedDiodeNonlinearCheckpoint {
+            instance_name: instance_name.to_string(),
+            runtime_tag: runtime_tag.to_string(),
+            state: DiodeNonlinearState {
+                prev_vd,
+                prev_vd_old,
+                prev_id,
+                prev_gd,
+                candidate_eval_valid,
+                junction_gmin,
+                junction_history_valid,
+                last_limited_vd,
+                limited,
+                last_stamp_vd,
+                last_stamp_id,
+                last_stamp_gd,
+            },
+        });
+    }
+    Ok(states)
+}
+
+fn read_accepted_bjt_nonlinear_states(
+    lines: &mut CheckpointLines<'_>,
+) -> Result<Vec<AcceptedBjtNonlinearCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'accepted_bjt_nonlinear_states' section".to_string())?;
+    let count = parse_count_header(header, "accepted_bjt_nonlinear_states")?;
+    let rows_per_state = BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT.saturating_add(2);
+    let maximum_count = lines.remaining() / rows_per_state;
+    if count > maximum_count {
+        return Err(format!(
+            "'accepted_bjt_nonlinear_states' declares {count} states but only {} checkpoint rows remain; each state requires {rows_per_state} rows",
+            lines.remaining()
+        ));
+    }
+    let mut states = allocate_checkpoint_rows(lines, count, "accepted_bjt_nonlinear_states")?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'accepted_bjt_nonlinear_states' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("accepted_bjt_nonlinear_state") {
+            return Err(format!(
+                "malformed 'accepted_bjt_nonlinear_state' row: '{line}'"
+            ));
+        }
+        let instance_name = fields
+            .next()
+            .ok_or_else(|| format!("accepted BJT state row {row} is missing instance name"))?;
+        let runtime_tag = fields
+            .next()
+            .ok_or_else(|| format!("accepted BJT state row {row} is missing runtime tag"))?;
+        let mut read_bool = |name: &str| {
+            fields
+                .next()
+                .ok_or_else(|| format!("accepted BJT state row {row} is missing {name}"))
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, &format!("accepted BJT state row {row} {name}"))
+                })
+        };
+        let legacy_junction_limited = read_bool("legacy-junction-limited flag")?;
+        let reduced_linearization_valid = read_bool("reduced-linearization-valid flag")?;
+        let previous_reduced_linearization_valid =
+            read_bool("previous-reduced-linearization-valid flag")?;
+        let charge_snapshot_valid = read_bool("charge-snapshot-valid flag")?;
+        if let Some(extra) = fields.next() {
+            return Err(format!(
+                "accepted BJT state row {row} has extra field '{extra}'"
+            ));
+        }
+        let values_header = lines.next().ok_or_else(|| {
+            format!("accepted BJT state row {row} is missing its state-values header")
+        })?;
+        let value_count = parse_count_header(values_header, "accepted_bjt_state_values")?;
+        if value_count != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+            return Err(format!(
+                "accepted BJT state row {row} has {value_count} values; runtime requires {BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT}"
+            ));
+        }
+        let mut state_values =
+            allocate_checkpoint_rows(lines, value_count, "accepted_bjt_state_values")?;
+        for value_row in 0..value_count {
+            let value_line = lines.next().ok_or_else(|| {
+                format!("accepted BJT state row {row} values truncate at row {value_row}")
+            })?;
+            let mut value_fields = value_line.split_whitespace();
+            let field = value_fields.next().ok_or_else(|| {
+                format!("accepted BJT state row {row} value {value_row} is empty")
+            })?;
+            let value = field.parse::<Value>().map_err(|_| {
+                format!("accepted BJT state row {row} value {value_row} is invalid: '{field}'")
+            })?;
+            if !value.is_finite() {
+                return Err(format!(
+                    "accepted BJT state row {row} value {value_row} is non-finite: '{field}'"
+                ));
+            }
+            if let Some(extra) = value_fields.next() {
+                return Err(format!(
+                    "accepted BJT state row {row} value {value_row} has extra field '{extra}'"
+                ));
+            }
+            state_values.push(value);
+        }
+        states.push(AcceptedBjtNonlinearCheckpoint {
+            instance_name: instance_name.to_string(),
+            runtime_tag: runtime_tag.to_string(),
+            legacy_junction_limited,
+            reduced_linearization_valid,
+            previous_reduced_linearization_valid,
+            charge_snapshot_valid,
+            state_values,
+        });
+    }
+    Ok(states)
 }
 
 fn read_generated_state_rows(
@@ -1620,6 +1862,104 @@ impl TransientCheckpoint {
                 "checkpoint reactive history and device store values must be finite".to_string(),
             );
         }
+        if !self.accepted_nonlinear_state_available
+            && (!self.accepted_nonlinear_states.resume_blockers.is_empty()
+                || !self.accepted_nonlinear_states.diodes.is_empty()
+                || !self.accepted_nonlinear_states.bjts.is_empty())
+        {
+            return Err(
+                "accepted diode/BJT nonlinear checkpoint state is present without availability provenance"
+                    .to_string(),
+            );
+        }
+        if self
+            .accepted_nonlinear_states
+            .resume_blockers
+            .iter()
+            .any(|blocker| {
+                blocker.trim().is_empty()
+                    || blocker != blocker.trim()
+                    || blocker.contains(['\r', '\n'])
+            })
+        {
+            return Err(
+                "accepted diode/BJT nonlinear checkpoint blocker text is malformed".to_string(),
+            );
+        }
+        let mut diode_names = std::collections::HashSet::new();
+        for (index, checkpoint) in self.accepted_nonlinear_states.diodes.iter().enumerate() {
+            if checkpoint.instance_name.is_empty()
+                || checkpoint.instance_name.chars().any(char::is_whitespace)
+                || !diode_names.insert(checkpoint.instance_name.as_str())
+            {
+                return Err(format!(
+                    "accepted diode nonlinear checkpoint state {index} has an invalid or duplicate instance name"
+                ));
+            }
+            if checkpoint.runtime_tag != DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG {
+                return Err(format!(
+                    "accepted diode nonlinear checkpoint state {index} uses unsupported runtime tag '{}'",
+                    checkpoint.runtime_tag
+                ));
+            }
+            let state = checkpoint.state;
+            if [
+                state.prev_vd,
+                state.prev_vd_old,
+                state.prev_id,
+                state.prev_gd,
+                state.junction_gmin,
+                state.last_limited_vd,
+                state.last_stamp_vd,
+                state.last_stamp_id,
+                state.last_stamp_gd,
+            ]
+            .iter()
+            .any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "accepted diode nonlinear checkpoint state {index} contains a non-finite value"
+                ));
+            }
+            if state.junction_gmin < 0.0 {
+                return Err(format!(
+                    "accepted diode nonlinear checkpoint state {index} has negative junction gmin"
+                ));
+            }
+        }
+        let mut bjt_names = std::collections::HashSet::new();
+        for (index, checkpoint) in self.accepted_nonlinear_states.bjts.iter().enumerate() {
+            if checkpoint.instance_name.is_empty()
+                || checkpoint.instance_name.chars().any(char::is_whitespace)
+                || !bjt_names.insert(checkpoint.instance_name.as_str())
+            {
+                return Err(format!(
+                    "accepted BJT nonlinear checkpoint state {index} has an invalid or duplicate instance name"
+                ));
+            }
+            if checkpoint.runtime_tag != BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG {
+                return Err(format!(
+                    "accepted BJT nonlinear checkpoint state {index} uses unsupported runtime tag '{}'",
+                    checkpoint.runtime_tag
+                ));
+            }
+            if checkpoint.state_values.len() != BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT {
+                return Err(format!(
+                    "accepted BJT nonlinear checkpoint state {index} has {} values; runtime requires {}",
+                    checkpoint.state_values.len(),
+                    BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+                ));
+            }
+            if checkpoint
+                .state_values
+                .iter()
+                .any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "accepted BJT nonlinear checkpoint state {index} contains a non-finite value"
+                ));
+            }
+        }
         if !self.lte_signal_global_reference.is_finite()
             || self.lte_signal_global_reference < 0.0
             || self
@@ -1834,6 +2174,14 @@ impl TransientCheckpoint {
                 xspice_resume_blockers.join("; ")
             );
         }
+        let accepted_nonlinear_states =
+            circuit.capture_accepted_native_nonlinear_checkpoint_states();
+        if !accepted_nonlinear_states.resume_blockers.is_empty() {
+            log::warn!(
+                "transient checkpoint at t={time:.6e}: accepted native diode/BJT state is not fully serialized; this checkpoint will be refused for resume: {}",
+                accepted_nonlinear_states.resume_blockers.join("; ")
+            );
+        }
 
         #[cfg(feature = "veriloga")]
         let runtime_veriloga_instance_states = circuit.runtime_veriloga_checkpoint_states()?;
@@ -1894,6 +2242,8 @@ impl TransientCheckpoint {
                 .map(|binding| binding.resistance_store)
                 .collect(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
+            accepted_nonlinear_state_available: true,
+            accepted_nonlinear_states,
             tline_state_available: true,
             tline_resume_blockers,
             tline_states,
@@ -1917,6 +2267,14 @@ impl TransientCheckpoint {
     pub(crate) fn inject(&self, circuit: &mut CircuitData) -> Result<(), String> {
         self.validate_numeric_state()?;
 
+        if !self.accepted_nonlinear_state_available
+            && (!circuit.diodes.is_empty() || !circuit.bjts.is_empty())
+        {
+            return Err(
+                "legacy transient checkpoint does not contain accepted native diode/BJT nonlinear state; re-run the transient from t=0"
+                    .to_string(),
+            );
+        }
         // Validate identity-bearing device state before ordinal storage
         // shapes. Named instance mismatches are the most specific evidence
         // that a checkpoint belongs to a different elaboration, whereas a
@@ -1930,6 +2288,9 @@ impl TransientCheckpoint {
         circuit.validate_runtime_veriloga_checkpoint_states(
             &self.runtime_veriloga_instance_states,
             self.runtime_veriloga_state_available,
+        )?;
+        circuit.validate_accepted_native_nonlinear_checkpoint_states(
+            &self.accepted_nonlinear_states,
         )?;
         if !self.tline_resume_blockers.is_empty() {
             return Err(format!(
@@ -2066,6 +2427,8 @@ impl TransientCheckpoint {
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
+        circuit
+            .restore_accepted_native_nonlinear_checkpoint_states(&self.accepted_nonlinear_states)?;
         circuit.capacitors.v_prev.copy_from_slice(&self.cap_v_prev);
         circuit
             .capacitors
@@ -2190,6 +2553,12 @@ impl TransientCheckpoint {
     }
 
     fn validate_resume_capabilities(&self, netlist: &Netlist) -> Result<(), String> {
+        if !self.accepted_nonlinear_states.resume_blockers.is_empty() {
+            return Err(format!(
+                "transient checkpoint resume cannot restore unsupported accepted native diode/BJT state: {}. Run this transient deck unsegmented.",
+                self.accepted_nonlinear_states.resume_blockers.join("; ")
+            ));
+        }
         if !self.xspice_resume_blockers.is_empty() {
             return Err(format!(
                 "transient checkpoint resume cannot restore unsupported XSPICE \
@@ -2392,6 +2761,20 @@ impl TransientCheckpoint {
             .saturating_add(self.ind_v_prev.len())
             .saturating_add(self.xyce_memristor_resistance_stores.len())
             .saturating_add(self.generic_switch_stores.len().saturating_mul(4))
+            .saturating_add(self.accepted_nonlinear_states.resume_blockers.len())
+            .saturating_add(
+                self.accepted_nonlinear_states
+                    .diodes
+                    .len()
+                    .saturating_mul(12),
+            )
+            .saturating_add(
+                self.accepted_nonlinear_states
+                    .bjts
+                    .iter()
+                    .map(|state| state.state_values.len().saturating_add(4))
+                    .fold(0_usize, usize::saturating_add),
+            )
             .saturating_add(self.pending_tline_arrivals.len())
             .saturating_add(self.lte_signal_local_reference.len());
 
@@ -2583,6 +2966,62 @@ impl TransientCheckpoint {
                 "{} {} {} {}\n",
                 store[0], store[1], store[2], store[3]
             ));
+        }
+        out.push_str(&format!(
+            "accepted_nonlinear_state_available {}\n",
+            u8::from(self.accepted_nonlinear_state_available)
+        ));
+        out.push_str(&format!(
+            "accepted_nonlinear_blockers {}\n",
+            self.accepted_nonlinear_states.resume_blockers.len()
+        ));
+        for blocker in &self.accepted_nonlinear_states.resume_blockers {
+            out.push_str(blocker);
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "accepted_diode_nonlinear_states {}\n",
+            self.accepted_nonlinear_states.diodes.len()
+        ));
+        for checkpoint in &self.accepted_nonlinear_states.diodes {
+            let state = checkpoint.state;
+            out.push_str(&format!(
+                "accepted_diode_nonlinear_state {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
+                checkpoint.instance_name,
+                checkpoint.runtime_tag,
+                state.prev_vd,
+                state.prev_vd_old,
+                state.prev_id,
+                state.prev_gd,
+                u8::from(state.candidate_eval_valid),
+                state.junction_gmin,
+                u8::from(state.junction_history_valid),
+                state.last_limited_vd,
+                u8::from(state.limited),
+                state.last_stamp_vd,
+                state.last_stamp_id,
+                state.last_stamp_gd,
+            ));
+        }
+        out.push_str(&format!(
+            "accepted_bjt_nonlinear_states {}\n",
+            self.accepted_nonlinear_states.bjts.len()
+        ));
+        for checkpoint in &self.accepted_nonlinear_states.bjts {
+            out.push_str(&format!(
+                "accepted_bjt_nonlinear_state {} {} {} {} {} {}\n",
+                checkpoint.instance_name,
+                checkpoint.runtime_tag,
+                u8::from(checkpoint.legacy_junction_limited),
+                u8::from(checkpoint.reduced_linearization_valid),
+                u8::from(checkpoint.previous_reduced_linearization_valid),
+                u8::from(checkpoint.charge_snapshot_valid),
+            ));
+            write_value_vector(
+                &mut out,
+                "accepted_bjt_state_values",
+                &checkpoint.state_values,
+            );
         }
         out.push_str(&format!(
             "tline_state_available {}\n",
@@ -3146,6 +3585,44 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
+        let (accepted_nonlinear_state_available, accepted_nonlinear_states) =
+            if version >= NATIVE_NONLINEAR_FORMAT_VERSION {
+            let availability_line = lines
+                .next()
+                .ok_or_else(|| "missing accepted nonlinear state availability line".to_string())?;
+            let mut fields = availability_line.split_whitespace();
+            if fields.next() != Some("accepted_nonlinear_state_available") {
+                return Err(format!(
+                    "malformed accepted nonlinear state availability line: '{availability_line}'"
+                ));
+            }
+            let available = fields
+                .next()
+                .ok_or_else(|| {
+                    "accepted nonlinear state availability line is missing its boolean".to_string()
+                })
+                .and_then(|field| {
+                    parse_checkpoint_bool(field, "accepted nonlinear state availability")
+                })?;
+            if let Some(extra) = fields.next() {
+                return Err(format!(
+                    "accepted nonlinear state availability line has extra field '{extra}'"
+                ));
+            }
+            (
+                available,
+                AcceptedNativeNonlinearCheckpointStates {
+                    resume_blockers: read_canonical_nonempty_line_vector(
+                        &mut lines,
+                        "accepted_nonlinear_blockers",
+                    )?,
+                    diodes: read_accepted_diode_nonlinear_states(&mut lines)?,
+                    bjts: read_accepted_bjt_nonlinear_states(&mut lines)?,
+                },
+            )
+        } else {
+            (false, AcceptedNativeNonlinearCheckpointStates::default())
+        };
         let (tline_state_available, tline_resume_blockers, tline_states) = if version >= 14 {
             let availability_line = lines
                 .next()
@@ -3298,6 +3775,8 @@ impl TransientCheckpoint {
             inductor_flux_history_available,
             xyce_memristor_resistance_stores,
             generic_switch_stores,
+            accepted_nonlinear_state_available,
+            accepted_nonlinear_states,
             tline_state_available,
             tline_resume_blockers,
             tline_states,
@@ -3814,6 +4293,39 @@ mod tests {
             inductor_flux_history_available: true,
             xyce_memristor_resistance_stores: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
+            accepted_nonlinear_state_available: true,
+            accepted_nonlinear_states: AcceptedNativeNonlinearCheckpointStates {
+                resume_blockers: Vec::new(),
+                diodes: vec![AcceptedDiodeNonlinearCheckpoint {
+                    instance_name: "dcheck".to_string(),
+                    runtime_tag: DIODE_ACCEPTED_NONLINEAR_RUNTIME_TAG.to_string(),
+                    state: DiodeNonlinearState {
+                        prev_vd: -0.0,
+                        prev_vd_old: f64::MIN_POSITIVE,
+                        prev_id: -1.25e-12,
+                        prev_gd: 2.5e-9,
+                        candidate_eval_valid: true,
+                        junction_gmin: 1.0e-12,
+                        junction_history_valid: true,
+                        last_limited_vd: 0.625,
+                        limited: false,
+                        last_stamp_vd: 0.625,
+                        last_stamp_id: 3.75e-4,
+                        last_stamp_gd: 4.5e-3,
+                    },
+                }],
+                bjts: vec![AcceptedBjtNonlinearCheckpoint {
+                    instance_name: "qcheck".to_string(),
+                    runtime_tag: BJT_ACCEPTED_NONLINEAR_RUNTIME_TAG.to_string(),
+                    legacy_junction_limited: true,
+                    reduced_linearization_valid: true,
+                    previous_reduced_linearization_valid: false,
+                    charge_snapshot_valid: true,
+                    state_values: (0..BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT)
+                        .map(|index| index as Value * 0.125 - 2.0)
+                        .collect(),
+                }],
+            },
             tline_state_available: true,
             tline_resume_blockers: Vec::new(),
             tline_states: Vec::new(),
@@ -3951,6 +4463,66 @@ mod tests {
                     lines
                         .next()
                         .expect("complete generic switch checkpoint rows");
+                }
+                continue;
+            }
+            if version < NATIVE_NONLINEAR_FORMAT_VERSION
+                && line.starts_with("accepted_nonlinear_state_available ")
+            {
+                continue;
+            }
+            if version < NATIVE_NONLINEAR_FORMAT_VERSION
+                && line.starts_with("accepted_nonlinear_blockers ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("accepted nonlinear blocker count")
+                    .parse::<usize>()
+                    .expect("numeric accepted nonlinear blocker count");
+                for _ in 0..count {
+                    lines
+                        .next()
+                        .expect("complete accepted nonlinear blocker rows");
+                }
+                continue;
+            }
+            if version < NATIVE_NONLINEAR_FORMAT_VERSION
+                && line.starts_with("accepted_diode_nonlinear_states ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("accepted diode state count")
+                    .parse::<usize>()
+                    .expect("numeric accepted diode state count");
+                for _ in 0..count {
+                    lines.next().expect("complete accepted diode state rows");
+                }
+                continue;
+            }
+            if version < NATIVE_NONLINEAR_FORMAT_VERSION
+                && line.starts_with("accepted_bjt_nonlinear_states ")
+            {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("accepted BJT state count")
+                    .parse::<usize>()
+                    .expect("numeric accepted BJT state count");
+                for _ in 0..count {
+                    lines.next().expect("complete accepted BJT state header");
+                    let values = lines
+                        .next()
+                        .expect("accepted BJT state values header")
+                        .split_whitespace()
+                        .nth(1)
+                        .expect("accepted BJT state values count")
+                        .parse::<usize>()
+                        .expect("numeric accepted BJT state values count");
+                    for _ in 0..values {
+                        lines.next().expect("complete accepted BJT state values");
+                    }
                 }
                 continue;
             }
@@ -4206,6 +4778,12 @@ mod tests {
         let original = sample();
         let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
         assert_eq!(original, restored);
+        let packed = original
+            .to_bytes(TransientCheckpointEncoding::Packed)
+            .expect("v18 checkpoint packs");
+        let restored_packed =
+            TransientCheckpoint::from_bytes(&packed).expect("v18 packed checkpoint parses");
+        assert_eq!(original, restored_packed);
         // Bit-level check on the touchy values (subnormals, negative zero).
         for (a, b) in original.solution.iter().zip(&restored.solution) {
             assert_eq!(a.to_bits(), b.to_bits());
@@ -4222,6 +4800,266 @@ mod tests {
         {
             assert_eq!(a.to_bits(), b.to_bits());
         }
+        let original_diode = original.accepted_nonlinear_states.diodes[0].state;
+        let restored_diode = restored.accepted_nonlinear_states.diodes[0].state;
+        for (a, b) in [
+            (original_diode.prev_vd, restored_diode.prev_vd),
+            (original_diode.prev_vd_old, restored_diode.prev_vd_old),
+            (original_diode.prev_id, restored_diode.prev_id),
+            (original_diode.prev_gd, restored_diode.prev_gd),
+            (original_diode.junction_gmin, restored_diode.junction_gmin),
+            (
+                original_diode.last_limited_vd,
+                restored_diode.last_limited_vd,
+            ),
+            (original_diode.last_stamp_vd, restored_diode.last_stamp_vd),
+            (original_diode.last_stamp_id, restored_diode.last_stamp_id),
+            (original_diode.last_stamp_gd, restored_diode.last_stamp_gd),
+        ] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        for (a, b) in original.accepted_nonlinear_states.bjts[0]
+            .state_values
+            .iter()
+            .zip(&restored.accepted_nonlinear_states.bjts[0].state_values)
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        for (a, b) in original.accepted_nonlinear_states.bjts[0]
+            .state_values
+            .iter()
+            .zip(&restored_packed.accepted_nonlinear_states.bjts[0].state_values)
+        {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
+
+    #[test]
+    fn malformed_accepted_native_names_tags_counts_and_values_fail_closed() {
+        let mut duplicate = sample();
+        duplicate
+            .accepted_nonlinear_states
+            .diodes
+            .push(duplicate.accepted_nonlinear_states.diodes[0].clone());
+        let error = duplicate
+            .validate_numeric_state()
+            .expect_err("duplicate accepted diode names must fail closed");
+        assert!(
+            error.contains("duplicate instance name"),
+            "unexpected error: {error}"
+        );
+
+        let mut bad_tag = sample();
+        bad_tag.accepted_nonlinear_states.bjts[0].runtime_tag = "future-bjt-v99".to_string();
+        let error = TransientCheckpoint::from_text(&bad_tag.to_text())
+            .expect_err("unknown accepted BJT runtime tags must fail while parsing");
+        assert!(
+            error.contains("unsupported runtime tag"),
+            "unexpected error: {error}"
+        );
+
+        let mut bad_count = sample();
+        bad_count.accepted_nonlinear_states.bjts[0]
+            .state_values
+            .pop();
+        let error = TransientCheckpoint::from_text(&bad_count.to_text())
+            .expect_err("wrong fixed BJT payload counts must fail while parsing");
+        assert!(
+            error.contains("runtime requires"),
+            "unexpected error: {error}"
+        );
+
+        let text = sample().to_text();
+        let marker = format!(
+            "accepted_bjt_state_values {}\n",
+            BJT_ACCEPTED_NONLINEAR_STATE_VALUE_COUNT
+        );
+        let marker_offset = text
+            .find(&marker)
+            .expect("sample contains accepted BJT value section")
+            + marker.len();
+        let value_end = text[marker_offset..]
+            .find('\n')
+            .map(|offset| marker_offset + offset)
+            .expect("sample contains first accepted BJT value");
+        let mut non_finite = text;
+        non_finite.replace_range(marker_offset..value_end, "NaN");
+        let error = TransientCheckpoint::from_text(&non_finite)
+            .expect_err("non-finite accepted BJT payload values must fail while parsing");
+        assert!(error.contains("non-finite"), "unexpected error: {error}");
+
+        let mut whitespace_blocker = sample();
+        whitespace_blocker.accepted_nonlinear_states.resume_blockers =
+            vec![" padded blocker ".to_string()];
+        let error = whitespace_blocker
+            .validate_numeric_state()
+            .expect_err("noncanonical blocker whitespace must fail before serialization");
+        assert!(error.contains("blocker text"), "unexpected error: {error}");
+
+        let mut canonical_blocker = sample();
+        canonical_blocker.accepted_nonlinear_states.resume_blockers =
+            vec!["Q1: unsupported runtime".to_string()];
+        let padded_text = canonical_blocker.to_text().replacen(
+            "\nQ1: unsupported runtime\n",
+            "\n Q1: unsupported runtime\n",
+            1,
+        );
+        let error = TransientCheckpoint::from_text(&padded_text)
+            .expect_err("the v18 parser must reject noncanonical blocker whitespace");
+        assert!(
+            error.contains("surrounding whitespace"),
+            "unexpected error: {error}"
+        );
+    }
+
+    fn native_junction_checkpoint_fixture() -> (Engine, Netlist, TransientCheckpoint) {
+        let netlist = Netlist::parse(
+            "accepted native nonlinear checkpoint fixture\n\
+             D1 da 0 DM\n\
+             Q1 qc qb 0 0 QM\n\
+             .MODEL DM D(IS=1e-12 N=1)\n\
+             .MODEL QM NPN LEVEL=1 IS=3e-14 BF=130 BR=1 CJE=1p CJC=2p CJS=3p\n\
+             .END\n",
+        )
+        .expect("native diode/BJT checkpoint fixture parses");
+        let engine = Engine::default();
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("native diode/BJT checkpoint fixture builds");
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        solution[0] = 0.65;
+        solution[1] = 5.0;
+        solution[2] = 0.72;
+        circuit.update_nonlinear(&solution);
+        let checkpoint = TransientCheckpoint::capture(
+            netlist_fingerprint(&netlist),
+            netlist_checkpoint_identity(&netlist),
+            simulation_checkpoint_identity(engine.config()),
+            0.0,
+            &solution,
+            &circuit,
+            TransientStartupMode::OperatingPoint,
+            None,
+        );
+        (engine, netlist, checkpoint)
+    }
+
+    #[test]
+    fn accepted_native_nonlinear_state_round_trips_and_restores_exactly() {
+        let (engine, netlist, checkpoint) = native_junction_checkpoint_fixture();
+        assert!(checkpoint.accepted_nonlinear_state_available);
+        assert!(
+            checkpoint
+                .accepted_nonlinear_states
+                .resume_blockers
+                .is_empty()
+        );
+        assert_eq!(checkpoint.accepted_nonlinear_states.diodes.len(), 1);
+        assert_eq!(checkpoint.accepted_nonlinear_states.bjts.len(), 1);
+
+        let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("v18 native nonlinear checkpoint parses");
+        assert_eq!(checkpoint, restored);
+
+        let mut target = engine
+            .build_circuit(&netlist)
+            .expect("native diode/BJT restore target builds");
+        let mut different_solution = vec![0.0; target.matrix_size()];
+        different_solution[0] = -0.5;
+        different_solution[1] = 1.0;
+        different_solution[2] = -0.25;
+        target.update_nonlinear(&different_solution);
+        let before = target.capture_accepted_native_nonlinear_checkpoint_states();
+        let expected = restored.accepted_nonlinear_states.clone();
+        assert_ne!(
+            before, expected,
+            "fixture must begin with different device state"
+        );
+
+        restored
+            .inject(&mut target)
+            .expect("v18 native nonlinear state injects");
+        assert_eq!(
+            target.capture_accepted_native_nonlinear_checkpoint_states(),
+            expected
+        );
+    }
+
+    #[test]
+    fn v17_fails_closed_for_native_diode_and_bjt_resume() {
+        let (engine, netlist, checkpoint) = native_junction_checkpoint_fixture();
+        let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 17))
+            .expect("version-17 checkpoint remains parseable for diagnostics");
+        assert!(!legacy.accepted_nonlinear_state_available);
+        assert!(legacy.accepted_nonlinear_states.diodes.is_empty());
+        assert!(legacy.accepted_nonlinear_states.bjts.is_empty());
+
+        let mut target = engine
+            .build_circuit(&netlist)
+            .expect("legacy restore target builds");
+        let error = legacy
+            .inject(&mut target)
+            .expect_err("v17 cannot reconstruct accepted diode/BJT state");
+        assert!(
+            error.contains("legacy transient checkpoint") && error.contains("diode/BJT"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn accepted_native_validation_precedes_every_injection_mutation() {
+        let (engine, netlist, mut checkpoint) = native_junction_checkpoint_fixture();
+        let mut target = engine
+            .build_circuit(&netlist)
+            .expect("native nonlinear validation target builds");
+        let before = target.capture_accepted_native_nonlinear_checkpoint_states();
+        checkpoint.accepted_nonlinear_states.diodes[0].instance_name = "wrong-name".to_string();
+
+        let error = checkpoint
+            .inject(&mut target)
+            .expect_err("a named instance mismatch must reject before injection");
+        assert!(
+            error.contains("instance name mismatch"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            target.capture_accepted_native_nonlinear_checkpoint_states(),
+            before,
+            "native nonlinear rejection must occur before device mutation"
+        );
+
+        checkpoint.accepted_nonlinear_states.diodes[0].instance_name = "D1".to_string();
+        checkpoint.accepted_nonlinear_states.bjts[0]
+            .state_values
+            .pop();
+        let error = checkpoint
+            .inject(&mut target)
+            .expect_err("a fixed-shape BJT mismatch must reject before injection");
+        assert!(
+            error.contains("runtime requires"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            target.capture_accepted_native_nonlinear_checkpoint_states(),
+            before,
+            "BJT shape rejection must occur before device mutation"
+        );
+    }
+
+    #[test]
+    fn accepted_native_blockers_round_trip_and_fail_before_circuit_construction() {
+        let mut checkpoint = sample();
+        checkpoint.accepted_nonlinear_states.resume_blockers =
+            vec!["QVBIC: promoted native VBIC runtime has no v18 checkpoint contract".to_string()];
+        let retained_before = sample().retained_value_count();
+        let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("accepted nonlinear blockers parse");
+        assert_eq!(restored, checkpoint);
+        assert_eq!(restored.retained_value_count(), retained_before + 1);
+        let error = restored
+            .validate_resume_capabilities(&Netlist::default())
+            .expect_err("named unsupported native runtime must fail pre-build validation");
+        assert!(error.contains("QVBIC"), "unexpected error: {error}");
     }
 
     #[test]
@@ -5692,6 +6530,15 @@ mod tests {
         let err = read_xspice_instance_states(&mut lines, FORMAT_VERSION)
             .expect_err("oversized nested XSPICE sections must fail closed");
         assert!(err.contains("rows remain"), "unexpected error: {err}");
+
+        let text = format!("accepted_bjt_nonlinear_states {count}\n\n\n\n");
+        let mut lines = CheckpointLines::new(&text);
+        let err = read_accepted_bjt_nonlinear_states(&mut lines)
+            .expect_err("outer accepted BJT counts must be bounded by fixed nested row shape");
+        assert!(
+            err.contains("each state requires"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
