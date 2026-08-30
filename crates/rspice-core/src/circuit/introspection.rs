@@ -752,17 +752,67 @@ impl CircuitData {
         report
     }
 
-    /// Build an accepted transient report, replacing legacy native-BJT lead
-    /// currents with the exact total currents from the committed companion.
-    /// Ordinary `.OP` and every non-BJT parameter retain the static report;
-    /// the override exists only for this transient sample and cannot leak
-    /// into a later analysis.
+    /// Build an accepted transient report, replacing native diode and legacy
+    /// BJT lead currents with the exact totals from their committed
+    /// companions. Ordinary `.OP` and every other parameter retain the static
+    /// report; these overrides exist only for this transient sample and cannot
+    /// leak into a later analysis.
     pub(crate) fn transient_device_op_report(
         &self,
         solution: &[Value],
+        accepted_diode_displacement_currents: &[Value],
         accepted_bjt_terminal_currents: &[Option<[Value; 4]>],
     ) -> Result<DeviceOpReport, String> {
+        if accepted_diode_displacement_currents.len() != self.diodes.devices.len() {
+            return Err(format!(
+                "accepted diode current count mismatch: history has {}, circuit has {}",
+                accepted_diode_displacement_currents.len(),
+                self.diodes.devices.len()
+            ));
+        }
         let mut report = self.device_op_report();
+        for (diode, displacement_current) in self
+            .diodes
+            .devices
+            .iter()
+            .zip(accepted_diode_displacement_currents.iter().copied())
+        {
+            let node_voltage = |node: NodeId| {
+                if node == 0 {
+                    0.0
+                } else {
+                    solution.get(node - 1).copied().unwrap_or(0.0)
+                }
+            };
+            let voltage = node_voltage(diode.node_anode) - node_voltage(diode.node_cathode);
+            let total_current = diode.stamped_conduction_current(voltage) + displacement_current;
+            let entry = report
+                .entries
+                .iter_mut()
+                .find(|entry| {
+                    entry
+                        .device_kind
+                        .eq_ignore_ascii_case(OpLabel::DIODE.as_str())
+                        && entry.name.eq_ignore_ascii_case(&diode.name)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "native diode '{}' is missing from its transient operating-point report",
+                        diode.name
+                    )
+                })?;
+            let id = entry
+                .params
+                .iter_mut()
+                .find(|(parameter, _)| parameter.eq_ignore_ascii_case(OpLabel::ID.as_str()))
+                .ok_or_else(|| {
+                    format!(
+                        "native diode '{}' transient report is missing ID",
+                        diode.name
+                    )
+                })?;
+            id.1 = total_current;
+        }
         for (bjt, intrinsic) in self
             .bjts
             .devices
@@ -812,7 +862,8 @@ impl CircuitData {
                     .then(|| bjt.operating_point_terminal_currents())
             })
             .collect::<Vec<_>>();
-        self.transient_device_op_report(solution, &currents)
+        let diode_displacement_currents = vec![0.0; self.diodes.devices.len()];
+        self.transient_device_op_report(solution, &diode_displacement_currents, &currents)
     }
 
     /// Read-only access to linear resistor storage (names, nodes, conductances).

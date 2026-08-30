@@ -394,6 +394,9 @@ enum DerivedTransientBranchCurrentKind {
     LinearResistor,
     LinearCapacitor,
     IndependentCurrentSource,
+    NativeDiode,
+    #[cfg(feature = "veriloga-builtins-base")]
+    GeneratedVerilogA,
     XyceMemristor,
     BehavioralCurrentSource,
     VoltageSwitch,
@@ -837,7 +840,18 @@ impl Engine {
                 .len()
                 .saturating_add(circuit.resistors.names.len())
                 .saturating_add(circuit.capacitors.names.len())
-                .saturating_add(circuit.current_sources.names.len()),
+                .saturating_add(circuit.current_sources.names.len())
+                .saturating_add(circuit.diodes.devices.len())
+                .saturating_add({
+                    #[cfg(feature = "veriloga-builtins-base")]
+                    {
+                        circuit.generated_veriloga_devices().len()
+                    }
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
+                    {
+                        0
+                    }
+                }),
         );
         seen_names.extend(
             existing_branch_names
@@ -887,6 +901,28 @@ impl Engine {
                 name,
                 DerivedTransientBranchCurrent {
                     kind: DerivedTransientBranchCurrentKind::IndependentCurrentSource,
+                    index,
+                },
+            );
+        }
+        for (index, diode) in circuit.diodes.devices.iter().enumerate() {
+            consider(
+                &diode.name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::NativeDiode,
+                    index,
+                },
+            );
+        }
+        #[cfg(feature = "veriloga-builtins-base")]
+        for (index, device) in circuit.generated_veriloga_devices().iter().enumerate() {
+            if device.external_terminals().len() != 2 {
+                continue;
+            }
+            consider(
+                &device.instance_name,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::GeneratedVerilogA,
                     index,
                 },
             );
@@ -959,6 +995,14 @@ impl Engine {
             DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
                 &circuit.current_sources.names[branch.index]
             }
+            DerivedTransientBranchCurrentKind::NativeDiode => {
+                &circuit.diodes.devices[branch.index].name
+            }
+            #[cfg(feature = "veriloga-builtins-base")]
+            DerivedTransientBranchCurrentKind::GeneratedVerilogA => circuit
+                .generated_veriloga_devices()
+                .two_terminal_instance_name(branch.index)
+                .expect("derived generated-device branch index is topology-aligned"),
             DerivedTransientBranchCurrentKind::XyceMemristor => {
                 &circuit.xyce_memristors[branch.index].name
             }
@@ -1007,6 +1051,7 @@ impl Engine {
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
         time: Value,
+        diode_history: Option<&DiodeTransientHistory>,
         branch: DerivedTransientBranchCurrent,
     ) -> Result<Value, SimulationError> {
         let current = match branch.kind {
@@ -1025,6 +1070,33 @@ impl Engine {
             DerivedTransientBranchCurrentKind::IndependentCurrentSource => {
                 circuit.current_sources.value_at_time(branch.index, time)
             }
+            DerivedTransientBranchCurrentKind::NativeDiode => {
+                let diode = &circuit.diodes.devices[branch.index];
+                let voltage = Self::solution_node_voltage(solution, diode.node_anode)
+                    - Self::solution_node_voltage(solution, diode.node_cathode);
+                let displacement_current = match diode_history {
+                    Some(history) => {
+                        history.cqd_prev.get(branch.index).copied().ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                "accepted diode current history is missing instance '{}'",
+                                diode.name
+                            ))
+                        })?
+                    }
+                    None => 0.0,
+                };
+                diode.stamped_conduction_current(voltage) + displacement_current
+            }
+            #[cfg(feature = "veriloga-builtins-base")]
+            DerivedTransientBranchCurrentKind::GeneratedVerilogA => circuit
+                .generated_veriloga_devices()
+                .primary_terminal_current(branch.index)
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "generated Verilog-A instance '{}' has no primary terminal current",
+                        Self::derived_transient_branch_name_ref(circuit, branch)
+                    ))
+                })?,
             DerivedTransientBranchCurrentKind::XyceMemristor => {
                 let binding = &circuit.xyce_memristors[branch.index];
                 let v_pos = Self::solution_node_voltage(solution, binding.node_pos);
@@ -1120,7 +1192,7 @@ impl Engine {
                 // the initial sample.
                 0.0
             } else {
-                Self::derived_transient_branch_current(circuit, solution, time, branch)?
+                Self::derived_transient_branch_current(circuit, solution, time, None, branch)?
             };
             currents.push(vec![current]);
         }
@@ -1243,6 +1315,7 @@ impl Engine {
         step_size: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
         bjt_history: &BjtTransientHistory,
+        diode_history: &DiodeTransientHistory,
         record_device_op_traces: bool,
         capture: &TransientCapturePlan,
         trajectory_point_count: usize,
@@ -1310,7 +1383,11 @@ impl Engine {
         {
             if retain {
                 currents.push(Self::derived_transient_branch_current(
-                    circuit, solution, time, *branch,
+                    circuit,
+                    solution,
+                    time,
+                    Some(diode_history),
+                    *branch,
                 )?);
                 added_values = added_values.saturating_add(1);
             }
@@ -1321,6 +1398,7 @@ impl Engine {
                     circuit
                         .transient_device_op_report(
                             solution,
+                            &diode_history.cqd_prev,
                             &bjt_history.accepted_terminal_currents,
                         )
                         .map_err(SimulationError::Circuit)?,
@@ -3870,24 +3948,6 @@ impl Engine {
                     *first = binding.resistance_store;
                 }
             }
-            // Derived branches are initialized before checkpoint injection.
-            // Recompute their seam sample from the restored device stores so
-            // hysteretic switch currents and other state-derived observations
-            // represent the accepted checkpoint timepoint exactly.
-            let solved_branch_count = circuit.num_branches();
-            for (branch, currents) in derived_branch_currents
-                .iter()
-                .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
-            {
-                if let Some(first) = currents.first_mut() {
-                    *first = Self::derived_transient_branch_current(
-                        &mut circuit,
-                        &solution,
-                        resume_time,
-                        *branch,
-                    )?;
-                }
-            }
             // The checkpointed companion history is authoritative for the
             // accepted capacitor lead current across an integration restart.
             for (capacitor, branch_ordinal) in circuit
@@ -3959,6 +4019,28 @@ impl Engine {
             vbic_snapshot_cache = restored_snapshot_cache;
         }
 
+        if resume.is_some() {
+            // Derived branches are initialized before checkpoint injection
+            // and before integration-owned junction history exists. Rebuild
+            // the seam only after both state owners are authoritative so a
+            // native diode includes its exact committed dQ/dt contribution.
+            let solved_branch_count = circuit.num_branches();
+            for (branch, currents) in derived_branch_currents
+                .iter()
+                .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
+            {
+                if let Some(first) = currents.first_mut() {
+                    *first = Self::derived_transient_branch_current(
+                        &mut circuit,
+                        &solution,
+                        resume_time,
+                        Some(&diode_history),
+                        *branch,
+                    )?;
+                }
+            }
+        }
+
         if resume.is_some() && record_device_op_traces {
             // The initial seam report was created before checkpoint injection
             // and before the accepted terminal-current history was installed.
@@ -3969,6 +4051,7 @@ impl Engine {
                     circuit
                         .transient_device_op_report(
                             &solution,
+                            &diode_history.cqd_prev,
                             &bjt_history.accepted_terminal_currents,
                         )
                         .map_err(SimulationError::Circuit)?,
@@ -7536,6 +7619,7 @@ impl Engine {
                             dt,
                             &derived_branch_currents,
                             &bjt_history,
+                            &diode_history,
                             record_device_op_traces,
                             &capture_plan,
                             trajectory_point_count,
@@ -8002,6 +8086,7 @@ impl Engine {
                     dt,
                     &derived_branch_currents,
                     &bjt_history,
+                    &diode_history,
                     record_device_op_traces,
                     &capture_plan,
                     trajectory_point_count,
@@ -9075,6 +9160,109 @@ D1 D 0 DMOD
                     "restored suffix changed {device}[{parameter}] at row {index}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn native_diode_total_current_checkpoint_resume_preserves_exact_suffix() {
+        let source = "native diode total-current checkpoint continuation\n\
+                      VD D 0 SIN(0 0.05 100MEG)\n\
+                      D1 D 0 DMOD\n\
+                      .MODEL DMOD D IS=1e-30 N=1 CJO=10p VJ=1 M=0.5 TT=0\n\
+                      .TRAN 0.05n 2n\n\
+                      .PRINT TRAN V(D) I(D1) ID(D1)\n\
+                      .END\n";
+        let netlist = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("native diode checkpoint deck parses");
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let (uninterrupted, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &netlist,
+                2.0e-9,
+                0.05e-9,
+                TransientStartupMode::OperatingPoint,
+                &[0.625e-9],
+            )
+            .expect("native diode checkpoint trajectory solves");
+        assert_eq!(scheduled.len(), 1);
+        let checkpoint = &scheduled[0].checkpoint;
+        let junction_history = checkpoint.accepted_junction_transient_history();
+        assert!(junction_history.available);
+        assert!(junction_history.resume_blockers.is_empty());
+        assert_eq!(junction_history.diode_history.cqd_prev.len(), 1);
+        assert!(
+            junction_history.diode_history.cqd_prev[0].abs() > 1.0e-8,
+            "checkpoint must exercise nonzero accepted diode dQ/dt current"
+        );
+
+        let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("native diode checkpoint round-trips");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &serialized, 2.0e-9, 0.05e-9)
+            .expect("native diode checkpoint resumes");
+        let seam_index = uninterrupted
+            .time
+            .iter()
+            .position(|time| time.to_bits() == checkpoint.time.to_bits())
+            .expect("checkpoint seam is present in uninterrupted result");
+        let expected_time = &uninterrupted.time[seam_index..];
+        assert_eq!(resumed.time.len(), expected_time.len());
+        for (index, (&actual, &expected)) in resumed.time.iter().zip(expected_time).enumerate() {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "resumed accepted time changed at suffix row {index}"
+            );
+        }
+
+        let uninterrupted_generic = uninterrupted
+            .try_branch_current_waveform_named("D1")
+            .expect("uninterrupted I(D1) trace exists");
+        let resumed_generic = resumed
+            .try_branch_current_waveform_named("D1")
+            .expect("resumed I(D1) trace exists");
+        let uninterrupted_accepted = uninterrupted
+            .try_device_op_waveform_named("D1", "ID")
+            .expect("uninterrupted ID(D1) trace exists");
+        let resumed_accepted = resumed
+            .try_device_op_waveform_named("D1", "ID")
+            .expect("resumed ID(D1) trace exists");
+        for (name, actual, expected) in [
+            (
+                "I(D1)",
+                resumed_generic,
+                &uninterrupted_generic[seam_index..],
+            ),
+            (
+                "ID(D1)",
+                resumed_accepted,
+                &uninterrupted_accepted[seam_index..],
+            ),
+        ] {
+            assert_eq!(actual.len(), expected.len());
+            for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "resumed {name} changed at suffix row {index}"
+                );
+            }
+        }
+        for (index, (&generic, &accepted)) in
+            resumed_generic.iter().zip(resumed_accepted).enumerate()
+        {
+            assert_eq!(
+                generic.to_bits(),
+                accepted.to_bits(),
+                "resumed I(D1) diverged from accepted ID(D1) at row {index}"
+            );
         }
     }
 
@@ -11122,6 +11310,95 @@ D1 D 0 DMOD
             "{:?}",
             measurements[0]
         );
+    }
+
+    #[test]
+    fn native_diode_measurement_retains_the_accepted_total_current() {
+        let source = "measurement-owned native diode total current\n\
+                      VD D 0 SIN(0 0.05 100MEG)\n\
+                      D1 D 0 DMOD\n\
+                      .MODEL DMOD D IS=1e-30 N=1 CJO=10p VJ=1 M=0.5 TT=0\n\
+                      .TRAN 0.05n 2n\n\
+                      .SAVE V(D)\n\
+                      .MEASURE TRAN generic_peak MAX {ABS(I(D1))}\n\
+                      .MEASURE TRAN accepted_peak MAX {ABS(ID(D1))}\n\
+                      .END\n";
+        let mut netlist = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("native diode measurement deck parses");
+
+        // Preserve only the authored SAVE sidecar. Neither current is owned
+        // by PRINT/SAVE after the parser's MEASURE provenance is removed.
+        netlist
+            .output_requests
+            .retain(|request| request.directive != OutputDirectiveKind::Measure);
+        assert!(!netlist.saves.keeps_everything());
+        assert!(
+            !netlist
+                .output_requests
+                .iter()
+                .any(|request| request.selects_transient_device_current("D1"))
+        );
+        assert!(Engine::should_record_transient_device_op_traces(&netlist));
+
+        let engine =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+        let result = engine
+            .run_tran(&netlist, 2.0e-9, 0.05e-9)
+            .expect("native diode measurement transient runs");
+        let generic = result
+            .try_branch_current_waveform_named("D1")
+            .expect("I(D1) retained solely for its measurement");
+        let accepted = result
+            .try_device_op_waveform_named("D1", "ID")
+            .expect("ID(D1) retained solely for its measurement");
+        let voltage = result
+            .try_voltage_waveform_named("D")
+            .expect("authored voltage SAVE is retained");
+        assert_eq!(generic.len(), result.time.len());
+        assert_eq!(accepted.len(), result.time.len());
+        assert_eq!(voltage.len(), result.time.len());
+
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("native diode fixture circuit builds");
+        let diode = circuit
+            .diodes
+            .devices
+            .first()
+            .expect("native diode fixture contains D1");
+        let mut observed_dynamic_current = false;
+        for (index, ((&generic_current, &accepted_current), &diode_voltage)) in
+            generic.iter().zip(accepted).zip(voltage).enumerate()
+        {
+            assert_eq!(
+                generic_current.to_bits(),
+                accepted_current.to_bits(),
+                "I(D1) diverged from accepted ID(D1) at row {index}"
+            );
+            let static_current = diode.stamped_conduction_current(diode_voltage);
+            observed_dynamic_current |= (generic_current - static_current).abs() > 1.0e-8;
+        }
+        assert!(
+            observed_dynamic_current,
+            "fixture never exercised the diode's accepted dQ/dt current"
+        );
+
+        let measurements = crate::analysis::evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 2);
+        assert!(measurements.iter().all(|measurement| measurement.passed));
+        let generic_peak = measurements[0]
+            .value
+            .expect("generic diode-current measurement has a value");
+        let accepted_peak = measurements[1]
+            .value
+            .expect("accepted diode-current measurement has a value");
+        assert_eq!(generic_peak.to_bits(), accepted_peak.to_bits());
     }
 
     /// An explicitly configured `max_timestep` must cap the accepted step

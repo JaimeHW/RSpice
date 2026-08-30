@@ -356,6 +356,31 @@ impl BuiltinVerilogADevices {
         self.devices.iter()
     }
 
+    /// Exact current entering the first external module terminal from the
+    /// most recent complete device evaluation.
+    ///
+    /// SPICE's generic `I(instance)` projection names the first authored
+    /// terminal. Keeping the indexed lookup here makes transient publication
+    /// O(1) per device while leaving the generated model as the sole owner of
+    /// its flow equations and terminal ordering.
+    #[inline]
+    pub(crate) fn primary_terminal_current(&self, index: usize) -> Option<Value> {
+        let device = self.devices.get(index)?;
+        if device.external_terminals.len() != 2 {
+            return None;
+        }
+        device.terminal_currents.first().copied()
+    }
+
+    /// Instance name for a structurally valid generic two-terminal current
+    /// projection. Multi-terminal compact devices require an explicit lead
+    /// accessor and intentionally fail closed here.
+    #[inline]
+    pub(crate) fn two_terminal_instance_name(&self, index: usize) -> Option<&str> {
+        let device = self.devices.get(index)?;
+        (device.external_terminals.len() == 2).then_some(device.instance_name.as_str())
+    }
+
     pub(crate) fn checkpoint_states(&self) -> Vec<GeneratedVerilogAInstanceCheckpoint> {
         self.devices
             .iter()
@@ -644,6 +669,7 @@ impl BuiltinVerilogAInstance {
             model_identity: self.kind.checkpoint_model_identity().to_string(),
             state_version: GENERATED_PERSISTENT_STATE_VERSION,
             state: self.kind.capture_persistent_state(),
+            terminal_currents: self.terminal_currents.clone(),
         }
     }
 
@@ -676,7 +702,27 @@ impl BuiltinVerilogAInstance {
                 self.instance_name, checkpoint.state_version, GENERATED_PERSISTENT_STATE_VERSION
             ));
         }
-        self.kind.validate_persistent_state_shape(&checkpoint.state)
+        self.kind
+            .validate_persistent_state_shape(&checkpoint.state)?;
+        if checkpoint.terminal_currents.len() != self.terminal_currents.len() {
+            return Err(format!(
+                "terminal-current count mismatch for '{}': captured {}, circuit has {}",
+                self.instance_name,
+                checkpoint.terminal_currents.len(),
+                self.terminal_currents.len()
+            ));
+        }
+        if checkpoint
+            .terminal_currents
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(format!(
+                "terminal-current checkpoint for '{}' contains a non-finite value",
+                self.instance_name
+            ));
+        }
+        Ok(())
     }
 
     fn restore_checkpoint_state(
@@ -684,7 +730,10 @@ impl BuiltinVerilogAInstance {
         checkpoint: &GeneratedVerilogAInstanceCheckpoint,
     ) -> Result<(), String> {
         self.validate_checkpoint_state(checkpoint)?;
-        self.kind.restore_persistent_state(&checkpoint.state)
+        self.kind.restore_persistent_state(&checkpoint.state)?;
+        self.terminal_currents
+            .copy_from_slice(&checkpoint.terminal_currents);
+        Ok(())
     }
 
     /// Instantiate a built-in outside a netlist, against explicit unknown indices.
@@ -1734,6 +1783,67 @@ mod tests {
         devices
     }
 
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn two_terminal_primary_current_projection_is_exact_and_index_aligned() {
+        let mut devices = checkpoint_test_devices();
+        devices.devices[0]
+            .terminal_currents
+            .copy_from_slice(&[1.25, -1.25]);
+        devices.devices[1]
+            .terminal_currents
+            .copy_from_slice(&[-0.5, 0.5]);
+
+        assert_eq!(devices.two_terminal_instance_name(0), Some("d1"));
+        assert_eq!(devices.primary_terminal_current(0), Some(1.25));
+        assert_eq!(devices.two_terminal_instance_name(1), Some("d2"));
+        assert_eq!(devices.primary_terminal_current(1), Some(-0.5));
+        assert_eq!(devices.two_terminal_instance_name(2), None);
+        assert_eq!(devices.primary_terminal_current(2), None);
+
+        devices
+            .advance_state()
+            .expect("accepted generated state advances transactionally");
+        assert_eq!(devices.two_terminal_instance_name(0), Some("d1"));
+        assert_eq!(devices.primary_terminal_current(0), Some(1.25));
+        assert_eq!(devices.two_terminal_instance_name(1), Some("d2"));
+        assert_eq!(devices.primary_terminal_current(1), Some(-0.5));
+    }
+
+    #[cfg(feature = "veriloga-builtins-base")]
+    #[test]
+    fn primary_current_projection_fails_closed_for_multiterminal_metadata() {
+        const MULTI_TERMINALS: [super::GeneratedVerilogATerminalDescriptor; 3] = [
+            super::GeneratedVerilogATerminalDescriptor {
+                name: "D",
+                direction: super::GeneratedVerilogATerminalDirection::InOut,
+                discipline: "electrical",
+                current_parameter: "id",
+            },
+            super::GeneratedVerilogATerminalDescriptor {
+                name: "G",
+                direction: super::GeneratedVerilogATerminalDirection::InOut,
+                discipline: "electrical",
+                current_parameter: "ig",
+            },
+            super::GeneratedVerilogATerminalDescriptor {
+                name: "S",
+                direction: super::GeneratedVerilogATerminalDirection::InOut,
+                discipline: "electrical",
+                current_parameter: "is",
+            },
+        ];
+
+        let mut devices = checkpoint_test_devices();
+        devices.devices[0].external_terminals = &MULTI_TERMINALS;
+        devices.devices[0].terminal_currents = vec![1.0, 2.0, -3.0];
+
+        assert_eq!(devices.two_terminal_instance_name(0), None);
+        assert_eq!(devices.primary_terminal_current(0), None);
+        assert_eq!(devices.two_terminal_instance_name(1), Some("d2"));
+        assert_eq!(devices.primary_terminal_current(1), Some(0.0));
+    }
+
     /// Stamp one current both ways and compare what reached the matrix.
     ///
     /// `stamp_current_packed` exists so a backend carrying derivatives as an
@@ -1841,6 +1951,12 @@ mod tests {
     #[test]
     fn generated_checkpoint_restore_is_atomic_and_validates_provenance() {
         let mut devices = checkpoint_test_devices();
+        devices.devices[0]
+            .terminal_currents
+            .copy_from_slice(&[1.25, -1.25]);
+        devices.devices[1]
+            .terminal_currents
+            .copy_from_slice(&[-0.5, 0.5]);
         let mut accepted = devices.checkpoint_states();
         accepted[0].state.ddt_previous[0] = 1.25;
         accepted[0].state.ddt_older[0] = -0.0;
@@ -1882,6 +1998,14 @@ mod tests {
         let mut non_finite = baseline.clone();
         non_finite[0].state.ddt_previous[0] = f64::INFINITY;
         invalid_cases.push(non_finite);
+
+        let mut wrong_terminal_shape = baseline.clone();
+        wrong_terminal_shape[0].terminal_currents.pop();
+        invalid_cases.push(wrong_terminal_shape);
+
+        let mut non_finite_terminal_current = baseline.clone();
+        non_finite_terminal_current[0].terminal_currents[0] = f64::INFINITY;
+        invalid_cases.push(non_finite_terminal_current);
 
         for invalid in invalid_cases {
             assert!(devices.restore_checkpoint_states(&invalid).is_err());

@@ -1229,7 +1229,7 @@ pub struct GeneratedVerilogARollbackState {
     pub flags: Vec<bool>,
 }
 
-pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 2;
+pub const GENERATED_PERSISTENT_STATE_VERSION: u32 = 3;
 
 /// Persistent state plus exact generated-model and instance provenance.
 #[derive(Debug, Clone, PartialEq)]
@@ -1239,6 +1239,9 @@ pub struct GeneratedVerilogAInstanceCheckpoint {
     pub model_identity: String,
     pub state_version: u32,
     pub state: GeneratedVerilogAPersistentState,
+    /// Exact currents entering external module terminals at the accepted
+    /// checkpoint boundary, in canonical declaration order.
+    pub terminal_currents: Vec<Value>,
 }
 
 /// Which unknown a lane of a packed derivative array belongs to.

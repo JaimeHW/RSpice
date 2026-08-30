@@ -1575,7 +1575,14 @@ impl Diode {
         capd += sidewall_c;
 
         if self.tt > 0.0 {
-            let (id, gd) = self.current_and_conductance(vd);
+            // Both reference implementations form diffusion charge from the
+            // complete junction F/G contribution, including the active
+            // continuation conductance. Excluding gmin here would stamp its
+            // static current but omit d/dt(TT*gmin*vd) from the same physical
+            // lead current.
+            let (model_current, model_conductance) = self.current_and_conductance(vd);
+            let id = model_current + self.junction_gmin * vd;
+            let gd = model_conductance + self.junction_gmin;
             qd += self.tt * id;
             capd += self.tt * gd;
         }
@@ -1769,6 +1776,17 @@ impl Diode {
     /// Public for noise analysis (shot noise = 2qI)
     pub fn current(&self, vd: Value) -> Value {
         self.current_and_conductance(vd).0
+    }
+
+    /// Physical static current stamped from anode to cathode at `vd`.
+    ///
+    /// Junction continuation conductance is part of the device's nonlinear
+    /// F contribution in both Xyce and ngspice. Transient lead-current
+    /// publication must therefore retain it alongside the model conduction
+    /// current before the integration-owned dQ/dt term is added.
+    #[inline]
+    pub(crate) fn stamped_conduction_current(&self, vd: Value) -> Value {
+        self.current(vd) + self.junction_gmin * vd
     }
 
     /// Junction current and conductance in one evaluation.
@@ -3014,6 +3032,40 @@ mod tests {
         assert_eq!(explicit.rs, 5.0);
         assert_eq!(explicit.cj0, 2.0e-12);
         assert_eq!(explicit.sidewall_cj0, 3.0e-12);
+    }
+
+    #[test]
+    fn junction_gmin_contributes_to_stamped_current_and_tt_diffusion_charge() {
+        let mut diode = test_diode();
+        diode.cj0 = 0.0;
+        diode.sidewall_cj0 = 0.0;
+        diode.overlap_capacitance = 0.0;
+        diode.tt = 4.0e-6;
+        diode.set_junction_gmin(2.5e-3);
+
+        let vd = 0.2;
+        let (model_current, model_conductance) = diode.current_and_conductance(vd);
+        let expected_stamped_current = model_current + diode.junction_gmin * vd;
+        let expected_diffusion_charge = diode.tt * expected_stamped_current;
+        let expected_diffusion_capacitance = diode.tt * (model_conductance + diode.junction_gmin);
+        let (charge, capacitance) = diode.junction_charge_and_capacitance(vd);
+
+        let current_tolerance = 16.0 * Value::EPSILON * expected_stamped_current.abs();
+        let charge_tolerance = 16.0 * Value::EPSILON * expected_diffusion_charge.abs();
+        let capacitance_tolerance = 16.0 * Value::EPSILON * expected_diffusion_capacitance.abs();
+        assert!(
+            (diode.stamped_conduction_current(vd) - expected_stamped_current).abs()
+                <= current_tolerance,
+            "stamped current omitted the junction-gmin branch"
+        );
+        assert!(
+            (charge - expected_diffusion_charge).abs() <= charge_tolerance,
+            "TT diffusion charge {charge:.17e} did not equal TT times stamped current {expected_diffusion_charge:.17e}"
+        );
+        assert!(
+            (capacitance - expected_diffusion_capacitance).abs() <= capacitance_tolerance,
+            "TT diffusion capacitance {capacitance:.17e} did not include TT*gmin {expected_diffusion_capacitance:.17e}"
+        );
     }
 
     #[test]
