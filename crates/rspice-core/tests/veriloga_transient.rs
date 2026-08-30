@@ -11,13 +11,14 @@ use rspice_core::engine::TransientCheckpoint;
 use rspice_core::register_precompiled_veriloga_model;
 #[cfg(feature = "veriloga-native")]
 use rspice_core::register_precompiled_veriloga_runtime_with_dependencies;
-use rspice_core::{Engine, Netlist};
+use rspice_core::{Engine, Netlist, SimulationConfig};
 #[cfg(feature = "veriloga-native")]
 use rspice_veriloga::canonical_ir::{CanonicalIrArtifact, HirExprKind};
 use rspice_veriloga::codegen::{BytecodeProgram, Instruction};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 fn write_model(name: &str, source: &str) -> PathBuf {
     let mut path = std::env::temp_dir();
@@ -156,6 +157,82 @@ endmodule
             .all(|voltage| (*voltage - 1.0 / 1.001).abs() < 1.0e-9),
         "interior points must not retain a lifecycle flag: {out:?}"
     );
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn veriloga_cross_refines_the_candidate_before_accepting_event_state() {
+    let model = write_model(
+        "cross_refinement",
+        r#"
+`include "disciplines.vams"
+module va_cross_refinement(input_node, output_node);
+    input input_node;
+    output output_node;
+    electrical input_node, output_node;
+    real latched;
+    analog begin
+        @(cross(V(input_node), +1, 1.0e-12, 1.0e-6)) latched = 1.0;
+        V(output_node) <+ latched;
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* Verilog-A cross root refinement\n\
+         V1 input 0 PWL(0 -1 1u 1)\n\
+         X1 input output va_cross_refinement\n\
+         .va \"{}\" va_cross_refinement\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse cross-refinement deck");
+    let assert_event = |result: &rspice_core::engine::TransientResult, mode: &str| {
+        let input = node_series(&result.node_names, &result.voltages, "input");
+        let output = node_series(&result.node_names, &result.voltages, "output");
+        let event_index = output
+            .iter()
+            .position(|value| *value > 0.5)
+            .unwrap_or_else(|| panic!("{mode}: cross event must latch the output"));
+        let event_time = result.time[event_index];
+        let analytic_root = 0.5e-6;
+
+        assert!(
+            event_time >= analytic_root,
+            "{mode}: cross event must not be accepted before the root: {event_time:.16e}"
+        );
+        assert!(
+            event_time - analytic_root <= 1.0e-12,
+            "{mode}: cross event missed time_tol: root={analytic_root:.16e}, event={event_time:.16e}"
+        );
+        assert!(
+            input[event_index].abs() <= 1.0e-6,
+            "{mode}: cross event missed expr_tol: input={:.16e} at t={event_time:.16e}",
+            input[event_index]
+        );
+        assert!(
+            output[..event_index]
+                .iter()
+                .all(|value| value.abs() < 1.0e-12),
+            "{mode}: event-controlled state changed before the accepted root: {output:?}"
+        );
+    };
+
+    let adaptive = Engine::default()
+        .run_tran(&netlist, 1.0e-6, 8.0e-7)
+        .expect("adaptive cross-refinement transient run");
+    assert_event(&adaptive, "adaptive");
+
+    let locked = Engine::new(SimulationConfig {
+        transient_initial_timestep: Some(1.0e-6),
+        locked_time_grid: Some(Arc::new(vec![0.0, 1.0e-6])),
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 1.0e-6, 1.0e-6)
+    .expect("locked-grid cross-refinement transient run");
+    assert_event(&locked, "locked grid");
 
     let _ = std::fs::remove_file(model);
 }

@@ -2066,6 +2066,27 @@ impl CircuitData {
         Ok(tightest)
     }
 
+    /// Earliest interior `cross`/`above` root requested by the latest final
+    /// Verilog-A evaluation. The transient engine must reject the current
+    /// endpoint before any device or integration history is committed.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn veriloga_event_refinement_time(&self) -> Result<Option<Value>, String> {
+        let mut earliest: Option<Value> = None;
+        for device in self.veriloga_devices.iter() {
+            let instance = device.name.clone();
+            let Some(target) = device
+                .try_transient_event_refinement_time()
+                .map_err(|error| {
+                    format!("Verilog-A device '{instance}' event refinement failed: {error}")
+                })?
+            else {
+                continue;
+            };
+            earliest = Some(earliest.map_or(target, |current| current.min(target)));
+        }
+        Ok(earliest)
+    }
+
     /// Check if all XSPICE instances have converged
     pub fn xspice_converged(&self, tolerance: Value) -> bool {
         self.xspice_instances

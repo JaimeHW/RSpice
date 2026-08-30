@@ -1162,6 +1162,31 @@ impl VmContext {
             })
     }
 
+    /// Earliest interior zero-crossing target produced by the latest complete
+    /// transient evaluation. The request is speculative and is cleared before
+    /// every replacement Newton pass.
+    pub(crate) fn cross_event_refinement_time(&self) -> Result<Option<f64>, VmError> {
+        self.cross_detectors
+            .iter()
+            .enumerate()
+            .filter_map(|(detector_id, detector)| {
+                detector
+                    .candidate_refinement_time()
+                    .map(|target| (detector_id, target))
+            })
+            .try_fold(None, |minimum, (detector_id, target)| {
+                if !target.is_finite() || target < 0.0 || target >= self.time {
+                    return Err(VmError::InvalidNumericResult(format!(
+                        "cross detector {detector_id} produced invalid refinement target {target} for candidate time {}",
+                        self.time
+                    )));
+                }
+                Ok(Some(
+                    minimum.map_or(target, |current: f64| current.min(target)),
+                ))
+            })
+    }
+
     /// Set the timestep for transient analysis.
     pub fn set_timestep(&mut self, dt: f64) {
         self.timestep = dt;
@@ -1541,9 +1566,9 @@ mod tests {
         context.slew_filters[0].eval(2.0, 1.5, slew_rates(0.5, 0.5));
 
         context.allocate_cross_detectors(1);
-        context.cross_detectors[0].eval(-1.0, 0.0, 0);
+        context.cross_detectors[0].eval(-1.0, 0.0, 0).unwrap();
         context.cross_detectors[0].commit();
-        context.cross_detectors[0].eval(1.0, 1.0, 0);
+        context.cross_detectors[0].eval(1.0, 1.0, 0).unwrap();
 
         let mut laplace = StateSpaceFilter::integrator(1.0).unwrap();
         laplace.step(2.0, 0.25).unwrap();
@@ -1801,7 +1826,7 @@ mod tests {
         context.delay_buffers[0].eval(1.0, 1.0, 0.25);
         context.transition_filters[0].eval(1.0, 1.0, 0.0, 0.0, 0.0);
         context.slew_filters[0].eval(1.0, 1.0, slew_rates(10.0, 10.0));
-        context.cross_detectors[0].eval(-1.0, 1.0, 0);
+        context.cross_detectors[0].eval(-1.0, 1.0, 0).unwrap();
         context.laplace_filters[0].step(1.0, 0.25).unwrap();
         context.advance_state().unwrap();
         let accepted = context.accepted_checkpoint().unwrap();
@@ -1810,7 +1835,7 @@ mod tests {
         context.delay_buffers[0].eval(1.0, 9.0, 0.25);
         context.transition_filters[0].eval(9.0, 1.0, 0.0, 0.0, 0.0);
         context.slew_filters[0].eval(9.0, 1.0, slew_rates(10.0, 10.0));
-        context.cross_detectors[0].eval(1.0, 1.0, 0);
+        context.cross_detectors[0].eval(1.0, 1.0, 0).unwrap();
         context.laplace_filters[0].step(9.0, 0.25).unwrap();
         context.request_timer_event(2.0);
 
@@ -1841,7 +1866,7 @@ mod tests {
         context.delay_buffers[0].eval(1.0, 2.0, 0.25);
         context.transition_filters[0].eval(3.0, f64::NAN, 0.0, 1.0, 1.0);
         context.slew_filters[0].eval(4.0, 1.0, slew_rates(10.0, 10.0));
-        context.cross_detectors[0].eval(1.0, 1.0, 0);
+        context.cross_detectors[0].eval(1.0, 1.0, 0).unwrap();
         context.laplace_filters[0].step(5.0, 0.25).unwrap();
 
         let before = format!("{context:#?}");
@@ -1895,7 +1920,7 @@ mod tests {
         context.allocate_slew_filters(1);
         context.slew_filters[0].eval(5.0, 0.25, slew_rates(1.0, 1.0));
         context.allocate_cross_detectors(1);
-        context.cross_detectors[0].eval(1.0, 0.25, 0);
+        context.cross_detectors[0].eval(1.0, 0.25, 0).unwrap();
         context
             .laplace_filters
             .push(crate::laplace::StateSpaceFilter::integrator(1.0).unwrap());
@@ -2067,5 +2092,30 @@ mod tests {
         let expected = original.transition_filters[0].eval(1.0, 0.25, 0.0, 1.0, 1.0);
         let actual = resumed.transition_filters[0].eval(1.0, 0.25, 0.0, 1.0, 1.0);
         assert_eq!(expected.to_bits(), actual.to_bits());
+    }
+
+    #[test]
+    fn cross_refinement_selects_the_earliest_candidate_and_clears_on_replacement() {
+        let mut context = VmContext {
+            analysis_type: 2,
+            time: 0.0,
+            ..VmContext::default()
+        };
+        context.allocate_cross_detectors(2);
+        context.cross_detectors[0].eval(-1.0, 0.0, 1).unwrap();
+        context.cross_detectors[1].eval(-3.0, 0.0, 1).unwrap();
+        context.cross_detectors[0].commit();
+        context.cross_detectors[1].commit();
+
+        context.time = 1.0;
+        context.cross_detectors[0].eval(1.0, 1.0, 1).unwrap();
+        context.cross_detectors[1].eval(1.0, 1.0, 1).unwrap();
+        assert_eq!(
+            context.cross_event_refinement_time().unwrap(),
+            Some(0.5000000000000001)
+        );
+
+        context.begin_stateful_evaluation();
+        assert_eq!(context.cross_event_refinement_time().unwrap(), None);
     }
 }

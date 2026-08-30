@@ -13,8 +13,20 @@ use super::context::INTEGRATION_CANDIDATE_VALID;
 use super::{VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
-use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
+use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::timing_contract::{NormalizedSlewRates, normalize_slew_rates};
+
+fn event_integer_operand(name: &str, value: f64) -> Result<i32, VmError> {
+    let converted = real_to_integer(value).map_err(|error| {
+        VmError::InvalidNumericResult(format!("{name} integer conversion failed: {error}"))
+    })?;
+    if f64::from(converted) != value {
+        return Err(VmError::InvalidNumericResult(format!(
+            "{name} must evaluate to an integer, got {value}"
+        )));
+    }
+    Ok(converted)
+}
 
 fn limited_exp(value: f64) -> f64 {
     const LIMIT: f64 = 80.0;
@@ -764,13 +776,8 @@ impl<'a> Vm<'a> {
                 let direction = self.pop()?;
                 let value = self.pop()?;
                 let time = self.context.time;
-                let direction = if direction > 0.5 {
-                    1
-                } else if direction < -0.5 {
-                    -1
-                } else {
-                    0
-                };
+                let direction = event_integer_operand("cross direction", direction)?;
+                let enabled = event_integer_operand("cross enable", enable)? != 0;
                 let is_transient = self.context.analysis_type == 2;
 
                 if self.context.cross_detectors.len() <= *detector_id {
@@ -779,8 +786,11 @@ impl<'a> Vm<'a> {
                         .resize_with(*detector_id + 1, Default::default);
                 }
                 let detector = &mut self.context.cross_detectors[*detector_id];
-                let crossed =
-                    detector.eval_event(value, time, direction, time_tol, expr_tol, enable != 0.0);
+                let crossed = detector
+                    .eval_event(value, time, direction, time_tol, expr_tol, enabled)
+                    .map_err(|error| {
+                        VmError::InvalidNumericResult(format!("cross evaluation failed: {error}"))
+                    })?;
 
                 // Cross events only trigger in transient analysis.
                 let result = if is_transient { crossed } else { 0.0 };
@@ -793,21 +803,20 @@ impl<'a> Vm<'a> {
             Instruction::LastCrossingState(detector_id) => {
                 let direction = self.pop()?;
                 let value = self.pop()?;
-                let direction = if direction > 0.5 {
-                    1
-                } else if direction < -0.5 {
-                    -1
-                } else {
-                    0
-                };
+                let direction = event_integer_operand("last_crossing direction", direction)?;
                 if self.context.cross_detectors.len() <= *detector_id {
                     self.context
                         .cross_detectors
                         .resize_with(*detector_id + 1, Default::default);
                 }
                 let detector = &mut self.context.cross_detectors[*detector_id];
-                let crossing_time =
-                    detector.eval_last_crossing(value, self.context.time, direction);
+                let crossing_time = detector
+                    .eval_last_crossing(value, self.context.time, direction)
+                    .map_err(|error| {
+                        VmError::InvalidNumericResult(format!(
+                            "last_crossing evaluation failed: {error}"
+                        ))
+                    })?;
                 self.stack.push(if self.context.analysis_type == 2 {
                     crossing_time
                 } else {
@@ -895,13 +904,12 @@ impl<'a> Vm<'a> {
                         .resize_with(*detector_id + 1, Default::default);
                 }
                 let detector = &mut self.context.cross_detectors[*detector_id];
-                let result = detector.eval_above(
-                    value,
-                    self.context.time,
-                    time_tol,
-                    expr_tol,
-                    enable != 0.0,
-                );
+                let enabled = event_integer_operand("above enable", enable)? != 0;
+                let result = detector
+                    .eval_above(value, self.context.time, time_tol, expr_tol, enabled)
+                    .map_err(|error| {
+                        VmError::InvalidNumericResult(format!("above evaluation failed: {error}"))
+                    })?;
                 self.stack.push(result);
             }
 
@@ -1106,6 +1114,40 @@ mod tests {
                 Instruction::Shl,
             ])
             .expect_err("invalid integer operation must fail");
+            assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        }
+    }
+
+    #[test]
+    fn event_integer_operands_are_exact_and_invalid_directions_are_inactive() {
+        let cross = |value, direction, enable| {
+            vec![
+                Instruction::PushConst(value),
+                Instruction::PushConst(direction),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(enable),
+                Instruction::CrossState(0),
+            ]
+        };
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.time = 0.0;
+        assert_eq!(
+            execute_with_context(&mut context, cross(-1.0, 2.0, 1.0)),
+            Ok(0.0)
+        );
+        context.cross_detectors[0].commit();
+        context.time = 1.0;
+        assert_eq!(
+            execute_with_context(&mut context, cross(1.0, 2.0, 1.0)),
+            Ok(0.0),
+            "a direction other than -1, 0, or +1 generates no event"
+        );
+
+        for (direction, enable) in [(0.6, 1.0), (1.0, 0.5), (f64::NAN, 1.0)] {
+            let error = execute_with_context(&mut context, cross(1.0, direction, enable))
+                .expect_err("non-integer event operands must fail closed");
             assert!(matches!(error, VmError::InvalidNumericResult(_)));
         }
     }

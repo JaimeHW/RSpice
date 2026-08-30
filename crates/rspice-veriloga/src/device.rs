@@ -1778,6 +1778,16 @@ impl VerilogADevice {
             .reduce(f64::min))
     }
 
+    /// Earliest interior `cross`/`above` root requested by the latest complete
+    /// transient evaluation. Unlike a next-step bound, this asks the solver to
+    /// reject the current endpoint and retry inside the attempted interval.
+    pub fn try_transient_event_refinement_time(&self) -> Result<Option<f64>, VmError> {
+        if self.context.analysis_type != 2 {
+            return Ok(None);
+        }
+        self.context.cross_event_refinement_time()
+    }
+
     /// Whether `$discontinuity` fired during the latest evaluation
     pub fn discontinuity_pending(&self) -> bool {
         self.variable("$discontinuity").is_some_and(|v| v != 0.0)

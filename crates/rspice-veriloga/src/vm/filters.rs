@@ -601,26 +601,101 @@ mod tests {
         assert_eq!(slew.eval(1.0, 1.0, TEST_SLEW_RATES), 0.5);
 
         let mut cross = CrossDetector::default();
-        assert_eq!(cross.eval(-1.0, 0.0, 1), 0.0);
+        assert_eq!(cross.eval(-1.0, 0.0, 1).unwrap(), 0.0);
         cross.commit();
-        assert_eq!(cross.eval(1.0, 1.0, 1), 1.0);
-        assert_eq!(cross.eval(1.0, 1.0, 1), 1.0);
+        assert_eq!(cross.eval(1.0, 1.0, 1).unwrap(), 1.0);
+        assert_eq!(cross.eval(1.0, 1.0, 1).unwrap(), 1.0);
     }
 
     #[test]
-    fn cross_time_tolerance_coalesces_nearby_events() {
+    fn cross_tolerances_control_root_landing_without_coalescing_events() {
         let mut cross = CrossDetector::default();
-        assert_eq!(cross.eval_event(-1.0, 0.0, 0, 1.0, 0.0, true), 0.0);
+        assert_eq!(cross.eval_event(-1.0, 0.0, 0, 1.0, 0.0, true), Ok(0.0));
         cross.commit();
-        assert_eq!(cross.eval_event(1.0, 1.0, 0, 1.0, 0.0, true), 1.0);
-        cross.commit();
-
-        assert_eq!(cross.eval_event(-1.0, 1.2, 0, 1.0, 0.0, true), 0.0);
-        cross.commit();
-        assert_eq!(cross.eval_event(1.0, 1.4, 0, 1.0, 0.0, true), 0.0);
+        assert_eq!(cross.eval_event(1.0, 1.0, 0, 1.0, 0.0, true), Ok(1.0));
+        assert_eq!(cross.candidate_refinement_time(), Some(0.5000000000000001));
         cross.commit();
 
-        assert_eq!(cross.eval_event(-1.0, 2.0, 0, 1.0, 0.0, true), 1.0);
+        assert_eq!(cross.eval_event(-1.0, 1.2, 0, 1.0, 0.0, true), Ok(1.0));
+        cross.commit();
+        assert_eq!(cross.eval_event(1.0, 1.4, 0, 1.0, 0.0, true), Ok(1.0));
+        cross.commit();
+    }
+
+    #[test]
+    fn cross_refinement_requires_a_real_enabled_matching_sign_crossing() {
+        let mut cross = CrossDetector::default();
+        assert_eq!(cross.eval_event(-1.0, 0.0, 0, 0.01, 0.1, true), Ok(0.0));
+        cross.commit();
+
+        assert_eq!(
+            cross.eval_event(-0.05, 1.0, 0, 0.01, 0.1, true),
+            Ok(0.0),
+            "entering the expression tolerance on the negative side is not a crossing"
+        );
+        assert_eq!(cross.candidate_refinement_time(), None);
+
+        assert_eq!(cross.eval_event(1.0, 1.0, -1, 0.01, 0.1, true), Ok(0.0));
+        assert_eq!(cross.candidate_refinement_time(), None);
+        assert_eq!(cross.eval_event(1.0, 1.0, 1, 0.01, 0.1, false), Ok(0.0));
+        assert_eq!(cross.candidate_refinement_time(), None);
+        assert_eq!(cross.eval_event(1.0, 1.0, 2, 0.01, 0.1, true), Ok(0.0));
+        assert_eq!(cross.candidate_refinement_time(), None);
+    }
+
+    #[test]
+    fn cross_requires_both_root_tolerances_and_validates_them() {
+        let mut cross = CrossDetector::default();
+        assert_eq!(cross.eval_event(-1.0, 0.0, 1, 0.6, 0.5, true), Ok(0.0));
+        cross.commit();
+
+        assert_eq!(cross.eval_event(0.25, 1.0, 1, 0.6, 0.5, true), Ok(1.0));
+        assert_eq!(
+            cross.candidate_refinement_time(),
+            None,
+            "both requested tolerances are satisfied"
+        );
+        assert_eq!(cross.eval_event(0.25, 1.0, 1, 0.1, 0.5, true), Ok(1.0));
+        assert!(
+            cross.candidate_refinement_time().is_some(),
+            "expression convergence alone cannot waive time_tol"
+        );
+        assert_eq!(cross.eval_event(1.0, 1.0, 1, 0.6, 0.5, true), Ok(1.0));
+        assert!(
+            cross.candidate_refinement_time().is_some(),
+            "time convergence alone cannot waive expr_tol"
+        );
+
+        assert!(cross.eval_event(1.0, 1.0, 1, -1.0, 0.0, true).is_err());
+        assert!(cross.eval_event(1.0, 1.0, 1, 0.0, f64::NAN, true).is_err());
+    }
+
+    #[test]
+    fn above_initial_positive_event_ignores_root_tolerance_deadband() {
+        let mut above = CrossDetector::default();
+        assert_eq!(above.eval_above(1.0e-9, 0.0, 0.0, 1.0, true), Ok(1.0));
+        assert_eq!(above.candidate_refinement_time(), None);
+    }
+
+    #[test]
+    fn cross_interpolation_is_overflow_safe_and_unrepresentable_roots_fail_closed() {
+        let mut extreme = CrossDetector::default();
+        extreme.eval(-f64::MAX, 0.0, 1).unwrap();
+        extreme.commit();
+        assert_eq!(extreme.eval(f64::MAX, 1.0, 1), Ok(1.0));
+        assert_eq!(
+            extreme.candidate_refinement_time(),
+            Some(0.5000000000000001)
+        );
+
+        let mut adjacent = CrossDetector::default();
+        adjacent.eval(-1.0, 1.0, 1).unwrap();
+        adjacent.commit();
+        let next_time = f64::from_bits(1.0_f64.to_bits() + 1);
+        let error = adjacent
+            .eval(1.0, next_time, 1)
+            .expect_err("an interval without an interior float must not accept an inaccurate root");
+        assert!(error.contains("representable interior time"), "{error}");
     }
 }
 
@@ -1105,6 +1180,9 @@ pub struct CrossDetector {
     committed: CrossState,
     candidate: CrossState,
     candidate_valid: bool,
+    /// Absolute time at which the transient solver should retry the current
+    /// interval. This is speculative solver guidance, never accepted history.
+    candidate_refinement_time: Option<f64>,
 }
 
 impl CrossDetector {
@@ -1114,7 +1192,7 @@ impl CrossDetector {
 
     /// Check for zero crossing, returns 1.0 if crossed, 0.0 otherwise.
     /// direction: +1 = rising only, -1 = falling only, 0 = both.
-    pub fn eval(&mut self, value: f64, time: f64, direction: i32) -> f64 {
+    pub fn eval(&mut self, value: f64, time: f64, direction: i32) -> Result<f64, String> {
         self.eval_event(value, time, direction, 0.0, 0.0, true)
     }
 
@@ -1127,7 +1205,7 @@ impl CrossDetector {
         time_tol: f64,
         expr_tol: f64,
         enabled: bool,
-    ) -> f64 {
+    ) -> Result<f64, String> {
         self.eval_impl(value, time, direction, time_tol, expr_tol, enabled, false)
     }
 
@@ -1142,13 +1220,19 @@ impl CrossDetector {
         time_tol: f64,
         expr_tol: f64,
         enabled: bool,
-    ) -> f64 {
+    ) -> Result<f64, String> {
         self.eval_impl(value, time, 1, time_tol, expr_tol, enabled, true)
     }
 
     /// Return the linearly interpolated time of the most recent crossing.
     /// Returns -1.0 until a crossing matching `direction` has occurred.
-    pub fn eval_last_crossing(&mut self, value: f64, time: f64, direction: i32) -> f64 {
+    pub fn eval_last_crossing(
+        &mut self,
+        value: f64,
+        time: f64,
+        direction: i32,
+    ) -> Result<f64, String> {
+        Self::validate_value_and_time(value, time)?;
         if !self.committed.initialized {
             self.candidate = CrossState {
                 value,
@@ -1158,13 +1242,15 @@ impl CrossDetector {
                 ..CrossState::default()
             };
             self.candidate_valid = true;
-            return -1.0;
+            self.candidate_refinement_time = None;
+            return Ok(-1.0);
         }
 
-        if !value.is_finite() || !time.is_finite() || time <= self.committed.time {
+        if time <= self.committed.time {
             self.candidate = self.committed;
             self.candidate_valid = true;
-            return self.committed.last_crossing_time;
+            self.candidate_refinement_time = None;
+            return Ok(self.committed.last_crossing_time);
         }
 
         let rising = self.committed.value < 0.0 && value >= 0.0;
@@ -1187,7 +1273,8 @@ impl CrossDetector {
         }
         self.candidate = candidate;
         self.candidate_valid = true;
-        candidate.last_crossing_time
+        self.candidate_refinement_time = None;
+        Ok(candidate.last_crossing_time)
     }
 
     fn eval_impl(
@@ -1199,20 +1286,14 @@ impl CrossDetector {
         expr_tol: f64,
         enabled: bool,
         initial_above: bool,
-    ) -> f64 {
-        let expr_tol = if expr_tol.is_finite() {
-            expr_tol.abs()
-        } else {
-            0.0
-        };
-        let time_tol = if time_tol.is_finite() {
-            time_tol.max(0.0)
-        } else {
-            0.0
-        };
+    ) -> Result<f64, String> {
+        Self::validate_value_and_time(value, time)?;
+        Self::validate_tolerance("time_tol", time_tol)?;
+        Self::validate_tolerance("expr_tol", expr_tol)?;
+        self.candidate_refinement_time = None;
 
         if !self.committed.initialized {
-            let side = Self::side(value, expr_tol);
+            let side = Self::side(value, 0.0);
             let mut candidate = CrossState {
                 value,
                 time,
@@ -1220,24 +1301,26 @@ impl CrossDetector {
                 initialized: true,
                 ..CrossState::default()
             };
-            let fired = initial_above && enabled && side > 0;
+            let fired = initial_above && enabled && value > 0.0;
             if fired {
                 candidate.last_event_time = time;
                 candidate.last_crossing_time = time;
             }
             self.candidate = candidate;
             self.candidate_valid = true;
-            return if fired { 1.0 } else { 0.0 };
+            return Ok(if fired { 1.0 } else { 0.0 });
         }
 
-        if !value.is_finite() || !time.is_finite() || time <= self.committed.time {
+        if time <= self.committed.time {
             self.candidate = self.committed;
             self.candidate_valid = true;
-            return 0.0;
+            return Ok(0.0);
         }
 
-        let rising = self.committed.side < 0 && value >= -expr_tol;
-        let falling = self.committed.side > 0 && value <= expr_tol;
+        // A tolerance is a landing criterion, not permission to manufacture a
+        // crossing between two values on the same side of zero.
+        let rising = self.committed.side < 0 && value >= 0.0;
+        let falling = self.committed.side > 0 && value <= 0.0;
         let crossing_direction = if rising {
             1
         } else if falling {
@@ -1251,10 +1334,29 @@ impl CrossDetector {
             -1.0
         };
         let direction_matches = direction == 0 || direction == crossing_direction;
-        let separated = crossing_time - self.committed.last_event_time > time_tol;
-        let fired = enabled && crossing_direction != 0 && direction_matches && separated;
+        let fired = enabled && crossing_direction != 0 && direction_matches;
 
-        let stable_side = Self::side(value, expr_tol);
+        if fired {
+            let effective_time_tol =
+                Self::effective_tolerance(time_tol, self.committed.time.abs().max(time.abs()));
+            let effective_expr_tol =
+                Self::effective_tolerance(expr_tol, self.committed.value.abs().max(value.abs()));
+            let time_error = (time - crossing_time).max(0.0);
+            let converged = time_error <= effective_time_tol && value.abs() <= effective_expr_tol;
+            if !converged {
+                self.candidate_refinement_time = Some(
+                    Self::strictly_interior_time(self.committed.time, crossing_time, time)
+                        .ok_or_else(|| {
+                            format!(
+                                "crossing in ({}, {time}) cannot be refined to a representable interior time",
+                                self.committed.time
+                            )
+                        })?,
+                );
+            }
+        }
+
+        let stable_side = Self::side(value, 0.0);
         let side = if stable_side != 0 {
             stable_side
         } else if crossing_direction != 0 {
@@ -1274,7 +1376,53 @@ impl CrossDetector {
         }
         self.candidate = candidate;
         self.candidate_valid = true;
-        if fired { 1.0 } else { 0.0 }
+        Ok(if fired { 1.0 } else { 0.0 })
+    }
+
+    fn validate_value_and_time(value: f64, time: f64) -> Result<(), String> {
+        if !value.is_finite() {
+            return Err(format!("cross expression must be finite, got {value}"));
+        }
+        if !time.is_finite() || time < 0.0 {
+            return Err(format!(
+                "cross evaluation time must be finite and non-negative, got {time}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_tolerance(name: &str, tolerance: f64) -> Result<(), String> {
+        if !tolerance.is_finite() || tolerance < 0.0 {
+            return Err(format!(
+                "cross {name} must be finite and non-negative, got {tolerance}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn effective_tolerance(requested: f64, scale: f64) -> f64 {
+        if requested > 0.0 {
+            requested
+        } else {
+            (64.0 * f64::EPSILON * scale).max(f64::MIN_POSITIVE)
+        }
+    }
+
+    fn strictly_interior_time(start: f64, estimate: f64, end: f64) -> Option<f64> {
+        if !estimate.is_finite() || end <= start {
+            return None;
+        }
+        let target = Self::next_time_after(estimate.max(start));
+        (target > start && target < end).then_some(target)
+    }
+
+    fn next_time_after(time: f64) -> f64 {
+        debug_assert!(time.is_finite() && time >= 0.0);
+        if time == 0.0 {
+            f64::from_bits(1)
+        } else {
+            f64::from_bits(time.to_bits() + 1)
+        }
     }
 
     fn side(value: f64, tolerance: f64) -> i8 {
@@ -1288,11 +1436,15 @@ impl CrossDetector {
     }
 
     fn estimate_crossing_time(&self, value: f64, time: f64) -> f64 {
-        let delta = value - self.committed.value;
-        if delta == 0.0 || !delta.is_finite() {
+        let accepted_magnitude = self.committed.value.abs();
+        let candidate_magnitude = value.abs();
+        let scale = accepted_magnitude.max(candidate_magnitude);
+        if scale == 0.0 || !scale.is_finite() {
             return time;
         }
-        let fraction = (-self.committed.value / delta).clamp(0.0, 1.0);
+        let accepted_scaled = accepted_magnitude / scale;
+        let candidate_scaled = candidate_magnitude / scale;
+        let fraction = (accepted_scaled / (accepted_scaled + candidate_scaled)).clamp(0.0, 1.0);
         self.committed.time + fraction * (time - self.committed.time)
     }
 
@@ -1301,11 +1453,18 @@ impl CrossDetector {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+        self.candidate_refinement_time = None;
+    }
+
+    /// Absolute interior root estimate produced by the latest evaluation.
+    pub(crate) fn candidate_refinement_time(&self) -> Option<f64> {
+        self.candidate_refinement_time
     }
 
     /// Discard a candidate produced by an earlier complete device pass.
     pub(crate) fn begin_evaluation(&mut self) {
         self.candidate_valid = false;
+        self.candidate_refinement_time = None;
     }
 
     /// Validate the candidate that would be committed, without mutation.
@@ -1382,5 +1541,6 @@ impl CrossDetector {
         };
         self.candidate = self.committed;
         self.candidate_valid = false;
+        self.candidate_refinement_time = None;
     }
 }

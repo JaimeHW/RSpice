@@ -13,7 +13,7 @@ fn evaluate(device: &mut VerilogADevice, time: f64, voltage: f64) -> f64 {
 }
 
 #[test]
-fn cross_is_newton_idempotent_and_uses_expression_tolerance() {
+fn cross_is_newton_idempotent_and_does_not_treat_tolerance_as_a_crossing() {
     let model = DeviceFixture::compile(
         r#"
 `include "disciplines.vams"
@@ -34,16 +34,21 @@ endmodule
 
     assert_eq!(
         evaluate(&mut device, 1.0, -0.05).to_bits(),
-        1.0_f64.to_bits()
+        0.0_f64.to_bits(),
+        "entering the expression tolerance on the same side is not a crossing"
     );
     assert_eq!(
         evaluate(&mut device, 1.0, -0.05).to_bits(),
-        1.0_f64.to_bits(),
-        "repeated Newton evaluations must preserve the crossing event"
+        0.0_f64.to_bits()
     );
     device.advance_state();
 
-    assert_eq!(evaluate(&mut device, 2.0, 1.0).to_bits(), 0.0_f64.to_bits());
+    assert_eq!(evaluate(&mut device, 2.0, 1.0).to_bits(), 1.0_f64.to_bits());
+    assert_eq!(
+        evaluate(&mut device, 2.0, 1.0).to_bits(),
+        1.0_f64.to_bits(),
+        "repeated Newton evaluations must preserve the crossing event"
+    );
 }
 
 #[test]

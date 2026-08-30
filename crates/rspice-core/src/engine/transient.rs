@@ -4005,6 +4005,10 @@ impl Engine {
 
         // Main transient loop
         let mut retry_count = 0;
+        #[cfg(feature = "veriloga")]
+        let mut pending_veriloga_event_time: Option<Value> = None;
+        #[cfg(feature = "veriloga")]
+        let mut veriloga_event_refinement_count = 0_usize;
         // Xyce's OneStep/Gear12 `nef_` counts every rejected attempt, including
         // Newton failures and LTE failures, and is reset only after a point is
         // accepted.  Keep that integration-state counter separate from the
@@ -4016,6 +4020,8 @@ impl Engine {
         let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
         // Xyce OneStep/Gear12 start at order 1; every native Gear2 path remains order 2.
         const MAX_RETRIES: usize = 200; // Maximum recovery retries per timepoint
+        #[cfg(feature = "veriloga")]
+        const MAX_VERILOGA_EVENT_REFINEMENTS: usize = 64;
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
         // Keep cancellation responsiveness tight for large transient decks where a
@@ -4481,7 +4487,7 @@ impl Engine {
                             .get(locked_cursor.saturating_sub(1))
                             .is_some_and(|&previous_target| previous_target == t)
                 });
-            let (dt, mut at_breakpoint) = match locked_grid.as_ref() {
+            let (mut dt, mut at_breakpoint) = match locked_grid.as_ref() {
                 Some(grid) => {
                     let Some(&target) = grid.get(locked_cursor) else {
                         break;
@@ -4549,7 +4555,19 @@ impl Engine {
                 }
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
-            let mut dt = dt.min(tstop - t); // Don't overshoot tstop
+            dt = dt.min(tstop - t); // Don't overshoot tstop
+            #[cfg(feature = "veriloga")]
+            if let Some(target) = pending_veriloga_event_time
+                && target > t
+                && target <= canonical_transient_step_time(t, dt, tstop)
+            {
+                dt = target - t;
+                at_breakpoint = true;
+                locked_step_lands_on_grid = locked_grid
+                    .as_ref()
+                    .and_then(|grid| grid.get(locked_cursor))
+                    .is_some_and(|grid_target| *grid_target == target);
+            }
             let mut locked_replay_hidden_attempt = false;
             let locked_contraction_replay = locked_grid.as_ref().is_some_and(|grid| {
                 Self::dialect_requires_locked_grid_order_restart(
@@ -4560,6 +4578,16 @@ impl Engine {
                 )
             });
             if locked_grid.is_some()
+                && {
+                    #[cfg(feature = "veriloga")]
+                    {
+                        pending_veriloga_event_time.is_none()
+                    }
+                    #[cfg(not(feature = "veriloga"))]
+                    {
+                        true
+                    }
+                }
                 && (retry_count > 0 || locked_contraction_replay)
                 && let (Some(grid), Some(steps)) =
                     (locked_grid.as_ref(), locked_step_sizes.as_ref())
@@ -4810,6 +4838,67 @@ impl Engine {
                             );
                         } else {
                             circuit.restore_nonlinear_state(snapshot);
+                        }
+                    }
+                }};
+            }
+            macro_rules! reject_for_veriloga_event_refinement {
+                ($candidate_solution:expr, $candidate_time:expr, $phase_start:expr) => {{
+                    #[cfg(feature = "veriloga")]
+                    if circuit.has_veriloga_devices() {
+                        circuit
+                            .evaluate_veriloga_timepoint($candidate_solution)
+                            .map_err(SimulationError::Circuit)?;
+                        if let Some(target) = circuit
+                            .veriloga_event_refinement_time()
+                            .map_err(SimulationError::Circuit)?
+                        {
+                            let accepted_time = t;
+                            let candidate_time = $candidate_time;
+                            let refinement_dt = target - accepted_time;
+                            if !target.is_finite()
+                                || target <= accepted_time
+                                || target >= candidate_time
+                                || !refinement_dt.is_finite()
+                            {
+                                restore_rejected_transient_nonlinear_state!();
+                                return Err(SimulationError::Circuit(format!(
+                                    "Verilog-A event refinement target {target} is not strictly inside transient interval ({accepted_time}, {candidate_time})"
+                                )));
+                            }
+                            if refinement_dt < timestep.hard_min_dt() {
+                                restore_rejected_transient_nonlinear_state!();
+                                return Err(SimulationError::Circuit(format!(
+                                    "Verilog-A event refinement at t={accepted_time:.16e}s requires dt={refinement_dt:.16e}s below the solver hard minimum {:.16e}s",
+                                    timestep.hard_min_dt()
+                                )));
+                            }
+                            veriloga_event_refinement_count =
+                                veriloga_event_refinement_count.saturating_add(1);
+                            if veriloga_event_refinement_count > MAX_VERILOGA_EVENT_REFINEMENTS {
+                                restore_rejected_transient_nonlinear_state!();
+                                return Err(SimulationError::Circuit(format!(
+                                    "Verilog-A event root failed to satisfy its time and expression tolerances after {MAX_VERILOGA_EVENT_REFINEMENTS} refinements at t={accepted_time:.16e}s"
+                                )));
+                            }
+                            pending_veriloga_event_time = Some(target);
+                            retry_count = retry_count.saturating_add(1);
+                            self.record_convergence(|quality| quality.record_timestep_reduction());
+                            trap_order = Self::trapezoidal_order_after_timestep_control_reject(
+                                step_trap_order,
+                            );
+                            timestep.force_step(refinement_dt);
+                            restore_rejected_transient_nonlinear_state!();
+                            total_middle_nanos += $phase_start.elapsed().as_nanos();
+                            continue;
+                        }
+                        // Any accepted point changes the interpolation lower
+                        // endpoint. Discard an older secant target even when
+                        // another breakpoint or device limit landed first;
+                        // the next genuine bracket will derive a fresh root.
+                        if pending_veriloga_event_time.is_some() {
+                            pending_veriloga_event_time = None;
+                            veriloga_event_refinement_count = 0;
                         }
                     }
                 }};
@@ -6998,6 +7087,17 @@ impl Engine {
                     stale_accept_count = 0;
                     force_accepted_rejected_lte_step = true;
 
+                    new_solution = bounded_force_candidate;
+
+                    if circuit.has_nonlinear_devices() {
+                        self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
+                    }
+                    reject_for_veriloga_event_refinement!(
+                        &new_solution,
+                        step_time,
+                        middle_phase_start
+                    );
+
                     t = step_time;
                     let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
                     if hit_breakpoint {
@@ -7006,11 +7106,6 @@ impl Engine {
                         }
                         let restart_dt = breakpoints.mark_breakpoint_solved(t);
                         timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
-                    }
-                    new_solution = bounded_force_candidate;
-
-                    if circuit.has_nonlinear_devices() {
-                        self.update_transient_nonlinear_devices(&mut circuit, &new_solution)?;
                     }
 
                     let method_after_step = current_integration_method(&trapgear);
@@ -7541,9 +7636,6 @@ impl Engine {
                 continue;
             }
 
-            // Success - reset retry counter
-            retry_count = 0;
-
             // Keep ideal source constraints exact before LTE and state updates.
             let projected_voltage_sources = circuit
                 .enforce_prescribed_transient_voltage_constraints(&mut new_solution, step_time)?;
@@ -7579,6 +7671,11 @@ impl Engine {
                 continue;
             }
             stale_accept_count = 0;
+            reject_for_veriloga_event_refinement!(&new_solution, step_time, middle_phase_start);
+
+            // Success - reset retry counter only after event-root refinement
+            // has had the opportunity to reject this candidate endpoint.
+            retry_count = 0;
 
             // Accept this timestep
             t = step_time;

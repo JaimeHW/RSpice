@@ -26,6 +26,15 @@ const INTEGER_BINARY_DESCRIPTOR_BASE: usize = 1;
 const INTEGER_SHIFT_CONST_DESCRIPTOR_BASE: usize = 16;
 const INTEGER_BINARY_CONST_DESCRIPTOR_BASE: usize = 32;
 
+fn event_integer_operand(name: &str, value: f64) -> Result<i32, String> {
+    let converted = real_to_integer(value)
+        .map_err(|error| format!("{name} integer conversion failed: {error}"))?;
+    if f64::from(converted) != value {
+        return Err(format!("{name} must evaluate to an integer, got {value}"));
+    }
+    Ok(converted)
+}
+
 pub(crate) fn integer_binary_descriptor(operation: IntegerBinaryOperation) -> usize {
     INTEGER_BINARY_DESCRIPTOR_BASE + integer_operation_code(operation)
 }
@@ -1897,13 +1906,19 @@ pub unsafe extern "C" fn rspice_cross_state_native(
     let direction_raw = operands[1];
     let time_tol = operands[2];
     let expr_tol = operands[3];
-    let enabled = operands[4] != 0.0;
-    let direction = if direction_raw > 0.5 {
-        1
-    } else if direction_raw < -0.5 {
-        -1
-    } else {
-        0
+    let direction = match event_integer_operand("cross direction", direction_raw) {
+        Ok(direction) => direction,
+        Err(error) => {
+            set_native_context_error(ctx, error);
+            return 0.0;
+        }
+    };
+    let enabled = match event_integer_operand("cross enable", operands[4]) {
+        Ok(enable) => enable != 0,
+        Err(error) => {
+            set_native_context_error(ctx, error);
+            return 0.0;
+        }
     };
     if ctx.cross_detectors.is_null() {
         set_native_context_error(
@@ -1927,8 +1942,15 @@ pub unsafe extern "C" fn rspice_cross_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let crossed =
-        detectors[detector_id].eval_event(value, ctx.time, direction, time_tol, expr_tol, enabled);
+    let crossed = match detectors[detector_id]
+        .eval_event(value, ctx.time, direction, time_tol, expr_tol, enabled)
+    {
+        Ok(crossed) => crossed,
+        Err(error) => {
+            set_native_context_error(ctx, format!("cross evaluation failed: {error}"));
+            return 0.0;
+        }
+    };
     if ctx.analysis_type == 2 { crossed } else { 0.0 }
 }
 
@@ -1965,6 +1987,13 @@ pub unsafe extern "C" fn rspice_above_state_native(
     }
 
     let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
+    let enabled = match event_integer_operand("above enable", operands[3]) {
+        Ok(enable) => enable != 0,
+        Err(error) => {
+            set_native_context_error(ctx, error);
+            return 0.0;
+        }
+    };
     if ctx.cross_detectors.is_null() {
         set_native_context_error(
             ctx,
@@ -1987,13 +2016,19 @@ pub unsafe extern "C" fn rspice_above_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    detectors[detector_id].eval_above(
+    match detectors[detector_id].eval_above(
         operands[0],
         ctx.time,
         operands[1],
         operands[2],
-        operands[3] != 0.0,
-    )
+        enabled,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            set_native_context_error(ctx, format!("above evaluation failed: {error}"));
+            0.0
+        }
+    }
 }
 
 /// External helper for native x64 `last_crossing(...)` history.
@@ -2024,12 +2059,12 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
     }
 
     let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
-    let direction = if operands[1] > 0.5 {
-        1
-    } else if operands[1] < -0.5 {
-        -1
-    } else {
-        0
+    let direction = match event_integer_operand("last_crossing direction", operands[1]) {
+        Ok(direction) => direction,
+        Err(error) => {
+            set_native_context_error(ctx, error);
+            return -1.0;
+        }
     };
     if ctx.cross_detectors.is_null() {
         set_native_context_error(
@@ -2053,7 +2088,14 @@ pub unsafe extern "C" fn rspice_last_crossing_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let crossing_time = detectors[detector_id].eval_last_crossing(operands[0], ctx.time, direction);
+    let crossing_time =
+        match detectors[detector_id].eval_last_crossing(operands[0], ctx.time, direction) {
+            Ok(crossing_time) => crossing_time,
+            Err(error) => {
+                set_native_context_error(ctx, format!("last_crossing evaluation failed: {error}"));
+                return -1.0;
+            }
+        };
     if ctx.analysis_type == 2 {
         crossing_time
     } else {
@@ -3042,6 +3084,33 @@ mod tests {
             "falling edge should obey negative direction"
         );
         assert!(ctx.take_runtime_error().is_none());
+
+        detectors[0] = CrossDetector::default();
+        operands = [-1.0, 2.0, 0.0, 0.0, 1.0];
+        ctx.time = 0.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+        detectors[0].commit();
+        operands[0] = 1.0;
+        ctx.time = 1.0;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits(),
+            "invalid integral direction must not alias a rising event"
+        );
+        assert!(ctx.take_runtime_error().is_none());
+
+        operands[1] = 0.6;
+        assert_eq!(
+            unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+        let error = ctx
+            .take_runtime_error()
+            .expect("non-integer native direction must fail closed");
+        assert!(error.contains("must evaluate to an integer"), "{error}");
     }
 
     #[test]
