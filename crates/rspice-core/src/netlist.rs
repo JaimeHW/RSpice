@@ -67,7 +67,7 @@ pub(crate) use output_symbols::{
     collect_output_node_namespace_from_elements_with_abort,
     collect_output_node_namespace_with_limits_and_abort,
     collect_requested_interface_node_aliases_with_abort, is_current_output_accessor,
-    is_current_projection_accessor, is_device_lead_current_accessor,
+    is_current_projection_accessor, is_device_lead_current_accessor, measure_output_dependencies,
 };
 pub use output_symbols::{
     OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,

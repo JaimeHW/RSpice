@@ -27,6 +27,7 @@ const RESULT_DIGEST_ENCODING_VERSION_V5: u16 = 5;
 const RESULT_DIGEST_ENCODING_VERSION_V6: u16 = 6;
 const RESULT_DIGEST_ENCODING_VERSION_V7: u16 = 7;
 const RESULT_DIGEST_ENCODING_VERSION_V8: u16 = 8;
+const RESULT_DIGEST_ENCODING_VERSION_V9: u16 = 9;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 
 struct ResultDigestWriter {
@@ -142,7 +143,7 @@ impl AnalysisResult {
     /// derived display caches are intentionally not part of the identity.
     #[must_use]
     pub fn result_data_digest(&self) -> ContentDigest {
-        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9)
     }
 
     /// Logical bytes occupied by all authoritative retained result evidence.
@@ -154,7 +155,7 @@ impl AnalysisResult {
     /// excluded from immutable content identity.
     #[must_use]
     pub fn retained_storage_bytes(&self) -> u64 {
-        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8);
+        let writer = self.result_data_writer_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9);
         let cache_bytes = self.waveforms.iter().fold(0_u64, |total, waveform| {
             let bytes = waveform.display_cache.as_ref().map_or(0_u64, |cache| {
                 u64::try_from(cache.x.len())
@@ -216,6 +217,13 @@ impl AnalysisResult {
         self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
     }
 
+    /// Schema-v17 digest retained solely for authenticated migration. It
+    /// predates durable measurement FAILVALUE verification evidence.
+    #[must_use]
+    pub(crate) fn legacy_v8_result_data_digest(&self) -> ContentDigest {
+        self.result_data_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
+    }
+
     fn result_data_digest_with_encoding(&self, version: u16) -> ContentDigest {
         self.result_data_writer_with_encoding(version).finish()
     }
@@ -230,6 +238,7 @@ impl AnalysisResult {
             RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.analysis-result-data/v6",
             RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.analysis-result-data/v7",
             RESULT_DIGEST_ENCODING_VERSION_V8 => "rspice.analysis-result-data/v8",
+            RESULT_DIGEST_ENCODING_VERSION_V9 => "rspice.analysis-result-data/v9",
             _ => unreachable!("supported result digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -287,6 +296,15 @@ impl AnalysisResult {
             writer.option(measurement.tolerance.as_ref(), |writer, value| {
                 writer.f64(*value);
             });
+            if version >= RESULT_DIGEST_ENCODING_VERSION_V9 {
+                writer.option(measurement.raw_value.as_ref(), |writer, value| {
+                    writer.f64(*value);
+                });
+                writer.option(measurement.failure_limit.as_ref(), |writer, value| {
+                    writer.f64(*value);
+                });
+                writer.bool(measurement.failure_limit_exceeded);
+            }
         }
 
         writer.sequence(self.saved_output_receipts.len());
@@ -314,7 +332,7 @@ impl SimulationRun {
     /// they address the dataset but do not define its sample content.
     #[must_use]
     pub fn dataset_content_digest(&self) -> ContentDigest {
-        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V9)
     }
 
     /// Schema-v8 dataset digest retained solely for authenticated migration.
@@ -360,6 +378,12 @@ impl SimulationRun {
         self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V7)
     }
 
+    /// Schema-v17 dataset digest retained solely for authenticated migration.
+    #[must_use]
+    pub(crate) fn legacy_v8_dataset_content_digest(&self) -> ContentDigest {
+        self.dataset_content_digest_with_encoding(RESULT_DIGEST_ENCODING_VERSION_V8)
+    }
+
     fn dataset_content_digest_with_encoding(&self, version: u16) -> ContentDigest {
         let domain = match version {
             RESULT_DIGEST_ENCODING_VERSION_V1 => "rspice.simulation-dataset-data/v1",
@@ -370,6 +394,7 @@ impl SimulationRun {
             RESULT_DIGEST_ENCODING_VERSION_V6 => "rspice.simulation-dataset-data/v6",
             RESULT_DIGEST_ENCODING_VERSION_V7 => "rspice.simulation-dataset-data/v7",
             RESULT_DIGEST_ENCODING_VERSION_V8 => "rspice.simulation-dataset-data/v8",
+            RESULT_DIGEST_ENCODING_VERSION_V9 => "rspice.simulation-dataset-data/v9",
             _ => unreachable!("supported dataset digest encoding"),
         };
         let mut writer = ResultDigestWriter::new(domain, version);
@@ -384,7 +409,8 @@ impl SimulationRun {
                 RESULT_DIGEST_ENCODING_VERSION_V5 => analysis.legacy_v5_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V6 => analysis.legacy_v6_result_data_digest(),
                 RESULT_DIGEST_ENCODING_VERSION_V7 => analysis.legacy_v7_result_data_digest(),
-                RESULT_DIGEST_ENCODING_VERSION_V8 => analysis.result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V8 => analysis.legacy_v8_result_data_digest(),
+                RESULT_DIGEST_ENCODING_VERSION_V9 => analysis.result_data_digest(),
                 _ => unreachable!("supported dataset digest encoding"),
             });
         }
@@ -1437,6 +1463,47 @@ mod tests {
         assert_eq!(
             first_run.legacy_v7_dataset_content_digest(),
             second_run.legacy_v7_dataset_content_digest()
+        );
+    }
+
+    #[test]
+    fn measurement_verification_fields_are_v9_identity_while_v8_stays_legacy() {
+        let mut measurement = rspice_core::MeasureResult::success("peak", 12.0);
+        measurement.failure_limit = Some(10.0);
+        measurement.failure_limit_exceeded = true;
+        measurement.passed = false;
+        measurement.error = Some("FAILVALUE limit exceeded".to_owned());
+        let source = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![measurement]);
+        let current = source.result_data_digest();
+        let legacy = source.legacy_v8_result_data_digest();
+
+        let mut raw_changed = source.clone();
+        raw_changed.measurements[0].raw_value = Some(13.0);
+        assert_ne!(current, raw_changed.result_data_digest());
+        assert_eq!(legacy, raw_changed.legacy_v8_result_data_digest());
+
+        let mut limit_changed = source.clone();
+        limit_changed.measurements[0].failure_limit = Some(11.0);
+        assert_ne!(current, limit_changed.result_data_digest());
+        assert_eq!(legacy, limit_changed.legacy_v8_result_data_digest());
+
+        let mut verdict_changed = source.clone();
+        verdict_changed.measurements[0].failure_limit_exceeded = false;
+        assert_ne!(current, verdict_changed.result_data_digest());
+        assert_eq!(legacy, verdict_changed.legacy_v8_result_data_digest());
+
+        let mut first_run = SimulationRun::new(1);
+        first_run.analyses = vec![source];
+        let mut second_run = first_run.clone();
+        second_run.analyses[0].measurements[0].raw_value = Some(13.0);
+        assert_ne!(
+            first_run.dataset_content_digest(),
+            second_run.dataset_content_digest()
+        );
+        assert_eq!(
+            first_run.legacy_v8_dataset_content_digest(),
+            second_run.legacy_v8_dataset_content_digest()
         );
     }
 

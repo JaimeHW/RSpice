@@ -1068,10 +1068,13 @@ mod tests {
         let result = |name: &str, value: Value| rspice_core::analysis::MeasureResult {
             name: name.to_string(),
             value: Some(value),
+            raw_value: Some(value),
             error: None,
             passed: true,
             expected: None,
             tolerance: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
             event_axis: Some(value),
         };
         let valid = [result("T1", FIRST_CROSSING), result("T2", THIRD_CROSSING)];

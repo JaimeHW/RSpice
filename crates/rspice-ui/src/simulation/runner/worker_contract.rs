@@ -1568,7 +1568,7 @@ impl WorkerSimulationResult {
     }
 }
 
-const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 12;
+const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 13;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkerResponseTransport {

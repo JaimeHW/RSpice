@@ -375,12 +375,40 @@ class TestResults:
         measurement = report.measurement("vmax")
         restored = round_trip(measurement)
         assert restored.value == measurement.value
+        assert restored.raw_value == measurement.raw_value
+        assert restored.failure_limit == measurement.failure_limit
+        assert restored.failure_limit_exceeded == measurement.failure_limit_exceeded
         assert restored.passed == measurement.passed
         assert restored.analysis == measurement.analysis
 
         record = round_trip(report.records[0])
         assert record.kind == report.records[0].kind
         assert record.skipped == report.records[0].skipped
+
+    def test_measurement_failvalue_contract_round_trips_and_legacy_state_migrates(self):
+        authored = rspice.Measurement._unpickle(
+            "error_metric",
+            "TRAN",
+            2.5,
+            "measurement magnitude 2.5e0 meets or exceeds FAILVALUE 2e0",
+            (None, None),
+            False,
+            (-2.5, 2.0, True),
+        )
+
+        restored = round_trip(authored)
+        assert restored.value == pytest.approx(2.5)
+        assert restored.raw_value == pytest.approx(-2.5)
+        assert restored.failure_limit == pytest.approx(2.0)
+        assert restored.failure_limit_exceeded
+        assert not restored.passed
+
+        legacy = rspice.Measurement._unpickle(
+            "legacy", "DC", 1.25, None, (None, None), True
+        )
+        assert legacy.raw_value == pytest.approx(1.25)
+        assert legacy.failure_limit is None
+        assert not legacy.failure_limit_exceeded
 
 
 def _simulate_in_worker(payload):

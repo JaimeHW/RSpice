@@ -389,3 +389,50 @@ pub(super) fn validate_v16_result_digests(run: &ProjectSimulationRun) -> Result<
     }
     Ok(())
 }
+
+/// Authenticate a schema-v17 run with the exact digest encoding that wrote it
+/// before measurement FAILVALUE verification evidence is admitted and the
+/// document is resealed.
+pub(super) fn validate_v17_result_digests(run: &ProjectSimulationRun) -> Result<(), String> {
+    for analysis in &run.analyses {
+        let retained = analysis
+            .result_data_digest
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "schema-v17 analysis {} is missing its result data digest",
+                    analysis.id
+                )
+            })?;
+        let computed = analysis
+            .clone()
+            .into_analysis()?
+            .legacy_v8_result_data_digest();
+        if retained != computed {
+            return Err(format!(
+                "schema-v17 analysis {} result data digest does not match retained content",
+                analysis.id
+            ));
+        }
+    }
+
+    let retained = run
+        .dataset_content_digest
+        .as_ref()
+        .copied()
+        .ok_or_else(|| {
+            format!(
+                "schema-v17 simulation run {} is missing its dataset content digest",
+                run.id
+            )
+        })?;
+    let computed = run.clone().into_run()?.legacy_v8_dataset_content_digest();
+    if retained != computed {
+        return Err(format!(
+            "schema-v17 simulation run {} dataset content digest does not match retained content",
+            run.id
+        ));
+    }
+    Ok(())
+}

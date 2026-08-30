@@ -107,14 +107,18 @@ pub(crate) const XYCE_MEASURE_TYPE_KEYWORDS: &[&str] = &[
     "THD",
 ];
 
-/// Complete Xyce 7.10 `.MEASURE` qualifier-keyword vocabulary.
+/// Xyce `.MEASURE` qualifier-keyword vocabulary supported by the parser.
 ///
 /// This includes measure families not yet executable in RSpice. Recognizing
 /// the full vocabulary is still essential: unsupported qualifiers must never
-/// be mistaken for equation text or discarded as anonymous operands.
+/// be mistaken for equation text or discarded as anonymous operands. The
+/// regression corpus also carries statement-wide `FAILVALUE` metadata as an
+/// authored oracle even though Release 7.10's measurement keyword table does
+/// not register it as an executable measure keyword.
 pub(crate) const XYCE_MEASURE_QUALIFIER_KEYWORDS: &[&str] = &[
     "GOAL",
     "DEFAULT_VAL",
+    "FAILVALUE",
     "PRINT",
     "MINVAL",
     "FROM",
@@ -438,6 +442,10 @@ pub struct MeasureStatement {
     /// Per-statement Xyce `DEFAULT_VAL`. The global
     /// `.OPTIONS MEASURE DEFAULT_VAL` setting takes precedence when present.
     pub default_value: Option<Value>,
+    /// Per-statement Xyce `FAILVALUE` threshold. A completed measurement is
+    /// considered failed when the absolute value of its raw result is greater
+    /// than or equal to this value.
+    pub fail_value: Option<Value>,
     /// Per-statement Xyce `PRINT=ALL|STDOUT|NONE` output policy.
     pub print_policy: MeasurePrintPolicy,
 }

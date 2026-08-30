@@ -1506,10 +1506,13 @@ mod tests {
         MeasureResult {
             name: name.to_string(),
             value: Some(value),
+            raw_value: Some(value),
             error: None,
             passed: true,
             expected: None,
             tolerance: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
             event_axis: Some(0.0),
         }
     }

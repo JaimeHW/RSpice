@@ -40,6 +40,277 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
     assert!(migrated.success, "legacy outcome evidence is preserved");
 }
 
+fn persisted_measurement_at_schema_v17() -> ProjectSimulationResults {
+    let mut run = SimulationRun::new(18);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![rspice_core::MeasureResult::success("peak", 12.0)]),
+    );
+    seal_legacy_unattributed(&mut run);
+
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 18;
+    let mut persisted = ProjectSimulationResults::from_state(&simulation);
+    persisted.schema_version = PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION;
+    let measurement = &mut persisted.runs[0].analyses[0].measurements[0];
+    measurement.raw_value = None;
+    measurement.failure_limit = None;
+    measurement.failure_limit_exceeded = false;
+    downgrade_result_digests_to_v8(&mut persisted);
+    persisted
+}
+
+#[test]
+fn schema_v17_is_authenticated_then_restores_measurement_verification_defaults() {
+    let mut persisted = persisted_measurement_at_schema_v17();
+    let legacy_digest = persisted.runs[0].analyses[0]
+        .result_data_digest
+        .as_ref()
+        .copied()
+        .expect("schema-v17 fixture carries a digest");
+
+    persisted
+        .migrate_to_current(ProjectId::new())
+        .expect("authentic schema-v17 measurement history migrates");
+
+    assert_eq!(
+        persisted.schema_version,
+        PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    );
+    let measurement = &persisted.runs[0].analyses[0].measurements[0];
+    assert_eq!(measurement.raw_value, measurement.value);
+    assert_eq!(measurement.failure_limit, None);
+    assert!(!measurement.failure_limit_exceeded);
+    let current_digest = persisted.runs[0].analyses[0]
+        .result_data_digest
+        .as_ref()
+        .copied()
+        .expect("migrated fixture carries a current digest");
+    assert_ne!(legacy_digest, current_digest);
+    persisted.validate().expect("migrated schema validates");
+}
+
+#[test]
+fn schema_v17_rejects_tampering_before_resealing() {
+    let mut persisted = persisted_measurement_at_schema_v17();
+    persisted.runs[0].analyses[0].measurements[0].value = Some(13.0);
+
+    let error = persisted
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v17 content must match its retained V8 digest");
+
+    assert!(
+        error.contains("schema-v17 analysis 1 result data digest"),
+        "{error}"
+    );
+
+    let mut dataset_digest = persisted_measurement_at_schema_v17();
+    dataset_digest.runs[0].dataset_content_digest =
+        PersistedField::Value(ContentDigest::from_bytes([0x5a; 32]));
+    let error = dataset_digest
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v17 dataset identity is authenticated before resealing");
+    assert!(
+        error.contains("schema-v17 simulation run 18 dataset content digest"),
+        "{error}"
+    );
+}
+
+#[test]
+fn schema_v17_rejects_smuggled_measurement_verification_fields() {
+    let source = persisted_measurement_at_schema_v17();
+
+    let mut raw_value = source.clone();
+    raw_value.runs[0].analyses[0].measurements[0].raw_value = Some(12.0);
+    let error = raw_value
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v17 did not authenticate raw measurement values");
+    assert!(
+        error.contains("measurement verification evidence introduced by schema v18"),
+        "{error}"
+    );
+
+    let mut failure_limit = source.clone();
+    failure_limit.runs[0].analyses[0].measurements[0].failure_limit = Some(10.0);
+    let error = failure_limit
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v17 did not authenticate FAILVALUE limits");
+    assert!(
+        error.contains("measurement verification evidence introduced by schema v18"),
+        "{error}"
+    );
+
+    let mut verdict = source;
+    verdict.runs[0].analyses[0].measurements[0].failure_limit_exceeded = true;
+    let error = verdict
+        .migrate_to_current(ProjectId::new())
+        .expect_err("schema-v17 did not authenticate FAILVALUE verdicts");
+    assert!(
+        error.contains("measurement verification evidence introduced by schema v18"),
+        "{error}"
+    );
+}
+
+#[test]
+fn schema_v18_digest_rejects_measurement_verification_tampering() {
+    let mut current = persisted_measurement_at_schema_v17();
+    current
+        .migrate_to_current(ProjectId::new())
+        .expect("fixture migrates to schema v18");
+
+    let mut raw_value = current.clone();
+    raw_value.runs[0].analyses[0].measurements[0].raw_value = Some(13.0);
+    let error = raw_value
+        .validate()
+        .expect_err("schema-v18 authenticates raw measurement values");
+    assert!(
+        error.contains("result_data_digest does not match retained analysis content"),
+        "{error}"
+    );
+
+    let mut raw_value_removed = current.clone();
+    raw_value_removed.runs[0].analyses[0].measurements[0].raw_value = None;
+    let error = raw_value_removed
+        .validate()
+        .expect_err("schema-v18 requires explicit raw measurement values");
+    assert!(
+        error.contains("raw value exactly when it carries a published value"),
+        "{error}"
+    );
+
+    let mut failure_limit = current;
+    failure_limit.runs[0].analyses[0].measurements[0].failure_limit = Some(20.0);
+    let error = failure_limit
+        .validate()
+        .expect_err("schema-v18 authenticates FAILVALUE limits");
+    assert!(
+        error.contains("result_data_digest does not match retained analysis content"),
+        "{error}"
+    );
+}
+
+fn current_projected_failvalue_results() -> ProjectSimulationResults {
+    let measurement = rspice_core::MeasureResult {
+        name: "peak_at".to_owned(),
+        value: Some(20.0),
+        raw_value: Some(3.0),
+        error: None,
+        passed: true,
+        expected: None,
+        tolerance: None,
+        failure_limit: Some(4.0),
+        failure_limit_exceeded: false,
+        event_axis: Some(20.0),
+    };
+    let mut run = SimulationRun::new(19);
+    run.mark_running().expect("fixture run starts");
+    run.finish_lifecycle(SimulationRunLifecycle::Completed)
+        .expect("fixture run completes");
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![measurement]),
+    );
+    seal_legacy_unattributed(&mut run);
+
+    let mut simulation = SimulationState::default();
+    simulation.runs = vec![run];
+    simulation.next_run_id = 19;
+    ProjectSimulationResults::from_state(&simulation)
+}
+
+#[test]
+fn current_project_results_preserve_projected_failvalue_evidence_without_synthesis() {
+    let persisted = current_projected_failvalue_results();
+    persisted
+        .validate()
+        .expect("distinct projected and raw values are valid current evidence");
+
+    let restored = persisted
+        .into_simulation_state()
+        .expect("current result restores after validation");
+    let measurement = &restored.runs[0].analyses[0].measurements[0];
+    assert_eq!(measurement.value, Some(20.0));
+    assert_eq!(measurement.raw_value, Some(3.0));
+    assert_eq!(measurement.failure_limit, Some(4.0));
+    assert!(!measurement.failure_limit_exceeded);
+}
+
+#[test]
+fn current_project_results_preserve_unevaluated_failvalue_metadata_without_raw_synthesis() {
+    let mut persisted = current_projected_failvalue_results();
+    let measurement = &mut persisted.runs[0].analyses[0].measurements[0];
+    measurement.value = None;
+    measurement.raw_value = None;
+    measurement.event_axis = None;
+    measurement.passed = false;
+    measurement.error = Some("signal was unavailable".to_owned());
+    seal_project_result_digests(&mut persisted.runs[0]).expect("fixture digests reseal");
+
+    persisted
+        .validate()
+        .expect("an early failure retains the authored limit without raw evidence");
+    let restored = persisted
+        .into_simulation_state()
+        .expect("unevaluated FAILVALUE metadata restores");
+    let measurement = &restored.runs[0].analyses[0].measurements[0];
+    assert_eq!(measurement.value, None);
+    assert_eq!(measurement.raw_value, None);
+    assert_eq!(measurement.failure_limit, Some(4.0));
+    assert!(!measurement.failure_limit_exceeded);
+    assert!(!measurement.passed);
+}
+
+#[test]
+fn current_project_results_reject_incomplete_or_forged_failvalue_evidence() {
+    let source = current_projected_failvalue_results();
+
+    let mut missing_raw = source.clone();
+    missing_raw.runs[0].analyses[0].measurements[0].raw_value = None;
+    let error = missing_raw
+        .validate()
+        .expect_err("current results never infer raw evidence from a published value");
+    assert!(error.contains("raw value"), "{error}");
+
+    let mut nonfinite_raw = source.clone();
+    nonfinite_raw.runs[0].analyses[0].measurements[0].raw_value = Some(f64::NAN);
+    assert!(nonfinite_raw.validate().is_err());
+
+    let mut nonfinite_limit = source.clone();
+    nonfinite_limit.runs[0].analyses[0].measurements[0].failure_limit = Some(f64::INFINITY);
+    assert!(nonfinite_limit.validate().is_err());
+
+    let mut false_positive = source.clone();
+    let measurement = &mut false_positive.runs[0].analyses[0].measurements[0];
+    measurement.failure_limit_exceeded = true;
+    measurement.passed = false;
+    let error = false_positive
+        .validate()
+        .expect_err("FAILVALUE verdicts are recomputed from raw evidence");
+    assert!(error.contains("FAILVALUE verdict"), "{error}");
+
+    let mut false_negative = source.clone();
+    let measurement = &mut false_negative.runs[0].analyses[0].measurements[0];
+    measurement.raw_value = Some(-4.0);
+    measurement.passed = false;
+    let error = false_negative
+        .validate()
+        .expect_err("inclusive FAILVALUE equality must be retained as exceeded");
+    assert!(error.contains("FAILVALUE verdict"), "{error}");
+
+    let mut passed_after_exceeded = source;
+    let measurement = &mut passed_after_exceeded.runs[0].analyses[0].measurements[0];
+    measurement.raw_value = Some(4.0);
+    measurement.failure_limit_exceeded = true;
+    let error = passed_after_exceeded
+        .validate()
+        .expect_err("an exceeded FAILVALUE measurement cannot be marked passed");
+    assert!(error.contains("cannot pass"), "{error}");
+}
+
 /// Build a completed one-analysis run whose single waveform optionally
 /// states a unit, sealed as legacy-unattributed so no plan fixture is needed.
 fn run_with_waveform_unit(sequence: u64, unit: Option<&str>) -> SimulationRun {

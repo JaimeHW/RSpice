@@ -4423,16 +4423,10 @@ pub fn evaluate_noise_measurements(
     let series = match NoiseSweepSeries::from_sweep(sweep) {
         Ok(Some(series)) => series,
         Ok(None) => {
-            return statements
-                .iter()
-                .map(|m| MeasureResult::failed(&m.name, "noise sweep produced no points"))
-                .collect();
+            return failed_measurements(&statements, "noise sweep produced no points");
         }
         Err(error) => {
-            return statements
-                .iter()
-                .map(|m| MeasureResult::failed(&m.name, &error))
-                .collect();
+            return failed_measurements(&statements, &error);
         }
     };
     let alias_projection = match InterfaceNodeAliasProjection::new(
@@ -4557,7 +4551,7 @@ pub fn measurements_for_analysis<'a>(
 fn failed_measurements(statements: &[&MeasureStatement], reason: &str) -> Vec<MeasureResult> {
     statements
         .iter()
-        .map(|statement| MeasureResult::failed(&statement.name, reason))
+        .map(|statement| MeasureResult::failed_for_statement(statement, reason))
         .collect()
 }
 
@@ -4818,8 +4812,8 @@ fn overlay_continuous_equation_results(
                     .iter()
                     .find(|trace| trace.name.eq_ignore_ascii_case(&statement.name))
                 else {
-                    *result = MeasureResult::failed(
-                        &statement.name,
+                    *result = MeasureResult::failed_for_statement(
+                        statement,
                         &format!("continuous {analysis} equation trace was not produced"),
                     );
                     continue;
@@ -4844,14 +4838,14 @@ fn overlay_continuous_equation_results(
                 } else {
                     continue;
                 }
-                .check_goal(statement);
+                .check_contract(statement);
             }
         }
         Err(err) => {
             for (statement, result) in statements.iter().zip(results) {
                 if matches!(statement.measure_type, MeasureType::Equation { .. }) {
-                    *result = MeasureResult::failed(
-                        &statement.name,
+                    *result = MeasureResult::failed_for_statement(
+                        statement,
                         &format!("continuous {analysis} equation evaluation failed: {err}"),
                     );
                 }
@@ -5387,10 +5381,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
         .collect::<Vec<_>>();
     let statements = normalized_statements.iter().collect::<Vec<_>>();
     let Some(series) = DcSweepSeries::from_sweep(sweep) else {
-        return statements
-            .iter()
-            .map(|m| MeasureResult::failed(&m.name, "DC sweep produced no points"))
-            .collect();
+        return failed_measurements(&statements, "DC sweep produced no points");
     };
     let alias_projection = match InterfaceNodeAliasProjection::new(
         netlist,
@@ -5407,15 +5398,10 @@ pub fn evaluate_dc_measurements_with_parameter_contexts(
     let parameter_series = if point_params.is_empty() {
         Vec::new()
     } else if point_params.len() != series.axis().len() {
-        return statements
-            .iter()
-            .map(|statement| {
-                MeasureResult::failed(
-                    &statement.name,
-                    "DC point-parameter context count does not match sweep length",
-                )
-            })
-            .collect();
+        return failed_measurements(
+            &statements,
+            "DC point-parameter context count does not match sweep length",
+        );
     } else {
         dc_parameter_context_series(point_params)
     };
@@ -5612,10 +5598,7 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
         return Vec::new();
     }
     let Some(series) = AcSweepSeries::from_sweep(sweep) else {
-        return statements
-            .iter()
-            .map(|m| MeasureResult::failed(&m.name, "AC sweep produced no points"))
-            .collect();
+        return failed_measurements(&statements, "AC sweep produced no points");
     };
     let alias_projection = match InterfaceNodeAliasProjection::new(
         netlist,
@@ -5662,7 +5645,7 @@ pub fn unevaluated_measurements(
 ) -> Vec<MeasureResult> {
     measurements_for_analysis(netlist, analysis)
         .iter()
-        .map(|m| MeasureResult::failed(&m.name, reason))
+        .map(|m| MeasureResult::failed_for_statement(m, reason))
         .collect()
 }
 
@@ -5679,6 +5662,30 @@ mod tests {
             },
         )
         .expect("Xyce test netlist parses")
+    }
+
+    #[test]
+    fn unevaluated_scalar_measurement_retains_authored_contract_metadata() {
+        let netlist = xyce_netlist(
+            "unevaluated measurement contract\n\
+             V1 out 0 1\n\
+             .tran 1n 2n\n\
+             .measure tran sample MAX V(out) GOAL=3 FAILVALUE=5\n\
+             .end\n",
+        );
+
+        let results = unevaluated_measurements(&netlist, "TRAN", "analysis did not run");
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert!(!result.passed);
+        assert_eq!(result.value, None);
+        assert_eq!(result.raw_value, None);
+        assert_eq!(result.expected, Some(3.0));
+        assert_eq!(result.tolerance, Some(0.03));
+        assert_eq!(result.failure_limit, Some(5.0));
+        assert!(!result.failure_limit_exceeded);
+        assert_eq!(result.error.as_deref(), Some("analysis did not run"));
     }
 
     #[test]
@@ -7528,6 +7535,7 @@ mod tests {
         };
         let statement = |name: &str, measure_type| MeasureStatement {
             default_value: Some(-7.0),
+            fail_value: None,
             print_policy: crate::netlist::measure::MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type,

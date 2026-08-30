@@ -1427,10 +1427,13 @@ fn active_measurement_rows(
             let derived = rspice_core::MeasureResult {
                 name: name.to_owned(),
                 value: Some(value),
+                raw_value: Some(value),
                 error: None,
                 passed: true,
                 expected: None,
                 tolerance: None,
+                failure_limit: None,
+                failure_limit_exceeded: false,
                 event_axis,
             };
             rows.push(measurement_table_row(&derived, label, spec));
@@ -1445,83 +1448,22 @@ fn measurement_table_row(
     specification: Option<&crate::state::SpecEntry>,
 ) -> MeasurementTableRow {
     let value = measurement.value;
-    let specification_text = specification.map_or_else(
-        || {
-            measurement.expected.map_or_else(
-                || "—".to_owned(),
-                |expected| {
-                    measurement.tolerance.map_or_else(
-                        || format!("= {}", format_measure_value(expected)),
-                        |tolerance| {
-                            format!(
-                                "{} ± {}",
-                                format_measure_value(expected),
-                                format_measure_value(tolerance)
-                            )
-                        },
-                    )
-                },
-            )
-        },
-        specification_text,
-    );
+    let specification_text = measurement_contract_text(measurement, specification);
     let (status, tone, margin) = if let Some(error) = measurement
+        .error
+        .as_deref()
+        .filter(|_| measurement.value.is_none())
+        .filter(|error| !error.trim().is_empty())
+    {
+        ("ERROR", SemanticTone::Error, error.to_owned())
+    } else if measurement_has_contract(measurement, specification) {
+        measurement_contract_verdict(measurement, specification)
+    } else if let Some(error) = measurement
         .error
         .as_deref()
         .filter(|error| !error.trim().is_empty())
     {
         ("ERROR", SemanticTone::Error, error.to_owned())
-    } else if let Some(specification) = specification {
-        value.map_or(
-            ("NO DATA", SemanticTone::Warning, "—".to_owned()),
-            |value| {
-                let passing = specification.passes(value);
-                let signed_margin = if passing {
-                    let lower = specification.min.map(|minimum| value - minimum);
-                    let upper = specification.max.map(|maximum| maximum - value);
-                    lower
-                        .into_iter()
-                        .chain(upper)
-                        .reduce(f64::min)
-                        .unwrap_or(f64::INFINITY)
-                } else {
-                    -specification.violation(value)
-                };
-                (
-                    if passing { "PASS" } else { "FAIL" },
-                    if passing {
-                        SemanticTone::Success
-                    } else {
-                        SemanticTone::Error
-                    },
-                    if signed_margin.is_finite() {
-                        format_signed_measure_value(signed_margin)
-                    } else {
-                        "unbounded".to_owned()
-                    },
-                )
-            },
-        )
-    } else if measurement.expected.is_some() {
-        let margin = measurement
-            .value
-            .zip(measurement.expected)
-            .zip(measurement.tolerance)
-            .map_or_else(
-                || "—".to_owned(),
-                |((value, expected), tolerance)| {
-                    format_signed_measure_value(tolerance - (value - expected).abs())
-                },
-            );
-        (
-            if measurement.passed { "PASS" } else { "FAIL" },
-            if measurement.passed {
-                SemanticTone::Success
-            } else {
-                SemanticTone::Error
-            },
-            margin,
-        )
     } else {
         ("NO SPEC", SemanticTone::Info, "—".to_owned())
     };
@@ -1537,6 +1479,138 @@ fn measurement_table_row(
         status,
         tone,
     }
+}
+
+fn measurement_has_contract(
+    measurement: &rspice_core::MeasureResult,
+    specification: Option<&crate::state::SpecEntry>,
+) -> bool {
+    specification.is_some() || measurement.expected.is_some() || measurement.failure_limit.is_some()
+}
+
+fn measurement_contract_text(
+    measurement: &rspice_core::MeasureResult,
+    specification: Option<&crate::state::SpecEntry>,
+) -> String {
+    let mut contracts = Vec::with_capacity(3);
+    if let Some(specification) = specification {
+        contracts.push(("PROJECT", specification_text(specification)));
+    }
+    if let Some(expected) = measurement.expected {
+        let text = measurement.tolerance.map_or_else(
+            || format!("= {}", format_measure_value(expected)),
+            |tolerance| {
+                format!(
+                    "{} ± {}",
+                    format_measure_value(expected),
+                    format_measure_value(tolerance)
+                )
+            },
+        );
+        contracts.push(("GOAL", text));
+    }
+    if let Some(limit) = measurement.failure_limit {
+        contracts.push((
+            "FAILVALUE",
+            format!("|raw| < {}", format_measure_value(limit)),
+        ));
+    }
+
+    match contracts.as_slice() {
+        [] => "—".to_owned(),
+        [(_, text)] => text.clone(),
+        _ => contracts
+            .into_iter()
+            .map(|(label, text)| format!("{label} {text}"))
+            .collect::<Vec<_>>()
+            .join(" · "),
+    }
+}
+
+fn measurement_contract_verdict(
+    measurement: &rspice_core::MeasureResult,
+    specification: Option<&crate::state::SpecEntry>,
+) -> (&'static str, SemanticTone, String) {
+    let Some(value) = measurement.value else {
+        return ("NO DATA", SemanticTone::Warning, "—".to_owned());
+    };
+    if measurement.failure_limit.is_some() && measurement.raw_value.is_none() {
+        return (
+            "NO DATA",
+            SemanticTone::Warning,
+            "raw value unavailable".to_owned(),
+        );
+    }
+
+    let project_passed = specification.is_none_or(|specification| specification.passes(value));
+    let passed = measurement.passed && project_passed;
+    let mut margins = Vec::with_capacity(4);
+    let has_numeric_bound = measurement.expected.zip(measurement.tolerance).is_some()
+        || measurement.failure_limit.is_some()
+        || specification.is_some_and(|specification| {
+            specification.min.is_some() || specification.max.is_some()
+        });
+
+    if let (Some(expected), Some(tolerance)) = (measurement.expected, measurement.tolerance) {
+        margins.push(tolerance - (value - expected).abs());
+    }
+    if let (Some(raw_value), Some(limit)) = (measurement.raw_value, measurement.failure_limit) {
+        let margin = limit - raw_value.abs();
+        // FAILVALUE is inclusive: equality is a failure. Preserve that fact in
+        // the signed presentation even though the mathematical clearance is
+        // exactly zero.
+        margins.push(if measurement.failure_limit_exceeded && margin == 0.0 {
+            -0.0
+        } else {
+            margin
+        });
+    }
+    if let Some(specification) = specification {
+        margins.extend(
+            specification
+                .min
+                .map(|minimum| value - minimum)
+                .into_iter()
+                .chain(specification.max.map(|maximum| maximum - value)),
+        );
+    }
+
+    let limiting_margin = margins
+        .into_iter()
+        .filter(|margin| margin.is_finite())
+        .reduce(f64::min);
+    let margin = if passed {
+        limiting_margin.map_or_else(
+            || {
+                if has_numeric_bound {
+                    "—".to_owned()
+                } else {
+                    "unbounded".to_owned()
+                }
+            },
+            format_signed_measure_value,
+        )
+    } else if let Some(margin) =
+        limiting_margin.filter(|margin| *margin < 0.0 || margin.is_sign_negative())
+    {
+        format_signed_measure_value(margin)
+    } else {
+        measurement
+            .error
+            .as_deref()
+            .filter(|error| !error.trim().is_empty())
+            .unwrap_or("contract failed")
+            .to_owned()
+    };
+    (
+        if passed { "PASS" } else { "FAIL" },
+        if passed {
+            SemanticTone::Success
+        } else {
+            SemanticTone::Error
+        },
+        margin,
+    )
 }
 
 fn specification_text(specification: &crate::state::SpecEntry) -> String {
@@ -2202,6 +2276,105 @@ mod tests {
         assert_eq!(row.status, "FAIL");
         assert_eq!(row.tone, SemanticTone::Error);
         assert_eq!(row.margin, "-250.000000 m");
+    }
+
+    #[test]
+    fn measurement_table_presents_failvalue_against_the_raw_value() {
+        let passing = rspice_core::MeasureResult {
+            name: "peak_at".to_owned(),
+            value: Some(20.0),
+            raw_value: Some(3.0),
+            error: None,
+            passed: true,
+            expected: None,
+            tolerance: None,
+            failure_limit: Some(4.0),
+            failure_limit_exceeded: false,
+            event_axis: Some(20.0),
+        };
+        let row = measurement_table_row(&passing, "TRAN", None);
+        assert_eq!(row.status, "PASS");
+        assert_eq!(
+            row.value, "20.000000",
+            "the published axis remains the value"
+        );
+        assert_eq!(row.specification, "|raw| < 4.000000");
+        assert_eq!(
+            row.margin, "+1.000000",
+            "the margin uses raw=3, not value=20"
+        );
+
+        let failing_at_limit = rspice_core::MeasureResult {
+            raw_value: Some(-4.0),
+            passed: false,
+            error: Some("FAILVALUE reached".to_owned()),
+            failure_limit_exceeded: true,
+            ..passing
+        };
+        let row = measurement_table_row(&failing_at_limit, "TRAN", None);
+        assert_eq!(row.status, "FAIL");
+        assert_eq!(row.tone, SemanticTone::Error);
+        assert_eq!(
+            row.margin, "-0.000000",
+            "inclusive FAILVALUE equality must retain a failing sign"
+        );
+    }
+
+    #[test]
+    fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
+        let spec = crate::state::SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: String::new(),
+            min: Some(9.0),
+            max: Some(11.0),
+            unit: "dB".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        };
+        let passing = rspice_core::MeasureResult {
+            name: "gain".to_owned(),
+            value: Some(10.0),
+            raw_value: Some(1.0),
+            error: None,
+            passed: true,
+            expected: Some(10.0),
+            tolerance: Some(2.0),
+            failure_limit: Some(5.0),
+            failure_limit_exceeded: false,
+            event_axis: None,
+        };
+        let row = measurement_table_row(&passing, "AC", Some(&spec));
+        assert_eq!(row.status, "PASS");
+        assert_eq!(
+            row.margin, "+1.000000",
+            "the project upper bound limits clearance"
+        );
+        assert!(row.specification.contains("PROJECT 9.000000 … 11.000000"));
+        assert!(row.specification.contains("GOAL 10.000000 ± 2.000000"));
+        assert!(row.specification.contains("FAILVALUE |raw| < 5.000000"));
+
+        let authored_failure = rspice_core::MeasureResult {
+            raw_value: Some(6.0),
+            error: Some("FAILVALUE reached".to_owned()),
+            passed: false,
+            failure_limit_exceeded: true,
+            ..passing.clone()
+        };
+        let row = measurement_table_row(&authored_failure, "AC", Some(&spec));
+        assert_eq!(row.status, "FAIL");
+        assert_eq!(
+            row.margin, "-1.000000",
+            "a passing project bound must not hide the authored failure margin"
+        );
+
+        let project_failure = rspice_core::MeasureResult {
+            value: Some(12.0),
+            raw_value: Some(1.0),
+            expected: Some(12.0),
+            ..passing
+        };
+        let row = measurement_table_row(&project_failure, "AC", Some(&spec));
+        assert_eq!(row.status, "FAIL");
+        assert_eq!(row.margin, "-1.000000");
     }
 
     #[test]

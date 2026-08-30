@@ -55,10 +55,16 @@ pub struct MeasurementReport {
     pub name: String,
     /// Measured value
     pub value: Option<f64>,
+    /// Exact dependent measurement value before any output projection.
+    pub raw_value: Option<f64>,
     /// Expected value (for comparison)
     pub expected: Option<f64>,
     /// Tolerance for comparison
     pub tolerance: Option<f64>,
+    /// Authored Xyce FAILVALUE threshold.
+    pub failure_limit: Option<f64>,
+    /// Whether the raw measurement magnitude met or exceeded FAILVALUE.
+    pub failure_limit_exceeded: bool,
     /// Whether measurement passed
     pub passed: bool,
     /// Error message if failed
@@ -159,15 +165,14 @@ fn write_junit_report<W: Write>(
                 ),
             )?;
 
-            if !meas.passed
-                && let Some(ref err) = meas.error
-            {
+            if !meas.passed {
+                let diagnostics = measurement_failure_diagnostics(meas);
                 write_line(
                     writer,
                     path,
                     format_args!(
                         "      <failure message=\"Measurement failed\">{}</failure>",
-                        xml_escape(err)
+                        xml_escape(&diagnostics)
                     ),
                 )?;
             }
@@ -240,16 +245,53 @@ fn write_tap_report<W: Write>(
                     path,
                     format_args!("not ok {} - {}", test_num, meas.name),
                 )?;
-                if let Some(ref err) = meas.error {
-                    write_line(writer, path, format_args!("  ---"))?;
-                    write_line(writer, path, format_args!("  message: '{}'", err))?;
-                    write_line(writer, path, format_args!("  ..."))?;
-                }
+                let diagnostics = measurement_failure_diagnostics(meas);
+                write_line(writer, path, format_args!("  ---"))?;
+                write_line(writer, path, format_args!("  message: '{}'", diagnostics))?;
+                write_line(writer, path, format_args!("  ..."))?;
             }
         }
     }
 
     Ok(())
+}
+
+fn measurement_failure_diagnostics(measurement: &MeasurementReport) -> String {
+    let mut diagnostics = Vec::new();
+    if let Some(error) = measurement.error.as_deref() {
+        diagnostics.push(error.to_string());
+    }
+    if let (Some(value), Some(expected), Some(tolerance)) = (
+        measurement.value,
+        measurement.expected,
+        measurement.tolerance,
+    ) && (value - expected).abs() > tolerance
+    {
+        diagnostics.push(format!(
+            "GOAL failed: published value {} differs from {} by more than {}",
+            format_spice_exponent(value),
+            format_spice_exponent(expected),
+            format_spice_exponent(tolerance)
+        ));
+    }
+    if measurement.failure_limit_exceeded {
+        let raw = measurement
+            .raw_value
+            .map(format_spice_exponent)
+            .unwrap_or_else(|| "missing".to_string());
+        let limit = measurement
+            .failure_limit
+            .map(format_spice_exponent)
+            .unwrap_or_else(|| "missing".to_string());
+        diagnostics.push(format!(
+            "FAILVALUE failed: raw magnitude of {raw} meets or exceeds {limit}"
+        ));
+    }
+    if diagnostics.is_empty() {
+        "Measurement failed without retained diagnostics".to_string()
+    } else {
+        diagnostics.join(" | ")
+    }
 }
 
 fn run_failure_message(report: &SimulationReport) -> Option<String> {
@@ -304,8 +346,11 @@ fn write_measurement_json<W: Write>(
                 "netlist": report.netlist,
                 "name": meas.name,
                 "value": meas.value,
+                "raw_value": meas.raw_value,
                 "expected": meas.expected,
                 "tolerance": meas.tolerance,
+                "failure_limit": meas.failure_limit,
+                "failure_limit_exceeded": meas.failure_limit_exceeded,
                 "passed": meas.passed,
                 "error": meas.error,
             }));
@@ -339,7 +384,9 @@ impl CsvMeasReporter {
         write_line(
             &mut writer,
             path,
-            format_args!("netlist,name,value,expected,tolerance,passed,error,run"),
+            format_args!(
+                "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded"
+            ),
         )?;
 
         for report in reports {
@@ -348,7 +395,7 @@ impl CsvMeasReporter {
                     &mut writer,
                     path,
                     format_args!(
-                        "{},{},{},{},{},{},{},{}",
+                        "{},{},{},{},{},{},{},{},{},{},{}",
                         csv_escape(&report.netlist),
                         csv_escape(&meas.name),
                         meas.value.map(|v| format!("{:.9e}", v)).unwrap_or_default(),
@@ -361,6 +408,13 @@ impl CsvMeasReporter {
                         meas.passed,
                         csv_escape(meas.error.as_deref().unwrap_or("")),
                         csv_escape(&report.name),
+                        meas.raw_value
+                            .map(|v| format!("{:.9e}", v))
+                            .unwrap_or_default(),
+                        meas.failure_limit
+                            .map(|v| format!("{:.9e}", v))
+                            .unwrap_or_default(),
+                        meas.failure_limit_exceeded,
                     ),
                 )?;
             }
@@ -425,8 +479,11 @@ mod tests {
             measurements: vec![MeasurementReport {
                 name: "risetime".into(),
                 value,
+                raw_value: value,
                 expected: None,
                 tolerance: None,
+                failure_limit: None,
+                failure_limit_exceeded: false,
                 passed: value.is_some(),
                 error: None,
             }],
@@ -450,6 +507,74 @@ mod tests {
     }
 
     #[test]
+    fn measurement_reports_preserve_raw_failvalue_verdicts() {
+        let mut report = report_with_measurement(Some(20.0));
+        let measurement = &mut report.measurements[0];
+        measurement.raw_value = Some(5.0);
+        measurement.failure_limit = Some(4.0);
+        measurement.failure_limit_exceeded = true;
+        measurement.passed = false;
+        measurement.error = Some("FAILVALUE exceeded".to_string());
+        let reports = [report];
+
+        let mut json_bytes = Vec::new();
+        write_measurement_json(&mut json_bytes, Path::new("measurement.json"), &reports)
+            .expect("write measurement JSON");
+        let json: serde_json::Value =
+            serde_json::from_slice(&json_bytes).expect("parse measurement JSON");
+        assert_eq!(json["measurements"][0]["value"], 20.0);
+        assert_eq!(json["measurements"][0]["raw_value"], 5.0);
+        assert_eq!(json["measurements"][0]["failure_limit"], 4.0);
+        assert_eq!(json["measurements"][0]["failure_limit_exceeded"], true);
+
+        let path = std::env::temp_dir().join(format!(
+            "rspice_failvalue_measurement_{}.csv",
+            std::process::id()
+        ));
+        CsvMeasReporter::write(&reports, &path).expect("write measurement CSV");
+        let csv = std::fs::read_to_string(&path).expect("read measurement CSV");
+        assert!(
+            csv.starts_with(
+                "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded"
+            ),
+            "{csv}"
+        );
+        assert!(csv.contains(",5.000000000e0,4.000000000e0,true"), "{csv}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn junit_and_tap_disclose_simultaneous_goal_and_failvalue_failures() {
+        let mut report = report_with_measurement(Some(12.0));
+        report.passed = false;
+        let measurement = &mut report.measurements[0];
+        measurement.raw_value = Some(-5.0);
+        measurement.expected = Some(10.0);
+        measurement.tolerance = Some(1.0);
+        measurement.failure_limit = Some(4.0);
+        measurement.failure_limit_exceeded = true;
+        measurement.passed = false;
+        measurement.error = Some("value misses GOAL".to_string());
+        let reports = [report];
+
+        let mut junit_bytes = Vec::new();
+        write_junit_report(&mut junit_bytes, Path::new("measurement.xml"), &reports)
+            .expect("write JUnit report");
+        let junit = String::from_utf8(junit_bytes).expect("JUnit is UTF-8");
+        assert!(junit.contains("GOAL failed"), "{junit}");
+        assert!(junit.contains("FAILVALUE failed"), "{junit}");
+        assert!(junit.contains("-5.000000e+00"), "{junit}");
+
+        let mut tap_bytes = Vec::new();
+        write_tap_report(&mut tap_bytes, Path::new("measurement.tap"), &reports)
+            .expect("write TAP report");
+        let tap = String::from_utf8(tap_bytes).expect("TAP is UTF-8");
+        assert!(tap.contains("GOAL failed"), "{tap}");
+        assert!(tap.contains("FAILVALUE failed"), "{tap}");
+        assert!(tap.contains("-5.000000e+00"), "{tap}");
+    }
+
+    #[test]
     fn cancellation_run_status_is_failed_in_measurement_json_and_csv() {
         let reports = [SimulationReport {
             name: "deck [timed-out]".into(),
@@ -461,8 +586,11 @@ mod tests {
             measurements: vec![MeasurementReport {
                 name: "__rspice_run_status__".into(),
                 value: None,
+                raw_value: None,
                 expected: None,
                 tolerance: None,
+                failure_limit: None,
+                failure_limit_exceeded: false,
                 passed: false,
                 error: Some("Simulation timed out after 1s".into()),
             }],

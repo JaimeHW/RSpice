@@ -35,10 +35,13 @@ use thiserror::Error;
 
 /// Legacy snapshot schema retained for installed clients and immutable pages.
 pub const PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION: u32 = 2;
-/// Current snapshot schema. Version 3 adds typed page presentation,
+/// Legacy snapshot schema that added typed page presentation,
 /// component/net identity, explicit signal bindings, and simulation
 /// provenance while preserving strict v2 decoding.
-pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 3;
+pub const PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION: u32 = 3;
+/// Current snapshot schema. Version 4 adds immutable, typed FAILVALUE
+/// measurement evidence while preserving strict v2 and v3 decoding.
+pub const PUBLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 4;
 /// Exact schema version a conforming figure manifest must declare.
 pub const FIGURE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// Hard upper bound on canonical snapshot bytes, matching the hardcopy
@@ -170,10 +173,16 @@ pub enum ContractError {
     NonFiniteSample { dataset_id: u64 },
     #[error("measurement {name} carries a non-finite value")]
     NonFiniteMeasurement { name: String },
+    #[error("measurement {name} carries non-finite FAILVALUE evidence in {field}")]
+    NonFiniteMeasurementFailValue { name: String, field: &'static str },
+    #[error("measurement {name} carries inconsistent FAILVALUE evidence: {reason}")]
+    InconsistentMeasurementFailValue { name: String, reason: &'static str },
     #[error("figure payload byte length must be positive and at most {MAX_FIGURE_PAYLOAD_BYTES}")]
     PayloadLengthOutOfRange,
     #[error("schema v2 snapshot cannot carry the v3 field {field}")]
     V3FieldInLegacySnapshot { field: &'static str },
+    #[error("legacy snapshot cannot carry the v4 field {field}")]
+    V4FieldInLegacySnapshot { field: &'static str },
     #[error("publication section {section} is duplicated")]
     DuplicateSection { section: &'static str },
     #[error("publication section {section} is missing for disclosed content")]
@@ -257,7 +266,7 @@ fn validate_required_multiline(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublicationSnapshot {
-    /// Version 2 and [`PUBLICATION_SNAPSHOT_SCHEMA_VERSION`] are accepted.
+    /// Versions 2, 3, and [`PUBLICATION_SNAPSHOT_SCHEMA_VERSION`] are accepted.
     pub schema_version: u32,
     pub metadata: PublicationMetadata,
     pub disclosure: Disclosure,
@@ -796,6 +805,24 @@ pub struct Measurement {
     /// Pass state against the declared specification; `None` when no
     /// specification was declared.
     pub passed: Option<bool>,
+    /// Typed authored FAILVALUE evidence. Schema v4 snapshots retain the raw
+    /// dependent scalar independently from a projected published value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fail_value: Option<MeasurementFailValueEvidence>,
+}
+
+/// Immutable evidence for one authored Xyce FAILVALUE contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeasurementFailValueEvidence {
+    /// IEEE-754 binary64 bit pattern of the raw dependent scalar. This is
+    /// absent only when the measurement did not compute a numeric result.
+    pub raw_value_bits: Option<u64>,
+    /// Exact IEEE-754 binary64 bit pattern of the authored failure limit.
+    pub failure_limit_bits: u64,
+    /// Whether `abs(raw_value) >= failure_limit`. False for an uncomputed
+    /// result, which cannot establish a threshold crossing.
+    pub exceeded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1592,6 +1619,7 @@ impl Validate for PublicationSnapshot {
     fn validate(&self) -> Result<(), ContractError> {
         if ![
             PUBLICATION_SNAPSHOT_V2_SCHEMA_VERSION,
+            PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION,
             PUBLICATION_SNAPSHOT_SCHEMA_VERSION,
         ]
         .contains(&self.schema_version)
@@ -1612,6 +1640,18 @@ impl Validate for PublicationSnapshot {
                     field: "engineering",
                 });
             }
+        }
+        if self.schema_version != PUBLICATION_SNAPSHOT_SCHEMA_VERSION
+            && self.results.as_ref().is_some_and(|results| {
+                results
+                    .measurements
+                    .iter()
+                    .any(|measurement| measurement.fail_value.is_some())
+            })
+        {
+            return Err(ContractError::V4FieldInLegacySnapshot {
+                field: "results.measurements[].fail_value",
+            });
         }
 
         validate_required_text(&self.metadata.title, "title", MAX_TITLE_CHARS)?;
@@ -1716,6 +1756,53 @@ impl Validate for PublicationSnapshot {
                     return Err(ContractError::NonFiniteMeasurement {
                         name: measurement.name.clone(),
                     });
+                }
+                if let Some(evidence) = &measurement.fail_value {
+                    let failure_limit = f64::from_bits(evidence.failure_limit_bits);
+                    if !failure_limit.is_finite() {
+                        return Err(ContractError::NonFiniteMeasurementFailValue {
+                            name: measurement.name.clone(),
+                            field: "failure_limit_bits",
+                        });
+                    }
+                    let raw_value = evidence.raw_value_bits.map(f64::from_bits);
+                    if raw_value.is_some_and(|value| !value.is_finite()) {
+                        return Err(ContractError::NonFiniteMeasurementFailValue {
+                            name: measurement.name.clone(),
+                            field: "raw_value_bits",
+                        });
+                    }
+                    if measurement.value_bits.is_some() != raw_value.is_some() {
+                        return Err(ContractError::InconsistentMeasurementFailValue {
+                            name: measurement.name.clone(),
+                            reason: "published and raw numeric evidence must be present together",
+                        });
+                    }
+                    let Some(passed) = measurement.passed else {
+                        return Err(ContractError::InconsistentMeasurementFailValue {
+                            name: measurement.name.clone(),
+                            reason: "authored failure evidence requires a published pass verdict",
+                        });
+                    };
+                    if let Some(raw_value) = raw_value {
+                        if evidence.exceeded != (raw_value.abs() >= failure_limit) {
+                            return Err(ContractError::InconsistentMeasurementFailValue {
+                                name: measurement.name.clone(),
+                                reason: "exceeded verdict does not match the raw value and failure limit",
+                            });
+                        }
+                    } else if evidence.exceeded {
+                        return Err(ContractError::InconsistentMeasurementFailValue {
+                            name: measurement.name.clone(),
+                            reason: "an uncomputed measurement cannot exceed its failure limit",
+                        });
+                    }
+                    if (evidence.exceeded || raw_value.is_none()) && passed {
+                        return Err(ContractError::InconsistentMeasurementFailValue {
+                            name: measurement.name.clone(),
+                            reason: "FAILVALUE evidence requires a failed published verdict",
+                        });
+                    }
                 }
             }
         }
@@ -2137,18 +2224,152 @@ mod tests {
     }
 
     #[test]
-    fn v3_metadata_round_trips_with_explicit_engineering_identity() {
+    fn typed_metadata_round_trips_with_explicit_engineering_identity() {
         let mut snapshot = minimal_snapshot();
         add_v3_metadata(&mut snapshot);
-        snapshot.validate().expect("complete v3 metadata");
-        let bytes = snapshot.canonical_bytes().expect("canonical v3 bytes");
-        let reparsed = PublicationSnapshot::from_canonical_bytes(&bytes).expect("parse v3");
+        snapshot.validate().expect("complete typed metadata");
+        let bytes = snapshot.canonical_bytes().expect("canonical bytes");
+        let reparsed = PublicationSnapshot::from_canonical_bytes(&bytes).expect("parse snapshot");
         assert_eq!(reparsed, snapshot);
         assert!(
             bytes
                 .windows(b"signal".len())
                 .any(|window| window == b"signal")
         );
+    }
+
+    #[test]
+    fn legacy_v3_snapshots_remain_compatible_but_cannot_claim_v4_evidence() {
+        let mut snapshot = minimal_snapshot();
+        snapshot.schema_version = PUBLICATION_SNAPSHOT_V3_SCHEMA_VERSION;
+        add_v3_metadata(&mut snapshot);
+        snapshot.validate().expect("plain v3 remains supported");
+        let bytes = snapshot.canonical_bytes().expect("v3 canonical bytes");
+        let reparsed = PublicationSnapshot::from_canonical_bytes(&bytes).expect("parse v3");
+        assert_eq!(snapshot, reparsed);
+
+        snapshot
+            .results
+            .as_mut()
+            .expect("results")
+            .measurements
+            .push(Measurement {
+                analysis_id: 1,
+                name: "projected_peak".to_string(),
+                value_bits: Some(20.0_f64.to_bits()),
+                display: "20 s".to_string(),
+                spec_display: Some("|raw| < 4".to_string()),
+                passed: Some(true),
+                fail_value: Some(MeasurementFailValueEvidence {
+                    raw_value_bits: Some((-3.0_f64).to_bits()),
+                    failure_limit_bits: 4.0_f64.to_bits(),
+                    exceeded: false,
+                }),
+            });
+        assert_eq!(
+            snapshot.validate(),
+            Err(ContractError::V4FieldInLegacySnapshot {
+                field: "results.measurements[].fail_value"
+            })
+        );
+    }
+
+    #[test]
+    fn v4_failvalue_evidence_round_trips_and_rejects_inconsistency() {
+        let mut snapshot = minimal_snapshot();
+        snapshot
+            .results
+            .as_mut()
+            .expect("results")
+            .measurements
+            .push(Measurement {
+                analysis_id: 1,
+                name: "projected_peak".to_string(),
+                value_bits: Some(20.0_f64.to_bits()),
+                display: "20 s".to_string(),
+                spec_display: Some("|raw| < 4".to_string()),
+                passed: Some(true),
+                fail_value: Some(MeasurementFailValueEvidence {
+                    raw_value_bits: Some((-3.0_f64).to_bits()),
+                    failure_limit_bits: 4.0_f64.to_bits(),
+                    exceeded: false,
+                }),
+            });
+
+        snapshot
+            .validate()
+            .expect("consistent v4 FAILVALUE evidence");
+        let bytes = snapshot.canonical_bytes().expect("v4 canonical bytes");
+        let reparsed = PublicationSnapshot::from_canonical_bytes(&bytes).expect("parse v4");
+        assert_eq!(snapshot, reparsed);
+        let reparsed_results = reparsed.results.expect("results");
+        let evidence = reparsed_results.measurements[0]
+            .fail_value
+            .as_ref()
+            .expect("typed FAILVALUE evidence");
+        assert_eq!(evidence.raw_value_bits, Some((-3.0_f64).to_bits()));
+
+        let mut changed_raw_evidence = snapshot.clone();
+        changed_raw_evidence
+            .results
+            .as_mut()
+            .expect("results")
+            .measurements[0]
+            .fail_value
+            .as_mut()
+            .expect("evidence")
+            .raw_value_bits = Some((-2.0_f64).to_bits());
+        assert_ne!(
+            bytes,
+            changed_raw_evidence
+                .canonical_bytes()
+                .expect("changed evidence remains valid"),
+            "raw FAILVALUE evidence is part of the canonical publication identity"
+        );
+
+        let mut wrong_threshold_verdict = snapshot.clone();
+        wrong_threshold_verdict
+            .results
+            .as_mut()
+            .expect("results")
+            .measurements[0]
+            .fail_value
+            .as_mut()
+            .expect("evidence")
+            .exceeded = true;
+        assert!(matches!(
+            wrong_threshold_verdict.validate(),
+            Err(ContractError::InconsistentMeasurementFailValue { .. })
+        ));
+
+        let mut missing_raw = snapshot.clone();
+        missing_raw.results.as_mut().expect("results").measurements[0]
+            .fail_value
+            .as_mut()
+            .expect("evidence")
+            .raw_value_bits = None;
+        assert!(matches!(
+            missing_raw.validate(),
+            Err(ContractError::InconsistentMeasurementFailValue { .. })
+        ));
+
+        let mut non_finite_raw = snapshot;
+        non_finite_raw
+            .results
+            .as_mut()
+            .expect("results")
+            .measurements[0]
+            .fail_value
+            .as_mut()
+            .expect("evidence")
+            .raw_value_bits = Some(f64::NAN.to_bits());
+        assert!(matches!(
+            non_finite_raw.validate(),
+            Err(ContractError::NonFiniteMeasurementFailValue {
+                field: "raw_value_bits",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -2328,6 +2549,7 @@ mod tests {
             display: "∞".to_string(),
             spec_display: None,
             passed: None,
+            fail_value: None,
         });
         assert!(matches!(
             measurement.validate(),

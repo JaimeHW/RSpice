@@ -10,9 +10,10 @@ use super::*;
 
 /// Result of a single .MEAS statement
 ///
-/// `passed` is true when the measurement evaluated to a value and, if the
-/// statement declared `GOAL=` (optionally `TOL=`), the value landed within
-/// tolerance. A failed measurement carries an `error` message.
+/// `passed` is true when the measurement evaluated to a value and every
+/// authored verification contract passed: `GOAL=` (optionally `TOL=`) checks
+/// the published value, while Xyce `FAILVALUE=` checks the raw dependent
+/// magnitude. A failed measurement carries an `error` message.
 ///
 /// Example:
 ///     >>> m = report.measurement("trise")
@@ -29,6 +30,9 @@ pub struct PyMeasurement {
     /// Measured value, or None if evaluation failed
     #[pyo3(get)]
     pub value: Option<f64>,
+    /// Exact dependent value before an output-axis projection.
+    #[pyo3(get)]
+    pub raw_value: Option<f64>,
     /// Failure description when evaluation failed
     #[pyo3(get)]
     pub error: Option<String>,
@@ -38,6 +42,12 @@ pub struct PyMeasurement {
     /// Effective tolerance applied to the GOAL check
     #[pyo3(get)]
     pub tolerance: Option<f64>,
+    /// Authored Xyce FAILVALUE threshold.
+    #[pyo3(get)]
+    pub failure_limit: Option<f64>,
+    /// Whether the raw magnitude met or exceeded FAILVALUE.
+    #[pyo3(get)]
+    pub failure_limit_exceeded: bool,
     pub(crate) ok: bool,
 }
 
@@ -47,9 +57,12 @@ impl PyMeasurement {
             name: result.name.clone(),
             analysis: analysis.to_string(),
             value: result.value,
+            raw_value: result.raw_value,
             error: result.error.clone(),
             expected: result.expected,
             tolerance: result.tolerance,
+            failure_limit: result.failure_limit,
+            failure_limit_exceeded: result.failure_limit_exceeded,
             ok: result.passed,
         }
     }
@@ -59,9 +72,12 @@ impl PyMeasurement {
             name: name.to_string(),
             analysis: analysis.to_string(),
             value: None,
+            raw_value: None,
             error: Some(reason.to_string()),
             expected: None,
             tolerance: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
             ok: false,
         }
     }
@@ -85,7 +101,8 @@ impl PyMeasurement {
 
 #[pymethods]
 impl PyMeasurement {
-    /// True when the measurement produced a value within any declared GOAL
+    /// True when the measurement produced a value and every authored
+    /// GOAL/TOL and FAILVALUE contract passed.
     #[getter]
     fn passed(&self) -> bool {
         self.ok
@@ -127,6 +144,7 @@ impl PyMeasurement {
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (name, analysis, value, error, goal, ok, verification=None))]
     fn _unpickle(
         name: String,
         analysis: String,
@@ -134,15 +152,21 @@ impl PyMeasurement {
         error: Option<String>,
         goal: (Option<f64>, Option<f64>),
         ok: bool,
+        verification: Option<(Option<f64>, Option<f64>, bool)>,
     ) -> Self {
         let (expected, tolerance) = goal;
+        let (raw_value, failure_limit, failure_limit_exceeded) =
+            verification.unwrap_or((value, None, false));
         Self {
             name,
             analysis,
             value,
+            raw_value,
             error,
             expected,
             tolerance,
+            failure_limit,
+            failure_limit_exceeded,
             ok,
         }
     }
@@ -160,6 +184,7 @@ impl PyMeasurement {
             Option<String>,
             (Option<f64>, Option<f64>),
             bool,
+            (Option<f64>, Option<f64>, bool),
         ),
     )> {
         Ok((
@@ -171,6 +196,11 @@ impl PyMeasurement {
                 self.error.clone(),
                 (self.expected, self.tolerance),
                 self.ok,
+                (
+                    self.raw_value,
+                    self.failure_limit,
+                    self.failure_limit_exceeded,
+                ),
             ),
         ))
     }

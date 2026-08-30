@@ -44,16 +44,21 @@ impl WorkerResponseTransport {
         }
         validate_worker_transfer_buffers(&self.buffers)?;
 
-        Ok(WorkerResponse {
+        let response = WorkerResponse {
             id: self.response.id,
             outcome: self.response.outcome.into_outcome(&self.buffers)?,
-        })
+        };
+        validate_worker_response_before_transport(&response)?;
+        Ok(response)
     }
 }
 
 pub(super) fn validate_worker_response_before_transport(
     response: &WorkerResponse,
 ) -> Result<(), String> {
+    if let WorkerOutcome::Success(result) = &response.outcome {
+        validate_worker_measurements(result)?;
+    }
     if let WorkerOutcome::Success(result) = &response.outcome
         && let WorkerSimulationResult::DcOp {
             configuration,
@@ -256,6 +261,22 @@ pub(super) fn validate_worker_response_before_transport(
         return Err(format!(
             "retained PSS response contains {numeric_values} unique numerical values, exceeding the {MAX_WORKER_F64_VALUES}-value limit"
         ));
+    }
+    Ok(())
+}
+
+fn validate_worker_measurements(result: &WorkerSimulationResult) -> Result<(), String> {
+    let measurements = match result {
+        WorkerSimulationResult::DcSweep { measurements, .. }
+        | WorkerSimulationResult::Transient { measurements, .. }
+        | WorkerSimulationResult::Pss { measurements, .. }
+        | WorkerSimulationResult::Hb { measurements, .. }
+        | WorkerSimulationResult::Ac { measurements, .. }
+        | WorkerSimulationResult::Noise { measurements, .. } => measurements,
+        _ => return Ok(()),
+    };
+    for (index, measurement) in measurements.iter().enumerate() {
+        measurement.validate_current_evidence(&format!("worker measurement[{index}]"))?;
     }
     Ok(())
 }

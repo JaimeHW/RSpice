@@ -395,19 +395,7 @@ impl OutputRequest {
         origin: NetlistSourceLocation,
         authored_source: &str,
     ) -> Self {
-        let mut sources = Vec::new();
-        collect_measure_sources(statement, &mut sources);
-        let mut dependencies = Vec::new();
-        for source in sources {
-            let (source, expression_context) = match source {
-                MeasureDependencySource::Direct(source) => (source, false),
-                MeasureDependencySource::Expression(source) => (source, true),
-            };
-            dependencies.extend(extract_output_dependencies_with_context(
-                source,
-                expression_context,
-            ));
-        }
+        let dependencies = measure_output_dependencies(statement);
         let dependencies = retain_authored_dependency_spelling(
             dependencies,
             extract_output_dependencies(authored_source),
@@ -2944,6 +2932,31 @@ fn is_symbol_char(ch: char) -> bool {
 enum MeasureDependencySource<'a> {
     Direct(&'a str),
     Expression(&'a str),
+}
+
+/// Collect the typed circuit dependencies needed to evaluate one measurement.
+///
+/// This is shared by the parser's output-request sidecar and by analysis
+/// capture planning. Keeping one collector prevents result retention from
+/// depending on whether a frontend constructed the statement from source or
+/// inserted an already parsed [`MeasureStatement`] directly.
+pub(crate) fn measure_output_dependencies(
+    statement: &MeasureStatement,
+) -> Vec<OutputSymbolDependency> {
+    let mut sources = Vec::new();
+    collect_measure_sources(statement, &mut sources);
+    let mut dependencies = Vec::new();
+    for source in sources {
+        let (source, expression_context) = match source {
+            MeasureDependencySource::Direct(source) => (source, false),
+            MeasureDependencySource::Expression(source) => (source, true),
+        };
+        dependencies.extend(extract_output_dependencies_with_context(
+            source,
+            expression_context,
+        ));
+    }
+    dependencies
 }
 
 fn collect_measure_sources<'a>(

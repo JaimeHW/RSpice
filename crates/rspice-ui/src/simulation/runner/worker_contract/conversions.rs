@@ -683,10 +683,16 @@ impl From<WorkerWaveform> for WaveformData {
 pub(crate) struct WorkerMeasurement {
     pub name: String,
     pub value: Option<f64>,
+    #[serde(default)]
+    pub raw_value: Option<f64>,
     pub error: Option<String>,
     pub passed: bool,
     pub expected: Option<f64>,
     pub tolerance: Option<f64>,
+    #[serde(default)]
+    pub failure_limit: Option<f64>,
+    #[serde(default)]
+    pub failure_limit_exceeded: bool,
     pub event_axis: Option<f64>,
 }
 
@@ -695,10 +701,62 @@ impl WorkerMeasurement {
     pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
         f64_payload_bytes(
             usize::from(self.value.is_some())
+                + usize::from(self.raw_value.is_some())
                 + usize::from(self.expected.is_some())
                 + usize::from(self.tolerance.is_some())
+                + usize::from(self.failure_limit.is_some())
                 + usize::from(self.event_axis.is_some()),
         )
+    }
+}
+
+impl WorkerMeasurement {
+    pub(super) fn validate_current_evidence(&self, prefix: &str) -> Result<(), String> {
+        if self.name.trim().is_empty() || self.name.chars().any(char::is_control) {
+            return Err(format!("{prefix} has an invalid measurement name"));
+        }
+        if [
+            self.value,
+            self.raw_value,
+            self.expected,
+            self.tolerance,
+            self.failure_limit,
+            self.event_axis,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| !value.is_finite())
+            || self.tolerance.is_some_and(|tolerance| tolerance < 0.0)
+        {
+            return Err(format!(
+                "{prefix} contains non-finite measurement evidence or a negative tolerance"
+            ));
+        }
+        if self.value.is_some() != self.raw_value.is_some() {
+            return Err(format!(
+                "{prefix}.raw_value must be present exactly when value is present"
+            ));
+        }
+        let expected_exceeded = match (self.raw_value, self.failure_limit) {
+            (Some(raw_value), Some(limit)) => raw_value.abs() >= limit,
+            _ => false,
+        };
+        if self.failure_limit_exceeded != expected_exceeded {
+            return Err(format!(
+                "{prefix}.failure_limit_exceeded does not match abs(raw_value) >= failure_limit"
+            ));
+        }
+        if self.failure_limit_exceeded && self.passed {
+            return Err(format!(
+                "{prefix} cannot pass after its FAILVALUE limit was reached"
+            ));
+        }
+        if self.passed && (self.value.is_none() || self.error.is_some()) {
+            return Err(format!(
+                "{prefix} has contradictory passing measurement evidence"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -707,10 +765,13 @@ impl From<rspice_core::MeasureResult> for WorkerMeasurement {
         Self {
             name: value.name,
             value: value.value,
+            raw_value: value.raw_value,
             error: value.error,
             passed: value.passed,
             expected: value.expected,
             tolerance: value.tolerance,
+            failure_limit: value.failure_limit,
+            failure_limit_exceeded: value.failure_limit_exceeded,
             event_axis: value.event_axis,
         }
     }
@@ -721,10 +782,13 @@ impl From<WorkerMeasurement> for rspice_core::MeasureResult {
         Self {
             name: value.name,
             value: value.value,
+            raw_value: value.raw_value,
             error: value.error,
             passed: value.passed,
             expected: value.expected,
             tolerance: value.tolerance,
+            failure_limit: value.failure_limit,
+            failure_limit_exceeded: value.failure_limit_exceeded,
             event_axis: value.event_axis,
         }
     }
@@ -1194,8 +1258,11 @@ pub(crate) fn worker_response_from_value(
         .map(|value| value as u8);
 
     if protocol != Some(WORKER_RESPONSE_TRANSPORT_PROTOCOL) {
-        return serde_wasm_bindgen::from_value::<WorkerResponse>(value)
-            .map_err(|error| SimulationError::InvalidConfig(error.to_string()));
+        let response = serde_wasm_bindgen::from_value::<WorkerResponse>(value)
+            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
+        super::transport::validate_worker_response_before_transport(&response)
+            .map_err(SimulationError::InvalidConfig)?;
+        return Ok(response);
     }
 
     let response =

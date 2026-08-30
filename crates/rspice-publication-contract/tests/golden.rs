@@ -381,6 +381,7 @@ fn rc_lowpass_snapshot() -> PublicationSnapshot {
                 display: "2.20 ms".to_string(),
                 spec_display: Some("≤ 2.5 ms".to_string()),
                 passed: Some(true),
+                fail_value: None,
             }],
         }),
         figures: vec![
@@ -560,6 +561,7 @@ fn multi_analysis_snapshot() -> PublicationSnapshot {
                     display: "3.2 MHz".to_string(),
                     spec_display: Some("≥ 1 MHz".to_string()),
                     passed: Some(true),
+                    fail_value: None,
                 },
                 Measurement {
                     analysis_id: 2,
@@ -568,6 +570,7 @@ fn multi_analysis_snapshot() -> PublicationSnapshot {
                     display: "12 mV".to_string(),
                     spec_display: Some("≤ 5 mV".to_string()),
                     passed: Some(false),
+                    fail_value: None,
                 },
                 Measurement {
                     analysis_id: 3,
@@ -576,6 +579,7 @@ fn multi_analysis_snapshot() -> PublicationSnapshot {
                     display: "not computed".to_string(),
                     spec_display: None,
                     passed: None,
+                    fail_value: None,
                 },
             ],
         }),

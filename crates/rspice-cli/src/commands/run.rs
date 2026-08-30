@@ -135,12 +135,14 @@ impl<'a> RunContext<'a> {
                         mr.name,
                         crate::report::format_spice_exponent(value)
                     ),
-                    // Evaluated, but missed a declared GOAL.
+                    // Evaluated, but failed an authored verification contract.
                     (Some(value), false) => println!(
                         "    {} = {} FAILED ({})",
                         mr.name,
                         crate::report::format_spice_exponent(value),
-                        mr.error.as_deref().unwrap_or("missed goal")
+                        mr.error
+                            .as_deref()
+                            .unwrap_or("verification contract failed")
                     ),
                     (None, _) => println!(
                         "    {} = FAILED ({})",
@@ -156,8 +158,11 @@ impl<'a> RunContext<'a> {
             .extend(results.into_iter().map(|mr| MeasurementReport {
                 name: mr.name,
                 value: mr.value,
+                raw_value: mr.raw_value,
                 expected: mr.expected,
                 tolerance: mr.tolerance,
+                failure_limit: mr.failure_limit,
+                failure_limit_exceeded: mr.failure_limit_exceeded,
                 passed: mr.passed,
                 error: mr.error,
             }));
@@ -677,8 +682,11 @@ fn ensure_cancellation_report(
     let run_status_measurement = || MeasurementReport {
         name: "__rspice_run_status__".to_string(),
         value: None,
+        raw_value: None,
         expected: None,
         tolerance: None,
+        failure_limit: None,
+        failure_limit_exceeded: false,
         passed: false,
         error: Some(error_message.clone()),
     };

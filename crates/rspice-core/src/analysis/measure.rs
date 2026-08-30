@@ -42,18 +42,28 @@ pub struct MeasureResult {
     /// Measurement name
     pub name: String,
     /// Numeric payload, when the measurement produced one. A failed GOAL/TOL
-    /// check can retain its raw payload; inspect [`Self::passed`] and
-    /// [`Self::error`] for the measurement outcome.
+    /// or FAILVALUE check retains its numeric payload; inspect [`Self::passed`]
+    /// and [`Self::error`] for the measurement outcome.
     pub value: Option<Value>,
+    /// Exact dependent scalar produced by the measurement before an output
+    /// projection such as Xyce `MIN/MAX OUTPUT=TIME|FREQ|SV` replaces the
+    /// published value with an independent-axis location. For ordinary
+    /// measurements this is identical to [`Self::value`].
+    pub raw_value: Option<Value>,
     /// Error message if failed
     pub error: Option<String>,
-    /// Whether the measurement passed: a value was computed and, when a
-    /// GOAL was declared, it landed within tolerance.
+    /// Whether the measurement produced a value and every authored GOAL/TOL
+    /// and FAILVALUE verification contract passed.
     pub passed: bool,
     /// The declared goal, when the statement carried one.
     pub expected: Option<Value>,
     /// The effective tolerance applied to the goal check.
     pub tolerance: Option<Value>,
+    /// Authored Xyce `FAILVALUE` threshold, when present.
+    pub failure_limit: Option<Value>,
+    /// Whether `abs(raw_value) >= failure_limit`. This remains independently
+    /// observable when another contract (for example `GOAL/TOL`) also fails.
+    pub failure_limit_exceeded: bool,
     /// Independent-axis location associated with a point or extrema result.
     ///
     /// Xyce reports this metadata alongside scalar `AT`, `WHEN`, `MIN`, and
@@ -67,10 +77,13 @@ impl MeasureResult {
         Self {
             name: name.to_string(),
             value: Some(value),
+            raw_value: Some(value),
             error: None,
             passed: true,
             expected: None,
             tolerance: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
             event_axis: None,
         }
     }
@@ -79,12 +92,25 @@ impl MeasureResult {
         Self {
             name: name.to_string(),
             value: None,
+            raw_value: None,
             error: Some(error.to_string()),
             passed: false,
             expected: None,
             tolerance: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
             event_axis: None,
         }
+    }
+
+    /// Build a failed scalar result while retaining every verification
+    /// contract authored on the originating statement.
+    ///
+    /// Evaluation failures have no raw value, so they cannot exceed a
+    /// `FAILVALUE` threshold. The authored threshold and GOAL/TOL metadata
+    /// remain observable, and the original evaluation error keeps priority.
+    pub(super) fn failed_for_statement(statement: &MeasureStatement, error: &str) -> Self {
+        Self::failed(&statement.name, error).check_contract(statement)
     }
 
     fn with_event_axis(mut self, event_axis: Value) -> Self {
@@ -92,39 +118,64 @@ impl MeasureResult {
         self
     }
 
-    /// Apply a statement's GOAL/TOL contract to a computed result.
-    pub(super) fn check_goal(mut self, statement: &MeasureStatement) -> Self {
-        let Some(goal) = statement.goal else {
-            return self;
-        };
-        if !goal.is_finite() {
+    fn with_output_projection(mut self, value: Value) -> Self {
+        self.value = Some(value);
+        self
+    }
+
+    /// Apply a statement's verification contracts to a computed result.
+    pub(super) fn check_contract(mut self, statement: &MeasureStatement) -> Self {
+        if let Some(raw_value) = self.raw_value
+            && !raw_value.is_finite()
+        {
             self.passed = false;
-            self.error = Some(format!("GOAL must be finite, got {goal}"));
-            self.expected = Some(goal);
-            self.tolerance = statement.tolerance;
-            return self;
+            self.error
+                .get_or_insert_with(|| format!("measurement raw value is non-finite: {raw_value}"));
         }
-        let tolerance = statement
-            .tolerance
-            .unwrap_or_else(|| (goal.abs() * 0.01).max(1e-12));
-        self.expected = Some(goal);
-        self.tolerance = Some(tolerance);
-        if !tolerance.is_finite() || tolerance < 0.0 {
-            self.passed = false;
-            self.error = Some(format!(
-                "TOL must be a finite non-negative value, got {tolerance}"
-            ));
-            return self;
+
+        if let Some(goal) = statement.goal {
+            if !goal.is_finite() {
+                self.passed = false;
+                self.error
+                    .get_or_insert_with(|| format!("GOAL must be finite, got {goal}"));
+                self.expected = Some(goal);
+                self.tolerance = statement.tolerance;
+            } else {
+                let tolerance = statement
+                    .tolerance
+                    .unwrap_or_else(|| (goal.abs() * 0.01).max(1e-12));
+                self.expected = Some(goal);
+                self.tolerance = Some(tolerance);
+                if !tolerance.is_finite() || tolerance < 0.0 {
+                    self.passed = false;
+                    self.error.get_or_insert_with(|| {
+                        format!("TOL must be a finite non-negative value, got {tolerance}")
+                    });
+                } else if let Some(value) = self.value {
+                    if value.is_nan() {
+                        self.passed = false;
+                        self.error
+                            .get_or_insert_with(|| "measurement value is NaN".to_string());
+                    } else if (value - goal).abs() > tolerance {
+                        self.passed = false;
+                        self.error.get_or_insert_with(|| {
+                            format!(
+                                "value {value:e} misses GOAL {goal:e} (tolerance {tolerance:e})"
+                            )
+                        });
+                    }
+                }
+            }
         }
-        if let Some(value) = self.value {
-            if value.is_nan() {
+
+        self.failure_limit = statement.fail_value;
+        if let (Some(value), Some(limit)) = (self.raw_value, statement.fail_value) {
+            self.failure_limit_exceeded = value.abs() >= limit;
+            if self.failure_limit_exceeded {
                 self.passed = false;
-                self.error = Some("measurement value is NaN".to_string());
-            } else if (value - goal).abs() > tolerance {
-                self.passed = false;
-                self.error = Some(format!(
-                    "value {value:e} misses GOAL {goal:e} (tolerance {tolerance:e})"
-                ));
+                self.error.get_or_insert_with(|| {
+                    format!("measurement magnitude {value:e} meets or exceeds FAILVALUE {limit:e}")
+                });
             }
         }
         self
@@ -610,6 +661,12 @@ impl MeasureEngine {
         self.measurements
             .iter()
             .map(|statement| {
+                if statement.fail_value.is_some() {
+                    return ContinuousMeasureResult::failed(
+                        &statement.name,
+                        "FAILVALUE is not supported for continuous measurements because its per-record semantics are undefined",
+                    );
+                }
                 if !matches!(
                     statement.analysis.to_ascii_uppercase().as_str(),
                     "TRAN_CONT" | "DC_CONT" | "AC_CONT" | "NOISE_CONT"
@@ -791,7 +848,7 @@ impl MeasureEngine {
             .enumerate()
             .map(|(index, m)| match &m.measure_type {
                 MeasureType::Param { .. } | MeasureType::Equation { .. } => {
-                    MeasureResult::failed(&m.name, "PARAM expression not yet evaluated")
+                    MeasureResult::failed_for_statement(m, "PARAM expression not yet evaluated")
                 }
                 _ => {
                     let signals = if signal_maps.len() == 1 {
@@ -807,7 +864,7 @@ impl MeasureEngine {
             if let MeasureType::Param { expression } = &m.measure_type {
                 results[idx] = self
                     .eval_param(&m.name, expression, &results, params)
-                    .check_goal(m);
+                    .check_contract(m);
             }
         }
         results
@@ -816,7 +873,7 @@ impl MeasureEngine {
     fn fail_all(&self, reason: &str) -> Vec<MeasureResult> {
         self.measurements
             .iter()
-            .map(|measurement| MeasureResult::failed(&measurement.name, reason))
+            .map(|measurement| MeasureResult::failed_for_statement(measurement, reason))
             .collect()
     }
 
@@ -828,7 +885,7 @@ impl MeasureEngine {
         segment_starts: &[usize],
     ) -> MeasureResult {
         self.evaluate_kind(measurement, time, signals, segment_starts)
-            .check_goal(measurement)
+            .check_contract(measurement)
     }
 
     fn evaluate_kind(
@@ -1373,12 +1430,11 @@ impl MeasureEngine {
         let Some((selected_index, selected_value)) = selected else {
             return MeasureResult::failed(name, "Empty range");
         };
-        let result = match output {
-            ExtremaOutput::Value => selected_value,
-            ExtremaOutput::IndependentAxis => time[selected_index],
-        };
-
-        MeasureResult::success(name, result).with_event_axis(time[selected_index])
+        let mut result = MeasureResult::success(name, selected_value);
+        if output == ExtremaOutput::IndependentAxis {
+            result = result.with_output_projection(time[selected_index]);
+        }
+        result.with_event_axis(time[selected_index])
     }
 
     fn eval_pp(
@@ -1721,7 +1777,7 @@ impl MeasureEngine {
     ) -> MeasureResult {
         let mut ctx = params.clone();
         for result in prior {
-            if let Some(value) = result.value {
+            if let Some(value) = result.raw_value {
                 ctx.set(&result.name, value);
             }
         }
@@ -3576,6 +3632,7 @@ mod tests {
     ) -> MeasureStatement {
         MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::Find {
@@ -3601,6 +3658,7 @@ mod tests {
     ) -> MeasureStatement {
         MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::Derivative {
@@ -3766,6 +3824,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
         });
         engine.add(MeasureStatement {
@@ -3781,6 +3840,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
         });
 
@@ -3993,6 +4053,7 @@ mod tests {
     fn integration_over_one_selected_sample_is_zero() {
         let statement = MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             goal: None,
             tolerance: None,
@@ -4021,6 +4082,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "average".to_string(),
             measure_type: MeasureType::Avg {
@@ -4048,6 +4110,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::Integ {
@@ -4079,6 +4142,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "rms".to_string(),
             measure_type: MeasureType::Rms {
@@ -4106,6 +4170,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "maximum".to_string(),
             measure_type: MeasureType::Max {
@@ -4120,6 +4185,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "peak_to_peak".to_string(),
             measure_type: MeasureType::PeakToPeak {
@@ -4149,6 +4215,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "peak_frequency".to_string(),
             measure_type: MeasureType::Max {
@@ -4175,6 +4242,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "peak".to_string(),
             measure_type: MeasureType::Max {
@@ -4317,6 +4385,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "bad_param".to_string(),
             measure_type: MeasureType::Param {
@@ -4355,6 +4424,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "derived".to_string(),
             measure_type: MeasureType::Param {
@@ -4366,6 +4436,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "raw_derived".to_string(),
             measure_type: MeasureType::Param {
@@ -4411,6 +4482,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
         }
     }
@@ -4594,6 +4666,7 @@ mod tests {
         signals.insert("CONDITION".to_string(), condition.as_slice());
         let statement = |name: &str, from: Option<Value>, to: Option<Value>| MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::When {
@@ -4644,6 +4717,7 @@ mod tests {
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "event_axis".to_string(),
             measure_type: MeasureType::When {
@@ -4659,6 +4733,7 @@ mod tests {
         });
         engine.add(MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "found_value".to_string(),
             measure_type: MeasureType::Find {
@@ -4691,6 +4766,7 @@ mod tests {
             |name: &str, edge: EdgeType, number: isize, from: Option<Value>| -> MeasureStatement {
                 MeasureStatement {
                     default_value: None,
+                    fail_value: None,
                     print_policy: MeasurePrintPolicy::All,
                     name: name.to_string(),
                     measure_type: MeasureType::When {
@@ -4738,6 +4814,7 @@ mod tests {
             |name: &str, analysis: &str, from: Option<Value>, td: Option<Value>, minval: Value| {
                 MeasureStatement {
                     default_value: None,
+                    fail_value: None,
                     print_policy: MeasurePrintPolicy::All,
                     name: name.to_string(),
                     measure_type: MeasureType::When {
@@ -4906,6 +4983,7 @@ mod tests {
         let mut engine = MeasureEngine::new();
         engine.add(MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "inherited_td".to_string(),
             measure_type: MeasureType::Delay {
@@ -4931,6 +5009,7 @@ mod tests {
         });
         engine.add(MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "last_is_signed".to_string(),
             measure_type: MeasureType::Delay {
@@ -4956,6 +5035,7 @@ mod tests {
         });
         engine.add(MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: "second_from_last".to_string(),
             measure_type: MeasureType::Delay {
@@ -5003,6 +5083,7 @@ mod tests {
         };
         let statement = |name: &str, trig: TrigSpec, targ: TrigSpec| MeasureStatement {
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::Delay {
@@ -5119,6 +5200,7 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
         };
         let mut engine = MeasureEngine::new();
@@ -5194,7 +5276,7 @@ mod tests {
         assert_eq!(no_goal.error, None);
 
         statement.goal = Some(0.0);
-        let with_goal = MeasureResult::success("nan", Value::NAN).check_goal(&statement);
+        let with_goal = MeasureResult::success("nan", Value::NAN).check_contract(&statement);
         assert!(!with_goal.passed);
         assert!(with_goal.value.is_some_and(Value::is_nan));
         assert_eq!(with_goal.expected, Some(0.0));
@@ -5206,6 +5288,133 @@ mod tests {
         );
     }
 
+    #[test]
+    fn failvalue_uses_exact_inclusive_absolute_value_semantics() {
+        let cases = [
+            (1.999, 2.0, false),
+            (2.0, 2.0, true),
+            (-2.0, 2.0, true),
+            (0.0, 0.0, true),
+            (0.0, -1.0, true),
+            (Value::INFINITY, 1.0, true),
+            (Value::NAN, 1.0, false),
+        ];
+
+        for (value, limit, exceeded) in cases {
+            let mut statement = max_statement("V(out)");
+            statement.fail_value = Some(limit);
+            let result = MeasureResult::success("value", value).check_contract(&statement);
+
+            assert_eq!(result.raw_value.map(Value::to_bits), Some(value.to_bits()));
+            assert_eq!(result.failure_limit, Some(limit));
+            assert_eq!(result.failure_limit_exceeded, exceeded);
+            assert_eq!(
+                result.passed,
+                value.is_finite() && !exceeded,
+                "value={value:?}, limit={limit:?}"
+            );
+            if !value.is_finite() {
+                assert!(
+                    result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("non-finite"))
+                );
+            } else if exceeded {
+                assert_eq!(result.value, Some(value));
+                assert!(
+                    result
+                        .error
+                        .as_deref()
+                        .is_some_and(|error| error.contains("FAILVALUE"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn early_scalar_failure_retains_authored_contract_metadata() {
+        let mut statement = max_statement("V(out)");
+        statement.goal = Some(3.0);
+        statement.tolerance = Some(0.25);
+        statement.fail_value = Some(5.0);
+        let signals = HashMap::new();
+
+        let results = engine_with(statement).evaluate(&[], &signals);
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert!(!result.passed);
+        assert_eq!(result.value, None);
+        assert_eq!(result.raw_value, None);
+        assert_eq!(result.expected, Some(3.0));
+        assert_eq!(result.tolerance, Some(0.25));
+        assert_eq!(result.failure_limit, Some(5.0));
+        assert!(!result.failure_limit_exceeded);
+        assert_eq!(result.error.as_deref(), Some("measurement axis is empty"));
+    }
+
+    #[test]
+    fn projected_extrema_publish_axis_but_verify_and_feed_param_from_raw_value() {
+        let mut peak = max_statement("V(out)");
+        peak.name = "peak".to_string();
+        peak.measure_type = MeasureType::Max {
+            signal: "V(out)".to_string(),
+            from: None,
+            to: None,
+            output: ExtremaOutput::IndependentAxis,
+        };
+        peak.fail_value = Some(4.0);
+        let dependent = MeasureStatement {
+            name: "dependent".to_string(),
+            measure_type: MeasureType::Param {
+                expression: MeasureExpression::expression("peak"),
+            },
+            analysis: "TRAN".to_string(),
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+        };
+        let axis = [10.0, 20.0, 30.0];
+        let values = [2.0, 5.0, 3.0];
+        let signals = HashMap::from([("V(out)".to_string(), values.as_slice())]);
+        let mut engine = MeasureEngine::new();
+        engine.add(peak);
+        engine.add(dependent);
+
+        let results = engine.evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, Some(20.0));
+        assert_eq!(results[0].raw_value, Some(5.0));
+        assert_eq!(results[0].event_axis, Some(20.0));
+        assert!(results[0].failure_limit_exceeded);
+        assert!(!results[0].passed);
+        assert_eq!(results[1].value, Some(5.0));
+        assert_eq!(results[1].raw_value, Some(5.0));
+        assert!(results[1].passed);
+    }
+
+    #[test]
+    fn failvalue_verdict_does_not_overwrite_an_earlier_goal_failure() {
+        let mut statement = max_statement("V(out)");
+        statement.goal = Some(0.0);
+        statement.tolerance = Some(0.1);
+        statement.fail_value = Some(1.0);
+
+        let result = MeasureResult::success("value", 2.0).check_contract(&statement);
+
+        assert!(!result.passed);
+        assert!(result.failure_limit_exceeded);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("GOAL"))
+        );
+    }
+
     fn continuous_statement(name: &str, measure_type: MeasureType) -> MeasureStatement {
         MeasureStatement {
             name: name.to_string(),
@@ -5214,8 +5423,37 @@ mod tests {
             goal: None,
             tolerance: None,
             default_value: None,
+            fail_value: None,
             print_policy: MeasurePrintPolicy::All,
         }
+    }
+
+    #[test]
+    fn continuous_evaluation_rejects_programmatic_failvalue_contracts() {
+        let axis = [0.0, 1.0, 2.0];
+        let signal = [-1.0, 1.0, -1.0];
+        let mut signals = HashMap::new();
+        signals.insert("Y".to_string(), signal.as_slice());
+
+        let mut statement = continuous_statement(
+            "contract",
+            MeasureType::When {
+                condition: alternating_condition(1),
+                from: None,
+                to: None,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+        );
+        statement.fail_value = Some(1.0);
+        let mut engine = MeasureEngine::new();
+        engine.add(statement);
+
+        let result = &engine.evaluate_continuous(&axis, &signals, &[])[0];
+        assert!(result.records.is_empty());
+        assert!(result.failure.as_deref().is_some_and(|error| {
+            error.contains("FAILVALUE") && error.contains("per-record semantics are undefined")
+        }));
     }
 
     fn alternating_condition(number: isize) -> WhenCondition {

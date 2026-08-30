@@ -26,7 +26,7 @@ pub use executed_deck::{ProjectExecutedDeck, ProjectExecutedDeckPoint};
 use legacy_digests::{
     validate_v8_result_digests, validate_v9_result_digests, validate_v10_result_digests,
     validate_v11_result_digests, validate_v12_result_digests, validate_v13_to_v15_result_digests,
-    validate_v16_result_digests,
+    validate_v16_result_digests, validate_v17_result_digests,
 };
 pub use provenance::*;
 use provenance::{
@@ -199,7 +199,10 @@ impl ProjectSimulationResults {
     /// payload encoding before optional pole-zero gain is admitted. Schema-v16
     /// is authenticated with its exact V7 encoding before recognizable PSS or
     /// PSTB curve-only results acquire an explicit legacy-unknown periodic
-    /// marker. No spectrum, orbit policy, or verdict is inferred. Schema-v14
+    /// marker. No spectrum, orbit policy, or verdict is inferred. Schema-v17
+    /// is authenticated with its exact V8 encoding before measurement raw
+    /// values are restored from the retained result and absent FAILVALUE
+    /// verdicts are made explicit. Schema-v14
     /// receipts predate the deck's hierarchy map and keep an empty
     /// one: a run that executed before the map was sealed has no occurrence
     /// record, and inventing rows for it would forge the provenance the map
@@ -217,6 +220,17 @@ impl ProjectSimulationResults {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        reject_measurement_verification_before_schema_v18(self, source_schema)?;
+        if source_schema == PERIODIC_STABILITY_RESULTS_SCHEMA_VERSION {
+            for run in &self.runs {
+                validate_v17_result_digests(run)?;
+            }
+            for run in &mut self.runs {
+                reseal_legacy_project_result_digests(run)?;
+            }
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         migrate_legacy_specification_receipts(self, source_schema)?;
         reject_periodic_stability_payload_before_schema_v17(self, source_schema)?;
         reject_pole_zero_evidence_before_schema_v16(self, source_schema)?;
@@ -229,7 +243,7 @@ impl ProjectSimulationResults {
             }
             for run in &mut self.runs {
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -243,7 +257,7 @@ impl ProjectSimulationResults {
             for run in &mut self.runs {
                 validate_v13_to_v15_result_digests(run, source_schema)?;
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -252,7 +266,7 @@ impl ProjectSimulationResults {
             for run in &mut self.runs {
                 validate_v12_result_digests(run)?;
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -261,7 +275,7 @@ impl ProjectSimulationResults {
             for run in &mut self.runs {
                 validate_v11_result_digests(run)?;
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -270,7 +284,7 @@ impl ProjectSimulationResults {
             for run in &mut self.runs {
                 validate_v10_result_digests(run)?;
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -302,7 +316,7 @@ impl ProjectSimulationResults {
                     ));
                 }
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -321,7 +335,7 @@ impl ProjectSimulationResults {
                     ));
                 }
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -334,7 +348,7 @@ impl ProjectSimulationResults {
                 require_legacy_result_digest_absence(run, source_schema)?;
                 validate_result_fields_for_source_schema(run, source_schema)?;
                 synthesize_legacy_periodic_markers(run)?;
-                seal_project_result_digests(run)?;
+                reseal_legacy_project_result_digests(run)?;
             }
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -529,7 +543,7 @@ impl ProjectSimulationResults {
             run.provenance_mode = PersistedField::Value(migrated_mode);
             run.lifecycle = Some(SimulationRunLifecycle::LegacyUnknown);
             synthesize_legacy_periodic_markers(run)?;
-            seal_project_result_digests(run)?;
+            reseal_legacy_project_result_digests(run)?;
             run.validate(run_idx)?;
         }
         self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
@@ -968,6 +982,41 @@ fn validate_legacy_noise_summary_shape(
     Ok(())
 }
 
+fn reject_measurement_verification_before_schema_v18(
+    results: &ProjectSimulationResults,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema >= MEASUREMENT_VERIFICATION_RESULTS_SCHEMA_VERSION {
+        return Ok(());
+    }
+    for run in &results.runs {
+        for analysis in &run.analyses {
+            for measurement in &analysis.measurements {
+                if measurement.raw_value.is_some()
+                    || measurement.failure_limit.is_some()
+                    || measurement.failure_limit_exceeded
+                {
+                    return Err(format!(
+                        "schema-v{source_schema} analysis {} measurement '{}' contains measurement verification evidence introduced by schema v18",
+                        analysis.id, measurement.name
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn restore_legacy_measurement_verification(run: &mut ProjectSimulationRun) {
+    for analysis in &mut run.analyses {
+        for measurement in &mut analysis.measurements {
+            measurement.raw_value = measurement.value;
+            measurement.failure_limit = None;
+            measurement.failure_limit_exceeded = false;
+        }
+    }
+}
+
 pub(super) fn seal_project_result_digests(run: &mut ProjectSimulationRun) -> Result<(), String> {
     for analysis in &mut run.analyses {
         let digest = analysis.clone().into_analysis()?.result_data_digest();
@@ -976,6 +1025,11 @@ pub(super) fn seal_project_result_digests(run: &mut ProjectSimulationRun) -> Res
     let digest = run.clone().into_run()?.dataset_content_digest();
     run.dataset_content_digest = PersistedField::Value(digest);
     Ok(())
+}
+
+fn reseal_legacy_project_result_digests(run: &mut ProjectSimulationRun) -> Result<(), String> {
+    restore_legacy_measurement_verification(run);
+    seal_project_result_digests(run)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2319,11 +2373,17 @@ impl ProjectNamedValue {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectMeasurement {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_value: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub passed: bool,
@@ -2331,6 +2391,10 @@ pub struct ProjectMeasurement {
     pub expected: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tolerance: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_limit: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub failure_limit_exceeded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_axis: Option<f64>,
 }
@@ -2340,19 +2404,44 @@ impl ProjectMeasurement {
         rspice_core::MeasureResult {
             name: self.name,
             value: self.value,
+            raw_value: self.raw_value,
             error: self.error,
             passed: self.passed,
             expected: self.expected,
             tolerance: self.tolerance,
+            failure_limit: self.failure_limit,
+            failure_limit_exceeded: self.failure_limit_exceeded,
             event_axis: self.event_axis,
         }
     }
 
     fn validate(&self, prefix: &str) -> Result<(), String> {
         require_optional_finite(self.value, &format!("{prefix}.value"))?;
+        require_optional_finite(self.raw_value, &format!("{prefix}.raw_value"))?;
+        if self.value.is_some() != self.raw_value.is_some() {
+            return Err(format!(
+                "{prefix}.raw_value must be present exactly when value is present"
+            ));
+        }
         require_optional_finite(self.expected, &format!("{prefix}.expected"))?;
         require_optional_finite(self.tolerance, &format!("{prefix}.tolerance"))?;
-        require_optional_finite(self.event_axis, &format!("{prefix}.event_axis"))
+        require_optional_finite(self.failure_limit, &format!("{prefix}.failure_limit"))?;
+        let expected_exceeded = match (self.raw_value, self.failure_limit) {
+            (Some(raw_value), Some(limit)) => raw_value.abs() >= limit,
+            _ => false,
+        };
+        if self.failure_limit_exceeded != expected_exceeded {
+            return Err(format!(
+                "{prefix}.failure_limit_exceeded does not match abs(raw_value) >= failure_limit"
+            ));
+        }
+        if self.failure_limit_exceeded && self.passed {
+            return Err(format!(
+                "{prefix} cannot pass after its FAILVALUE limit was reached"
+            ));
+        }
+        require_optional_finite(self.event_axis, &format!("{prefix}.event_axis"))?;
+        Ok(())
     }
 }
 
@@ -2361,10 +2450,13 @@ impl From<&rspice_core::MeasureResult> for ProjectMeasurement {
         Self {
             name: measurement.name.clone(),
             value: measurement.value,
+            raw_value: measurement.raw_value,
             error: measurement.error.clone(),
             passed: measurement.passed,
             expected: measurement.expected,
             tolerance: measurement.tolerance,
+            failure_limit: measurement.failure_limit,
+            failure_limit_exceeded: measurement.failure_limit_exceeded,
             event_axis: measurement.event_axis,
         }
     }

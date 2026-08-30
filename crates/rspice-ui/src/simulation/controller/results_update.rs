@@ -17,14 +17,22 @@ fn echo_measurements(state: &mut AppState, measurements: &[rspice_core::MeasureR
         measurements.len()
     )));
     for m in measurements {
-        match m.value {
-            Some(value) => {
+        match (m.value, m.passed) {
+            (Some(value), true) => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::info(format!(
                     "  {} = {:.6e}",
                     m.name, value
                 )));
             }
-            None => {
+            (Some(value), false) => {
+                state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
+                    "  {} = {:.6e} FAILED ({})",
+                    m.name,
+                    value,
+                    m.error.as_deref().unwrap_or("verification contract failed")
+                )));
+            }
+            (None, _) => {
                 state.push_sim_message(crate::diagnostics::ConsoleMessage::warning(format!(
                     "  {} = FAILED ({})",
                     m.name,

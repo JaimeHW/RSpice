@@ -271,7 +271,7 @@ pub(super) fn nondefault_op_config() -> crate::simulation::dialog::OpConfig {
 
 #[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 12);
+    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 13);
     assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 8);
     let source = include_str!("../../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
@@ -766,10 +766,13 @@ fn transient_worker_result_round_trips_through_json() {
         measurements: vec![WorkerMeasurement {
             name: "rise".to_string(),
             value: Some(1e-9),
+            raw_value: Some(1e-9),
             error: None,
             passed: true,
             expected: Some(1e-9),
             tolerance: Some(1e-12),
+            failure_limit: Some(2e-9),
+            failure_limit_exceeded: false,
             event_axis: Some(1e-9),
         }],
         events: WorkerEventHistory {
@@ -801,6 +804,124 @@ fn transient_worker_result_round_trips_through_json() {
         serde_json::from_str(&encoded).expect("result deserializes");
 
     assert_eq!(decoded, result);
+}
+
+fn projected_worker_measurement() -> WorkerMeasurement {
+    WorkerMeasurement {
+        name: "peak_at".to_owned(),
+        value: Some(20.0),
+        raw_value: Some(3.0),
+        error: None,
+        passed: true,
+        expected: None,
+        tolerance: None,
+        failure_limit: Some(4.0),
+        failure_limit_exceeded: false,
+        event_axis: Some(20.0),
+    }
+}
+
+fn response_with_measurement(measurement: WorkerMeasurement) -> WorkerResponse {
+    WorkerResponse {
+        id: 901,
+        outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Transient {
+            time: vec![0.0],
+            waveforms: Vec::new(),
+            measurements: vec![measurement],
+            events: WorkerEventHistory::default(),
+        })),
+    }
+}
+
+fn transported_measurement_mut(transport: &mut WorkerResponseTransport) -> &mut WorkerMeasurement {
+    let WorkerOutcomeTransport::Success(WorkerSimulationResultTransport::Transient {
+        measurements,
+        ..
+    }) = &mut transport.response.outcome
+    else {
+        panic!("fixture must retain a transient measurement")
+    };
+    &mut measurements[0]
+}
+
+#[test]
+fn protocol_v13_preserves_distinct_projected_and_raw_measurement_values() {
+    let response = response_with_measurement(projected_worker_measurement());
+    let transport = WorkerResponseTransport::from_response(response).expect("egress validates");
+    let restored = transport.into_response().expect("ingress validates");
+    let WorkerOutcome::Success(result) = restored.outcome else {
+        panic!("fixture must succeed")
+    };
+    let WorkerSimulationResult::Transient { measurements, .. } = *result else {
+        panic!("fixture must remain transient")
+    };
+    assert_eq!(measurements[0].value, Some(20.0));
+    assert_eq!(measurements[0].raw_value, Some(3.0));
+
+    let mut missing_raw = projected_worker_measurement();
+    missing_raw.raw_value = None;
+    let core = rspice_core::MeasureResult::from(missing_raw);
+    assert_eq!(
+        core.raw_value, None,
+        "the current conversion must never synthesize raw evidence from a projected value"
+    );
+}
+
+#[test]
+fn protocol_v13_rejects_missing_or_inconsistent_failvalue_evidence_both_ways() {
+    let mut unevaluated = projected_worker_measurement();
+    unevaluated.value = None;
+    unevaluated.raw_value = None;
+    unevaluated.event_axis = None;
+    unevaluated.passed = false;
+    unevaluated.error = Some("signal was unavailable".to_owned());
+    WorkerResponseTransport::from_response(response_with_measurement(unevaluated))
+        .expect("an unevaluated failure retains its authored limit without inventing raw evidence");
+
+    let mut missing_raw = projected_worker_measurement();
+    missing_raw.raw_value = None;
+    assert!(
+        WorkerResponseTransport::from_response(response_with_measurement(missing_raw)).is_err(),
+        "worker egress requires raw and published values together"
+    );
+
+    let mut false_positive = projected_worker_measurement();
+    false_positive.failure_limit_exceeded = true;
+    false_positive.passed = false;
+    assert!(
+        WorkerResponseTransport::from_response(response_with_measurement(false_positive)).is_err(),
+        "the retained verdict must be recomputed from the raw value"
+    );
+
+    let mut passed_after_exceeded = projected_worker_measurement();
+    passed_after_exceeded.raw_value = Some(-4.0);
+    passed_after_exceeded.failure_limit_exceeded = true;
+    assert!(
+        WorkerResponseTransport::from_response(response_with_measurement(passed_after_exceeded))
+            .is_err(),
+        "a measurement cannot pass after reaching its inclusive FAILVALUE limit"
+    );
+
+    let mut transport = WorkerResponseTransport::from_response(response_with_measurement(
+        projected_worker_measurement(),
+    ))
+    .expect("valid fixture transports");
+    transported_measurement_mut(&mut transport).raw_value = None;
+    assert!(
+        transport.into_response().is_err(),
+        "worker ingress applies the same evidence validation after reconstruction"
+    );
+
+    let mut transport = WorkerResponseTransport::from_response(response_with_measurement(
+        projected_worker_measurement(),
+    ))
+    .expect("valid fixture transports");
+    let measurement = transported_measurement_mut(&mut transport);
+    measurement.raw_value = Some(5.0);
+    assert!(
+        transport.into_response().is_err(),
+        "worker ingress rejects a false-negative FAILVALUE verdict"
+    );
 }
 
 /// A worker built before event transport omits the field entirely. It must

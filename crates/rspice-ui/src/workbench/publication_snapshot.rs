@@ -10,13 +10,14 @@
 
 use rspice_publication_contract::{
     AnalysisRecord, AxisScale, ComponentPin, ComponentRecord, Dataset, Disclosure,
-    EngineeringPublication, Figure, FigureContent, Measurement, ModelReference, NetConnection,
-    NetRecord, NetlistSection, Paint, PaintRole, PathPrimitive, PathSegment, PlotFigure,
-    PlotHydration, PlotTraceBinding, Point, Primitive, PrimitiveGroup, PublicationMetadata,
-    PublicationOverview, PublicationPresentation, PublicationSection, PublicationSnapshot,
-    ResultsSection, Scene, SchematicSection, SheetScene, SignalIdentity, SignalTarget,
-    SimulationProvenance, SimulationSetting, Specification, Stroke, StrokePattern, SweepAxis,
-    TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues, Validate as _,
+    EngineeringPublication, Figure, FigureContent, Measurement, MeasurementFailValueEvidence,
+    ModelReference, NetConnection, NetRecord, NetlistSection, Paint, PaintRole, PathPrimitive,
+    PathSegment, PlotFigure, PlotHydration, PlotTraceBinding, Point, Primitive, PrimitiveGroup,
+    PublicationMetadata, PublicationOverview, PublicationPresentation, PublicationSection,
+    PublicationSnapshot, ResultsSection, Scene, SchematicSection, SheetScene, SignalIdentity,
+    SignalTarget, SimulationProvenance, SimulationSetting, Specification, Stroke, StrokePattern,
+    SweepAxis, TextAnchor, TextFont, TextPrimitive, Trace, TraceTransform, TraceValues,
+    Validate as _,
 };
 
 use crate::hardcopy::HardcopyScope;
@@ -109,6 +110,8 @@ pub(crate) enum PublicationBuildError {
     CoordinateRange { source: String },
     /// A result trace carries a non-finite sample.
     NonFiniteSample { trace: String },
+    /// A measurement's retained FAILVALUE fields contradict one another.
+    MeasurementEvidence { name: String, reason: &'static str },
     /// The assembled snapshot failed contract validation.
     Contract(rspice_publication_contract::ContractError),
     /// Nothing publishable exists: no scenes, no results, no deck.
@@ -135,6 +138,12 @@ impl std::fmt::Display for PublicationBuildError {
             }
             Self::NonFiniteSample { trace } => {
                 write!(f, "trace {trace} carries a non-finite sample")
+            }
+            Self::MeasurementEvidence { name, reason } => {
+                write!(
+                    f,
+                    "measurement {name} has inconsistent FAILVALUE evidence: {reason}"
+                )
             }
             Self::Contract(error) => write!(f, "snapshot rejected by the contract: {error}"),
             Self::NothingToPublish => {
@@ -1102,7 +1111,7 @@ fn results_section(
             let spec = specs
                 .iter()
                 .find(|entry| entry.measurement.eq_ignore_ascii_case(&measure.name));
-            measurements.push(publication_measurement(measure, spec, analysis_id));
+            measurements.push(publication_measurement(measure, spec, analysis_id)?);
         }
     }
 
@@ -1177,7 +1186,7 @@ fn publication_measurement(
     measure: &rspice_core::MeasureResult,
     spec: Option<&SpecEntry>,
     analysis_id: u64,
-) -> Measurement {
+) -> Result<Measurement, PublicationBuildError> {
     let display = match measure.value {
         Some(value) => {
             let formatted = format_engineering_value(value);
@@ -1190,30 +1199,21 @@ fn publication_measurement(
         }
         None => "not computed".to_string(),
     };
-    let spec_display = spec.and_then(|entry| {
-        let unit = if entry.unit.trim().is_empty() {
-            String::new()
-        } else {
-            format!(" {}", entry.unit.trim())
+    let spec_display = publication_contract_display(measure, spec);
+    let has_contract =
+        spec.is_some() || measure.expected.is_some() || measure.failure_limit.is_some();
+    let passed = has_contract.then(|| {
+        let value_available = measure.value.is_some();
+        let raw_value_available = measure.failure_limit.is_none() || measure.raw_value.is_some();
+        let project_passed = match (spec, measure.value) {
+            (Some(entry), Some(value)) => entry.passes(value),
+            (Some(_), None) => false,
+            (None, _) => true,
         };
-        match (entry.min, entry.max) {
-            (Some(min), Some(max)) => Some(format!(
-                "{}–{}{unit}",
-                format_engineering_value(min),
-                format_engineering_value(max)
-            )),
-            (Some(min), None) => Some(format!("≥ {}{unit}", format_engineering_value(min))),
-            (None, Some(max)) => Some(format!("≤ {}{unit}", format_engineering_value(max))),
-            (None, None) => None,
-        }
+        value_available && raw_value_available && measure.passed && project_passed
     });
-    let passed = match (spec, measure.value) {
-        (Some(entry), Some(value)) => Some(entry.passes(value)),
-        (Some(_), None) => Some(false),
-        (None, _) if measure.expected.is_some() => Some(measure.passed),
-        _ => None,
-    };
-    Measurement {
+    let fail_value = publication_fail_value_evidence(measure)?;
+    Ok(Measurement {
         analysis_id,
         name: measure.name.clone(),
         value_bits: measure
@@ -1223,6 +1223,120 @@ fn publication_measurement(
         display,
         spec_display,
         passed,
+        fail_value,
+    })
+}
+
+fn publication_fail_value_evidence(
+    measure: &rspice_core::MeasureResult,
+) -> Result<Option<MeasurementFailValueEvidence>, PublicationBuildError> {
+    let Some(failure_limit) = measure.failure_limit else {
+        if measure.failure_limit_exceeded {
+            return Err(PublicationBuildError::MeasurementEvidence {
+                name: measure.name.clone(),
+                reason: "the exceeded verdict has no authored failure limit",
+            });
+        }
+        return Ok(None);
+    };
+    if !failure_limit.is_finite() {
+        return Err(PublicationBuildError::MeasurementEvidence {
+            name: measure.name.clone(),
+            reason: "the authored failure limit is non-finite",
+        });
+    }
+    if measure.value.is_some() != measure.raw_value.is_some() {
+        return Err(PublicationBuildError::MeasurementEvidence {
+            name: measure.name.clone(),
+            reason: "published and raw numeric evidence must be present together",
+        });
+    }
+    if measure.value.is_some_and(|value| !value.is_finite())
+        || measure.raw_value.is_some_and(|value| !value.is_finite())
+    {
+        return Err(PublicationBuildError::MeasurementEvidence {
+            name: measure.name.clone(),
+            reason: "published and raw numeric evidence must be finite",
+        });
+    }
+    let computed_exceeded = measure
+        .raw_value
+        .is_some_and(|raw_value| raw_value.abs() >= failure_limit);
+    if measure.failure_limit_exceeded != computed_exceeded {
+        return Err(PublicationBuildError::MeasurementEvidence {
+            name: measure.name.clone(),
+            reason: "the exceeded verdict does not match the raw value and failure limit",
+        });
+    }
+    if (measure.failure_limit_exceeded || measure.raw_value.is_none()) && measure.passed {
+        return Err(PublicationBuildError::MeasurementEvidence {
+            name: measure.name.clone(),
+            reason: "the measurement pass verdict contradicts its FAILVALUE evidence",
+        });
+    }
+
+    Ok(Some(MeasurementFailValueEvidence {
+        raw_value_bits: measure.raw_value.map(f64::to_bits),
+        failure_limit_bits: failure_limit.to_bits(),
+        exceeded: measure.failure_limit_exceeded,
+    }))
+}
+
+fn publication_contract_display(
+    measure: &rspice_core::MeasureResult,
+    spec: Option<&SpecEntry>,
+) -> Option<String> {
+    let mut contracts = Vec::with_capacity(3);
+    if let Some(entry) = spec {
+        let unit = if entry.unit.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" {}", entry.unit.trim())
+        };
+        let text = match (entry.min, entry.max) {
+            (Some(min), Some(max)) => Some(format!(
+                "{}–{}{unit}",
+                format_engineering_value(min),
+                format_engineering_value(max)
+            )),
+            (Some(min), None) => Some(format!("≥ {}{unit}", format_engineering_value(min))),
+            (None, Some(max)) => Some(format!("≤ {}{unit}", format_engineering_value(max))),
+            (None, None) => Some("tracked".to_owned()),
+        };
+        if let Some(text) = text {
+            contracts.push(("PROJECT", text));
+        }
+    }
+    if let Some(expected) = measure.expected {
+        let text = measure.tolerance.map_or_else(
+            || format!("= {}", format_engineering_value(expected)),
+            |tolerance| {
+                format!(
+                    "{} ± {}",
+                    format_engineering_value(expected),
+                    format_engineering_value(tolerance)
+                )
+            },
+        );
+        contracts.push(("GOAL", text));
+    }
+    if let Some(limit) = measure.failure_limit {
+        contracts.push((
+            "FAILVALUE",
+            format!("|raw| < {}", format_engineering_value(limit)),
+        ));
+    }
+
+    match contracts.as_slice() {
+        [] => None,
+        [(_, text)] => Some(text.clone()),
+        _ => Some(
+            contracts
+                .into_iter()
+                .map(|(label, text)| format!("{label} {text}"))
+                .collect::<Vec<_>>()
+                .join(" · "),
+        ),
     }
 }
 
@@ -1481,10 +1595,13 @@ mod tests {
         let measure = rspice_core::MeasureResult {
             name: "Rise_Time".to_string(),
             value: Some(2.2e-3),
+            raw_value: Some(2.2e-3),
             error: None,
             passed: true,
             expected: None,
             tolerance: None,
+            failure_limit: None,
+            failure_limit_exceeded: false,
             event_axis: None,
         };
         let spec = SpecEntry {
@@ -1495,7 +1612,8 @@ mod tests {
             unit: "s".to_string(),
             scope: crate::state::SpecPointScope::AllPoints,
         };
-        let published = publication_measurement(&measure, Some(&spec), 1);
+        let published =
+            publication_measurement(&measure, Some(&spec), 1).expect("measurement publishes");
         assert_eq!(published.passed, Some(true));
         assert!(
             published
@@ -1505,9 +1623,128 @@ mod tests {
         );
         assert!(published.value_bits.is_some());
 
-        let unspecified = publication_measurement(&measure, None, 1);
+        let unspecified =
+            publication_measurement(&measure, None, 1).expect("measurement publishes");
         assert_eq!(unspecified.passed, None);
         assert_eq!(unspecified.spec_display, None);
+    }
+
+    #[test]
+    fn publication_failvalue_uses_raw_evidence_and_retains_its_verdict() {
+        let passing = rspice_core::MeasureResult {
+            name: "peak_at".to_owned(),
+            value: Some(20.0),
+            raw_value: Some(-3.0),
+            error: None,
+            passed: true,
+            expected: None,
+            tolerance: None,
+            failure_limit: Some(4.0),
+            failure_limit_exceeded: false,
+            event_axis: Some(20.0),
+        };
+        let published =
+            publication_measurement(&passing, None, 1).expect("FAILVALUE evidence publishes");
+        assert_eq!(published.value_bits, Some(20.0_f64.to_bits()));
+        assert_eq!(published.spec_display.as_deref(), Some("|raw| < 4"));
+        assert_eq!(published.passed, Some(true));
+        let evidence = published.fail_value.expect("typed FAILVALUE evidence");
+        assert_eq!(evidence.raw_value_bits, Some((-3.0_f64).to_bits()));
+        assert_eq!(evidence.failure_limit_bits, 4.0_f64.to_bits());
+        assert!(!evidence.exceeded);
+
+        let failed = rspice_core::MeasureResult {
+            raw_value: Some(-4.0),
+            error: Some("FAILVALUE reached".to_owned()),
+            passed: false,
+            failure_limit_exceeded: true,
+            ..passing.clone()
+        };
+        let published =
+            publication_measurement(&failed, None, 1).expect("failed evidence publishes");
+        assert_eq!(published.value_bits, Some(20.0_f64.to_bits()));
+        assert_eq!(published.passed, Some(false));
+        assert!(published.fail_value.expect("typed evidence").exceeded);
+
+        let wrong_threshold_verdict = rspice_core::MeasureResult {
+            failure_limit_exceeded: true,
+            passed: false,
+            ..passing.clone()
+        };
+        assert!(matches!(
+            publication_measurement(&wrong_threshold_verdict, None, 1),
+            Err(PublicationBuildError::MeasurementEvidence { .. })
+        ));
+
+        let missing_raw = rspice_core::MeasureResult {
+            raw_value: None,
+            passed: false,
+            ..passing
+        };
+        assert!(matches!(
+            publication_measurement(&missing_raw, None, 1),
+            Err(PublicationBuildError::MeasurementEvidence { .. })
+        ));
+    }
+
+    #[test]
+    fn publication_combines_authored_and_project_contracts() {
+        let spec = SpecEntry {
+            measurement: "gain".to_owned(),
+            expression: String::new(),
+            min: Some(9.0),
+            max: Some(11.0),
+            unit: "dB".to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        };
+        let passing = rspice_core::MeasureResult {
+            name: "gain".to_owned(),
+            value: Some(10.0),
+            raw_value: Some(1.0),
+            error: None,
+            passed: true,
+            expected: Some(10.0),
+            tolerance: Some(2.0),
+            failure_limit: Some(5.0),
+            failure_limit_exceeded: false,
+            event_axis: None,
+        };
+        let published =
+            publication_measurement(&passing, Some(&spec), 1).expect("combined contracts publish");
+        let display = published.spec_display.expect("all contracts are disclosed");
+        assert!(display.contains("PROJECT 9–11 dB"));
+        assert!(display.contains("GOAL 10 ± 2"));
+        assert!(display.contains("FAILVALUE |raw| < 5"));
+        assert_eq!(published.passed, Some(true));
+
+        let authored_failure = rspice_core::MeasureResult {
+            raw_value: Some(5.0),
+            error: Some("FAILVALUE reached".to_owned()),
+            passed: false,
+            failure_limit_exceeded: true,
+            ..passing.clone()
+        };
+        assert_eq!(
+            publication_measurement(&authored_failure, Some(&spec), 1)
+                .expect("authored failure publishes")
+                .passed,
+            Some(false),
+            "a passing project spec cannot override an authored failure"
+        );
+
+        let project_failure = rspice_core::MeasureResult {
+            value: Some(12.0),
+            raw_value: Some(1.0),
+            expected: Some(12.0),
+            ..passing
+        };
+        assert_eq!(
+            publication_measurement(&project_failure, Some(&spec), 1)
+                .expect("project failure publishes")
+                .passed,
+            Some(false),
+            "all authored contracts passing cannot override a project-spec failure"
+        );
     }
 
     #[test]
@@ -1837,12 +2074,15 @@ mod tests {
             );
             result.measurements.push(rspice_core::MeasureResult {
                 name: "final".to_string(),
-                value: Some(0.8),
+                value: Some(2.0),
+                raw_value: Some(-0.8),
                 error: None,
                 passed: true,
                 expected: None,
                 tolerance: None,
-                event_axis: None,
+                failure_limit: Some(1.0),
+                failure_limit_exceeded: false,
+                event_axis: Some(2.0),
             });
             result
         });
@@ -1867,8 +2107,21 @@ mod tests {
         assert_eq!(results.analyses.len(), 1);
         assert_eq!(results.datasets.len(), 1);
         assert_eq!(results.measurements.len(), 1);
+        assert_eq!(results.measurements[0].value_bits, Some(2.0_f64.to_bits()));
+        let fail_value = results.measurements[0]
+            .fail_value
+            .as_ref()
+            .expect("projected measurement retains FAILVALUE evidence");
+        assert_eq!(fail_value.raw_value_bits, Some((-0.8_f64).to_bits()));
+        assert_eq!(fail_value.failure_limit_bits, 1.0_f64.to_bits());
+        assert!(!fail_value.exceeded);
         assert!(snapshot.disclosure.netlist);
         assert!(snapshot.disclosure.results);
         assert!(!snapshot.disclosure.schematic);
+
+        let canonical = snapshot.canonical_bytes().expect("canonical snapshot");
+        let reparsed = PublicationSnapshot::from_canonical_bytes(&canonical)
+            .expect("published evidence reparses");
+        assert_eq!(snapshot, reparsed);
     }
 }

@@ -2927,8 +2927,10 @@ impl AnalysisResult {
             }
             if [
                 measurement.value,
+                measurement.raw_value,
                 measurement.expected,
                 measurement.tolerance,
+                measurement.failure_limit,
                 measurement.event_axis,
             ]
             .into_iter()
@@ -2940,6 +2942,28 @@ impl AnalysisResult {
             {
                 return Err(format!(
                     "retained measurement '{}' has contradictory or non-finite evidence",
+                    measurement.name
+                ));
+            }
+            if measurement.value.is_some() != measurement.raw_value.is_some() {
+                return Err(format!(
+                    "retained measurement '{}' must carry its raw value exactly when it carries a published value",
+                    measurement.name
+                ));
+            }
+            let expected_exceeded = match (measurement.raw_value, measurement.failure_limit) {
+                (Some(raw_value), Some(limit)) => raw_value.abs() >= limit,
+                _ => false,
+            };
+            if measurement.failure_limit_exceeded != expected_exceeded {
+                return Err(format!(
+                    "retained measurement '{}' FAILVALUE verdict does not match abs(raw_value) >= failure_limit",
+                    measurement.name
+                ));
+            }
+            if measurement.failure_limit_exceeded && measurement.passed {
+                return Err(format!(
+                    "retained measurement '{}' cannot pass after its FAILVALUE limit was reached",
                     measurement.name
                 ));
             }
@@ -3092,6 +3116,72 @@ impl AnalysisResult {
 #[cfg(test)]
 mod retained_payload_tests {
     use super::*;
+
+    fn projected_failvalue_measurement() -> rspice_core::MeasureResult {
+        rspice_core::MeasureResult {
+            name: "peak_at".to_owned(),
+            value: Some(20.0),
+            raw_value: Some(3.0),
+            error: None,
+            passed: true,
+            expected: None,
+            tolerance: None,
+            failure_limit: Some(4.0),
+            failure_limit_exceeded: false,
+            event_axis: Some(20.0),
+        }
+    }
+
+    #[test]
+    fn retained_measurements_require_exact_failvalue_evidence() {
+        let valid = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![projected_failvalue_measurement()]);
+        valid
+            .validate_retained_evidence()
+            .expect("a projected value may differ from its exact raw FAILVALUE evidence");
+
+        let mut unevaluated = projected_failvalue_measurement();
+        unevaluated.value = None;
+        unevaluated.raw_value = None;
+        unevaluated.event_axis = None;
+        unevaluated.passed = false;
+        unevaluated.error = Some("signal was unavailable".to_owned());
+        AnalysisResult::new(2, AnalysisType::Transient, "TRAN")
+            .with_measurements(vec![unevaluated])
+            .validate_retained_evidence()
+            .expect("an early failure retains the authored limit without raw evidence");
+
+        let mut missing_raw = valid.clone();
+        missing_raw.measurements[0].raw_value = None;
+        assert!(missing_raw.validate_retained_evidence().is_err());
+
+        let mut missing_published = valid.clone();
+        missing_published.measurements[0].value = None;
+        assert!(missing_published.validate_retained_evidence().is_err());
+
+        let mut nonfinite_raw = valid.clone();
+        nonfinite_raw.measurements[0].raw_value = Some(f64::NAN);
+        assert!(nonfinite_raw.validate_retained_evidence().is_err());
+
+        let mut nonfinite_limit = valid.clone();
+        nonfinite_limit.measurements[0].failure_limit = Some(f64::INFINITY);
+        assert!(nonfinite_limit.validate_retained_evidence().is_err());
+
+        let mut false_positive = valid.clone();
+        false_positive.measurements[0].failure_limit_exceeded = true;
+        false_positive.measurements[0].passed = false;
+        assert!(false_positive.validate_retained_evidence().is_err());
+
+        let mut false_negative = valid.clone();
+        false_negative.measurements[0].raw_value = Some(-4.0);
+        false_negative.measurements[0].passed = false;
+        assert!(false_negative.validate_retained_evidence().is_err());
+
+        let mut passed_after_exceeded = valid;
+        passed_after_exceeded.measurements[0].raw_value = Some(4.0);
+        passed_after_exceeded.measurements[0].failure_limit_exceeded = true;
+        assert!(passed_after_exceeded.validate_retained_evidence().is_err());
+    }
 
     fn floquet_certificate(problem_order: u64) -> FloquetSpectrumCertificateEvidence {
         FloquetSpectrumCertificateEvidence {

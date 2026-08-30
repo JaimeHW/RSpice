@@ -3834,8 +3834,15 @@ pub(super) fn parse_meas_command(
             ),
         });
     }
-    let (goal, tolerance, default_value, print_policy, minval) =
-        scan_meas_statement_options(stream, line_num, params)?;
+    let statement_options = scan_meas_statement_options(stream, line_num, params)?;
+    if analysis.ends_with("_CONT") && statement_options.fail_value.is_some() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "FAILVALUE is not supported for continuous .MEASURE mode {analysis}; continuous results require per-record verification semantics"
+            ),
+        });
+    }
 
     // Create the measurement type based on keyword
     let measure_type = match measure_type_key.as_str() {
@@ -3859,7 +3866,7 @@ pub(super) fn parse_meas_command(
                 targ,
                 from,
                 to,
-                minval,
+                minval: statement_options.minval,
             }
         }
         "PARAM" | "EQN" => {
@@ -4062,7 +4069,7 @@ pub(super) fn parse_meas_command(
                         from: options.from,
                         to: options.to,
                         td: options.td,
-                        minval,
+                        minval: statement_options.minval,
                     }
                 }
                 "DERIV" | "DERIVATIVE" => {
@@ -4075,7 +4082,7 @@ pub(super) fn parse_meas_command(
                         from: options.from,
                         to: options.to,
                         td: options.td,
-                        minval,
+                        minval: statement_options.minval,
                     }
                 }
                 "WHEN" => {
@@ -4097,7 +4104,7 @@ pub(super) fn parse_meas_command(
                         from,
                         to,
                         td,
-                        minval,
+                        minval: statement_options.minval,
                     }
                 }
                 _ => {
@@ -4114,10 +4121,11 @@ pub(super) fn parse_meas_command(
         name,
         measure_type,
         analysis,
-        goal,
-        tolerance,
-        default_value,
-        print_policy,
+        goal: statement_options.goal,
+        tolerance: statement_options.tolerance,
+        default_value: statement_options.default_value,
+        fail_value: statement_options.fail_value,
+        print_policy: statement_options.print_policy,
     })
 }
 
@@ -4861,49 +4869,67 @@ fn parse_measure_name(stream: &mut TokenStream, line_num: usize) -> Result<Strin
 /// Scan statement-wide Xyce measurement qualifiers without disturbing the
 /// type-specific parser. Xyce accepts these qualifiers in any order relative
 /// to measurement-specific qualifiers, and the last duplicate wins.
+struct MeasStatementOptions {
+    goal: Option<Value>,
+    tolerance: Option<Value>,
+    default_value: Option<Value>,
+    fail_value: Option<Value>,
+    print_policy: crate::netlist::measure::MeasurePrintPolicy,
+    minval: Value,
+}
+
 fn scan_meas_statement_options(
     stream: &TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<
-    (
-        Option<Value>,
-        Option<Value>,
-        Option<Value>,
-        crate::netlist::measure::MeasurePrintPolicy,
-        Value,
-    ),
-    ParseError,
-> {
+) -> Result<MeasStatementOptions, ParseError> {
     let mut stream = stream.clone();
-    let mut goal = None;
-    let mut tolerance = None;
-    let mut default_value = None;
-    let mut print_policy = crate::netlist::measure::MeasurePrintPolicy::All;
-    let mut minval = crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
+    let mut options = MeasStatementOptions {
+        goal: None,
+        tolerance: None,
+        default_value: None,
+        fail_value: None,
+        print_policy: crate::netlist::measure::MeasurePrintPolicy::All,
+        minval: crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL,
+    };
+    // The separator is optional for FAILVALUE, so top-level grammar context
+    // distinguishes it from a node or branch named `FAILVALUE` inside a probe.
+    let mut parenthesis_depth = 0usize;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        let base_assignment_ahead = matches!(stream.peek().kind, TokenKind::Ident(_))
-            && matches!(stream.peek_n(1).kind, TokenKind::Equals);
-        if base_assignment_ahead {
+        let statement_qualifier_ahead = parenthesis_depth == 0
+            && match &stream.peek().kind {
+                TokenKind::Ident(key) => {
+                    matches!(stream.peek_n(1).kind, TokenKind::Equals)
+                        || key.eq_ignore_ascii_case("FAILVALUE")
+                }
+                _ => false,
+            };
+        if statement_qualifier_ahead {
             if let Some(qualifier) =
                 consume_meas_statement_qualifier(&mut stream, line_num, params, true)?
             {
                 match qualifier {
                     ParsedMeasStatementQualifier::Numeric { key, value } => match key.as_str() {
-                        "GOAL" => goal = Some(value),
-                        "TOL" => tolerance = Some(value),
-                        "DEFAULT_VAL" => default_value = Some(value),
-                        "MINVAL" => minval = value,
+                        "GOAL" => options.goal = Some(value),
+                        "TOL" => options.tolerance = Some(value),
+                        "DEFAULT_VAL" => options.default_value = Some(value),
+                        "FAILVALUE" => options.fail_value = Some(value),
+                        "MINVAL" => options.minval = value,
                         _ => unreachable!(),
                     },
-                    ParsedMeasStatementQualifier::Print(policy) => print_policy = policy,
+                    ParsedMeasStatementQualifier::Print(policy) => options.print_policy = policy,
                 }
                 continue;
             }
         }
+        match stream.peek().kind {
+            TokenKind::LParen => parenthesis_depth += 1,
+            TokenKind::RParen => parenthesis_depth = parenthesis_depth.saturating_sub(1),
+            _ => {}
+        }
         stream.advance();
     }
-    Ok((goal, tolerance, default_value, print_policy, minval))
+    Ok(options)
 }
 
 enum ParsedMeasStatementQualifier {
@@ -4923,14 +4949,21 @@ fn consume_meas_statement_qualifier(
     let key = key.to_ascii_uppercase();
     if !matches!(
         key.as_str(),
-        "GOAL" | "TOL" | "DEFAULT_VAL" | "PRINT" | "MINVAL"
+        "GOAL" | "TOL" | "DEFAULT_VAL" | "FAILVALUE" | "PRINT" | "MINVAL"
     ) || key == "MINVAL" && !allow_minval
         || key == "TOL" && params.expression_dialect() == crate::config::ExpressionDialect::Xyce
     {
         return Ok(None);
     }
+    if key == "FAILVALUE" && params.expression_dialect() != crate::config::ExpressionDialect::Xyce {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".MEAS FAILVALUE is only supported in Xyce compatibility mode".to_string(),
+        });
+    }
     stream.advance();
-    if !stream.consume(&TokenKind::Equals) {
+    let has_equals = stream.consume(&TokenKind::Equals);
+    if key != "FAILVALUE" && !has_equals {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!("Expected '=' after {key} in .MEAS"),
@@ -7802,6 +7835,88 @@ mod tests {
         };
         assert_eq!(signal, "V(DEFAULT_VAL)");
         assert_eq!((*from, *to), (Some(0.25), Some(0.75)));
+    }
+
+    #[test]
+    fn xyce_measure_failvalue_is_typed_order_independent_and_last_wins() {
+        let netlist = Netlist::parse_with_options(
+            "typed Xyce FAILVALUE qualifier\n\
+             .param LIMIT=3\n\
+             V1 FAILVALUE 0 1\n\
+             .dc V1 0 1 1\n\
+             .measure dc sample AVG V(FAILVALUE) FROM=0 FaIlVaLuE +LIMIT DEFAULT_VAL=2 TO=1 FAILVALUE=-{LIMIT/2}\n\
+             .measure dc zero AVG V(FAILVALUE) FAILVALUE = 0\n\
+             .measure dc positive AVG V(FAILVALUE) FAILVALUE +LIMIT\n\
+             .end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce FAILVALUE forms parse");
+
+        assert_eq!(netlist.measurements[0].fail_value, Some(-1.5));
+        assert_eq!(netlist.measurements[0].default_value, Some(2.0));
+        let crate::netlist::measure::MeasureType::Avg { signal, from, to } =
+            &netlist.measurements[0].measure_type
+        else {
+            panic!("expected AVG measurement");
+        };
+        assert_eq!(signal, "V(FAILVALUE)");
+        assert_eq!((*from, *to), (Some(0.0), Some(1.0)));
+        assert_eq!(netlist.measurements[1].fail_value, Some(0.0));
+        assert_eq!(netlist.measurements[2].fail_value, Some(3.0));
+    }
+
+    #[test]
+    fn measure_failvalue_rejects_malformed_values_and_non_xyce_dialects() {
+        let xyce_options = crate::netlist::NetlistParseOptions {
+            expression_dialect: crate::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        };
+        for qualifier in [
+            "FAILVALUE",
+            "FAILVALUE=",
+            "FAILVALUE=UNKNOWN",
+            "FAILVALUE FROM=0",
+        ] {
+            let deck = format!(
+                "malformed FAILVALUE\nV1 out 0 1\n.tran 1n 2n\n.measure tran sample AVG V(out) {qualifier}\n.end\n"
+            );
+            Netlist::parse_with_options(&deck, xyce_options)
+                .expect_err("a missing or malformed FAILVALUE must fail parsing");
+        }
+
+        let ngspice_deck = "FAILVALUE is Xyce-specific\n\
+                            V1 out 0 1\n\
+                            .tran 1n 2n\n\
+                            .measure tran sample AVG V(out) FAILVALUE=1\n\
+                            .end\n";
+        let error = Netlist::parse(ngspice_deck)
+            .expect_err("ngspice compatibility must reject Xyce FAILVALUE");
+        assert!(error.to_string().contains("Xyce compatibility mode"));
+    }
+
+    #[test]
+    fn measure_failvalue_rejects_continuous_modes_without_per_record_semantics() {
+        let options = crate::netlist::NetlistParseOptions {
+            expression_dialect: crate::config::ExpressionDialect::Xyce,
+            ..Default::default()
+        };
+        for analysis in ["TRAN_CONT", "AC_CONT", "DC_CONT", "NOISE_CONT"] {
+            let deck = format!(
+                "continuous FAILVALUE requires per-record semantics\n\
+                 V1 out 0 1\n\
+                 .measure {analysis} sample FIND V(out) AT=1 FAILVALUE=2\n\
+                 .end\n"
+            );
+            let error = Netlist::parse_with_options(&deck, options)
+                .expect_err("continuous FAILVALUE must be rejected before execution");
+            let message = error.to_string();
+            assert!(message.contains("FAILVALUE"), "{analysis}: {message}");
+            assert!(message.contains("continuous"), "{analysis}: {message}");
+            assert!(message.contains(analysis), "{analysis}: {message}");
+        }
     }
 
     #[test]

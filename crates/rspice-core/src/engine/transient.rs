@@ -16,7 +16,7 @@ use crate::device::semiconductor::{
 use crate::engine::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::netlist::{
     AnalysisCommand, OutputAnalysisKind, OutputDirectiveKind, OutputSymbolKind, SaveSet,
-    SaveSignal, is_device_lead_current_accessor,
+    SaveSignal, is_device_lead_current_accessor, measure_output_dependencies,
 };
 use crate::numerics::integration::{
     BreakpointManager, BreakpointStepPolicy, LteEstimator, TimestepController,
@@ -2259,6 +2259,18 @@ impl Engine {
                             &dependency.operator.to_ascii_uppercase(),
                         )
                 })
+            })
+            || netlist.measurements.iter().any(|statement| {
+                OutputAnalysisKind::from_keyword(&statement.analysis)
+                    == Some(OutputAnalysisKind::Tran)
+                    && measure_output_dependencies(statement)
+                        .iter()
+                        .any(|dependency| {
+                            dependency.kind == OutputSymbolKind::Device
+                                && is_device_lead_current_accessor(
+                                    &dependency.operator.to_ascii_uppercase(),
+                                )
+                        })
             })
             || netlist.elements.iter().any(|element| {
                 matches!(
@@ -10838,6 +10850,128 @@ D1 D 0 DMOD
                 "{accessor} retained nonphysical R1 current {current:.12e}"
             );
         }
+    }
+
+    #[test]
+    fn measure_retention_is_independent_of_print_for_lead_bsrc_currents() {
+        let run = |print: bool| {
+            let print = if print {
+                ".PRINT TRAN {I(VS)-I(R1)} {I(B2)-I(R2)}\n"
+            } else {
+                ""
+            };
+            let source = format!(
+                "measurement-owned BSRC lead-current retention\n\
+                 VS 1 0 PWL(0 0 1n 1 2n 4)\n\
+                 R1 0 1 1\n\
+                 B2 2 0 V={{SQRT(V(1))}}\n\
+                 R2 0 2 1\n\
+                 .TRAN 1n 2n\n\
+                 {print}\
+                 .MEASURE TRAN max_source MAX {{ABS(I(VS)-I(R1))}}\n\
+                 .MEASURE TRAN rms_source RMS {{I(VS)-I(R1)}}\n\
+                 .MEASURE TRAN max_behavioral MAX {{ABS(I(B2)-I(R2))}}\n\
+                 .MEASURE TRAN rms_behavioral RMS {{I(B2)-I(R2)}}\n\
+                 .END\n"
+            );
+            let netlist = Netlist::parse_with_options(
+                &source,
+                crate::netlist::NetlistParseOptions {
+                    expression_dialect: crate::config::ExpressionDialect::Xyce,
+                    ..Default::default()
+                },
+            )
+            .expect("lead-BSRC measurement deck parses");
+            let result =
+                Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                    .run_tran(&netlist, 2.0e-9, 1.0e-9)
+                    .expect("lead-BSRC measurement transient runs");
+            let measurements = crate::analysis::evaluate_tran_measurements(&netlist, &result);
+            (result, measurements)
+        };
+
+        let (with_print, with_print_measurements) = run(true);
+        let (without_print, without_print_measurements) = run(false);
+        assert_eq!(without_print.time, with_print.time);
+        assert_eq!(without_print.node_names, with_print.node_names);
+        assert_eq!(without_print.voltages, with_print.voltages);
+        assert_eq!(without_print.branch_names, with_print.branch_names);
+        assert_eq!(without_print.branch_currents, with_print.branch_currents);
+        for branch in ["VS", "R1", "B2", "R2"] {
+            let waveform = without_print
+                .try_branch_current_waveform_named(branch)
+                .unwrap_or_else(|| panic!("measurement did not retain {branch} current"));
+            assert_eq!(waveform.len(), without_print.time.len());
+        }
+        assert_eq!(without_print_measurements.len(), 4);
+        assert_eq!(
+            without_print_measurements
+                .iter()
+                .map(|measurement| measurement.name.as_str())
+                .collect::<Vec<_>>(),
+            with_print_measurements
+                .iter()
+                .map(|measurement| measurement.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        for measurement in without_print_measurements {
+            assert!(measurement.passed, "{measurement:?}");
+            assert!(
+                measurement.value.is_some_and(|value| value.abs() <= 1.0e-8),
+                "{measurement:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parsed_measure_statement_directly_retains_its_device_lead_trace() {
+        let source = "measurement-owned device-lead retention\n\
+                      VC 0 C 5\n\
+                      VB 0 B 0.75\n\
+                      VE 0 E 0\n\
+                      VS 0 S 0\n\
+                      Q1 C B E S QMOD\n\
+                      .MODEL QMOD NPN LEVEL=1 IS=3e-14 BF=130 BR=1 \
+                      RB=45 RBM=45 RC=2 RE=1 CJE=0 CJC=0 CJS=0 TF=0 TR=0\n\
+                      .TRAN 0.5n 1n\n\
+                      .MEASURE TRAN collector MAX {ABS(IC(Q1)-I(VC))}\n\
+                      .END\n";
+        let mut netlist = Netlist::parse_with_options(
+            source,
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("device-lead measurement deck parses");
+
+        // A frontend may insert or preserve the typed statement without the
+        // parser's provenance sidecar. Capture planning must still derive its
+        // dependencies from MeasureStatement itself.
+        netlist
+            .output_requests
+            .retain(|request| request.directive != OutputDirectiveKind::Measure);
+        assert!(netlist.output_requests.is_empty());
+        assert!(Engine::should_record_transient_device_op_traces(&netlist));
+
+        let result =
+            Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce))
+                .run_tran(&netlist, 1.0e-9, 0.5e-9)
+                .expect("device-lead measurement transient runs");
+        let collector = result
+            .try_device_op_waveform_named("Q1", "IC")
+            .expect("IC(Q1) trace retained without PRINT/SAVE or output sidecar");
+        assert_eq!(collector.len(), result.time.len());
+        let measurements = crate::analysis::evaluate_tran_measurements(&netlist, &result);
+        assert_eq!(measurements.len(), 1);
+        assert!(measurements[0].passed, "{:?}", measurements[0]);
+        assert!(
+            measurements[0]
+                .value
+                .is_some_and(|value| value.abs() <= 1.0e-6),
+            "{:?}",
+            measurements[0]
+        );
     }
 
     /// An explicitly configured `max_timestep` must cap the accepted step
