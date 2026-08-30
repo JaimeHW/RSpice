@@ -965,6 +965,15 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     }
 }
 
+/// External helper for native Z-domain sampled-data filter derivative
+/// evaluation.
+///
+/// # Safety
+/// When non-null, `ctx` must point to a live [`EvalContext`] whose
+/// `zi_filters` allocation contains `zi_filters_len` initialized entries and
+/// remains valid for the call. When non-null, `operands` must point to the
+/// contiguous `f64` operand sequence described by `descriptor`. No other code
+/// may access the selected Zi filter while this function mutates it.
 #[unsafe(export_name = "rspice_zi_derivative_native")]
 pub unsafe extern "C" fn rspice_zi_derivative_native(
     operands: *const f64,
