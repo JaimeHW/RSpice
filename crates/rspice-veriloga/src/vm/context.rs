@@ -1040,13 +1040,15 @@ mod tests {
 
     #[test]
     fn zi_multi_filter_commit_is_atomic_without_cloning_histories() {
-        let mut context = VmContext::default();
-        context.analysis_type = 2;
-        context.time = 0.0;
-        context.zi_filters = vec![
-            ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap(),
-            ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap(),
-        ];
+        let mut context = VmContext {
+            analysis_type: 2,
+            time: 0.0,
+            zi_filters: vec![
+                ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap(),
+                ZiFilter::new(vec![1.0], vec![1.0], 1.0).unwrap(),
+            ],
+            ..VmContext::default()
+        };
         context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
         context.zi_filters[1].eval(3.0, 0.0, true).unwrap();
         context.zi_filters[1].begin_evaluation();
@@ -1066,10 +1068,12 @@ mod tests {
 
     #[test]
     fn duplicate_zi_acceptance_leaves_every_vm_history_unchanged() {
-        let mut context = VmContext::default();
-        context.analysis_type = 2;
-        context.time = 0.0;
-        context.zi_filters = vec![ZiFilter::new(vec![1.0, 0.25], vec![1.0, -0.5], 1.0).unwrap()];
+        let mut context = VmContext {
+            analysis_type: 2,
+            time: 0.0,
+            zi_filters: vec![ZiFilter::new(vec![1.0, 0.25], vec![1.0, -0.5], 1.0).unwrap()],
+            ..VmContext::default()
+        };
         context.zi_filters[0].eval(2.0, 0.0, true).unwrap();
         context.advance_state().unwrap();
 
@@ -1111,10 +1115,12 @@ mod tests {
 
     #[test]
     fn dormant_zi_slot_neither_schedules_nor_advances_placeholder_clock() {
-        let mut context = VmContext::default();
-        context.analysis_type = 2;
-        context.time = 0.0;
-        context.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 0.25).unwrap()];
+        let mut context = VmContext {
+            analysis_type: 2,
+            time: 0.0,
+            zi_filters: vec![ZiFilter::new(vec![1.0], vec![1.0], 0.25).unwrap()],
+            ..VmContext::default()
+        };
 
         assert_eq!(context.zi_filter_step_bound().unwrap(), None);
         context.advance_state().unwrap();
@@ -1132,9 +1138,11 @@ mod tests {
 
     #[test]
     fn accepted_checkpoint_refuses_every_speculative_operator_candidate() {
-        let mut context = VmContext::default();
-        context.time = 0.0;
-        context.analysis_type = 2;
+        let mut context = VmContext {
+            time: 0.0,
+            analysis_type: 2,
+            ..VmContext::default()
+        };
         context.allocate_delay_buffers(1);
         context.delay_buffers[0].eval(0.0, 1.0, 0.25);
         let error = context
@@ -1153,21 +1161,27 @@ mod tests {
 
     #[test]
     fn zi_iir_checkpoint_resume_is_bit_identical_between_and_on_sample_edges() {
-        let mut original = VmContext::default();
-        original.analysis_type = 2;
-        original.zi_filters =
-            vec![ZiFilter::new_with_timing(vec![0.5, 0.25], vec![1.0, -0.5], 1.0, 0.0).unwrap()];
-        original.time = 0.0;
+        let mut original = VmContext {
+            analysis_type: 2,
+            zi_filters: vec![
+                ZiFilter::new_with_timing(vec![0.5, 0.25], vec![1.0, -0.5], 1.0, 0.0).unwrap(),
+            ],
+            time: 0.0,
+            ..VmContext::default()
+        };
         original.zi_filters[0]
             .eval_with_transition(2.0, 0.0, true, 0.5)
             .unwrap();
         original.advance_state().unwrap();
 
         let between_checkpoint = original.accepted_checkpoint().unwrap();
-        let mut resumed = VmContext::default();
-        resumed.analysis_type = 2;
-        resumed.zi_filters =
-            vec![ZiFilter::new_with_timing(vec![0.5, 0.25], vec![1.0, -0.5], 1.0, 0.0).unwrap()];
+        let mut resumed = VmContext {
+            analysis_type: 2,
+            zi_filters: vec![
+                ZiFilter::new_with_timing(vec![0.5, 0.25], vec![1.0, -0.5], 1.0, 0.0).unwrap(),
+            ],
+            ..VmContext::default()
+        };
         resumed
             .validate_accepted_checkpoint(&between_checkpoint)
             .unwrap();
@@ -1204,9 +1218,11 @@ mod tests {
 
     #[test]
     fn transition_ramp_and_sub_attosecond_bound_survive_accepted_snapshot() {
-        let mut original = VmContext::default();
-        original.analysis_type = 2;
-        original.time = 0.0;
+        let mut original = VmContext {
+            analysis_type: 2,
+            time: 0.0,
+            ..VmContext::default()
+        };
         original.allocate_transition_filters(1);
         original.transition_filters[0].eval(1.0, 0.0, 0.0, 1.0, 1.0);
         original.advance_state().unwrap();
@@ -1216,8 +1232,10 @@ mod tests {
         assert_eq!(original.zi_filter_step_bound().unwrap(), Some(5.0e-19));
 
         let checkpoint = original.accepted_checkpoint().unwrap();
-        let mut resumed = VmContext::default();
-        resumed.analysis_type = 2;
+        let mut resumed = VmContext {
+            analysis_type: 2,
+            ..VmContext::default()
+        };
         resumed.allocate_transition_filters(1);
         resumed.zi_filters = vec![ZiFilter::new(vec![1.0], vec![1.0], 5.0e-19).unwrap()];
         resumed.validate_accepted_checkpoint(&checkpoint).unwrap();
