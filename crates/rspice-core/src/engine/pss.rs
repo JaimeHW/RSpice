@@ -1742,7 +1742,8 @@ impl Engine {
             &circuit,
             crate::engine::TransientStartupMode::OperatingPoint,
             Some(&lte_estimator),
-        );
+        )
+        .map_err(SimulationError::Circuit)?;
 
         Ok((
             analysis,

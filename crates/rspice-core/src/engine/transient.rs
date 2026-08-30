@@ -2293,7 +2293,8 @@ impl Engine {
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
             Some(lte_estimator),
-        );
+        )
+        .map_err(SimulationError::Circuit)?;
         let retained_checkpoint_values = checkpoint.retained_value_count().saturating_add(1);
         self.ensure_result_values(
             retained_result_values
@@ -2407,7 +2408,8 @@ impl Engine {
                 &[],
                 0,
                 None,
-            );
+            )
+            .map_err(SimulationError::Circuit)?;
             if scheduled_checkpoint_times.iter().any(|time| *time != 0.0) {
                 return Err(SimulationError::Circuit(
                     "a topology-free transient cannot produce positive-time scheduled checkpoints"
@@ -2481,6 +2483,12 @@ impl Engine {
         // Establish transient lifecycle state before the t=0 operating point.
         // UIC has no t=0 solve, so its first candidate carries the initial flag
         // below instead.
+        #[cfg(feature = "veriloga")]
+        if resume.is_none() {
+            circuit
+                .begin_veriloga_analysis(2)
+                .map_err(SimulationError::Circuit)?;
+        }
         #[cfg(feature = "veriloga")]
         circuit
             .prepare_veriloga_timepoint(
@@ -3068,6 +3076,26 @@ impl Engine {
             uic_requested,
             &derived_branch_currents,
         )?;
+        // The operating-point and UIC startup paths both need one explicit,
+        // final t=0 Verilog-A pass against the solution that will actually be
+        // reported. Commit it exactly once so sampled/event operators advance
+        // their origin-time state before the first positive timestep.
+        #[cfg(feature = "veriloga")]
+        if resume.is_none() && circuit.has_veriloga_devices() {
+            circuit
+                .evaluate_veriloga_timepoint(&solution)
+                .map_err(SimulationError::Circuit)?;
+            circuit
+                .accept_veriloga_timestep()
+                .map_err(SimulationError::Circuit)?;
+            if let Some(bound) = circuit
+                .veriloga_timestep_bound()
+                .map_err(SimulationError::Circuit)?
+                && bound < timestep.dt()
+            {
+                timestep.force_step(bound.min(max_step));
+            }
+        }
         for (trace, &retain) in branch_currents
             .iter_mut()
             .zip(&capture_plan.branch_currents)
@@ -3362,6 +3390,15 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
+            #[cfg(feature = "veriloga")]
+            if circuit.has_veriloga_devices()
+                && let Some(bound) = circuit
+                    .veriloga_timestep_bound()
+                    .map_err(SimulationError::Circuit)?
+                && bound < timestep.dt()
+            {
+                timestep.force_step(bound.min(max_step));
+            }
             // The first resumed sample represents the accepted checkpoint
             // state. A PEM store can deliberately retain its last finite
             // resistance while the instantaneous conductance is zero, so its
@@ -6679,7 +6716,12 @@ impl Engine {
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
-                        circuit.accept_veriloga_timestep();
+                        circuit
+                            .evaluate_veriloga_timepoint(&new_solution)
+                            .map_err(SimulationError::Circuit)?;
+                        circuit
+                            .accept_veriloga_timestep()
+                            .map_err(SimulationError::Circuit)?;
                     }
                     #[cfg(feature = "veriloga-builtins-base")]
                     if circuit.has_generated_veriloga_devices() {
@@ -7035,7 +7077,12 @@ impl Engine {
             }
             #[cfg(feature = "veriloga")]
             let veriloga_discontinuity = if circuit.has_veriloga_devices() {
-                circuit.accept_veriloga_timestep()
+                circuit
+                    .evaluate_veriloga_timepoint(&new_solution)
+                    .map_err(SimulationError::Circuit)?;
+                circuit
+                    .accept_veriloga_timestep()
+                    .map_err(SimulationError::Circuit)?
             } else {
                 false
             };
@@ -7228,8 +7275,10 @@ impl Engine {
             // breakpoint so the corner resolves sharply
             #[cfg(feature = "veriloga")]
             if circuit.has_veriloga_devices() {
-                if let Some(bound) = circuit.veriloga_timestep_bound()
-                    && bound + 1e-18 < timestep.dt()
+                if let Some(bound) = circuit
+                    .veriloga_timestep_bound()
+                    .map_err(SimulationError::Circuit)?
+                    && bound < timestep.dt()
                 {
                     timestep.force_step(bound.min(max_step));
                 }
@@ -7395,7 +7444,8 @@ impl Engine {
             &pending_dynamic_tline_breakpoints,
             dynamic_tline_breakpoints_added,
             Some(&lte_estimator),
-        );
+        )
+        .map_err(SimulationError::Circuit)?;
         self.ensure_result_values(
             retained_result_values
                 .saturating_add(retained_scheduled_checkpoint_values)

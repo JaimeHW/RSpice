@@ -38,6 +38,7 @@ pub use rspice_veriloga::{
 
     // Device types
     device::VerilogADevice,
+    device::VerilogADeviceCheckpoint,
     error::CompileError,
 
     // VM context for advanced usage
@@ -167,6 +168,71 @@ impl VerilogADevices {
         self.devices.iter_mut()
     }
 
+    pub(crate) fn checkpoint_states(&self) -> Result<Vec<VerilogADeviceCheckpoint>, String> {
+        self.devices
+            .iter()
+            .map(|device| {
+                device.checkpoint_state().map_err(|error| {
+                    format!(
+                        "Verilog-A device '{}' checkpoint capture failed: {error}",
+                        device.name
+                    )
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn validate_checkpoint_states(
+        &self,
+        states: &[VerilogADeviceCheckpoint],
+    ) -> Result<(), String> {
+        if states.len() != self.devices.len() {
+            return Err(format!(
+                "runtime Verilog-A checkpoint shape mismatch: captured {}, circuit has {}",
+                states.len(),
+                self.devices.len()
+            ));
+        }
+        for (index, (device, state)) in self.devices.iter().zip(states).enumerate() {
+            device.validate_checkpoint_state(state).map_err(|error| {
+                format!(
+                    "runtime Verilog-A checkpoint instance {index} ('{}') is invalid: {error}",
+                    device.name
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_checkpoint_states(
+        &mut self,
+        states: &[VerilogADeviceCheckpoint],
+    ) -> Result<(), String> {
+        self.validate_checkpoint_states(states)?;
+        for (device, state) in self.devices.iter_mut().zip(states) {
+            device.apply_validated_checkpoint_state(state);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_timestep_acceptance(&self) -> Result<(), String> {
+        for device in &self.devices {
+            device.validate_advance_state().map_err(|error| {
+                format!(
+                    "Verilog-A device '{}' timestep acceptance failed: {error}",
+                    device.name
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_validated_timestep_acceptance(&mut self) {
+        for device in &mut self.devices {
+            device.apply_validated_advance_state();
+        }
+    }
+
     /// Set temperature for all devices
     pub fn set_temperature(&mut self, temp_k: Value) {
         for device in &mut self.devices {
@@ -223,5 +289,59 @@ impl VerilogADevices {
         for device in &mut self.devices {
             device.remap_circuit_nodes(&mut remap);
         }
+    }
+}
+
+#[cfg(all(test, feature = "veriloga", not(feature = "veriloga-native")))]
+mod checkpoint_tests {
+    use super::{Compiler, VerilogADevice, VerilogADevices};
+
+    #[test]
+    fn multi_device_acceptance_validates_all_before_mutating_any_instance() {
+        let source = r#"
+`include "disciplines.vams"
+module atomic_zi(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ zi_nd(V(p, n), {1.0}, {1.0}, 1.0e-6, 0.0);
+endmodule
+"#;
+        let model = Compiler::default()
+            .compile(source)
+            .expect("compile atomic Zi fixture");
+        let mut devices = VerilogADevices::new();
+        devices.add(VerilogADevice::try_new("x1", model.clone(), &[1, 0]).unwrap());
+        devices.add(VerilogADevice::try_new("x2", model, &[1, 0]).unwrap());
+        for device in devices.iter_mut() {
+            device.try_set_analysis_type(2).unwrap();
+            device.try_set_time(0.0).unwrap();
+            device.try_set_timestep(0.0).unwrap();
+            device
+                .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+                .unwrap();
+        }
+        devices.validate_timestep_acceptance().unwrap();
+        devices.apply_validated_timestep_acceptance();
+
+        for device in devices.iter_mut() {
+            device.try_set_time(0.5e-6).unwrap();
+            device.try_set_timestep(0.5e-6).unwrap();
+        }
+        devices
+            .get_mut(0)
+            .unwrap()
+            .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+            .unwrap();
+        assert!(
+            devices.validate_timestep_acceptance().is_err(),
+            "the second active Zi site was not evaluated at the candidate time"
+        );
+
+        let first = devices.get_mut(0).unwrap();
+        first.try_set_time(0.25e-6).unwrap();
+        first.try_set_timestep(0.25e-6).unwrap();
+        first
+            .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
+            .expect("failed validation must leave the first device accepted at t=0");
     }
 }

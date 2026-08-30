@@ -23,6 +23,8 @@
 
 use crate::Value;
 use crate::circuit::CircuitData;
+#[cfg(feature = "veriloga")]
+use crate::device::veriloga::VerilogADeviceCheckpoint;
 use crate::device::veriloga_builtins::{
     GENERATED_PERSISTENT_STATE_VERSION, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
@@ -44,12 +46,11 @@ use super::TransientStartupMode;
 
 /// Format version written to and required from checkpoint files.
 ///
-/// Version 14 adds validated scalar lossless transmission-line history,
-/// pending dynamic line arrivals, the per-run maximum-step contract, and a
-/// collision-resistant authored-restart compatibility identity. Earlier files
-/// remain readable, but fail closed for these capabilities because inventing
-/// delayed waves or authorizing a changed trajectory would be unsafe.
-const FORMAT_VERSION: u32 = 14;
+/// Version 15 adds accepted runtime-compiled Verilog-A VM/operator state.
+/// Earlier files remain readable, but fail closed when the resumed circuit
+/// contains runtime-compiled Verilog-A because inventing operator history is
+/// unsafe.
+const FORMAT_VERSION: u32 = 15;
 
 const PACKED_MAGIC: &[u8; 16] = b"RSPICE-CPACK\0\0\0\0";
 const PACKED_ENVELOPE_VERSION: u32 = 1;
@@ -140,6 +141,9 @@ pub struct TransientCheckpoint {
     xspice_instance_states: Vec<XspiceInstanceCheckpoint>,
     generated_veriloga_state_available: bool,
     generated_veriloga_instance_states: Vec<GeneratedVerilogAInstanceCheckpoint>,
+    runtime_veriloga_state_available: bool,
+    #[cfg(feature = "veriloga")]
+    runtime_veriloga_instance_states: Vec<VerilogADeviceCheckpoint>,
 }
 
 /// Stable legacy fingerprint of the netlist identity (FNV-1a over source text
@@ -1336,6 +1340,81 @@ fn read_generated_veriloga_states(
     Ok(states)
 }
 
+#[cfg(feature = "veriloga")]
+fn read_runtime_veriloga_states(
+    lines: &mut CheckpointLines<'_>,
+) -> Result<Vec<VerilogADeviceCheckpoint>, String> {
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
+    let count = parse_count_header(header, "runtime_veriloga_states")?;
+    let mut states = allocate_checkpoint_rows(lines, count, "runtime_veriloga_states")?;
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'runtime_veriloga_states' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("runtime_veriloga_state") {
+            return Err(format!(
+                "malformed runtime Verilog-A state header: '{line}'"
+            ));
+        }
+        let instance = fields
+            .next()
+            .ok_or_else(|| format!("runtime state row {row} is missing instance name"))?;
+        let model = fields
+            .next()
+            .ok_or_else(|| format!("runtime state row {row} is missing model name"))?;
+        let source = fields
+            .next()
+            .ok_or_else(|| format!("runtime state row {row} is missing source digest"))?;
+        let shape = fields
+            .next()
+            .ok_or_else(|| format!("runtime state row {row} is missing shape identity"))?;
+        let state_version = fields
+            .next()
+            .ok_or_else(|| format!("runtime state row {row} is missing state version"))?
+            .parse::<u32>()
+            .map_err(|_| format!("runtime state row {row} has invalid state version"))?;
+        if let Some(extra) = fields.next() {
+            return Err(format!("runtime state row {row}: extra field '{extra}'"));
+        }
+        let words_header = lines
+            .next()
+            .ok_or_else(|| format!("runtime state row {row} is missing its payload"))?;
+        let word_count = parse_count_header(words_header, "runtime_veriloga_words")?;
+        let mut words = allocate_checkpoint_rows(lines, word_count, "runtime_veriloga_words")?;
+        for word_index in 0..word_count {
+            let word_line = lines.next().ok_or_else(|| {
+                format!("runtime state row {row} payload truncated at word {word_index}")
+            })?;
+            let word = u64::from_str_radix(word_line.trim(), 16).map_err(|_| {
+                format!("runtime state row {row} payload word {word_index} is invalid")
+            })?;
+            words.push(word);
+        }
+        let state = VerilogADeviceCheckpoint::from_words(
+            instance.into(),
+            model.into(),
+            if source == "-" {
+                "".into()
+            } else {
+                source.into()
+            },
+            shape.into(),
+            &words,
+        )?;
+        if state.state_version != state_version {
+            return Err(format!(
+                "runtime state row {row} header version {state_version} disagrees with payload version {}",
+                state.state_version
+            ));
+        }
+        states.push(state);
+    }
+    Ok(states)
+}
+
 impl TransientCheckpoint {
     fn validate_numeric_state(&self) -> Result<(), String> {
         if !self.time.is_finite() || self.time < 0.0 {
@@ -1485,6 +1564,15 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
+        #[cfg(feature = "veriloga")]
+        if !self.runtime_veriloga_state_available
+            && !self.runtime_veriloga_instance_states.is_empty()
+        {
+            return Err(
+                "runtime Verilog-A checkpoint state is present without availability provenance"
+                    .into(),
+            );
+        }
         if !self.tline_state_available && !self.tline_states.is_empty() {
             return Err(
                 "transmission-line checkpoint state is present without availability provenance"
@@ -1542,6 +1630,33 @@ impl TransientCheckpoint {
                 ));
             }
         }
+        #[cfg(feature = "veriloga")]
+        for (index, instance) in self.runtime_veriloga_instance_states.iter().enumerate() {
+            let lower_hex = |value: &str| {
+                value.len() == 64
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            };
+            if instance.instance_name.is_empty()
+                || instance.instance_name.chars().any(char::is_whitespace)
+                || instance.model_name.is_empty()
+                || instance.model_name.chars().any(char::is_whitespace)
+                || instance.source_digest.chars().any(char::is_whitespace)
+                || !lower_hex(instance.shape_identity.as_str())
+                || instance.accepted.time.to_bits() != self.time.to_bits()
+            {
+                return Err(format!(
+                    "runtime Verilog-A checkpoint instance {index} has invalid provenance or accepted time"
+                ));
+            }
+            if instance.state_version != rspice_veriloga::device::RUNTIME_CHECKPOINT_STATE_VERSION {
+                return Err(format!(
+                    "runtime Verilog-A checkpoint instance {index} uses unsupported state version {}",
+                    instance.state_version
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -1556,7 +1671,7 @@ impl TransientCheckpoint {
         circuit: &CircuitData,
         startup_mode: TransientStartupMode,
         lte_estimator: Option<&LteEstimator>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         Self::capture_with_restart_identity(
             fingerprint,
             netlist_identity,
@@ -1587,7 +1702,7 @@ impl TransientCheckpoint {
         pending_tline_arrivals: &[Value],
         dynamic_tline_breakpoints_added: usize,
         lte_estimator: Option<&LteEstimator>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let mut tline_states = Vec::with_capacity(circuit.tlines.len());
         let mut tline_resume_blockers = Vec::new();
         for line in &circuit.tlines {
@@ -1629,6 +1744,9 @@ impl TransientCheckpoint {
             );
         }
 
+        #[cfg(feature = "veriloga")]
+        let runtime_veriloga_instance_states = circuit.runtime_veriloga_checkpoint_states()?;
+
         let (lte_signal_global_reference, lte_signal_local_reference) = lte_estimator
             .map(LteEstimator::signal_reference_snapshot)
             .map_or((0.0, Vec::new()), |(global, local)| {
@@ -1642,7 +1760,7 @@ impl TransientCheckpoint {
         pending_tline_arrivals.sort_by(Value::total_cmp);
         pending_tline_arrivals.dedup_by(|left, right| left.to_bits() == right.to_bits());
 
-        Self {
+        Ok(Self {
             time,
             solution: solution.to_vec(),
             netlist_fingerprint: fingerprint,
@@ -1681,7 +1799,10 @@ impl TransientCheckpoint {
             xspice_instance_states,
             generated_veriloga_state_available: true,
             generated_veriloga_instance_states: circuit.generated_veriloga_checkpoint_states(),
-        }
+            runtime_veriloga_state_available: true,
+            #[cfg(feature = "veriloga")]
+            runtime_veriloga_instance_states,
+        })
     }
 
     /// Inject the captured reactive-state histories into a freshly built
@@ -1697,6 +1818,11 @@ impl TransientCheckpoint {
         circuit.validate_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
+        )?;
+        #[cfg(feature = "veriloga")]
+        circuit.validate_runtime_veriloga_checkpoint_states(
+            &self.runtime_veriloga_instance_states,
+            self.runtime_veriloga_state_available,
         )?;
         if !self.tline_resume_blockers.is_empty() {
             return Err(format!(
@@ -1866,6 +1992,11 @@ impl TransientCheckpoint {
         circuit.restore_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
+        )?;
+        #[cfg(feature = "veriloga")]
+        circuit.restore_runtime_veriloga_checkpoint_states(
+            &self.runtime_veriloga_instance_states,
+            self.runtime_veriloga_state_available,
         )?;
         circuit.tlines = restored_tlines;
         Ok(())
@@ -2138,6 +2269,10 @@ impl TransientCheckpoint {
                 .saturating_add(state.limiter_anchor.len())
                 .saturating_add(state.limiter_initialized.len());
         }
+        #[cfg(feature = "veriloga")]
+        for instance in &self.runtime_veriloga_instance_states {
+            count = count.saturating_add(instance.retained_value_count());
+        }
         count
     }
 
@@ -2401,6 +2536,39 @@ impl TransientCheckpoint {
                 ));
             }
         }
+        out.push_str(&format!(
+            "runtime_veriloga_state_available {}\n",
+            u8::from(self.runtime_veriloga_state_available)
+        ));
+        #[cfg(feature = "veriloga")]
+        {
+            out.push_str(&format!(
+                "runtime_veriloga_states {}\n",
+                self.runtime_veriloga_instance_states.len()
+            ));
+            for instance in &self.runtime_veriloga_instance_states {
+                let source = if instance.source_digest.is_empty() {
+                    "-"
+                } else {
+                    instance.source_digest.as_str()
+                };
+                out.push_str(&format!(
+                    "runtime_veriloga_state {} {} {} {} {}\n",
+                    instance.instance_name,
+                    instance.model_name,
+                    source,
+                    instance.shape_identity,
+                    instance.state_version
+                ));
+                let words = instance.to_words();
+                out.push_str(&format!("runtime_veriloga_words {}\n", words.len()));
+                for word in words {
+                    out.push_str(&format!("{word:016x}\n"));
+                }
+            }
+        }
+        #[cfg(not(feature = "veriloga"))]
+        out.push_str("runtime_veriloga_states 0\n");
         out
     }
 
@@ -2776,6 +2944,49 @@ impl TransientCheckpoint {
             } else {
                 (false, Vec::new())
             };
+        let runtime_veriloga_state_available = if version >= 15 {
+            let availability_line = lines
+                .next()
+                .ok_or_else(|| "missing 'runtime_veriloga_state_available' line".to_string())?;
+            let mut fields = availability_line.split_whitespace();
+            if fields.next() != Some("runtime_veriloga_state_available") {
+                return Err(format!(
+                    "malformed runtime Verilog-A availability line: '{availability_line}'"
+                ));
+            }
+            let available = fields
+                .next()
+                .ok_or_else(|| {
+                    "runtime Verilog-A availability line is missing its boolean".to_string()
+                })
+                .and_then(|field| parse_checkpoint_bool(field, "runtime Verilog-A availability"))?;
+            if let Some(extra) = fields.next() {
+                return Err(format!(
+                    "runtime Verilog-A availability line has extra field '{extra}'"
+                ));
+            }
+            available
+        } else {
+            false
+        };
+        #[cfg(feature = "veriloga")]
+        let runtime_veriloga_instance_states = if version >= 15 {
+            read_runtime_veriloga_states(&mut lines)?
+        } else {
+            Vec::new()
+        };
+        #[cfg(not(feature = "veriloga"))]
+        if version >= 15 {
+            let header = lines
+                .next()
+                .ok_or_else(|| "missing 'runtime_veriloga_states' section".to_string())?;
+            let count = parse_count_header(header, "runtime_veriloga_states")?;
+            if count != 0 {
+                return Err(format!(
+                    "checkpoint contains {count} runtime Verilog-A states, but this build cannot decode them"
+                ));
+            }
+        }
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -2817,6 +3028,9 @@ impl TransientCheckpoint {
             xspice_instance_states,
             generated_veriloga_state_available,
             generated_veriloga_instance_states,
+            runtime_veriloga_state_available,
+            #[cfg(feature = "veriloga")]
+            runtime_veriloga_instance_states,
         };
         checkpoint.validate_numeric_state()?;
         Ok(checkpoint)
@@ -3338,6 +3552,9 @@ mod tests {
                     limiter_initialized: vec![true],
                 },
             }],
+            runtime_veriloga_state_available: true,
+            #[cfg(feature = "veriloga")]
+            runtime_veriloga_instance_states: Vec::new(),
         }
     }
 
@@ -3444,6 +3661,19 @@ mod tests {
             }
             if version < 7 && line.starts_with("generated_veriloga_state_available ") {
                 break;
+            }
+            if version < 15 && line.starts_with("runtime_veriloga_state_available ") {
+                continue;
+            }
+            if version < 15 && line.starts_with("runtime_veriloga_states ") {
+                let count = line
+                    .split_whitespace()
+                    .nth(1)
+                    .expect("runtime Verilog-A checkpoint count")
+                    .parse::<usize>()
+                    .expect("numeric runtime Verilog-A checkpoint count");
+                assert_eq!(count, 0, "legacy fixture has no runtime Verilog-A state");
+                continue;
             }
             if version < 6 && line.starts_with("lte_reference_mode ") {
                 continue;
@@ -3620,6 +3850,10 @@ mod tests {
         let legacy = TransientCheckpoint::from_text(&legacy_text(&checkpoint, 11))
             .expect("version-eleven checkpoint remains parseable for diagnostics");
         assert_eq!(legacy.startup_mode(), None);
+        assert!(
+            !legacy.runtime_veriloga_state_available,
+            "legacy parsing must never invent runtime Verilog-A state provenance"
+        );
     }
 
     #[test]
@@ -3692,7 +3926,8 @@ mod tests {
             &[],
             0,
             None,
-        );
+        )
+        .expect("accepted checkpoint captures");
         let restored = TransientCheckpoint::from_text(&checkpoint.to_text())
             .expect("PEM store checkpoint parses");
         let mut resumed_circuit = engine

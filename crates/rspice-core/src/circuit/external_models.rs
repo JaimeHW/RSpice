@@ -1844,6 +1844,47 @@ impl CircuitData {
         }
     }
 
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn runtime_veriloga_checkpoint_states(
+        &self,
+    ) -> Result<Vec<crate::device::veriloga::VerilogADeviceCheckpoint>, String> {
+        self.veriloga_devices.checkpoint_states()
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn validate_runtime_veriloga_checkpoint_states(
+        &self,
+        states: &[crate::device::veriloga::VerilogADeviceCheckpoint],
+        state_available: bool,
+    ) -> Result<(), String> {
+        if !state_available {
+            if !states.is_empty() {
+                return Err(
+                    "runtime Verilog-A checkpoint state is present without availability provenance"
+                        .into(),
+                );
+            }
+            if !self.veriloga_devices.is_empty() {
+                return Err(
+                    "legacy transient checkpoint does not contain runtime-compiled Verilog-A accepted state; re-run the transient from t=0"
+                        .into(),
+                );
+            }
+            return Ok(());
+        }
+        self.veriloga_devices.validate_checkpoint_states(states)
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn restore_runtime_veriloga_checkpoint_states(
+        &mut self,
+        states: &[crate::device::veriloga::VerilogADeviceCheckpoint],
+        state_available: bool,
+    ) -> Result<(), String> {
+        self.validate_runtime_veriloga_checkpoint_states(states, state_available)?;
+        self.veriloga_devices.restore_checkpoint_states(states)
+    }
+
     pub(crate) fn restore_generated_veriloga_checkpoint_states(
         &mut self,
         states: &[crate::device::veriloga_builtins::GeneratedVerilogAInstanceCheckpoint],
@@ -1904,6 +1945,36 @@ impl CircuitData {
     ///
     /// Sets the simulation time, integration timestep, and analysis type so
     /// ddt/idt and event operators see transient semantics.
+    #[cfg(feature = "veriloga")]
+    pub fn begin_veriloga_analysis(&mut self, analysis: u8) -> Result<(), String> {
+        for device in self.veriloga_devices.iter_mut() {
+            let instance = device.name.clone();
+            device.try_begin_analysis(analysis).map_err(|error| {
+                format!("Verilog-A device '{instance}' analysis begin failed: {error}")
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Evaluate every runtime-compiled Verilog-A device against one final
+    /// solver solution without adding another matrix/RHS contribution. This
+    /// refreshes ordered assignments and speculative state immediately before
+    /// the timepoint is accepted.
+    #[cfg(feature = "veriloga")]
+    pub fn evaluate_veriloga_timepoint(&mut self, solution: &[Value]) -> Result<(), String> {
+        for device in self.veriloga_devices.iter_mut() {
+            let instance = device.name.clone();
+            device
+                .try_stamp(solution, |_, _, _| {}, |_, _| {})
+                .map_err(|error| {
+                    format!(
+                        "Verilog-A device '{instance}' final timepoint evaluation failed: {error}"
+                    )
+                })?;
+        }
+        Ok(())
+    }
+
     #[cfg(feature = "veriloga")]
     pub fn prepare_veriloga_timepoint(
         &mut self,
@@ -1966,23 +2037,32 @@ impl CircuitData {
     /// stepper can place a fine restart without a level-true region
     /// pinning tiny steps forever.
     #[cfg(feature = "veriloga")]
-    pub fn accept_veriloga_timestep(&mut self) -> bool {
-        let mut discontinuity = false;
-        for device in self.veriloga_devices.iter_mut() {
-            discontinuity |= device.discontinuity_rising();
-            device.advance_state();
-        }
-        discontinuity
+    pub fn accept_veriloga_timestep(&mut self) -> Result<bool, String> {
+        self.veriloga_devices.validate_timestep_acceptance()?;
+        let discontinuity = self
+            .veriloga_devices
+            .iter()
+            .any(rspice_veriloga::device::VerilogADevice::discontinuity_rising);
+        self.veriloga_devices.apply_validated_timestep_acceptance();
+        Ok(discontinuity)
     }
 
     /// Tightest `$bound_step` request across Verilog-A devices at the
     /// latest evaluation (None when nothing bounds the next step)
     #[cfg(feature = "veriloga")]
-    pub fn veriloga_timestep_bound(&self) -> Option<Value> {
-        self.veriloga_devices
-            .iter()
-            .filter_map(|device| device.transient_bound_step())
-            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    pub fn veriloga_timestep_bound(&self) -> Result<Option<Value>, String> {
+        let mut tightest: Option<Value> = None;
+        for device in self.veriloga_devices.iter() {
+            let instance = device.name.clone();
+            let Some(bound) = device.try_transient_bound_step().map_err(|error| {
+                format!("Verilog-A device '{instance}' timestep bound failed: {error}")
+            })?
+            else {
+                continue;
+            };
+            tightest = Some(tightest.map_or(bound, |current| current.min(bound)));
+        }
+        Ok(tightest)
     }
 
     /// Check if all XSPICE instances have converged

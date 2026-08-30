@@ -6,6 +6,7 @@
 //! and the backward-Euler ddt() state pipeline.
 #![cfg(feature = "veriloga")]
 
+use rspice_core::engine::TransientCheckpoint;
 #[cfg(not(feature = "veriloga-native"))]
 use rspice_core::register_precompiled_veriloga_model;
 #[cfg(feature = "veriloga-native")]
@@ -154,6 +155,134 @@ endmodule
             .iter()
             .all(|voltage| (*voltage - 1.0 / 1.001).abs() < 1.0e-9),
         "interior points must not retain a lifecycle flag: {out:?}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn veriloga_zi_commits_t0_and_lands_on_sample_lattice() {
+    let model = write_model(
+        "zi_lifecycle",
+        r#"
+`include "disciplines.vams"
+module va_zi_lifecycle(p, n);
+    inout p, n;
+    electrical p, n;
+    real sampled;
+    analog begin
+        sampled = zi_nd(1.0, {1.0}, {1.0}, 1.0e-6, 0.0);
+        V(p, n) <+ sampled;
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* Zi production transient lifecycle\n\
+         X1 out 0 va_zi_lifecycle\n\
+         .va \"{}\" va_zi_lifecycle\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 2.5e-6, 2.0e-6)
+        .expect("Zi transient must accept t=0 before advancing");
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    assert!(
+        out.iter().all(|value| (*value - 1.0).abs() < 1.0e-12),
+        "unity Zi source must hold one from the accepted t=0 sample: {out:?}"
+    );
+    for edge in [1.0e-6, 2.0e-6] {
+        assert!(
+            result
+                .time
+                .iter()
+                .any(|time| (*time - edge).abs() <= f64::EPSILON * edge.max(1.0)),
+            "sample edge {edge:.3e} missing from accepted grid: {:?}",
+            result.time
+        );
+    }
+
+    let _ = std::fs::remove_file(model);
+}
+
+#[test]
+fn veriloga_zi_iir_checkpoint_resume_is_bit_identical_on_and_between_edges() {
+    let model = write_model(
+        "zi_checkpoint",
+        r#"
+`include "disciplines.vams"
+module va_zi_checkpoint(p, n);
+    inout p, n;
+    electrical p, n;
+    real sampled;
+    analog begin
+        sampled = zi_nd(1.0, {0.5, 0.25}, {1.0, -0.5}, 1.0e-6, 0.0);
+        V(p, n) <+ sampled;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* Zi checkpoint/resume\n\
+         X1 out 0 va_zi_checkpoint\n\
+         .va \"{}\" va_zi_checkpoint\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse Zi checkpoint deck");
+    let engine = Engine::default();
+    let continuous = engine
+        .run_tran(&netlist, 3.5e-6, 0.2e-6)
+        .expect("continuous Zi reference run");
+    let expected = node_series(&continuous.node_names, &continuous.voltages, "out")
+        .last()
+        .copied()
+        .expect("continuous endpoint");
+
+    for checkpoint_time in [1.0e-6, 1.3e-6] {
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, checkpoint_time, 0.2e-6)
+            .expect("Zi checkpoint segment solves");
+        let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
+            .expect("runtime Verilog-A state survives portable text");
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &serialized, 3.5e-6, 0.2e-6)
+            .expect("Zi checkpoint resumes");
+        let actual = node_series(&resumed.node_names, &resumed.voltages, "out")
+            .last()
+            .copied()
+            .expect("resumed endpoint");
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "Zi IIR endpoint differs after checkpoint at {checkpoint_time:.3e}"
+        );
+    }
+
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 1.3e-6, 0.2e-6)
+        .expect("legacy refusal fixture captures");
+    let legacy = checkpoint
+        .to_text()
+        .replace("RSPICE-CHECKPOINT 15", "RSPICE-CHECKPOINT 14")
+        .lines()
+        .take_while(|line| !line.starts_with("runtime_veriloga_state_available "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let legacy = TransientCheckpoint::from_text(&(legacy + "\n"))
+        .expect("legacy checkpoint remains parseable for a precise refusal");
+    let error = engine
+        .run_tran_resume(&netlist, &legacy, 3.5e-6, 0.2e-6)
+        .expect_err("legacy checkpoint must not invent runtime operator history");
+    assert!(
+        error
+            .to_string()
+            .contains("runtime-compiled Verilog-A accepted state"),
+        "unexpected legacy refusal: {error}"
     );
 
     let _ = std::fs::remove_file(model);
