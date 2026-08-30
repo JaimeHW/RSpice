@@ -1457,9 +1457,9 @@ impl<'a> ExprConverter<'a> {
         }
     }
 
-    /// Parse a noise_table pair list `{f1, p1, f2, p2, ...}` into sorted
-    /// (frequency, power) points. String (file) input and non-constant
-    /// entries are clean unsupported errors.
+    /// Parse a noise_table pair list `{f1, p1, f2, p2, ...}` into sorted,
+    /// frequency-unique (frequency, power) points. String (file) input and
+    /// non-constant entries are clean unsupported errors.
     fn noise_table_points(
         &self,
         arg: &Expression,
@@ -1479,12 +1479,52 @@ impl<'a> ExprConverter<'a> {
             .into());
         }
         let mut points: Vec<(f64, f64)> = flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
-        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        if log_interp && points.iter().any(|&(f, p)| f <= 0.0 || p <= 0.0) {
+        if points
+            .iter()
+            .any(|&(frequency, power)| !frequency.is_finite() || !power.is_finite())
+        {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "noise_table frequencies and powers must be finite".into(),
+            ))
+            .into());
+        }
+        if log_interp
+            && points
+                .iter()
+                .any(|&(frequency, power)| frequency <= 0.0 || power <= 0.0)
+        {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "noise_table_log requires strictly positive frequencies and powers".into(),
             ))
             .into());
+        }
+        if !log_interp
+            && points
+                .iter()
+                .any(|&(frequency, power)| frequency < 0.0 || power < 0.0)
+        {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "noise_table requires non-negative frequencies and powers".into(),
+            ))
+            .into());
+        }
+        points.sort_by(|left, right| left.0.total_cmp(&right.0));
+        if let Some(duplicate) = points
+            .windows(2)
+            .find(|adjacent| adjacent[0].0 == adjacent[1].0)
+        {
+            let operator = if log_interp {
+                "noise_table_log"
+            } else {
+                "noise_table"
+            };
+            return Err(
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{operator} frequency points must be unique; duplicate frequency {}",
+                    duplicate[0].0
+                )))
+                .into(),
+            );
         }
         Ok(points)
     }
@@ -2528,7 +2568,7 @@ mod tests {
     use super::*;
     use crate::ast::{
         ArrayLiteralExpr, BinaryExpr, CallExpr, ConditionalExpr, LaplaceKind, NumberLit,
-        ReplicationExpr, ZiKind,
+        ReplicationExpr, SystemFunction, ZiKind,
     };
     use crate::error::CompileError;
     use crate::source::{SourceId, Span};
@@ -2577,6 +2617,173 @@ mod tests {
             assignment_pattern: true,
             span: Span::dummy(),
         })
+    }
+
+    fn inline_noise_table(name: &str, values: &[f64]) -> Expression {
+        let args = vec![vector(values, true)];
+        if name.starts_with('$') {
+            Expression::SystemFunction(SystemFunction {
+                name: name.into(),
+                args,
+                span: Span::dummy(),
+            })
+        } else {
+            Expression::Call(CallExpr {
+                name: name.into(),
+                args,
+                span: Span::dummy(),
+            })
+        }
+    }
+
+    fn converted_noise_table(
+        converter: &ExprConverter<'_>,
+        name: &str,
+        values: &[f64],
+    ) -> CompileResult<(Vec<(f64, f64)>, bool)> {
+        let converted = converter.convert(&inline_noise_table(name, values))?;
+        let IrExpr::NoiseTable {
+            points, log_interp, ..
+        } = converted
+        else {
+            panic!("{name} did not lower to IrExpr::NoiseTable");
+        };
+        Ok((points, log_interp))
+    }
+
+    #[test]
+    fn inline_noise_tables_accept_finite_boundaries_and_sort_by_frequency() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+
+        for name in ["noise_table", "$noise_table"] {
+            let (points, log_interp) =
+                converted_noise_table(&converter, name, &[f64::MAX, 0.0, 0.0, f64::MAX, 10.0, 1.0])
+                    .unwrap_or_else(|error| panic!("{name} rejected valid linear points: {error}"));
+            assert!(!log_interp);
+            assert_eq!(points, vec![(0.0, f64::MAX), (10.0, 1.0), (f64::MAX, 0.0)]);
+        }
+
+        for name in ["noise_table_log", "$noise_table_log"] {
+            let (points, log_interp) = converted_noise_table(
+                &converter,
+                name,
+                &[
+                    f64::MAX,
+                    f64::MIN_POSITIVE,
+                    f64::MIN_POSITIVE,
+                    f64::MAX,
+                    10.0,
+                    1.0,
+                ],
+            )
+            .unwrap_or_else(|error| panic!("{name} rejected valid log points: {error}"));
+            assert!(log_interp);
+            assert_eq!(
+                points,
+                vec![
+                    (f64::MIN_POSITIVE, f64::MAX),
+                    (10.0, 1.0),
+                    (f64::MAX, f64::MIN_POSITIVE),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn inline_noise_tables_reject_nonfinite_frequency_or_power() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+        let invalid = [
+            [f64::NAN, 1.0],
+            [1.0, f64::NAN],
+            [f64::INFINITY, 1.0],
+            [1.0, f64::NEG_INFINITY],
+        ];
+
+        for name in [
+            "noise_table",
+            "$noise_table",
+            "noise_table_log",
+            "$noise_table_log",
+        ] {
+            for values in invalid {
+                let error = converter
+                    .convert(&inline_noise_table(name, &values))
+                    .expect_err("nonfinite noise-table point must fail")
+                    .to_string();
+                assert!(
+                    error.contains("frequencies and powers must be finite"),
+                    "unexpected {name} diagnostic: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_noise_tables_enforce_linear_and_log_domains() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+
+        for name in ["noise_table", "$noise_table"] {
+            for values in [[-1.0, 1.0], [1.0, -1.0]] {
+                let error = converter
+                    .convert(&inline_noise_table(name, &values))
+                    .expect_err("negative linear noise-table point must fail")
+                    .to_string();
+                assert!(
+                    error.contains("requires non-negative frequencies and powers"),
+                    "unexpected {name} diagnostic: {error}"
+                );
+            }
+        }
+
+        for name in ["noise_table_log", "$noise_table_log"] {
+            for values in [[0.0, 1.0], [1.0, 0.0], [-1.0, 1.0], [1.0, -1.0]] {
+                let error = converter
+                    .convert(&inline_noise_table(name, &values))
+                    .expect_err("nonpositive log noise-table point must fail")
+                    .to_string();
+                assert!(
+                    error.contains("requires strictly positive frequencies and powers"),
+                    "unexpected {name} diagnostic: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_noise_tables_reject_duplicate_frequencies_after_sorting() {
+        let context = empty_context();
+        let converter = ExprConverter::new(&context);
+
+        for name in [
+            "noise_table",
+            "$noise_table",
+            "noise_table_log",
+            "$noise_table_log",
+        ] {
+            let error = converter
+                .convert(&inline_noise_table(name, &[10.0, 1.0, 1.0, 2.0, 10.0, 3.0]))
+                .expect_err("duplicate noise-table frequencies must fail")
+                .to_string();
+            assert!(
+                error.contains("frequency points must be unique")
+                    && error.contains("duplicate frequency 10"),
+                "unexpected {name} diagnostic: {error}"
+            );
+        }
+
+        for name in ["noise_table", "$noise_table"] {
+            let error = converter
+                .convert(&inline_noise_table(name, &[-0.0, 1.0, 0.0, 2.0]))
+                .expect_err("signed zero frequencies are the same linear knot")
+                .to_string();
+            assert!(
+                error.contains("frequency points must be unique"),
+                "unexpected {name} signed-zero diagnostic: {error}"
+            );
+        }
     }
 
     #[test]

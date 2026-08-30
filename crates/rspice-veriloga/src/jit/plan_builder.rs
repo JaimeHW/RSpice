@@ -1806,6 +1806,7 @@ fn canonical_table_points(
             canonical_number_value(model, mir, pair[1])?,
         ));
     }
+    points.sort_by(|left, right| left.0.total_cmp(&right.0));
     Ok(points)
 }
 

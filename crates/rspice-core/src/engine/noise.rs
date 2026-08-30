@@ -750,7 +750,9 @@ impl Engine {
                     for pair in evaluation.table_operands.chunks_exact(2) {
                         let frequency = pair[0];
                         let power = pair[1];
-                        let valid = if descriptor.table_log_interp {
+                        let valid = if !frequency.is_finite() || !power.is_finite() {
+                            false
+                        } else if descriptor.table_log_interp {
                             frequency > 0.0 && power > 0.0
                         } else {
                             frequency >= 0.0 && power >= 0.0
@@ -768,6 +770,15 @@ impl Engine {
                         points.push((frequency, power));
                     }
                     points.sort_by(|left, right| left.0.total_cmp(&right.0));
+                    if let Some(duplicate) = points
+                        .windows(2)
+                        .find(|adjacent| adjacent[0].0 == adjacent[1].0)
+                    {
+                        return Err(invalid(format!(
+                            "table frequency points must be unique; duplicate frequency {}",
+                            duplicate[0].0
+                        )));
+                    }
                     points
                 } else {
                     Vec::new()
@@ -4372,6 +4383,57 @@ R2 out 0 1k
         )
         .expect_err("active generated tables must match their canonical operand count");
         assert!(malformed.to_string().contains("declares 4 operands"));
+
+        for operands in [
+            vec![f64::INFINITY, 2.0, 10.0, 4.0],
+            vec![1.0, f64::INFINITY, 10.0, 4.0],
+            vec![-1.0, 2.0, 10.0, 4.0],
+            vec![1.0, -2.0, 10.0, 4.0],
+        ] {
+            let invalid_point = Engine::generated_noise_source(
+                &circuit,
+                "R1",
+                BuiltinEvaluatedNoiseSource {
+                    mapped: GeneratedMappedNoiseDescriptor {
+                        descriptor: table_descriptor,
+                        injection: GeneratedNoiseInjection::Current {
+                            node_pos: positive,
+                            node_neg: 0,
+                        },
+                    },
+                    evaluation: GeneratedNoiseEvaluation {
+                        active: true,
+                        psd: 1.0,
+                        exponent: None,
+                        table_operands: operands,
+                    },
+                },
+            )
+            .expect_err("generated table points must be finite and in-domain");
+            assert!(invalid_point.to_string().contains("violates"));
+        }
+
+        let duplicate = Engine::generated_noise_source(
+            &circuit,
+            "R1",
+            BuiltinEvaluatedNoiseSource {
+                mapped: GeneratedMappedNoiseDescriptor {
+                    descriptor: table_descriptor,
+                    injection: GeneratedNoiseInjection::Current {
+                        node_pos: positive,
+                        node_neg: 0,
+                    },
+                },
+                evaluation: GeneratedNoiseEvaluation {
+                    active: true,
+                    psd: 1.0,
+                    exponent: None,
+                    table_operands: vec![10.0, 2.0, 10.0, 4.0],
+                },
+            },
+        )
+        .expect_err("generated table frequencies must be unique");
+        assert!(duplicate.to_string().contains("must be unique"));
 
         let potential_descriptor = GeneratedNoiseDescriptor {
             mechanism: "WHITE_P_GND_POTENTIAL",

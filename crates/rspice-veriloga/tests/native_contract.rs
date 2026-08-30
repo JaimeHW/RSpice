@@ -4998,8 +4998,8 @@ module native_noise_table_metadata(p, n);
     parameter real ex = 2.0;
     analog begin
         I(p, n) <+ flicker_noise(s, ex, "fl");
-        I(p, n) <+ noise_table('{1.0, 2.0e-18, 10.0, 4.0e-18}, "tbl");
-        I(p, n) <+ noise_table_log('{1.0, 2.0e-18, 10.0, 4.0e-18}, "tbl_log");
+        I(p, n) <+ noise_table('{10.0, 4.0e-18, 1.0, 2.0e-18}, "tbl");
+        I(p, n) <+ noise_table_log('{10.0, 4.0e-18, 1.0, 2.0e-18}, "tbl_log");
     end
 endmodule
 "#;
@@ -5046,12 +5046,26 @@ endmodule
         sources[1]
             .table
             .as_ref()
+            .map(|(points, _)| points.as_slice()),
+        Some([(1.0, 2.0e-18), (10.0, 4.0e-18)].as_slice())
+    );
+    assert_eq!(
+        sources[1]
+            .table
+            .as_ref()
             .map(|(points, log)| (points.len(), *log)),
         Some((2, false))
     );
 
     assert_eq!(sources[2].psd, 1.0);
     assert_eq!(sources[2].exponent, None);
+    assert_eq!(
+        sources[2]
+            .table
+            .as_ref()
+            .map(|(points, _)| points.as_slice()),
+        Some([(1.0, 2.0e-18), (10.0, 4.0e-18)].as_slice())
+    );
     assert_eq!(
         sources[2]
             .table
