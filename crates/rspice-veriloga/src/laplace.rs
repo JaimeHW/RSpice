@@ -65,6 +65,10 @@ pub struct StateSpaceFilter {
     state: Vec<f64>,
     /// State at the last accepted timestep
     state_prev: Vec<f64>,
+    /// Whether `state` was successfully recreated by the current complete
+    /// device evaluation pass.
+    #[serde(skip)]
+    candidate_valid: bool,
     /// System order
     order: usize,
 }
@@ -91,6 +95,7 @@ impl StateSpaceFilter {
             d,
             state,
             state_prev,
+            candidate_valid: false,
             order,
         };
         filter.validate_structure()?;
@@ -149,6 +154,7 @@ impl StateSpaceFilter {
                 d: gain,
                 state: vec![],
                 state_prev: vec![],
+                candidate_valid: false,
                 order: 0,
             });
         }
@@ -208,6 +214,7 @@ impl StateSpaceFilter {
             d: d_scalar,
             state: vec![0.0; n],
             state_prev: vec![0.0; n],
+            candidate_valid: false,
             order: n,
         };
         filter.validate_structure()?;
@@ -235,6 +242,7 @@ impl StateSpaceFilter {
                 d: gain,
                 state: vec![],
                 state_prev: vec![],
+                candidate_valid: false,
                 order: 0,
             });
         }
@@ -331,6 +339,7 @@ impl StateSpaceFilter {
             d: 1.0,
             state: vec![],
             state_prev: vec![],
+            candidate_valid: false,
             order: 0,
         }
     }
@@ -375,6 +384,9 @@ impl StateSpaceFilter {
     /// state. The simulator calls [`Self::commit`] only after accepting the
     /// timestep, keeping Newton reevaluations idempotent.
     pub fn step(&mut self, input: f64, timestep: f64) -> Result<f64, LaplaceError> {
+        // A failed reevaluation must not leave an older candidate eligible for
+        // acceptance.
+        self.candidate_valid = false;
         self.validate_structure()?;
         if !input.is_finite() {
             return Err(LaplaceError::InvalidEvaluation(
@@ -390,12 +402,34 @@ impl StateSpaceFilter {
             )));
         }
 
-        self.step_checked(input, timestep)
+        let output = self.step_checked(input, timestep)?;
+        self.candidate_valid = true;
+        Ok(output)
     }
 
     /// Commit the most recently evaluated candidate.
     pub fn commit(&mut self) {
-        self.state_prev.clone_from(&self.state);
+        if self.candidate_valid {
+            self.state_prev.clone_from(&self.state);
+            self.candidate_valid = false;
+        }
+    }
+
+    /// Start one complete device evaluation pass by invalidating any state
+    /// candidate left by the preceding pass.
+    pub(crate) fn begin_evaluation(&mut self) {
+        self.candidate_valid = false;
+    }
+
+    /// Validate the candidate that would be committed, without mutation.
+    pub(crate) fn validate_commit(&self) -> Result<(), LaplaceError> {
+        self.validate_structure()?;
+        if self.candidate_valid && self.state.iter().any(|value| !value.is_finite()) {
+            return Err(LaplaceError::InvalidEvaluation(
+                "Laplace candidate state is not finite".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub(crate) fn checkpoint(&self) -> LaplaceCheckpoint {
@@ -406,12 +440,7 @@ impl StateSpaceFilter {
 
     pub(crate) fn validate_checkpoint_ready(&self) -> Result<(), LaplaceError> {
         self.validate_structure()?;
-        if self
-            .state
-            .iter()
-            .zip(&self.state_prev)
-            .any(|(candidate, accepted)| candidate.to_bits() != accepted.to_bits())
-        {
+        if self.candidate_valid {
             return Err(LaplaceError::InvalidEvaluation(
                 "Laplace filter has an in-flight Newton candidate".into(),
             ));
@@ -442,6 +471,7 @@ impl StateSpaceFilter {
     pub(crate) fn restore_checkpoint(&mut self, checkpoint: &LaplaceCheckpoint) {
         self.state_prev.copy_from_slice(&checkpoint.state);
         self.state.copy_from_slice(&checkpoint.state);
+        self.candidate_valid = false;
     }
 
     fn step_checked(&mut self, input: f64, h: f64) -> Result<f64, LaplaceError> {
@@ -504,6 +534,7 @@ impl StateSpaceFilter {
     pub fn reset(&mut self) {
         self.state.fill(0.0);
         self.state_prev.fill(0.0);
+        self.candidate_valid = false;
     }
 
     /// Set initial state
@@ -523,6 +554,7 @@ impl StateSpaceFilter {
         }
         self.state.copy_from_slice(initial);
         self.state_prev.copy_from_slice(initial);
+        self.candidate_valid = false;
         Ok(())
     }
 
@@ -1107,6 +1139,29 @@ endmodule
             restored.dc_output(1.0),
             Err(LaplaceError::SingularSystem("DC equilibrium"))
         ));
+    }
+
+    #[test]
+    fn serialization_never_persists_an_in_flight_candidate() {
+        let mut filter = StateSpaceFilter::integrator(1.0).expect("filter definition");
+        filter
+            .step(2.0, 0.25)
+            .expect("produce a speculative transient candidate");
+        assert!(filter.candidate_valid);
+        assert_ne!(filter.state, filter.state_prev);
+
+        let serialized = serde_json::to_value(&filter).expect("serialize state-space filter");
+        assert!(serialized.get("candidate_valid").is_none());
+        let mut restored: StateSpaceFilter =
+            serde_json::from_value(serialized).expect("deserialize state-space filter");
+        assert!(!restored.candidate_valid);
+
+        let accepted_before = restored.state_prev.clone();
+        restored.commit();
+        assert_eq!(restored.state_prev, accepted_before);
+        restored
+            .validate_checkpoint_ready()
+            .expect("deserialization must not recreate an in-flight candidate");
     }
 
     #[test]

@@ -151,6 +151,32 @@ impl DelayBuffer {
         }
     }
 
+    /// Start one complete device evaluation pass.
+    ///
+    /// A speculative sample belongs only to the pass that produced it. If a
+    /// later Newton pass skips this operator, the earlier sample must not be
+    /// admitted into accepted delay history.
+    pub(crate) fn begin_evaluation(&mut self) {
+        self.candidate = None;
+    }
+
+    /// Validate the candidate that would be committed, without changing
+    /// either accepted or speculative state.
+    pub(crate) fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
+        let Some((time, value)) = self.candidate else {
+            return Ok(());
+        };
+        if !time.is_finite() || !value.is_finite() {
+            return Err("delay candidate sample is not finite".into());
+        }
+        if time != accepted_time {
+            return Err(format!(
+                "delay candidate time {time} does not equal accepted time {accepted_time}"
+            ));
+        }
+        Ok(())
+    }
+
     /// Commit the latest candidate after the transient step is accepted.
     pub fn commit(&mut self) {
         if let Some((time, value)) = self.candidate.take() {
@@ -431,6 +457,7 @@ impl Default for TransitionState {
 pub struct TransitionFilter {
     committed: TransitionState,
     candidate: TransitionState,
+    candidate_time: f64,
     candidate_valid: bool,
 }
 
@@ -478,6 +505,7 @@ impl TransitionFilter {
             state.output
         };
         self.candidate = state;
+        self.candidate_time = time;
         self.candidate_valid = true;
         output
     }
@@ -487,6 +515,32 @@ impl TransitionFilter {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+    }
+
+    /// Discard a candidate produced by an earlier complete device pass.
+    pub(crate) fn begin_evaluation(&mut self) {
+        self.candidate_valid = false;
+    }
+
+    /// Validate the candidate that would be committed, without mutation.
+    pub(crate) fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
+        if !self.candidate_valid {
+            return Ok(());
+        }
+        Self::validate_checkpoint(&TransitionCheckpoint {
+            output: self.candidate.output,
+            target: self.candidate.target,
+            start_time: self.candidate.start_time,
+            end_time: self.candidate.end_time,
+            start_value: self.candidate.start_value,
+        })?;
+        if self.candidate_time != accepted_time {
+            return Err(format!(
+                "transition candidate time {} does not equal accepted time {accepted_time}",
+                self.candidate_time
+            ));
+        }
+        Ok(())
     }
 
     /// Clear accepted and speculative transition history for a new analysis.
@@ -537,6 +591,7 @@ impl TransitionFilter {
             start_value: checkpoint.start_value,
         };
         self.candidate = self.committed;
+        self.candidate_time = 0.0;
         self.candidate_valid = false;
     }
 }
@@ -600,6 +655,29 @@ impl SlewFilter {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+    }
+
+    /// Discard a candidate produced by an earlier complete device pass.
+    pub(crate) fn begin_evaluation(&mut self) {
+        self.candidate_valid = false;
+    }
+
+    /// Validate the candidate that would be committed, without mutation.
+    pub(crate) fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
+        if !self.candidate_valid {
+            return Ok(());
+        }
+        Self::validate_checkpoint(&SlewCheckpoint {
+            output: self.candidate.output,
+            prev_time: self.candidate.prev_time,
+        })?;
+        if self.candidate.prev_time != accepted_time {
+            return Err(format!(
+                "slew candidate time {} does not equal accepted time {accepted_time}",
+                self.candidate.prev_time
+            ));
+        }
+        Ok(())
     }
 
     /// Clear accepted and speculative slew history for a new analysis.
@@ -873,6 +951,33 @@ impl CrossDetector {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+    }
+
+    /// Discard a candidate produced by an earlier complete device pass.
+    pub(crate) fn begin_evaluation(&mut self) {
+        self.candidate_valid = false;
+    }
+
+    /// Validate the candidate that would be committed, without mutation.
+    pub(crate) fn validate_commit(&self, accepted_time: f64) -> Result<(), String> {
+        if !self.candidate_valid {
+            return Ok(());
+        }
+        Self::validate_checkpoint(&CrossCheckpoint {
+            value: self.candidate.value,
+            time: self.candidate.time,
+            side: self.candidate.side,
+            last_event_time: self.candidate.last_event_time,
+            last_crossing_time: self.candidate.last_crossing_time,
+            initialized: self.candidate.initialized,
+        })?;
+        if self.candidate.initialized && self.candidate.time != accepted_time {
+            return Err(format!(
+                "cross candidate time {} does not equal accepted time {accepted_time}",
+                self.candidate.time
+            ));
+        }
+        Ok(())
     }
 
     /// Clear crossing, event, and interpolation history for a new analysis.

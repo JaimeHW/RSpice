@@ -437,7 +437,47 @@ impl VmContext {
         // state. The second pass is deliberately infallible, preserving the
         // all-or-nothing contract without cloning filter histories (and
         // allocating) on every accepted timestep.
+        let invalid = |message: String| VmError::InvalidNumericResult(message);
         let time = self.time;
+        if !time.is_finite() || time < 0.0 {
+            return Err(invalid(format!(
+                "cannot commit invalid simulation time {time}"
+            )));
+        }
+        let state_count = self.state_values.len();
+        if self.state_values_prev.len() != state_count
+            || self.state_values_older.len() != state_count
+            || self.state_derivatives.len() != state_count
+            || self.state_derivatives_prev.len() != state_count
+            || self.state_initialized.len() != state_count
+        {
+            return Err(invalid(
+                "candidate integration-state storage shape is inconsistent".into(),
+            ));
+        }
+        if self
+            .state_values
+            .iter()
+            .chain(&self.state_values_prev)
+            .chain(&self.state_values_older)
+            .chain(&self.state_derivatives)
+            .chain(&self.state_derivatives_prev)
+            .any(|value| !value.is_finite())
+        {
+            return Err(invalid(
+                "candidate integration state contains a non-finite value".into(),
+            ));
+        }
+        if self.timer_event_bound != f64::INFINITY
+            && (!self.timer_event_bound.is_finite() || self.timer_event_bound <= time)
+        {
+            return Err(invalid(format!(
+                "timer candidate bound {} is not strictly after accepted time {time}",
+                self.timer_event_bound
+            )));
+        }
+        // Preserve the existing Zi error precedence for callers while still
+        // completing every validation before any accepted state is mutated.
         for (filter_id, filter) in self.zi_filters.iter().enumerate() {
             filter.validate_commit(time).map_err(|error| {
                 VmError::InvalidNumericResult(format!(
@@ -445,7 +485,31 @@ impl VmContext {
                 ))
             })?;
         }
-
+        for (index, buffer) in self.delay_buffers.iter().enumerate() {
+            buffer
+                .validate_commit(time)
+                .map_err(|error| invalid(format!("delay {index} commit failed: {error}")))?;
+        }
+        for (index, filter) in self.transition_filters.iter().enumerate() {
+            filter
+                .validate_commit(time)
+                .map_err(|error| invalid(format!("transition {index} commit failed: {error}")))?;
+        }
+        for (index, filter) in self.slew_filters.iter().enumerate() {
+            filter
+                .validate_commit(time)
+                .map_err(|error| invalid(format!("slew {index} commit failed: {error}")))?;
+        }
+        for (index, detector) in self.cross_detectors.iter().enumerate() {
+            detector
+                .validate_commit(time)
+                .map_err(|error| invalid(format!("cross {index} commit failed: {error}")))?;
+        }
+        for (index, filter) in self.laplace_filters.iter().enumerate() {
+            filter.validate_commit().map_err(|error| {
+                invalid(format!("Laplace filter {index} commit failed: {error}"))
+            })?;
+        }
         Ok(())
     }
 
@@ -779,13 +843,29 @@ impl VmContext {
         self.timer_event_bound = f64::INFINITY;
     }
 
-    /// Invalidate speculative zi candidates before each complete device
-    /// evaluation. Only candidates recreated by the final Newton pass may be
-    /// committed when the point is accepted.
-    pub(crate) fn begin_zi_evaluation(&mut self) {
+    /// Invalidate every speculative operator candidate before each complete
+    /// device evaluation. Only candidates recreated by the final Newton pass
+    /// may be committed when the point is accepted.
+    pub(crate) fn begin_stateful_evaluation(&mut self) {
+        for buffer in &mut self.delay_buffers {
+            buffer.begin_evaluation();
+        }
+        for filter in &mut self.transition_filters {
+            filter.begin_evaluation();
+        }
+        for filter in &mut self.slew_filters {
+            filter.begin_evaluation();
+        }
+        for detector in &mut self.cross_detectors {
+            detector.begin_evaluation();
+        }
+        for filter in &mut self.laplace_filters {
+            filter.begin_evaluation();
+        }
         for filter in &mut self.zi_filters {
             filter.begin_evaluation();
         }
+        self.clear_timer_event_bound();
     }
 
     /// Tightest exact sampled-filter edge after the current time.
@@ -1257,6 +1337,92 @@ mod tests {
         context.advance_state().unwrap();
         assert_eq!(context.zi_filters[0].eval(9.0, 0.5, true).unwrap(), 2.0);
         assert_eq!(context.zi_filters[1].eval(9.0, 0.5, true).unwrap(), 3.0);
+    }
+
+    #[test]
+    fn final_pass_skip_discards_every_non_zi_candidate() {
+        let mut context = VmContext {
+            analysis_type: 2,
+            time: 1.0,
+            ..VmContext::default()
+        };
+        context.allocate_delay_buffers(1);
+        context.allocate_transition_filters(1);
+        context.allocate_slew_filters(1);
+        context.allocate_cross_detectors(1);
+        context
+            .laplace_filters
+            .push(StateSpaceFilter::integrator(1.0).unwrap());
+
+        context.begin_stateful_evaluation();
+        context.delay_buffers[0].eval(1.0, 1.0, 0.25);
+        context.transition_filters[0].eval(1.0, 1.0, 0.0, 0.0, 0.0);
+        context.slew_filters[0].eval(1.0, 1.0, 10.0, 10.0);
+        context.cross_detectors[0].eval(-1.0, 1.0, 0);
+        context.laplace_filters[0].step(1.0, 0.25).unwrap();
+        context.advance_state().unwrap();
+        let accepted = context.accepted_checkpoint().unwrap();
+
+        context.begin_stateful_evaluation();
+        context.delay_buffers[0].eval(1.0, 9.0, 0.25);
+        context.transition_filters[0].eval(9.0, 1.0, 0.0, 0.0, 0.0);
+        context.slew_filters[0].eval(9.0, 1.0, 10.0, 10.0);
+        context.cross_detectors[0].eval(1.0, 1.0, 0);
+        context.laplace_filters[0].step(9.0, 0.25).unwrap();
+        context.request_timer_event(2.0);
+
+        // The final complete pass skips every operator. No candidate or event
+        // constraint from the earlier pass may survive acceptance.
+        context.begin_stateful_evaluation();
+        context.advance_state().unwrap();
+        assert_eq!(context.accepted_checkpoint().unwrap(), accepted);
+        assert_eq!(context.timer_event_step_bound(), None);
+    }
+
+    #[test]
+    fn failed_pool_validation_is_atomic_and_a_retry_starts_clean() {
+        let mut context = VmContext {
+            analysis_type: 2,
+            time: 1.0,
+            ..VmContext::default()
+        };
+        context.allocate_delay_buffers(1);
+        context.allocate_transition_filters(1);
+        context.allocate_slew_filters(1);
+        context.allocate_cross_detectors(1);
+        context
+            .laplace_filters
+            .push(StateSpaceFilter::integrator(1.0).unwrap());
+
+        context.begin_stateful_evaluation();
+        context.delay_buffers[0].eval(1.0, 2.0, 0.25);
+        context.transition_filters[0].eval(3.0, f64::NAN, 0.0, 1.0, 1.0);
+        context.slew_filters[0].eval(4.0, 1.0, 10.0, 10.0);
+        context.cross_detectors[0].eval(1.0, 1.0, 0);
+        context.laplace_filters[0].step(5.0, 0.25).unwrap();
+
+        let before = format!("{context:#?}");
+        let error = context
+            .advance_state()
+            .expect_err("a malformed transition candidate must fail acceptance");
+        assert!(error.to_string().contains("transition 0 commit failed"));
+        assert_eq!(format!("{context:#?}"), before);
+
+        // A failed-evaluation retry starts a new complete pass. Skipped slots
+        // cannot commit the partial candidates produced by the failed pass.
+        context.begin_stateful_evaluation();
+        context.advance_state().unwrap();
+        let accepted = context.accepted_checkpoint().unwrap();
+        assert!(accepted.delay_buffers[0].samples.is_empty());
+        assert_eq!(accepted.transition_filters[0].output, 0.0);
+        assert_eq!(accepted.slew_filters[0].output, 0.0);
+        assert!(!accepted.cross_detectors[0].initialized);
+        assert!(
+            accepted.laplace_filters[0]
+                .state
+                .iter()
+                .all(|value| *value == 0.0)
+        );
     }
 
     #[test]

@@ -3087,12 +3087,7 @@ impl VerilogADevice {
     #[inline]
     fn begin_evaluation(&mut self, mode: crate::vm::VerilogAEvaluationMode) {
         self.context.evaluation_mode = mode;
-        self.context.begin_zi_evaluation();
-        // Event constraints describe the latest complete device pass. A
-        // later pass can legitimately move a parameterized timer or Zi edge
-        // outward, so retaining the previous minimum would permanently pin
-        // the solver to a stale breakpoint.
-        self.context.clear_timer_event_bound();
+        self.context.begin_stateful_evaluation();
         if mode.limiting_enabled() {
             self.context.limiter_active = 0;
         }
