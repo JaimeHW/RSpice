@@ -1667,6 +1667,10 @@ impl Engine {
         frequency_hz: Value,
         physical_analysis: SmallSignalAnalysisKind,
     ) -> Result<(), SimulationError> {
+        // The analysis identity remains part of this shared stamping contract
+        // even when neither Verilog-A backend is compiled into the build.
+        let _ = physical_analysis;
+
         struct AcRealStamper<'a> {
             matrix: &'a mut ComplexMatrix,
         }

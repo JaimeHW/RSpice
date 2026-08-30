@@ -2016,6 +2016,9 @@ impl CircuitData {
                 "equilibrium Verilog-A analysis must be 0=dc, 1=ac, or 3=noise, got {analysis}"
             ));
         }
+        // Both arguments remain part of the lifecycle contract even in a
+        // feature-minimal build where neither Verilog-A backend is compiled.
+        let _ = (initial_step, final_step);
         #[cfg(feature = "veriloga")]
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
