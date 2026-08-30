@@ -2,8 +2,8 @@ use super::*;
 
 #[cfg(feature = "veriloga")]
 // Bump whenever a persisted runtime artifact or its integrity contract changes.
-// Version 16 adds model/instance/dual parameter-storage semantics to canonical IR.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 17;
+// Version 18 retains exact transfer-function DC actions in compiled Laplace filters.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 18;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

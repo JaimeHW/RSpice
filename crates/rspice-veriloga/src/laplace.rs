@@ -110,6 +110,11 @@ pub struct StateSpaceFilter {
     c: Vec<f64>,
     /// Feedthrough coefficient D (scalar)
     d: f64,
+    /// Exact checked zero-frequency action retained from the authored
+    /// transfer function. Arbitrary state-space systems and legacy
+    /// serialized artifacts fall back to the realization solve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transfer_function_dc_gain: Option<f64>,
     /// Candidate state vector for the in-flight timestep
     state: Vec<f64>,
     /// State at the last accepted timestep
@@ -142,6 +147,7 @@ impl StateSpaceFilter {
             b,
             c,
             d,
+            transfer_function_dc_gain: None,
             state,
             state_prev,
             candidate_valid: false,
@@ -177,6 +183,15 @@ impl StateSpaceFilter {
         } else {
             numerator
         };
+        let transfer_function_dc_gain = if denominator.last() == Some(&0.0) {
+            None
+        } else {
+            Some(checked_ratio(
+                numerator.last().copied().unwrap_or(0.0),
+                denominator.last().copied().unwrap_or(0.0),
+                "transfer-function DC gain",
+            )?)
+        };
 
         let numerator_degree = if numerator == [0.0] {
             0
@@ -201,6 +216,7 @@ impl StateSpaceFilter {
                 b: vec![],
                 c: vec![],
                 d: gain,
+                transfer_function_dc_gain,
                 state: vec![],
                 state_prev: vec![],
                 candidate_valid: false,
@@ -261,6 +277,7 @@ impl StateSpaceFilter {
             b: b_vec,
             c: c_vec,
             d: d_scalar,
+            transfer_function_dc_gain,
             state: vec![0.0; n],
             state_prev: vec![0.0; n],
             candidate_valid: false,
@@ -289,6 +306,7 @@ impl StateSpaceFilter {
                 b: vec![],
                 c: vec![],
                 d: gain,
+                transfer_function_dc_gain: Some(gain),
                 state: vec![],
                 state_prev: vec![],
                 candidate_valid: false,
@@ -386,6 +404,7 @@ impl StateSpaceFilter {
             b: vec![],
             c: vec![],
             d: 1.0,
+            transfer_function_dc_gain: Some(1.0),
             state: vec![],
             state_prev: vec![],
             candidate_valid: false,
@@ -619,6 +638,15 @@ impl StateSpaceFilter {
 
     /// Get DC output (s=0) for a given input
     pub fn dc_output(&self, input: f64) -> Result<f64, LaplaceError> {
+        self.validate_structure()?;
+        if !input.is_finite() {
+            return Err(LaplaceError::InvalidEvaluation(
+                "input must be finite".into(),
+            ));
+        }
+        if let Some(gain) = self.transfer_function_dc_gain {
+            return checked_product(gain, input, "DC output");
+        }
         self.dc_equilibrium(input).map(|(_, output)| output)
     }
 
@@ -640,7 +668,11 @@ impl StateSpaceFilter {
             .collect();
         let rhs = self.b.iter().map(|value| *value * input).collect();
         let equilibrium = solve_real_system(matrix, rhs, "DC equilibrium")?;
-        let output = checked_state_output(&self.c, &equilibrium, self.d, input)?;
+        let output = if let Some(gain) = self.transfer_function_dc_gain {
+            checked_product(gain, input, "DC output")?
+        } else {
+            checked_state_output(&self.c, &equilibrium, self.d, input)?
+        };
         Ok((Some(equilibrium), output))
     }
 
@@ -726,6 +758,9 @@ impl StateSpaceFilter {
             )));
         }
         if !self.d.is_finite()
+            || self
+                .transfer_function_dc_gain
+                .is_some_and(|gain| !gain.is_finite())
             || self
                 .a
                 .iter()
