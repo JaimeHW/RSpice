@@ -21,6 +21,7 @@ use super::contracts_bug411::Bug411Role;
 use super::contracts_bug412::Bug412Role;
 use super::contracts_bug440::Bug440Role;
 use super::contracts_bug442::Bug442Role;
+use super::contracts_bug456::Bug456Role;
 use super::contracts_bug689::Bug689Role;
 use super::contracts_bug706::Bug706Role;
 use super::contracts_bug805::Bug805Role;
@@ -274,6 +275,29 @@ impl XyceTestRunner {
         if let Some(role) = Bug442Role::for_record(&deck.relative_path) {
             let contract = role.contract();
             let result = match self.validate_bug442_oracle(deck, role, start) {
+                Ok(()) => self.passed_result(deck, start, contract),
+                Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        // Until the sibling worker rows are promoted from the exact upstream
+        // exclusion ledger, only the historical wrapper owners enter this
+        // native relational contract. Each owner still executes and proves
+        // its sealed baseline/restart pair end to end.
+        if let Some(role) = Bug456Role::for_record(&deck.relative_path)
+            && role.is_qualified_owner()
+        {
+            let contract = role.contract();
+            let result = match self.validate_bug456_oracle(deck, role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };

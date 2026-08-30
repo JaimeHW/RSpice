@@ -12608,6 +12608,7 @@ mod contracts_bug42_son;
 mod contracts_bug440;
 mod contracts_bug442;
 mod contracts_bug45;
+mod contracts_bug456;
 mod contracts_bug48;
 mod contracts_bug519;
 mod contracts_bug636;
