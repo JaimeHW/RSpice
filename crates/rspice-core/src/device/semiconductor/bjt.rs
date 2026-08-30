@@ -1368,6 +1368,18 @@ impl Bjt {
         let endpoint_start = BJT_ACCEPTED_SCALAR_VALUE_COUNT
             + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
             + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT;
+        let canonical_charge_branches = if checkpoint.charge_snapshot_valid {
+            let mut reduction_cursor =
+                BJT_ACCEPTED_SCALAR_VALUE_COUNT + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT;
+            let reduction = Self::checkpoint_take_dynamic_reduction(
+                &checkpoint.state_values,
+                &mut reduction_cursor,
+            );
+            debug_assert_eq!(reduction_cursor, endpoint_start);
+            Some(self.legacy_dynamic_charge_branches(&reduction))
+        } else {
+            None
+        };
         let mut cursor = endpoint_start;
         for branch in 0..BJT_DYNAMIC_CHARGE_COUNT {
             cursor += 1 + BJT_INTERNAL_STATE_DIM + EXTERNAL_DIM;
@@ -1398,6 +1410,25 @@ impl Bjt {
                     "BJT '{}' charge branch {branch} checkpoint selects both internal and external endpoints",
                     self.name
                 ));
+            }
+            if let Some(canonical_charge_branches) = canonical_charge_branches.as_ref() {
+                let canonical = canonical_charge_branches[branch];
+                let canonical_endpoints = [
+                    Self::checkpoint_endpoint_value(canonical.pos_internal),
+                    Self::checkpoint_endpoint_value(canonical.neg_internal),
+                    Self::checkpoint_endpoint_value(canonical.pos_external),
+                    Self::checkpoint_endpoint_value(canonical.neg_external),
+                ];
+                if endpoints
+                    .iter()
+                    .zip(canonical_endpoints)
+                    .any(|(captured, expected)| captured.to_bits() != expected.to_bits())
+                {
+                    return Err(format!(
+                        "BJT '{}' charge branch {branch} endpoint pattern does not match the live legacy-GP topology",
+                        self.name
+                    ));
+                }
             }
             cursor += 4;
         }
@@ -2364,7 +2395,7 @@ mod checkpoint_tests {
                 .contains("shape mismatch")
         );
 
-        let mut wrong_endpoint = checkpoint;
+        let mut wrong_endpoint = checkpoint.clone();
         let first_endpoint = BJT_ACCEPTED_SCALAR_VALUE_COUNT
             + 2 * BJT_REDUCED_CHECKPOINT_VALUE_COUNT
             + BJT_DYNAMIC_REDUCTION_CHECKPOINT_VALUE_COUNT
@@ -2376,6 +2407,16 @@ mod checkpoint_tests {
             bjt.validate_accepted_nonlinear_checkpoint(&wrong_endpoint)
                 .unwrap_err()
                 .contains("outside its runtime topology")
+        );
+
+        let mut wrong_in_range_endpoint = checkpoint;
+        wrong_in_range_endpoint.state_values[first_endpoint] = 0.0;
+        let error = bjt
+            .validate_accepted_nonlinear_checkpoint(&wrong_in_range_endpoint)
+            .expect_err("an in-range endpoint outside the live branch pattern must fail");
+        assert!(
+            error.contains("does not match the live legacy-GP topology"),
+            "unexpected error: {error}"
         );
     }
 
