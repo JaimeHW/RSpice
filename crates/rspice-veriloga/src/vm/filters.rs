@@ -678,6 +678,23 @@ mod tests {
     }
 
     #[test]
+    fn above_detects_same_time_dc_sweep_crossings_without_refinement() {
+        let mut above = CrossDetector::default();
+        assert_eq!(above.eval_above_static(-1.0, 0.0, 0.0, 0.0, true), Ok(0.0));
+        above.commit();
+
+        assert_eq!(above.eval_above_static(1.0, 0.0, 0.0, 0.0, true), Ok(1.0));
+        assert_eq!(above.candidate_refinement_time(), None);
+        assert_eq!(
+            above.eval_above_static(1.0, 0.0, 0.0, 0.0, true),
+            Ok(1.0),
+            "repeated Newton evaluation must replay from accepted DC history"
+        );
+        above.commit();
+        assert_eq!(above.eval_above_static(2.0, 0.0, 0.0, 0.0, true), Ok(0.0));
+    }
+
+    #[test]
     fn cross_interpolation_is_overflow_safe_and_unrepresentable_roots_fail_closed() {
         let mut extreme = CrossDetector::default();
         extreme.eval(-f64::MAX, 0.0, 1).unwrap();
@@ -1206,7 +1223,9 @@ impl CrossDetector {
         expr_tol: f64,
         enabled: bool,
     ) -> Result<f64, String> {
-        self.eval_impl(value, time, direction, time_tol, expr_tol, enabled, false)
+        self.eval_impl(
+            value, time, direction, time_tol, expr_tol, enabled, false, false,
+        )
     }
 
     /// Evaluate `above(expr, time_tol, expr_tol, enable)`.
@@ -1221,7 +1240,21 @@ impl CrossDetector {
         expr_tol: f64,
         enabled: bool,
     ) -> Result<f64, String> {
-        self.eval_impl(value, time, 1, time_tol, expr_tol, enabled, true)
+        self.eval_impl(value, time, 1, time_tol, expr_tol, enabled, true, false)
+    }
+
+    /// Evaluate `above` at accepted DC/IC sweep points. These analyses keep
+    /// simulation time fixed, so an upward crossing must compare consecutive
+    /// accepted values without requesting transient root refinement.
+    pub fn eval_above_static(
+        &mut self,
+        value: f64,
+        time: f64,
+        time_tol: f64,
+        expr_tol: f64,
+        enabled: bool,
+    ) -> Result<f64, String> {
+        self.eval_impl(value, time, 1, time_tol, expr_tol, enabled, true, true)
     }
 
     /// Return the linearly interpolated time of the most recent crossing.
@@ -1286,6 +1319,7 @@ impl CrossDetector {
         expr_tol: f64,
         enabled: bool,
         initial_above: bool,
+        allow_same_time_crossing: bool,
     ) -> Result<f64, String> {
         Self::validate_value_and_time(value, time)?;
         Self::validate_tolerance("time_tol", time_tol)?;
@@ -1311,7 +1345,8 @@ impl CrossDetector {
             return Ok(if fired { 1.0 } else { 0.0 });
         }
 
-        if time <= self.committed.time {
+        let same_time_static = allow_same_time_crossing && time == self.committed.time;
+        if time < self.committed.time || (time == self.committed.time && !same_time_static) {
             self.candidate = self.committed;
             self.candidate_valid = true;
             return Ok(0.0);
@@ -1336,7 +1371,7 @@ impl CrossDetector {
         let direction_matches = direction == 0 || direction == crossing_direction;
         let fired = enabled && crossing_direction != 0 && direction_matches;
 
-        if fired {
+        if fired && !same_time_static {
             let effective_time_tol =
                 Self::effective_tolerance(time_tol, self.committed.time.abs().max(time.abs()));
             let effective_expr_tol =

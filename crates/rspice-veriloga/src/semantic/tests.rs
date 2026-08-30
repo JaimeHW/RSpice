@@ -112,6 +112,25 @@ fn stateful_analog_operator_guards_are_checked_as_one_complete_family() {
 }
 
 #[test]
+fn event_calls_reject_invalid_null_argument_dependencies() {
+    for (expression, expected) in [
+        ("cross(V(p, n), , 1.0e-9)", "tolerances require"),
+        ("cross(V(p, n), 1, , 1.0e-3)", "expr_tol requires"),
+        ("above(V(p, n), , 1.0e-3)", "expr_tol requires"),
+        ("cross(, 1)", "argument 1 may not be null"),
+    ] {
+        let source = module_src(&format!("analog I(p, n) <+ {expression};"));
+        let diagnostic = analyze(&source)
+            .expect_err("invalid event call unexpectedly passed semantic analysis")
+            .to_string();
+        assert!(
+            diagnostic.contains(expected),
+            "{expression} produced the wrong diagnostic: {diagnostic}"
+        );
+    }
+}
+
+#[test]
 fn stateful_operator_under_model_and_connectivity_guards_is_analysis_invariant() {
     let source = module_src(
         r#"

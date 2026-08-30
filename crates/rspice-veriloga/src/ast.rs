@@ -521,7 +521,7 @@ pub enum EventExpr {
     /// Cross event
     Cross {
         signal: Expression,
-        direction: Option<CrossDirection>,
+        direction: Option<Box<Expression>>,
         time_tol: Option<Box<Expression>>,
         expr_tol: Option<Box<Expression>>,
         enable: Option<Box<Expression>>,

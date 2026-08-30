@@ -212,6 +212,37 @@ fn validate_arg_range(
     Ok(())
 }
 
+fn validate_event_argument_dependencies(name: &str, args: &[Expression]) -> CompileResult<()> {
+    let defined = |index: usize| {
+        args.get(index)
+            .is_some_and(|argument| !matches!(argument, Expression::NullArgument(_)))
+    };
+    match name {
+        "cross" => {
+            if (defined(2) || defined(3)) && !defined(1) {
+                return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                    "cross tolerances require a defined direction".into(),
+                ))
+                .into());
+            }
+            if defined(3) && !defined(2) {
+                return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                    "cross expr_tol requires time_tol".into(),
+                ))
+                .into());
+            }
+        }
+        "above" if defined(2) && !defined(1) => {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "above expr_tol requires time_tol".into(),
+            ))
+            .into());
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn normalize_analysis_name(name: &str) -> Option<String> {
     let normalized = name.to_ascii_lowercase();
     match normalized.as_str() {
@@ -464,6 +495,17 @@ impl<'a> ExprConverter<'a> {
         }
     }
 
+    fn convert_optional_argument(
+        &self,
+        args: &[Expression],
+        index: usize,
+    ) -> CompileResult<Option<Box<IrExpr>>> {
+        match args.get(index) {
+            None | Some(Expression::NullArgument(_)) => Ok(None),
+            Some(expression) => self.convert(expression).map(Box::new).map(Some),
+        }
+    }
+
     /// Convert an AST expression to an IR expression
     pub fn convert(&self, expr: &Expression) -> CompileResult<IrExpr> {
         match expr {
@@ -478,12 +520,12 @@ impl<'a> ExprConverter<'a> {
             Expression::Unary(unary) => self.convert_unary(unary),
             Expression::Conditional(cond) => self.convert_conditional(cond),
             Expression::Call(call) => self.convert_call(call),
-            Expression::NullArgument(_) => Err(CodeGenError::new(
-                CodeGenErrorKind::InvalidExpression(
-                    "null positional argument is only legal in the zeros operand of zi_zp/zi_zd and corresponding Laplace forms".into(),
-                ),
-            )
-            .into()),
+            Expression::NullArgument(_) => {
+                Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                    "null positional argument is not legal in this expression position".into(),
+                ))
+                .into())
+            }
             Expression::BranchAccess(access) => self.convert_branch_access(access),
             Expression::ArrayAccess(access) => {
                 let Some((base, lower, len)) = self.ctx.array(&access.array) else {
@@ -765,25 +807,15 @@ impl<'a> ExprConverter<'a> {
             "cross" => {
                 // cross(expr [, direction [, time_tol [, expr_tol [, enable]]]])
                 validate_arg_range(&func.name, func.args.len(), 1, Some(5))?;
+                validate_event_argument_dependencies("cross", &func.args)?;
                 let expr = self.convert(&func.args[0])?;
-                // Direction: +1=rising, -1=falling, 0=both (default)
-                let direction = func
-                    .args
-                    .get(1)
-                    .map(|arg| self.const_cross_direction(arg, "cross"))
-                    .transpose()?;
-                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    func.args
-                        .get(index)
-                        .map(|expr| self.convert(expr).map(Box::new))
-                        .transpose()
-                };
+                let direction = self.convert_optional_argument(&func.args, 1)?;
                 Ok(IrExpr::Cross {
                     expr: Box::new(expr),
                     direction,
-                    time_tol: optional(2)?,
-                    expr_tol: optional(3)?,
-                    enable: optional(4)?,
+                    time_tol: self.convert_optional_argument(&func.args, 2)?,
+                    expr_tol: self.convert_optional_argument(&func.args, 3)?,
+                    enable: self.convert_optional_argument(&func.args, 4)?,
                 })
             }
             "$white_noise" | "white_noise" => {
@@ -822,18 +854,13 @@ impl<'a> ExprConverter<'a> {
             "analysis" => analysis_expression(&func.name, &func.args),
             "above" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(4))?;
+                validate_event_argument_dependencies("above", &func.args)?;
                 let expr = self.convert(&func.args[0])?;
-                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    func.args
-                        .get(index)
-                        .map(|expr| self.convert(expr).map(Box::new))
-                        .transpose()
-                };
                 Ok(IrExpr::Above {
                     expr: Box::new(expr),
-                    time_tol: optional(1)?,
-                    expr_tol: optional(2)?,
-                    enable: optional(3)?,
+                    time_tol: self.convert_optional_argument(&func.args, 1)?,
+                    expr_tol: self.convert_optional_argument(&func.args, 2)?,
+                    enable: self.convert_optional_argument(&func.args, 3)?,
                 })
             }
             "timer" => {
@@ -1144,40 +1171,26 @@ impl<'a> ExprConverter<'a> {
             }
             "cross" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(5))?;
+                validate_event_argument_dependencies("cross", &call.args)?;
                 let expr = self.convert(require_arg(0)?)?;
-                let direction = call
-                    .args
-                    .get(1)
-                    .map(|arg| self.const_cross_direction(arg, "cross"))
-                    .transpose()?;
-                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    call.args
-                        .get(index)
-                        .map(|expr| self.convert(expr).map(Box::new))
-                        .transpose()
-                };
+                let direction = self.convert_optional_argument(&call.args, 1)?;
                 Ok(IrExpr::Cross {
                     expr: Box::new(expr),
                     direction,
-                    time_tol: optional(2)?,
-                    expr_tol: optional(3)?,
-                    enable: optional(4)?,
+                    time_tol: self.convert_optional_argument(&call.args, 2)?,
+                    expr_tol: self.convert_optional_argument(&call.args, 3)?,
+                    enable: self.convert_optional_argument(&call.args, 4)?,
                 })
             }
             "above" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
+                validate_event_argument_dependencies("above", &call.args)?;
                 let expr = self.convert(require_arg(0)?)?;
-                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
-                    call.args
-                        .get(index)
-                        .map(|expr| self.convert(expr).map(Box::new))
-                        .transpose()
-                };
                 Ok(IrExpr::Above {
                     expr: Box::new(expr),
-                    time_tol: optional(1)?,
-                    expr_tol: optional(2)?,
-                    enable: optional(3)?,
+                    time_tol: self.convert_optional_argument(&call.args, 1)?,
+                    expr_tol: self.convert_optional_argument(&call.args, 2)?,
+                    enable: self.convert_optional_argument(&call.args, 3)?,
                 })
             }
             "timer" => {

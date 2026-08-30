@@ -1385,22 +1385,40 @@ impl<'a> Parser<'a> {
                 }
                 let mut args = args.into_iter();
                 let signal = args.next().unwrap();
-                let direction = match args.next() {
-                    Some(direction) => {
-                        Some(Self::const_cross_direction(&direction).ok_or_else(|| {
-                            self.error(ParseErrorKind::InvalidEventExpression(
-                                "cross direction must be a constant -1, 0, or 1".into(),
-                            ))
-                        })?)
-                    }
-                    None => None,
-                };
-                let time_tol = args.next().map(Box::new);
-                let expr_tol = args.next().map(Box::new);
-                let enable = args.next().map(Box::new);
+                if matches!(signal, Expression::NullArgument(_)) {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "cross expression may not be null".into(),
+                    )));
+                }
+                let direction = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
+                let time_tol = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
+                let expr_tol = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
+                let enable = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
                 if args.next().is_some() {
                     return Err(self.error(ParseErrorKind::InvalidEventExpression(
                         "cross event accepts at most 5 arguments".into(),
+                    )));
+                }
+                if (time_tol.is_some() || expr_tol.is_some()) && direction.is_none() {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "cross tolerances require a defined direction".into(),
+                    )));
+                }
+                if expr_tol.is_some() && time_tol.is_none() {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "cross expr_tol requires time_tol".into(),
                     )));
                 }
                 Ok(EventExpr::Cross {
@@ -1420,12 +1438,31 @@ impl<'a> Parser<'a> {
                 }
                 let mut args = args.into_iter();
                 let signal = args.next().unwrap();
-                let time_tol = args.next().map(Box::new);
-                let expr_tol = args.next().map(Box::new);
-                let enable = args.next().map(Box::new);
+                if matches!(signal, Expression::NullArgument(_)) {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "above expression may not be null".into(),
+                    )));
+                }
+                let time_tol = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
+                let expr_tol = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
+                let enable = args
+                    .next()
+                    .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                    .map(Box::new);
                 if args.next().is_some() {
                     return Err(self.error(ParseErrorKind::InvalidEventExpression(
                         "above event accepts at most 4 arguments".into(),
+                    )));
+                }
+                if expr_tol.is_some() && time_tol.is_none() {
+                    return Err(self.error(ParseErrorKind::InvalidEventExpression(
+                        "above expr_tol requires time_tol".into(),
                     )));
                 }
                 Ok(EventExpr::Above {
@@ -1541,24 +1578,6 @@ impl<'a> Parser<'a> {
                 )))),
             })
             .collect()
-    }
-
-    /// Extract a constant cross direction (+1, -1, 0) from an expression
-    fn const_cross_direction(expr: &Expression) -> Option<CrossDirection> {
-        match expr {
-            Expression::Number(n) if n.value == 1.0 => Some(CrossDirection::Rising),
-            Expression::Number(n) if n.value == 0.0 => Some(CrossDirection::Both),
-            Expression::Number(n) if n.value == -1.0 => Some(CrossDirection::Falling),
-            Expression::Unary(u) if u.op == UnaryOp::Pos => Self::const_cross_direction(&u.operand),
-            Expression::Unary(u) if u.op == UnaryOp::Neg => {
-                match Self::const_cross_direction(&u.operand) {
-                    Some(CrossDirection::Rising) => Some(CrossDirection::Falling),
-                    Some(CrossDirection::Falling) => Some(CrossDirection::Rising),
-                    other => other,
-                }
-            }
-            _ => None,
-        }
     }
 
     /// Parse assignment or contribution statement
@@ -3097,17 +3116,70 @@ mod tests {
         let AnalogStatement::EventControl(e2) = &stmts[1] else {
             panic!("expected event control");
         };
+        let EventExpr::Cross {
+            direction: Some(direction),
+            ..
+        } = &e2.event
+        else {
+            panic!("expected directed cross event");
+        };
         assert!(matches!(
-            e2.event,
-            EventExpr::Cross {
-                direction: Some(CrossDirection::Rising),
-                ..
-            }
+            direction.as_ref(),
+            Expression::Number(number) if number.value == 1.0
         ));
         let AnalogStatement::EventControl(e3) = &stmts[2] else {
             panic!("expected event control");
         };
         assert!(matches!(e3.event, EventExpr::Or { .. }));
+    }
+
+    #[test]
+    fn cross_event_direction_accepts_an_analog_expression() {
+        let module = parse_module(
+            r#"module a(p, n);
+                inout p, n;
+                electrical p, n;
+                real direction, x;
+                analog begin
+                    direction = V(p, n) >= 0.0 ? 1.0 : -1.0;
+                    @(cross(V(p, n), direction)) x = x + 1.0;
+                end
+            endmodule"#,
+        );
+        let statements = &module.analog_block.as_ref().unwrap().statements;
+        let AnalogStatement::EventControl(event) = &statements[1] else {
+            panic!("expected event control");
+        };
+        let EventExpr::Cross {
+            direction: Some(direction),
+            ..
+        } = &event.event
+        else {
+            panic!("expected directed cross event");
+        };
+        assert!(matches!(
+            direction.as_ref(),
+            Expression::Identifier(identifier) if identifier.name == "direction"
+        ));
+    }
+
+    #[test]
+    fn event_controls_reject_invalid_null_argument_dependencies() {
+        for (event, expected) in [
+            ("cross(V(p, n), , 1.0e-9)", "tolerances require"),
+            ("cross(V(p, n), 1, , 1.0e-3)", "expr_tol requires"),
+            ("above(V(p, n), , 1.0e-3)", "expr_tol requires"),
+            ("cross(, 1)", "expression may not be null"),
+        ] {
+            let source = format!(
+                "module a(p, n); inout p, n; electrical p, n; real x; analog @({event}) x = 1.0; endmodule"
+            );
+            let diagnostic = parse_error(&source).to_string();
+            assert!(
+                diagnostic.contains(expected),
+                "{event} produced the wrong diagnostic: {diagnostic}"
+            );
+        }
     }
 
     #[test]

@@ -2834,12 +2834,14 @@ impl SemanticAnalyzer {
                 span,
             } => {
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
-                let dir_value = match direction {
-                    Some(CrossDirection::Rising) => 1.0,
-                    Some(CrossDirection::Falling) => -1.0,
-                    Some(CrossDirection::Both) | None => 0.0,
-                };
-                let mut args = vec![signal, Self::number_expr(dir_value, *span)];
+                let direction = direction
+                    .as_deref()
+                    .map(|direction| {
+                        self.lower_expression_with_side_effects(direction, module, sink)
+                    })
+                    .transpose()?
+                    .unwrap_or_else(|| Self::number_expr(0.0, *span));
+                let mut args = vec![signal, direction];
                 if let Some(time_tol) = time_tol {
                     args.push(self.lower_expression_with_side_effects(time_tol, module, sink)?);
                 } else if expr_tol.is_some() || enable.is_some() {
@@ -5692,21 +5694,49 @@ impl SemanticAnalyzer {
             if !matches!(argument, Expression::NullArgument(_)) {
                 continue;
             }
-            let authorized = index == 1
-                && matches!(
-                    normalized.as_str(),
-                    "zi_zp" | "zi_zd" | "laplace_zp" | "laplace_zd"
-                );
+            let authorized = match normalized.as_str() {
+                "cross" => (1..=4).contains(&index),
+                "above" => (1..=3).contains(&index),
+                "zi_zp" | "zi_zd" | "laplace_zp" | "laplace_zd" => index == 1,
+                _ => false,
+            };
             if !authorized {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::InvalidAnalogOperator(format!(
-                        "{} argument {} may not be null; only the zeros operand of zi_zp/zi_zd and laplace_zp/laplace_zd authorizes an adjacent-comma null",
+                        "{} argument {} may not be null at this position",
                         call.name,
                         index + 1
                     )),
                     argument.span(),
                 )));
             }
+        }
+        let defined = |index: usize| {
+            call.args
+                .get(index)
+                .is_some_and(|argument| !matches!(argument, Expression::NullArgument(_)))
+        };
+        let dependency_error = |message: &str| {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(message.to_string()),
+                call.span,
+            ))
+        };
+        match normalized.as_str() {
+            "cross" => {
+                if (defined(2) || defined(3)) && !defined(1) {
+                    return Err(dependency_error(
+                        "cross tolerances require a defined direction",
+                    ));
+                }
+                if defined(3) && !defined(2) {
+                    return Err(dependency_error("cross expr_tol requires time_tol"));
+                }
+            }
+            "above" if defined(2) && !defined(1) => {
+                return Err(dependency_error("above expr_tol requires time_tol"));
+            }
+            _ => {}
         }
         Ok(())
     }

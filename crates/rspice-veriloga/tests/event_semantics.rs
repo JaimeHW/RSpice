@@ -115,6 +115,35 @@ endmodule
 }
 
 #[test]
+fn above_fires_on_same_time_dc_sweep_crossings() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module dc_sweep_above(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ above(V(p, n));
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.set_analysis_type(0);
+    device.set_time(0.0);
+
+    device.update_voltages(&[-1.0]);
+    assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+    device.advance_state();
+
+    device.update_voltages(&[1.0]);
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.0);
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.0);
+    device.advance_state();
+
+    device.update_voltages(&[2.0]);
+    assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+}
+
+#[test]
 fn full_event_control_argument_lists_compile() {
     DeviceFixture::compile(
         r#"
@@ -127,10 +156,70 @@ module event_argument_lists(p, n);
         enabled = 1.0;
         @(cross(V(p, n), 1, 1.0e-12, 1.0e-6, enabled)) state = 1.0;
         @(above(V(p, n), 1.0e-12, 1.0e-6, enabled)) state = 2.0;
+        @(cross(V(p, n), 1, , , enabled)) state = 3.0;
+        @(above(V(p, n), , , enabled)) state = 4.0;
         I(p, n) <+ state;
     end
 endmodule
 "#,
+    );
+}
+
+#[test]
+fn null_event_optional_slots_use_runtime_defaults() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module null_event_arguments(p, n);
+    inout p, n;
+    electrical p, n;
+    real enabled;
+    analog begin
+        enabled = 1.0;
+        I(p, n) <+ cross(V(p, n), 1, , , enabled)
+                   + above(V(p, n), , , enabled);
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+
+    assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
+    device.advance_state();
+    assert_eq!(
+        evaluate(&mut device, 1.0, 1.0),
+        2.0,
+        "null tolerances must select defaults without disabling either rising event"
+    );
+}
+
+#[test]
+fn cross_event_direction_is_evaluated_at_runtime() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module dynamic_cross_direction(p, n);
+    inout p, n;
+    electrical p, n;
+    real direction, count;
+    analog begin
+        direction = V(p, n) >= 0.0 ? 1.0 : -1.0;
+        @(cross(V(p, n), direction)) count = count + 1.0;
+        I(p, n) <+ count;
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+
+    assert_eq!(evaluate(&mut device, 0.0, -1.0), 0.0);
+    device.advance_state();
+    assert_eq!(evaluate(&mut device, 1.0, 1.0), 1.0);
+    device.advance_state();
+    assert_eq!(
+        evaluate(&mut device, 2.0, -1.0),
+        2.0,
+        "a falling crossing must fire after the runtime direction changes to -1"
     );
 }
 

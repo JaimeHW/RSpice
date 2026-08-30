@@ -7279,6 +7279,22 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 )));
             }
         };
+        let direction = match direction {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            direction => direction,
+        };
+        let time_tol = match time_tol {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            time_tol => time_tol,
+        };
+        let expr_tol = match expr_tol {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            expr_tol => expr_tol,
+        };
+        let enable = match enable {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            enable => enable,
+        };
         let Some(slot) = self.limits.canonical_cross_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator cross expression {expr_id} detector slot"
@@ -7381,6 +7397,18 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     args.len()
                 )));
             }
+        };
+        let time_tol = match time_tol {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            time_tol => time_tol,
+        };
+        let expr_tol = match expr_tol {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            expr_tol => expr_tol,
+        };
+        let enable = match enable {
+            Some(id) if matches!(&self.expression(id)?.kind, HirExprKind::NullArgument) => None,
+            enable => enable,
         };
         let Some(slot) = self.limits.canonical_above_slot(expr_id) else {
             return Err(self.unsupported(format!(

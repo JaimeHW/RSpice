@@ -1082,6 +1082,64 @@ mod tests {
     }
 
     #[test]
+    fn event_helper_accepts_runtime_direction_and_default_optional_operands() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.allocate_cross_detectors(1);
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        assert_eq!(
+            evaluate_helper_with_session(
+                426,
+                0,
+                0,
+                0,
+                [-1.0, -1.0, 0.0, 0.0, 1.0],
+                &[],
+                Some(&mut session),
+            ),
+            Ok(0.0)
+        );
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept initial event state");
+
+        session.context_mut().time = 1.0;
+        assert_eq!(
+            evaluate_helper_with_session(
+                426,
+                0,
+                0,
+                0,
+                [1.0, 1.0, 0.0, 0.0, 1.0],
+                &[],
+                Some(&mut session),
+            ),
+            Ok(1.0)
+        );
+        session
+            .context_mut()
+            .advance_state()
+            .expect("accept rising event state");
+
+        session.context_mut().time = 2.0;
+        assert_eq!(
+            evaluate_helper_with_session(
+                426,
+                0,
+                0,
+                0,
+                [-1.0, -1.0, 0.0, 0.0, 1.0],
+                &[],
+                Some(&mut session),
+            ),
+            Ok(1.0),
+            "browser helper must consume the runtime -1 direction on the falling edge"
+        );
+    }
+
+    #[test]
     fn laplace_derivative_helper_matches_vm_and_preserves_filter_state() {
         let mut context = VmContext::default();
         context.analysis_type = 2;

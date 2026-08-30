@@ -398,7 +398,7 @@ pub enum IrExpr {
     /// Returns 1 when expr crosses zero, else 0
     Cross {
         expr: Box<IrExpr>,
-        direction: Option<i32>, // +1=rising, -1=falling, 0=both
+        direction: Option<Box<IrExpr>>, // runtime integer: +1=rising, -1=falling, 0=both
         time_tol: Option<Box<IrExpr>>,
         expr_tol: Option<Box<IrExpr>>,
         enable: Option<Box<IrExpr>>,
@@ -1277,12 +1277,13 @@ impl DeviceIR {
                 }
                 IrExpr::Cross {
                     expr,
+                    direction,
                     time_tol,
                     expr_tol,
                     enable,
-                    ..
                 } => {
                     contains_ddt(expr)
+                        || direction.as_deref().is_some_and(contains_ddt)
                         || time_tol.as_deref().is_some_and(contains_ddt)
                         || expr_tol.as_deref().is_some_and(contains_ddt)
                         || enable.as_deref().is_some_and(contains_ddt)

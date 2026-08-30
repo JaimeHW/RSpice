@@ -905,11 +905,20 @@ impl<'a> Vm<'a> {
                 }
                 let detector = &mut self.context.cross_detectors[*detector_id];
                 let enabled = event_integer_operand("above enable", enable)? != 0;
-                let result = detector
-                    .eval_above(value, self.context.time, time_tol, expr_tol, enabled)
-                    .map_err(|error| {
-                        VmError::InvalidNumericResult(format!("above evaluation failed: {error}"))
-                    })?;
+                let result = if matches!(self.context.analysis_type, 0 | 4) {
+                    detector.eval_above_static(
+                        value,
+                        self.context.time,
+                        time_tol,
+                        expr_tol,
+                        enabled,
+                    )
+                } else {
+                    detector.eval_above(value, self.context.time, time_tol, expr_tol, enabled)
+                }
+                .map_err(|error| {
+                    VmError::InvalidNumericResult(format!("above evaluation failed: {error}"))
+                })?;
                 self.stack.push(result);
             }
 

@@ -2016,13 +2016,18 @@ pub unsafe extern "C" fn rspice_above_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    match detectors[detector_id].eval_above(
-        operands[0],
-        ctx.time,
-        operands[1],
-        operands[2],
-        enabled,
-    ) {
+    let result = if matches!(ctx.analysis_type, 0 | 4) {
+        detectors[detector_id].eval_above_static(
+            operands[0],
+            ctx.time,
+            operands[1],
+            operands[2],
+            enabled,
+        )
+    } else {
+        detectors[detector_id].eval_above(operands[0], ctx.time, operands[1], operands[2], enabled)
+    };
+    match result {
         Ok(result) => result,
         Err(error) => {
             set_native_context_error(ctx, format!("above evaluation failed: {error}"));

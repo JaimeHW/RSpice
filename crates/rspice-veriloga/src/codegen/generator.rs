@@ -1210,11 +1210,11 @@ impl CodeGenerator {
             } => {
                 // cross(expr, direction, time_tol, expr_tol, enable)
                 self.emit_expr(expr, emit_ctx, program)?;
-                // Push direction constant (-1, 0, or +1)
-                let dir = direction.unwrap_or(0);
-                program
-                    .instructions
-                    .push(Instruction::PushConst(dir as f64));
+                if let Some(direction) = direction {
+                    self.emit_expr(direction, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
                 if let Some(tolerance) = time_tol {
                     self.emit_expr(tolerance, emit_ctx, program)?;
                 } else {
