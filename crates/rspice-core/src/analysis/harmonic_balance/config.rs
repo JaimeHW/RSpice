@@ -348,7 +348,7 @@ impl HbConfig {
         if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
             return Err(HbConfigError::new(
                 "fundamental_freq",
-                "must be finite and greater than zero",
+                "must be finite and positive",
             ));
         }
         if !self.fundamental_freq.recip().is_finite() {
