@@ -10,6 +10,10 @@
 <script type="module">
   const root = document.documentElement;
   const status = document.getElementById("status");
+  const expectedAbiVersion = Number.parseInt(
+    new URL(location.href).searchParams.get("expectedAbi") || "",
+    10,
+  );
   const workerUrl = new URL("./simulation-worker.js", import.meta.url);
   workerUrl.searchParams.set("v", `qualification-${Date.now()}`);
   const worker = new Worker(workerUrl, { type: "module" });
@@ -70,8 +74,10 @@
     if (message.type === "ready") {
       const capability = message.wasmJit || {};
       if (
+        Number.isSafeInteger(expectedAbiVersion) &&
+        expectedAbiVersion > 0 &&
         capability.available === true &&
-        capability.abiVersion === 4 &&
+        capability.abiVersion === expectedAbiVersion &&
         capability.result === 42 &&
         capability.solverResult === 15 &&
         capability.kernel?.contributions === 3 &&

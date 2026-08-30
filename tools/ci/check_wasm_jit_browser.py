@@ -14,6 +14,7 @@ import threading
 import urllib.parse
 
 EXPECTED_STAMPS = 20000
+EXPECTED_WASM_JIT_ABI_VERSION = 6
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
@@ -111,7 +112,13 @@ def main() -> None:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    url = f"http://127.0.0.1:{server.server_port}/wasm-jit-qualification.html"
+    qualification_query = urllib.parse.urlencode(
+        {"expectedAbi": EXPECTED_WASM_JIT_ABI_VERSION}
+    )
+    url = (
+        f"http://127.0.0.1:{server.server_port}/wasm-jit-qualification.html"
+        f"?{qualification_query}"
+    )
     with tempfile.TemporaryDirectory(prefix="rspice-wasm-jit-chrome-") as profile:
         browser = subprocess.Popen(
             [
@@ -154,7 +161,7 @@ def main() -> None:
 
     expected = {
         "status": "qualified",
-        "abi": "4",
+        "abi": str(EXPECTED_WASM_JIT_ABI_VERSION),
         "solverResult": "15",
         "contributions": "3",
         "jacobians": "14",
@@ -178,7 +185,8 @@ def main() -> None:
             "fusing, still computes the right answer and only shows up here."
         )
     print(
-        "browser WASM JIT qualification passed: ABI 4, solver result 15, "
+        f"browser WASM JIT qualification passed: ABI {EXPECTED_WASM_JIT_ABI_VERSION}, "
+        "solver result 15, "
         f"3 contributions, 14 Jacobian entries, {nanoseconds:.1f} ns/stamp"
     )
 
