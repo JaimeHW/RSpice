@@ -6147,6 +6147,8 @@ fn authored_fail_value_discovery_and_execution_qualify_lead_current_decks_withou
     for relative_path in [
         "Netlists/LEAD_CURRENTS/lead_bsrc_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_bsrc_trap.cir",
+        "Netlists/LEAD_CURRENTS/lead_bjt_gear.cir",
+        "Netlists/LEAD_CURRENTS/lead_bjt_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_dio1_gear.cir",
         "Netlists/LEAD_CURRENTS/lead_dio1_trap.cir",
         "Netlists/LEAD_CURRENTS/lead_dio1_m2_gear.cir",
@@ -6243,6 +6245,11 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
             "GEAR",
         ),
         (
+            "native level-1 Gummel-Poon NPN",
+            "VCC supply 0 5\nR1 supply out 1k\nVB base 0 PULSE(0 .8 0 1u 1u 5u 10u)\nQ1 out base 0 QMOD\n.MODEL QMOD NPN BF=100 IS=1e-14 CJE=1n CJC=1n TF=1n TNOM=27",
+            "GEAR",
+        ),
+        (
             "generated two-terminal JUNCAP diode",
             "V1 in 0 PULSE(0 1 0 1u 1u 5u 10u)\nR1 in out 1k\nD1 out 0 DMOD\n.MODEL DMOD D LEVEL=200",
             "GEAR",
@@ -6269,6 +6276,14 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
         (
             "voltage switch",
             "V1 out 0 1\nVCTRL ctl 0 1\nS1 out 0 ctl 0 SWMOD\n.MODEL SWMOD VSWITCH RON=1 ROFF=1MEG VON=1 VOFF=0",
+        ),
+        (
+            "PNP BJT",
+            "V1 out 0 1\nQ1 out out 0 QMOD\n.MODEL QMOD PNP BF=100 IS=1e-14",
+        ),
+        (
+            "multiple level-1 NPN BJTs",
+            "V1 out 0 1\nQ1 out out 0 QMOD\nQ2 out out 0 QMOD\n.MODEL QMOD NPN BF=100 IS=1e-14",
         ),
         (
             "transmission line",
@@ -6305,6 +6320,38 @@ fn authored_fail_value_device_envelope_admits_only_verified_transient_shapes() {
             "CORE LEVEL={level} returned the wrong capability diagnostic: {error}"
         );
     }
+
+    let bjt_lead_source = "native BJT lead dependency\n\
+VC 0 c 5\n\
+VB 0 b PULSE(0 .8 0 1u 1u 5u 10u)\n\
+VE 0 e 0\n\
+Q1 c b e QMOD\n\
+.MODEL QMOD NPN BF=100 IS=1e-14 CJE=1n CJC=1n TF=1n TNOM=27\n\
+.OPTIONS TIMEINT METHOD=GEAR\n\
+.TRAN 1u 10u\n\
+.MEASURE TRAN MAX_LEAD MAX {ABS(I(VC)-IC(Q1))} FAILVALUE=1e-6\n\
+.END\n";
+    assert!(
+        admission(bjt_lead_source)
+            .expect("validated BJT lead-current dependency qualifies")
+            .is_some()
+    );
+
+    let wrong_device_lead_source = "device-specific lead dependency\n\
+V1 out 0 1\n\
+D1 out 0 DMOD\n\
+.MODEL DMOD D IS=1e-14 N=1 RS=.1\n\
+.OPTIONS TIMEINT METHOD=GEAR\n\
+.TRAN 1u 10u\n\
+.MEASURE TRAN WRONG_LEAD MAX {ABS(IB(D1))} FAILVALUE=1e-6\n\
+.END\n";
+    let error = admission(wrong_device_lead_source)
+        .expect_err("BJT lead operators must not qualify for a diode instance");
+    assert!(
+        error.contains("cannot materialize measurement dependency 'IB(D1)'")
+            || error.contains("unresolved output dependency"),
+        "wrong-device lead dependency returned the wrong diagnostic: {error}"
+    );
 }
 
 #[test]

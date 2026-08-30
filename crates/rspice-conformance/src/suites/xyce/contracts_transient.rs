@@ -3607,7 +3607,17 @@ impl XyceTestRunner {
         }
         for request in measurement_requests {
             for dependency in &request.dependencies {
-                if !matches!(dependency.operator.to_ascii_uppercase().as_str(), "V" | "I") {
+                let operator = dependency.operator.to_ascii_uppercase();
+                let materializable = matches!(operator.as_str(), "V" | "I")
+                    || (matches!(operator.as_str(), "IB" | "IC" | "IE" | "IS")
+                        && Self::find_semiconductor_device_element(netlist, &dependency.symbol)
+                            .is_some_and(|element| {
+                                matches!(element.kind, ElementKind::Bjt { .. })
+                                    && Self::netlist_element_is_native_absolute_transient_level1_gp_npn(
+                                        netlist, &element,
+                                    )
+                            }));
+                if !materializable {
                     return Err(format!(
                         "{LABEL} cannot materialize measurement dependency '{}({})'",
                         dependency.operator, dependency.symbol
@@ -3677,6 +3687,11 @@ impl XyceTestRunner {
                     ) || Self::netlist_element_is_native_generated_juncap_diode(
                         netlist, element,
                     ) => {}
+                ElementKind::Bjt { .. }
+                    if Self::netlist_is_native_absolute_transient_level1_gp_npn(netlist)
+                        && Self::netlist_element_is_native_absolute_transient_level1_gp_npn(
+                            netlist, element,
+                        ) => {}
                 ElementKind::Coupling {
                     inductors,
                     coefficient,
@@ -3710,7 +3725,7 @@ impl XyceTestRunner {
                 }
                 _ => {
                     return Err(format!(
-                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, coupled inductors, native legacy diodes, and generated two-terminal JUNCAP diodes; element '{}' requires a broader self-verifying transient contract",
+                        "{LABEL} supports validated independent and behavioral sources, static R/L/C passives, coupled inductors, native legacy diodes, native level-1 NPN BJTs, and generated two-terminal JUNCAP diodes; element '{}' requires a broader self-verifying transient contract",
                         element.name
                     ));
                 }
@@ -4063,6 +4078,8 @@ impl XyceTestRunner {
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_npn(netlist, element)
             });
+        let has_qualified_full_gp_npn = purpose.validates_absolute_device_contract()
+            && Self::netlist_is_native_absolute_transient_level1_gp_npn(netlist);
         let has_qualified_irb_bjt = purpose.validates_absolute_device_contract()
             && elements.iter().any(|element| {
                 Self::netlist_device_is_single_native_transient_level1_npn_irb(netlist, element)
@@ -4342,6 +4359,11 @@ impl XyceTestRunner {
                 ElementKind::Bjt { .. }
                     if purpose.validates_absolute_device_contract()
                         && Self::netlist_element_is_native_transient_level1_npn(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Bjt { .. }
+                    if has_qualified_full_gp_npn
+                        && Self::netlist_element_is_native_absolute_transient_level1_gp_npn(
                             netlist, element,
                         ) => {}
                 ElementKind::Bjt { .. }

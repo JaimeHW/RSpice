@@ -3630,6 +3630,69 @@ impl XyceTestRunner {
                 .is_some_and(Self::model_is_native_transient_level1_npn)
     }
 
+    pub(super) fn netlist_element_is_native_absolute_transient_level1_gp_npn(
+        netlist: &Netlist,
+        element: &rspice_core::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        let topology_is_qualified = match element.nodes.as_slice() {
+            [_, _, _] => true,
+            [_, _, _, substrate] => Self::node_name_is_ground(substrate),
+            _ => false,
+        };
+        topology_is_qualified
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_absolute_transient_level1_gp_npn)
+    }
+
+    pub(super) fn netlist_is_native_absolute_transient_level1_gp_npn(netlist: &Netlist) -> bool {
+        let bjts = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Bjt { .. }))
+            .collect::<Vec<_>>();
+        bjts.len() == 1
+            && bjts.iter().all(|element| {
+                Self::netlist_element_is_native_absolute_transient_level1_gp_npn(netlist, element)
+            })
+    }
+
+    pub(super) fn model_is_native_absolute_transient_level1_gp_npn(
+        model: &rspice_core::netlist::ModelDef,
+    ) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NPN")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return false;
+        }
+
+        let mut names = BTreeSet::new();
+        model.params.iter().all(|(name, value)| {
+            let name = name.to_ascii_uppercase();
+            names.insert(name.clone())
+                && match name.as_str() {
+                    "LEVEL" => value.is_finite() && (*value - 1.0).abs() <= 1.0e-9,
+                    "TNOM" => value.is_finite() && *value > -273.15,
+                    _ => Self::native_full_level1_gp_bjt_model_param(&name, *value),
+                }
+        })
+    }
+
     pub(super) fn netlist_element_is_native_transient_level1_gp_bjt(
         netlist: &Netlist,
         element: &rspice_core::netlist::Element,
@@ -3722,10 +3785,10 @@ impl XyceTestRunner {
             && model
                 .params
                 .iter()
-                .all(|(name, value)| Self::native_bug805_bjt_model_param(name, *value))
+                .all(|(name, value)| Self::native_full_level1_gp_bjt_model_param(name, *value))
     }
 
-    fn native_bug805_bjt_model_param(name: &str, value: Value) -> bool {
+    fn native_full_level1_gp_bjt_model_param(name: &str, value: Value) -> bool {
         if !value.is_finite() {
             return false;
         }
