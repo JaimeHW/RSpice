@@ -14,6 +14,16 @@ const RELEASE_TAG: &str = "Release-7.10.0";
 const TOOLS_PM_SHA256: &str = "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3";
 const XYCE_VERIFY_SHA256: &str = "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3";
 
+type Bug372NumericParameters = Vec<(String, u64)>;
+type Bug372StringParameters = Vec<(String, String)>;
+type Bug372ModelFingerprintEntry = (
+    String,
+    String,
+    Bug372NumericParameters,
+    Bug372StringParameters,
+);
+type Bug372ModelFingerprint = Vec<Bug372ModelFingerprintEntry>;
+
 const HISTORICAL_CONTENT_BYTES: usize = 227_245;
 const HISTORICAL_STREAM_BYTES: usize = 8_062;
 const HISTORICAL_STREAM_SHA256: &str =
@@ -794,9 +804,7 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn bug372_model_fingerprint(
-        netlist: &Netlist,
-    ) -> Vec<(String, String, Vec<(String, u64)>, Vec<(String, String)>)> {
+    fn bug372_model_fingerprint(netlist: &Netlist) -> Bug372ModelFingerprint {
         let mut models = netlist
             .models
             .iter()

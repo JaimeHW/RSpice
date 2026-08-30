@@ -12,6 +12,11 @@ const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
 const RELEASE_TAG: &str = "Release-7.10.0";
 
+type Bug308RetainedFiles = BTreeMap<String, Vec<u8>>;
+type Bug308RetainedCensus = (Bug308RetainedFiles, Vec<u8>);
+type Bug308ExpectedMember = (&'static str, usize, &'static str, &'static str);
+type Bug308ExpectedFiles = BTreeMap<String, Bug308ExpectedMember>;
+
 const HISTORICAL_CONTENT_BYTES: usize = 157_664;
 const HISTORICAL_STREAM_BYTES: usize = 3_909;
 const HISTORICAL_STREAM_SHA256: &str =
@@ -298,14 +303,11 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn read_bug308_census(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<(BTreeMap<String, Vec<u8>>, Vec<u8>), String> {
+    fn read_bug308_census(&self, abort: &dyn AbortSignal) -> Result<Bug308RetainedCensus, String> {
         Self::validate_bug308_retained_stream()?;
         let read_directory = |directory: &Path,
-                              expected: BTreeMap<String, (&str, usize, &str, &str)>|
-         -> Result<BTreeMap<String, Vec<u8>>, String> {
+                              expected: Bug308ExpectedFiles|
+         -> Result<Bug308RetainedFiles, String> {
             if abort.is_aborted() {
                 return Err(format!("{LABEL} retained census aborted"));
             }
@@ -398,10 +400,10 @@ impl XyceTestRunner {
         Ok((sources, output))
     }
 
-    fn bug308_source<'a>(
-        sources: &'a BTreeMap<String, Vec<u8>>,
+    fn bug308_source(
+        sources: &Bug308RetainedFiles,
         role: Bug308WorkerRole,
-    ) -> Result<&'a str, String> {
+    ) -> Result<&str, String> {
         std::str::from_utf8(
             sources
                 .get(&role.file_name().to_ascii_lowercase())
@@ -415,7 +417,7 @@ impl XyceTestRunner {
         deck: &XyceDeck,
         role: Bug308SonRole,
         abort: &dyn AbortSignal,
-    ) -> Result<(BTreeMap<String, Vec<u8>>, Vec<u8>), String> {
+    ) -> Result<Bug308RetainedCensus, String> {
         Self::validate_bug308_historical()?;
         if abort.is_aborted() {
             return Err(format!("{LABEL} provenance validation aborted"));
@@ -1235,7 +1237,7 @@ mod tests {
         extended.print_precision = Some(17);
         extended.print_width = Some(-1);
         let extended_text = serialize_xyce_prn_sequence(
-            &[table.clone()],
+            std::slice::from_ref(&table),
             &extended,
             &netlist.options,
             XycePrnFooter::None,
@@ -1246,7 +1248,7 @@ mod tests {
 
         extended.print_precision = Some(0);
         let zero_precision_text = serialize_xyce_prn_sequence(
-            &[table.clone()],
+            std::slice::from_ref(&table),
             &extended,
             &netlist.options,
             XycePrnFooter::None,
@@ -1406,8 +1408,10 @@ mod tests {
                 .is_err()
         );
 
-        let mut config = XyceRunnerConfig::default();
-        config.max_time_per_test_ms = 1;
+        let config = XyceRunnerConfig {
+            max_time_per_test_ms: 1,
+            ..XyceRunnerConfig::default()
+        };
         let expired = XyceTestRunner::new(canonical.root.clone(), config);
         assert!(
             expired

@@ -183,19 +183,19 @@ impl XyceTestRunner {
             .collect::<Vec<_>>();
         canonical.sort();
         let stream = canonical.join("\n");
+        let sha = format!("{:x}", Sha256::digest(stream.as_bytes()));
+        let b3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
         if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
             || RELEASE_COMMIT != "d6e278e371ec2f3df1325dcff4552e585bc7ecc1"
             || RELEASE_TAG != "Release-7.10.0"
             || records.len() != HISTORICAL.len()
             || stream.len() != HISTORICAL_RECORD_BYTES
-            || format!("{:x}", Sha256::digest(stream.as_bytes())) != HISTORICAL_RECORDS_SHA256
-            || blake3::hash(stream.as_bytes()).to_hex().as_str() != HISTORICAL_RECORDS_BLAKE3
+            || sha != HISTORICAL_RECORDS_SHA256
+            || b3 != HISTORICAL_RECORDS_BLAKE3
         {
             return Err(format!(
-                "{LABEL} Release wrapper/ACComparator provenance changed: bytes={}, sha={}, b3={}",
-                stream.len(),
-                format!("{:x}", Sha256::digest(stream.as_bytes())),
-                blake3::hash(stream.as_bytes()).to_hex()
+                "{LABEL} Release wrapper/ACComparator provenance changed: bytes={}, sha={sha}, b3={b3}",
+                stream.len()
             ));
         }
         Ok(())

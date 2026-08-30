@@ -290,7 +290,7 @@ fn open_directory_member_nofollow(
                 "{contract_label} {record_label} did not open as a directory"
             ));
         }
-        return Ok(file);
+        Ok(file)
     }
     #[cfg(not(unix))]
     open_directory_nofollow(&directory.path.join(name), contract_label, record_label)
@@ -332,7 +332,7 @@ fn open_file_member_nofollow(
                 "{contract_label} {record_label} did not open as a regular file"
             ));
         }
-        return Ok(file);
+        Ok(file)
     }
     #[cfg(not(unix))]
     open_regular_nofollow(&directory.path.join(name), contract_label, record_label)

@@ -5496,7 +5496,7 @@ impl XyceTestRunner {
                     .to_string(),
             );
         }
-        let content = std::str::from_utf8(&bytes)
+        let content = std::str::from_utf8(bytes)
             .map_err(|error| format!("upstream-exclusions manifest is not UTF-8: {error}"))?;
 
         fn safe_relative_path(raw: &str, required_suffix: &str) -> Option<String> {
@@ -5710,7 +5710,7 @@ impl XyceTestRunner {
                 ),
                 (
                     "complete manifest",
-                    sha256_hex(&bytes),
+                    sha256_hex(bytes),
                     UPSTREAM_EXCLUSIONS_MANIFEST_SHA256,
                 ),
             ] {

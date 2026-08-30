@@ -1,6 +1,7 @@
 use super::*;
 use rspice_core::analysis::HbResult;
 use rspice_core::netlist::{SourceSpec, XyceHbPreconditioner};
+use std::cmp::Ordering;
 use std::io::Read as _;
 
 const LABEL: &str = "BUG_340 stepped harmonic-balance wrapper";
@@ -24,6 +25,9 @@ const AC_ABSOLUTE_TOLERANCE: Value = 1.0e-6;
 const AC_RELATIVE_TOLERANCE: Value = 1.0e-3;
 const AC_ZERO_TOLERANCE: Value = 1.0e-14;
 const AC_FREQUENCY_RELATIVE_TOLERANCE: Value = 1.0e-6;
+
+type Bug340RetainedFiles = BTreeMap<String, Vec<u8>>;
+type Bug340Provenance = (Bug340RetainedFiles, Vec<u8>);
 
 const HISTORICAL_CONTENT_BYTES: usize = 24_170;
 const HISTORICAL_STREAM_BYTES: usize = 1_387;
@@ -365,7 +369,7 @@ impl XyceTestRunner {
         &self,
         deck: &XyceDeck,
         abort: &dyn AbortSignal,
-    ) -> Result<(BTreeMap<String, Vec<u8>>, Vec<u8>), String> {
+    ) -> Result<Bug340Provenance, String> {
         if abort.is_aborted() {
             return Err(format!("{LABEL} provenance validation aborted"));
         }
@@ -896,7 +900,7 @@ impl XyceTestRunner {
         }
         if output_magnitudes
             .windows(2)
-            .any(|pair| !(pair[1] < pair[0]))
+            .any(|pair| !matches!(pair[1].partial_cmp(&pair[0]), Some(Ordering::Less)))
         {
             return Err(format!(
                 "{LABEL} RC response is not monotonic across R1 STEP"
