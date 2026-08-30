@@ -462,6 +462,8 @@ pub struct TrapGearController {
     prev_values: Vec<Value>,
     /// Previous derivative signs (true = positive, false = negative)
     prev_signs: Vec<bool>,
+    /// Whether each previous derivative sign came from a real interval.
+    prev_sign_valid: Vec<bool>,
     /// Count of consecutive sign changes per node
     sign_change_count: Vec<usize>,
     /// Steps since last oscillation detected
@@ -481,6 +483,7 @@ impl TrapGearController {
             current_method: IntegrationMethod::Trapezoidal,
             prev_values: Vec::new(),
             prev_signs: Vec::new(),
+            prev_sign_valid: Vec::new(),
             sign_change_count: Vec::new(),
             smooth_steps: 0,
             at_breakpoint: false,
@@ -514,6 +517,7 @@ impl TrapGearController {
         if self.prev_values.len() != solution.len() {
             self.prev_values = solution.to_vec();
             self.prev_signs = vec![true; solution.len()];
+            self.prev_sign_valid = vec![false; solution.len()];
             self.sign_change_count = vec![0; solution.len()];
             return false;
         }
@@ -528,7 +532,12 @@ impl TrapGearController {
             let curr_sign = derivative >= 0.0;
 
             // Check for sign change in derivative
-            if curr_sign != self.prev_signs[i] && derivative.abs() > TRAPGEAR_SIGN_CHANGE_FLOOR {
+            if !self.prev_sign_valid[i] {
+                self.sign_change_count[i] = 0;
+                self.prev_sign_valid[i] = true;
+            } else if curr_sign != self.prev_signs[i]
+                && derivative.abs() > TRAPGEAR_SIGN_CHANGE_FLOOR
+            {
                 self.sign_change_count[i] += 1;
                 any_sign_change = true;
             } else {
@@ -572,10 +581,32 @@ impl TrapGearController {
         self.current_method = method;
     }
 
+    /// Restart the hybrid detector from an accepted breakpoint solution.
+    ///
+    /// A source discontinuity invalidates derivative-sign evidence collected
+    /// on the preceding smooth span. Retain the accepted breakpoint value as
+    /// the derivative origin for the first departure, while returning the
+    /// effective method and hysteresis counters to their canonical startup
+    /// state.
+    pub(crate) fn restart_from(&mut self, accepted_solution: &[Value]) {
+        self.current_method = IntegrationMethod::Trapezoidal;
+        self.prev_values.clear();
+        self.prev_values.extend_from_slice(accepted_solution);
+        self.prev_signs.clear();
+        self.prev_signs.resize(accepted_solution.len(), true);
+        self.prev_sign_valid.clear();
+        self.prev_sign_valid.resize(accepted_solution.len(), false);
+        self.sign_change_count.clear();
+        self.sign_change_count.resize(accepted_solution.len(), 0);
+        self.smooth_steps = 0;
+        self.at_breakpoint = true;
+    }
+
     /// Reset the controller state
     pub fn reset(&mut self) {
         self.prev_values.clear();
         self.prev_signs.clear();
+        self.prev_sign_valid.clear();
         self.sign_change_count.clear();
         self.smooth_steps = 0;
         self.at_breakpoint = false;
@@ -616,5 +647,25 @@ mod trapgear_controller_tests {
         controller.set_at_breakpoint(true);
 
         assert_eq!(controller.current_method(), IntegrationMethod::Trapezoidal);
+    }
+
+    #[test]
+    fn breakpoint_restart_discards_detector_phase_and_seeds_the_accepted_solution() {
+        let mut controller = TrapGearController::new();
+        controller.force_method(IntegrationMethod::Gear2);
+        controller.update(&[100.0], 1.0e-9);
+        controller.update(&[-100.0], 1.0e-9);
+
+        controller.restart_from(&[3.0]);
+        assert_eq!(controller.current_method(), IntegrationMethod::Trapezoidal);
+
+        assert!(!controller.update(&[2.0], 1.0e-9));
+        assert!(!controller.update(&[3.0], 1.0e-9));
+        assert!(!controller.update(&[2.0], 1.0e-9));
+        assert!(
+            controller.update(&[3.0], 1.0e-9),
+            "the accepted breakpoint value must be the first derivative origin"
+        );
+        assert_eq!(controller.current_method(), IntegrationMethod::Gear2);
     }
 }

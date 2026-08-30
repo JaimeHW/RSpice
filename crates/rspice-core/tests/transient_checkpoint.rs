@@ -573,8 +573,8 @@ fn xyce_source_breakpoint_checkpoint_restores_the_global_controller_phase() {
         .expect("source checkpoint is an accepted baseline point");
     let expected = full
         .time
-        .get(baseline_index..baseline_index + 3)
-        .expect("baseline has two accepted intervals after the source breakpoint");
+        .get(baseline_index..baseline_index + 7)
+        .expect("baseline has six accepted intervals after the source breakpoint");
     let checkpoint_text = source_checkpoint.to_text();
     let continuation = checkpoint_text
         .lines()
@@ -602,10 +602,10 @@ fn xyce_source_breakpoint_checkpoint_restores_the_global_controller_phase() {
             .run_tran_resume(&netlist, &checkpoint, stop, max_step)
             .unwrap_or_else(|error| panic!("{encoding:?} checkpoint resumes: {error}"));
         assert!(
-            resumed.time.len() >= 3,
-            "{encoding:?} resume must accept two intervals after the seam"
+            resumed.time.len() >= 7,
+            "{encoding:?} resume must accept six intervals after the seam"
         );
-        for (offset, (&actual, &baseline)) in resumed.time[..3].iter().zip(expected).enumerate() {
+        for (offset, (&actual, &baseline)) in resumed.time[..7].iter().zip(expected).enumerate() {
             assert_eq!(
                 actual.to_bits(),
                 baseline.to_bits(),

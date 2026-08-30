@@ -3001,6 +3001,12 @@ impl Engine {
         let mut trapgear = TrapGearController::new();
         if let Some(method) = fixed_method {
             trapgear.force_method(method);
+        } else if xyce_lte_restart_first_step {
+            // Xyce reinitializes OneStep from the accepted breakpoint
+            // solution. The hybrid detector is RSpice policy layered above
+            // that integrator, so it must discard pre-discontinuity evidence
+            // and use the same accepted solution as its derivative origin.
+            trapgear.restart_from(&solution);
         }
         // Track integration method order for LTE scaling
         let effective_method_order = |method: IntegrationMethod, trap_order: u8| -> u32 {
@@ -6704,7 +6710,11 @@ impl Engine {
                         accepted_step_trap_order,
                     ));
                     if fixed_method.is_none() {
-                        trapgear.update(&new_solution, dt);
+                        if hit_breakpoint {
+                            trapgear.restart_from(&new_solution);
+                        } else {
+                            trapgear.update(&new_solution, dt);
+                        }
                     }
                     let capture_xyce_static_history = self.config.spice_dialect
                         == SpiceDialect::Xyce
@@ -7016,7 +7026,11 @@ impl Engine {
                     .set_method_order(effective_method_order(method_after_step, step_trap_order));
             }
             if fixed_method.is_none() {
-                trapgear.update(&new_solution, dt);
+                if hit_breakpoint {
+                    trapgear.restart_from(&new_solution);
+                } else {
+                    trapgear.update(&new_solution, dt);
+                }
             }
 
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
