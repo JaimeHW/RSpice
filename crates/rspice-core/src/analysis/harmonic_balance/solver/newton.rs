@@ -7,6 +7,16 @@ use std::f64::consts::PI;
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
+#[inline]
+fn exact_krylov_dense_recovery_allowed(size: usize, error: &rspice_matrix::SolverError) -> bool {
+    size < super::krylov::KRYLOV_AUTO_THRESHOLD
+        && matches!(
+            error,
+            rspice_matrix::SolverError::ConvergenceFailed(_)
+                | rspice_matrix::SolverError::InaccurateSolution(_)
+        )
+}
+
 #[derive(Debug)]
 struct HbNewtonStep {
     node_voltages: Vec<Vec<Complex64>>,
@@ -33,6 +43,7 @@ struct ExactHbOperator<'a> {
     l_matrix: &'a [(usize, usize, Value)],
     g_spectra: &'a [PeriodicSpectrum],
     c_spectra: &'a [PeriodicSpectrum],
+    mna_branches: &'a [ExactMnaBranch],
 }
 
 #[cfg(test)]
@@ -56,6 +67,7 @@ mod exact_matrix_free_tests {
             l_matrix: &[],
             g_spectra,
             c_spectra,
+            mna_branches: &[],
         }
     }
 
@@ -243,7 +255,169 @@ mod exact_matrix_free_tests {
     }
 
     #[test]
-    fn line_search_removes_unrepresentable_dc_imaginary_state() {
+    fn branch_aware_operator_matches_explicit_mna_orientation_and_dense_stream() {
+        let g = vec![(0, 0, 3.0), (1, 1, 4.0)];
+        let branches = vec![
+            ExactMnaBranch::VoltageSource {
+                branch_ordinal: 1,
+                node_pos: 1,
+                node_neg: 0,
+                source_index: 0,
+                source: None,
+            },
+            ExactMnaBranch::Inductor {
+                branch_ordinal: 2,
+                node_pos: 2,
+                node_neg: 1,
+                inductance: 2.5e-6,
+            },
+        ];
+        let base = fixture(&g, &[], &[], &[]);
+        let operator = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&g, &[], &[], &[])
+        };
+        operator.validate().expect("branch-aware operator is valid");
+
+        let size = operator.entity_count() * operator.real_width;
+        let input = (0..size)
+            .map(|index| Complex64::new(0.03 * index as Value - 0.2, 0.0))
+            .collect::<Vec<_>>();
+        let actual = operator.apply(&input);
+
+        // Start from the independently checked nodal operator, then apply
+        // the canonical branch equations explicitly in complex form.
+        let mut expected = vec![Complex64::new(0.0, 0.0); size];
+        expected[..2 * operator.real_width]
+            .copy_from_slice(&base.apply(&input[..2 * operator.real_width]));
+        let coefficient = |entity: usize, harmonic: usize| {
+            let re = input[operator.re_idx(entity, harmonic)].re;
+            let im = if harmonic == 0 {
+                0.0
+            } else {
+                input[operator.im_idx(entity, harmonic)].re
+            };
+            Complex64::new(re, im)
+        };
+        let mut add = |entity: usize, harmonic: usize, value: Complex64| {
+            expected[operator.re_idx(entity, harmonic)] += value.re;
+            if harmonic > 0 {
+                expected[operator.im_idx(entity, harmonic)] += value.im;
+            }
+        };
+        for harmonic in 0..operator.num_components {
+            let v0 = coefficient(0, harmonic);
+            let v1 = coefficient(1, harmonic);
+            let source_current = coefficient(2, harmonic);
+            let inductor_current = coefficient(3, harmonic);
+            add(0, harmonic, -source_current + inductor_current);
+            add(1, harmonic, -inductor_current);
+            add(2, harmonic, -v0);
+            add(
+                3,
+                harmonic,
+                v0 - v1
+                    + Complex64::new(0.0, harmonic as Value * operator.omega0 * 2.5e-6)
+                        * inductor_current,
+            );
+        }
+        for (&value, &reference) in actual.iter().zip(&expected) {
+            assert_close(value, reference);
+        }
+
+        let mut streamed_dense = vec![0.0; size * size];
+        operator.visit_entries(|row, column, value| {
+            streamed_dense[row * size + column] += value;
+        });
+        for row in 0..size {
+            let value = (0..size)
+                .map(|column| streamed_dense[row * size + column] * input[column])
+                .sum();
+            assert_close(actual[row], value);
+        }
+        assert_eq!(actual[operator.im_idx(3, 1)].im, 0.0);
+    }
+
+    #[test]
+    fn branch_aware_matrix_free_gmres_matches_direct_real_lu() {
+        let g = vec![(0, 0, 5.0), (1, 1, 7.0)];
+        let branches = vec![ExactMnaBranch::VoltageSource {
+            branch_ordinal: 1,
+            node_pos: 1,
+            node_neg: 0,
+            source_index: 0,
+            source: None,
+        }];
+        let operator = ExactHbOperator {
+            mna_branches: &branches,
+            ..fixture(&g, &[], &[], &[])
+        };
+        let preconditioner = ExactHbPreconditioner::build(&operator);
+        let size = operator.entity_count() * operator.real_width;
+        let rhs = (0..size)
+            .map(|index| Complex64::new(0.1 - index as Value * 0.006, 0.0))
+            .collect::<Vec<_>>();
+        let outcome = super::super::krylov::gmres(
+            &|input| operator.apply(input),
+            &preconditioner,
+            &rhs,
+            size,
+            4,
+        );
+        assert!(outcome.converged, "relative={}", outcome.relative_residual);
+        rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+            size,
+            size,
+            &outcome.solution,
+            &rhs,
+            |visitor| {
+                operator.visit_entries(|row, column, value| {
+                    visitor(column, row, Complex64::new(value, 0.0));
+                });
+            },
+        )
+        .expect("branch-aware Krylov candidate is componentwise certified");
+
+        let mut dense = vec![Complex64::new(0.0, 0.0); size * size];
+        operator.visit_entries(|row, column, value| {
+            dense[row * size + column] += value;
+        });
+        let factors = super::super::krylov::LuFactors::factor(dense, size);
+        let mut direct = rhs.clone();
+        factors.solve_in_place(&mut direct);
+        for (value, reference) in outcome.solution.iter().zip(&direct) {
+            assert_close(*value, *reference);
+        }
+    }
+
+    #[test]
+    fn large_or_structurally_invalid_krylov_steps_never_select_dense_recovery() {
+        use rspice_matrix::SolverError;
+
+        assert!(exact_krylov_dense_recovery_allowed(
+            super::super::krylov::KRYLOV_AUTO_THRESHOLD - 1,
+            &SolverError::ConvergenceFailed(7),
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            super::super::krylov::KRYLOV_AUTO_THRESHOLD,
+            &SolverError::InaccurateSolution(1.0e-8),
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            1,
+            &SolverError::Overflow,
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            1,
+            &SolverError::InvalidCircuit("malformed operator".to_string()),
+        ));
+        assert!(!exact_krylov_dense_recovery_allowed(
+            1,
+            &SolverError::OutOfMemory,
+        ));
+    }
+
+    #[test]
+    fn line_search_rejects_unrepresentable_dc_imaginary_state() {
         let mut solver = HbSolver::new(HbConfig::new(1.0e6).with_harmonics(1), 1);
         solver.add_conductance(0, 0, 1.0);
         solver.add_dc_source(0, 1.0);
@@ -260,59 +434,210 @@ mod exact_matrix_free_tests {
         };
         let reltol = solver.config.tolerance;
         let abstol = solver.config.abstol;
-        solver
+        let error = solver
             .apply_line_search_with_gmin(&mut state, &delta, 0.0, 1.0, reltol, abstol, &NoAbort)
-            .expect("line search accepts the representable DC state");
-
-        assert_eq!(state.x[0][0], Complex64::new(1.0, 0.0));
-        assert_eq!(state.residual_norm, 0.0);
+            .expect_err("non-real DC evidence must fail closed before line search");
+        assert!(error.to_string().contains("imaginary DC"), "{error}");
     }
 }
 
 impl ExactHbOperator<'_> {
     #[inline]
-    fn re_idx(&self, node: usize, harmonic: usize) -> usize {
+    fn entity_count(&self) -> usize {
+        self.num_nodes + self.mna_branches.len()
+    }
+
+    #[inline]
+    fn re_idx(&self, entity: usize, harmonic: usize) -> usize {
         if harmonic == 0 {
-            node * self.real_width
+            entity * self.real_width
         } else {
-            node * self.real_width + 2 * harmonic - 1
+            entity * self.real_width + 2 * harmonic - 1
         }
     }
 
     #[inline]
-    fn im_idx(&self, node: usize, harmonic: usize) -> usize {
-        node * self.real_width + 2 * harmonic
+    fn im_idx(&self, entity: usize, harmonic: usize) -> usize {
+        entity * self.real_width + 2 * harmonic
     }
 
-    fn apply(&self, input: &[Complex64]) -> Vec<Complex64> {
-        let n = self.num_nodes;
-        let h = self.num_components;
-        debug_assert_eq!(input.len(), n * self.real_width);
-
-        let mut x = vec![Complex64::new(0.0, 0.0); n * h];
-        for node in 0..n {
-            for k in 0..h {
-                let re = input[self.re_idx(node, k)].re;
-                let im = if k == 0 {
-                    0.0
-                } else {
-                    input[self.im_idx(node, k)].re
-                };
-                x[node * h + k] = Complex64::new(re, im);
+    fn validate(&self) -> Result<(), HbError> {
+        let expected_width = self
+            .num_components
+            .checked_mul(2)
+            .and_then(|value| value.checked_sub(1))
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "exact HB operator harmonic layout exceeds this platform".to_string(),
+                )
+            })?;
+        if self.num_components == 0 || self.real_width != expected_width {
+            return Err(HbError::InvalidCircuit(format!(
+                "exact HB operator real width {} does not match {} harmonic components",
+                self.real_width, self.num_components
+            )));
+        }
+        if !self.omega0.is_finite()
+            || self.omega0 <= 0.0
+            || !self.gmin.is_finite()
+            || self.gmin < 0.0
+        {
+            return Err(HbError::InvalidCircuit(
+                "exact HB operator frequency/GMIN is non-finite or outside its valid range"
+                    .to_string(),
+            ));
+        }
+        for (kind, entries) in [
+            ("conductance", self.g_matrix),
+            ("capacitance", self.c_matrix),
+            ("legacy inductance", self.l_matrix),
+        ] {
+            if let Some(&(row, column, value)) = entries.iter().find(|(row, column, value)| {
+                *row >= self.num_nodes || *column >= self.num_nodes || !value.is_finite()
+            }) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact HB {kind} operator entry ({row}, {column}, {value}) is malformed"
+                )));
             }
         }
+        for (kind, spectra) in [
+            ("conductance", self.g_spectra),
+            ("capacitance", self.c_spectra),
+        ] {
+            if let Some((row, column, _)) = spectra.iter().find(|(row, column, spectrum)| {
+                *row >= self.num_nodes
+                    || *column >= self.num_nodes
+                    || spectrum
+                        .iter()
+                        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            }) {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact HB periodic {kind} operator stamp ({row}, {column}) is malformed or non-finite"
+                )));
+            }
+        }
+        for (index, branch) in self.mna_branches.iter().enumerate() {
+            let expected_ordinal = index.checked_add(1).ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "exact HB canonical branch ordinal exceeds this platform".to_string(),
+                )
+            })?;
+            let (ordinal, node_pos, node_neg, inductance) = match branch {
+                ExactMnaBranch::VoltageSource {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    ..
+                } => (*branch_ordinal, *node_pos, *node_neg, None),
+                ExactMnaBranch::Inductor {
+                    branch_ordinal,
+                    node_pos,
+                    node_neg,
+                    inductance,
+                } => (*branch_ordinal, *node_pos, *node_neg, Some(*inductance)),
+            };
+            if ordinal != expected_ordinal
+                || node_pos > self.num_nodes
+                || node_neg > self.num_nodes
+                || node_pos == node_neg
+                || inductance.is_some_and(|value| !value.is_finite() || value == 0.0)
+            {
+                return Err(HbError::InvalidCircuit(format!(
+                    "exact HB canonical MNA branch {index} is malformed"
+                )));
+            }
+        }
+        Ok(())
+    }
 
-        let mut y = vec![Complex64::new(0.0, 0.0); n * h];
+    fn emit_entry(
+        visitor: &mut dyn FnMut(usize, usize, Value),
+        row: usize,
+        column: usize,
+        value: Value,
+    ) {
+        if value != 0.0 {
+            visitor(row, column, value);
+        }
+    }
+
+    /// Visit the realified entries contributed by a complex-linear term
+    /// `y[row,k] += value * x[column,l]`.
+    fn visit_linear_term(
+        &self,
+        row_entity: usize,
+        row_harmonic: usize,
+        column_entity: usize,
+        column_harmonic: usize,
+        value: Complex64,
+        visitor: &mut dyn FnMut(usize, usize, Value),
+    ) {
+        let row_re = self.re_idx(row_entity, row_harmonic);
+        let column_re = self.re_idx(column_entity, column_harmonic);
+        Self::emit_entry(visitor, row_re, column_re, value.re);
+        if column_harmonic > 0 {
+            Self::emit_entry(
+                visitor,
+                row_re,
+                self.im_idx(column_entity, column_harmonic),
+                -value.im,
+            );
+        }
+        if row_harmonic > 0 {
+            let row_im = self.im_idx(row_entity, row_harmonic);
+            Self::emit_entry(visitor, row_im, column_re, value.im);
+            if column_harmonic > 0 {
+                Self::emit_entry(
+                    visitor,
+                    row_im,
+                    self.im_idx(column_entity, column_harmonic),
+                    value.re,
+                );
+            }
+        }
+    }
+
+    /// Visit the realified entries contributed by an antilinear term
+    /// `y[row,k] += value * conj(x[column,m])`.
+    fn visit_antilinear_term(
+        &self,
+        row_entity: usize,
+        row_harmonic: usize,
+        column_entity: usize,
+        column_harmonic: usize,
+        value: Complex64,
+        visitor: &mut dyn FnMut(usize, usize, Value),
+    ) {
+        debug_assert!(column_harmonic > 0);
+        let row_re = self.re_idx(row_entity, row_harmonic);
+        let column_re = self.re_idx(column_entity, column_harmonic);
+        let column_im = self.im_idx(column_entity, column_harmonic);
+        Self::emit_entry(visitor, row_re, column_re, value.re);
+        Self::emit_entry(visitor, row_re, column_im, value.im);
+        if row_harmonic > 0 {
+            let row_im = self.im_idx(row_entity, row_harmonic);
+            Self::emit_entry(visitor, row_im, column_re, value.im);
+            Self::emit_entry(visitor, row_im, column_im, -value.re);
+        }
+    }
+
+    /// Stream the exact realified Jacobian entries without materializing the
+    /// global matrix. The same stream drives both matvecs and the independent
+    /// componentwise backward-error certificate.
+    fn visit_entries(&self, mut visitor: impl FnMut(usize, usize, Value)) {
+        let n = self.num_nodes;
+        let h = self.num_components;
         for k in 0..h {
             let omega_k = (k as Value) * self.omega0;
+            let jw = Complex64::new(0.0, omega_k);
             for &(i, j, g) in self.g_matrix {
                 if i < n && j < n {
-                    y[i * h + k] -= g * x[j * h + k];
+                    self.visit_linear_term(i, k, j, k, Complex64::new(-g, 0.0), &mut visitor);
                 }
             }
             for &(i, j, c) in self.c_matrix {
                 if i < n && j < n {
-                    y[i * h + k] -= Complex64::new(0.0, omega_k) * c * x[j * h + k];
+                    self.visit_linear_term(i, k, j, k, -jw * c, &mut visitor);
                 }
             }
             for &(i, j, l) in self.l_matrix {
@@ -322,82 +647,137 @@ impl ExactHbOperator<'_> {
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };
-                    y[i * h + k] -= admittance * x[j * h + k];
+                    self.visit_linear_term(i, k, j, k, -admittance, &mut visitor);
                 }
             }
             for node in 0..n {
-                y[node * h + k] -= self.gmin * x[node * h + k];
+                self.visit_linear_term(
+                    node,
+                    k,
+                    node,
+                    k,
+                    Complex64::new(-self.gmin, 0.0),
+                    &mut visitor,
+                );
+            }
+
+            for (branch_index, branch) in self.mna_branches.iter().enumerate() {
+                let branch_entity = n + branch_index;
+                let (node_pos, node_neg) = match branch {
+                    ExactMnaBranch::VoltageSource {
+                        node_pos, node_neg, ..
+                    }
+                    | ExactMnaBranch::Inductor {
+                        node_pos, node_neg, ..
+                    } => (*node_pos, *node_neg),
+                };
+                if node_pos > 0 {
+                    let node = node_pos - 1;
+                    self.visit_linear_term(
+                        node,
+                        k,
+                        branch_entity,
+                        k,
+                        Complex64::new(-1.0, 0.0),
+                        &mut visitor,
+                    );
+                    self.visit_linear_term(
+                        branch_entity,
+                        k,
+                        node,
+                        k,
+                        Complex64::new(-1.0, 0.0),
+                        &mut visitor,
+                    );
+                }
+                if node_neg > 0 {
+                    let node = node_neg - 1;
+                    self.visit_linear_term(
+                        node,
+                        k,
+                        branch_entity,
+                        k,
+                        Complex64::new(1.0, 0.0),
+                        &mut visitor,
+                    );
+                    self.visit_linear_term(
+                        branch_entity,
+                        k,
+                        node,
+                        k,
+                        Complex64::new(1.0, 0.0),
+                        &mut visitor,
+                    );
+                }
+                if let ExactMnaBranch::Inductor { inductance, .. } = branch {
+                    self.visit_linear_term(
+                        branch_entity,
+                        k,
+                        branch_entity,
+                        k,
+                        jw * *inductance,
+                        &mut visitor,
+                    );
+                }
             }
         }
 
-        // Toeplitz coupling from the periodic conductance and charge
-        // Jacobians.
         for &(i, j, ref spectrum) in self.g_spectra {
+            if i >= n || j >= n {
+                continue;
+            }
             for k in 0..h {
                 for l in 0..h {
                     let diff = k as isize - l as isize;
-                    let index = diff.unsigned_abs();
-                    if let Some(&coefficient) = spectrum.get(index) {
+                    if let Some(&coefficient) = spectrum.get(diff.unsigned_abs()) {
                         let coefficient = if diff >= 0 {
                             coefficient
                         } else {
                             coefficient.conj()
                         };
-                        y[i * h + k] -= coefficient * x[j * h + l];
+                        self.visit_linear_term(i, k, j, l, -coefficient, &mut visitor);
+                    }
+                }
+                for m in 1..h {
+                    if let Some(&coefficient) = spectrum.get(k + m) {
+                        self.visit_antilinear_term(i, k, j, m, -coefficient, &mut visitor);
                     }
                 }
             }
         }
         for &(i, j, ref spectrum) in self.c_spectra {
+            if i >= n || j >= n {
+                continue;
+            }
             for k in 0..h {
                 let jw = Complex64::new(0.0, (k as Value) * self.omega0);
                 for l in 0..h {
                     let diff = k as isize - l as isize;
-                    let index = diff.unsigned_abs();
-                    if let Some(&coefficient) = spectrum.get(index) {
+                    if let Some(&coefficient) = spectrum.get(diff.unsigned_abs()) {
                         let coefficient = if diff >= 0 {
                             coefficient
                         } else {
                             coefficient.conj()
                         };
-                        y[i * h + k] -= jw * coefficient * x[j * h + l];
+                        self.visit_linear_term(i, k, j, l, -jw * coefficient, &mut visitor);
                     }
                 }
-            }
-        }
-
-        // The one-sided spectrum implies conjugate negative-frequency
-        // coefficients.  Their exact derivative is the Hankel/antilinear
-        // term H * conj(x), sampled through harmonic 2H.
-        for &(i, j, ref spectrum) in self.g_spectra {
-            for k in 0..h {
                 for m in 1..h {
                     if let Some(&coefficient) = spectrum.get(k + m) {
-                        y[i * h + k] -= coefficient * x[j * h + m].conj();
+                        self.visit_antilinear_term(i, k, j, m, -jw * coefficient, &mut visitor);
                     }
                 }
             }
         }
-        for &(i, j, ref spectrum) in self.c_spectra {
-            for k in 0..h {
-                let jw = Complex64::new(0.0, (k as Value) * self.omega0);
-                for m in 1..h {
-                    if let Some(&coefficient) = spectrum.get(k + m) {
-                        y[i * h + k] -= jw * coefficient * x[j * h + m].conj();
-                    }
-                }
-            }
-        }
+    }
 
-        let mut output = vec![Complex64::new(0.0, 0.0); n * self.real_width];
-        for node in 0..n {
-            for k in 0..h {
-                output[self.re_idx(node, k)] = Complex64::new(y[node * h + k].re, 0.0);
-                if k > 0 {
-                    output[self.im_idx(node, k)] = Complex64::new(y[node * h + k].im, 0.0);
-                }
-            }
-        }
+    fn apply(&self, input: &[Complex64]) -> Vec<Complex64> {
+        let size = self.entity_count() * self.real_width;
+        debug_assert_eq!(input.len(), size);
+        let mut output = vec![Complex64::new(0.0, 0.0); size];
+        self.visit_entries(|row, column, value| {
+            output[row] += value * input[column];
+        });
         output
     }
 
@@ -405,88 +785,54 @@ impl ExactHbOperator<'_> {
     /// the block-Jacobi preconditioner.  This costs O(H*N^2), not
     /// O((H*N)^2), and includes the exact same-harmonic Hankel coupling.
     fn harmonic_blocks(&self) -> Vec<Vec<Complex64>> {
-        let n = self.num_nodes;
+        let entities = self.entity_count();
         let h = self.num_components;
-        let mut blocks = Vec::with_capacity(h);
-        for k in 0..h {
-            let omega_k = (k as Value) * self.omega0;
-            let jw = Complex64::new(0.0, omega_k);
-            let mut toeplitz = vec![Complex64::new(0.0, 0.0); n * n];
-            let mut hankel = vec![Complex64::new(0.0, 0.0); n * n];
-            for &(i, j, g) in self.g_matrix {
-                if i < n && j < n {
-                    toeplitz[i * n + j] -= g;
-                }
+        let mut blocks = (0..h)
+            .map(|harmonic| {
+                let size = if harmonic == 0 {
+                    entities
+                } else {
+                    2 * entities
+                };
+                vec![Complex64::new(0.0, 0.0); size * size]
+            })
+            .collect::<Vec<_>>();
+        self.visit_entries(|row, column, value| {
+            let row_entity = row / self.real_width;
+            let row_local = row % self.real_width;
+            let column_entity = column / self.real_width;
+            let column_local = column % self.real_width;
+            let row_harmonic = if row_local == 0 {
+                0
+            } else {
+                (row_local + 1) / 2
+            };
+            let column_harmonic = if column_local == 0 {
+                0
+            } else {
+                (column_local + 1) / 2
+            };
+            if row_harmonic != column_harmonic {
+                return;
             }
-            for &(i, j, c) in self.c_matrix {
-                if i < n && j < n {
-                    toeplitz[i * n + j] -= jw * c;
-                }
+            let harmonic = row_harmonic;
+            if harmonic == 0 {
+                blocks[0][row_entity * entities + column_entity] += value;
+            } else {
+                let block_size = 2 * entities;
+                let row_component = (row_local + 1) % 2;
+                let column_component = (column_local + 1) % 2;
+                let block_row = 2 * row_entity + row_component;
+                let block_column = 2 * column_entity + column_component;
+                blocks[harmonic][block_row * block_size + block_column] += value;
             }
-            for &(i, j, l) in self.l_matrix {
-                if i < n && j < n && l.abs() > 1e-30 {
-                    let admittance = if k == 0 {
-                        Complex64::new(inductor_dc_short_admittance(l), 0.0)
-                    } else {
-                        Complex64::new(0.0, -1.0 / (omega_k * l))
-                    };
-                    toeplitz[i * n + j] -= admittance;
-                }
-            }
-            for node in 0..n {
-                toeplitz[node * n + node] -= self.gmin;
-            }
-            for &(i, j, ref spectrum) in self.g_spectra {
-                if let Some(&coefficient) = spectrum.first() {
-                    toeplitz[i * n + j] -= coefficient;
-                }
-                if k > 0
-                    && let Some(&coefficient) = spectrum.get(2 * k)
-                {
-                    hankel[i * n + j] -= coefficient;
-                }
-            }
-            for &(i, j, ref spectrum) in self.c_spectra {
-                if let Some(&coefficient) = spectrum.first() {
-                    toeplitz[i * n + j] -= jw * coefficient;
-                }
-                if k > 0
-                    && let Some(&coefficient) = spectrum.get(2 * k)
-                {
-                    hankel[i * n + j] -= jw * coefficient;
-                }
-            }
-
-            if k == 0 {
-                blocks.push(
-                    toeplitz
-                        .into_iter()
-                        .map(|value| Complex64::new(value.re, 0.0))
-                        .collect(),
-                );
-                continue;
-            }
-
-            let block_size = 2 * n;
-            let mut block = vec![Complex64::new(0.0, 0.0); block_size * block_size];
-            for i in 0..n {
-                for j in 0..n {
-                    let t = toeplitz[i * n + j];
-                    let a = hankel[i * n + j];
-                    block[(2 * i) * block_size + 2 * j] = Complex64::new(t.re + a.re, 0.0);
-                    block[(2 * i) * block_size + 2 * j + 1] = Complex64::new(-t.im + a.im, 0.0);
-                    block[(2 * i + 1) * block_size + 2 * j] = Complex64::new(t.im + a.im, 0.0);
-                    block[(2 * i + 1) * block_size + 2 * j + 1] = Complex64::new(t.re - a.re, 0.0);
-                }
-            }
-            blocks.push(block);
-        }
+        });
         blocks
     }
 }
 
 struct ExactHbPreconditioner {
-    num_nodes: usize,
+    num_entities: usize,
     num_components: usize,
     real_width: usize,
     factors: Vec<super::krylov::LuFactors>,
@@ -500,15 +846,15 @@ impl ExactHbPreconditioner {
             .enumerate()
             .map(|(k, block)| {
                 let size = if k == 0 {
-                    operator.num_nodes
+                    operator.entity_count()
                 } else {
-                    2 * operator.num_nodes
+                    2 * operator.entity_count()
                 };
                 super::krylov::LuFactors::factor(block, size)
             })
             .collect();
         Self {
-            num_nodes: operator.num_nodes,
+            num_entities: operator.entity_count(),
             num_components: operator.num_components,
             real_width: operator.real_width,
             factors,
@@ -519,23 +865,23 @@ impl ExactHbPreconditioner {
 impl super::krylov::KrylovPreconditioner for ExactHbPreconditioner {
     fn apply(&self, r: &[Complex64]) -> Vec<Complex64> {
         let mut output = vec![Complex64::new(0.0, 0.0); r.len()];
-        let mut dc = (0..self.num_nodes)
-            .map(|node| r[node * self.real_width])
+        let mut dc = (0..self.num_entities)
+            .map(|entity| r[entity * self.real_width])
             .collect::<Vec<_>>();
         self.factors[0].solve_in_place(&mut dc);
-        for (node, &value) in dc.iter().enumerate() {
-            output[node * self.real_width] = value;
+        for (entity, &value) in dc.iter().enumerate() {
+            output[entity * self.real_width] = value;
         }
         for k in 1..self.num_components {
-            let mut block = vec![Complex64::new(0.0, 0.0); 2 * self.num_nodes];
-            for node in 0..self.num_nodes {
-                block[2 * node] = r[node * self.real_width + 2 * k - 1];
-                block[2 * node + 1] = r[node * self.real_width + 2 * k];
+            let mut block = vec![Complex64::new(0.0, 0.0); 2 * self.num_entities];
+            for entity in 0..self.num_entities {
+                block[2 * entity] = r[entity * self.real_width + 2 * k - 1];
+                block[2 * entity + 1] = r[entity * self.real_width + 2 * k];
             }
             self.factors[k].solve_in_place(&mut block);
-            for node in 0..self.num_nodes {
-                output[node * self.real_width + 2 * k - 1] = block[2 * node];
-                output[node * self.real_width + 2 * k] = block[2 * node + 1];
+            for entity in 0..self.num_entities {
+                output[entity * self.real_width + 2 * k - 1] = block[2 * entity];
+                output[entity * self.real_width + 2 * k] = block[2 * entity + 1];
             }
         }
         output
@@ -834,7 +1180,7 @@ impl HbSolver {
             // path remains selectable for A/B comparison and for the large-
             // system Krylov fast path.
             let delta_x = if self.config.use_exact_jacobian {
-                match self.solve_jacobian_system_exact(state, gmin) {
+                match self.solve_jacobian_system_exact(state, gmin, abort) {
                     Ok(dx) => dx,
                     Err(HbError::SingularMatrix) => return Ok(false),
                     Err(err) => return Err(err),
@@ -1601,20 +1947,27 @@ impl HbSolver {
         &mut self,
         state: &HbSolverState,
         gmin: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<HbNewtonStep, HbError> {
         let n = self.num_nodes;
         let branch_count = self.exact_mna_branches().len();
-        if branch_count > 0 && self.config.use_krylov {
-            return Err(HbError::InvalidCircuit(
-                "forced Krylov nonlinear HB with exact MNA branches requires the branch-aware realified operator"
-                    .to_string(),
-            ));
-        }
         let entity_count = n.checked_add(branch_count).ok_or_else(|| {
             HbError::InvalidCircuit("nonlinear HB MNA dimension exceeds this platform".to_string())
         })?;
-        let h = self.num_harmonics + 1; // complex components per node
-        let w = 2 * self.num_harmonics + 1; // real unknowns per node
+        let h = self.num_harmonics.checked_add(1).ok_or_else(|| {
+            HbError::InvalidCircuit(
+                "nonlinear HB harmonic component count exceeds this platform".to_string(),
+            )
+        })?;
+        let w = self
+            .num_harmonics
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "nonlinear HB realified harmonic width exceeds this platform".to_string(),
+                )
+            })?;
         let size = entity_count.checked_mul(w).ok_or_else(|| {
             HbError::InvalidCircuit(
                 "nonlinear HB realified MNA dimension exceeds this platform".to_string(),
@@ -1654,16 +2007,19 @@ impl HbSolver {
             }
         }
 
-        // Large exact systems take the matrix-free route first.  A failed or
-        // stagnated inner solve falls through to the established dense
-        // elimination below, preserving the convergence policy exactly.
-        // The matrix-free realified operator is node-only today. Branch-aware
-        // Krylov is a separate implementation stage; exact-MNA systems use
-        // the qualified dense real elimination below.
-        let try_krylov = branch_count == 0
-            && (self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD);
-        if try_krylov && n > 0 {
-            let extended = 2 * self.num_harmonics;
+        // Large exact systems take the branch-aware matrix-free route. A
+        // candidate is accepted only after the matrix package independently
+        // certifies its componentwise backward error from the streamed
+        // operator entries. Numerical failure may recover through dense
+        // elimination only below the automatic Krylov threshold; structural,
+        // non-finite, allocation, and large-system failures are fail-closed.
+        let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
+        if try_krylov && entity_count > 0 {
+            let extended = self.num_harmonics.checked_mul(2).ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "nonlinear HB coupling span exceeds this platform".to_string(),
+                )
+            })?;
             let g_spectra = if self.has_nonlinear_devices() {
                 self.conductance_spectra(state, extended)?
             } else {
@@ -1685,51 +2041,115 @@ impl HbSolver {
                 l_matrix: &self.l_matrix,
                 g_spectra: &g_spectra,
                 c_spectra: &c_spectra,
+                mna_branches: self.exact_mna_branches(),
             };
+            operator.validate()?;
             let preconditioner = ExactHbPreconditioner::build(&operator);
             let rhs_complex = rhs
                 .iter()
                 .map(|&value| Complex64::new(value, 0.0))
                 .collect::<Vec<_>>();
             let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
-            let outcome = super::krylov::gmres(
+            let outcome = super::krylov::gmres_with_abort(
                 &|input| operator.apply(input),
                 &preconditioner,
                 &rhs_complex,
                 restart,
                 6,
-            );
-            if outcome.converged {
-                if self.config.verbose {
+                &|| abort.is_aborted(),
+            )
+            .map_err(|_| HbError::Aborted)?;
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            let qualification = if outcome.solution.len() != size {
+                Err(rspice_matrix::SolverError::InvalidCircuit(format!(
+                    "exact HB GMRES returned {} values for a {size}-unknown system",
+                    outcome.solution.len()
+                )))
+            } else if outcome
+                .solution
+                .iter()
+                .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                || !outcome.relative_residual.is_finite()
+            {
+                Err(rspice_matrix::SolverError::Overflow)
+            } else if outcome.converged {
+                rspice_matrix::certify_complex_transpose_solution_by_entry_visitor(
+                    size,
+                    size,
+                    &outcome.solution,
+                    &rhs_complex,
+                    |visitor| {
+                        // The matrix helper certifies A^T*x=b. Transposed
+                        // coordinates therefore certify this forward J*x=b.
+                        operator.visit_entries(|row, column, value| {
+                            visitor(column, row, Complex64::new(value, 0.0));
+                        });
+                    },
+                )
+            } else {
+                Err(rspice_matrix::SolverError::ConvergenceFailed(
+                    outcome.iterations,
+                ))
+            };
+            match qualification {
+                Ok(()) => {
+                    if self.config.verbose {
+                        log::debug!(
+                            "HB exact matrix-free solve: {} iterations, componentwise certified \
+                             (reported normwise relative residual {:.2e})",
+                            outcome.iterations,
+                            outcome.relative_residual
+                        );
+                    }
+                    let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+                    for node in 0..n {
+                        for k in 0..h {
+                            let re = outcome.solution[re_idx(node, k)].re;
+                            let im = if k > 0 {
+                                outcome.solution[im_idx(node, k)].re
+                            } else {
+                                0.0
+                            };
+                            node_voltages[node][k] = Complex64::new(re, im);
+                        }
+                    }
+                    let mut branch_currents = vec![vec![Complex64::new(0.0, 0.0); h]; branch_count];
+                    for (branch, spectrum) in branch_currents.iter_mut().enumerate() {
+                        let entity = n + branch;
+                        for (k, coefficient) in spectrum.iter_mut().enumerate() {
+                            let re = outcome.solution[re_idx(entity, k)].re;
+                            let im = if k > 0 {
+                                outcome.solution[im_idx(entity, k)].re
+                            } else {
+                                0.0
+                            };
+                            *coefficient = Complex64::new(re, im);
+                        }
+                    }
+                    return Ok(HbNewtonStep {
+                        node_voltages,
+                        branch_currents,
+                    });
+                }
+                Err(error) if exact_krylov_dense_recovery_allowed(size, &error) => {
                     log::debug!(
-                        "HB exact matrix-free solve: {} iterations, relative residual {:.2e}",
+                        "HB exact matrix-free step was not certified after {} iterations \
+                         (reported relative residual {:.2e}: {}); using bounded dense recovery",
                         outcome.iterations,
-                        outcome.relative_residual
+                        outcome.relative_residual,
+                        error
                     );
                 }
-                let mut node_voltages = vec![vec![Complex64::new(0.0, 0.0); h]; n];
-                for node in 0..n {
-                    for k in 0..h {
-                        let re = outcome.solution[re_idx(node, k)].re;
-                        let im = if k > 0 {
-                            outcome.solution[im_idx(node, k)].re
-                        } else {
-                            0.0
-                        };
-                        node_voltages[node][k] = Complex64::new(re, im);
-                    }
+                Err(error) => {
+                    return Err(HbError::InvalidCircuit(format!(
+                        "HB exact {size}x{size} matrix-free Newton step is uncertified after {} \
+                         iterations (reported normwise relative residual {:.3e}): {error}",
+                        outcome.iterations, outcome.relative_residual
+                    )));
                 }
-                return Ok(HbNewtonStep {
-                    node_voltages,
-                    branch_currents: Vec::new(),
-                });
             }
-            log::debug!(
-                "HB exact matrix-free solve stagnated after {} iterations (relative residual \
-                 {:.2e}); falling back to dense elimination",
-                outcome.iterations,
-                outcome.relative_residual
-            );
         }
 
         // Toeplitz part (linear + GMIN + nonlinear G and charge), expanded
@@ -1764,7 +2184,11 @@ impl HbSolver {
 
         // Hankel part: H = -(G[k+m]) and -(jw_k * C[k+m]), m >= 1.
         if self.has_nonlinear_devices() {
-            let extended = 2 * self.num_harmonics;
+            let extended = self.num_harmonics.checked_mul(2).ok_or_else(|| {
+                HbError::InvalidCircuit(
+                    "nonlinear HB coupling span exceeds this platform".to_string(),
+                )
+            })?;
             let g_spectra = self.conductance_spectra(state, extended)?;
             let c_spectra = self.capacitance_spectra(state, extended)?;
 

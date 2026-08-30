@@ -763,7 +763,7 @@ impl Engine {
         let mut result = solver.build_result(&state).map_err(|error| {
             SimulationError::Circuit(format!("HB result construction failed: {error}"))
         })?;
-        self.hb_attach_periodic_state(&circuit, &mut result, false);
+        self.hb_attach_periodic_state(&circuit, &mut result)?;
 
         let mna_branch_names = if solver.exact_mna_branches().is_empty() {
             Vec::new()
@@ -889,9 +889,55 @@ mod tests {
             .expect("driven input spectrum is retained");
         assert!(
             input.coefficients[1].norm() > 4.0e-3,
-            "direct nonlinear HB lost its Norton-stamped periodic drive: {:?}",
+            "direct nonlinear HB lost its exact periodic source constraint: {:?}",
             input.coefficients
         );
+    }
+
+    #[test]
+    fn retained_inductor_state_requires_a_complete_exact_mna_spectrum() {
+        let netlist = Netlist::parse(
+            "retained exact inductor state\n\
+             V1 in 0 DC 1\n\
+             R1 in out 1k\n\
+             LSTATE out 0 1m\n\
+             .end\n",
+        )
+        .expect("exact inductor deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let exact = engine
+            .run_hb(&netlist, HbConfig::new(1.0e3).with_harmonics(2))
+            .expect("exact branch-aware HB converges")
+            .result;
+
+        let mut missing = exact.clone();
+        missing.reactive_spectra.clear();
+        missing
+            .mna_branch_currents
+            .retain(|branch| !branch.device_name.eq_ignore_ascii_case("LSTATE"));
+        let error = engine
+            .hb_attach_periodic_state(&circuit, &mut missing)
+            .expect_err("missing exact inductor branch state must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("lost exact MNA current spectrum")
+        );
+
+        let mut malformed = exact;
+        malformed.reactive_spectra.clear();
+        malformed
+            .mna_branch_currents
+            .iter_mut()
+            .find(|branch| branch.device_name.eq_ignore_ascii_case("LSTATE"))
+            .expect("exact inductor branch is retained")
+            .coefficients
+            .pop();
+        let error = engine
+            .hb_attach_periodic_state(&circuit, &mut malformed)
+            .expect_err("truncated exact inductor branch state must fail closed");
+        assert!(error.to_string().contains("is malformed"));
     }
 
     #[test]

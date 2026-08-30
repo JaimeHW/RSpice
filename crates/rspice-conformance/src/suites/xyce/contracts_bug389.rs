@@ -618,10 +618,9 @@ impl XyceTestRunner {
                 spectrum.coefficients.len() != HARMONICS + 1
                     || !frequency_grid_matches(&spectrum.frequencies)
             })
-            || result.mna_branch_currents.len() != 1
+            || result.mna_branch_currents.len() != 2
             || result.reactive_spectra.len() != 2
-            || result.continuation_limitations.as_slice()
-                != [rspice_core::analysis::HbContinuationLimitation::InductorDcCurrentUsesShortSurrogate]
+            || !result.continuation_limitations.is_empty()
         {
             return Err(format!(
                 "{LABEL} HB result envelope changed: converged={}/valid={}/residual={}/fundamental={}/harmonics={}/frequencies={}/nodes={:?}/spectra={}/branches={}/reactive={}/limitations={:?}",
@@ -663,6 +662,11 @@ impl XyceTestRunner {
             .iter()
             .find(|spectrum| spectrum.device_name.eq_ignore_ascii_case("VsigGen"))
             .ok_or_else(|| format!("{LABEL} lost VsigGen branch-current spectrum"))?;
+        let exact_inductor_current = result
+            .mna_branch_currents
+            .iter()
+            .find(|spectrum| spectrum.device_name.eq_ignore_ascii_case("X_bigline.L1"))
+            .ok_or_else(|| format!("{LABEL} lost cable-inductor MNA current spectrum"))?;
         let capacitor = result
             .reactive_spectra
             .iter()
@@ -681,10 +685,13 @@ impl XyceTestRunner {
             .ok_or_else(|| format!("{LABEL} lost cable inductor spectrum"))?;
         if source_current.coefficients.len() != HARMONICS + 1
             || !frequency_grid_matches(&source_current.frequencies)
+            || exact_inductor_current.coefficients.len() != HARMONICS + 1
+            || !frequency_grid_matches(&exact_inductor_current.frequencies)
             || capacitor.current_coefficients.len() != HARMONICS + 1
             || inductor.current_coefficients.len() != HARMONICS + 1
             || !capacitor.dc_current_is_exact
-            || inductor.dc_current_is_exact
+            || !inductor.dc_current_is_exact
+            || inductor.current_coefficients != exact_inductor_current.coefficients
         {
             return Err(format!("{LABEL} branch/reactive spectrum shape changed"));
         }
@@ -733,7 +740,7 @@ impl XyceTestRunner {
             )?;
             Self::bug389_close(
                 &format!("open cable inductor current H{harmonic}"),
-                inductor.current_coefficients[harmonic],
+                exact_inductor_current.coefficients[harmonic],
                 Complex64::new(0.0, 0.0),
             )?;
             if harmonic > 1 {

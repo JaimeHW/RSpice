@@ -361,8 +361,8 @@ impl HbSolver {
     }
 
     /// Register a voltage constraint only in the periodic small-signal MNA
-    /// system. This avoids adding a zero-valued source to a large-signal
-    /// operating-point solve that is intentionally using a Norton continuation.
+    /// system, without adding a zero-valued source to the large-signal
+    /// operating-point source spectrum.
     pub(crate) fn try_add_periodic_voltage_source_branch(
         &mut self,
         node_pos: usize,

@@ -1,6 +1,6 @@
 use num_complex::Complex64;
 use rspice_core::AtomicAbort;
-use rspice_core::analysis::harmonic_balance::{HbConfig, HbReactiveKind};
+use rspice_core::analysis::harmonic_balance::{HbConfig, HbPhaseProjectionError, HbReactiveKind};
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::{PI, TAU};
@@ -189,6 +189,60 @@ fn nonlinear_exact_source_retains_mna_branch_spectrum() {
             .expect("finite phase projects")
             .is_complete()
     );
+}
+
+#[test]
+fn malformed_hb_results_are_not_valid_periodic_states() {
+    let exact = run(
+        "HB result validation\n\
+         V1 in 0 SIN(0 1 1meg)\n\
+         R1 in out 1k\n\
+         L1 out 0 1m\n\
+         C1 out 0 1p\n\
+         .end\n",
+        1.0e6,
+        3,
+    )
+    .result;
+    assert!(exact.is_valid());
+
+    let mut truncated_node = exact.clone();
+    truncated_node.spectral_voltages[0].coefficients.pop();
+
+    let mut wrong_frequency_grid = exact.clone();
+    wrong_frequency_grid.harmonic_frequencies[1] += 1.0;
+
+    let mut imaginary_branch_dc = exact.clone();
+    imaginary_branch_dc.mna_branch_currents[0].coefficients[0].im = 1.0e-12;
+
+    let mut truncated_reactive_current = exact.clone();
+    truncated_reactive_current.reactive_spectra[0]
+        .current_coefficients
+        .pop();
+
+    let mut duplicate_node_identity = exact;
+    duplicate_node_identity.node_names[1] = duplicate_node_identity.node_names[0].clone();
+    duplicate_node_identity.spectral_voltages[1].node_name = duplicate_node_identity
+        .spectral_voltages[0]
+        .node_name
+        .clone();
+
+    for (case, malformed) in [
+        ("truncated node spectrum", truncated_node),
+        ("wrong frequency grid", wrong_frequency_grid),
+        ("imaginary branch DC", imaginary_branch_dc),
+        ("truncated reactive current", truncated_reactive_current),
+        ("duplicate node identity", duplicate_node_identity),
+    ] {
+        assert!(!malformed.is_valid(), "{case} passed HB validation");
+        assert!(
+            matches!(
+                malformed.project_phase(0.0),
+                Err(HbPhaseProjectionError::InvalidResult)
+            ),
+            "{case} projected as a periodic state"
+        );
+    }
 }
 
 fn envelope_deck() -> Netlist {

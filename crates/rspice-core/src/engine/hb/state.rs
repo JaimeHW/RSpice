@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::analysis::harmonic_balance::{
-    DC_SHORT_CONDUCTANCE, HbContinuationLimitation, HbReactiveKind, HbReactiveSpectrum,
-};
+#[cfg(feature = "veriloga")]
+use crate::analysis::harmonic_balance::HbContinuationLimitation;
+use crate::analysis::harmonic_balance::{HbReactiveKind, HbReactiveSpectrum};
 use crate::circuit::CircuitData;
 use crate::engine::transient::{
     netlist_checkpoint_identity, netlist_fingerprint, simulation_checkpoint_identity,
@@ -685,8 +685,7 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         result: &mut HbResult,
-        used_node_only_nonlinear_solver: bool,
-    ) {
+    ) -> Result<(), SimulationError> {
         let omega0 = TAU * result.fundamental_freq;
 
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
@@ -710,63 +709,52 @@ impl Engine {
             });
         }
 
-        let mut used_inductor_dc_surrogate = false;
         for index in 0..circuit.inductors.len() {
             let voltage_coefficients = Self::hb_terminal_voltage_spectrum(
                 result,
                 circuit.inductors.node_pos[index],
                 circuit.inductors.node_neg[index],
             );
-            let inductance = circuit.inductors.inductances[index];
-            let exact_current = result.mna_branch_currents.iter().find(|branch| {
-                branch
-                    .device_name
-                    .eq_ignore_ascii_case(&circuit.inductors.names[index])
-            });
-            let (current_coefficients, dc_current_is_exact) = if let Some(branch) = exact_current {
-                (branch.coefficients.clone(), true)
-            } else {
-                used_inductor_dc_surrogate = true;
-                (
-                    voltage_coefficients
-                        .iter()
-                        .enumerate()
-                        .map(|(harmonic, &voltage)| {
-                            if harmonic == 0 {
-                                voltage * DC_SHORT_CONDUCTANCE
-                            } else {
-                                let omega = harmonic as Value * omega0;
-                                voltage / Complex64::new(0.0, omega * inductance)
-                            }
-                        })
-                        .collect(),
-                    false,
-                )
-            };
+            let exact_current = result
+                .mna_branch_currents
+                .iter()
+                .find(|branch| {
+                    branch
+                        .device_name
+                        .eq_ignore_ascii_case(&circuit.inductors.names[index])
+                })
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "HB result lost exact MNA current spectrum for inductor '{}'",
+                        circuit.inductors.names[index]
+                    ))
+                })?;
+            if exact_current.coefficients.len() != voltage_coefficients.len()
+                || exact_current
+                    .coefficients
+                    .iter()
+                    .any(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "HB exact MNA current spectrum for inductor '{}' is malformed",
+                    circuit.inductors.names[index]
+                )));
+            }
             result.reactive_spectra.push(HbReactiveSpectrum {
                 device_name: circuit.inductors.names[index].clone(),
                 kind: HbReactiveKind::Inductor,
                 voltage_coefficients,
-                current_coefficients,
-                dc_current_is_exact,
+                current_coefficients: exact_current.coefficients.clone(),
+                dc_current_is_exact: true,
             });
         }
 
-        if used_inductor_dc_surrogate {
-            result
-                .continuation_limitations
-                .push(HbContinuationLimitation::InductorDcCurrentUsesShortSurrogate);
-        }
-        if used_node_only_nonlinear_solver && !circuit.voltage_sources.is_empty() {
-            result
-                .continuation_limitations
-                .push(HbContinuationLimitation::NonlinearVoltageSourcesUseNortonEquivalent);
-        }
         #[cfg(feature = "veriloga")]
         if circuit.veriloga_devices().iter().next().is_some() {
             result
                 .continuation_limitations
                 .push(HbContinuationLimitation::VerilogAInternalStateNotRetained);
         }
+        Ok(())
     }
 }

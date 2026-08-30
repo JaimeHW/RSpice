@@ -1,11 +1,11 @@
-//! Nonlinear-HB source-stamping orientation pinned against basic circuit
-//! physics.
+//! Exact nonlinear-HB source-constraint orientation pinned against basic
+//! circuit physics.
 //!
-//! The nonlinear Newton path converts ideal voltage sources into stiff Norton
-//! equivalents. The injected current must reproduce the source polarity: a
-//! +2 V rail has to come out at +2 V, and an AC drive at phase 0 must appear
-//! in-phase at the driven node. A mirrored injection produces an inverted
-//! bias that a symmetric-drive rectifier test can never catch.
+//! The nonlinear Newton path retains ideal voltage sources as MNA branch
+//! constraints. Their incidence and authored spectrum must reproduce source
+//! polarity: a +2 V rail has to come out at +2 V, and an AC drive at phase 0
+//! must appear in-phase at the driven node. A mirrored constraint produces an
+//! inverted bias that a symmetric-drive rectifier test can never catch.
 
 use rspice_core::analysis::harmonic_balance::HbConfig;
 use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
@@ -29,7 +29,7 @@ fn coefficient(result: &HbAnalysisResult, node: &str, k: usize) -> num_complex::
 }
 
 #[test]
-fn dc_rail_keeps_its_polarity_through_norton_conversion() {
+fn dc_rail_keeps_its_polarity_through_exact_mna_constraint() {
     // Forward-biased diode behind a +2 V rail: V(vin) must sit at +2 V and the
     // diode node at one forward drop, ~0.72 V for Is=1e-14 at ~13 mA.
     let deck = "\

@@ -300,7 +300,7 @@ impl HbSolver {
             // with the scale built from that row's own current contributions.
             // Any circuit-wide reference (a norm, the max source current)
             // lets a microamp imbalance at a high-impedance node hide under
-            // the amp scale of stiff Norton source rows.
+            // an unrelated large-row scale.
             if state.dc_rows_converged_with_branch_tolerances(tol, abstol, crate::constants::VNTOL)
             {
                 return Ok(true);
