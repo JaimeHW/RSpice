@@ -88,6 +88,7 @@ pub mod expr_converter;
 pub mod ir;
 pub mod lexer;
 pub mod metrics;
+mod numeric_literal;
 pub mod parser;
 pub mod preprocessor;
 pub mod runtime_report;

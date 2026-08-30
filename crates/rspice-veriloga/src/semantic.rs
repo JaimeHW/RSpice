@@ -10,6 +10,7 @@
 use crate::ast::*;
 use crate::disciplines::{Discipline, DisciplineDb, Domain, Nature};
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
+use crate::numeric_literal::parse_integer_literal;
 use crate::source::Span;
 use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, ValueType};
 use smol_str::SmolStr;
@@ -6076,21 +6077,7 @@ impl SemanticAnalyzer {
     }
 
     fn integer_literal_value(number: &NumberLit) -> Option<i64> {
-        let raw = number.raw.as_str();
-        if raw.is_empty()
-            || raw.contains('.')
-            || raw.contains('e')
-            || raw.contains('E')
-            || raw.chars().any(|character| {
-                matches!(
-                    character,
-                    'T' | 'G' | 'M' | 'k' | 'K' | 'm' | 'u' | 'n' | 'p' | 'f' | 'a'
-                )
-            })
-        {
-            return None;
-        }
-        raw.replace('_', "").parse().ok()
+        parse_integer_literal(number.raw.as_str()).ok().flatten()
     }
 
     fn constant_for_declared_type(

@@ -72,6 +72,42 @@ endmodule
 }
 
 #[test]
+fn canonical_parameter_validation_preserves_exact_based_integer_identity() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module based_constants(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real exact_large = 54'h20_0000_0000_0000;
+    parameter integer width = 4'b0011;
+    parameter real shaped[width:0] = '{1.0, 2.0, 3.0, 4.0};
+    analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+        )
+        .expect("based integer canonical IR");
+
+    let exact_large = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "exact_large")
+        .expect("exact large parameter");
+    assert_eq!(exact_large.default, Some(9_007_199_254_740_992.0));
+    let default_expression = exact_large
+        .default_expr
+        .as_ref()
+        .expect("exact large default expression");
+    assert!(matches!(
+        &artifact.hir.expressions[usize::from(default_expression.id)].kind,
+        HirExprKind::Number { value, raw }
+            if *value == 9_007_199_254_740_992.0
+                && raw.as_str() == "54'h20_0000_0000_0000"
+    ));
+}
+
+#[test]
 fn canonical_noise_plan_retains_scaled_guarded_sources_and_vbic13_names() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(
@@ -1536,6 +1572,51 @@ fn canonical_parameter_array_safety_rejects_contradictory_folded_scalar_default(
 }
 
 #[test]
+fn canonical_parameter_array_safety_rejects_rounded_integer_literal_payload() {
+    assert_matching_parameter_array_tamper_rejected(
+        integer_parameter_array_source(),
+        0,
+        "resolves to 9007199254740993, which is not represented exactly",
+        |hir, mir| {
+            let hir_default = hir.parameters[0]
+                .default_expr
+                .as_ref()
+                .expect("integer array default")
+                .id;
+            let mir_default = mir.parameters[0]
+                .default_expr
+                .as_ref()
+                .expect("integer array default")
+                .id;
+            let HirExprKind::ArrayLiteral {
+                elements: hir_elements,
+                ..
+            } = &hir.expressions[usize::from(hir_default)].kind
+            else {
+                panic!("expected HIR assignment pattern");
+            };
+            let hir_element = hir_elements[0];
+            let HirExprKind::ArrayLiteral {
+                elements: mir_elements,
+                ..
+            } = &mir.expressions[usize::from(mir_default)].kind
+            else {
+                panic!("expected MIR assignment pattern");
+            };
+            let mir_element = mir_elements[0];
+            hir.expressions[usize::from(hir_element)].kind = HirExprKind::Number {
+                value: 9_007_199_254_740_992.0,
+                raw: "54'h20_0000_0000_0001".into(),
+            };
+            mir.expressions[usize::from(mir_element)].kind = HirExprKind::Number {
+                value: 9_007_199_254_740_992.0,
+                raw: "54'h20_0000_0000_0001".into(),
+            };
+        },
+    );
+}
+
+#[test]
 fn canonical_parameter_array_contract_rejects_fractional_integer_elements() {
     assert_matching_parameter_array_tamper_rejected(
         integer_parameter_array_source(),
@@ -1591,7 +1672,7 @@ fn canonical_parameter_array_contract_rejects_numeric_payload_tampering() {
     assert_matching_parameter_array_tamper_rejected(
         parameter_array_source(),
         1,
-        "integer literal raw text '0' resolves to 0, contradicting stored value 0.5",
+        "integer literal raw text '0' resolves to 0, which is not represented exactly by stored value 0.5",
         |hir, mir| {
             let hir_bound = hir.parameters[1].dimensions[0].left.id;
             let mir_bound = mir.parameters[1].dimensions[0].left.id;

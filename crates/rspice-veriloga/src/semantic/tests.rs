@@ -70,6 +70,41 @@ fn constant_arithmetic_preserves_integer_and_real_literal_types() {
 }
 
 #[test]
+fn based_integer_constants_keep_signed_and_large_exact_values() {
+    let module = analyze_one(&module_src(
+        r#"
+            parameter integer neg_one = 8'shFF;
+            parameter integer truncated = 4'h1F;
+            parameter real exact_large = 54'h20_0000_0000_0000;
+            parameter integer width = 4'b0011;
+            parameter real shaped[width:0] = '{1.0, 2.0, 3.0, 4.0};
+            analog I(p, n) <+ V(p, n);
+        "#,
+    ));
+
+    let defaults = module
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.name.as_str(), parameter.default))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(defaults["neg_one"], Some(-1.0));
+    assert_eq!(defaults["truncated"], Some(15.0));
+    assert_eq!(defaults["exact_large"], Some(9_007_199_254_740_992.0));
+    assert_eq!(defaults["width"], Some(3.0));
+
+    let shaped = module
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "shaped")
+        .expect("based-literal-shaped parameter array");
+    assert_eq!(shaped.dimensions.len(), 1);
+    assert!(matches!(
+        shaped.dimensions[0].left,
+        Expression::Identifier(ref identifier) if identifier.name == "width"
+    ));
+}
+
+#[test]
 fn numeric_literal_expression_types_match_the_lexer_token_kind() {
     let module = analyze_one(&module_src(
         r#"

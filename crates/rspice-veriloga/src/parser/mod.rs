@@ -6,6 +6,7 @@
 use crate::ast::*;
 use crate::error::{ParseError, ParseErrorKind};
 use crate::lexer::{Token, TokenKind};
+use crate::numeric_literal::parse_numeric_literal;
 use crate::source::Span;
 use smol_str::SmolStr;
 
@@ -2509,46 +2510,7 @@ impl<'a> Parser<'a> {
 
 /// Parse a number literal with scale factors
 fn parse_number(s: &str) -> Result<f64, String> {
-    let s = s.trim();
-
-    // Check for scale factors at the end
-    let (num_str, scale) = if let Some(pos) = s.find(|c: char| {
-        matches!(
-            c,
-            'T' | 'G' | 'M' | 'k' | 'K' | 'm' | 'u' | 'n' | 'p' | 'f' | 'a'
-        )
-    }) {
-        let scale_str = &s[pos..];
-        let scale = if scale_str.eq_ignore_ascii_case("meg") {
-            1e6
-        } else {
-            match scale_str {
-                "T" => 1e12,
-                "G" => 1e9,
-                "M" => 1e6,
-                "k" | "K" => 1e3,
-                "m" => 1e-3,
-                "u" => 1e-6,
-                "n" => 1e-9,
-                "p" => 1e-12,
-                "f" => 1e-15,
-                "a" => 1e-18,
-                _ => 1.0,
-            }
-        };
-        (&s[..pos], scale)
-    } else {
-        (s, 1.0)
-    };
-
-    let value = num_str
-        .parse::<f64>()
-        .map_err(|_| format!("'{s}' is not a valid number"))?
-        * scale;
-    if !value.is_finite() {
-        return Err(format!("'{s}' is outside the finite real range"));
-    }
-    Ok(value)
+    parse_numeric_literal(s)?.as_exact_f64(s)
 }
 
 #[cfg(test)]
@@ -3313,5 +3275,61 @@ mod tests {
         assert_eq!(parse_number("8a").unwrap(), 8e-18);
         assert_eq!(parse_number("9T").unwrap(), 9e12);
         assert_eq!(parse_number("10G").unwrap(), 10e9);
+    }
+
+    #[test]
+    fn based_literals_preserve_raw_spelling_and_apply_width_and_signedness() {
+        let module = parse_module(
+            r#"module based;
+                parameter integer neg_one = 8'shFF;
+                parameter integer truncated = 4 'h 1F;
+                parameter integer exact_large = 54'h20_0000_0000_0000;
+            endmodule"#,
+        );
+        for (index, raw, expected) in [
+            (0, "8'shFF", -1.0),
+            (1, "4 'h 1F", 15.0),
+            (2, "54'h20_0000_0000_0000", 9_007_199_254_740_992.0),
+        ] {
+            let Some(Expression::Number(number)) = &module.parameters[index].default else {
+                panic!("expected numeric default");
+            };
+            assert_eq!(number.raw.as_str(), raw);
+            assert_eq!(number.value, expected);
+        }
+    }
+
+    #[test]
+    fn numeric_underscores_do_not_change_values() {
+        assert_eq!(parse_number("1_000_000").unwrap(), 1_000_000.0);
+        assert_eq!(parse_number("1_2.3_4").unwrap(), 12.34);
+        assert_eq!(parse_number("1.0e1_2").unwrap(), 1.0e12);
+        assert_eq!(parse_number("2_5k").unwrap(), 25_000.0);
+        assert_eq!(parse_number("1__000__").unwrap(), 1_000.0);
+        assert_eq!(parse_number("1__2.3__4__").unwrap(), 12.34);
+        assert_eq!(parse_number("1e__3__").unwrap(), 1_000.0);
+        assert_eq!(parse_number("1.0__").unwrap(), 1.0);
+        assert_eq!(parse_number("8'h1234_5678_9ABC_DEFF").unwrap(), 255.0);
+        assert_eq!(
+            parse_number("9_007_199_254_740_992").unwrap(),
+            9_007_199_254_740_992.0
+        );
+        assert!(parse_number("9_007_199_254_740_993").is_err());
+    }
+
+    #[test]
+    fn integer_not_exactly_representable_by_scalar_ir_is_rejected() {
+        let error = parse_error(
+            r#"module rounded;
+                parameter integer bad = 54'h20_0000_0000_0001;
+            endmodule"#,
+        );
+        let ParseErrorKind::InvalidNumber(message) = error.kind else {
+            panic!("unexpected parse error: {error}");
+        };
+        assert!(
+            message.contains("cannot be represented exactly"),
+            "{message}"
+        );
     }
 }

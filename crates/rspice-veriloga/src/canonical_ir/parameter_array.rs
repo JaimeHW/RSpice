@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use smol_str::SmolStr;
 
+use crate::numeric_literal::{exact_integer_as_f64, parse_integer_literal};
 use crate::semantic::{MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK};
 
 use super::{
@@ -533,12 +534,15 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
             .clone();
         let next_depth = depth + 1;
         match kind {
-            HirExprKind::Number { value, raw } => match integer_literal_value(&raw) {
-                Some(integer) if value.to_bits() == (integer as f64).to_bits() => {
+            HirExprKind::Number { value, raw } => match integer_literal_value(&raw)? {
+                Some(integer)
+                    if exact_integer_as_f64(integer)
+                        .is_some_and(|exact| value.to_bits() == exact.to_bits()) =>
+                {
                     Ok(ConstantValue::Integer(integer))
                 }
                 Some(integer) => Err(format!(
-                    "integer literal raw text '{raw}' resolves to {integer}, contradicting stored value {value}"
+                    "integer literal raw text '{raw}' resolves to {integer}, which is not represented exactly by stored value {value}"
                 )),
                 None => Ok(ConstantValue::Real(value)),
             },
@@ -693,21 +697,19 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
     }
 }
 
-fn integer_literal_value(raw: &str) -> Option<i64> {
-    if raw.is_empty()
-        || raw.contains('.')
-        || raw.contains('e')
-        || raw.contains('E')
-        || raw.chars().any(|character| {
-            matches!(
-                character,
-                'T' | 'G' | 'M' | 'k' | 'K' | 'm' | 'u' | 'n' | 'p' | 'f' | 'a'
-            )
-        })
+fn integer_literal_value(raw: &str) -> Result<Option<i64>, String> {
+    // Built-in constants are lowered to numeric HIR nodes with their symbolic
+    // spelling retained as `raw`. Only source spellings that can begin a
+    // numeric literal are parsed here.
+    if !raw
+        .trim_start()
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_digit() || character == '\'')
     {
-        return None;
+        return Ok(None);
     }
-    raw.replace('_', "").parse().ok()
+    parse_integer_literal(raw)
 }
 
 fn constant_integer(value: ConstantValue) -> Option<i64> {

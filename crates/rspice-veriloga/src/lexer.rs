@@ -12,6 +12,7 @@
 //! - Compiler directives (`include, `define, etc.)
 
 use crate::error::{LexerError, LexerErrorKind};
+use crate::numeric_literal::parse_integer_literal;
 use crate::source::{SourceId, Span};
 
 /// Token produced by the lexer
@@ -561,6 +562,8 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 TokenKind::AssignmentPatternStart
             }
+            // Unsized based integer literal (`'hff`, `'sb10`, ...).
+            '\'' => return self.scan_based_number(start),
 
             // Compiler directive
             '`' => return self.scan_directive(start),
@@ -721,10 +724,25 @@ impl<'a> Lexer<'a> {
         let mut has_dot = first == '.';
         let mut has_exp = false;
 
-        // Continue scanning digits
+        // Continue scanning decimal digits. The LRM permits underscores
+        // anywhere after the first character of a number, including between
+        // digits in the width of a based literal.
         while let Some(ch) = self.peek_char() {
-            if ch.is_ascii_digit() {
+            if ch.is_ascii_digit() || ch == '_' {
                 self.advance();
+            } else if ch == '\'' && !has_dot && !has_exp {
+                self.advance();
+                return self.scan_based_number(start);
+            } else if ch.is_whitespace()
+                && !has_dot
+                && !has_exp
+                && self.whitespace_precedes_apostrophe()
+            {
+                while self.peek_char().is_some_and(char::is_whitespace) {
+                    self.advance();
+                }
+                self.advance(); // apostrophe established by the lookahead
+                return self.scan_based_number(start);
             } else if ch == '.' && !has_dot && !has_exp {
                 self.advance();
                 if !self.peek_char().is_some_and(|next| next.is_ascii_digit()) {
@@ -742,6 +760,9 @@ impl<'a> Lexer<'a> {
                 if let Some(sign) = self.peek_char()
                     && (sign == '+' || sign == '-')
                 {
+                    self.advance();
+                }
+                while self.peek_char() == Some('_') {
                     self.advance();
                 }
                 if !self.peek_char().is_some_and(|next| next.is_ascii_digit()) {
@@ -795,6 +816,57 @@ impl<'a> Lexer<'a> {
         };
 
         Ok(Token::with_text(kind, span, text))
+    }
+
+    /// Finish a based integer after its apostrophe has been consumed.
+    fn scan_based_number(&mut self, start: usize) -> Result<Token, LexerError> {
+        if self
+            .peek_char()
+            .is_some_and(|character| matches!(character, 's' | 'S'))
+        {
+            self.advance();
+        }
+        if self
+            .peek_char()
+            .is_some_and(|character| character.is_ascii_alphabetic())
+        {
+            self.advance();
+        }
+        while self.peek_char().is_some_and(char::is_whitespace) {
+            self.advance();
+        }
+        while self.peek_char().is_some_and(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '?'
+        }) {
+            self.advance();
+        }
+
+        let text = &self.source[start..self.pos];
+        let span = Span::new(self.source_id, start as u32, self.pos as u32);
+        match parse_integer_literal(text) {
+            Ok(Some(_)) => Ok(Token::with_text(TokenKind::IntegerLiteral, span, text)),
+            Ok(None) => Err(LexerError::new(
+                LexerErrorKind::InvalidNumber(text.to_string()),
+                span,
+            )),
+            Err(detail) => Err(LexerError::new(
+                LexerErrorKind::InvalidNumber(format!("{text}: {detail}")),
+                span,
+            )),
+        }
+    }
+
+    fn whitespace_precedes_apostrophe(&self) -> bool {
+        let mut lookahead = self.chars.clone();
+        while lookahead
+            .peek()
+            .is_some_and(|(_, character)| character.is_whitespace())
+        {
+            lookahead.next();
+        }
+        lookahead
+            .peek()
+            .is_some_and(|(_, character)| *character == '\'')
     }
 
     fn scan_string(&mut self, start: usize) -> Result<Token, LexerError> {
@@ -979,6 +1051,71 @@ mod tests {
             assert_eq!(toks[0].kind, TokenKind::RealLiteral, "for {src}");
         }
         assert_eq!(lex("42")[0].kind, TokenKind::IntegerLiteral);
+    }
+
+    #[test]
+    fn based_signed_and_underscored_integer_literals_are_single_tokens() {
+        for src in [
+            "8'b1111_0000",
+            "12'o7_123",
+            "16'd65_535",
+            "32'h7fff_ffff",
+            "8'shFF",
+            "4'Sb1000",
+            "'hCAFE",
+            "'sHffff_ffff",
+            "8'h_FF__",
+            "32 'h 12ab_f001",
+            "'h 837FF",
+            "8'h1FF",
+        ] {
+            let toks = lex(src);
+            assert_eq!(toks[0].kind, TokenKind::IntegerLiteral, "for {src}");
+            assert_eq!(toks[0].text.as_deref(), Some(src), "for {src}");
+            assert_eq!(toks[1].kind, TokenKind::Eof, "for {src}");
+        }
+    }
+
+    #[test]
+    fn underscores_are_retained_in_decimal_and_real_literals() {
+        for (src, expected_kind) in [
+            ("1_000_000", TokenKind::IntegerLiteral),
+            ("1_2.3_4", TokenKind::RealLiteral),
+            ("1.0e1_2", TokenKind::RealLiteral),
+            ("2_5k", TokenKind::RealLiteral),
+            ("1__000__", TokenKind::IntegerLiteral),
+            ("1__2.3__4__", TokenKind::RealLiteral),
+            ("1e__3__", TokenKind::RealLiteral),
+            ("1.0__", TokenKind::RealLiteral),
+        ] {
+            let toks = lex(src);
+            assert_eq!(toks[0].kind, expected_kind, "for {src}");
+            assert_eq!(toks[0].text.as_deref(), Some(src), "for {src}");
+        }
+    }
+
+    #[test]
+    fn malformed_or_four_state_based_literals_fail_closed() {
+        for src in [
+            "0'h0", "65'h1", "8'", "8's", "8'q1", "8'h", "8'b102", "8'o8", "8'dA", "8'hx1",
+            "8'b10?1", "8'oz",
+        ] {
+            let error = Lexer::new(src, SourceId::new(0))
+                .collect_tokens()
+                .expect_err("malformed based literal must be rejected");
+            assert!(
+                matches!(error.kind, LexerErrorKind::InvalidNumber(_)),
+                "unexpected error for {src}: {error}"
+            );
+        }
+
+        let error = Lexer::new("'h1_0000_0000_0000_0000", SourceId::new(0))
+            .collect_tokens()
+            .expect_err("over-wide unsized literal must be rejected");
+        assert!(
+            error.to_string().contains("requires more than 64 bits"),
+            "{error}"
+        );
     }
 
     #[test]
