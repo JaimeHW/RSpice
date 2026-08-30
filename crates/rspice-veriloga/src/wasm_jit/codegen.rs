@@ -1293,25 +1293,6 @@ fn emit_instruction(body: &mut Function, instruction: &Instruction) -> WasmJitRe
             },
             &|body| emit_operand(body, operands, 0),
         )?,
-        NativeOp::IntegerCast => {
-            emit_operand(body, operands, 0)?;
-            emit_saturating_i64_round_trip(body);
-        }
-        NativeOp::IntegerBinary(kind) if integer_bitwise_instruction(kind).is_some() => {
-            emit_operand(body, operands, 0)?;
-            body.instruction(&WasmInstruction::I64TruncSatF64S);
-            emit_operand(body, operands, 1)?;
-            body.instruction(&WasmInstruction::I64TruncSatF64S);
-            emit_integer_bitwise(body, kind)?;
-        }
-        NativeOp::IntegerBinaryConst(kind, value)
-            if integer_bitwise_instruction(kind).is_some() =>
-        {
-            emit_operand(body, operands, 0)?;
-            body.instruction(&WasmInstruction::I64TruncSatF64S);
-            body.instruction(&WasmInstruction::I64Const(value));
-            emit_integer_bitwise(body, kind)?;
-        }
         _ => emit_helper_call(body, op, operands, instruction.result())?,
     };
     Ok(())
@@ -1379,37 +1360,6 @@ fn emit_is_zero_magnitude(
     body.instruction(&WasmInstruction::F64Abs);
     body.instruction(&WasmInstruction::F64Const(0.0.into()));
     body.instruction(&WasmInstruction::F64Eq);
-    Ok(())
-}
-
-/// Truncate to `i64` and convert back, matching Rust's saturating `as` cast:
-/// NaN becomes zero and out-of-range magnitudes clamp to the `i64` bounds,
-/// which is exactly `i64.trunc_sat_f64_s`.
-fn emit_saturating_i64_round_trip(body: &mut Function) {
-    body.instruction(&WasmInstruction::I64TruncSatF64S);
-    body.instruction(&WasmInstruction::F64ConvertI64S);
-}
-
-/// The bitwise integer operations, which cannot fail.
-///
-/// Shifts are deliberately absent: `constant_integer_binary` rejects a shift
-/// count outside `0..64` as a runtime error, and that trap belongs on the
-/// descriptor path that already knows how to publish one.
-fn integer_bitwise_instruction(op: IntegerBinaryOp) -> Option<WasmInstruction<'static>> {
-    match op {
-        IntegerBinaryOp::BitAnd => Some(WasmInstruction::I64And),
-        IntegerBinaryOp::BitOr => Some(WasmInstruction::I64Or),
-        IntegerBinaryOp::BitXor => Some(WasmInstruction::I64Xor),
-        IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => None,
-    }
-}
-
-fn emit_integer_bitwise(body: &mut Function, op: IntegerBinaryOp) -> WasmJitResult<()> {
-    let instruction = integer_bitwise_instruction(op).ok_or_else(|| {
-        WasmJitError::Encoding("integer shifts are not part of the bitwise fast path".into())
-    })?;
-    body.instruction(&instruction);
-    body.instruction(&WasmInstruction::F64ConvertI64S);
     Ok(())
 }
 
@@ -2549,11 +2499,11 @@ mod tests {
             let bytes = emit_verified_value_program(&program).expect("encode bitwise module");
             let (mut store, memory, instance) = instantiate_value_module(&engine, &bytes);
 
-            for left in [0.0, 6.0, -6.0, 255.0, f64::NAN, 1.0e30] {
-                for right in [0.0, 3.0, -3.0, 15.0, f64::NAN, -1.0e30] {
+            for left in [0.0, 6.0, -6.0, 255.0, f64::from(i32::MIN)] {
+                for right in [0.0, 3.0, -3.0, 15.0, f64::from(i32::MAX)] {
                     let actual = call_value_entry(&mut store, &memory, &instance, &[left, right]);
                     let expected = crate::jit::expr::constant_integer_binary(op, left, right)
-                        .expect("bitwise operations are total");
+                        .expect("valid signed-32-bit bitwise operation");
                     assert_eq!(
                         actual.to_bits(),
                         expected.to_bits(),
@@ -2571,14 +2521,14 @@ mod tests {
             -0.0,
             2.5,
             -2.5,
-            f64::NAN,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            1.0e30,
-            -1.0e30,
+            f64::from(i32::MAX),
+            f64::from(i32::MIN),
         ] {
             let actual = call_value_entry(&mut store, &memory, &instance, &[value]);
-            let expected = (value as i64) as f64;
+            let expected = f64::from(
+                crate::integer_runtime::real_to_integer(value)
+                    .expect("valid signed-32-bit conversion"),
+            );
             assert_eq!(
                 actual.to_bits(),
                 expected.to_bits(),
@@ -2587,9 +2537,9 @@ mod tests {
         }
     }
 
-    /// Instantiate a single-entry value module with every capability bound and
-    /// the frame-carrying helper wired to a trap, so an operation that is meant
-    /// to be inlined fails loudly if it regresses onto the descriptor path.
+    /// Instantiate a single-entry value module with every capability bound.
+    /// The frame-carrying helper evaluates the same shared pure contract used
+    /// by the browser host runtime.
     fn instantiate_value_module(
         engine: &Engine,
         bytes: &[u8],
@@ -2607,17 +2557,25 @@ mod tests {
                 WASM_JIT_IMPORT_MODULE,
                 WASM_JIT_EVAL_HELPER_IMPORT,
                 |_: i32,
-                 _: i32,
-                 _: i32,
-                 _: i32,
-                 _: i64,
-                 _: f64,
-                 _: f64,
-                 _: f64,
-                 _: f64,
-                 _: f64|
+                 opcode: i32,
+                 aux0: i32,
+                 aux1: i32,
+                 aux2: i64,
+                 operand0: f64,
+                 operand1: f64,
+                 operand2: f64,
+                 operand3: f64,
+                 operand4: f64|
                  -> f64 {
-                    panic!("inlined operations must not reach the descriptor helper")
+                    crate::wasm_jit::runtime::evaluate_helper(
+                        opcode,
+                        aux0,
+                        aux1,
+                        aux2,
+                        [operand0, operand1, operand2, operand3, operand4],
+                        &[],
+                    )
+                    .expect("pure value helper")
                 },
             )
             .expect("define trap helper import");

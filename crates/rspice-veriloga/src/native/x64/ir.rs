@@ -689,6 +689,10 @@ fn op_may_call(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::BinaryMath(_)
+            | NativeOp::IntegerCast
+            | NativeOp::IntegerBinary(_)
+            | NativeOp::IntegerShiftConst(_, _)
+            | NativeOp::IntegerBinaryConst(_, _)
             | NativeOp::TableLookup(_)
             | NativeOp::TableDerivative(_)
             | NativeOp::LimiterPrevious(_)
@@ -744,10 +748,6 @@ fn op_reads_entry_args(op: NativeOp) -> bool {
             | NativeOp::ExtremumConstLhs(_, _)
             | NativeOp::UnaryMath(_)
             | NativeOp::BinaryMath(_)
-            | NativeOp::IntegerCast
-            | NativeOp::IntegerBinary(_)
-            | NativeOp::IntegerShiftConst(_, _)
-            | NativeOp::IntegerBinaryConst(_, _)
             | NativeOp::WhiteNoise
             | NativeOp::FlickerNoise
     )
@@ -798,10 +798,6 @@ fn op_preserves_context_pointer_cache(op: NativeOp) -> bool {
                 | NativeOp::ExtremumConst(_, _)
                 | NativeOp::ExtremumConstLhs(_, _)
                 | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
-                | NativeOp::IntegerCast
-                | NativeOp::IntegerBinary(_)
-                | NativeOp::IntegerShiftConst(_, _)
-                | NativeOp::IntegerBinaryConst(_, _)
                 | NativeOp::WhiteNoise
                 | NativeOp::FlickerNoise
         ),

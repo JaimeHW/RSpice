@@ -12,6 +12,7 @@
 use super::{VmContext, VmError};
 use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
 use crate::codegen::{BytecodeProgram, Instruction};
+use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
 
 fn limited_exp(value: f64) -> f64 {
     const LIMIT: f64 = 80.0;
@@ -294,11 +295,11 @@ impl<'a> Vm<'a> {
             Instruction::Div => self.binary_op(|a, b| a / b)?,
             Instruction::Pow => self.binary_op(|a, b| a.powf(b))?,
             Instruction::Mod => self.binary_op(|a, b| a % b)?,
-            Instruction::Shl => self.binary_op(|a, b| ((a as i64) << (b as i64)) as f64)?,
-            Instruction::Shr => self.binary_op(|a, b| ((a as i64) >> (b as i64)) as f64)?,
-            Instruction::BitAnd => self.binary_op(|a, b| ((a as i64) & (b as i64)) as f64)?,
-            Instruction::BitOr => self.binary_op(|a, b| ((a as i64) | (b as i64)) as f64)?,
-            Instruction::BitXor => self.binary_op(|a, b| ((a as i64) ^ (b as i64)) as f64)?,
+            Instruction::Shl => self.integer_binary_op(IntegerBinaryOperation::Shl)?,
+            Instruction::Shr => self.integer_binary_op(IntegerBinaryOperation::Shr)?,
+            Instruction::BitAnd => self.integer_binary_op(IntegerBinaryOperation::BitAnd)?,
+            Instruction::BitOr => self.integer_binary_op(IntegerBinaryOperation::BitOr)?,
+            Instruction::BitXor => self.integer_binary_op(IntegerBinaryOperation::BitXor)?,
 
             // Unary operations
             Instruction::Neg => self.unary_op(|a| -a)?,
@@ -927,6 +928,17 @@ impl<'a> Vm<'a> {
         self.stack.push(f(a, b));
         Ok(())
     }
+
+    #[inline]
+    fn integer_binary_op(&mut self, operation: IntegerBinaryOperation) -> Result<(), VmError> {
+        let right = self.pop()?;
+        let left = self.pop()?;
+        let value = integer_binary(operation, left, right).map_err(|error| {
+            VmError::InvalidNumericResult(format!("Verilog-AMS integer operation failed: {error}"))
+        })?;
+        self.stack.push(value);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -945,6 +957,52 @@ mod tests {
     ) -> Result<f64, VmError> {
         let mut vm = Vm::new(context);
         vm.execute(&BytecodeProgram { instructions })
+    }
+
+    #[test]
+    fn integer_instructions_follow_the_shared_32_bit_contract() {
+        assert_eq!(
+            execute(vec![
+                Instruction::PushConst(-16.0),
+                Instruction::PushConst(2.0),
+                Instruction::Shr,
+            ]),
+            Ok(1_073_741_820.0)
+        );
+        assert_eq!(
+            execute(vec![
+                Instruction::PushConst(1_073_741_824.0),
+                Instruction::PushConst(1.0),
+                Instruction::Shl,
+            ]),
+            Ok(f64::from(i32::MIN))
+        );
+        assert_eq!(
+            execute(vec![
+                Instruction::PushConst(5.5),
+                Instruction::PushConst(3.0),
+                Instruction::BitAnd,
+            ]),
+            Ok(2.0)
+        );
+    }
+
+    #[test]
+    fn integer_instructions_fail_closed_without_panicking() {
+        for (left, right) in [
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 1.0),
+            (1.0, f64::NAN),
+            (1.0, f64::from(i32::MAX) + 0.5),
+        ] {
+            let error = execute(vec![
+                Instruction::PushConst(left),
+                Instruction::PushConst(right),
+                Instruction::Shl,
+            ])
+            .expect_err("invalid integer operation must fail");
+            assert!(matches!(error, VmError::InvalidNumericResult(_)));
+        }
     }
 
     #[test]

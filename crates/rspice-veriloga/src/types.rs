@@ -36,7 +36,8 @@ impl ValueType {
         match (self, target) {
             // Integer can coerce to Real
             (ValueType::Integer, ValueType::Real) => true,
-            // Integer-valued reals truncate to integer per LRM 4.2.1.1
+            // Reals round to nearest (exact halves away from zero) when
+            // assigned to integer per LRM 4.2.1.1.
             (ValueType::Real, ValueType::Integer) => true,
             // Boolean can coerce to Integer (0/1) then to Real
             (ValueType::Boolean, ValueType::Integer) => true,

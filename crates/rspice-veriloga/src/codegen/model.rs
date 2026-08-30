@@ -615,7 +615,8 @@ pub enum Instruction {
     Pow,
     /// Modulus (fmod semantics on reals, LRM 4.2.3)
     Mod,
-    /// Bitwise/shift operations (operands truncate to integers)
+    /// Signed-32-bit bitwise/logical-shift operations. Runtime conversion
+    /// rounds to nearest with half cases away from zero.
     Shl,
     Shr,
     BitAnd,

@@ -132,6 +132,56 @@ fn numeric_literal_expression_types_match_the_lexer_token_kind() {
 }
 
 #[test]
+fn bitwise_and_shift_operators_reject_real_operands() {
+    for (expression, offending_text) in [
+        ("~value", "value"),
+        ("value & 1", "value"),
+        ("1 | value", "value"),
+        ("value ^ 1", "value"),
+        ("value << 1", "value"),
+        ("1 >> value", "value"),
+        ("V(p, n) >> 1", "V(p, n)"),
+        ("sin(value << 1)", "value"),
+        ("$foo(value & 1)", "value"),
+    ] {
+        let source = module_src(&format!(
+            "real value; integer result; analog begin result = {expression}; I(p, n) <+ V(p, n); end"
+        ));
+        let expression_offset = source.find(expression).expect("operator expression");
+        let expected_offset = expression_offset
+            + expression
+                .find(offending_text)
+                .expect("offending operand inside expression");
+        let error = analyze(&source).expect_err("real bitwise operand must be rejected");
+        let CompileError::Semantic(error) = error else {
+            panic!("expected semantic diagnostic, got {error:?}");
+        };
+        assert_eq!(error.span.start, expected_offset as u32, "{expression}");
+        let message = error.to_string();
+        assert!(message.contains("expected integer"), "{expression}: {message}");
+        assert!(
+            message.contains("found real") || message.contains("found nature_access"),
+            "{expression}: {message}"
+        );
+    }
+}
+
+#[test]
+fn bitwise_and_shift_operators_accept_integer_and_boolean_operands() {
+    analyze(&module_src(
+        r#"
+            integer result;
+            analog begin
+                result = ~(1 << 2);
+                result = (1 < 2) & (3 == 3);
+                I(p, n) <+ V(p, n);
+            end
+        "#,
+    ))
+    .expect("integer and comparison-result operands are legal");
+}
+
+#[test]
 fn filter_vectors_require_assignment_patterns_and_report_the_operand_span() {
     for (operator, role) in [("laplace_nd", "numerator"), ("zi_nd", "numerator")] {
         let suffix = if operator.starts_with("zi_") {
@@ -193,7 +243,7 @@ fn filter_replication_counts_and_operand_budgets_fail_before_allocation() {
     for (count, expected) in [
         ("2.0", "integer constant expression"),
         ("-1", "must be non-negative"),
-        ("(1 << 62)", "replication element count overflows u64"),
+        ("4611686018427387904", "replication element count overflows u64"),
         ("1021", "supported safety limit is 1020"),
     ] {
         let source = module_src(&format!(
@@ -676,7 +726,7 @@ fn parameter_array_zero_and_unsafe_replication_counts_are_diagnostic() {
     for (count, expected) in [
         ("2.0", "integer constant expression"),
         ("-1", "must be non-negative"),
-        ("(1 << 62)", "replication element count overflows u64"),
+        ("4611686018427387904", "replication element count overflows u64"),
         ("1048577", "supported safety limit is 1048576"),
     ] {
         let error = analyze(&module_src(&format!(
@@ -706,9 +756,7 @@ fn parameter_array_shape_uses_transitive_declared_defaults() {
 #[test]
 fn parameter_array_bound_shifts_and_storage_limits_fail_closed() {
     for (bound, expected) in [
-        ("1 << -1", "does not resolve to a valid integer"),
-        ("1 << 64", "does not resolve to a valid integer"),
-        ("1 << 1.0e100", "does not resolve to a valid integer"),
+        ("1 << 1.0e100", "expected integer"),
         ("0:1048576", "supported safety limit is 1048576"),
     ] {
         let range = if bound.contains(':') {
@@ -723,6 +771,15 @@ fn parameter_array_bound_shifts_and_storage_limits_fail_closed() {
         .to_string();
         assert!(error.contains(expected), "unexpected diagnostic: {error}");
     }
+
+    analyze(&module_src(
+        r#"
+            parameter real negative_count[1 << -1:0] = '{1.0};
+            parameter real wide_count[1 << 64:0] = '{1.0};
+            analog I(p, n) <+ V(p, n);
+        "#,
+    ))
+    .expect("unsigned out-of-width shift counts have the defined zero result");
 
     let dimensions = "[0:0]".repeat(MAX_PARAMETER_ARRAY_RANK + 1);
     let error = analyze(&module_src(&format!(

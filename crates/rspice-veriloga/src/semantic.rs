@@ -10,6 +10,7 @@
 use crate::ast::*;
 use crate::disciplines::{Discipline, DisciplineDb, Domain, Nature};
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
+use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
 use crate::numeric_literal::parse_integer_literal;
 use crate::source::Span;
 use crate::types::{FunctionRegistry, ParameterRange as TypedParameterRange, ValueType};
@@ -4763,17 +4764,50 @@ impl SemanticAnalyzer {
                 self.validate_branch_access_compatible(access, access.span())?;
                 expr.clone()
             }
-            Expression::Binary(b) => Expression::Binary(BinaryExpr {
-                op: b.op,
-                left: Box::new(self.lower_expression(&b.left)?),
-                right: Box::new(self.lower_expression(&b.right)?),
-                span: b.span,
-            }),
-            Expression::Unary(u) => Expression::Unary(UnaryExpr {
-                op: u.op,
-                operand: Box::new(self.lower_expression(&u.operand)?),
-                span: u.span,
-            }),
+            Expression::Binary(b) => {
+                let left = self.lower_expression(&b.left)?;
+                let right = self.lower_expression(&b.right)?;
+                if matches!(
+                    b.op,
+                    BinaryOp::BitAnd
+                        | BinaryOp::BitOr
+                        | BinaryOp::BitXor
+                        | BinaryOp::Shl
+                        | BinaryOp::Shr
+                ) {
+                    Self::validate_integer_operator_operand(
+                        self.infer_type(&left)?,
+                        "left operand of bitwise or shift operator",
+                        left.span(),
+                    )?;
+                    Self::validate_integer_operator_operand(
+                        self.infer_type(&right)?,
+                        "right operand of bitwise or shift operator",
+                        right.span(),
+                    )?;
+                }
+                Expression::Binary(BinaryExpr {
+                    op: b.op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    span: b.span,
+                })
+            }
+            Expression::Unary(u) => {
+                let operand = self.lower_expression(&u.operand)?;
+                if u.op == UnaryOp::BitNot {
+                    Self::validate_integer_operator_operand(
+                        self.infer_type(&operand)?,
+                        "operand of bitwise complement",
+                        operand.span(),
+                    )?;
+                }
+                Expression::Unary(UnaryExpr {
+                    op: u.op,
+                    operand: Box::new(operand),
+                    span: u.span,
+                })
+            }
             Expression::Conditional(c) => {
                 let condition = self.lower_expression(&c.condition)?;
                 let dynamic_condition = !self.expression_is_simulation_invariant(&condition);
@@ -6060,7 +6094,14 @@ impl SemanticAnalyzer {
                 match unary.op {
                     UnaryOp::Pos | UnaryOp::Neg => Ok(operand_type),
                     UnaryOp::Not => Ok(ValueType::Boolean),
-                    UnaryOp::BitNot => Ok(ValueType::Integer),
+                    UnaryOp::BitNot => {
+                        Self::validate_integer_operator_operand(
+                            operand_type,
+                            "operand of bitwise complement",
+                            unary.operand.span(),
+                        )?;
+                        Ok(ValueType::Integer)
+                    }
                 }
             }
             Expression::Binary(binary) => {
@@ -6085,7 +6126,19 @@ impl SemanticAnalyzer {
                     | BinaryOp::BitOr
                     | BinaryOp::BitXor
                     | BinaryOp::Shl
-                    | BinaryOp::Shr => Ok(ValueType::Integer),
+                    | BinaryOp::Shr => {
+                        Self::validate_integer_operator_operand(
+                            left,
+                            "left operand of bitwise or shift operator",
+                            binary.left.span(),
+                        )?;
+                        Self::validate_integer_operator_operand(
+                            right,
+                            "right operand of bitwise or shift operator",
+                            binary.right.span(),
+                        )?;
+                        Ok(ValueType::Integer)
+                    }
                 }
             }
             Expression::Conditional(cond) => {
@@ -6103,6 +6156,67 @@ impl SemanticAnalyzer {
             Expression::ArrayLiteral(_) => Ok(ValueType::Unknown),
             Expression::AnalogOperator(_) => Ok(ValueType::Real),
             Expression::NoiseSource(_) => Ok(ValueType::Real),
+        }
+    }
+
+    fn validate_integer_operator_operand(
+        operand_type: ValueType,
+        context: &str,
+        span: Span,
+    ) -> CompileResult<()> {
+        if matches!(
+            operand_type,
+            ValueType::Integer | ValueType::Boolean | ValueType::Unknown | ValueType::Error
+        ) {
+            return Ok(());
+        }
+        Err(CompileError::Semantic(SemanticError::new(
+            SemanticErrorKind::TypeMismatch {
+                expected: "integer".into(),
+                found: operand_type.to_string(),
+                context: context.into(),
+            },
+            span,
+        )))
+    }
+
+    fn validate_integer_operator_expression(
+        &mut self,
+        expression: &Expression,
+        context: &str,
+    ) -> bool {
+        match self.infer_type(expression) {
+            Ok(operand_type) => {
+                match Self::validate_integer_operator_operand(
+                    operand_type,
+                    context,
+                    expression.span(),
+                ) {
+                    Ok(()) => true,
+                    Err(CompileError::Semantic(error)) => {
+                        self.errors.push(error);
+                        false
+                    }
+                    Err(error) => {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(error.to_string()),
+                            expression.span(),
+                        );
+                        false
+                    }
+                }
+            }
+            Err(CompileError::Semantic(error)) => {
+                self.errors.push(error);
+                false
+            }
+            Err(error) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(error.to_string()),
+                    expression.span(),
+                );
+                false
+            }
         }
     }
 
@@ -6270,10 +6384,10 @@ impl SemanticAnalyzer {
                     },
                     UnaryOp::Pos => v,
                     UnaryOp::Not => ConstantValue::Integer(i64::from(!v.is_truthy())),
-                    UnaryOp::BitNot => match v {
-                        ConstantValue::Integer(value) => ConstantValue::Integer(!value),
-                        ConstantValue::Real(_) => return None,
-                    },
+                    UnaryOp::BitNot => ConstantValue::Integer(i64::from(!i32::try_from(
+                        Self::constant_integer(v)?,
+                    )
+                    .ok()?)),
                 })
             }
             Expression::Binary(b) => {
@@ -6299,32 +6413,38 @@ impl SemanticAnalyzer {
                         ConstantValue::Integer(i64::from(l.is_truthy() || r.is_truthy()))
                     }
                     BinaryOp::Shl => {
-                        let ConstantValue::Integer(value) = l else {
-                            return None;
-                        };
-                        let ConstantValue::Integer(shift) = r else {
-                            return None;
-                        };
-                        ConstantValue::Integer(value.checked_shl(u32::try_from(shift).ok()?)?)
+                        let value = integer_binary(
+                            IntegerBinaryOperation::Shl,
+                            Self::constant_integer(l)? as f64,
+                            Self::constant_integer(r)? as f64,
+                        )
+                        .ok()?;
+                        ConstantValue::Integer(i64::from(real_to_integer(value).ok()?))
                     }
                     BinaryOp::Shr => {
-                        let ConstantValue::Integer(value) = l else {
-                            return None;
-                        };
-                        let ConstantValue::Integer(shift) = r else {
-                            return None;
-                        };
-                        ConstantValue::Integer(value.checked_shr(u32::try_from(shift).ok()?)?)
+                        let value = integer_binary(
+                            IntegerBinaryOperation::Shr,
+                            Self::constant_integer(l)? as f64,
+                            Self::constant_integer(r)? as f64,
+                        )
+                        .ok()?;
+                        ConstantValue::Integer(i64::from(real_to_integer(value).ok()?))
                     }
-                    BinaryOp::BitAnd => ConstantValue::Integer(
-                        Self::constant_integer(l)? & Self::constant_integer(r)?,
-                    ),
-                    BinaryOp::BitOr => ConstantValue::Integer(
-                        Self::constant_integer(l)? | Self::constant_integer(r)?,
-                    ),
-                    BinaryOp::BitXor => ConstantValue::Integer(
-                        Self::constant_integer(l)? ^ Self::constant_integer(r)?,
-                    ),
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+                        let operation = match b.op {
+                            BinaryOp::BitAnd => IntegerBinaryOperation::BitAnd,
+                            BinaryOp::BitOr => IntegerBinaryOperation::BitOr,
+                            BinaryOp::BitXor => IntegerBinaryOperation::BitXor,
+                            _ => unreachable!("bitwise branch only receives bitwise operators"),
+                        };
+                        let value = integer_binary(
+                            operation,
+                            Self::constant_integer(l)? as f64,
+                            Self::constant_integer(r)? as f64,
+                        )
+                        .ok()?;
+                        ConstantValue::Integer(i64::from(real_to_integer(value).ok()?))
+                    }
                 })
             }
             Expression::Conditional(c) => {
@@ -7272,11 +7392,39 @@ impl SemanticAnalyzer {
                     true
                 }
             }
-            Expression::Unary(unary) => validate_child(self, &unary.operand),
+            Expression::Unary(unary) => {
+                let child = validate_child(self, &unary.operand);
+                let operand = unary.op != UnaryOp::BitNot
+                    || self.validate_integer_operator_expression(
+                        &unary.operand,
+                        "operand of bitwise complement",
+                    );
+                child && operand
+            }
             Expression::Binary(binary) => {
                 let left = validate_child(self, &binary.left);
                 let right = validate_child(self, &binary.right);
-                left && right
+                let operands = if matches!(
+                    binary.op,
+                    BinaryOp::BitAnd
+                        | BinaryOp::BitOr
+                        | BinaryOp::BitXor
+                        | BinaryOp::Shl
+                        | BinaryOp::Shr
+                ) {
+                    let left_type = self.validate_integer_operator_expression(
+                        &binary.left,
+                        "left operand of bitwise or shift operator",
+                    );
+                    let right_type = self.validate_integer_operator_expression(
+                        &binary.right,
+                        "right operand of bitwise or shift operator",
+                    );
+                    left_type && right_type
+                } else {
+                    true
+                };
+                left && right && operands
             }
             Expression::Conditional(conditional) => {
                 let condition = validate_child(self, &conditional.condition);

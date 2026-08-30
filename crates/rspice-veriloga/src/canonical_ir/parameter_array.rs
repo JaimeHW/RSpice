@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use smol_str::SmolStr;
 
+use crate::integer_runtime::{IntegerBinaryOperation, integer_binary};
 use crate::numeric_literal::{exact_integer_as_f64, parse_integer_literal};
 use crate::semantic::{MAX_PARAMETER_ARRAY_ELEMENTS, MAX_PARAMETER_ARRAY_RANK};
 
@@ -563,9 +564,14 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                     },
                     "Pos" => Ok(value),
                     "Not" => Ok(ConstantValue::Integer(i64::from(!value.is_truthy()))),
-                    "BitNot" => constant_integer(value)
-                        .map(|value| ConstantValue::Integer(!value))
-                        .ok_or_else(|| "bitwise operand is not an integer".to_string()),
+                    "BitNot" => {
+                        let value = constant_integer(value)
+                            .ok_or_else(|| "bitwise operand is not an integer".to_string())?;
+                        let value = i32::try_from(value).map_err(|_| {
+                            "bitwise operand is outside the signed 32-bit integer range".to_string()
+                        })?;
+                        Ok(ConstantValue::Integer(i64::from(!value)))
+                    }
                     _ => Err(format!("unsupported unary operator '{op}'")),
                 }
             }
@@ -606,30 +612,30 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                     "Shl" | "Shr" => {
                         let value = constant_integer(left)
                             .ok_or_else(|| "shift value is not an integer".to_string())?;
-                        let shift = u32::try_from(constant_integer(right).ok_or_else(|| {
-                            "shift count is not a nonnegative integer".to_string()
-                        })?)
-                        .map_err(|_| {
-                            "shift count is not a nonnegative exact integer".to_string()
-                        })?;
-                        let shifted = if op == "Shl" {
-                            value.checked_shl(shift)
+                        let shift = constant_integer(right)
+                            .ok_or_else(|| "shift count is not an integer".to_string())?;
+                        let operation = if op == "Shl" {
+                            IntegerBinaryOperation::Shl
                         } else {
-                            value.checked_shr(shift)
-                        }
-                        .ok_or_else(|| "shift count is outside 0..64".to_string())?;
-                        Ok(ConstantValue::Integer(shifted))
+                            IntegerBinaryOperation::Shr
+                        };
+                        integer_binary(operation, value as f64, shift as f64)
+                            .map(|value| ConstantValue::Integer(value as i64))
+                            .map_err(|error| error.to_string())
                     }
                     "BitAnd" | "BitOr" | "BitXor" => {
                         let left = constant_integer(left)
                             .ok_or_else(|| "bitwise operand is not an integer".to_string())?;
                         let right = constant_integer(right)
                             .ok_or_else(|| "bitwise operand is not an integer".to_string())?;
-                        Ok(ConstantValue::Integer(match op.as_str() {
-                            "BitAnd" => left & right,
-                            "BitOr" => left | right,
-                            _ => left ^ right,
-                        }))
+                        let operation = match op.as_str() {
+                            "BitAnd" => IntegerBinaryOperation::BitAnd,
+                            "BitOr" => IntegerBinaryOperation::BitOr,
+                            _ => IntegerBinaryOperation::BitXor,
+                        };
+                        integer_binary(operation, left as f64, right as f64)
+                            .map(|value| ConstantValue::Integer(value as i64))
+                            .map_err(|error| error.to_string())
                     }
                     _ => Err(format!("unsupported binary operator '{op}'")),
                 }

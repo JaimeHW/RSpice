@@ -18,6 +18,10 @@ use crate::canonical_ir::{
     HirLimiterArgument, MirEquationKind, MirModel, NodeId,
 };
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction, ZiRuntimeLayout};
+use crate::integer_runtime::{
+    IntegerBinaryOperation as RuntimeIntegerBinaryOperation, integer_binary, real_to_integer,
+    shift_count,
+};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -8884,7 +8888,10 @@ fn lower_constant_rhs_integer_bitwise(ops: &mut Vec<NativeOp>, op: IntegerBinary
     let Some(NativeOp::Const(value)) = ops.last().copied() else {
         return false;
     };
-    let rhs = value as i64;
+    let Ok(rhs) = real_to_integer(value) else {
+        return false;
+    };
+    let rhs = i64::from(rhs);
 
     ops.pop();
     push_integer_bitwise_const_op(ops, op, rhs);
@@ -8909,8 +8916,11 @@ fn lower_constant_lhs_integer_bitwise(ops: &mut Vec<NativeOp>, op: IntegerBinary
     let NativeOp::Const(value) = ops[lhs_index] else {
         return false;
     };
+    let Ok(value) = real_to_integer(value) else {
+        return false;
+    };
     ops.remove(lhs_index);
-    push_integer_bitwise_const_op(ops, op, value as i64);
+    push_integer_bitwise_const_op(ops, op, i64::from(value));
     true
 }
 
@@ -9366,21 +9376,21 @@ pub(crate) fn constant_binary_math(op: BinaryMathOp, left: f64, right: f64) -> f
 }
 
 pub(crate) fn constant_integer_binary(op: IntegerBinaryOp, left: f64, right: f64) -> Option<f64> {
-    let left = left as i64;
-    let right = right as i64;
-    let value = match op {
-        IntegerBinaryOp::Shl => left.checked_shl(u32::try_from(right).ok()?)?,
-        IntegerBinaryOp::Shr => left.checked_shr(u32::try_from(right).ok()?)?,
-        IntegerBinaryOp::BitAnd => left & right,
-        IntegerBinaryOp::BitOr => left | right,
-        IntegerBinaryOp::BitXor => left ^ right,
-    };
-    Some(value as f64)
+    integer_binary(runtime_integer_operation(op), left, right).ok()
 }
 
 fn constant_shift_count(value: f64) -> Option<u8> {
-    let count = value as i64;
-    (0..64).contains(&count).then_some(count as u8)
+    u8::try_from(shift_count(value).ok()?).ok()
+}
+
+pub(crate) fn runtime_integer_operation(op: IntegerBinaryOp) -> RuntimeIntegerBinaryOperation {
+    match op {
+        IntegerBinaryOp::Shl => RuntimeIntegerBinaryOperation::Shl,
+        IntegerBinaryOp::Shr => RuntimeIntegerBinaryOperation::Shr,
+        IntegerBinaryOp::BitAnd => RuntimeIntegerBinaryOperation::BitAnd,
+        IntegerBinaryOp::BitOr => RuntimeIntegerBinaryOperation::BitOr,
+        IntegerBinaryOp::BitXor => RuntimeIntegerBinaryOperation::BitXor,
+    }
 }
 
 pub(crate) fn constant_unary_math(op: UnaryMathOp, value: f64) -> f64 {
@@ -13897,13 +13907,6 @@ endmodule
                 7.0,
                 7,
             ),
-            (
-                "bitand-saturating",
-                Instruction::BitAnd,
-                IntegerBinaryOp::BitAnd,
-                f64::INFINITY,
-                i64::MAX,
-            ),
         ];
 
         for (case, instruction, expected_op, literal, expected_rhs) in cases {
@@ -14001,13 +14004,6 @@ endmodule
                 7.0,
                 7,
             ),
-            (
-                "bitand-saturating",
-                Instruction::BitAnd,
-                IntegerBinaryOp::BitAnd,
-                f64::INFINITY,
-                i64::MAX,
-            ),
         ];
 
         for (case, instruction, expected_op, literal, expected_lhs) in cases {
@@ -14040,6 +14036,41 @@ endmodule
                 1,
                 "{case} should not allocate an LHS XMM stack slot"
             );
+        }
+    }
+
+    #[test]
+    fn leaves_nonfinite_constant_bitwise_operands_on_the_failing_runtime_path() {
+        for instructions in [
+            vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(f64::INFINITY),
+                Instruction::BitAnd,
+            ],
+            vec![
+                Instruction::PushConst(f64::NEG_INFINITY),
+                Instruction::PushTemperature,
+                Instruction::BitOr,
+            ],
+        ] {
+            let lowered = NativeProgram::from_bytecode(
+                "nonfinite-bitwise",
+                EntryKind::Assignment,
+                &BytecodeProgram { instructions },
+                limits(0, 0),
+            )
+            .expect("invalid bitwise operand remains representable for fail-closed runtime handling");
+
+            assert_eq!(lowered.max_stack_depth(), 2);
+            assert!(matches!(
+                lowered.ops(),
+                [NativeOp::LoadTemperature, NativeOp::Const(value), NativeOp::IntegerBinary(_)]
+                    if !value.is_finite()
+            ) || matches!(
+                lowered.ops(),
+                [NativeOp::Const(value), NativeOp::LoadTemperature, NativeOp::IntegerBinary(_)]
+                    if !value.is_finite()
+            ));
         }
     }
 
@@ -14085,19 +14116,12 @@ endmodule
     fn lowers_valid_constant_rhs_shifts_without_extra_stack_slot() {
         let cases = [
             ("shl", Instruction::Shl, IntegerBinaryOp::Shl, 2.0, 2),
-            ("shr", Instruction::Shr, IntegerBinaryOp::Shr, 3.75, 3),
+            ("shr", Instruction::Shr, IntegerBinaryOp::Shr, 3.75, 4),
             (
                 "negative-fraction-count",
                 Instruction::Shr,
                 IntegerBinaryOp::Shr,
                 -0.25,
-                0,
-            ),
-            (
-                "nan-count",
-                Instruction::Shl,
-                IntegerBinaryOp::Shl,
-                f64::NAN,
                 0,
             ),
         ];
@@ -14135,7 +14159,7 @@ endmodule
     fn folds_safe_constant_integer_binary_ops_to_exact_literals() {
         let cases = [
             ("shl", Instruction::Shl, 3.0, 2.0, ((3_i64) << 2) as f64),
-            ("shr", Instruction::Shr, -16.0, 2.0, ((-16_i64) >> 2) as f64),
+            ("shr", Instruction::Shr, -16.0, 2.0, 1_073_741_820.0),
             (
                 "bitand",
                 Instruction::BitAnd,
@@ -14152,11 +14176,11 @@ endmodule
                 (15_i64 ^ 6) as f64,
             ),
             (
-                "truncates-operands",
+                "rounds-operands",
                 Instruction::BitAnd,
                 13.75,
                 6.25,
-                (13_i64 & 6) as f64,
+                (14_i64 & 6) as f64,
             ),
         ];
 
@@ -14191,32 +14215,14 @@ endmodule
     }
 
     #[test]
-    fn leaves_unsafe_constant_shift_counts_as_runtime_integer_ops() {
+    fn folds_unsigned_out_of_width_constant_shift_counts_to_zero() {
         let cases = [
-            (
-                "left-shift-negative",
-                Instruction::Shl,
-                3.0,
-                -1.0,
-                IntegerBinaryOp::Shl,
-            ),
-            (
-                "left-shift-too-wide",
-                Instruction::Shl,
-                3.0,
-                64.0,
-                IntegerBinaryOp::Shl,
-            ),
-            (
-                "right-shift-too-wide",
-                Instruction::Shr,
-                3.0,
-                64.0,
-                IntegerBinaryOp::Shr,
-            ),
+            ("left-shift-negative", Instruction::Shl, 3.0, -1.0),
+            ("left-shift-too-wide", Instruction::Shl, 3.0, 64.0),
+            ("right-shift-too-wide", Instruction::Shr, 3.0, 64.0),
         ];
 
-        for (case, instruction, left, right, expected) in cases {
+        for (case, instruction, left, right) in cases {
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushConst(left),
@@ -14226,24 +14232,47 @@ endmodule
             };
 
             let lowered = NativeProgram::from_bytecode(
-                "literal-unsafe-shift",
+                "literal-out-of-width-shift",
                 EntryKind::Assignment,
                 &program,
                 limits(0, 0),
             )
-            .expect("unsafe constant shift remains a runtime integer helper op");
+            .expect("out-of-width constant shift is a defined zero result");
 
-            assert_eq!(lowered.max_stack_depth(), 2, "{case}");
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
             assert_eq!(
                 lowered.ops(),
-                &[
-                    NativeOp::Const(left),
-                    NativeOp::Const(right),
-                    NativeOp::IntegerBinary(expected),
-                ],
-                "{case} should preserve current helper-call behavior"
+                &[NativeOp::Const(0.0)],
+                "{case} should fold with the shared logical-shift contract"
             );
         }
+    }
+
+    #[test]
+    fn leaves_nonfinite_constant_shift_counts_on_the_failing_runtime_path() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(f64::NAN),
+                Instruction::Shl,
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "nonfinite-shift",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("nonfinite shift count remains representable for fail-closed runtime handling");
+
+        assert_eq!(lowered.ops().len(), 3);
+        assert_eq!(lowered.ops()[0], NativeOp::LoadTemperature);
+        assert!(matches!(lowered.ops()[1], NativeOp::Const(value) if value.is_nan()));
+        assert_eq!(
+            lowered.ops()[2],
+            NativeOp::IntegerBinary(IntegerBinaryOp::Shl)
+        );
     }
 
     #[test]

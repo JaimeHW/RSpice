@@ -904,7 +904,8 @@ impl CodeGenerator {
             IrExpr::Unary(crate::ast::UnaryOp::Pos, inner) => {
                 self.emit_expr(inner, emit_ctx, program)?;
             }
-            // Bitwise complement truncates to integer: ~x = -x - 1
+            // Bitwise complement is represented through the shared integer
+            // conversion and 32-bit XOR contract: ~x == x ^ -1.
             IrExpr::Unary(crate::ast::UnaryOp::BitNot, inner) => {
                 self.emit_expr(inner, emit_ctx, program)?;
                 program.instructions.push(Instruction::PushConst(-1.0));

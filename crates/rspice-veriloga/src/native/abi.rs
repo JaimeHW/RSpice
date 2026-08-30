@@ -15,6 +15,60 @@
 use std::cell::UnsafeCell;
 
 use crate::array_index::{checked_array_slot, checked_rounded_i64};
+use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
+
+const INTEGER_DESCRIPTOR_KIND_MASK: usize = 0xff;
+const INTEGER_DESCRIPTOR_PAYLOAD_SHIFT: u32 = 32;
+pub(crate) const INTEGER_CAST_DESCRIPTOR: usize = 0;
+const INTEGER_BINARY_DESCRIPTOR_BASE: usize = 1;
+const INTEGER_SHIFT_CONST_DESCRIPTOR_BASE: usize = 16;
+const INTEGER_BINARY_CONST_DESCRIPTOR_BASE: usize = 32;
+
+pub(crate) fn integer_binary_descriptor(operation: IntegerBinaryOperation) -> usize {
+    INTEGER_BINARY_DESCRIPTOR_BASE + integer_operation_code(operation)
+}
+
+pub(crate) fn integer_shift_const_descriptor(
+    operation: IntegerBinaryOperation,
+    count: u8,
+) -> usize {
+    INTEGER_SHIFT_CONST_DESCRIPTOR_BASE
+        + integer_operation_code(operation)
+        + (usize::from(count) << 8)
+}
+
+pub(crate) fn integer_binary_const_descriptor(
+    operation: IntegerBinaryOperation,
+    value: i64,
+) -> Option<usize> {
+    let value = i32::try_from(value).ok()?;
+    Some(
+        INTEGER_BINARY_CONST_DESCRIPTOR_BASE
+            + integer_operation_code(operation)
+            + ((value as u32 as usize) << INTEGER_DESCRIPTOR_PAYLOAD_SHIFT),
+    )
+}
+
+fn integer_operation_code(operation: IntegerBinaryOperation) -> usize {
+    match operation {
+        IntegerBinaryOperation::Shl => 0,
+        IntegerBinaryOperation::Shr => 1,
+        IntegerBinaryOperation::BitAnd => 2,
+        IntegerBinaryOperation::BitOr => 3,
+        IntegerBinaryOperation::BitXor => 4,
+    }
+}
+
+fn integer_operation_from_code(code: usize) -> Option<IntegerBinaryOperation> {
+    match code {
+        0 => Some(IntegerBinaryOperation::Shl),
+        1 => Some(IntegerBinaryOperation::Shr),
+        2 => Some(IntegerBinaryOperation::BitAnd),
+        3 => Some(IntegerBinaryOperation::BitOr),
+        4 => Some(IntegerBinaryOperation::BitXor),
+        _ => None,
+    }
+}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -326,14 +380,6 @@ pub extern "C" fn rspice_native_non_finite_contribution_error(
             "contribution {contribution} evaluated to a non-finite value (NaN or infinity)"
         ));
     }
-}
-
-#[unsafe(export_name = "rspice_native_integer_shift_count_error")]
-pub extern "C" fn rspice_native_integer_shift_count_error(ctx: *const EvalContext) {
-    set_native_context_error_ptr(
-        ctx,
-        "native integer shift count outside valid range [0:63]; no interpreter fallback",
-    );
 }
 
 #[unsafe(export_name = "rspice_native_limit_state_values_error")]
@@ -782,6 +828,77 @@ pub extern "C" fn rspice_hypot(left: f64, right: f64) -> f64 {
 #[unsafe(export_name = "rspice_mod")]
 pub extern "C" fn rspice_mod(left: f64, right: f64) -> f64 {
     left % right
+}
+
+/// Evaluate the shared signed-32-bit Verilog-AMS integer contract for native
+/// code. The descriptor selects a cast, a two-operand operation, or one of the
+/// bounded constant forms used by the native optimizer.
+#[unsafe(export_name = "rspice_integer_operation_native")]
+pub unsafe extern "C" fn rspice_integer_operation_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    descriptor: usize,
+) -> f64 {
+    let result = (|| {
+        if operands.is_null() {
+            return Err("native integer operation received null operand storage".to_string());
+        }
+        let kind = descriptor & INTEGER_DESCRIPTOR_KIND_MASK;
+        // SAFETY: generated native call sites pass a validated operand run of
+        // the length selected by the descriptor kind.
+        let left = unsafe { *operands };
+        if kind == INTEGER_CAST_DESCRIPTOR {
+            return real_to_integer(left)
+                .map(f64::from)
+                .map_err(|error| error.to_string());
+        }
+
+        if (INTEGER_BINARY_DESCRIPTOR_BASE..INTEGER_BINARY_DESCRIPTOR_BASE + 5).contains(&kind) {
+            let operation = integer_operation_from_code(kind - INTEGER_BINARY_DESCRIPTOR_BASE)
+                .ok_or_else(|| "native integer descriptor has an invalid operation".to_string())?;
+            // SAFETY: binary descriptors require exactly two operands.
+            let right = unsafe { *operands.add(1) };
+            return integer_binary(operation, left, right).map_err(|error| error.to_string());
+        }
+
+        if (INTEGER_SHIFT_CONST_DESCRIPTOR_BASE..INTEGER_SHIFT_CONST_DESCRIPTOR_BASE + 5)
+            .contains(&kind)
+        {
+            let operation = integer_operation_from_code(kind - INTEGER_SHIFT_CONST_DESCRIPTOR_BASE)
+                .ok_or_else(|| {
+                    "native integer constant-shift descriptor has an invalid operation".to_string()
+                })?;
+            let count = ((descriptor >> 8) & 0xff) as f64;
+            return integer_binary(operation, left, count).map_err(|error| error.to_string());
+        }
+
+        if (INTEGER_BINARY_CONST_DESCRIPTOR_BASE..INTEGER_BINARY_CONST_DESCRIPTOR_BASE + 5)
+            .contains(&kind)
+        {
+            let operation =
+                integer_operation_from_code(kind - INTEGER_BINARY_CONST_DESCRIPTOR_BASE)
+                    .ok_or_else(|| {
+                        "native integer constant descriptor has an invalid operation".to_string()
+                    })?;
+            let right = ((descriptor >> INTEGER_DESCRIPTOR_PAYLOAD_SHIFT) as u32 as i32) as f64;
+            return integer_binary(operation, left, right).map_err(|error| error.to_string());
+        }
+
+        Err("native integer operation received an invalid descriptor".to_string())
+    })();
+
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            set_native_context_error_ptr(
+                ctx,
+                format!(
+                    "native Verilog-AMS integer operation failed: {error}; no interpreter fallback"
+                ),
+            );
+            0.0
+        }
+    }
 }
 
 /// External helper function for native x64 Laplace state-space filter
@@ -1816,15 +1933,17 @@ fn dynamic_variable_bounds_error(
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, NativeRuntimeStatus, rspice_above_state_native, rspice_absdelay_state_native,
-        rspice_cross_state_native, rspice_ddt_state_native, rspice_dynamic_variable_slot_native,
-        rspice_laplace_step_native, rspice_last_crossing_state_native,
-        rspice_limiter_previous_native, rspice_limiter_store_native,
-        rspice_native_dynamic_variable_error, rspice_slew_state_native,
-        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
-        rspice_transition_state_native, rspice_zi_step_native,
+        EvalContext, INTEGER_CAST_DESCRIPTOR, NativeRuntimeStatus, integer_binary_descriptor,
+        rspice_above_state_native, rspice_absdelay_state_native, rspice_cross_state_native,
+        rspice_ddt_state_native, rspice_dynamic_variable_slot_native,
+        rspice_integer_operation_native, rspice_laplace_step_native,
+        rspice_last_crossing_state_native, rspice_limiter_previous_native,
+        rspice_limiter_store_native, rspice_native_dynamic_variable_error,
+        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
     };
     use crate::codegen::LookupTable;
+    use crate::integer_runtime::IntegerBinaryOperation;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
     use std::mem::{align_of, offset_of, size_of};
 
@@ -2771,6 +2890,46 @@ mod tests {
             ctx.take_runtime_error().is_none(),
             "a successful next dispatch must remain clean after the prior error is drained"
         );
+    }
+
+    #[test]
+    fn native_integer_helper_matches_signed_32_bit_logical_shift_contract() {
+        let ctx = empty_eval_context();
+        let operands = [-16.0, 2.0];
+        let descriptor = integer_binary_descriptor(IntegerBinaryOperation::Shr);
+
+        let value = unsafe { rspice_integer_operation_native(operands.as_ptr(), &ctx, descriptor) };
+
+        assert_eq!(value.to_bits(), 1_073_741_820.0_f64.to_bits());
+        assert!(ctx.take_runtime_error().is_none());
+
+        let shifted_out = [-1.0, 32.0];
+        let value =
+            unsafe { rspice_integer_operation_native(shifted_out.as_ptr(), &ctx, descriptor) };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        assert!(ctx.take_runtime_error().is_none());
+    }
+
+    #[test]
+    fn native_integer_helper_rounds_ties_and_reports_invalid_conversions() {
+        let ctx = empty_eval_context();
+        let half = [-1.5];
+        let value = unsafe {
+            rspice_integer_operation_native(half.as_ptr(), &ctx, INTEGER_CAST_DESCRIPTOR)
+        };
+        assert_eq!(value.to_bits(), (-2.0_f64).to_bits());
+        assert!(ctx.take_runtime_error().is_none());
+
+        let invalid = [f64::NAN];
+        let value = unsafe {
+            rspice_integer_operation_native(invalid.as_ptr(), &ctx, INTEGER_CAST_DESCRIPTOR)
+        };
+        assert_eq!(value.to_bits(), 0.0_f64.to_bits());
+        let error = ctx
+            .take_runtime_error()
+            .expect("invalid integer conversion must publish a native error");
+        assert!(error.contains("requires a finite value"), "{error}");
+        assert!(error.contains("no interpreter fallback"), "{error}");
     }
 
     fn empty_eval_context() -> EvalContext {

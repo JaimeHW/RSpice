@@ -1,10 +1,11 @@
 //! Primary-module implementation of the versioned helper capabilities.
 
 use crate::codegen::Instruction;
+use crate::integer_runtime::{integer_binary, real_to_integer};
 use crate::jit::expr::{
     BinaryMathOp, ExtremumOp, IntegerBinaryOp, UnaryMathOp, constant_binary_math,
-    constant_dynamic_variable_slot, constant_extremum, constant_integer_binary,
-    constant_unary_math,
+    constant_dynamic_variable_slot, constant_extremum, constant_unary_math,
+    runtime_integer_operation,
 };
 use crate::vm::{Vm, VmContext, execute_zi_state, execute_zi_state_derivative};
 
@@ -24,7 +25,7 @@ use super::{WASM_JIT_ABI_VERSION, WASM_JIT_EVAL_FRAME_BYTES};
 pub(super) enum HelperError {
     InvalidOpcode,
     InvalidDynamicIndex,
-    InvalidIntegerShift,
+    InvalidIntegerOperation,
     StatefulRuntimeUnavailable,
     StatefulRuntimeFailed,
 }
@@ -153,7 +154,9 @@ fn evaluate_helper_with_session(
             operands[0],
             operands[1],
         )),
-        300 => Ok((operands[0] as i64) as f64),
+        300 => real_to_integer(operands[0])
+            .map(f64::from)
+            .map_err(|_| HelperError::InvalidIntegerOperation),
         301..=305 => integer(integer_op(opcode - 301)?, operands[0], operands[1]),
         310..=314 => integer(integer_op(opcode - 310)?, operands[0], f64::from(aux0)),
         320..=324 => integer(integer_op(opcode - 320)?, operands[0], aux2 as f64),
@@ -472,7 +475,8 @@ fn dynamic_slot(
 }
 
 fn integer(op: IntegerBinaryOp, lhs: f64, rhs: f64) -> Result<f64, HelperError> {
-    constant_integer_binary(op, lhs, rhs).ok_or(HelperError::InvalidIntegerShift)
+    integer_binary(runtime_integer_operation(op), lhs, rhs)
+        .map_err(|_| HelperError::InvalidIntegerOperation)
 }
 
 fn extremum(code: i32) -> Result<ExtremumOp, HelperError> {
@@ -966,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn helper_fails_closed_for_bounds_shifts_and_uninstalled_state() {
+    fn helper_fails_closed_for_bounds_invalid_integers_and_uninstalled_state() {
         let variables = [1.0];
         for raw_index in [2.0, f64::NAN, f64::INFINITY, 1.0e300] {
             assert_eq!(
@@ -976,7 +980,22 @@ mod tests {
         }
         assert_eq!(
             evaluate_helper(301, 0, 0, 0, [1.0, 64.0, 0.0, 0.0, 0.0], &variables),
-            Err(HelperError::InvalidIntegerShift)
+            Ok(0.0)
+        );
+        assert_eq!(
+            evaluate_helper(301, 0, 0, 0, [1.0, f64::NAN, 0.0, 0.0, 0.0], &variables),
+            Err(HelperError::InvalidIntegerOperation)
+        );
+        assert_eq!(
+            evaluate_helper(
+                300,
+                0,
+                0,
+                0,
+                [f64::INFINITY, 0.0, 0.0, 0.0, 0.0],
+                &variables
+            ),
+            Err(HelperError::InvalidIntegerOperation)
         );
         assert_eq!(
             evaluate_helper(440, 0, 0, 0, [0.0; 5], &variables),

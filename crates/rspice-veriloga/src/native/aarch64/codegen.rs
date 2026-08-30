@@ -10,27 +10,29 @@ use super::encoder::{A64Encoder, BranchPatch, Condition, DReg, LiteralPatch, XRe
 use super::verifier::{verify_exact_function, verify_exact_function_at};
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
-    rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
-    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_cos, rspice_cosh,
-    rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot, rspice_idt_jacobian_native,
-    rspice_idt_state_native, rspice_idtmod_state_native, rspice_laplace_step_native,
-    rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
-    rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
-    rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
-    rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
-    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
-    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
-    rspice_native_non_finite_contribution_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
+    INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
+    integer_shift_const_descriptor, rspice_above_state_native, rspice_absdelay_state_native,
+    rspice_acos, rspice_acosh, rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh,
+    rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native,
+    rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot,
+    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_integer_operation_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
+    rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
+    rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
+    rspice_native_dynamic_variable_error,
+    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
+    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
+    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_derivative_native, rspice_zi_step_native,
 };
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
     BinaryMathOp, CompareOp, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeOp, NativeProgram,
-    UnaryMathOp, VoltageNode,
+    UnaryMathOp, VoltageNode, runtime_integer_operation,
 };
 use crate::native::model::{CodeOffset, NativeStampKernelIo};
 use crate::native::ssa::{
@@ -47,8 +49,6 @@ const STACK_PROBE_INTERVAL_BYTES: usize = 4080;
 const MAX_EXPRESSION_STACK_DEPTH: usize = 4096;
 const MAX_SEGMENT_INSTRUCTIONS: usize = 1024;
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
-const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
-const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
 const MAX_RUNTIME_LOOP_ITERATIONS: u64 = 100_000;
 const A64_ALLOCATABLE_VALUE_REGISTERS: usize = 15;
 /// D0-D7 and D16-D22, every one of them volatile: the host convention keeps
@@ -1534,8 +1534,12 @@ impl FunctionCompiler {
     }
 
     fn emit_integer_cast(&mut self, prepared: &PreparedInstruction) -> JitResult<()> {
-        self.emit_rust_f64_to_i64(unary_operand(prepared)?, XReg::X9)?;
-        self.encoder.scvtf_d_x(prepared.result, XReg::X9)
+        self.emit_operand_context_helper(
+            prepared,
+            1,
+            INTEGER_CAST_DESCRIPTOR,
+            rspice_integer_operation_native as *const () as usize,
+        )
     }
 
     fn emit_integer_binary(
@@ -1543,58 +1547,12 @@ impl FunctionCompiler {
         prepared: &PreparedInstruction,
         op: IntegerBinaryOp,
     ) -> JitResult<()> {
-        let (left, right) = binary_operands(prepared)?;
-        self.emit_rust_f64_to_i64(left, XReg::X9)?;
-        self.emit_rust_f64_to_i64(right, XReg::X10)?;
-        match op {
-            IntegerBinaryOp::BitAnd => {
-                self.encoder.and_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::BitOr => {
-                self.encoder.orr_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::BitXor => {
-                self.encoder.eor_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                return self.emit_checked_integer_shift(prepared.result, op);
-            }
-        }
-        self.encoder.scvtf_d_x(prepared.result, XReg::X9)
-    }
-
-    fn emit_checked_integer_shift(&mut self, result: DReg, op: IntegerBinaryOp) -> JitResult<()> {
-        self.encoder.cmp_x_imm(XReg::X10, 0)?;
-        let negative = self.encoder.b_cond_placeholder(Condition::SignedLess);
-        self.encoder.cmp_x_imm(XReg::X10, 64)?;
-        let too_large = self
-            .encoder
-            .b_cond_placeholder(Condition::SignedGreaterOrEqual);
-        match op {
-            IntegerBinaryOp::Shl => {
-                self.encoder.lslv_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::Shr => {
-                self.encoder.asrv_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                return Err(encoding_error(
-                    "AArch64 checked shift received a bitwise operator",
-                ));
-            }
-        }
-        self.encoder.scvtf_d_x(result, XReg::X9)?;
-        let done = self.encoder.b_placeholder();
-
-        let error_target = self.encoder.position();
-        self.encoder.patch_branch(negative, error_target)?;
-        self.encoder.patch_branch(too_large, error_target)?;
-        self.emit_void_error_early_return(
-            rspice_native_integer_shift_count_error as *const () as usize,
-        )?;
-
-        let done_target = self.encoder.position();
-        self.encoder.patch_branch(done, done_target)
+        self.emit_operand_context_helper(
+            prepared,
+            2,
+            integer_binary_descriptor(runtime_integer_operation(op)),
+            rspice_integer_operation_native as *const () as usize,
+        )
     }
 
     fn emit_integer_shift_const(
@@ -1603,27 +1561,12 @@ impl FunctionCompiler {
         op: IntegerBinaryOp,
         count: u8,
     ) -> JitResult<()> {
-        if count >= 64 {
-            return Err(encoding_error(format!(
-                "AArch64 constant integer shift count {count} is outside 0..64"
-            )));
-        }
-        self.emit_rust_f64_to_i64(unary_operand(prepared)?, XReg::X9)?;
-        self.encoder.mov_u64(XReg::X10, u64::from(count))?;
-        match op {
-            IntegerBinaryOp::Shl => {
-                self.encoder.lslv_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::Shr => {
-                self.encoder.asrv_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                return Err(encoding_error(
-                    "AArch64 constant shift received a bitwise operator",
-                ));
-            }
-        }
-        self.encoder.scvtf_d_x(prepared.result, XReg::X9)
+        self.emit_operand_context_helper(
+            prepared,
+            1,
+            integer_shift_const_descriptor(runtime_integer_operation(op), count),
+            rspice_integer_operation_native as *const () as usize,
+        )
     }
 
     fn emit_integer_binary_const(
@@ -1632,64 +1575,18 @@ impl FunctionCompiler {
         op: IntegerBinaryOp,
         value: i64,
     ) -> JitResult<()> {
-        self.emit_rust_f64_to_i64(unary_operand(prepared)?, XReg::X9)?;
-        self.encoder.mov_u64(XReg::X10, value as u64)?;
-        match op {
-            IntegerBinaryOp::BitAnd => {
-                self.encoder.and_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::BitOr => {
-                self.encoder.orr_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::BitXor => {
-                self.encoder.eor_x(XReg::X9, XReg::X9, XReg::X10)?;
-            }
-            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                return Err(encoding_error(
-                    "AArch64 constant bitwise operation received a shift",
-                ));
-            }
-        }
-        self.encoder.scvtf_d_x(prepared.result, XReg::X9)
-    }
-
-    fn emit_rust_f64_to_i64(&mut self, source: DReg, destination: XReg) -> JitResult<()> {
-        self.encoder.fcmp_d(source, source);
-        let nan = self.encoder.b_cond_placeholder(Condition::NotEqual);
-        self.emit_literal(DReg::D31, I64_MAX_EXCLUSIVE_AS_F64)?;
-        self.encoder.fcmp_d(source, DReg::D31);
-        let positive_saturation = self
-            .encoder
-            .b_cond_placeholder(Condition::SignedGreaterOrEqual);
-        self.emit_literal(DReg::D31, I64_MIN_AS_F64)?;
-        self.encoder.fcmp_d(source, DReg::D31);
-        let negative_saturation = self
-            .encoder
-            .b_cond_placeholder(Condition::UnsignedLowerOrSame);
-
-        self.encoder.fcvtzs_x_d(destination, source)?;
-        let converted = self.encoder.b_placeholder();
-
-        let nan_target = self.encoder.position();
-        self.encoder.patch_branch(nan, nan_target)?;
-        self.encoder.mov_u64(destination, 0)?;
-        let nan_done = self.encoder.b_placeholder();
-
-        let positive_target = self.encoder.position();
-        self.encoder
-            .patch_branch(positive_saturation, positive_target)?;
-        self.encoder.mov_u64(destination, i64::MAX as u64)?;
-        let positive_done = self.encoder.b_placeholder();
-
-        let negative_target = self.encoder.position();
-        self.encoder
-            .patch_branch(negative_saturation, negative_target)?;
-        self.encoder.mov_u64(destination, i64::MIN as u64)?;
-
-        let done = self.encoder.position();
-        self.encoder.patch_branch(converted, done)?;
-        self.encoder.patch_branch(nan_done, done)?;
-        self.encoder.patch_branch(positive_done, done)
+        let descriptor = integer_binary_const_descriptor(runtime_integer_operation(op), value)
+            .ok_or_else(|| {
+                encoding_error(format!(
+                    "constant Verilog-AMS integer operand {value} is outside signed 32-bit range"
+                ))
+            })?;
+        self.emit_operand_context_helper(
+            prepared,
+            1,
+            descriptor,
+            rspice_integer_operation_native as *const () as usize,
+        )
     }
 
     fn emit_compare(
@@ -3648,12 +3545,13 @@ mod tests {
             ],
             1,
         );
-        assert_eq!(execute(&shift, &[]), -2.0);
-
-        let nan_cast = program(vec![NativeOp::Const(f64::NAN), NativeOp::IntegerCast], 1);
-        assert_eq!(execute(&nan_cast, &[]), 0.0);
+        assert_eq!(execute(&shift, &[]), 1_073_741_822.0);
 
         let mut context = EvalContext::empty_for_test();
+        let nan_cast = program(vec![NativeOp::Const(f64::NAN), NativeOp::IntegerCast], 1);
+        assert_eq!(execute_with_context(&nan_cast, &context, &[]), 0.0);
+        assert!(context.take_runtime_error().is_some());
+
         context.analysis_type = 4;
         context.analysis_initial_step = 1;
         for (analysis_id, expected) in [(0, 0.0), (5, 1.0), (7, 1.0)] {
@@ -3665,17 +3563,19 @@ mod tests {
             );
         }
 
-        let invalid_shift = program(
+        let out_of_width_shift = program(
             vec![
                 NativeOp::Const(1.0),
                 NativeOp::Const(-1.0),
                 NativeOp::IntegerBinary(IntegerBinaryOp::Shl),
-                NativeOp::AddConst(100.0),
             ],
             2,
         );
-        assert_eq!(execute_with_context(&invalid_shift, &context, &[]), 0.0);
-        assert!(context.take_runtime_error().is_some());
+        assert_eq!(
+            execute_with_context(&out_of_width_shift, &context, &[]),
+            0.0
+        );
+        assert!(context.take_runtime_error().is_none());
     }
 
     #[cfg(target_arch = "aarch64")]

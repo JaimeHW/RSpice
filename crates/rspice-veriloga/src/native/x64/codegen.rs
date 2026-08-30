@@ -25,15 +25,16 @@ use super::{
 };
 use crate::native::abi::NativeRuntimeStatus;
 use crate::native::abi::{
-    rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
-    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
-    rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
-    rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
-    rspice_laplace_step_native, rspice_last_crossing_state_native, rspice_limexp,
-    rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log,
-    rspice_log10, rspice_mod, rspice_native_current_probe_error,
-    rspice_native_dynamic_variable_error, rspice_native_integer_shift_count_error,
+    INTEGER_CAST_DESCRIPTOR, integer_binary_const_descriptor, integer_binary_descriptor,
+    integer_shift_const_descriptor, rspice_above_state_native, rspice_absdelay_state_native,
+    rspice_acos, rspice_acosh, rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh,
+    rspice_ceil, rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native,
+    rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
+    rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
+    rspice_integer_operation_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
+    rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
+    rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
+    rspice_native_dynamic_variable_error,
     rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
     rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
     rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
@@ -45,7 +46,7 @@ use crate::native::abi::{
 };
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
-use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
+use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp, runtime_integer_operation};
 use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{EvalContext, JitError, JitResult, NativeStampKernelIo};
 
@@ -90,7 +91,9 @@ const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
+#[cfg(test)]
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
+#[cfg(test)]
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
 #[cfg(all(test, target_arch = "x86_64"))]
 const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = super::ir::INLINE_DYNAMIC_LOWER_ABS_LIMIT;
@@ -2489,15 +2492,12 @@ impl FunctionCompiler {
         }
 
         let left = self.register_stack[self.depth - 2];
-        let right = self.register_stack[self.depth - 1];
-        match op {
-            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                self.emit_integer_shift_op(left, right, op)?
-            }
-            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                self.emit_integer_bitwise_op(left, right, op)?
-            }
-        }
+        self.emit_operand_context_filter_helper_call(
+            left,
+            2,
+            integer_binary_descriptor(runtime_integer_operation(op)),
+            rspice_integer_operation_native,
+        );
         self.drop_stack_values(1)?;
         Ok(())
     }
@@ -2511,54 +2511,12 @@ impl FunctionCompiler {
         }
 
         let target = self.register_stack[self.depth - 1];
-        self.emit_rust_f64_to_i64(target, Gpr::R10)?;
-        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
-        Ok(())
-    }
-
-    fn emit_integer_shift_op(
-        &mut self,
-        left: Xmm,
-        right: Xmm,
-        op: IntegerBinaryOp,
-    ) -> JitResult<()> {
-        #[cfg(windows)]
-        let restore_entry_ctx = !self.saves_entry_args();
-        #[cfg(windows)]
-        if restore_entry_ctx {
-            self.encoder.mov_r64_r64(Gpr::R10, entry_ctx_arg_reg());
-        }
-
-        self.emit_rust_f64_to_i64(left, Gpr::R11)?;
-        self.emit_rust_f64_to_i64(right, Gpr::Rcx)?;
-        self.encoder.test_r64_r64(Gpr::Rcx, Gpr::Rcx);
-        let negative_count = self.encoder.jcc_rel32_placeholder(ConditionCode::Negative);
-        self.encoder.cmp_r64_imm32(Gpr::Rcx, 64);
-        let too_large_count = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
-        match op {
-            IntegerBinaryOp::Shl => self.encoder.shl_r64_cl(Gpr::R11),
-            IntegerBinaryOp::Shr => self.encoder.sar_r64_cl(Gpr::R11),
-            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                unreachable!("bitwise integer ops use emit_integer_bitwise_op")
-            }
-        }
-        #[cfg(windows)]
-        if restore_entry_ctx {
-            self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
-        }
-        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R11);
-        let valid_count_done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(negative_count)?;
-        self.patch_rel32_to_current(too_large_count)?;
-        #[cfg(windows)]
-        if restore_entry_ctx {
-            self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
-        }
-        self.emit_integer_shift_count_error_return();
-        self.patch_rel32_to_current(valid_count_done)?;
+        self.emit_operand_context_filter_helper_call(
+            target,
+            1,
+            INTEGER_CAST_DESCRIPTOR,
+            rspice_integer_operation_native,
+        );
         Ok(())
     }
 
@@ -2571,41 +2529,12 @@ impl FunctionCompiler {
         }
 
         let target = self.register_stack[self.depth - 1];
-        self.emit_rust_f64_to_i64(target, Gpr::R11)?;
-        if count != 0 {
-            match op {
-                IntegerBinaryOp::Shl => self.encoder.shl_r64_imm8(Gpr::R11, count),
-                IntegerBinaryOp::Shr => self.encoder.sar_r64_imm8(Gpr::R11, count),
-                IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                    unreachable!("constant integer shifts only accept shl/shr")
-                }
-            }
-        }
-        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R11);
-        Ok(())
-    }
-
-    fn emit_integer_shift_count_error_return(&mut self) {
-        self.emit_void_error_return(rspice_native_integer_shift_count_error);
-    }
-
-    fn emit_integer_bitwise_op(
-        &mut self,
-        left: Xmm,
-        right: Xmm,
-        op: IntegerBinaryOp,
-    ) -> JitResult<()> {
-        self.emit_rust_f64_to_i64(left, Gpr::R10)?;
-        self.emit_rust_f64_to_i64(right, Gpr::R11)?;
-        match op {
-            IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::R10, Gpr::R11),
-            IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::R10, Gpr::R11),
-            IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::R10, Gpr::R11),
-            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                unreachable!("shift integer ops use emit_integer_shift_op")
-            }
-        }
-        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R10);
+        self.emit_operand_context_filter_helper_call(
+            target,
+            1,
+            integer_shift_const_descriptor(runtime_integer_operation(op), count),
+            rspice_integer_operation_native,
+        );
         Ok(())
     }
 
@@ -2617,29 +2546,21 @@ impl FunctionCompiler {
             });
         }
 
+        let descriptor = integer_binary_const_descriptor(runtime_integer_operation(op), value)
+            .ok_or_else(|| JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "constant Verilog-AMS integer operand {value} is outside signed 32-bit range"
+                )
+                .into(),
+            })?;
         let target = self.register_stack[self.depth - 1];
-        self.emit_rust_f64_to_i64(target, Gpr::R10)?;
-        if let Ok(value) = i32::try_from(value) {
-            match op {
-                IntegerBinaryOp::BitAnd => self.encoder.and_r64_imm32(Gpr::R10, value),
-                IntegerBinaryOp::BitOr => self.encoder.or_r64_imm32(Gpr::R10, value),
-                IntegerBinaryOp::BitXor => self.encoder.xor_r64_imm32(Gpr::R10, value),
-                IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                    unreachable!("constant bitwise lowering only accepts bitwise ops")
-                }
-            }
-        } else {
-            self.emit_i64_arg(Gpr::R11, value);
-            match op {
-                IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::R10, Gpr::R11),
-                IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::R10, Gpr::R11),
-                IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::R10, Gpr::R11),
-                IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                    unreachable!("constant bitwise lowering only accepts bitwise ops")
-                }
-            }
-        }
-        self.encoder.cvtsi2sd_xmm_r64(target, Gpr::R10);
+        self.emit_operand_context_filter_helper_call(
+            target,
+            1,
+            descriptor,
+            rspice_integer_operation_native,
+        );
         Ok(())
     }
 
@@ -2703,37 +2624,6 @@ impl FunctionCompiler {
         self.emit_void_error_return(helper);
 
         self.patch_rel32_to_current(done)
-    }
-
-    fn emit_rust_f64_to_i64(&mut self, src: Xmm, dst: Gpr) -> JitResult<()> {
-        self.encoder.ucomisd_xmm_xmm(src, src);
-        let nan = self.encoder.jcc_rel32_placeholder(ConditionCode::Parity);
-        self.emit_literal_compare(src, I64_MAX_EXCLUSIVE_AS_F64);
-        let positive_saturation = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
-        self.emit_literal_compare(src, I64_MIN_AS_F64);
-        let negative_saturation = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
-
-        self.encoder.cvttsd2si_r64_xmm(dst, src);
-        let done_after_convert = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(nan)?;
-        self.encoder.xor_r64_r64(dst, dst);
-        let done_after_nan = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(positive_saturation)?;
-        self.encoder.movabs_r64_imm64(dst, i64::MAX as u64);
-        let done_after_positive_saturation = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(negative_saturation)?;
-        self.encoder.movabs_r64_imm64(dst, i64::MIN as u64);
-
-        self.patch_rel32_to_current(done_after_convert)?;
-        self.patch_rel32_to_current(done_after_nan)?;
-        self.patch_rel32_to_current(done_after_positive_saturation)
     }
 
     fn emit_table_helper_call(&mut self, table_id: usize, helper: TableHelper) -> JitResult<()> {
@@ -5285,7 +5175,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_reuses_param_base_across_misc_pure_ops() {
+    fn generated_value_leaf_preserves_values_across_checked_integer_helpers() {
         let program = NativeProgram::from_ops_for_test(
             vec![
                 NativeOp::LoadParam(0),
@@ -5307,12 +5197,7 @@ mod tests {
             Vec::new(),
         );
 
-        let bytes = compile_value_function(&program).expect("compile misc pure param leaf");
-        assert_eq!(
-            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
-            1,
-            "param base should remain cached across branchless pure ops"
-        );
+        let bytes = compile_value_function(&program).expect("compile checked integer param leaf");
 
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate misc pure leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -5322,6 +5207,7 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 14.0_f64.to_bits());
+        assert!(ctx.take_runtime_error().is_none());
     }
 
     #[test]
@@ -10105,7 +9991,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_computes_constant_rhs_shifts_without_count_checks() {
+    fn generated_value_leaf_computes_constant_rhs_shifts_with_shared_contract() {
         let cases = [
             (
                 "shl",
@@ -10114,7 +10000,7 @@ mod tests {
                 3.0,
                 2.0,
                 runtime_shl(3.0, 2.0),
-                shift_imm_bytes(IntegerBinaryOp::Shl, Gpr::R11, 2),
+                2,
             ),
             (
                 "shr-negative",
@@ -10123,11 +10009,11 @@ mod tests {
                 -16.0,
                 2.75,
                 runtime_shr(-16.0, 2.75),
-                shift_imm_bytes(IntegerBinaryOp::Shr, Gpr::R11, 2),
+                3,
             ),
         ];
 
-        for (name, instruction, expected_op, left, right, integer_expected, shift_bytes) in cases {
+        for (name, instruction, expected_op, left, right, integer_expected, expected_count) in cases {
             let program = native_program(
                 EntryKind::StampValue,
                 vec![
@@ -10141,7 +10027,7 @@ mod tests {
                 program.ops(),
                 &[
                     NativeOp::LoadParam(0),
-                    NativeOp::IntegerShiftConst(expected_op, right as i64 as u8),
+                    NativeOp::IntegerShiftConst(expected_op, expected_count),
                 ],
                 "{name}: valid constant count should lower to an immediate shift"
             );
@@ -10152,19 +10038,6 @@ mod tests {
             );
 
             let bytes = compile_value_function(&program).expect("compile constant shift leaf");
-            assert!(
-                contains_bytes(&bytes, &shift_bytes),
-                "{name}: generated code should use an imm8 shift"
-            );
-            assert!(
-                !contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::Rcx, 64)),
-                "{name}: constant count shifts should not emit runtime count bounds checks"
-            );
-            assert!(
-                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rcx, Gpr::Rcx)),
-                "{name}: constant count shifts should not convert an RHS count through RCX"
-            );
-
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate constant shift leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -10177,11 +10050,12 @@ mod tests {
                 integer_expected.to_bits(),
                 "{name}"
             );
+            assert!(ctx.take_runtime_error().is_none(), "{name}");
         }
     }
 
     #[test]
-    fn generated_value_leaf_elides_zero_count_constant_shift_opcode() {
+    fn generated_value_leaf_zero_count_shift_preserves_checked_conversion() {
         let cases = [
             (
                 "shl-zero-fractional",
@@ -10219,18 +10093,6 @@ mod tests {
             );
 
             let bytes = compile_value_function(&program).expect("compile zero-count shift leaf");
-            assert!(
-                !contains_bytes(&bytes, &shift_imm_bytes(expected_op, Gpr::R11, 0)),
-                "{name}: zero-count constant shifts should skip the redundant shift instruction"
-            );
-            assert!(
-                !contains_bytes(&bytes, &cmp_r64_imm32_bytes(Gpr::Rcx, 64)),
-                "{name}: constant zero-count shifts should not emit runtime count bounds checks"
-            );
-            assert!(
-                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rcx, Gpr::Rcx)),
-                "{name}: constant zero-count shifts should not convert an RHS count through RCX"
-            );
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate zero-count shift leaf");
@@ -10243,13 +10105,14 @@ mod tests {
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
-                "{name}: zero-count shift must still perform Rust-style f64-to-i64 conversion"
+                "{name}: zero-count shift must still perform checked Verilog-AMS conversion"
             );
+            assert_eq!(ctx.take_runtime_error().is_some(), !left.is_finite(), "{name}");
         }
     }
 
     #[test]
-    fn generated_value_leaf_computes_runtime_shifts_without_helper_call() {
+    fn generated_value_leaf_computes_runtime_shifts_with_shared_contract() {
         let cases = [
             ("shl", Instruction::Shl, 3.0, 2.0, runtime_shl(3.0, 2.0)),
             (
@@ -10278,26 +10141,6 @@ mod tests {
                 0,
             );
             let bytes = compile_value_function(&program).expect("compile integer shift leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: runtime shifts should not pay helper-call prologue"
-            );
-            assert!(
-                contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
-                "{name}: f64-to-i64 NaN path should zero the left operand with a zero idiom"
-            );
-            assert!(
-                contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rcx, Gpr::Rcx)),
-                "{name}: f64-to-i64 NaN path should zero the shift count with a zero idiom"
-            );
-            assert!(
-                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, 0)),
-                "{name}: f64-to-i64 NaN path should not materialize zero as a 64-bit immediate"
-            );
-            assert!(
-                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::Rcx, 0)),
-                "{name}: f64-to-i64 NaN path should not materialize zero as a 64-bit immediate"
-            );
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer shift leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -10322,7 +10165,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_runtime_shifts_hard_fail_invalid_counts_without_helper_call() {
+    fn generated_value_leaf_unsigned_out_of_width_shift_counts_produce_zero() {
         let cases = [
             ("shl-negative-count", Instruction::Shl, 3.0, -1.0),
             ("shr-too-large-count", Instruction::Shr, -16.0, 64.0),
@@ -10335,10 +10178,6 @@ mod tests {
                 0,
             );
             let bytes = compile_value_function(&program).expect("compile integer shift leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: invalid runtime shifts should not require the helper-call prologue"
-            );
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer shift leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -10350,25 +10189,18 @@ mod tests {
             let result = f(&ctx, std::ptr::null());
 
             assert_eq!(result.to_bits(), 0.0_f64.to_bits(), "{name}");
-            let error = ctx
-                .take_runtime_error()
-                .expect("invalid shift count must hard-fail in its dispatch context");
             assert!(
-                error.contains("integer shift count"),
-                "{name}: error must identify shift-count failure, got: {error}"
-            );
-            assert!(
-                error.contains("no interpreter fallback"),
-                "{name}: error must preserve the native hard-fail contract, got: {error}"
+                ctx.take_runtime_error().is_none(),
+                "{name}: unsigned out-of-width counts are defined, not runtime errors"
             );
         }
     }
 
     #[test]
-    fn generated_value_leaf_computes_runtime_bitwise_integer_ops_without_helper_call() {
+    fn generated_value_leaf_computes_runtime_bitwise_integer_ops_with_shared_contract() {
         let cases = [
             (
-                "bitand-truncates",
+                "bitand-rounds",
                 Instruction::BitAnd,
                 13.75,
                 6.25,
@@ -10425,10 +10257,6 @@ mod tests {
                 0,
             );
             let bytes = compile_value_function(&program).expect("compile bitwise leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: runtime bitwise integer ops should not pay helper-call prologue"
-            );
 
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate bitwise leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -10442,11 +10270,14 @@ mod tests {
                 expected.to_bits(),
                 "{name}"
             );
+            let expected_error = crate::integer_runtime::real_to_integer(left).is_err()
+                || crate::integer_runtime::real_to_integer(right).is_err();
+            assert_eq!(ctx.take_runtime_error().is_some(), expected_error, "{name}");
         }
     }
 
     #[test]
-    fn generated_value_leaf_computes_constant_rhs_bitwise_without_rhs_conversion() {
+    fn generated_value_leaf_computes_constant_rhs_bitwise_with_shared_contract() {
         let cases = [
             (
                 "bitand-imm",
@@ -10502,21 +10333,6 @@ mod tests {
             );
 
             let bytes = compile_value_function(&program).expect("compile constant bitwise leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: constant bitwise ops should not pay helper-call prologue"
-            );
-            assert!(
-                contains_bytes(
-                    &bytes,
-                    &bitwise_imm32_bytes(expected_op, Gpr::R10, rhs_i64 as i32)
-                ),
-                "{name}: generated code should apply the RHS as an imm32"
-            );
-            assert!(
-                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
-                "{name}: constant RHS bitwise should not convert the RHS through R11"
-            );
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate constant bitwise leaf");
@@ -10529,6 +10345,11 @@ mod tests {
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
+                "{name}"
+            );
+            assert_eq!(
+                ctx.take_runtime_error().is_some(),
+                crate::integer_runtime::real_to_integer(left).is_err(),
                 "{name}"
             );
         }
@@ -10544,11 +10365,6 @@ mod tests {
         );
         let wide_bytes =
             compile_value_function(&wide_program).expect("compile wide constant bitwise leaf");
-        assert!(
-            contains_bytes(&wide_bytes, &movabs_imm64_bytes(Gpr::R11, i64::MAX as u64)),
-            "wide constant RHS bitwise should materialize the full i64 value"
-        );
-
         let memory = ExecutableMemory::allocate(&wide_bytes).expect("allocate wide bitwise leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -10559,10 +10375,11 @@ mod tests {
             f(&ctx, std::ptr::null()).to_bits(),
             runtime_bitand(13.75, f64::INFINITY).to_bits()
         );
+        assert!(ctx.take_runtime_error().is_some());
     }
 
     #[test]
-    fn generated_value_leaf_computes_constant_lhs_bitwise_without_lhs_conversion() {
+    fn generated_value_leaf_computes_constant_lhs_bitwise_with_shared_contract() {
         let cases = [
             (
                 "bitand-lhs-imm",
@@ -10619,21 +10436,6 @@ mod tests {
 
             let bytes =
                 compile_value_function(&program).expect("compile constant-LHS bitwise leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: constant-LHS bitwise ops should not pay helper-call prologue"
-            );
-            assert!(
-                contains_bytes(
-                    &bytes,
-                    &bitwise_imm32_bytes(expected_op, Gpr::R10, lhs_i64 as i32)
-                ),
-                "{name}: generated code should apply the LHS as an imm32"
-            );
-            assert!(
-                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
-                "{name}: constant LHS bitwise should not convert the LHS through R11"
-            );
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate constant-LHS bitwise leaf");
@@ -10646,6 +10448,11 @@ mod tests {
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
+                "{name}"
+            );
+            assert_eq!(
+                ctx.take_runtime_error().is_some(),
+                crate::integer_runtime::real_to_integer(right).is_err(),
                 "{name}"
             );
         }
@@ -10661,11 +10468,6 @@ mod tests {
         );
         let wide_bytes =
             compile_value_function(&wide_program).expect("compile wide constant-LHS bitwise leaf");
-        assert!(
-            contains_bytes(&wide_bytes, &movabs_imm64_bytes(Gpr::R11, i64::MAX as u64)),
-            "wide constant LHS bitwise should materialize the full i64 value"
-        );
-
         let memory = ExecutableMemory::allocate(&wide_bytes)
             .expect("allocate wide constant-LHS bitwise leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -10677,6 +10479,7 @@ mod tests {
             f(&ctx, std::ptr::null()).to_bits(),
             runtime_bitand(f64::INFINITY, 13.75).to_bits()
         );
+        assert!(ctx.take_runtime_error().is_some());
     }
 
     #[test]
@@ -10716,7 +10519,7 @@ mod tests {
             ),
         ];
 
-        for (name, instruction, elided_op, left, right, expected) in cases {
+        for (name, instruction, _elided_op, left, right, expected) in cases {
             let program = native_program(
                 EntryKind::StampValue,
                 vec![
@@ -10738,21 +10541,6 @@ mod tests {
             );
 
             let bytes = compile_value_function(&program).expect("compile integer-cast leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: integer cast should not pay helper-call prologue"
-            );
-            assert!(
-                !contains_bytes(
-                    &bytes,
-                    &bitwise_imm32_bytes(elided_op, Gpr::R10, right as i64 as i32)
-                ),
-                "{name}: generated code should elide the no-op bitwise immediate"
-            );
-            assert!(
-                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, right as i64 as u64)),
-                "{name}: generated code should not materialize the RHS"
-            );
 
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer-cast leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -10764,6 +10552,11 @@ mod tests {
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
+                "{name}"
+            );
+            assert_eq!(
+                ctx.take_runtime_error().is_some(),
+                crate::integer_runtime::real_to_integer(left).is_err(),
                 "{name}"
             );
         }
@@ -10806,7 +10599,7 @@ mod tests {
             ),
         ];
 
-        for (name, instruction, elided_op, left, right, expected) in cases {
+        for (name, instruction, _elided_op, left, right, expected) in cases {
             let program = native_program(
                 EntryKind::StampValue,
                 vec![
@@ -10828,21 +10621,6 @@ mod tests {
             );
 
             let bytes = compile_value_function(&program).expect("compile integer-cast leaf");
-            assert!(
-                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
-                "{name}: integer cast should not pay helper-call prologue"
-            );
-            assert!(
-                !contains_bytes(
-                    &bytes,
-                    &bitwise_imm32_bytes(elided_op, Gpr::R10, left as i64 as i32)
-                ),
-                "{name}: generated code should elide the no-op bitwise immediate"
-            );
-            assert!(
-                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, left as i64 as u64)),
-                "{name}: generated code should not materialize the LHS"
-            );
 
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer-cast leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -10854,6 +10632,11 @@ mod tests {
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
+                "{name}"
+            );
+            assert_eq!(
+                ctx.take_runtime_error().is_some(),
+                crate::integer_runtime::real_to_integer(right).is_err(),
                 "{name}"
             );
         }
@@ -10892,7 +10675,7 @@ mod tests {
                 runtime_bitxor(15.0, 6.0),
             ),
             (
-                "truncates-operands",
+                "rounds-operands",
                 Instruction::BitAnd,
                 13.75,
                 6.25,
@@ -11860,19 +11643,21 @@ mod tests {
                     ],
                     0,
                 ),
-                256,
+                384,
                 false,
             ),
         ];
 
         for (name, program, max_bytes, allow_cold_error_call) in cases {
-            assert!(
-                !program_uses_helper_calls(&program),
-                "{name}: hot path should remain helper-free at lowering"
+            let expected_helper = name == "integer_bitwise";
+            assert_eq!(
+                program_uses_helper_calls(&program),
+                expected_helper,
+                "{name}: lowering helper classification"
             );
 
             let bytes = compile_value_function(&program).expect("compile hot path");
-            if !allow_cold_error_call {
+            if !allow_cold_error_call && !expected_helper {
                 assert!(
                     !contains_bytes(&bytes, &call_rax_bytes()),
                     "{name}: helper-free hot path emitted an indirect helper call"
@@ -13157,31 +12942,6 @@ mod tests {
         encoder.into_bytes()
     }
 
-    fn shift_imm_bytes(op: IntegerBinaryOp, register: Gpr, count: u8) -> Vec<u8> {
-        let mut encoder = X64Encoder::new();
-        match op {
-            IntegerBinaryOp::Shl => encoder.shl_r64_imm8(register, count),
-            IntegerBinaryOp::Shr => encoder.sar_r64_imm8(register, count),
-            IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
-                unreachable!("shift byte helper only accepts shl/shr")
-            }
-        }
-        encoder.into_bytes()
-    }
-
-    fn bitwise_imm32_bytes(op: IntegerBinaryOp, register: Gpr, value: i32) -> Vec<u8> {
-        let mut encoder = X64Encoder::new();
-        match op {
-            IntegerBinaryOp::BitAnd => encoder.and_r64_imm32(register, value),
-            IntegerBinaryOp::BitOr => encoder.or_r64_imm32(register, value),
-            IntegerBinaryOp::BitXor => encoder.xor_r64_imm32(register, value),
-            IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
-                unreachable!("bitwise byte helper only accepts bitwise ops")
-            }
-        }
-        encoder.into_bytes()
-    }
-
     fn dynamic_variable_movabs_sub_lower_bytes(lower: i64) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.movabs_r64_imm64(Gpr::R11, lower as u64);
@@ -13508,23 +13268,48 @@ mod tests {
     }
 
     fn runtime_shl(left: f64, right: f64) -> f64 {
-        ((std::hint::black_box(left) as i64) << (std::hint::black_box(right) as i64)) as f64
+        crate::integer_runtime::integer_binary(
+            crate::integer_runtime::IntegerBinaryOperation::Shl,
+            std::hint::black_box(left),
+            std::hint::black_box(right),
+        )
+        .unwrap_or(0.0)
     }
 
     fn runtime_shr(left: f64, right: f64) -> f64 {
-        ((std::hint::black_box(left) as i64) >> (std::hint::black_box(right) as i64)) as f64
+        crate::integer_runtime::integer_binary(
+            crate::integer_runtime::IntegerBinaryOperation::Shr,
+            std::hint::black_box(left),
+            std::hint::black_box(right),
+        )
+        .unwrap_or(0.0)
     }
 
     fn runtime_bitand(left: f64, right: f64) -> f64 {
-        ((std::hint::black_box(left) as i64) & (std::hint::black_box(right) as i64)) as f64
+        crate::integer_runtime::integer_binary(
+            crate::integer_runtime::IntegerBinaryOperation::BitAnd,
+            std::hint::black_box(left),
+            std::hint::black_box(right),
+        )
+        .unwrap_or(0.0)
     }
 
     fn runtime_bitor(left: f64, right: f64) -> f64 {
-        ((std::hint::black_box(left) as i64) | (std::hint::black_box(right) as i64)) as f64
+        crate::integer_runtime::integer_binary(
+            crate::integer_runtime::IntegerBinaryOperation::BitOr,
+            std::hint::black_box(left),
+            std::hint::black_box(right),
+        )
+        .unwrap_or(0.0)
     }
 
     fn runtime_bitxor(left: f64, right: f64) -> f64 {
-        ((std::hint::black_box(left) as i64) ^ (std::hint::black_box(right) as i64)) as f64
+        crate::integer_runtime::integer_binary(
+            crate::integer_runtime::IntegerBinaryOperation::BitXor,
+            std::hint::black_box(left),
+            std::hint::black_box(right),
+        )
+        .unwrap_or(0.0)
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {
