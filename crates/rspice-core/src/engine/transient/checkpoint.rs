@@ -662,22 +662,33 @@ pub(crate) fn netlist_checkpoint_identity(netlist: &Netlist) -> Option<String> {
 /// Collision-resistant trajectory identity used by authored checkpoint/restart
 /// decks whose run horizon and restart I/O metadata necessarily differ.
 ///
-/// Only the stop horizon of `.TRAN` commands and the complete
-/// `.OPTIONS RESTART` control plane are normalized. The transient print step,
-/// start time, maximum step, UIC contract, circuit/model/source semantics,
-/// output requests, external dependency content, and every other typed option
+/// Only non-trajectory presentation/control metadata and effective-default
+/// execution policies are normalized. The transient print step, start time,
+/// maximum step, UIC contract, circuit/model/source semantics, output requests,
+/// external dependency content, and every trajectory-affecting typed option
 /// remain part of the identity through [`semantic_netlist_identity`].
 pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     let mut normalized = netlist.clone();
+    // A SPICE title is presentation metadata. Authored first/restart decks may
+    // legitimately use different descriptions without changing any equation,
+    // state variable, or accepted-step decision.
+    normalized.title.clear();
     for analysis in &mut normalized.analyses {
         if let crate::netlist::AnalysisCommand::Tran { stop, .. } = analysis {
             *stop = 0.0;
         }
     }
     normalized.options.restart = None;
+    // Xyce's DeviceOptions default is SEPARATELOAD=0. RSpice intentionally
+    // models the switch as loader-policy metadata rather than as a physical
+    // circuit option, so an explicit FALSE and omission are one effective
+    // authored-restart contract. TRUE remains identity-bound.
+    if normalized.options.device_separate_load == Some(false) {
+        normalized.options.device_separate_load = None;
+    }
     Some(semantic_netlist_identity(
         &normalized,
-        b"rspice-transient-restart-compatible-netlist-v2\0",
+        b"rspice-transient-restart-compatible-netlist-v3\0",
     ))
 }
 
@@ -4277,7 +4288,15 @@ mod tests {
     }
 
     #[test]
-    fn separate_load_policy_changes_semantic_and_restart_identities() {
+    fn separate_load_effective_default_is_restart_compatible_but_true_is_not() {
+        let omitted = Netlist::parse(
+            "separate-load identity\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .END\n",
+        )
+        .expect("omitted separate-load deck parses");
         let disabled = Netlist::parse(
             "separate-load identity\n\
              V1 out 0 1\n\
@@ -4298,14 +4317,57 @@ mod tests {
         .expect("enabled separate-load deck parses");
 
         assert_ne!(
+            netlist_checkpoint_identity(&omitted),
+            netlist_checkpoint_identity(&disabled),
+            "ordinary semantic identity retains explicit loader policy metadata"
+        );
+        assert_ne!(
             netlist_checkpoint_identity(&disabled),
             netlist_checkpoint_identity(&enabled),
             "authored loader policy must participate in semantic identity"
         );
-        assert_ne!(
+        assert_eq!(
+            restart_checkpoint_identity(&omitted),
             restart_checkpoint_identity(&disabled),
+            "omission and Xyce's explicit FALSE default are restart compatible"
+        );
+        assert_ne!(
+            restart_checkpoint_identity(&omitted),
             restart_checkpoint_identity(&enabled),
-            "authored loader policy must participate in restart compatibility"
+            "enabled separate loading remains restart identity-bound"
+        );
+    }
+
+    #[test]
+    fn authored_restart_identity_excludes_title_but_ordinary_identity_retains_it() {
+        let first = Netlist::parse(
+            "first-run title\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 2n\n\
+             .OPTIONS RESTART JOB=bench INITIAL_INTERVAL=1n\n\
+             .END\n",
+        )
+        .expect("first-run deck parses");
+        let restarted = Netlist::parse(
+            "different restart title\n\
+             V1 out 0 1\n\
+             R1 out 0 1k\n\
+             .TRAN 1n 3n\n\
+             .OPTIONS RESTART FILE=bench1e-09\n\
+             .END\n",
+        )
+        .expect("restart deck parses");
+
+        assert_ne!(
+            netlist_checkpoint_identity(&first),
+            netlist_checkpoint_identity(&restarted),
+            "ordinary resume retains the complete authored semantic identity"
+        );
+        assert_eq!(
+            restart_checkpoint_identity(&first),
+            restart_checkpoint_identity(&restarted),
+            "presentation-only title and restart control metadata cannot invalidate authored restart"
         );
     }
 
