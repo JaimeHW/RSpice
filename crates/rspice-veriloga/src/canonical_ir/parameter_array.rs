@@ -98,6 +98,19 @@ pub(super) fn validate_parameter_array_contract<P: CanonicalParameterMetadata>(
     parameters: &[P],
     expressions: &[HirExpression],
 ) -> Vec<IrDiagnostic> {
+    // Scalar defaults are evaluated here only to authenticate the constants
+    // consumed by parameter-array bounds and initializers.  Scalar-only
+    // artifacts retain their independent backend parameter-contract checks;
+    // applying the array dependency validator to them would collapse those
+    // boundaries and reject an artifact before a backend can authenticate it
+    // against the executable model supplied alongside it.
+    if !parameters
+        .iter()
+        .any(|parameter| !parameter.dimensions().is_empty())
+    {
+        return Vec::new();
+    }
+
     let mut diagnostics = Vec::new();
     let mut declared_scalars = HashMap::<SmolStr, ConstantValue>::new();
     let mut remaining_work = expressions
