@@ -67,6 +67,61 @@ pub(super) enum XyceDampedDecision {
     Failed { test: u8, return_code: i32 },
 }
 
+/// Persistent DampedNewton phase at an accepted transient boundary.
+///
+/// Xyce retains only the stagnation count and its best observed convergence
+/// rate across nonlinear solves.  The residual references belong to the
+/// completed attempt and are deliberately absent: both [`XyceTransientDampedStatus::begin_solve`]
+/// entry points replace them before the next candidate is evaluated.
+///
+/// The transient driver's separate `first_solver_call` flag controls frozen
+/// solution-weight construction rather than this status machine.  An
+/// enclosing transient checkpoint must therefore persist that flag alongside
+/// this payload.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct XyceDampedAcceptedBoundaryCheckpoint {
+    pub(super) bad_step_count: usize,
+    pub(super) min_convergence_rate: Value,
+}
+
+impl Default for XyceDampedAcceptedBoundaryCheckpoint {
+    fn default() -> Self {
+        Self {
+            bad_step_count: 0,
+            min_convergence_rate: 1.0,
+        }
+    }
+}
+
+impl XyceDampedAcceptedBoundaryCheckpoint {
+    /// Validate the complete persistent DampedNewton payload before restore.
+    pub(super) fn validate(&self) -> Result<(), String> {
+        if self.bad_step_count >= XYCE_DAMPED_MAX_BAD_STEPS {
+            return Err(format!(
+                "DampedNewton checkpoint bad-step count {} must be less than {}",
+                self.bad_step_count, XYCE_DAMPED_MAX_BAD_STEPS
+            ));
+        }
+
+        if !self.min_convergence_rate.is_finite() {
+            return Err(
+                "DampedNewton checkpoint minimum convergence rate must be finite".to_string(),
+            );
+        }
+
+        let minimum_rate = 1.0 - XYCE_DAMPED_STAGNATION_TOLERANCE;
+        let maximum_rate = 1.0 + XYCE_DAMPED_STAGNATION_TOLERANCE;
+        if !(minimum_rate..=maximum_rate).contains(&self.min_convergence_rate) {
+            return Err(format!(
+                "DampedNewton checkpoint minimum convergence rate {} is outside the stagnation interval [{minimum_rate}, {maximum_rate}]",
+                self.min_convergence_rate
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 /// Data observed after one DampedNewton candidate.
 ///
 /// `newton_step` is the one-based Xyce `nlStep_` value.  The update norm must
@@ -205,6 +260,43 @@ impl XyceTransientDampedStatus {
             self.initial_residual_l2_norm = Some(initial_residual_l2_norm);
             self.previous_residual_l2_norm = Some(initial_residual_l2_norm);
         }
+    }
+
+    /// Capture the persistent status at an accepted transient boundary.
+    ///
+    /// The caller establishes that the attempted timepoint was accepted.  Any
+    /// residual references still present describe that completed attempt and
+    /// are intentionally ignored because the next `begin_solve*` call replaces
+    /// them unconditionally.  Return-code policy and the iteration budget are
+    /// live configuration, not mutable continuation phase, and remain owned by
+    /// the status object reconstructed for the resumed analysis.
+    pub(super) fn capture_accepted_boundary_checkpoint(
+        &self,
+    ) -> Result<XyceDampedAcceptedBoundaryCheckpoint, String> {
+        let checkpoint = XyceDampedAcceptedBoundaryCheckpoint {
+            bad_step_count: self.bad_step_count,
+            min_convergence_rate: self.min_convergence_rate,
+        };
+        checkpoint.validate()?;
+        Ok(checkpoint)
+    }
+
+    /// Restore the persistent phase before beginning the next nonlinear solve.
+    ///
+    /// Validation completes before any live state is modified.  Attempt-local
+    /// residual references are cleared defensively so a restored object cannot
+    /// accidentally reuse norms from work performed before the checkpoint.
+    pub(super) fn restore_accepted_boundary_checkpoint(
+        &mut self,
+        checkpoint: &XyceDampedAcceptedBoundaryCheckpoint,
+    ) -> Result<(), String> {
+        checkpoint.validate()?;
+
+        self.bad_step_count = checkpoint.bad_step_count;
+        self.min_convergence_rate = checkpoint.min_convergence_rate;
+        self.initial_residual_l2_norm = None;
+        self.previous_residual_l2_norm = None;
+        Ok(())
     }
 
     /// Evaluate one candidate using Xyce's ordered DampedNewton tests.
@@ -599,5 +691,114 @@ mod tests {
                 return_code: -3,
             }
         );
+    }
+
+    #[test]
+    fn accepted_boundary_checkpoint_round_trip_preserves_only_persistent_phase() {
+        let mut source = XyceTransientDampedStatus::new(20);
+        source.initial_residual_l2_norm = Some(100.0);
+        source.previous_residual_l2_norm = Some(80.0);
+        source.bad_step_count = 3;
+        source.min_convergence_rate = 0.9995;
+
+        let checkpoint = source
+            .capture_accepted_boundary_checkpoint()
+            .expect("valid accepted-boundary checkpoint");
+        assert_eq!(
+            checkpoint,
+            XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: 3,
+                min_convergence_rate: 0.9995,
+            }
+        );
+
+        let configured_codes = XyceDampedReturnCodes {
+            near_convergence: 3,
+            small_update: -4,
+        };
+        let mut restored = XyceTransientDampedStatus::with_return_codes(7, configured_codes);
+        restored.initial_residual_l2_norm = Some(12.0);
+        restored.previous_residual_l2_norm = Some(11.0);
+        restored
+            .restore_accepted_boundary_checkpoint(&checkpoint)
+            .expect("restore accepted-boundary checkpoint");
+
+        assert_eq!(restored.bad_step_count, 3);
+        assert_eq!(
+            restored.min_convergence_rate.to_bits(),
+            0.9995_f64.to_bits()
+        );
+        assert_eq!(restored.initial_residual_l2_norm, None);
+        assert_eq!(restored.previous_residual_l2_norm, None);
+        assert_eq!(restored.max_iterations, 7);
+        assert_eq!(restored.return_codes, configured_codes);
+    }
+
+    #[test]
+    fn accepted_boundary_checkpoint_validation_is_strict() {
+        for checkpoint in [
+            XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: XYCE_DAMPED_MAX_BAD_STEPS,
+                min_convergence_rate: 1.0,
+            },
+            XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: 0,
+                min_convergence_rate: Value::NAN,
+            },
+            XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: 0,
+                min_convergence_rate: 1.0 - XYCE_DAMPED_STAGNATION_TOLERANCE - Value::EPSILON,
+            },
+            XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: 0,
+                min_convergence_rate: 1.0 + XYCE_DAMPED_STAGNATION_TOLERANCE + Value::EPSILON,
+            },
+        ] {
+            assert!(checkpoint.validate().is_err(), "accepted {checkpoint:?}");
+        }
+
+        for rate in [
+            1.0 - XYCE_DAMPED_STAGNATION_TOLERANCE,
+            1.0,
+            1.0 + XYCE_DAMPED_STAGNATION_TOLERANCE,
+        ] {
+            XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: XYCE_DAMPED_MAX_BAD_STEPS - 1,
+                min_convergence_rate: rate,
+            }
+            .validate()
+            .expect("closed stagnation interval is valid");
+        }
+    }
+
+    #[test]
+    fn rejected_checkpoint_does_not_mutate_live_status() {
+        let mut status = XyceTransientDampedStatus::new(13);
+        status.initial_residual_l2_norm = Some(9.0);
+        status.previous_residual_l2_norm = Some(8.0);
+        status.bad_step_count = 2;
+        status.min_convergence_rate = 0.99975;
+
+        let error = status
+            .restore_accepted_boundary_checkpoint(&XyceDampedAcceptedBoundaryCheckpoint {
+                bad_step_count: XYCE_DAMPED_MAX_BAD_STEPS,
+                min_convergence_rate: 1.0,
+            })
+            .expect_err("invalid checkpoint must fail closed");
+        assert!(error.contains("bad-step count"), "{error}");
+        assert_eq!(status.initial_residual_l2_norm, Some(9.0));
+        assert_eq!(status.previous_residual_l2_norm, Some(8.0));
+        assert_eq!(status.bad_step_count, 2);
+        assert_eq!(status.min_convergence_rate, 0.99975);
+    }
+
+    #[test]
+    fn capture_rejects_corrupt_live_persistent_phase() {
+        let mut status = XyceTransientDampedStatus::new(20);
+        status.min_convergence_rate = Value::INFINITY;
+        let error = status
+            .capture_accepted_boundary_checkpoint()
+            .expect_err("corrupt live phase must not be serialized");
+        assert!(error.contains("must be finite"), "{error}");
     }
 }
