@@ -424,7 +424,7 @@ impl<'a> Vm<'a> {
                     .unwrap_or(0.0);
 
                 self.context.state_values[*idx] = current_value;
-                let coefficients = self.context.integration;
+                let coefficients = self.context.integration_coefficients();
                 let derivative = if coefficients.active {
                     coefficients.derivative_scale * current_value
                         - coefficients.previous_value_scale * prev_value
@@ -460,7 +460,7 @@ impl<'a> Vm<'a> {
                 } else {
                     current_value
                 };
-                let coefficients = self.context.integration;
+                let coefficients = self.context.integration_coefficients();
                 let new_integral = if coefficients.active {
                     (current_value
                         + coefficients.previous_value_scale * prev_integral
@@ -505,7 +505,7 @@ impl<'a> Vm<'a> {
                 } else {
                     current_value
                 };
-                let coefficients = self.context.integration;
+                let coefficients = self.context.integration_coefficients();
                 let raw = if coefficients.active {
                     (current_value
                         + coefficients.previous_value_scale * prev
@@ -539,7 +539,7 @@ impl<'a> Vm<'a> {
 
             // Companion Jacobian factor for ddt: a / dt (0 at DC)
             Instruction::DdtJacobian => {
-                let coefficients = self.context.integration;
+                let coefficients = self.context.integration_coefficients();
                 self.unary_op(|a| {
                     if coefficients.active {
                         a * coefficients.derivative_scale
@@ -551,7 +551,7 @@ impl<'a> Vm<'a> {
 
             // Companion Jacobian factor for idt: a * dt (0 at DC)
             Instruction::IdtJacobian => {
-                let coefficients = self.context.integration;
+                let coefficients = self.context.integration_coefficients();
                 self.unary_op(|a| {
                     if coefficients.active {
                         a / coefficients.derivative_scale
@@ -935,7 +935,7 @@ impl<'a> Vm<'a> {
                     time_tol,
                     enable,
                     self.context.time,
-                    self.context.timestep,
+                    self.context.timestep(),
                 );
                 if let Some(next_event) = next_event {
                     self.context.request_timer_event(next_event);
@@ -948,9 +948,11 @@ impl<'a> Vm<'a> {
             Instruction::LaplaceState(filter_id) => {
                 let input = self.pop()?;
                 let result = if self.context.analysis_type == 2 {
+                    let integration_active = self.context.integration_coefficients().active;
+                    let timestep = self.context.timestep();
                     if let Some(filter) = self.context.laplace_filters.get_mut(*filter_id) {
-                        let result = if self.context.integration.active {
-                            filter.step(input, self.context.timestep)
+                        let result = if integration_active {
+                            filter.step(input, timestep)
                         } else {
                             // The transient operating-point pass has no
                             // integration formula. Solve an equilibrium
@@ -984,14 +986,16 @@ impl<'a> Vm<'a> {
             // equilibrium and all other analyses use the filter's DC action.
             Instruction::LaplaceStateDerivative(filter_id) => {
                 let input_derivative = self.pop()?;
+                let integration_active = self.context.integration_coefficients().active;
+                let timestep = self.context.timestep();
                 let filter = self
                     .context
                     .laplace_filters
                     .get(*filter_id)
                     .ok_or(VmError::InvalidInstruction("missing laplace filter"))?;
-                let result = if self.context.analysis_type == 2 && self.context.integration.active {
+                let result = if self.context.analysis_type == 2 && integration_active {
                     let gain = filter
-                        .backward_euler_input_gain(self.context.timestep)
+                        .backward_euler_input_gain(timestep)
                         .map_err(|error| {
                             VmError::InvalidNumericResult(format!(
                                 "Laplace derivative {filter_id}: {error}"
@@ -1481,8 +1485,7 @@ mod tests {
 
         let mut transient_context = VmContext::default();
         transient_context.analysis_type = 2;
-        transient_context.timestep = 1.0;
-        transient_context.integration = IntegrationCoefficients::backward_euler(1.0);
+        transient_context.try_set_timestep(1.0).unwrap();
         transient_context.laplace_filters.push(
             crate::laplace::StateSpaceFilter::new(vec![vec![1.0]], vec![1.0], vec![1.0], 0.0)
                 .expect("well-formed state-space filter"),
@@ -1500,8 +1503,7 @@ mod tests {
     fn transient_laplace_inactive_integration_seeds_the_first_step_on_acceptance() {
         let mut context = VmContext::default();
         context.analysis_type = 2;
-        context.timestep = 0.0;
-        context.integration = IntegrationCoefficients::inactive();
+        context.try_set_timestep(0.0).unwrap();
         context.laplace_filters.push(
             crate::laplace::StateSpaceFilter::integrator(1.0)
                 .expect("first-order low-pass realization"),
@@ -1536,8 +1538,7 @@ mod tests {
     fn laplace_derivative_matches_transient_primal_finite_difference_and_is_read_only() {
         let mut context = VmContext::default();
         context.analysis_type = 2;
-        context.timestep = 0.5;
-        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        context.try_set_timestep(0.5).unwrap();
         let mut filter = crate::laplace::StateSpaceFilter::integrator(1.0)
             .expect("first-order low-pass realization");
         filter
@@ -1596,7 +1597,9 @@ mod tests {
     fn laplace_derivative_uses_dc_action_without_active_transient_integration() {
         let mut context = VmContext::default();
         context.analysis_type = 2;
-        context.integration = IntegrationCoefficients::inactive();
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::inactive())
+            .unwrap();
         context.laplace_filters.push(
             crate::laplace::StateSpaceFilter::integrator(1.0)
                 .expect("first-order low-pass realization"),
@@ -1617,7 +1620,9 @@ mod tests {
     #[test]
     fn integration_initialization_is_published_only_when_the_candidate_is_accepted() {
         let mut context = VmContext::with_states(0, 3);
-        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5))
+            .unwrap();
 
         context.begin_stateful_evaluation();
         assert_eq!(
@@ -1710,7 +1715,9 @@ mod tests {
     #[test]
     fn acceptance_leaves_unexecuted_integration_slots_unchanged() {
         let mut context = VmContext::with_states(0, 2);
-        context.integration = IntegrationCoefficients::backward_euler(1.0);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0))
+            .unwrap();
         context.state_values_prev = vec![1.0, 2.0];
         context.state_values_older = vec![0.5, 1.5];
         context.state_derivatives_prev = vec![0.25, 0.75];
@@ -1733,7 +1740,9 @@ mod tests {
     #[test]
     fn skipped_retry_discards_a_failed_nonfinite_integration_candidate() {
         let mut context = VmContext::with_states(0, 1);
-        context.integration = IntegrationCoefficients::backward_euler(1.0);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0))
+            .unwrap();
         context.state_values[0] = 4.0;
         context.state_values_prev[0] = 4.0;
         context.state_values_older[0] = 3.0;

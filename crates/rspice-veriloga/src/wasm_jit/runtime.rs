@@ -1041,12 +1041,74 @@ mod tests {
     }
 
     #[test]
+    fn session_rejects_invalid_integration_configuration_before_dispatch() {
+        let mut context = VmContext::with_states(0, 1);
+        context.try_set_timestep(0.5).unwrap();
+        context.state_values_prev[0] = 2.0;
+        context.state_values_older[0] = 1.5;
+        context.state_derivatives_prev[0] = 0.25;
+        context.state_initialized[0] = true;
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let accepted_before = session.context().accepted_checkpoint().unwrap();
+        let candidate_before = session.context().state_values.clone();
+        let derivatives_before = session.context().state_derivatives.clone();
+        let timestep_before = session.context().timestep();
+        let integration_before = session.context().integration_coefficients();
+
+        let invalid = IntegrationCoefficients {
+            active: true,
+            derivative_scale: 1.0,
+            previous_value_scale: f64::MAX,
+            older_value_scale: -f64::MAX,
+            previous_derivative_scale: 0.0,
+        };
+        assert!(
+            session
+                .context_mut()
+                .try_set_integration_coefficients(invalid)
+                .is_err()
+        );
+        assert!(session.context_mut().try_set_timestep(-1.0).is_err());
+
+        assert_eq!(
+            session.context().accepted_checkpoint().unwrap(),
+            accepted_before
+        );
+        assert_eq!(session.context().state_values, candidate_before);
+        assert_eq!(session.context().state_derivatives, derivatives_before);
+        assert_eq!(
+            session.context().timestep().to_bits(),
+            timestep_before.to_bits()
+        );
+        assert_eq!(
+            session.context().integration_coefficients(),
+            integration_before
+        );
+        assert_eq!(session.take_error(), None);
+
+        let derivative = evaluate_helper_with_session(
+            440,
+            0,
+            0,
+            0,
+            [3.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("valid stateful helper remains dispatchable after rejected updates");
+        assert_eq!(derivative, 2.0);
+    }
+
+    #[test]
     fn stateful_helpers_share_reference_vm_candidate_semantics() {
         let mut context = VmContext::with_states(0, 1);
         context.state_values_prev[0] = 2.0;
         context.state_values_older[0] = 1.5;
         context.state_initialized[0] = true;
-        context.integration = IntegrationCoefficients::backward_euler(0.1);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.1))
+            .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
         let derivative = evaluate_helper_with_session(
@@ -1143,8 +1205,7 @@ mod tests {
     fn laplace_derivative_helper_matches_vm_and_preserves_filter_state() {
         let mut context = VmContext::default();
         context.analysis_type = 2;
-        context.timestep = 0.5;
-        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        context.try_set_timestep(0.5).unwrap();
         context.laplace_filters.push(
             crate::laplace::StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
                 .expect("valid first-order Laplace filter"),
@@ -1188,7 +1249,9 @@ mod tests {
     #[test]
     fn stateful_integration_helper_does_not_accept_initialization_speculatively() {
         let mut context = VmContext::with_states(0, 1);
-        context.integration = IntegrationCoefficients::backward_euler(1.0);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(1.0))
+            .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
         let first = evaluate_helper_with_session(
@@ -1226,7 +1289,9 @@ mod tests {
     #[test]
     fn integration_helpers_preserve_direct_start_history_for_gear2() {
         let mut context = VmContext::with_states(0, 3);
-        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.5))
+            .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
         let ddt = evaluate_helper_with_session(
@@ -1267,13 +1332,16 @@ mod tests {
         assert_eq!(session.context().state_values_older, vec![2.0, 0.5, -0.5]);
 
         session.context_mut().begin_stateful_evaluation();
-        session.context_mut().integration = IntegrationCoefficients {
-            active: true,
-            derivative_scale: 3.0,
-            previous_value_scale: 4.0,
-            older_value_scale: -1.0,
-            previous_derivative_scale: 0.0,
-        };
+        session
+            .context_mut()
+            .try_set_integration_coefficients(IntegrationCoefficients {
+                active: true,
+                derivative_scale: 3.0,
+                previous_value_scale: 4.0,
+                older_value_scale: -1.0,
+                previous_derivative_scale: 0.0,
+            })
+            .unwrap();
         let ddt = evaluate_helper_with_session(
             440,
             0,
@@ -1316,7 +1384,9 @@ mod tests {
         context.state_values_older[0] = 0.0;
         context.state_derivatives_prev[0] = 1.0;
         context.state_initialized[0] = true;
-        context.integration = IntegrationCoefficients::backward_euler(0.6);
+        context
+            .try_set_integration_coefficients(IntegrationCoefficients::backward_euler(0.6))
+            .unwrap();
         let mut session = WasmJitRuntimeSession::new(context);
 
         let wrapped = evaluate_helper_with_session(

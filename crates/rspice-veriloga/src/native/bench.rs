@@ -603,7 +603,8 @@ fn benchmark_context(model: &CompiledModel) -> VmContext {
     context.laplace_filters = model.laplace_filters.clone();
     context.zi_filters = model.zi_filters.clone();
     context.time = 1.0e-9;
-    context.timestep = 1.0e-12;
+    context.set_timestep(1.0e-12);
+    context.set_integration_coefficients(crate::vm::IntegrationCoefficients::inactive());
     preallocate_context(&mut context, model);
     context
 }
@@ -1233,6 +1234,7 @@ fn update_max_slot(slot: &mut Option<usize>, index: usize) {
 }
 
 fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
+    let integration = context.integration_coefficients();
     EvalContext {
         voltages: context.voltages.as_ptr(),
         internal_voltages: context.internal_voltages.as_ptr(),
@@ -1246,7 +1248,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         port_connected_len: context.port_connected.len(),
         temperature: context.temperature,
         time: context.time,
-        timestep: context.timestep,
+        timestep: context.timestep(),
         state_prev: if context.state_values_prev.is_empty() {
             std::ptr::null()
         } else {
@@ -1325,11 +1327,11 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         state_derivatives_len: context.state_derivatives.len(),
         state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
         state_derivatives_prev_len: context.state_derivatives_prev.len(),
-        integration_derivative_scale: context.integration.derivative_scale,
-        integration_previous_value_scale: context.integration.previous_value_scale,
-        integration_older_value_scale: context.integration.older_value_scale,
-        integration_previous_derivative_scale: context.integration.previous_derivative_scale,
-        integration_active: u8::from(context.integration.active),
+        integration_derivative_scale: integration.derivative_scale,
+        integration_previous_value_scale: integration.previous_value_scale,
+        integration_older_value_scale: integration.older_value_scale,
+        integration_previous_derivative_scale: integration.previous_derivative_scale,
+        integration_active: u8::from(integration.active),
         limiter_active: &mut context.limiter_active,
         limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
         runtime_status: Default::default(),

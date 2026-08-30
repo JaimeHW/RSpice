@@ -2311,13 +2311,7 @@ impl VerilogADevice {
 
     /// Checked transient-timestep update.
     pub fn try_set_timestep(&mut self, dt: f64) -> Result<(), VmError> {
-        if !dt.is_finite() || dt < 0.0 {
-            return Err(VmError::InvalidRuntimeConfiguration(format!(
-                "transient timestep must be finite and non-negative, got {dt}"
-            )));
-        }
-        self.context.set_timestep(dt);
-        Ok(())
+        self.context.try_set_timestep(dt)
     }
 
     /// Select the transient solver's companion coefficients for analog
@@ -2340,49 +2334,7 @@ impl VerilogADevice {
         &mut self,
         coefficients: crate::vm::IntegrationCoefficients,
     ) -> Result<(), VmError> {
-        let scales = [
-            coefficients.derivative_scale,
-            coefficients.previous_value_scale,
-            coefficients.older_value_scale,
-            coefficients.previous_derivative_scale,
-        ];
-        if scales.iter().any(|value| !value.is_finite()) {
-            return Err(VmError::InvalidRuntimeConfiguration(
-                "integration coefficients must all be finite".to_string(),
-            ));
-        }
-        if coefficients.active && coefficients.derivative_scale <= 0.0 {
-            return Err(VmError::InvalidRuntimeConfiguration(format!(
-                "active integration requires a positive derivative scale, got {}",
-                coefficients.derivative_scale
-            )));
-        }
-        if coefficients.active {
-            let scale = coefficients
-                .derivative_scale
-                .abs()
-                .max(coefficients.previous_value_scale.abs())
-                .max(coefficients.older_value_scale.abs());
-            let normalized_error = (coefficients.previous_value_scale / scale
-                + coefficients.older_value_scale / scale
-                - coefficients.derivative_scale / scale)
-                .abs();
-            if normalized_error > 64.0 * f64::EPSILON {
-                return Err(VmError::InvalidRuntimeConfiguration(format!(
-                    "integration value-history scales must sum to the derivative scale: previous {} + older {} != derivative {}",
-                    coefficients.previous_value_scale,
-                    coefficients.older_value_scale,
-                    coefficients.derivative_scale
-                )));
-            }
-        }
-        if !coefficients.active && scales.iter().any(|value| *value != 0.0) {
-            return Err(VmError::InvalidRuntimeConfiguration(
-                "inactive integration coefficients must have zero scales".to_string(),
-            ));
-        }
-        self.context.set_integration_coefficients(coefficients);
-        Ok(())
+        self.context.try_set_integration_coefficients(coefficients)
     }
 
     /// Set the analysis type (0=dc, 1=ac, 2=tran, 3=noise, 4=ic)
@@ -3555,6 +3507,7 @@ impl VerilogADevice {
     /// the underlying vectors.
     #[cfg(feature = "native")]
     fn eval_context_from(context: &mut VmContext) -> crate::native::EvalContext {
+        let integration = context.integration_coefficients();
         crate::native::EvalContext {
             voltages: context.voltages.as_ptr(),
             internal_voltages: context.internal_voltages.as_ptr(),
@@ -3568,7 +3521,7 @@ impl VerilogADevice {
             port_connected_len: context.port_connected.len(),
             temperature: context.temperature,
             time: context.time,
-            timestep: context.timestep,
+            timestep: context.timestep(),
             // Pass null for empty vecs - as_ptr() on empty vec gives dangling non-null pointer
             state_prev: if context.state_values_prev.is_empty() {
                 std::ptr::null()
@@ -3648,11 +3601,11 @@ impl VerilogADevice {
             state_derivatives_len: context.state_derivatives.len(),
             state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
             state_derivatives_prev_len: context.state_derivatives_prev.len(),
-            integration_derivative_scale: context.integration.derivative_scale,
-            integration_previous_value_scale: context.integration.previous_value_scale,
-            integration_older_value_scale: context.integration.older_value_scale,
-            integration_previous_derivative_scale: context.integration.previous_derivative_scale,
-            integration_active: u8::from(context.integration.active),
+            integration_derivative_scale: integration.derivative_scale,
+            integration_previous_value_scale: integration.previous_value_scale,
+            integration_older_value_scale: integration.older_value_scale,
+            integration_previous_derivative_scale: integration.previous_derivative_scale,
+            integration_active: u8::from(integration.active),
             limiter_active: &mut context.limiter_active,
             limiting_enabled: u8::from(context.evaluation_mode.limiting_enabled()),
             runtime_status: Default::default(),

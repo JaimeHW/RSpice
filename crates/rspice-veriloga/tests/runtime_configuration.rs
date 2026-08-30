@@ -149,6 +149,20 @@ fn companion_coefficients_are_validated_before_installation() {
             .expect_err("nonaffine history scales must fail"),
         "must sum to the derivative scale",
     );
+
+    let catastrophic_cancellation = IntegrationCoefficients {
+        active: true,
+        derivative_scale: 1.0,
+        previous_value_scale: f64::MAX,
+        older_value_scale: -f64::MAX,
+        previous_derivative_scale: 0.0,
+    };
+    assert_configuration_error(
+        device
+            .try_set_integration_coefficients(catastrophic_cancellation)
+            .expect_err("catastrophically cancelling history scales must fail"),
+        "must sum to the derivative scale",
+    );
 }
 
 #[test]

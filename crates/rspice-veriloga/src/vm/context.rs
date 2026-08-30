@@ -127,6 +127,60 @@ impl IntegrationCoefficients {
             previous_derivative_scale: 0.0,
         }
     }
+
+    /// Validate a solver-provided companion rule before it reaches an
+    /// integration operator.
+    ///
+    /// The value-history coefficients must reproduce a constant exactly up
+    /// to ordinary floating-point roundoff. Besides being required by `ddt`
+    /// and `idt`, this affine invariant is what makes translating every
+    /// `idtmod` history lane onto a common wrap branch mathematically sound.
+    pub fn validate(self) -> Result<(), VmError> {
+        let scales = [
+            self.derivative_scale,
+            self.previous_value_scale,
+            self.older_value_scale,
+            self.previous_derivative_scale,
+        ];
+        if scales.iter().any(|value| !value.is_finite()) {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "integration coefficients must all be finite".to_string(),
+            ));
+        }
+
+        if !self.active {
+            if scales.iter().any(|value| *value != 0.0) {
+                return Err(VmError::InvalidRuntimeConfiguration(
+                    "inactive integration coefficients must have zero scales".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+
+        if self.derivative_scale <= 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "active integration requires a positive derivative scale, got {}",
+                self.derivative_scale
+            )));
+        }
+
+        // Compare the history sum to the derivative scale, not to the
+        // potentially much larger individual history terms. Scaling by those
+        // terms would accept catastrophic cancellation such as MAX + -MAX.
+        let history_sum = self.previous_value_scale + self.older_value_scale;
+        let normalized_error = history_sum / self.derivative_scale - 1.0;
+        if !history_sum.is_finite()
+            || !normalized_error.is_finite()
+            || normalized_error.abs() > 64.0 * f64::EPSILON
+        {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "integration value-history scales must sum to the derivative scale: previous {} + older {} != derivative {}",
+                self.previous_value_scale, self.older_value_scale, self.derivative_scale
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for IntegrationCoefficients {
@@ -275,9 +329,9 @@ pub struct VmContext {
     /// Runtime-only; accepted history lanes are serialized by checkpoints.
     pub(crate) state_older_candidate: Vec<f64>,
     /// Current timestep (delta t) for transient analysis
-    pub timestep: f64,
+    timestep: f64,
     /// Companion coefficients selected by the transient solver.
-    pub integration: IntegrationCoefficients,
+    integration: IntegrationCoefficients,
     /// Lookup tables for $table_model interpolation
     pub lookup_tables: Vec<LookupTable>,
     /// Delay buffers for absdelay function
@@ -1187,14 +1241,59 @@ impl VmContext {
             })
     }
 
+    /// Current solver-provided companion coefficients.
+    #[inline]
+    pub fn integration_coefficients(&self) -> IntegrationCoefficients {
+        self.integration
+    }
+
+    /// Current transient timestep.
+    #[inline]
+    pub fn timestep(&self) -> f64 {
+        self.timestep
+    }
+
     /// Set the timestep for transient analysis.
     pub fn set_timestep(&mut self, dt: f64) {
+        self.try_set_timestep(dt)
+            .unwrap_or_else(|error| panic!("VM context timestep update failed: {error}"));
+    }
+
+    /// Checked timestep update. Validation completes before any runtime state
+    /// or lifecycle lane is mutated.
+    pub fn try_set_timestep(&mut self, dt: f64) -> Result<(), VmError> {
+        if !dt.is_finite() || dt < 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "transient timestep must be finite and non-negative, got {dt}"
+            )));
+        }
+        let coefficients = IntegrationCoefficients::backward_euler(dt);
+        coefficients.validate()?;
         self.timestep = dt;
-        self.set_integration_coefficients(IntegrationCoefficients::backward_euler(dt));
+        self.apply_integration_coefficients(coefficients);
+        Ok(())
     }
 
     /// Select solver-provided companion coefficients for this timepoint.
     pub fn set_integration_coefficients(&mut self, coefficients: IntegrationCoefficients) {
+        self.try_set_integration_coefficients(coefficients)
+            .unwrap_or_else(|error| {
+                panic!("VM context integration-coefficient update failed: {error}")
+            });
+    }
+
+    /// Checked companion-coefficient update. Validation completes before any
+    /// candidate state is promoted or invalidated.
+    pub fn try_set_integration_coefficients(
+        &mut self,
+        coefficients: IntegrationCoefficients,
+    ) -> Result<(), VmError> {
+        coefficients.validate()?;
+        self.apply_integration_coefficients(coefficients);
+        Ok(())
+    }
+
+    fn apply_integration_coefficients(&mut self, coefficients: IntegrationCoefficients) {
         if !self.integration.active && coefficients.active {
             // The DC operating-point evaluation establishes each operator's
             // current state but is not an accepted transient step.  Promote
@@ -1480,7 +1579,8 @@ impl VmContext {
 #[cfg(test)]
 mod tests {
     use super::{
-        IntegrationCoefficients, VerilogAEvaluationMode, VmContext, idtmod_wrapped_candidate,
+        INTEGRATION_CANDIDATE_VALID, IntegrationCoefficients, VerilogAEvaluationMode, VmContext,
+        VmError, idtmod_wrapped_candidate,
     };
     use crate::laplace::StateSpaceFilter;
     use crate::timing_contract::SlewRateMagnitudes;
@@ -1488,6 +1588,129 @@ mod tests {
 
     fn slew_rates(rise: f64, fall: f64) -> SlewRateMagnitudes {
         SlewRateMagnitudes { rise, fall }
+    }
+
+    #[test]
+    fn integration_coefficients_validate_supported_rules_and_tiny_scales() {
+        let valid = [
+            IntegrationCoefficients::inactive(),
+            IntegrationCoefficients::backward_euler(0.25),
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 2.0,
+                previous_value_scale: 2.0,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 1.0,
+            },
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 1.5,
+                previous_value_scale: 2.0,
+                older_value_scale: -0.5,
+                previous_derivative_scale: 0.0,
+            },
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: 2.5,
+                previous_value_scale: 10.0 / 3.0,
+                older_value_scale: -5.0 / 6.0,
+                previous_derivative_scale: 0.0,
+            },
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: f64::MIN_POSITIVE,
+                previous_value_scale: f64::MIN_POSITIVE,
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+            IntegrationCoefficients {
+                active: true,
+                derivative_scale: f64::from_bits(1),
+                previous_value_scale: f64::from_bits(1),
+                older_value_scale: 0.0,
+                previous_derivative_scale: 0.0,
+            },
+        ];
+
+        for coefficients in valid {
+            coefficients
+                .validate()
+                .unwrap_or_else(|error| panic!("valid coefficients {coefficients:?}: {error}"));
+        }
+    }
+
+    #[test]
+    fn integration_coefficients_reject_catastrophic_history_cancellation() {
+        let coefficients = IntegrationCoefficients {
+            active: true,
+            derivative_scale: 1.0,
+            previous_value_scale: f64::MAX,
+            older_value_scale: -f64::MAX,
+            previous_derivative_scale: 0.0,
+        };
+
+        assert!(matches!(
+            coefficients.validate(),
+            Err(VmError::InvalidRuntimeConfiguration(message))
+                if message.contains("must sum to the derivative scale")
+        ));
+
+        let overflowing_sum = IntegrationCoefficients {
+            active: true,
+            derivative_scale: f64::MAX,
+            previous_value_scale: f64::MAX,
+            older_value_scale: f64::MAX,
+            previous_derivative_scale: 0.0,
+        };
+        assert!(matches!(
+            overflowing_sum.validate(),
+            Err(VmError::InvalidRuntimeConfiguration(message))
+                if message.contains("must sum to the derivative scale")
+        ));
+    }
+
+    #[test]
+    fn rejected_integration_updates_do_not_mutate_runtime_state() {
+        let mut context = VmContext::with_states(0, 1);
+        context.try_set_timestep(0.25).unwrap();
+        context.state_values[0] = 7.0;
+        context.state_values_prev[0] = 3.0;
+        context.state_values_older[0] = 2.0;
+        context.state_derivatives[0] = 11.0;
+        context.state_derivatives_prev[0] = 5.0;
+        context.state_initialized[0] = true;
+        context.state_candidate_valid[0] = INTEGRATION_CANDIDATE_VALID;
+        context.state_older_candidate[0] = 13.0;
+
+        let before = context.clone();
+        let nonaffine = IntegrationCoefficients {
+            active: true,
+            derivative_scale: 1.0,
+            previous_value_scale: 2.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        };
+        assert!(context.try_set_integration_coefficients(nonaffine).is_err());
+        assert_eq!(context.integration, before.integration);
+        assert_eq!(context.state_values, before.state_values);
+        assert_eq!(context.state_values_prev, before.state_values_prev);
+        assert_eq!(context.state_values_older, before.state_values_older);
+        assert_eq!(context.state_derivatives, before.state_derivatives);
+        assert_eq!(
+            context.state_derivatives_prev,
+            before.state_derivatives_prev
+        );
+        assert_eq!(context.state_initialized, before.state_initialized);
+        assert_eq!(context.state_candidate_valid, before.state_candidate_valid);
+        assert_eq!(context.state_older_candidate, before.state_older_candidate);
+
+        for invalid_timestep in [f64::NAN, f64::INFINITY, -1.0] {
+            assert!(context.try_set_timestep(invalid_timestep).is_err());
+            assert_eq!(context.timestep().to_bits(), before.timestep().to_bits());
+            assert_eq!(context.integration, before.integration);
+            assert_eq!(context.state_candidate_valid, before.state_candidate_valid);
+            assert_eq!(context.state_older_candidate, before.state_older_candidate);
+        }
     }
 
     #[test]
@@ -1530,8 +1753,7 @@ mod tests {
         context.branch_current_values = vec![8.0];
         context.variables = vec![9.0, -10.0];
         context.time = 1.0;
-        context.timestep = 0.25;
-        context.integration = IntegrationCoefficients::backward_euler(0.25);
+        context.try_set_timestep(0.25).unwrap();
         context.analysis_type = 1;
         context.evaluation_mode = VerilogAEvaluationMode::SmallSignal;
         context.limiter_active = 1;
@@ -1607,8 +1829,11 @@ mod tests {
         assert_eq!(context.state_initialized, vec![false, false]);
         assert_eq!(context.state_candidate_valid, vec![0, 0]);
         assert_eq!(context.state_older_candidate, vec![0.0, 0.0]);
-        assert_eq!(context.timestep, 0.0);
-        assert_eq!(context.integration, IntegrationCoefficients::inactive());
+        assert_eq!(context.timestep(), 0.0);
+        assert_eq!(
+            context.integration_coefficients(),
+            IntegrationCoefficients::inactive()
+        );
         assert!(context.currents.is_empty());
         assert!(context.try_current(0, 1).is_err());
         assert_eq!(context.limiter_active, 0);
