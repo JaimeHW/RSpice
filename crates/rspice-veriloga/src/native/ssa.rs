@@ -1223,6 +1223,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::LimiterPrevious(_)
             | NativeOp::LimiterStore(_)
             | NativeOp::LaplaceState(_)
+            | NativeOp::LaplaceStateDerivative(_)
             | NativeOp::ZiState(_)
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::TimerState(_)
@@ -1340,6 +1341,7 @@ fn op_reads_state(op: NativeOp) -> bool {
             | NativeOp::LimiterStore(_)
             | NativeOp::LimitState(_)
             | NativeOp::LaplaceState(_)
+            | NativeOp::LaplaceStateDerivative(_)
             | NativeOp::ZiState(_)
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::TimerState(_)
@@ -1391,6 +1393,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::LimiterStore(_)
             | NativeOp::LimitState(_)
             | NativeOp::LaplaceState(_)
+            | NativeOp::LaplaceStateDerivative(_)
             | NativeOp::ZiState(_)
             | NativeOp::ZiStateDerivative(_)
             | NativeOp::TimerState(_)
@@ -1470,6 +1473,12 @@ mod tests {
         assert!(state.may_call());
         assert!(!state.is_semantically_pure());
         assert!(state.clobbers_context_pointer_cache());
+
+        let laplace_derivative = Effects::for_op(NativeOp::LaplaceStateDerivative(0));
+        assert!(laplace_derivative.contains(Effects::READ_STATE));
+        assert!(!laplace_derivative.contains(Effects::WRITE_STATE));
+        assert!(laplace_derivative.may_call());
+        assert!(laplace_derivative.may_fail());
     }
 
     #[test]

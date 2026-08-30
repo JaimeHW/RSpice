@@ -976,6 +976,87 @@ pub unsafe extern "C" fn rspice_laplace_step_native(
     }
 }
 
+/// Evaluate the exact input derivative of a native Laplace filter without
+/// changing either its accepted history or its in-flight candidate.
+///
+/// Active transient integration uses the current Backward Euler input
+/// coefficient. Transient operating-point and non-transient analyses use the
+/// DC action, matching the reference VM's `LaplaceStateDerivative` contract.
+///
+/// # Safety
+/// This function is called from JIT-compiled code with a valid EvalContext
+/// pointer. The context must own a Laplace filter array whose lifetime covers
+/// the call, and the calling dispatch must have exclusive access to its
+/// runtime status.
+#[unsafe(export_name = "rspice_laplace_derivative_native")]
+pub unsafe extern "C" fn rspice_laplace_derivative_native(
+    input_derivative: f64,
+    ctx: *const EvalContext,
+    filter_id: usize,
+) -> f64 {
+    if ctx.is_null() {
+        set_native_context_error_ptr(
+            ctx,
+            "native Laplace derivative helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let ctx = unsafe { &*ctx };
+    if ctx.laplace_filters.is_null() {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native Laplace derivative helper missing filter storage for filter {filter_id}; no interpreter fallback"
+            ),
+        );
+        return 0.0;
+    }
+    if filter_id >= ctx.laplace_filters_len {
+        set_native_context_error(
+            ctx,
+            format!(
+                "native Laplace derivative helper filter {filter_id} outside filter table length {}; no interpreter fallback",
+                ctx.laplace_filters_len
+            ),
+        );
+        return 0.0;
+    }
+
+    let filters = unsafe {
+        std::slice::from_raw_parts(ctx.laplace_filters.cast_const(), ctx.laplace_filters_len)
+    };
+    let filter = &filters[filter_id];
+    let result = if ctx.analysis_type == 2 && ctx.integration_active != 0 {
+        match filter.backward_euler_input_gain(ctx.timestep) {
+            Ok(gain) => {
+                let result = gain * input_derivative;
+                if !result.is_finite() || (result == 0.0 && gain != 0.0 && input_derivative != 0.0)
+                {
+                    Err("input action is not representable".to_owned())
+                } else {
+                    Ok(result)
+                }
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    } else {
+        filter
+            .dc_output(input_derivative)
+            .map_err(|error| error.to_string())
+    };
+
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            ctx.record_invalid_numeric_result(format!(
+                "native Laplace derivative {filter_id} evaluation failed: {error}"
+            ));
+            0.0
+        }
+    }
+}
+
 /// External helper function for native x64 Z-domain sampled-data filter
 /// evaluation.
 ///
@@ -1948,11 +2029,12 @@ mod tests {
         EvalContext, INTEGER_CAST_DESCRIPTOR, NativeRuntimeStatus, integer_binary_descriptor,
         rspice_above_state_native, rspice_absdelay_state_native, rspice_cross_state_native,
         rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_idt_state_native,
-        rspice_integer_operation_native, rspice_laplace_step_native,
-        rspice_last_crossing_state_native, rspice_limiter_previous_native,
-        rspice_limiter_store_native, rspice_native_dynamic_variable_error,
-        rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
+        rspice_integer_operation_native, rspice_laplace_derivative_native,
+        rspice_laplace_step_native, rspice_last_crossing_state_native,
+        rspice_limiter_previous_native, rspice_limiter_store_native,
+        rspice_native_dynamic_variable_error, rspice_slew_state_native,
+        rspice_table_derivative_native, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_transition_state_native, rspice_zi_step_native,
     };
     use crate::codegen::LookupTable;
     use crate::integer_runtime::IntegerBinaryOperation;
@@ -2284,6 +2366,46 @@ mod tests {
         let first_step = unsafe { rspice_laplace_step_native(2.0, &ctx, 0) };
         assert!((first_step - (14.0 / 3.0)).abs() <= 1.0e-12);
         assert!(ctx.take_runtime_error().is_none());
+    }
+
+    #[test]
+    fn laplace_native_derivative_helper_is_exact_read_only_and_checked() {
+        let mut filters =
+            [
+                crate::laplace::StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
+                    .expect("valid first-order Laplace filter"),
+            ];
+        let mut ctx = empty_eval_context();
+        ctx.laplace_filters = filters.as_mut_ptr();
+        ctx.laplace_filters_len = filters.len();
+
+        let initial = filters[0].checkpoint();
+        assert_eq!(
+            unsafe { rspice_laplace_derivative_native(2.0, &ctx, 0) }.to_bits(),
+            2.0_f64.to_bits(),
+            "non-transient derivative uses the DC action"
+        );
+        assert_eq!(filters[0].checkpoint(), initial);
+
+        ctx.analysis_type = 2;
+        ctx.timestep = 0.5;
+        ctx.integration_active = 1;
+        let transient = unsafe { rspice_laplace_derivative_native(2.0, &ctx, 0) };
+        assert!((transient - (2.0 / 3.0)).abs() <= 1.0e-15);
+        assert_eq!(filters[0].checkpoint(), initial);
+        assert!(ctx.take_native_runtime_error().is_none());
+
+        let underflow = unsafe { rspice_laplace_derivative_native(f64::from_bits(1), &ctx, 0) };
+        assert_eq!(underflow.to_bits(), 0.0_f64.to_bits());
+        let error = ctx
+            .take_native_runtime_error()
+            .expect("unrepresentable derivative must publish a typed runtime error");
+        assert_eq!(
+            error.kind,
+            super::NativeRuntimeErrorKind::InvalidNumericResult
+        );
+        assert!(error.message.contains("input action is not representable"));
+        assert_eq!(filters[0].checkpoint(), initial);
     }
 
     #[test]

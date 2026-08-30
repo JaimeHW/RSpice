@@ -50,12 +50,12 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 
 /// Version of the linear-memory and helper-function contract understood by
 /// emitted modules and the browser worker.
-pub const WASM_JIT_ABI_VERSION: u32 = 5;
+pub const WASM_JIT_ABI_VERSION: u32 = 6;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing
 /// runtime frames.
-pub const WASM_JIT_EMITTER_VERSION: u32 = 5;
+pub const WASM_JIT_EMITTER_VERSION: u32 = 6;
 
 /// Hard ceiling for one qualified shipped model's generated module.
 pub const SHIPPED_MODEL_WASM_CODE_SIZE_BUDGET_BYTES: usize = 32 * 1024 * 1024;

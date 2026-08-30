@@ -102,6 +102,7 @@ pub(crate) enum NativeOp {
     LimiterPrevious(usize),
     LimiterStore(usize),
     LaplaceState(usize),
+    LaplaceStateDerivative(usize),
     ZiState(ZiRuntimeLayout),
     ZiStateDerivative(ZiRuntimeLayout),
     TimerState(usize),
@@ -2088,10 +2089,7 @@ impl NativeProgram {
                         depth,
                         1,
                     )?;
-                    return Err(JitError::unsupported_native_coverage(
-                        model.clone(),
-                        "legacy-bytecode Laplace derivative action",
-                    ));
+                    ops.push(NativeOp::LaplaceStateDerivative(*filter_id));
                 }
                 Instruction::ZiState(layout) | Instruction::ZiStateDerivative(layout) => {
                     validate_index(
@@ -8632,6 +8630,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::LimiterPrevious(_) => "LimiterPrevious",
         NativeOp::LimiterStore(_) => "LimiterStore",
         NativeOp::LaplaceState(_) => "LaplaceState",
+        NativeOp::LaplaceStateDerivative(_) => "LaplaceStateDerivative",
         NativeOp::ZiState(_) => "ZiState",
         NativeOp::ZiStateDerivative(_) => "ZiStateDerivative",
         NativeOp::TimerState(_) => "TimerState",
@@ -9577,6 +9576,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::TableDerivative(_)
         | NativeOp::LimiterPrevious(_)
         | NativeOp::LaplaceState(_)
+        | NativeOp::LaplaceStateDerivative(_)
         | NativeOp::WhiteNoise
         | NativeOp::DdtState(_)
         | NativeOp::DdtJacobian
@@ -14899,6 +14899,33 @@ endmodule
         assert_eq!(
             lowered.ops(),
             &[NativeOp::LoadTemperature, NativeOp::LaplaceState(0)]
+        );
+        assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn lowers_laplace_derivative_as_a_distinct_read_only_action() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::LaplaceStateDerivative(0),
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "laplace-derivative",
+            EntryKind::Jacobian,
+            &program,
+            limits(0, 0).with_laplace_filter_count(1),
+        )
+        .expect("Laplace derivative has native read-only helper lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::LaplaceStateDerivative(0),
+            ]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
     }

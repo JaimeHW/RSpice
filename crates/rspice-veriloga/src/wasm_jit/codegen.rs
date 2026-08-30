@@ -1687,6 +1687,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
         NativeOp::LimiterPrevious(index) => set_index(&mut descriptor, 411, index)?,
         NativeOp::LimiterStore(index) => set_index(&mut descriptor, 412, index)?,
         NativeOp::LaplaceState(index) => set_index(&mut descriptor, 420, index)?,
+        NativeOp::LaplaceStateDerivative(index) => set_index(&mut descriptor, 432, index)?,
         NativeOp::ZiState(layout) | NativeOp::ZiStateDerivative(layout) => {
             let operand_count = layout.validate_operand_budget().map_err(|error| {
                 WasmJitError::Encoding(format!("Zi runtime layout rejected: {error}"))
@@ -2004,6 +2005,10 @@ mod tests {
                 1,
             ),
             (
+                vec![NativeOp::Const(1.0), NativeOp::LaplaceStateDerivative(2)],
+                1,
+            ),
+            (
                 vec![
                     NativeOp::Const(1.0),
                     NativeOp::Const(0.1),
@@ -2029,6 +2034,16 @@ mod tests {
                 .validate_all(&bytes)
                 .expect("validate helper module");
         }
+    }
+
+    #[test]
+    fn laplace_derivative_descriptor_is_pinned_to_the_read_only_helper() {
+        let descriptor = helper_descriptor(NativeOp::LaplaceStateDerivative(7))
+            .expect("encode Laplace derivative helper descriptor");
+        assert_eq!(descriptor.opcode, 432);
+        assert_eq!(descriptor.aux0, 7);
+        assert_eq!(descriptor.aux1, 0);
+        assert_eq!(descriptor.aux2, 0);
     }
 
     #[test]
@@ -2708,6 +2723,7 @@ mod tests {
             NativeOp::LimiterPrevious(0),
             NativeOp::LimiterStore(0),
             NativeOp::LaplaceState(0),
+            NativeOp::LaplaceStateDerivative(0),
             NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
             NativeOp::ZiStateDerivative(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
             NativeOp::TimerState(0),

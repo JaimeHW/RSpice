@@ -16,17 +16,18 @@ use crate::native::abi::{
     rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native,
     rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_hypot,
     rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
-    rspice_integer_operation_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
-    rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
-    rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
-    rspice_native_dynamic_variable_error, rspice_native_limit_state_bounds_error,
-    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
-    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
-    rspice_native_non_finite_contribution_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
+    rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
+    rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
+    rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
+    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
+    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
+    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_derivative_native, rspice_zi_step_native,
 };
 use crate::native::assignment::{NativeAssignment, shareable_batch_ranges};
 use crate::native::expr::{
@@ -1232,6 +1233,11 @@ impl FunctionCompiler {
                 prepared,
                 filter_id,
                 rspice_laplace_step_native as *const () as usize,
+            )?,
+            NativeOp::LaplaceStateDerivative(filter_id) => self.emit_scalar_context_helper(
+                prepared,
+                filter_id,
+                rspice_laplace_derivative_native as *const () as usize,
             )?,
             NativeOp::ZiState(layout) => {
                 let operands =

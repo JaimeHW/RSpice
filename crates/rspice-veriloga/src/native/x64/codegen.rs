@@ -31,17 +31,18 @@ use crate::native::abi::{
     rspice_ceil, rspice_cos, rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native,
     rspice_ddt_state_native, rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor,
     rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native, rspice_idtmod_state_native,
-    rspice_integer_operation_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
-    rspice_limexp, rspice_limited_exp, rspice_limiter_previous_native, rspice_limiter_store_native,
-    rspice_log, rspice_log10, rspice_mod, rspice_native_current_probe_error,
-    rspice_native_dynamic_variable_error, rspice_native_limit_state_bounds_error,
-    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
-    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
-    rspice_native_non_finite_contribution_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
-    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_derivative_native, rspice_zi_step_native,
+    rspice_integer_operation_native, rspice_laplace_derivative_native, rspice_laplace_step_native,
+    rspice_last_crossing_state_native, rspice_limexp, rspice_limited_exp,
+    rspice_limiter_previous_native, rspice_limiter_store_native, rspice_log, rspice_log10,
+    rspice_mod, rspice_native_current_probe_error, rspice_native_dynamic_variable_error,
+    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
+    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_native_non_finite_contribution_error,
+    rspice_native_param_given_error, rspice_native_port_connected_error,
+    rspice_native_prior_current_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_derivative_native, rspice_zi_step_native,
 };
 pub(crate) use crate::native::assignment::NativeAssignment;
 use crate::native::assignment::shareable_batch_ranges;
@@ -957,6 +958,9 @@ impl FunctionCompiler {
                 }
                 NativeOp::LimiterStore(index) => self.emit_limiter_store(index)?,
                 NativeOp::LaplaceState(filter_id) => self.emit_laplace_state(filter_id)?,
+                NativeOp::LaplaceStateDerivative(filter_id) => {
+                    self.emit_laplace_derivative(filter_id)?
+                }
                 NativeOp::ZiState(layout) => self.emit_zi_state(layout)?,
                 NativeOp::ZiStateDerivative(layout) => self.emit_zi_derivative_state(layout)?,
                 NativeOp::TimerState(timer_id) => self.emit_timer_state(timer_id)?,
@@ -2884,6 +2888,18 @@ impl FunctionCompiler {
 
         let target = self.register_stack[self.depth - 1];
         self.emit_context_filter_helper_call(target, filter_id, rspice_laplace_step_native)
+    }
+
+    fn emit_laplace_derivative(&mut self, filter_id: usize) -> JitResult<()> {
+        if self.depth == 0 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: "laplace derivative requires stack depth 1, found 0".into(),
+            });
+        }
+
+        let target = self.register_stack[self.depth - 1];
+        self.emit_context_filter_helper_call(target, filter_id, rspice_laplace_derivative_native)
     }
 
     fn emit_zi_state(&mut self, layout: crate::codegen::ZiRuntimeLayout) -> JitResult<()> {
@@ -5394,6 +5410,11 @@ mod tests {
             ("table-derivative", NativeOp::TableDerivative(0), false),
             ("laplace", NativeOp::LaplaceState(0), false),
             (
+                "laplace-derivative",
+                NativeOp::LaplaceStateDerivative(0),
+                false,
+            ),
+            (
                 "zi",
                 NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
                 false,
@@ -5466,6 +5487,7 @@ mod tests {
             ("table-lookup", NativeOp::TableLookup(0)),
             ("table-derivative", NativeOp::TableDerivative(0)),
             ("laplace", NativeOp::LaplaceState(0)),
+            ("laplace-derivative", NativeOp::LaplaceStateDerivative(0)),
             (
                 "zi",
                 NativeOp::ZiState(crate::codegen::ZiRuntimeLayout::unit_coefficients(0)),
@@ -9293,6 +9315,44 @@ mod tests {
             (next - (2.0 + 20.0 / 9.0)).abs() < 1.0e-12,
             "accepted Laplace state must advance exactly once: {next}"
         );
+    }
+
+    #[test]
+    fn generated_laplace_derivative_leaf_is_exact_and_read_only() {
+        let program = NativeProgram::from_bytecode(
+            "x64-laplace-derivative-test",
+            EntryKind::Jacobian,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(2.0),
+                    Instruction::LaplaceStateDerivative(0),
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 0, 0).with_laplace_filter_count(1),
+        )
+        .expect("lower Laplace derivative helper program");
+        let bytes = compile_value_function(&program).expect("compile Laplace derivative leaf");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate Laplace derivative leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+
+        let mut filters = [
+            StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
+                .expect("valid first-order Laplace filter"),
+        ];
+        let accepted = filters[0].checkpoint();
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.analysis_type = 2;
+        ctx.timestep = 0.5;
+        ctx.integration_active = 1;
+        ctx.laplace_filters = filters.as_mut_ptr();
+        ctx.laplace_filters_len = filters.len();
+
+        let derivative = f(&ctx, std::ptr::null());
+        assert!((derivative - (2.0 / 3.0)).abs() <= 1.0e-15);
+        assert_eq!(filters[0].checkpoint(), accepted);
+        assert!(ctx.take_native_runtime_error().is_none());
     }
 
     #[test]

@@ -227,6 +227,15 @@ fn evaluate_stateful_helper(
             )?;
             (Instruction::LaplaceState(index), 1)
         }
+        432 => {
+            require_slot(
+                session,
+                index,
+                session.context.laplace_filters.len(),
+                "Laplace derivative filter",
+            )?;
+            (Instruction::LaplaceStateDerivative(index), 1)
+        }
         422 => (Instruction::TimerState(index), 4),
         423 => {
             require_slot(
@@ -666,7 +675,7 @@ pub fn eval_op_v1(
 /// Variable-arity host capability for bounded stateful operations.
 ///
 /// Operands reside in the authenticated trailing region of `frame_offset`;
-/// callers supply only the count, never a linear-memory pointer. ABI v5
+/// callers supply only the count, never a linear-memory pointer. ABI v6
 /// allowlists Zi value and derivative operations on this capability.
 #[cfg(target_arch = "wasm32")]
 pub fn eval_op_slice_v1(
@@ -745,7 +754,7 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
 
 #[cfg(target_arch = "wasm32")]
 fn is_stateful_opcode(opcode: i32) -> bool {
-    matches!(opcode, 400..=429 | 440..=444)
+    matches!(opcode, 400..=429 | 432 | 440..=444)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1043,6 +1052,52 @@ mod tests {
         session.context_mut().time = 1.0;
         assert!(session.take_error().is_none());
         assert_eq!(session.into_context().time, 1.0);
+    }
+
+    #[test]
+    fn laplace_derivative_helper_matches_vm_and_preserves_filter_state() {
+        let mut context = VmContext::default();
+        context.analysis_type = 2;
+        context.timestep = 0.5;
+        context.integration = IntegrationCoefficients::backward_euler(0.5);
+        context.laplace_filters.push(
+            crate::laplace::StateSpaceFilter::from_transfer_function(&[1.0], &[1.0, 1.0])
+                .expect("valid first-order Laplace filter"),
+        );
+        let accepted = context.laplace_filters[0].checkpoint();
+        let mut session = WasmJitRuntimeSession::new(context);
+
+        let derivative = evaluate_helper_with_session(
+            432,
+            0,
+            0,
+            0,
+            [2.0, 0.0, 0.0, 0.0, 0.0],
+            &[],
+            Some(&mut session),
+        )
+        .expect("evaluate Laplace derivative through reference VM semantics");
+        assert!((derivative - (2.0 / 3.0)).abs() <= 1.0e-15);
+        assert_eq!(session.context().laplace_filters[0].checkpoint(), accepted);
+        assert!(session.take_error().is_none());
+
+        let mut missing = WasmJitRuntimeSession::new(VmContext::default());
+        assert_eq!(
+            evaluate_helper_with_session(
+                432,
+                0,
+                0,
+                0,
+                [1.0, 0.0, 0.0, 0.0, 0.0],
+                &[],
+                Some(&mut missing),
+            ),
+            Err(HelperError::StatefulRuntimeFailed)
+        );
+        assert!(missing.take_error().is_some_and(|error| {
+            error.contains("Laplace derivative filter")
+                && error.contains("outside preallocated length")
+        }));
     }
 
     #[test]
