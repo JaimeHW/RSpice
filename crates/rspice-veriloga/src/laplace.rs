@@ -499,14 +499,11 @@ impl StateSpaceFilter {
         checked_state_output(&self.c, &equilibrium, self.d, input)
     }
 
-    /// Reset filter state to zero
+    /// Reset all accepted and speculative state to zero for a new analysis.
+    /// The compiled state-space realization remains unchanged.
     pub fn reset(&mut self) {
-        for x in &mut self.state {
-            *x = 0.0;
-        }
-        for x in &mut self.state_prev {
-            *x = 0.0;
-        }
+        self.state.fill(0.0);
+        self.state_prev.fill(0.0);
     }
 
     /// Set initial state

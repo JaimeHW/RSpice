@@ -726,6 +726,59 @@ impl VmContext {
         self.timer_event_bound = checkpoint.timer_event_bound.unwrap_or(f64::INFINITY);
     }
 
+    /// Reset every device-owned trajectory and in-flight candidate for a new
+    /// analysis while retaining the instance configuration and preallocated
+    /// storage shapes.
+    ///
+    /// Parameters, connectivity, temperature, multiplicity, lookup tables,
+    /// compiled filter realizations, and the caller-selected analysis type and
+    /// evaluation mode deliberately survive. Terminal/internal voltages and
+    /// branch-current unknown values are solver-owned inputs retained as warm
+    /// starts and overwritten by the solver before evaluation. Procedural
+    /// variables and every analog-operator history start from their
+    /// language-defined zero state.
+    pub(crate) fn reset_analysis_state(&mut self) {
+        self.variables.fill(0.0);
+        self.time = 0.0;
+        self.state_values.fill(0.0);
+        self.state_values_prev.fill(0.0);
+        self.state_values_older.fill(0.0);
+        self.state_derivatives.fill(0.0);
+        self.state_derivatives_prev.fill(0.0);
+        self.state_initialized.fill(false);
+        self.timestep = 0.0;
+        self.integration = IntegrationCoefficients::inactive();
+
+        for buffer in &mut self.delay_buffers {
+            buffer.clear();
+        }
+        for filter in &mut self.transition_filters {
+            filter.reset_analysis();
+        }
+        for filter in &mut self.slew_filters {
+            filter.reset_analysis();
+        }
+        for detector in &mut self.cross_detectors {
+            detector.reset_analysis();
+        }
+        for filter in &mut self.laplace_filters {
+            filter.reset();
+        }
+        for filter in &mut self.zi_filters {
+            // A Zi definition may be derived from instance variables and must
+            // be frozen again only after the new analysis executes the
+            // operator's ordered argument programs.
+            filter.invalidate_definition();
+        }
+
+        self.currents.clear();
+        self.terminal_pair_currents.fill(f64::NAN);
+        self.limiter_active = 0;
+        self.analysis_initial_step = false;
+        self.analysis_final_step = false;
+        self.timer_event_bound = f64::INFINITY;
+    }
+
     /// Invalidate speculative zi candidates before each complete device
     /// evaluation. Only candidates recreated by the final Newton pass may be
     /// committed when the point is accepted.
@@ -1008,7 +1061,8 @@ impl VmContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{VerilogAEvaluationMode, VmContext};
+    use super::{IntegrationCoefficients, VerilogAEvaluationMode, VmContext};
+    use crate::laplace::StateSpaceFilter;
     use crate::zfilter::ZiFilter;
 
     #[test]
@@ -1036,6 +1090,145 @@ mod tests {
         assert!(VerilogAEvaluationMode::NewtonLimited.limiting_enabled());
         assert!(!VerilogAEvaluationMode::StaticProbe.limiting_enabled());
         assert!(!VerilogAEvaluationMode::SmallSignal.limiting_enabled());
+    }
+
+    #[test]
+    fn fresh_analysis_reset_clears_every_dynamic_pool_and_preserves_configuration() {
+        let mut context = VmContext::with_states(2, 2);
+        context.voltages = vec![1.0, -2.0];
+        context.internal_voltages = vec![3.0];
+        context.parameters = vec![4.0];
+        context.param_given = vec![1];
+        context.port_connected = vec![1, 0];
+        context.temperature = 325.0;
+        context.multiplicity = 7.0;
+        context.branch_current_values = vec![8.0];
+        context.variables = vec![9.0, -10.0];
+        context.time = 1.0;
+        context.timestep = 0.25;
+        context.integration = IntegrationCoefficients::backward_euler(0.25);
+        context.analysis_type = 1;
+        context.evaluation_mode = VerilogAEvaluationMode::SmallSignal;
+        context.limiter_active = 1;
+        context.analysis_initial_step = true;
+        context.analysis_final_step = true;
+        context.state_values = vec![11.0, 12.0];
+        context.state_values_prev = vec![13.0, 14.0];
+        context.state_values_older = vec![15.0, 16.0];
+        context.state_derivatives = vec![17.0, 18.0];
+        context.state_derivatives_prev = vec![19.0, 20.0];
+        context.state_initialized = vec![true, true];
+        context.currents = vec![21.0];
+        context.set_branch_current(0, 1, 22.0);
+        context.request_timer_event(2.0);
+
+        context.allocate_delay_buffers(1);
+        context.delay_buffers[0].eval(0.0, 1.0, 0.25);
+        context.delay_buffers[0].commit();
+        context.delay_buffers[0].eval(1.0, 2.0, 0.25);
+        let delay_capacity = context.delay_buffers[0].capacity;
+
+        context.allocate_transition_filters(1);
+        context.transition_filters[0].eval(1.0, 0.0, 0.0, 1.0, 1.0);
+        context.transition_filters[0].commit();
+        context.transition_filters[0].eval(2.0, 0.5, 0.0, 1.0, 1.0);
+
+        context.allocate_slew_filters(1);
+        context.slew_filters[0].eval(1.0, 1.0, 0.5, 0.5);
+        context.slew_filters[0].commit();
+        context.slew_filters[0].eval(2.0, 1.5, 0.5, 0.5);
+
+        context.allocate_cross_detectors(1);
+        context.cross_detectors[0].eval(-1.0, 0.0, 0);
+        context.cross_detectors[0].commit();
+        context.cross_detectors[0].eval(1.0, 1.0, 0);
+
+        let mut laplace = StateSpaceFilter::integrator(1.0).unwrap();
+        laplace.step(2.0, 0.25).unwrap();
+        laplace.commit();
+        laplace.step(3.0, 0.25).unwrap();
+        let laplace_response = laplace.frequency_response(123.0).unwrap();
+        context.laplace_filters.push(laplace);
+
+        let mut zi = ZiFilter::new(vec![1.0, 0.5], vec![1.0, -0.25], 1.0).unwrap();
+        zi.eval(2.0, 0.0, true).unwrap();
+        zi.commit(0.0).unwrap();
+        zi.eval(3.0, 0.5, true).unwrap();
+        let zi_gain = zi.dc_gain().unwrap();
+        context.zi_filters.push(zi);
+
+        context.reset_analysis_state();
+
+        assert_eq!(context.voltages, vec![1.0, -2.0]);
+        assert_eq!(context.internal_voltages, vec![3.0]);
+        assert_eq!(context.parameters, vec![4.0]);
+        assert_eq!(context.param_given, vec![1]);
+        assert_eq!(context.port_connected, vec![1, 0]);
+        assert_eq!(context.temperature, 325.0);
+        assert_eq!(context.multiplicity, 7.0);
+        assert_eq!(context.branch_current_values, vec![8.0]);
+        assert_eq!(context.analysis_type, 1);
+        assert_eq!(context.evaluation_mode, VerilogAEvaluationMode::SmallSignal);
+
+        assert_eq!(context.variables, vec![0.0, 0.0]);
+        assert_eq!(context.time, 0.0);
+        assert_eq!(context.state_values, vec![0.0, 0.0]);
+        assert_eq!(context.state_values_prev, vec![0.0, 0.0]);
+        assert_eq!(context.state_values_older, vec![0.0, 0.0]);
+        assert_eq!(context.state_derivatives, vec![0.0, 0.0]);
+        assert_eq!(context.state_derivatives_prev, vec![0.0, 0.0]);
+        assert_eq!(context.state_initialized, vec![false, false]);
+        assert_eq!(context.timestep, 0.0);
+        assert_eq!(context.integration, IntegrationCoefficients::inactive());
+        assert!(context.currents.is_empty());
+        assert!(context.try_current(0, 1).is_err());
+        assert_eq!(context.limiter_active, 0);
+        assert!(!context.analysis_initial_step);
+        assert!(!context.analysis_final_step);
+        assert_eq!(context.timer_event_step_bound(), None);
+        assert_eq!(context.zi_filter_step_bound().unwrap(), None);
+
+        assert_eq!(context.delay_buffers[0].capacity, delay_capacity);
+        assert_eq!(context.delay_buffers[0].count, 0);
+        assert_eq!(
+            context.laplace_filters[0]
+                .frequency_response(123.0)
+                .unwrap(),
+            laplace_response,
+            "reset must retain the compiled Laplace realization"
+        );
+        assert_eq!(context.zi_filters[0].dc_gain().unwrap(), zi_gain);
+        assert!(
+            !context.zi_filters[0].definition_is_frozen(),
+            "analysis-specific Zi arguments must be frozen again"
+        );
+
+        let reset = context
+            .accepted_checkpoint()
+            .expect("reset must remove every in-flight operator candidate");
+        assert!(reset.delay_buffers[0].samples.is_empty());
+        assert_eq!(reset.transition_filters[0].output, 0.0);
+        assert_eq!(reset.transition_filters[0].target, 0.0);
+        assert_eq!(reset.slew_filters[0].output, 0.0);
+        assert_eq!(reset.slew_filters[0].prev_time, 0.0);
+        assert!(!reset.cross_detectors[0].initialized);
+        assert_eq!(reset.cross_detectors[0].last_crossing_time, -1.0);
+        assert!(
+            reset.laplace_filters[0]
+                .state
+                .iter()
+                .all(|value| *value == 0.0)
+        );
+        assert!(!reset.zi_filters[0].definition_frozen);
+        assert!(
+            reset.zi_filters[0]
+                .x_hist
+                .iter()
+                .chain(&reset.zi_filters[0].y_hist)
+                .all(|value| *value == 0.0)
+        );
+        assert_eq!(reset.zi_filters[0].accepted_time, None);
+        assert_eq!(reset.timer_event_bound, None);
     }
 
     #[test]

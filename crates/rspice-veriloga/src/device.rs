@@ -1964,15 +1964,13 @@ impl VerilogADevice {
     }
 
     /// Explicitly begin a fresh analysis on a reusable device instance.
-    /// Stateful sampled operators and their frozen constant arguments are
-    /// invalidated even when the analysis code is unchanged from the
-    /// preceding run. Each logical Zi site freezes lazily on its first ordered
-    /// execution, after any preceding local assignments have run.
+    /// All device-owned dynamic state is reset even when the analysis code is
+    /// unchanged from the preceding run. Instance configuration and compiled
+    /// filter realizations survive, while each logical Zi site freezes its
+    /// analysis-specific constant arguments lazily on first ordered execution.
     pub fn try_begin_analysis(&mut self, analysis: u8) -> Result<(), VmError> {
         self.try_set_analysis_type(analysis)?;
-        for filter in &mut self.context.zi_filters {
-            filter.invalidate_definition();
-        }
+        self.context.reset_analysis_state();
         Ok(())
     }
 
@@ -5193,6 +5191,134 @@ mod bytecode_assignment_integrity_tests {
         let error = VerilogADevice::validate_compiled_assignment_layout(1, &indexed)
             .expect_err("overflowing indexed target must fail model validation");
         assert!(matches!(error, VmError::InvalidModel(_)));
+    }
+}
+
+#[cfg(test)]
+mod analysis_lifecycle_tests {
+    use super::VerilogADevice;
+    use crate::{CompilerOptions, VerilogACompiler};
+
+    #[test]
+    fn public_begin_analysis_is_failure_atomic_and_starts_with_fresh_history() {
+        let source = r#"
+`include "disciplines.vams"
+module begin_analysis_reset(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ absdelay(V(p, n), 0.5);
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let runtime = compiler
+            .compile_runtime(source, None)
+            .expect("compile begin-analysis reset fixture");
+        let fresh_model = runtime.model.clone();
+        let mut device = {
+            #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+            {
+                VerilogADevice::try_new_with_canonical_ir(
+                    "BEGINRESET1",
+                    runtime.model,
+                    &runtime.canonical_ir,
+                    &[1, 0],
+                )
+            }
+            #[cfg(not(any(
+                feature = "native",
+                all(feature = "wasm-jit", target_arch = "wasm32")
+            )))]
+            {
+                VerilogADevice::try_new("BEGINRESET1", runtime.model, &[1, 0])
+            }
+        }
+        .expect("build begin-analysis reset fixture");
+        device.try_begin_analysis(2).unwrap();
+        device.set_time(0.0);
+        device.set_timestep(0.5);
+        device.update_voltages(&[1.0]);
+        device.try_evaluate().expect("evaluate first delay sample");
+        device
+            .try_advance_state()
+            .expect("commit first delay sample");
+        device.set_time(1.0);
+        device.set_timestep(1.0);
+        device.update_voltages(&[3.0]);
+        let history_dependent = device
+            .try_evaluate()
+            .expect("evaluate interpolated delay history");
+        device
+            .try_advance_state()
+            .expect("commit interpolated delay history");
+
+        let before_invalid = device
+            .checkpoint_state()
+            .expect("capture committed state before rejected begin");
+        let error = device
+            .try_begin_analysis(5)
+            .expect_err("an invalid analysis code must fail closed");
+        assert!(error.to_string().contains("analysis type"), "got: {error}");
+        assert_eq!(
+            device
+                .checkpoint_state()
+                .expect("capture state after rejected begin"),
+            before_invalid,
+            "a rejected analysis begin must not partially reset the instance"
+        );
+
+        device
+            .try_begin_analysis(2)
+            .expect("a valid analysis begin resets the reusable instance");
+        device.set_time(1.0);
+        device.set_timestep(1.0);
+        device.update_voltages(&[9.0]);
+        let restarted = device
+            .try_evaluate()
+            .expect("evaluate the reused device after a fresh analysis");
+
+        let mut fresh = {
+            #[cfg(any(feature = "native", all(feature = "wasm-jit", target_arch = "wasm32")))]
+            {
+                VerilogADevice::try_new_with_canonical_ir(
+                    "BEGINRESET2",
+                    fresh_model,
+                    &runtime.canonical_ir,
+                    &[1, 0],
+                )
+            }
+            #[cfg(not(any(
+                feature = "native",
+                all(feature = "wasm-jit", target_arch = "wasm32")
+            )))]
+            {
+                VerilogADevice::try_new("BEGINRESET2", fresh_model, &[1, 0])
+            }
+        }
+        .expect("build independent fresh-analysis reference");
+        fresh.try_begin_analysis(2).unwrap();
+        fresh.set_time(1.0);
+        fresh.set_timestep(1.0);
+        fresh.update_voltages(&[9.0]);
+        let expected = fresh
+            .try_evaluate()
+            .expect("evaluate independent fresh-analysis reference");
+
+        let bits = |values: &[f64]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            bits(&restarted),
+            bits(&expected),
+            "a same-code fresh analysis must be independent of committed delay history"
+        );
+        assert_ne!(
+            bits(&restarted),
+            bits(&history_dependent),
+            "the fixture must distinguish a reset analysis from the prior trajectory"
+        );
     }
 }
 

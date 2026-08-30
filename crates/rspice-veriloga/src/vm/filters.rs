@@ -489,6 +489,11 @@ impl TransitionFilter {
         }
     }
 
+    /// Clear accepted and speculative transition history for a new analysis.
+    pub(crate) fn reset_analysis(&mut self) {
+        *self = Self::default();
+    }
+
     pub(crate) fn checkpoint(&self) -> TransitionCheckpoint {
         TransitionCheckpoint {
             output: self.committed.output,
@@ -595,6 +600,11 @@ impl SlewFilter {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+    }
+
+    /// Clear accepted and speculative slew history for a new analysis.
+    pub(crate) fn reset_analysis(&mut self) {
+        *self = Self::default();
     }
 
     pub(crate) fn checkpoint(&self) -> SlewCheckpoint {
@@ -863,6 +873,11 @@ impl CrossDetector {
             self.committed = self.candidate;
             self.candidate_valid = false;
         }
+    }
+
+    /// Clear crossing, event, and interpolation history for a new analysis.
+    pub(crate) fn reset_analysis(&mut self) {
+        *self = Self::default();
     }
 
     pub(crate) fn checkpoint(&self) -> CrossCheckpoint {
